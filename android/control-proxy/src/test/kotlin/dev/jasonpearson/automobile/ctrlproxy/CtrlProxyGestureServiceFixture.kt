@@ -5,9 +5,10 @@ import android.os.Looper
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import java.time.Duration
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.robolectric.Robolectric
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.shadows.ShadowAccessibilityService
@@ -18,6 +19,7 @@ import org.robolectric.util.ReflectionHelpers
  * Shared by the display-routing and caret-clearing tests; every gesture component remains the real
  * service's.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 internal class CtrlProxyGestureServiceFixture {
   data class Ack(val id: String?, val success: Boolean, val error: String?)
 
@@ -49,7 +51,7 @@ internal class CtrlProxyGestureServiceFixture {
     ReflectionHelpers.setField(
       service,
       "serviceScope",
-      CoroutineScope(Dispatchers.Unconfined + SupervisorJob()),
+      CoroutineScope(UnconfinedTestDispatcher() + SupervisorJob()),
     )
     val router =
       ReflectionHelpers.getField<GestureStreamRouter>(gestureController, "gestureStreamRouter")

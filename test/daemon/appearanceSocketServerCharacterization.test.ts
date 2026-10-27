@@ -3,7 +3,7 @@ import {
   AppearanceSocketServer,
   type AppearanceSocketServerDependencies,
 } from "../../src/daemon/appearanceSocketServer";
-import type { AppearanceSocketRequest } from "../../src/daemon/appearanceSocketTypes";
+import type { AppearanceSocketRequest } from "../../src/daemon/wire/appearanceSocketTypes";
 import type { AppearanceConfig } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -56,7 +56,7 @@ function setup(failure?: "update" | "sync") {
     },
     {
       getPooledDevices: () => [{ deviceId: "device", name: "device", platform: "android" }],
-      getCurrentDevice: () => undefined,
+      getSessionDevice: () => undefined,
       getSessionForDevice: () => null,
     },
     dependencies,
@@ -85,9 +85,9 @@ describe("appearance mutation ordering characterization", () => {
     for (const failure of ["update", "sync"] as const) {
       test(`${command} propagates ${failure} failure in order`, async () => {
         const { server, calls } = setup(failure);
-        await expect(server.dispatch({ command, mode: "auto", enabled: true })).rejects.toThrow(
-          `${failure} failed`,
-        );
+        await expect(
+          server.dispatch({ id: failure, command, mode: "auto", enabled: true }),
+        ).rejects.toThrow(`${failure} failed`);
         expect(calls).toEqual(
           failure === "update"
             ? ["authorize", "update"]

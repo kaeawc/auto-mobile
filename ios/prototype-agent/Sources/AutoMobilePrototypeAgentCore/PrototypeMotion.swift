@@ -1,5 +1,22 @@
 import Foundation
 
+/// A node's `transition` as authored: its type alone, or `{type, delayMs?}` (#15247). The agent
+/// keeps the type; delays, `stagger` and `blurReplace` need `prototype_choreography_v1`, which iOS
+/// does not advertise yet, so the host refuses them before they arrive.
+struct PrototypeTransitionForm: Decodable {
+    let type: String
+
+    private enum CodingKeys: String, CodingKey { case type }
+
+    init(from decoder: Decoder) throws {
+        if let name = try? decoder.singleValueContainer().decode(String.self) {
+            type = name
+        } else {
+            type = try decoder.container(keyedBy: CodingKeys.self).decode(String.self, forKey: .type)
+        }
+    }
+}
+
 /// How a `visibleWhen` node enters and leaves, after the spec's `motion`, the node's `transition`
 /// and the system's reduce-motion setting are applied.
 enum PrototypeVisibilityTransition: Equatable {
@@ -21,10 +38,10 @@ struct PrototypeMotion: Equatable {
     }
 
     /// Nodes without `visibleWhen` have nothing to animate, so callers pass the transition only for
-    /// those that do.
-    func visibility(transition: String?) -> PrototypeVisibilityTransition {
+    /// those that do. A stack's transition controls navigation only, so visibility uses the default.
+    func visibility(transition: String?, nodeType: String? = nil) -> PrototypeVisibilityTransition {
         guard enabled else { return .instant }
-        switch transition {
+        switch nodeType == "stack" ? nil : transition {
         case "none": return .instant
         case "fade": return .fade
         case "expand": return .expand
@@ -119,7 +136,12 @@ protocol PrototypeTimerHandle: AnyObject {
 
 /// Wall-clock timers behind an interface so snackbar timeouts run without real time in tests.
 protocol PrototypeClock {
+    var nowMilliseconds: Int { get }
     func schedule(afterMilliseconds: Int, _ fire: @escaping () -> Void) -> PrototypeTimerHandle
+}
+
+extension PrototypeClock {
+    var nowMilliseconds: Int { Int(Date().timeIntervalSince1970 * 1000) }
 }
 
 /// Fires on the main queue, where the prototype model lives. A plain timer: neither the reduce-motion

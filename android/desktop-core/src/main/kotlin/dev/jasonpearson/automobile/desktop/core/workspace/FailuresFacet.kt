@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.failures.FailuresDashboard
+import dev.jasonpearson.automobile.desktop.core.failures.FailuresDashboardOptions
 import dev.jasonpearson.automobile.desktop.core.failures.createFailuresDashboardPushClient
 
 /**
@@ -33,9 +34,12 @@ fun FailuresFacet(
 ) {
   val graph = LocalAutoMobileGraph.current
   FailuresDashboard(
-    dataSourceMode = dataSourceMode,
-    clientProvider = { graph.autoMobileClient },
-    sessionUuidProvider = sessionUuidProvider,
-    pushClientFactory = pushClientFactory,
+    options =
+      FailuresDashboardOptions(
+        dataSourceMode = dataSourceMode,
+        clientProvider = { graph.autoMobileClient },
+        sessionUuidProvider = sessionUuidProvider,
+        pushClientFactory = pushClientFactory,
+      ),
   )
 }

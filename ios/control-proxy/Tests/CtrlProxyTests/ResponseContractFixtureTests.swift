@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 @testable import CtrlProxy
 import CtrlProxyTestSupport
 import Foundation
@@ -83,6 +84,20 @@ final class ResponseContractFixtureTests: XCTestCase {
         try append(
             "hinge_angle_result",
             HingeAngleResponse(requestId: requestId, success: false, error: "unsupported", angle: 90, totalTimeMs: 17)
+        )
+        try append(
+            "accessibility_audit_result",
+            AccessibilityAuditResponse(
+                requestId: requestId,
+                issues: [AccessibilityAuditIssue(
+                    check: "contrast", summary: "fixture issue", detail: "fixture detail",
+                    elementId: "fixture-element", label: "Fixture",
+                    bounds: ElementBounds(left: 1, top: 2, right: 3, bottom: 4)
+                )],
+                unsupportedChecks: ["fixture-check"],
+                error: nil,
+                totalTimeMs: 17
+            )
         )
         try append(
             "magic_tap_result",
@@ -219,6 +234,14 @@ final class ResponseContractFixtureTests: XCTestCase {
         try append("clipboard_result", WebSocketResponse(type: ResponseType.clipboardResult.rawValue,
                                                          timestamp: 1_700_000_000_000, requestId: requestId,
                                                          success: true, totalTimeMs: 17, text: "fixture text"))
+        // The appearance envelope carries the read-back value in text (#14092).
+        try append("appearance_result", WebSocketResponse(type: ResponseType.appearanceResult.rawValue,
+                                                          timestamp: 1_700_000_000_000, requestId: requestId,
+                                                          success: true, totalTimeMs: 17, text: "dark"))
+        // The location envelope is a bare success/error acknowledgement (#14091).
+        try append("location_result", WebSocketResponse(type: ResponseType.locationResult.rawValue,
+                                                        timestamp: 1_700_000_000_000, requestId: requestId,
+                                                        success: true, totalTimeMs: 17))
 
         let errors: [(String, CommandError)] = [
             (
@@ -287,6 +310,30 @@ final class ResponseContractFixtureTests: XCTestCase {
                 blockingCommandType: "request_activate_accessibility_link",
                 blockingElapsedMs: 35000,
                 blockingDeadlineRemainingMs: -5000
+            )
+        )
+        try append(
+            "delete_keychain_item_result",
+            DeleteKeychainItemResponse(
+                requestId: requestId,
+                outcome: KeychainDeleteOutcome(
+                    outcome: "deleted",
+                    deletedScope: KeychainItemSelector(
+                        itemClass: "genericPassword",
+                        service: "test.service",
+                        account: "fixture",
+                        accessGroup: "TEAM.app"
+                    )
+                ),
+                totalTimeMs: 17
+            )
+        )
+        try append(
+            "delete_keychain_item_denied",
+            DeleteKeychainItemResponse(
+                requestId: requestId,
+                outcome: KeychainDeleteOutcome(outcome: "mutation_not_authorized"),
+                totalTimeMs: 17
             )
         )
         let root: [String: Any] = [

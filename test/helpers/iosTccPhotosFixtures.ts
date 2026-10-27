@@ -6,6 +6,7 @@ import {
 } from "../../src/utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import { FakeHostCommandExecutor } from "../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { createExecResult } from "../../src/utils/execResult";
 
 export const photosTccCases = ["none", "addonly", "full", "revoked", "full2"] as const;
 export type PhotosTccCase = (typeof photosTccCases)[number];
@@ -49,13 +50,14 @@ export async function loadPhotosTccCase(
   const capture =
     runtime === "ios26.5" ? loadCapture(name, runtime) : captures.get(name as PhotosTccCase)!;
   const executor = new FakeHostCommandExecutor();
-  executor.setCommandResponse("pragma table_info(access);", {
-    stdout: JSON.stringify(
-      ["service", "client", "auth_version", "auth_value"].map((name) => ({ name })),
+  executor.setCommandResponse(
+    "pragma table_info(access);",
+    createExecResult(
+      JSON.stringify(["service", "client", "auth_version", "auth_value"].map((name) => ({ name }))),
+      "",
     ),
-    stderr: "",
-  });
-  executor.setDefaultResponse({ stdout: capture.text, stderr: "" });
+  );
+  executor.setDefaultResponse(createExecResult(capture.text, ""));
   const client = new SimulatorTccSqliteClient({
     executor,
     fileSystem: { stat: async () => ({ isFile: () => true }) },

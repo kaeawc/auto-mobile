@@ -166,7 +166,14 @@ async function createdEntry(
   const key = { scopeKey: scope.scope.scopeKey, bindingIndex: 0 };
   await registry.initBinding(key, { role: "app", platform: "ios", requestedSpec: SPEC });
   const inventory = new FakeInventory();
-  inventory.devices.push({ platform: "ios", deviceId: "created", name: "amslot-created", ...SPEC });
+  inventory.devices.push({
+    platform: "ios",
+    deviceId: "created",
+    name: "amslot-created",
+    isRunning: false,
+    isRunningStateKnown: false,
+    ...SPEC,
+  });
   const deleter = new FakeDeleter(inventory);
   const opened = await registry.openBindingJournal(key, {
     kind: "create",

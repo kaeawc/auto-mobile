@@ -44,7 +44,7 @@ enum HeldSessionLoss {
 /// cooperative pool.
 public struct DaemonSocketHeldSessionController: HeldSessionControlling {
     /// The daemon's owner lease (`DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS` in
-    /// `src/daemon/sessionLivenessWindows.ts`): a session with no heartbeat for this long turns
+    /// `src/daemon/wire/sessionLivenessWindows.ts`): a session with no heartbeat for this long turns
     /// suspect, and is released after the suspect grace.
     static let daemonOwnerLeaseSeconds: TimeInterval = 4
     /// The loop sleeps this long after each reply, so the worst gap between two beats is the

@@ -1,8 +1,6 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import {
-  parseTouchNodes,
-  discoverTouchNode,
-} from "../../../../src/features/record/android/TouchNodeDiscovery";
+import { discoverInputNodes } from "../../../../src/features/record/android/InputNodeDiscovery";
+import { parseTouchNodes } from "../../../../src/features/record/android/TouchNodeDiscovery";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 
 // ---------------------------------------------------------------------------
@@ -142,10 +140,10 @@ add device 1: /dev/input/event0
 });
 
 // ---------------------------------------------------------------------------
-// discoverTouchNode — integration tests using FakeAdbExecutor
+// discoverInputNodes — integration tests using FakeAdbExecutor
 // ---------------------------------------------------------------------------
 
-describe("discoverTouchNode", () => {
+describe("discoverInputNodes", () => {
   let fakeAdb: FakeAdbExecutor;
 
   beforeEach(() => {
@@ -161,7 +159,7 @@ describe("discoverTouchNode", () => {
       includes: (s: string) => GETEVENT_P_TWO_DEVICES.includes(s),
     });
 
-    const node = await discoverTouchNode(fakeAdb);
+    const { touch: node } = await discoverInputNodes(fakeAdb);
     expect(node).not.toBeNull();
     expect(node!.path).toBe("/dev/input/event3");
     expect(node!.axisXMax).toBe(1079);
@@ -177,7 +175,7 @@ describe("discoverTouchNode", () => {
       includes: (s: string) => GETEVENT_NO_TOUCH.includes(s),
     });
 
-    const node = await discoverTouchNode(fakeAdb);
+    const { touch: node } = await discoverInputNodes(fakeAdb);
     expect(node).toBeNull();
   });
 
@@ -190,7 +188,7 @@ describe("discoverTouchNode", () => {
       includes: (s: string) => GETEVENT_P_TWO_DEVICES.includes(s),
     });
 
-    await discoverTouchNode(fakeAdb);
+    await discoverInputNodes(fakeAdb);
     expect(fakeAdb.wasCommandExecuted("getevent -p")).toBe(true);
   });
 });

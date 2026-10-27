@@ -1,10 +1,12 @@
-import { Visitor, type Argument } from "oxc-parser";
+import { type Argument } from "oxc-parser";
 import {
   localBindings,
   parseGuardSource,
   resolveImportedCallee,
   unwrapCallee,
   valueImports,
+  guardTextMayMatch,
+  GuardVisitor as Visitor,
 } from "./astGuard";
 
 type Kind = "lock" | "migration";
@@ -48,7 +50,15 @@ export function scanExclusiveLockGenerationProbe(
   file: string,
   source: string,
 ): { line: number; kind: Kind; valid: boolean }[] {
-  const program = parseGuardSource(file, source);
+  // Renamed imports still contain the exported name; escaped names/keys reach the visitor.
+  const program = parseGuardSource(
+    file,
+    source,
+    guardTextMayMatch(source, /tryAcquireExclusiveLock|FileMigrationLock/),
+  );
+  if (!program) {
+    return [];
+  }
   const imports = valueImports(file, program);
   const localBinding = localBindings(program);
   const findings: { line: number; kind: Kind; valid: boolean }[] = [];

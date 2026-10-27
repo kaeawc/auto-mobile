@@ -1,5 +1,5 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -10,7 +10,7 @@ const SESSION = "heartbeat-accepted-log";
 describe("accepted heartbeat debug log", () => {
   let timer: FakeTimer;
   let manager: SessionManager;
-  let debug: ReturnType<typeof spyOn>;
+  let debug: Mock<typeof logger.debug>;
 
   beforeEach(async () => {
     timer = new FakeTimer();

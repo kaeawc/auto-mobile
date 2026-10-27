@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { z } from "zod/v4";
 import { stripNavigationInternalParams, ToolRegistryClass } from "../../src/server/toolRegistry";
-import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 import { reportToolDispatched } from "../../src/utils/ToolDispatchContext";
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -14,6 +14,21 @@ import {
   installInMemoryNavManager,
   type InMemoryNavManagerHarness,
 } from "../helpers/navigationTestHarness";
+import type { BootedDevice } from "../../src/models";
+import type { ExecutionTargetContext } from "../../src/server/pipeline/executionTarget";
+
+const FAKE_DEVICE: BootedDevice = { deviceId: "fake", platform: "android", name: "Fake" };
+
+function executionTarget(args: unknown, sessionUuid?: string): ExecutionTargetContext {
+  return {
+    args,
+    baseSessionUuid: undefined,
+    device: FAKE_DEVICE,
+    internalCall: false,
+    sessionUuid,
+    shouldResolveDevice: true,
+  };
+}
 
 describe("navigation tool call recording", () => {
   test("does not persist internal execution metadata in navigation arguments", () => {
@@ -54,10 +69,7 @@ describe("navigation recorder handler outcomes", () => {
     registry = new ToolRegistryClass(timer);
     restore = registry.setPipelineOverridesForTesting({
       executionTargetResolver: {
-        resolveExecutionTarget: async () => ({
-          shouldResolveDevice: true,
-          device: { deviceId: "fake", platform: "android" },
-        }),
+        resolveExecutionTarget: async (input) => executionTarget(input.args),
       },
       // Exercise the handler through the audit seam without real device auditing.
       auditRunner: {
@@ -321,11 +333,7 @@ describe("navigation recorder handler outcomes", () => {
     // The execution target names the session the call ran under, as a real session-bound call does.
     const restoreTarget = registry.setPipelineOverridesForTesting({
       executionTargetResolver: {
-        resolveExecutionTarget: async () => ({
-          shouldResolveDevice: true,
-          device: { deviceId: "fake", platform: "android" },
-          sessionUuid: sessionId,
-        }),
+        resolveExecutionTarget: async (input) => executionTarget(input.args, sessionId),
       },
     });
     try {
@@ -406,10 +414,7 @@ describe("navigation recorder caller arguments", () => {
     record = spyOn(harness.manager, "recordToolCall");
     restorePipelineOverrides = registry.setPipelineOverridesForTesting({
       executionTargetResolver: {
-        resolveExecutionTarget: async () => ({
-          shouldResolveDevice: true,
-          device: { deviceId: "fake", platform: "android" },
-        }),
+        resolveExecutionTarget: async (input) => executionTarget(input.args),
       },
       afterToolCall: {
         handle: async (input) => ({ finalizedResponse: input.response, durationMs: 0 }),

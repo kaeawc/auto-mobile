@@ -2,11 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>LargeClass:PrototypeDataTest.kt:PrototypeDataTest</ID>
-    <ID>LargeClass:PrototypeRequestTest.kt:PrototypeRequestTest</ID>
-    <ID>LargeClass:WebSocketRequestTest.kt:WebSocketRequestTest</ID>
-    <ID>LargeClass:WebSocketResponseTest.kt:WebSocketResponseTest</ID>
-    <ID>LongMethod:PrototypeChecksTest.kt:PrototypeChecksTest.Companion$@BeforeAll @JvmStatic fun loadFixtures</ID>
-    <ID>UnnecessaryNotNullOperator:StorageProtocolTest.kt:StorageProtocolTest$deserialized.file!!</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -35,10 +35,11 @@ die() {
   exit 1
 }
 
-# shellcheck disable=SC2329,SC2317 # invoked through run_capture_status
 is_positive_integer() {
   [[ "$1" =~ ^[1-9][0-9]*$ ]]
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then is_positive_integer "$@"; fi
 
 if [[ "${1:-}" == "--help" ]]; then
   usage
@@ -79,7 +80,6 @@ fi
 
 mkdir -p "$LOG_DIR"
 
-# shellcheck disable=SC2329,SC2317 # invoked through run_capture_status
 is_retryable_gradle_failure() {
   local log_file="$1"
   local retryable_pattern
@@ -92,6 +92,8 @@ PATTERN
 
   grep -qiE "${retryable_pattern}|${MISSING_ARTIFACT_PATTERN}" "$log_file"
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then is_retryable_gradle_failure "$@"; fi
 
 # A restored dependency cache can hold module metadata whose jars are missing
 # (partial restore, #12706). Gradle then reports ArtifactNotFoundException for
@@ -109,7 +111,6 @@ purge_resolved_module_cache() {
   fi
 }
 
-# shellcheck disable=SC2329,SC2317 # invoked through run_capture_status
 has_refresh_dependencies_flag() {
   local arg
 
@@ -121,6 +122,8 @@ has_refresh_dependencies_flag() {
 
   return 1
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then has_refresh_dependencies_flag "$@"; fi
 
 stop_gradle_daemon() {
   local gradle_cmd="$1"
@@ -130,7 +133,6 @@ stop_gradle_daemon() {
   fi
 }
 
-# shellcheck disable=SC2329,SC2317 # invoked through run_capture_status
 run_gradle_command() {
   local log_file="$1"
   shift
@@ -142,6 +144,8 @@ run_gradle_command() {
 
   return "$exit_code"
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then run_gradle_command "$@"; fi
 
 command=("$@")
 attempt=1

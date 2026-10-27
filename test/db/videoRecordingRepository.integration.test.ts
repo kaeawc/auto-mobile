@@ -162,7 +162,7 @@ describe("VideoRecordingRepository", () => {
         highlights: [
           {
             description: "second insert highlight",
-            shape: { type: "circle", cx: 12, cy: 34, r: 5 },
+            shape: { type: "circle", bounds: { x: 7, y: 29, width: 10, height: 10 } },
             timeline: { appearedAtSeconds: 1.5 },
           },
         ],
@@ -220,7 +220,7 @@ describe("VideoRecordingRepository", () => {
         highlights: [
           {
             description: "first insert highlight",
-            shape: { type: "circle", cx: 100, cy: 200, r: 30 },
+            shape: { type: "circle", bounds: { x: 70, y: 170, width: 60, height: 60 } },
             timeline: { appearedAtSeconds: 1.0 },
           },
         ],
@@ -258,7 +258,7 @@ describe("VideoRecordingRepository", () => {
       highlights: [
         {
           description: "button tap",
-          shape: { type: "circle", cx: 100, cy: 200, r: 30 },
+          shape: { type: "circle", bounds: { x: 70, y: 170, width: 60, height: 60 } },
           timeline: { appearedAtSeconds: 1.0, disappearedAtSeconds: 2.0 },
         },
       ],
@@ -450,7 +450,7 @@ describe("VideoRecordingRepository", () => {
       highlights: [
         {
           description: "swipe gesture",
-          shape: { type: "circle", cx: 50, cy: 50, r: 20 },
+          shape: { type: "circle", bounds: { x: 30, y: 30, width: 40, height: 40 } },
           timeline: { appearedAtSeconds: 0.5 },
         },
       ],
@@ -477,7 +477,7 @@ describe("VideoRecordingRepository", () => {
     test("drops highlight entries without a usable timeline and keeps valid ones", async () => {
       await repo.insertRecording(makeRecord());
       const good = {
-        shape: { type: "circle", bounds: { x: 1, y: 2, width: 3, height: 4 } },
+        shape: { type: "circle" as const, bounds: { x: 1, y: 2, width: 3, height: 4 } },
         timeline: { appearedAtSeconds: 1 },
       };
       await rawUpdate({

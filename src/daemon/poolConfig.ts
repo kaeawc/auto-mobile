@@ -1,6 +1,7 @@
 import type { DeviceRecoveryPolicy } from "../models/DeviceRecoveryPolicy";
 import { readEnvPositiveInteger } from "../utils/envNumbers";
 import type { MatchingStrategy } from "../models/DeviceMatchCriteria";
+import { ENV, readEnvRaw } from "../config/env";
 
 export const DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS = 2;
 export const MAX_DEVICE_RECOVERY_ATTEMPTS = 10;
@@ -23,10 +24,10 @@ export interface DeviceRecoveryPolicyParseResult {
 export type Environment = Record<string, string | undefined>;
 
 const DEVICE_RECOVERY_ON_LOSS_KEYS = [
-  "AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS",
-  "AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS",
-  "AUTOMOBILE_ANDROID_REBOOT_ON_DEATH",
-  "AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH",
+  ENV.DEVICE_RECOVERY_ON_LOSS.name,
+  ENV.DEVICE_RECOVERY_ON_LOSS.legacyName,
+  ENV.ANDROID_REBOOT_ON_DEATH.name,
+  ENV.ANDROID_REBOOT_ON_DEATH.legacyName,
 ] as const;
 
 function firstDefined(env: Environment, keys: readonly string[]): string | undefined {
@@ -58,8 +59,8 @@ export function parseDeviceRecoveryPolicy(env: Environment): DeviceRecoveryPolic
   }
 
   const maxAttemptsValue = firstDefined(env, [
-    "AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS",
-    "AUTO_MOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS",
+    ENV.DEVICE_RECOVERY_MAX_ATTEMPTS.name,
+    ENV.DEVICE_RECOVERY_MAX_ATTEMPTS.legacyName,
   ]);
   let maxAttempts = DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS;
   if (maxAttemptsValue !== undefined) {
@@ -99,8 +100,8 @@ export function getDeviceRecoveryPolicy(): DeviceRecoveryPolicy {
  */
 export function getDeviceRecoveryWindowMs(env: Environment = process.env): number {
   const override = firstDefined(env, [
-    "AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS",
-    "AUTO_MOBILE_DEVICE_RECOVERY_WINDOW_MS",
+    ENV.DEVICE_RECOVERY_WINDOW_MS.name,
+    ENV.DEVICE_RECOVERY_WINDOW_MS.legacyName,
   ]);
   if (override !== undefined && /^[1-9]\d*$/.test(override)) {
     return Number(override);
@@ -129,8 +130,7 @@ export function isAndroidEmulatorSessionContinuityEnabled(env: Environment = pro
  * - RANDOM: random selection
  * - MINIMUM: prefer lowest OS version that satisfies the constraint
  */
-const matchingOverride =
-  process.env.AUTOMOBILE_DEVICE_POOL_MATCHING ?? process.env.AUTO_MOBILE_DEVICE_POOL_MATCHING;
+const matchingOverride = readEnvRaw(ENV.DEVICE_POOL_MATCHING);
 const validStrategies: MatchingStrategy[] = ["LATEST", "RANDOM", "MINIMUM"];
 export const DEVICE_POOL_MATCHING: MatchingStrategy =
   matchingOverride && validStrategies.includes(matchingOverride as MatchingStrategy)
@@ -145,7 +145,7 @@ export const DEVICE_POOL_MATCHING: MatchingStrategy =
  * picks up env changes without a restart.
  */
 export function isDevicePoolAutolockEnabled(env: Environment = process.env): boolean {
-  const override = env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK ?? env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
+  const override = readEnvRaw(ENV.DEVICE_POOL_AUTOLOCK, env);
   return override === "1";
 }
 
@@ -157,7 +157,7 @@ export function isDevicePoolAutolockEnabled(env: Environment = process.env): boo
 export function getDevicePoolTimeoutMs(): number {
   // The variable is in seconds; a unit suffix ("2m") is ignored with a warning, not read as 2.
   return (
-    readEnvPositiveInteger("AUTOMOBILE_DEVICE_POOL_TIMEOUT", "AUTO_MOBILE_DEVICE_POOL_TIMEOUT", {
+    readEnvPositiveInteger(ENV.DEVICE_POOL_TIMEOUT.name, ENV.DEVICE_POOL_TIMEOUT.legacyName, {
       fallback: 60,
     }) * 1000
   );

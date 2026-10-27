@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { toolText } from "../helpers/toolResponse";
 import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
@@ -48,7 +49,7 @@ describe("listDevices default device manager (#11063)", () => {
 
   const callListDevices = async (): Promise<ListDevicesPayload> => {
     const response = await ToolRegistry.getTool("listDevices")!.handler({ platform: "ios" });
-    return JSON.parse(response.content?.[0]?.text ?? "{}");
+    return JSON.parse(toolText(response));
   };
 
   beforeAll(() => {

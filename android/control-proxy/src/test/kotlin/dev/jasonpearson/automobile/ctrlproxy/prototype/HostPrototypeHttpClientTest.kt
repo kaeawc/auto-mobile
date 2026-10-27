@@ -299,4 +299,17 @@ class HostPrototypeHttpClientTest {
       )
       assertTrue(cancelled.isCancelled)
     }
+
+  @Test
+  fun `host blocked_destination is preserved on the wire`() = runTest {
+    val client = client()
+    val pending = async { client.execute(request()) }
+    runCurrent()
+    client.onResponse(
+      """{"type":"prototype_response","requestId":"r-1","ok":false,"error":{"code":"blocked_destination","message":"Blocked destination"},"durationMs":4,"futureField":true}""",
+    )
+    val error = failure(pending.await())
+    assertEquals(PrototypeRequestErrorCode.BLOCKED_DESTINATION, error.code)
+    assertEquals("Blocked destination", error.message)
+  }
 }

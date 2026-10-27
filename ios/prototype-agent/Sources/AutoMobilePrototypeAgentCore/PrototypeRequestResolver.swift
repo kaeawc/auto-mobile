@@ -50,6 +50,7 @@ enum PrototypeRequestResolver {
                 }
             }
         }
+        if let problem = PrototypeHttpHeaderCheck.problem(in: headers) { return .failure(problem) }
         var body: JSONValue?
         if let binding = action.body {
             switch PrototypeDataWrite.resolveValue(binding, inputs: inputs) {
@@ -152,6 +153,14 @@ enum PrototypeRequestURL {
     )
         -> Result<String, PrototypeRequestError>
     {
+        // WHATWG URL parsing trims edge C0/space and strips ASCII tab/newline, and http(s)
+        // treats backslashes as authority/path separators. Keep validation and execution identical.
+        let text = String(
+            text.unicodeScalars.drop(while: { $0.value <= 32 }).reversed().drop(while: { $0.value <= 32 })
+                .reversed().map(Character.init)
+        )
+        .replacingOccurrences(of: "\t", with: "").replacingOccurrences(of: "\r", with: "")
+        .replacingOccurrences(of: "\n", with: "").replacingOccurrences(of: "\\", with: "/")
         guard let separator = text.range(of: "://") else {
             return .failure(.init(.invalidURL, "Not an absolute URL: \(text)"))
         }
@@ -197,6 +206,12 @@ enum PrototypeRequestURL {
                 allowed: CharacterSet.urlUserAllowed.union(CharacterSet(charactersIn: ":"))
             ) + "@"
             hostPort = String(authority[authority.index(after: at)...])
+        }
+        if hostPort.hasPrefix("[") {
+            guard let close = hostPort.firstIndex(of: "]"),
+                  URLComponents(string: "\(scheme)://\(hostPort)")?.host != nil,
+                  hostPort[hostPort.index(after: close)...].isEmpty || hostPort[hostPort.index(after: close)...]
+                  .hasPrefix(":") else { return nil }
         }
         var host = hostPort
         var port: String?

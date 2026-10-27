@@ -1,17 +1,15 @@
 import { expect, test } from "bun:test";
 import { z } from "zod/v4";
-import {
-  addDeviceTargetingToSchema,
-  addSessionUuidToSchema,
-} from "../../src/server/toolSchemaHelpers";
+import { addDeviceTargetingToSchema, addSessionUuidToSchema } from "../../src/utils/schemaHelpers";
+import { schemaProperty } from "../helpers/toolResponse";
 
 test("device targeting preserves base definitions, field order, and passthrough values", () => {
   const base = z
     .object({ value: z.string(), platform: z.literal("ios"), deviceId: z.literal("owned") })
     .passthrough();
   const extended = addDeviceTargetingToSchema(base);
-  expect(extended.shape.platform).toBe(base.shape.platform);
-  expect(extended.shape.deviceId).toBe(base.shape.deviceId);
+  expect(schemaProperty(extended.shape, "platform")).toBe(schemaProperty(base.shape, "platform"));
+  expect(schemaProperty(extended.shape, "deviceId")).toBe(schemaProperty(base.shape, "deviceId"));
   expect(Object.keys(extended.shape)).toEqual([
     "value",
     "platform",
@@ -31,8 +29,10 @@ test("device targeting preserves base definitions, field order, and passthrough 
 test("session targeting preserves a stricter base field and strict unknown-key policy", () => {
   const base = z.object({ sessionUuid: z.literal("reserved"), value: z.number() }).strict();
   const extended = addSessionUuidToSchema(base);
-  expect(extended.shape.sessionUuid).toBe(base.shape.sessionUuid);
-  expect(extended.parse({ sessionUuid: "reserved", value: 1 })).toEqual({
+  expect(schemaProperty(extended.shape, "sessionUuid")).toBe(
+    schemaProperty(base.shape, "sessionUuid"),
+  );
+  expect<unknown>(extended.parse({ sessionUuid: "reserved", value: 1 })).toEqual({
     sessionUuid: "reserved",
     value: 1,
   });

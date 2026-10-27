@@ -1,6 +1,6 @@
 ---
 name: manual-test
-description: "Run one AutoMobile manual-test iteration: from a start point (commit, milestone/tag, or date), rebuild ALL components, restart the daemon with the right flags, and verify that closed issues and merged PRs actually fix their bugs / deliver their specced features on current HEAD by exercising tool calls on an Android emulator and iOS simulator. Use when asked to retest landed work, verify a release, or manually test what changed."
+description: "Run one AutoMobile manual-test iteration: from a start point (commit, milestone/tag, or date), rebuild ALL components, restart the daemon with the right flags, and verify that closed issues and merged PRs actually fix their bugs / deliver their specced features on current HEAD by exercising tool calls on an Android emulator and iOS simulator. Defaults to a multi-device (2 Android + 2 iOS), multi-client method: several independent MCP stdio proxies against one private daemon; also covers device failure and repair, bug-vs-flaky-vs-environment triage, and performance measurement (timings, operation counts, payload sizes, device reset and reuse). Use when asked to retest landed work, verify a release, or manually test what changed."
 ---
 
 # AutoMobile Manual Test Iteration
@@ -22,14 +22,14 @@ timings measured across a host sleep or a load spike as invalid.
 
 ## Harness
 
-Use [the manual-test harness](../../docs/using/manual-test-harness.md) for private
+Use [the manual-test harness](../../docs/design-docs/manual-test-harness.md) for private
 batches: `private-daemon.ts init|start|status|stop|env|wrappers|devices|shutdown-devices|preflight|boot-gate`, `in-daemon-env.sh`,
 `proxy-session.ts up|serve|call|read|tools|resources|subscribe|status|close|release|abandon|info|owner-kill`,
 `broker-batch.ts up|status|down|report`, `broker-scenario.ts list|run`,
 `daemon-frame.ts send|session-info|heartbeat`, and `aux-socket.ts recording|video|webrtc` under
 `scripts/manual-test/`. Use those commands instead of hand-rolling a private
 environment, MCP stdio loop or socket client. For Python/anyio close and typing
-reproduction, use the [Python MCP SDK stdio clients](../../docs/using/manual-test-harness.md#python-mcp-sdk-stdio-clients).
+reproduction, use the [Python MCP SDK stdio clients](../../docs/design-docs/manual-test-harness.md#python-mcp-sdk-stdio-clients).
 
 Initialize with `private-daemon.ts init --broker-batch /absolute/broker-batch.json
 --count 1` and use one broker daemon per batch. `--max-devices` defaults to 2,
@@ -75,7 +75,7 @@ scenario. Fake entries use an in-memory broker/native fake without devices or
 daemons. Device entries require an already-running private single-daemon batch,
 zero pooling, strict preflight, no live client drivers, and verified prior cleanup.
 Only `daemon-restart-with-live-sessions --device` accepts `--crash`.
-The [scenario/evidence table](../../docs/using/manual-test-harness.md#broker-scenarios-and-acceptance)
+The [scenario/evidence table](../../docs/design-docs/manual-test-harness.md#broker-scenarios-and-acceptance)
 lists expected assertions. Summaries at `evidence/<scenario>/summary.json`
 include redacted requests, timings and ledger deltas. Destruction/handoff
 resource samples are `not-verifiable` until a product read-only diagnostic exists;
@@ -261,6 +261,162 @@ gone. `boot-gate --min-interval-ms` is best-effort with more than one concurrent
 permit. A killed gate leaves its `permit-N.lock` until its PID is gone. Grant
 JSON uses `permit`; wait JSON uses `waitingFor: permit` (or `load`/`interval`).
 
+## Default method: multi-device, multi-client
+
+A full iteration runs **2 Android + 2 iOS devices at once** under ONE private
+daemon, driven by **several independent MCP stdio proxies** — one proxy (own
+process, own session) per device, plus one or two **contenders** that try to take
+a held device, call sessionless, or read a device they do not own. Single-device,
+single-actor runs are only a fallback for re-checking one item. Isolation,
+admission, lifecycle, timeout and concurrency defects only show up this way, and
+it is how the product is really used.
+
+- **Pin the SHA.** `main` keeps moving (other lanes merge continuously). Resolve
+  `origin/main` once, test that SHA for the whole batch, and record it with
+  `campaign.sh verified --repo <owner/repo> --sha <sha>` (the script takes `--sha`,
+  not a positional argument).
+- **Prepare clean devices first** (wipe AVDs / erase sims you own), one at a time,
+  Android first. Pin every AVD to an explicit non-5554 console port from its first
+  boot (e.g. 5610, 5612) — a first boot can otherwise claim `emulator-5554`, the
+  owner's port. If that happens, shut it down through the daemon's `killDevice` and
+  relaunch on the explicit port. Use device names the broker does not count against
+  its own budget: any running `ambroker-*` device is charged to the broker budget,
+  so a broker batch and a plain batch cannot share those names.
+- **Drivers** live under the batch directory, not the repo. Reuse
+  `proxy-session.ts`, `scripts/mcp-drive.ts --plan`, `live-device-acceptance.ts`,
+  `brokerDeviceScenarios.ts` and the multi-client coverage from the broker tests
+  before writing anything new.
+- **Harness traps learned the hard way:**
+  - A daemon env change between restarts must be edited in BOTH
+    `options.extraEnv` and `specs[0].env` of `batch.json`; editing one trips the
+    tamper check.
+  - After `proxy close`, bring the client back with a **new `--dir`**.
+  - Sessions idle-expire (120 s default): touch every device inside that window
+    (`pressButton` refreshes the idle window; `observe` and `setActiveDevice` do
+    not). `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` is read by the **proxy at start**, so
+    restarting the daemon alone keeps the old window.
+  - `--no-proxy` (direct mode) refuses to start while any other daemon is live, so
+    direct-mode checks need a quiet machine or a separate run.
+  - Redirect stdin with `< /dev/null` on harness calls made from an agent.
+  - Subagents may be unable to write files; the coordinator writes `report.md`
+    from the text they return.
+
+### Multi-client scenario checklist
+
+Run each on both platforms where it applies; record the observed field, not the
+tool's `success`.
+
+1. **Isolation:** client A never sees or steers B's device; a non-holder read of a
+   held device is allowed (read oracle) but a pin/steer/mutation is refused.
+2. **Contenders:** taking a held device, a sessionless call with several devices
+   up (typed `ambiguous_device_target`), `capacity_exhausted` while the pool is
+   full — each must be a **typed refusal in milliseconds, never a hang**.
+3. **Pins:** `setActiveDevice` is per-connection and cleared on disconnect.
+4. **Lifecycle:** release and immediate re-acquire by another client; daemon
+   restart with live sessions rehydrates the same session ids; heartbeat loss
+   releases within the idle bound; owner kill; takeover of an older daemon
+   (deferral and its guidance); SIGTERM mid-call (call completes, daemon stops).
+5. **Device loss:** `killDevice` (or killing your own emulator process) on one
+   device while the others keep working; the disconnect monitor counts misses and
+   releases without a restart storm.
+6. **Stall injection:** SIGSTOP/SIGCONT the daemon PID **you started** for ~18 s
+   with two emulators held — healthy devices must not be quarantined or reported
+   `device_lost`.
+7. **Timeouts and cancel:** per-tool budgets with the env var set client-only,
+   daemon-only and both (the daemon decides); cancel mid-flight; release replies
+   `cleanup_pending` and replays.
+8. **Push streams:** 2+ telemetry subscribers incl. a slow one; frames carry the
+   right `subscriptionId`; the slow subscriber is dropped without affecting others.
+9. **MCP Tasks:** `startDevice` as a task from one client while another holds a
+   different device.
+10. **Tool sweep in parallel** on all four devices (observe, tap, swipe,
+    setUIState, sendKeys, launch/terminate, install/uninstall, screenshot,
+    systemTray, keyboard, pressButton), light/dark, cold boot vs quickboot.
+
+## Device failure modes and repair
+
+Know these before calling anything a product bug. Repair only devices you own
+(`ambroker-*` / batch devices); never touch protected ones.
+
+| Symptom                                                                        | Usual cause                                                                                | Repair / handling                                                                                                                 |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| New AVD comes up as `emulator-5554`                                            | Owner's port was free                                                                      | `killDevice` via the daemon, relaunch with an explicit console port                                                               |
+| Sim goes `Shutdown` ~30 s after a daemon restart, daemon log shows no shutdown | External actor (another lane's simctl/launchd restart)                                     | Record as environment; re-boot via the daemon; do not file unless it reproduces with nobody else active                           |
+| Emulator `offline` / `authorizing`                                             | adb transport still settling, or stale adb server                                          | Wait with a bound; `adb reconnect`; as a last resort restart the adb server only if no protected device depends on it             |
+| Emulator process listed but no `sys.boot_completed`                            | Slow cold boot under load, or crashed qemu (SIGSEGV class)                                 | Check load first; relaunch with `-no-snapshot`; if it SIGSEGVs repeatedly under a GPU mode, change GPU mode (qualification issue) |
+| Healthy emulators reported `device_lost` / quarantined during a daemon stall   | Probe timed out because the event loop stalled (fixed in #14347; regression if it returns) | Confirm with SIGSTOP/SIGCONT repro; compare against the probe-timeout log lines                                                   |
+| Accessibility service never binds (API 35) / crashed a11y                      | Known platform behavior                                                                    | Reinstall the ctrlproxy APK, toggle the service, recover via the documented crashed-a11y path                                     |
+| iOS observe empty right after a cold sim boot                                  | Hierarchy not ready                                                                        | Retry once; persistent empties are a bug                                                                                          |
+| iOS runner stale / foreign runner serving the call                             | Reused external runner                                                                     | `grep 'Reusing an external CtrlProxy runner'`; restart the runner; confirm the served xctestrun path                              |
+| Notification shade not closing on iOS 27                                       | Cover sheet, not Notification Center                                                       | Home press dismisses it (#14139)                                                                                                  |
+| Keyguard / sleep-locked emulator                                               | `pressButton power` was used                                                               | Never power-press on Android; `wakeAndUnlock`                                                                                     |
+| Daemon restarts replace your flagged daemon                                    | A competing daemon on the shared socket                                                    | Use a private daemon with isolated dirs and a non-3000 port                                                                       |
+| Orphaned emulator/sim after a failed run                                       | Cleanup skipped                                                                            | Shut down only what your batch booted (`private-daemon.ts shutdown-devices`), then release the lock                               |
+
+## Bug vs flaky state vs environment
+
+Decide before filing. Work this list in order:
+
+1. **Ground truth first.** Compare the tool's answer with `adb`/`simctl`/`dumpsys`.
+   A tool result that contradicts ground truth is a bug candidate; a tool result
+   that matches ground truth on a device in a strange state is not.
+2. **Reproduce twice on a freshly reset device.** Deterministic (or ≥2 of 3) on a
+   clean device = **BUG**. Passes after reset or never reproduces = **FLAKY
+   STATE** — note it in the report, do not file.
+3. **Check the host.** Load average above ~24 (or CPU contention from other lanes)
+   invalidates absolute timings and explains most timeout misses. Re-run under
+   quieter load or use before/after pairs under similar load.
+4. **Check for external actors.** Device shutdowns or runner restarts that the
+   daemon log does not show are **ENVIRONMENT** (another session, launchd, CI sim).
+5. **Baseline against the previous build.** Build the previous verified SHA in a
+   second worktree and run it as a second private daemon: if the old build behaves
+   the same, it is not a regression (file as pre-existing only if it is wrong).
+6. **Harness vs product.** Failures that vanish with a new `--dir`, a refreshed
+   idle window, or the correct `batch.json` env are harness artifacts.
+
+Classify every non-PASS item as **BUG** (file with repro, root cause, suggested
+fix), **FLAKY-STATE** (record signature, no issue unless it recurs across
+batches), **ENVIRONMENT** (record, no issue), or **HARNESS** (fix the driver).
+Label policy: remove `needs-device-verify` only with direct evidence covering
+**every platform the change touches**; partial evidence keeps the label and adds a
+comment. A fix that merged but still fails on a device is **NOT-FIXED** — comment
+on the issue and keep it open.
+
+## Always measure: performance, speed, efficiency, fewer operations
+
+Every batch is also a performance review. The goal is fewer operations, fewer
+subprocesses, fewer round trips and less waiting — not just correctness.
+
+- **Take a number for everything you exercise** and compare it with the previous
+  batch's report (keep a running table in `report.md`). Use daemon-log timestamps
+  (phase gaps) instead of wall-clock guesses; absolute times are contaminated by
+  host load, so prefer before/after pairs and ratios.
+- **Standard measurements:** acquire time (cold and reuse); "Starting emulator" →
+  "Waiting for emulator" → ready; runner startup; `observe`/`tapOn`/`setUIState`
+  latency; idle subprocess spawns per minute (`adb`/`simctl`/`devicectl`) and
+  daemon CPU per 60 s; spawns per operation (e.g. simctl lists per boot/reset);
+  failed probes per observe; payload sizes (`tool-definitions.json`, layout row
+  bytes, observe size); push frame counts and subscriber fan-out; tool-list size.
+- **Hunt for waste while you drive:** fixed sleeps that could be event-driven,
+  polling that could be notified, serial work that could overlap, repeated reads
+  of the same state, full inventories where a targeted read would do, redundant
+  extractions after a tap, unbounded retries. File a performance issue with the
+  measured numbers and the proposed saving; mark device-timing fixes
+  `needs-device-verify`.
+- **Device reset and reuse deserve a dedicated pass** (fast reuse is being built
+  under epic #14358): time the erase/wipe baseline phase by phase (stop, erase,
+  boot, ready, next acquire); verify cleanliness after reset (installed apps,
+  permissions, settings, files, clipboard, keyboard, appearance, locale,
+  rotation, notifications); run simultaneous resets on several devices; reset one
+  device while another client drives a second; contend for a resetting device
+  (typed refusal, no hang); interrupt a reset (daemon restart, kill) and check
+  recovery; exercise any keep-booted or snapshot mode that exists at the pinned
+  SHA and compare it with the erase/wipe baseline. Android quickboot keeps dirty
+  state; only wipe-data is a clean baseline.
+- **Report the table, not just the verdict:** metric | previous batch | this batch
+  | delta | note on load. A faster path that is not clean, or a clean path that is
+  slower than a cold acquire, is a finding.
+
 ## Phase 0 — Scope from the start point
 
 1. **Get the start point.** Accept a commit SHA, a tag/milestone, or a date. If
@@ -426,7 +582,7 @@ retain unchanged request/token bytes. Drive calls through
 Never pass daemon flags to the proxy; a build/option mismatch must be resolved in your private
 batch before continuing. Do not replace the resident daemon to fix a mismatch.
 
-## Phase 3 — Exercise tool calls (Android, then iOS)
+## Phase 3 — Exercise tool calls (all devices; Android first, then iOS)
 
 Use the target client's granted session and leave other clients alone. For **each** checklist item:
 
@@ -532,6 +688,9 @@ private daemon with a short `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS`):**
 
 ## Phase 4 — Report, file, and confirm
 
+0. For a multi-client batch also write a **facet matrix** (facet × device × client)
+   and the performance table from "Always measure"; classify every non-PASS item
+   as BUG, FLAKY-STATE, ENVIRONMENT or HARNESS before filing anything.
 1. Write a per-item table: `Item # | Type | Platform | FIXED / PASS / NOT-FIXED / REGRESSED / BLOCKED | Evidence (the field checked)`.
 2. **File a GitHub issue** for every regression or not-fixed item: exact repro, the
    observed-vs-expected, root cause with `file:line` where known, and a suggested

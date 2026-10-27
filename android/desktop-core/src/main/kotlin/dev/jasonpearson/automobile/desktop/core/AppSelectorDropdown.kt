@@ -29,109 +29,45 @@ import androidx.compose.ui.window.PopupProperties
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
+private data class AppSelectorOptions(
+  val installedApps: List<InstalledApp>,
+  val selectedAppId: String?,
+  val isLoading: Boolean,
+  val expanded: Boolean,
+  val onExpandedChange: (Boolean) -> Unit,
+  val onAppSelected: (String?) -> Unit,
+)
+
 @Composable
-private fun AppSelectorDropdown(
-  installedApps: List<InstalledApp>,
-  selectedAppId: String?,
-  isLoading: Boolean,
-  expanded: Boolean,
-  onExpandedChange: (Boolean) -> Unit,
-  onAppSelected: (String?) -> Unit,
-) {
-  val colors = SharedTheme.globalColors
-  val selectedApp = installedApps.find { it.packageName == selectedAppId }
-  val displayText =
-    when {
-      isLoading -> "Loading..."
-      selectedApp != null -> selectedApp.displayName ?: selectedApp.packageName
-      selectedAppId != null -> selectedAppId // Show package name if app not in list
-      installedApps.isEmpty() -> "No apps"
-      else -> "Select app"
-    }
-
-  Row(
-    horizontalArrangement = Arrangement.spacedBy(6.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    Text(
-      "App:",
-      fontSize = 11.sp,
-      maxLines = 1,
-      softWrap = false,
-      color = colors.text.normal.copy(alpha = 0.5f),
-    )
-
-    Box {
-      Row(
-        modifier =
-          Modifier.background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-            .border(1.dp, colors.text.normal.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
-            .clickable(enabled = !isLoading) { onExpandedChange(!expanded) }
-            .pointerHoverIcon(if (isLoading) PointerIcon.Default else PointerIcon.Hand)
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Text(
-          displayText,
-          fontSize = 11.sp,
-          color = colors.text.normal,
-          maxLines = 1,
-        )
-
-        // Foreground indicator
-        if (selectedApp?.isForeground == true) {
-          Box(
-            modifier =
-              Modifier.background(Color(0xFF4CAF50), RoundedCornerShape(2.dp))
-                .padding(horizontal = 4.dp, vertical = 1.dp),
-          ) {
-            Text(
-              "FG",
-              fontSize = 9.sp,
-              color = Color.White,
-            )
-          }
-        }
-
-        Text(
-          if (expanded) "\u25B2" else "\u25BC",
-          fontSize = 8.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
-        )
+private fun AppSelectorDropdown(options: AppSelectorOptions) {
+  with(options) {
+    val colors = SharedTheme.globalColors
+    val selectedApp = installedApps.find { it.packageName == selectedAppId }
+    val displayText =
+      when {
+        isLoading -> "Loading..."
+        selectedApp != null -> selectedApp.displayName ?: selectedApp.packageName
+        selectedAppId != null -> selectedAppId // Show package name if app not in list
+        installedApps.isEmpty() -> "No apps"
+        else -> "Select app"
       }
 
-      // Dropdown popup overlay
-      if (expanded) {
-        Popup(
-          onDismissRequest = { onExpandedChange(false) },
-          offset = IntOffset(0, 32),
-          properties = PopupProperties(focusable = true),
-        ) {
-          Column(
-            modifier =
-              Modifier.width(300.dp)
-                .heightIn(max = 200.dp) // Show ~5 items, scroll for more
-                .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
-                .border(1.dp, Color(0xFF404040), RoundedCornerShape(4.dp))
-                .verticalScroll(rememberScrollState()),
-          ) {
-            // Installed apps - foreground first
-            val sortedApps = installedApps.sortedByDescending { it.isForeground }
-            sortedApps.forEach { app ->
-              AppDropdownItem(
-                displayName = app.displayName,
-                packageName = app.packageName,
-                isForeground = app.isForeground,
-                isSelected = app.packageName == selectedAppId,
-                onClick = {
-                  onAppSelected(app.packageName)
-                  onExpandedChange(false)
-                },
-              )
-            }
-          }
-        }
+    Row(
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        "App:",
+        fontSize = 11.sp,
+        maxLines = 1,
+        softWrap = false,
+        color = colors.text.normal.copy(alpha = 0.5f),
+      )
+
+      Box {
+        AppSelectorButton(options, displayText, selectedApp?.isForeground == true)
+
+        if (expanded) AppSelectorPopup(options)
       }
     }
   }
@@ -194,5 +130,94 @@ private fun AppDropdownItem(
         color = Color(0xFF4CAF50),
       )
     }
+  }
+}
+
+@Composable
+private fun AppSelectorPopup(options: AppSelectorOptions) {
+  with(options) {
+    Popup(
+      onDismissRequest = { onExpandedChange(false) },
+      offset = IntOffset(0, 32),
+      properties = PopupProperties(focusable = true),
+    ) {
+      Column(
+        modifier =
+          Modifier.width(300.dp)
+            .heightIn(max = 200.dp) // Show ~5 items, scroll for more
+            .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
+            .border(1.dp, Color(0xFF404040), RoundedCornerShape(4.dp))
+            .verticalScroll(rememberScrollState()),
+      ) {
+        // Installed apps - foreground first
+        val sortedApps = installedApps.sortedByDescending { it.isForeground }
+        sortedApps.forEach { app ->
+          AppDropdownItem(
+            displayName = app.displayName,
+            packageName = app.packageName,
+            isForeground = app.isForeground,
+            isSelected = app.packageName == selectedAppId,
+            onClick = {
+              onAppSelected(app.packageName)
+              onExpandedChange(false)
+            },
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun AppSelectorButton(
+  options: AppSelectorOptions,
+  displayText: String,
+  isForeground: Boolean,
+) {
+  val colors = SharedTheme.globalColors
+  with(options) {
+    Row(
+      modifier =
+        Modifier.background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+          .border(1.dp, colors.text.normal.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+          .clickable(enabled = !isLoading) { onExpandedChange(!expanded) }
+          .pointerHoverIcon(if (isLoading) PointerIcon.Default else PointerIcon.Hand)
+          .padding(horizontal = 10.dp, vertical = 4.dp),
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        displayText,
+        fontSize = 11.sp,
+        color = colors.text.normal,
+        maxLines = 1,
+      )
+
+      // Foreground indicator
+      if (isForeground) {
+        AppForegroundBadge()
+      }
+
+      Text(
+        if (expanded) "\u25B2" else "\u25BC",
+        fontSize = 8.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
+      )
+    }
+  }
+}
+
+@Composable
+private fun AppForegroundBadge() {
+  Box(
+    modifier =
+      Modifier.background(Color(0xFF4CAF50), RoundedCornerShape(2.dp))
+        .padding(horizontal = 4.dp, vertical = 1.dp),
+  ) {
+    Text(
+      "FG",
+      fontSize = 9.sp,
+      color = Color.White,
+    )
   }
 }

@@ -10,6 +10,7 @@ import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/m
 import { DeviceAlreadyRunningError } from "../../src/models/DeviceAlreadyRunningError";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import { AdbUnavailableError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { discoverySourceOutcome } from "../../src/utils/discoverySource";
@@ -20,9 +21,23 @@ import type {
   IosBootRequest,
 } from "../../src/features/iosSimFleet/IosBootInstrumentation";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { IosPhysicalDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
+import type {
+  IosPhysicalDeviceLister,
+  PhysicalIosDeviceDiscovery,
+} from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { logger } from "../../src/utils/logger";
-import type { BootedDeviceScanOptions } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { DefaultAndroidDeviceInventoryScanner } from "../../src/utils/android-cmdline-tools/AndroidDeviceInventoryScanner";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import type { BootedDeviceScanOptions } from "../../src/utils/android-cmdline-tools/AndroidDeviceInventoryScanner";
+import type { AndroidEmulatorLaunchHandle } from "../../src/utils/android-cmdline-tools/AndroidEmulatorLaunchTypes";
+
+const launchedHandle = (avdName: string): AndroidEmulatorLaunchHandle => ({
+  avdName,
+  process: null,
+  outcome: "launched",
+  dispose: () => {},
+  release: () => {},
+});
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -41,6 +56,54 @@ async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promi
 }
 
 describe("MultiPlatformDeviceManager", () => {
+  test("targeted Android discovery keeps AVD identity without probing other emulators or profiles", async () => {
+    const adb = new FakeAdbClient();
+    const names: string[] = [];
+    const timer = new FakeTimer();
+    const scanner = new DefaultAndroidDeviceInventoryScanner({
+      timer: () => timer,
+      adbFactory: () => new FakeAdbClientFactory(adb),
+      observationSequence: () => ({ next: () => 1 }),
+      avdConfigReader: () => ({ readConfig: async () => null }),
+      getRunningAvdName: async (device) => {
+        names.push(device.deviceId);
+        return { name: "broker-avd" };
+      },
+      isUnknownEmulatorName: (name, serial) => name === `Unknown (${serial})`,
+      unknownEmulatorName: (serial) => `Unknown (${serial})`,
+      throwIfAborted: (signal) => signal?.throwIfAborted(),
+    });
+    const manager = new MultiPlatformDeviceManager(
+      adb,
+      null,
+      createFakeAndroidEmulator({
+        getBootedDevicesChecked: async (onlyEmulators, options, signal) =>
+          (
+            await scanner.getBootedDevicesWithDiagnostics(
+              onlyEmulators,
+              {
+                ...options,
+                devices: ["emulator-5554", "emulator-5556"].map((deviceId) => ({
+                  deviceId,
+                  platform: "android",
+                  name: deviceId,
+                })),
+              },
+              signal,
+            )
+          ).devices,
+      }),
+    );
+    const result = await manager.getBootedDevicesDetailed("android", {
+      androidTargetDeviceId: "emulator-5554",
+      skipAndroidProfileEnrichment: true,
+    });
+    expect(result.devices.map((device) => device.deviceId)).toEqual(["emulator-5554"]);
+    expect(result.devices[0]!.name).toBe("broker-avd");
+    expect(names).toEqual(["emulator-5554"]);
+    expect(adb.getInteractionLog()).toEqual([]);
+  });
+
   describe("concurrent detailed discovery", () => {
     const androidDevice: BootedDevice = {
       name: "Pixel 9",
@@ -279,9 +342,9 @@ describe("MultiPlatformDeviceManager", () => {
         expect(physicalListings).toBe(0);
         expect(discovery.devices).toEqual([simulator]);
         expect(discovery.succeededPlatforms.has("ios")).toBe(true);
-        expect([...discovery.succeededSources]).toEqual(["ios-simulator"]);
+        expect([...(discovery.succeededSources ?? [])]).toEqual(["ios-simulator"]);
         expect(discovery.sourceErrors).toBeUndefined();
-        expect([...discovery.freshDeviceIds]).toEqual([simulator.deviceId]);
+        expect([...(discovery.freshDeviceIds ?? [])]).toEqual([simulator.deviceId]);
       });
     });
 
@@ -471,7 +534,7 @@ describe("MultiPlatformDeviceManager", () => {
           {
             listConnectedDevices: async () => {
               listerCalls++;
-              return [physicalDevice];
+              return { devices: [physicalDevice], complete: true };
             },
           },
         );
@@ -585,11 +648,8 @@ describe("MultiPlatformDeviceManager", () => {
     await withProcessPlatform("darwin", async () => {
       const controller = new AbortController();
       const cancellation = new Error("iOS discovery cancelled");
-      let resolvePhysical!: (discovery: { devices: BootedDevice[]; complete: boolean }) => void;
-      const physicalDiscovery = new Promise<{
-        devices: BootedDevice[];
-        complete: boolean;
-      }>((resolve) => {
+      let resolvePhysical!: (discovery: PhysicalIosDeviceDiscovery) => void;
+      const physicalDiscovery = new Promise<PhysicalIosDeviceDiscovery>((resolve) => {
         resolvePhysical = resolve;
       });
       let simctlCalled = false;
@@ -621,10 +681,11 @@ describe("MultiPlatformDeviceManager", () => {
     });
   });
 
-  test("getBootedDevicesDetailed forwards iOS cache bypass and cancellation to simctl", async () => {
+  test("getBootedDevicesDetailed forwards iOS cache bypass to both sources and cancellation to simctl", async () => {
     await withProcessPlatform("darwin", async () => {
       const controller = new AbortController();
       let request: { signal?: AbortSignal; options?: { bypassCache?: boolean } } | undefined;
+      let physicalOptions: { bypassCache?: boolean } | undefined;
       const fakeSimctl = fakeDeviceManagerSimctl({
         getBootedSimulatorsChecked: async (
           _timeoutMs?: number,
@@ -641,15 +702,22 @@ describe("MultiPlatformDeviceManager", () => {
         createFakeAndroidEmulator({}),
         undefined,
         undefined,
-        { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+        {
+          listConnectedDevices: async (options) => {
+            physicalOptions = options;
+            return { devices: [], complete: true };
+          },
+        },
       );
 
       await manager.getBootedDevicesDetailed("ios", {
         signal: controller.signal,
         bypassIosDeviceListCache: true,
+        bypassPhysicalIosDeviceListCache: true,
       });
 
       expect(request).toEqual({ signal: controller.signal, options: { bypassCache: true } });
+      expect(physicalOptions).toEqual({ bypassCache: true });
     });
   });
 
@@ -725,7 +793,7 @@ describe("MultiPlatformDeviceManager", () => {
       fakeSimctl,
       null,
     ).withIosBootInstrumentation(instrumentation);
-    const resourceProfile = { resources: { location: "disabled" as const } };
+    const resourceProfile = { resources: { widgets: "disabled" as const } };
 
     await manager.startDevice(
       { name: "iPhone", platform: "ios", isRunning: false, deviceId: "UDID-1", runtimeId: "rt" },
@@ -734,7 +802,14 @@ describe("MultiPlatformDeviceManager", () => {
     );
 
     expect(requests).toEqual([
-      { udid: "UDID-1", runtime: "rt", profile: resourceProfile, timeoutMs: 60_000 },
+      {
+        udid: "UDID-1",
+        runtime: "rt",
+        profile: resourceProfile,
+        timeoutMs: 60_000,
+        reason: "restart",
+        signal: undefined,
+      },
     ]);
     expect(started).toEqual([{ udid: "UDID-1", timeoutMs: 1234 }]);
   });
@@ -780,13 +855,6 @@ describe("MultiPlatformDeviceManager", () => {
         runningStateProbed = true;
         return [];
       },
-      // An already-booted simulator that happens to share the target's name:
-      // pre-fix, this made isDeviceImageRunning() return true and the caller
-      // observed "already running" instead of the missing-UDID error.
-      isSimulatorRunning: async () => {
-        runningStateProbed = true;
-        return true;
-      },
       startSimulator: async () => {
         throw new Error("simctl bootstatus must not run for a name-only iOS target");
       },
@@ -815,6 +883,7 @@ describe("MultiPlatformDeviceManager", () => {
           process: null,
           outcome: "joined-in-process-launch",
           dispose: () => {},
+          release: () => {},
         }),
       }),
     );
@@ -839,7 +908,7 @@ describe("MultiPlatformDeviceManager", () => {
         getBootedDevicesChecked: async () => [],
         launchEmulator: async (request) => {
           admitColdBoot = request.admitColdBoot;
-          return { process: null };
+          return launchedHandle(request.avdName);
         },
       }),
     ).withAndroidBootAdmission({
@@ -866,7 +935,7 @@ describe("MultiPlatformDeviceManager", () => {
         getBootedDevicesChecked: async () => [],
         launchEmulator: async (request) => {
           sawHook = request.admitColdBoot !== undefined;
-          return { process: null };
+          return launchedHandle(request.avdName);
         },
       }),
     ).withAndroidBootAdmission(null);
@@ -885,7 +954,7 @@ describe("MultiPlatformDeviceManager", () => {
         getBootedDevicesChecked: async () => [],
         launchEmulator: async (request) => {
           received = request.cameraPosterPath;
-          return { process: null };
+          return launchedHandle(request.avdName);
         },
       }),
     );
@@ -893,6 +962,25 @@ describe("MultiPlatformDeviceManager", () => {
       cameraPosterPath: "/poster.png",
     });
     expect(received).toBe("/poster.png");
+  });
+
+  test("startDevice launches with -no-snapshot-save only when asked (#15477)", async () => {
+    const received: Array<readonly string[] | undefined> = [];
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient(),
+      undefined,
+      createFakeAndroidEmulator({
+        getBootedDevicesChecked: async () => [],
+        launchEmulator: async (request) => {
+          received.push(request.extraArgs);
+          return launchedHandle(request.avdName);
+        },
+      }),
+    );
+    const image = { name: "Pixel", platform: "android" as const, isRunning: false };
+    await manager.startDevice(image, undefined, { discardSnapshotOnExit: true });
+    await manager.startDevice(image);
+    expect(received).toEqual([["-no-snapshot-save"], undefined]);
   });
 
   test("startDevice rejects physical Android poster requests before probing or launching", async () => {
@@ -920,7 +1008,7 @@ describe("MultiPlatformDeviceManager", () => {
       },
       launchEmulator: async () => {
         launched = true;
-        return { process: null };
+        return launchedHandle("Pixel");
       },
     });
     const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
@@ -948,7 +1036,7 @@ describe("MultiPlatformDeviceManager", () => {
       },
       launchEmulator: async () => {
         launched = true;
-        return { process: null };
+        return launchedHandle("Pixel");
       },
     });
     const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
@@ -970,7 +1058,7 @@ describe("MultiPlatformDeviceManager", () => {
         },
         startSimulator: async () => {
           launched = true;
-          return null;
+          return new FakeChildProcess();
         },
       });
       const manager = new MultiPlatformDeviceManager(
@@ -1001,7 +1089,7 @@ describe("MultiPlatformDeviceManager", () => {
         getBootedSimulatorsChecked: async (): Promise<BootedDevice[]> => [booted],
         startSimulator: async () => {
           launched = true;
-          return null;
+          return new FakeChildProcess();
         },
       });
       const manager = new MultiPlatformDeviceManager(
@@ -1058,9 +1146,6 @@ describe("MultiPlatformDeviceManager", () => {
       getBootedSimulatorsChecked: async () => [
         { name: "iPhone 15", platform: "ios", deviceId: "booted-1" },
       ],
-      isSimulatorRunning: async () => {
-        throw new Error("should not use name-based check when deviceId is present");
-      },
     });
 
     // Use FakeAdbClient to avoid starting real adb daemon
@@ -1425,13 +1510,13 @@ describe("MultiPlatformDeviceManager", () => {
 
   test("listDeviceImages(android) keeps configured AVDs when overlay mapping fails", async () => {
     const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
-    const malformedBootedDevice = {
+    const malformedBootedDevice: BootedDevice = {
       name: "Pixel_8",
       platform: "android",
       get deviceId(): string {
         throw new Error("malformed booted device");
       },
-    } as unknown as BootedDevice;
+    };
     const fakeEmulator = createFakeAndroidEmulator({
       listAvds: async () => [image],
       getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [malformedBootedDevice],
@@ -1570,7 +1655,7 @@ describe("MultiPlatformDeviceManager", () => {
     const fakeSimctl = fakeDeviceManagerSimctl({
       isAvailable: async () => true,
       listSimulatorImages: async (
-        _sessionId?: string,
+        _timeoutMs?: number,
         options?: { bypassCache?: boolean; signal?: AbortSignal },
       ): Promise<DeviceInfo[]> => {
         iosOptions = options;
@@ -1702,6 +1787,7 @@ describe("MultiPlatformDeviceManager", () => {
     timer.advanceTime(4_000);
     let reservedDeadlineMs: number | undefined;
     const lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = {
+      isReserved: () => false,
       reserve: async (identity, options) => {
         reservedDeadlineMs = options.deadlineMs;
         return {

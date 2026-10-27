@@ -1,3 +1,4 @@
+import { recordPlanCall } from "../helpers/recordPlanCall";
 import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import {
   startToolCallRecording,
@@ -6,7 +7,7 @@ import {
   getToolCallRecorder,
   resetToolCallRecordingState,
   dropToolCallRecording,
-} from "../../src/server/toolCallRecordingManager";
+} from "../../src/daemon/toolCallRecordingManager";
 import { PlanValidator } from "../../src/utils/plan/PlanValidator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -33,8 +34,8 @@ describe("toolCallRecordingManager", () => {
       const timer = new FakeTimer();
       startToolCallRecording({ connectionId: "A", timer });
       startToolCallRecording({ connectionId: "B", timer });
-      getToolCallRecorder({ connectionId: "A" })!.record("tapOn", { text: "Only A" });
-      getToolCallRecorder({ connectionId: "B" })!.record("tapOn", { text: "Only B" });
+      recordPlanCall(getToolCallRecorder({ connectionId: "A" })!, "tapOn", { text: "Only A" });
+      recordPlanCall(getToolCallRecorder({ connectionId: "B" })!, "tapOn", { text: "Only B" });
       const a = stopToolCallRecording({ connectionId: "A", timer });
       expect(a.planContent).toContain("Only A");
       expect(a.planContent).not.toContain("Only B");
@@ -51,7 +52,7 @@ describe("toolCallRecordingManager", () => {
     test("ending an absent connection cannot stop another recording", () => {
       const timer = new FakeTimer();
       startToolCallRecording({ connectionId: "B", timer });
-      getToolCallRecorder({ connectionId: "B" })!.record("tapOn", { text: "Only B" });
+      recordPlanCall(getToolCallRecorder({ connectionId: "B" })!, "tapOn", { text: "Only B" });
       expect(() => stopToolCallRecording({ connectionId: "A", timer })).toThrow(
         "No active tool call recording",
       );
@@ -62,7 +63,7 @@ describe("toolCallRecordingManager", () => {
       const timer = new FakeTimer();
       startToolCallRecording({ connectionId: "A", timer });
       startToolCallRecording({ connectionId: "B", timer });
-      getToolCallRecorder({ connectionId: "B" })!.record("tapOn", { text: "Only B" });
+      recordPlanCall(getToolCallRecorder({ connectionId: "B" })!, "tapOn", { text: "Only B" });
       expect(() => stopToolCallRecording({ connectionId: "A", timer })).toThrow(
         "No MCP tool calls were recorded",
       );
@@ -75,7 +76,7 @@ describe("toolCallRecordingManager", () => {
       const timer = new FakeTimer();
       for (const connectionId of ["A", "B"]) {
         startToolCallRecording({ connectionId, timer });
-        getToolCallRecorder({ connectionId })!.record("tapOn", { text: connectionId });
+        recordPlanCall(getToolCallRecorder({ connectionId })!, "tapOn", { text: connectionId });
       }
       const spy = spyOn(PlanValidator, "validate").mockImplementation(() => {
         throw new Error("validation boom");
@@ -114,7 +115,7 @@ describe("toolCallRecordingManager", () => {
       startToolCallRecording({ timer });
       startToolCallRecording({ connectionId: "A", timer });
       expect(startToolCallRecording({ connectionId: undefined, timer }).alreadyActive).toBe(true);
-      getToolCallRecorder()!.record("tapOn", { text: "Anonymous" });
+      recordPlanCall(getToolCallRecorder()!, "tapOn", { text: "Anonymous" });
       expect(stopToolCallRecording({ timer }).planContent).toContain("Anonymous");
       expect(getToolCallRecorder({ connectionId: "A" })?.isRecording()).toBe(true);
     });
@@ -150,8 +151,8 @@ describe("toolCallRecordingManager", () => {
       startToolCallRecording({ timer });
 
       const recorder = getToolCallRecorder()!;
-      recorder.record("tapOn", { text: "A" });
-      recorder.record("tapOn", { text: "B" });
+      recordPlanCall(recorder, "tapOn", { text: "A" });
+      recordPlanCall(recorder, "tapOn", { text: "B" });
 
       const result = startToolCallRecording({ timer });
 
@@ -187,8 +188,8 @@ describe("toolCallRecordingManager", () => {
       startToolCallRecording({ timer });
 
       const recorder = getToolCallRecorder()!;
-      recorder.record("tapOn", { text: "Login" });
-      recorder.record("sendKeys", { commands: [{ action: "type", text: "test" }] });
+      recordPlanCall(recorder, "tapOn", { text: "Login" });
+      recordPlanCall(recorder, "sendKeys", { commands: [{ action: "type", text: "test" }] });
 
       const statusTimer = new FakeTimer();
       statusTimer.setCurrentTime(3000);
@@ -205,7 +206,7 @@ describe("toolCallRecordingManager", () => {
     test("exports launchApp without transport metadata", () => {
       const timer = new FakeTimer();
       startToolCallRecording({ timer });
-      getToolCallRecorder()!.record("launchApp", {
+      recordPlanCall(getToolCallRecorder()!, "launchApp", {
         appId: "com.android.settings",
         sessionUuid: "session",
         __mcpRequestTimeoutMs: 120000,
@@ -239,9 +240,9 @@ describe("toolCallRecordingManager", () => {
       startToolCallRecording({ timer });
 
       const recorder = getToolCallRecorder()!;
-      recorder.record("launchApp", { appId: "com.test.app", platform: "android" });
-      recorder.record("tapOn", { text: "Login", sessionUuid: "abc" });
-      recorder.record("terminateApp", { appId: "com.test.app" });
+      recordPlanCall(recorder, "launchApp", { appId: "com.test.app", platform: "android" });
+      recordPlanCall(recorder, "tapOn", { text: "Login", sessionUuid: "abc" });
+      recordPlanCall(recorder, "terminateApp", { appId: "com.test.app" });
 
       const stopTimer = new FakeTimer();
       stopTimer.setCurrentTime(5000);
@@ -263,7 +264,7 @@ describe("toolCallRecordingManager", () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);
       startToolCallRecording({ timer });
-      getToolCallRecorder()!.record("tapOn", { text: "Login" });
+      recordPlanCall(getToolCallRecorder()!, "tapOn", { text: "Login" });
 
       const stopTimer = new FakeTimer();
       stopTimer.setCurrentTime(5000);
@@ -280,7 +281,7 @@ describe("toolCallRecordingManager", () => {
       startToolCallRecording({ timer });
 
       const recorder = getToolCallRecorder()!;
-      recorder.record("tapOn", {
+      recordPlanCall(recorder, "tapOn", {
         text: "Login",
         action: "tap",
         platform: "android",
@@ -307,7 +308,7 @@ describe("toolCallRecordingManager", () => {
       startToolCallRecording({ timer });
 
       const recorder = getToolCallRecorder()!;
-      recorder.record("observe", {});
+      recordPlanCall(recorder, "observe", {});
 
       const stopTimer = new FakeTimer();
       stopTimer.setCurrentTime(2000);
@@ -322,7 +323,7 @@ describe("toolCallRecordingManager", () => {
       startToolCallRecording({ timer });
 
       const recorder = getToolCallRecorder()!;
-      recorder.record("observe", {});
+      recordPlanCall(recorder, "observe", {});
 
       const stopTimer = new FakeTimer();
       stopTimer.setCurrentTime(2000);
@@ -342,7 +343,7 @@ describe("toolCallRecordingManager", () => {
       startToolCallRecording({ timer });
 
       const recorder = getToolCallRecorder()!;
-      recorder.record("tapOn", { text: "Login" });
+      recordPlanCall(recorder, "tapOn", { text: "Login" });
 
       expect(() => stopToolCallRecording({ planName: "test", timer })).toThrow("validation boom");
       expect(getToolCallRecorder()).toBeNull();

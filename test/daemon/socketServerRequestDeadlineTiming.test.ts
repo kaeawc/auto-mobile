@@ -1,13 +1,17 @@
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { Socket } from "node:net";
-import { expect, spyOn, test } from "bun:test";
+import { expect, spyOn, test, afterEach, mock, beforeEach } from "bun:test";
 import type { DaemonRequest } from "../../src/daemon/types";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
 } from "../../src/daemon/mcpRequestTimeout";
-import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
+import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/wire/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 /**
  * Behaviour pin for #11817: what deadline and abort signal a control-socket request carries from
@@ -25,15 +29,19 @@ interface Harness {
   release: () => void;
 }
 
+let socket: Socket;
+beforeEach(() => {
+  // A real, unconnected socket: no fd, so nothing is opened; writes are swallowed.
+  socket = new Socket();
+  spyOn(socket, "write").mockImplementation(() => true);
+});
+
 function harness(): Harness {
   const timer = new FakeTimer();
-  // A real, unconnected socket: no fd, so nothing is opened; writes are swallowed.
-  const socket = new Socket();
-  spyOn(socket, "write").mockImplementation(() => true);
   const server = createTestUnixSocketServer("unused", undefined, timer);
   // Bracket access is TypeScript's sanctioned way to reach private members from a test.
-  server["acceptingRequests"] = true;
-  server["handleConnection"](socket);
+  server.testHooks.acceptingRequests = true;
+  server.testHooks.transport.handleConnection(socket);
   const gate = Promise.withResolvers<unknown>();
   const seen: Harness["seen"] = [];
   server["handleLocalSocketRequest"] = (_request, _sessionId, signal, receivedAtMs) => {

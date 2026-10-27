@@ -161,7 +161,7 @@ const rows: BuilderCase[] = [
         payload: "ToolResponse",
         data: payload,
       });
-      expect(response.structuredContent).toEqual({
+      expect<unknown>(response.structuredContent).toEqual({
         success: true,
         artifact: {
           path: "/tmp/auto-mobile/tapOn-1.json",
@@ -214,7 +214,7 @@ describe("real response builders through classifier and PlanExecutor", () => {
       test(`${row.name}; optional: ${optional}`, async () => {
         const { response, payload, failure } = row.build();
         const interpretation = classifyToolResult(response, probeName, new FakeLogger());
-        expect(interpretation).toEqual({
+        expect<unknown>(interpretation).toEqual({
           kind: row.kind,
           ...(row.kind === "payload" ? { payload } : {}),
           ...(failure !== undefined ? { failure } : {}),

@@ -1,6 +1,7 @@
 import { useRealLogSinks } from "../helpers/realLogSinks";
 import { describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
+import { logStreamFactory, type LogStream } from "../../src/utils/loggingConfig";
 import fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,7 +65,7 @@ class FakeLogStream extends EventEmitter {
   }
 }
 
-class WritableFakeLogStream extends FakeLogStream {
+class WritableFakeLogStream extends FakeLogStream implements LogStream {
   destroyed = false;
   writable = true;
   writesAfterEnd = 0;
@@ -105,10 +106,10 @@ async function fileLoggerWithStreams(
   const dir = fs.mkdtempSync(join(tmpdir(), "automobile-logger-close-"));
   process.env.AUTOMOBILE_LOG_SINK = "file";
   process.env.AUTOMOBILE_LOG_DIR = dir;
-  const createStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
+  const createStream = spyOn(logStreamFactory, "create").mockImplementation(() => {
     const stream = makeStream();
     streams.push(stream);
-    return stream as unknown as fs.WriteStream;
+    return stream;
   });
   try {
     const mod = await import(`../../src/utils/logger.ts?logger-close-${instance}`);

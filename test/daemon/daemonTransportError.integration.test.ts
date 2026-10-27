@@ -1,16 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
 import { createServer, type Server, type Socket } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
-import {
-  DaemonBoundSessionLostError,
-  DaemonClient,
-  DaemonUnavailableError,
-} from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 
 const isWindows = platform() === "win32";
 

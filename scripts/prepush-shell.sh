@@ -5,7 +5,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=scripts/lib/vcs-diff.sh
-# shellcheck disable=SC1091 # Resolved relative to this script's location.
 source "${SCRIPT_DIR}/lib/vcs-diff.sh"
 DEFAULT_BASE="origin/main"
 BASE="${DEFAULT_BASE}"

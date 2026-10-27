@@ -1,4 +1,5 @@
 import type { BootedDevice, ExecResult } from "../../../models";
+import type { DeviceTraits } from "../../../utils/android-cmdline-tools/deviceTraits";
 import { ActionableError } from "../../../models/ActionableError";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import {
@@ -16,6 +17,15 @@ import {
   type LocationWaypoint,
   type EndedLocationRoute,
 } from "../LocationRoutePlayer";
+import { LocationWriteAdmissionError } from "./LocationWriteAdmissionError";
+import {
+  IosRunnerLocationError,
+  sendRunnerLocation,
+  type IosRunnerLocationClient,
+} from "./IosRunnerLocation";
+
+export type { IosRunnerLocationClient } from "./IosRunnerLocation";
+export { LocationWriteAdmissionError } from "./LocationWriteAdmissionError";
 
 export type SetDeviceLocationInput =
   | { mode: "static"; latitude: number; longitude: number }
@@ -34,7 +44,7 @@ export interface DeviceLocationState {
   mode?: "static" | "route" | "stop";
   latitude?: number;
   longitude?: number;
-  method?: "android_emulator_console" | "ios_simctl";
+  method?: "android_emulator_console" | "ios_simctl" | "ios_ctrl_proxy";
   stopped?: boolean;
   previousRoute?: EndedLocationRoute;
   waypointCount?: number;
@@ -134,8 +144,6 @@ function routeDurationMs(
   return duration;
 }
 
-export class LocationWriteAdmissionError extends ActionableError {}
-
 interface LocationSimulatorClient {
   executeCommandArgs?(
     args: string[],
@@ -150,12 +158,105 @@ interface LocationOperationsDependencies {
   simctl: () => LocationSimulatorClient | null;
   routeRegistry: () => LocationRouteRegistry;
   consoleFactory: () => EmulatorConsoleClientFactory;
+  deviceTraits: () => DeviceTraits;
   canWriteLocation: () => boolean;
   onLocationApplied: () => (() => void) | undefined;
+  /** Physical iOS seam (#14091); defaults to the device's CtrlProxy runner client. */
+  runnerLocation?: () => IosRunnerLocationClient | undefined;
 }
+
+const PHYSICAL_IOS_RUNNER_MISSING =
+  "Location simulation on a physical iOS device is not available from this entry point; " +
+  "use the MCP server or daemon, which connect the CtrlProxy runner.";
 
 export class LocationOperations {
   constructor(private readonly dependencies: LocationOperationsDependencies) {}
+
+  /** Throws when the emulator flag cannot be read; callers report that as a probe failure. */
+  private async isAndroidEmulator(): Promise<boolean> {
+    const device = this.dependencies.device();
+    const adb = this.dependencies.adbFactory().create(device);
+    const traits = await this.dependencies.deviceTraits().read(adb, device.deviceId);
+    return traits.isEmulator === true;
+  }
+
+  /** Throws an unsupported failure when this entry point wired no runner (#14091). */
+  private runnerLocation(): IosRunnerLocationClient {
+    const runner = this.dependencies.runnerLocation?.();
+    if (!runner) {
+      throw new IosRunnerLocationError(
+        { success: false, unsupported: true, totalTimeMs: 0 },
+        PHYSICAL_IOS_RUNNER_MISSING,
+      );
+    }
+    return runner;
+  }
+
+  private isPhysicalIos(): boolean {
+    const device = this.dependencies.device();
+    return device.platform === "ios" && !isIosSimulatorDevice(device);
+  }
+
+  /** Physical iOS route fixes go through the runner on the same host timer as simctl (#14091). */
+  private physicalIosRouteEmitter() {
+    const runner = this.runnerLocation();
+    return {
+      emit: async (
+        point: LocationWaypoint,
+        options: { signal: AbortSignal; timeoutMs: number },
+      ) => {
+        this.assertLocationWriteAdmitted();
+        await sendRunnerLocation(
+          runner,
+          { latitude: point.latitude, longitude: point.longitude, altitude: point.altitude },
+          options,
+        );
+      },
+      method: "ios_ctrl_proxy" as const,
+      onStarted: this.dependencies.onLocationApplied(),
+    };
+  }
+
+  /** Physical iOS static fix through the runner (#14091); release clears it like simctl's. */
+  private async writePhysicalIosStaticLocation(
+    input: Extract<SetDeviceLocationInput, { mode: "static" }>,
+  ): Promise<DeviceLocationState> {
+    const device = this.dependencies.device();
+    let previousRoute: EndedLocationRoute | undefined;
+    try {
+      ({ previousRoute } = await this.dependencies
+        .routeRegistry()
+        .stopAndSettle(device.deviceId, "replaced"));
+      this.assertLocationWriteAdmitted();
+      await sendRunnerLocation(this.runnerLocation(), {
+        latitude: input.latitude,
+        longitude: input.longitude,
+      });
+      this.dependencies.onLocationApplied()?.();
+      return {
+        supported: true,
+        mode: "static",
+        latitude: input.latitude,
+        longitude: input.longitude,
+        method: "ios_ctrl_proxy",
+        previousRoute,
+      };
+    } catch (error) {
+      if (error instanceof LocationWriteAdmissionError) {
+        throw error;
+      }
+      logger.warn(
+        `Failed to set physical iOS location for ${device.deviceId}: ${errorMessage(error)}`,
+        error,
+      );
+      return {
+        supported: !(error instanceof IosRunnerLocationError && error.unsupported),
+        method: "ios_ctrl_proxy",
+        error: `Failed to set physical iOS location: ${errorMessage(error)}`,
+        previousRoute,
+      };
+    }
+  }
 
   async writeLocation(input: SetDeviceLocationInput): Promise<DeviceLocationState> {
     if (input.mode === "stop") {
@@ -173,9 +274,17 @@ export class LocationOperations {
       return { supported: true, error: invalid };
     }
     if (input.mode === "route") {
-      return this.startLocationRoute(input);
+      return this.physicalIosRunnerMissing() ?? this.startLocationRoute(input);
     }
     return this.writeStaticLocation(input);
+  }
+
+  /** A route on physical iOS needs the injected runner; report it unsupported up front. */
+  private physicalIosRunnerMissing(): DeviceLocationState | undefined {
+    if (!this.isPhysicalIos() || this.dependencies.runnerLocation?.()) {
+      return undefined;
+    }
+    return { supported: false, method: "ios_ctrl_proxy", error: PHYSICAL_IOS_RUNNER_MISSING };
   }
 
   private assertLocationWriteAdmitted(): void {
@@ -191,11 +300,7 @@ export class LocationOperations {
   ): Promise<DeviceLocationState> {
     if (this.dependencies.device().platform === "ios") {
       if (!isIosSimulatorDevice(this.dependencies.device())) {
-        return {
-          supported: false,
-          error:
-            "Location simulation is unsupported on physical iOS devices. Use an iOS Simulator.",
-        };
+        return this.writePhysicalIosStaticLocation(input);
       }
       const simctl = this.dependencies.simctl() ?? new SimCtlClient(this.dependencies.device());
       let previousRoute: EndedLocationRoute | undefined;
@@ -248,9 +353,7 @@ export class LocationOperations {
     }
     let previousRoute: EndedLocationRoute | undefined;
     try {
-      const adb = this.dependencies.adbFactory().create(this.dependencies.device());
-      const probe = await adb.executeCommand("shell getprop ro.kernel.qemu");
-      if (probe.stdout.trim() !== "1") {
+      if (!(await this.isAndroidEmulator())) {
         return {
           supported: false,
           error: "Location simulation requires an Android emulator (ro.kernel.qemu=1).",
@@ -300,14 +403,9 @@ export class LocationOperations {
     ) => Promise<void>;
     let method: DeviceLocationState["method"];
     let onStarted: (() => void) | undefined;
-    if (this.dependencies.device().platform === "ios") {
-      if (!isIosSimulatorDevice(this.dependencies.device())) {
-        return {
-          supported: false,
-          error:
-            "Location simulation is unsupported on physical iOS devices. Use an iOS Simulator.",
-        };
-      }
+    if (this.isPhysicalIos()) {
+      ({ emit, method, onStarted } = this.physicalIosRouteEmitter());
+    } else if (this.dependencies.device().platform === "ios") {
       const simctl = this.dependencies.simctl() ?? new SimCtlClient(this.dependencies.device());
       if (!simctl.executeCommandArgs) {
         throw new ActionableError("simctl client does not support argv commands");
@@ -337,11 +435,7 @@ export class LocationOperations {
         };
       }
       try {
-        const probe = await this.dependencies
-          .adbFactory()
-          .create(this.dependencies.device())
-          .executeCommand("shell getprop ro.kernel.qemu");
-        if (probe.stdout.trim() !== "1") {
+        if (!(await this.isAndroidEmulator())) {
           return {
             supported: false,
             error: "Location simulation requires an Android emulator (ro.kernel.qemu=1).",

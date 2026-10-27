@@ -1,6 +1,8 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { DefaultDeviceWindowCacheInvalidator } from "../../../src/features/action/TerminateApp";
+import type { DeviceWindowCacheInvalidator } from "../../../src/features/observe/DeviceWindowCacheInvalidator";
 import { InstalledAppsRepository } from "../../../src/db/installedAppsRepository";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import {
@@ -315,9 +317,9 @@ describe("UninstallApp (Android)", () => {
       { userId: 10, name: "Work", flags: 0x30, running: true },
     ]);
     fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
-      { stdout: "package:com.example.app" },
-      { stdout: "package:com.example.app" },
-      { stdout: "package:com.android.settings" },
+      createExecResult("package:com.example.app", ""),
+      createExecResult("package:com.example.app", ""),
+      createExecResult("package:com.android.settings", ""),
     ]);
     setupNoApp(fakeAdb, 10);
     const usersSpy = spyOn(fakeAdb, "listUsers");
@@ -335,8 +337,8 @@ describe("UninstallApp (Android)", () => {
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     // Pre-uninstall the app is present; the post-uninstall re-check sees it gone.
     fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
-      { stdout: "package:com.example.app\npackage:com.android.settings" },
-      { stdout: "package:com.android.settings" },
+      createExecResult("package:com.example.app\npackage:com.android.settings", ""),
+      createExecResult("package:com.android.settings", ""),
     ]);
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb));
@@ -415,8 +417,8 @@ describe("UninstallApp (Android)", () => {
     const repo = new FakeInstalledAppsRepository();
     await repo.seedInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
     fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
-      { stdout: "package:com.example.app\npackage:com.android.settings" },
-      { stdout: "package:com.android.settings" },
+      createExecResult("package:com.example.app\npackage:com.android.settings", ""),
+      createExecResult("package:com.android.settings", ""),
     ]);
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb), {
@@ -461,8 +463,8 @@ describe("UninstallApp (Android)", () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
-      { stdout: "package:com.example.app\npackage:com.android.settings" },
-      { stdout: "package:com.android.settings" },
+      createExecResult("package:com.example.app\npackage:com.android.settings", ""),
+      createExecResult("package:com.android.settings", ""),
     ]);
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb));
@@ -676,9 +678,9 @@ describe("UninstallApp (Android)", () => {
     setupNoApp(fakeAdb, 0);
     fakeAdb.setCommandResultSequence("shell pm list packages --user 10", [
       // Resolution probes installation before the action's own pre-uninstall check.
-      { stdout: "package:com.example.app\npackage:com.android.settings" },
-      { stdout: "package:com.example.app\npackage:com.android.settings" },
-      { stdout: "package:com.android.settings" },
+      createExecResult("package:com.example.app\npackage:com.android.settings", ""),
+      createExecResult("package:com.example.app\npackage:com.android.settings", ""),
+      createExecResult("package:com.android.settings", ""),
     ]);
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb));

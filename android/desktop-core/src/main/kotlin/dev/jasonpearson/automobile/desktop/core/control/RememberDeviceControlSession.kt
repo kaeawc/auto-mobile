@@ -5,13 +5,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
-import dev.jasonpearson.automobile.desktop.core.daemon.DesktopInputAllocation
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionState
 import dev.jasonpearson.automobile.desktop.core.daemon.inputAllocatingClient
-import kotlin.coroutines.CoroutineContext
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 
 /**
  * The host's ONE [DeviceControlSession] and the wiring that makes its input active tool use
@@ -26,31 +21,28 @@ import kotlinx.coroutines.Dispatchers
  */
 @Composable
 internal fun rememberDeviceControlSession(
-  scope: CoroutineScope,
-  clientProvider: (() -> AutoMobileClient)?,
-  inputAllocation: () -> DesktopInputAllocation,
-  platform: () -> String,
-  nowMs: () -> Long,
-  publishError: (String?) -> Unit,
-  streamingEnabled: Boolean,
-  uiContext: CoroutineContext = Dispatchers.Main,
-  ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+  desktopSessionState: DesktopDaemonSessionState,
+  options: RememberDeviceControlOptions,
 ): DeviceControlSession {
-  val currentProvider by rememberUpdatedState(clientProvider)
-  val currentAllocation by rememberUpdatedState(inputAllocation)
-  val session =
-    remember(scope) {
-      DeviceControlSession(
-        scope = scope,
-        clientProvider = { inputAllocatingClient(currentProvider) { currentAllocation() } },
-        platform = platform,
-        nowMs = nowMs,
-        publishError = publishError,
-        uiContext = uiContext,
-        ioDispatcher = ioDispatcher,
-        streamingEnabled = streamingEnabled,
-      )
-    }
-  LaunchedEffect(clientProvider) { session.reset() }
-  return session
+  return with(options) {
+    val currentProvider by rememberUpdatedState(clientProvider)
+    val currentAllocation by rememberUpdatedState(desktopSessionState.inputAllocation)
+    val session =
+      remember(scope) {
+        DeviceControlSession(
+          DeviceControlSessionOptions(
+            scope = scope,
+            clientProvider = { inputAllocatingClient(currentProvider) { currentAllocation } },
+            platform = platform,
+            nowMs = nowMs,
+            publishError = publishError,
+            uiContext = uiContext,
+            ioDispatcher = ioDispatcher,
+            streamingEnabled = streamingEnabled,
+          ),
+        )
+      }
+    LaunchedEffect(clientProvider) { session.reset() }
+    session
+  }
 }

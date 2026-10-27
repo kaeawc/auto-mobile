@@ -218,7 +218,13 @@ Time sequential requests against the daemon's stateless MCP HTTP endpoint
 (`/auto-mobile/streamable`, #13068) on a loopback port. Device discovery is a
 fake whose cost is modelled by `--discovery-cost-ms`, so no device, emulator,
 simulator or resident daemon is touched; the report counts discovery probes per
-request, which must stay at zero once warm:
+request, which must stay at zero once warm. The harness injects its own token and
+sends `Authorization: Bearer <token>` on every request to harden daemon HTTP
+ingress with a per-daemon token. Local external clients read the daemon token
+file (or use `AUTOMOBILE_DAEMON_HTTP_TOKEN`); there is no unauthenticated fallback.
+See [daemon HTTP ingress](../docs/design-docs/mcp/daemon.md#http-ingress).
+
+Run the benchmark:
 
 ```bash
 bun scripts/benchmark-stateless-endpoint.ts --iterations 200 --warmup 30 --discovery-cost-ms 5
@@ -368,6 +374,11 @@ covers the script with a fake server, adb and clock.
   - `--once` - Build once and exit
   - `--device <udid>` - Target a specific booted simulator
   - Shared functions in `local-dev/lib/` (common.sh, deps.sh, xctestservice.sh)
+- `local-dev/probe-device-condition-capabilities.sh` - Probe an attached emulator for the commands the device-condition fixtures rely on (#14053)
+  - `matrix` (default) - Print a Markdown capability matrix; `OUT_FILE` also writes it to a file
+  - `persistence-prepare` / `persistence-verify` - Check whether `-writable-system` changes survive an `avd snapshot save` + cold reload
+  - See `docs/design-docs/plat/android/device-condition-capability-probe.md`
+- `capture-oem-evidence.sh <serial> [out-dir]` - Capture the non-interactive OEM evidence for #14048 from one connected device: `getprop` (device identifiers redacted), `pm list features`, system packages and default-app holders, under `test/fixtures/android-oem/<manufacturer>-<model>-<date>/` with a provenance manifest. The README it writes there lists the hierarchy captures still to take by hand. Tests: `test/bats/capture-oem-evidence.bats` (stub adb).
 
 ### Tool Definition Scripts
 
@@ -556,3 +567,72 @@ Each cycle cold boots (snapshot load/save disabled) with a fresh private daemon
 namespace for W. Host GPU boot refusal is UNEXERCISED. A crash is data and emits
 a warning; harness errors fail the cell. Inputs accept up to nine decimal digits. No runtime stability claim is made from
 one passing cycle. The artifacts can be large because cores and full logs are kept.
+
+## Host test workers and cancellation
+
+`scripts/test-ts.sh unit` and `changed` share a nonblocking host slot pool at
+`${AUTOMOBILE_COORDINATION_DIR:-$HOME/.auto-mobile}/test-slots` (the legacy
+`AUTO_MOBILE_COORDINATION_DIR` override is also supported). Worktrees must use
+one coordination directory to share the limit. `AUTOMOBILE_HOST_TEST_SLOTS`
+sets a positive pool capacity; the default is half the logical cores, rounded
+up, with a minimum of two. Set it to `off` to disable the semaphore.
+
+`AUTOMOBILE_UNIT_TEST_WORKERS` still bounds demand. Lanes acquire free slots in
+index order. Only a lane holding the entire base pool may acquire extra slots
+up to its demand, preserving the existing full worker count on an idle host,
+including hosted runners. Concurrent lanes divide the base pool; a lane with
+zero slots runs one **unslotted** worker so it can make progress. This is a
+cooperative cap, not an absolute process ceiling. Targeted runs also limit
+`--parallel` to the number of selected files. Coverage keeps `--parallel=1`.
+The `test-ts: host slots` stderr line reports demand, acquired slots and workers.
+
+INT, TERM and HUP stop the shard command and watchdog process groups, then
+escalate to KILL after `AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS` (default two
+seconds), release slots and exit with 128 plus the signal number. EXIT cleanup
+also runs on failures. Portable watchdogs check their caller every second;
+chunk runners check the original lane owner before starting another group.
+Dead slot owners are reclaimed on the next acquisition. Slots with an owner
+not yet published are conservatively left alone to avoid stealing an active
+acquisition.
+
+A timed-out unit shard is not retried when one-minute host load exceeds the
+logical core count. `AUTOMOBILE_TEST_LOADAVG_FILE` can inject a load-average
+file (first field is the one-minute value) for deterministic tests.
+
+The ordinary POSIX `changed` lane resolves its unit file list **once**, before
+sharding, with `scripts/lib/changedUnitTests.ts`. It uses the same ref-to-worktree
+`git diff` plus untracked files as Bun 1.3.14's `--changed`, rather than a
+merge-base diff. Selection unions a parse-only reverse import closure with
+`affectedTests.ts`'s full `unit` result (the existing CLI's `unit.txt` contains
+only reference extras and is insufficient). No test modules are executed during
+selection. The closure uses Bun's scanner and module resolver plus the existing
+TypeScript AST import scanner, follows import and require resolution conditions,
+canonicalizes symlinks, and excludes `node_modules`. Lexical AST edges retain
+imports Bun's public scanner can fold away in dead code. References and
+`test/always-run-tests.txt` add coverage beyond Bun's import graph; missing
+resolutions, parse errors, and unsupported graph loaders conservatively select
+the complete unit list. Thus this is intentionally a **superset**, rather than
+an exact emulation of Bun's private bundler graph. No changes selects zero files.
+Selection has its own wall-clock budget of 120 seconds, configurable with
+`AUTOMOBILE_CHANGED_SELECT_TIMEOUT_SECONDS` (a positive integer). A timeout
+returns 124 before any test workers start; shard wall budgets are unchanged.
+The reference behavior was checked against
+[Bun 1.3.14's changed-file filter](https://github.com/oven-sh/bun/blob/bun-v1.3.14/src/cli/test/ChangedFilesFilter.zig).
+
+The sorted selection is split round-robin across the capped worker count. Each
+shard uses the unit lane's shared/isolated group runner under its existing
+watchdog and process-group cleanup. Both groups in changed mode are split into
+processes of at most `AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE` files (default 30;
+changed mode also treats an explicit 0 as 30). Allow-listed files still
+share a process within each shared chunk. JUnit uses the unit chunk names
+(`shard-N.xml`, `shard-N-iso-K.xml`, and `shard-N-shared[-K].xml`). Empty selection
+succeeds without workers. Changed shards retain their existing no-retry policy.
+Windows and explicit targets/passthrough arguments retain native Bun selection.
+
+`scripts/typecheck-baseline.sh` and the type-aware stage of `scripts/oxlint-baseline.sh` (`tsgo`, and
+`tsgolint` through `oxlint --type-aware`) run through `scripts/lib/host-heavy-run.sh`, which takes
+`AUTOMOBILE_HEAVY_CHECK_SLOTS` slots (default 4) from the same pool. A run that has the pool to
+itself keeps the tool's default parallelism; alongside another holder, or with fewer slots than it
+asked for, the checker is capped to the slots it holds (`GOMAXPROCS`, `tsgo --checkers`,
+`oxlint --threads`). With no free slot it waits up to `AUTOMOBILE_HEAVY_CHECK_WAIT_SECONDS`
+(default 60) and then runs on one thread. `AUTOMOBILE_HOST_TEST_SLOTS=off` disables the cap.

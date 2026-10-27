@@ -268,7 +268,9 @@ export class DeviceRecoveryCoordinator {
     await this.pool.finishEmulatorLossIncident(incidentId, "not-attempted");
   }
 
-  async retryDueDeferredSessionRecoveries(): Promise<void> {
+  async retryDueDeferredSessionRecoveries(
+    mayRecover: (deviceId: string) => boolean = () => true,
+  ): Promise<void> {
     const dueRecoveries = Array.from(this.recoveringSessionLosses.entries()).filter(
       ([sessionId, loss]) =>
         loss.state === "deferred" &&
@@ -282,7 +284,8 @@ export class DeviceRecoveryCoordinator {
       // landed during that reboot is finalized by its owner, not here.
       if (
         this.finalizeUnownedReleasedRecoveryRecord(sessionId) ||
-        !this.isDueDeferredRecoveryStillCurrent(sessionId, loss)
+        !this.isDueDeferredRecoveryStillCurrent(sessionId, loss) ||
+        !mayRecover(loss.deviceId)
       ) {
         continue;
       }

@@ -1,3 +1,4 @@
+import { viewHierarchyFromFixture } from "../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import type { ViewHierarchyResult } from "../../../src/models";
@@ -6,8 +7,8 @@ import capturedHome from "../../fixtures/android-launcher/launcher-home-emulator
 import { hideCapturedNode } from "../../helpers/hideCapturedNode";
 
 const launcher = "com.google.android.apps.nexuslauncher";
-const recents: ViewHierarchyResult = capturedRecents.viewHierarchy;
-const home: ViewHierarchyResult = capturedHome.viewHierarchy;
+const recents: ViewHierarchyResult = viewHierarchyFromFixture(capturedRecents.viewHierarchy);
+const home: ViewHierarchyResult = viewHierarchyFromFixture(capturedHome.viewHierarchy);
 
 describe("ResolverElementSelector.resolveContainerMatch", () => {
   const selector = new ResolverElementSelector();

@@ -8,6 +8,21 @@ import type { InteractionEvent } from "../../observe/android/AndroidCtrlProxyCli
 // Touch frame types (output of TouchFrameReconstructor)
 // ---------------------------------------------------------------------------
 
+export type PointerToolType = "finger" | "stylus" | "eraser";
+export type StylusButton = "stylusPrimary" | "stylusSecondary";
+
+/**
+ * Pressure over a contact. `normalized` means min/max/mean are 0..1 fractions of
+ * the axis range from `getevent -p`; otherwise they are raw digitizer units.
+ * Zero-pressure samples are excluded (a zero means "not reported" or "no force").
+ */
+export interface GesturePressure {
+  min: number;
+  max: number;
+  mean: number;
+  normalized: boolean;
+}
+
 export interface TouchSlot {
   slotId: number;
   /** -1 means the finger has been lifted */
@@ -17,6 +32,15 @@ export interface TouchSlot {
   /** raw sensor y coordinate */
   y: number;
   pressure: number;
+  /** Set only for pen contacts (ABS_MT_TOOL_TYPE pen or BTN_TOOL_PEN/RUBBER); absent for fingers. */
+  toolType?: PointerToolType;
+  /** Held stylus buttons (BTN_STYLUS / BTN_STYLUS2); absent when none. */
+  buttons?: StylusButton[];
+  /** Raw ABS_TILT_X / ABS_TILT_Y (signed), when the digitizer reports them. */
+  tiltX?: number;
+  tiltY?: number;
+  /** Raw ABS_DISTANCE (hover height), when reported. */
+  distance?: number;
   /** Raw axes not yet observed in this stream; their numeric values are NaN. */
   unknownAxes?: ("x" | "y")[];
 }
@@ -29,13 +53,25 @@ export interface RawTouchFrame {
   activeSlots: ReadonlyArray<TouchSlot>;
   /** slotIds whose trackingId became -1 in this frame */
   releasedSlots: ReadonlyArray<number>;
+  /**
+   * Final sample of a released slot whose position changed in its release packet. Present only
+   * when non-empty, so ordinary frames keep their shape.
+   */
+  releasedFinalSamples?: ReadonlyArray<TouchSlot>;
 }
 
 // ---------------------------------------------------------------------------
 // Gesture types (output of GestureClassifier / GetEventReader)
 // ---------------------------------------------------------------------------
 
-type GestureEventType = "tap" | "doubleTap" | "longPress" | "swipe" | "pinch" | "pressButton";
+type GestureEventType =
+  | "tap"
+  | "doubleTap"
+  | "longPress"
+  | "swipe"
+  | "pinch"
+  | "pressButton"
+  | "hover";
 
 export interface GestureEvent {
   type: GestureEventType;
@@ -52,6 +88,13 @@ export interface GestureEvent {
    * geometry was in force for the touch (#10174).
    */
   downAt?: number;
+
+  /** Only present for pen contacts ("stylus" or "eraser"); finger gestures omit it. */
+  toolType?: PointerToolType;
+  /** Pressure over the contact; present only when the digitizer reported non-zero pressure. */
+  pressure?: GesturePressure;
+  /** Stylus buttons held at any point during the contact. */
+  buttons?: StylusButton[];
 
   // tap / doubleTap / longPress
   screenX?: number;

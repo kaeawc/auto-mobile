@@ -13,7 +13,7 @@ package dev.jasonpearson.automobile.junit
  * succeeds the device is ours and calls pass straight through; a successful read proves nothing
  * about ownership (reads are never refused and never hold a device), so it confirms nothing.
  *
- * Whether a refusal is waited on is decided by [AutoMobilePlanExecutor.classifyRefusalText], the
+ * Whether a refusal is waited on is decided by [DaemonToolResultParser.classifyRefusalText], the
  * same typed-field rule the `executePlan` loop uses, and its `retryAfterMs` lengthens the step
  * within the same budget.
  *
@@ -26,7 +26,7 @@ internal class HeldDeviceWaitingMCPClient(
   private val backoffDelayMs:
     (waitsSoFar: Int, waitedMs: Long, retryAfterMs: Long?, code: String?) -> Long? =
     { waits, waited, retryAfterMs, code ->
-      AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(waits, waited, retryAfterMs, code)
+      DeviceWaitPolicy.deviceOwnedBackoffDelayMs(waits, waited, retryAfterMs, code)
     },
   private val sleeper: (Long) -> Unit = { Thread.sleep(it) },
 ) : AutoMobileAgent.MCPClient {
@@ -53,11 +53,11 @@ internal class HeldDeviceWaitingMCPClient(
         return result
       } catch (error: RuntimeException) {
         val message = error.message.orEmpty()
-        val verdict = AutoMobilePlanExecutor.classifyRefusalText(message) ?: throw error
+        val verdict = DaemonToolResultParser.classifyRefusalText(message) ?: throw error
         when (verdict.disposition) {
-          AutoMobilePlanExecutor.RefusalDisposition.WAIT -> Unit
-          AutoMobilePlanExecutor.RefusalDisposition.ACQUIRE_NEW_SESSION ->
-            throw RuntimeException(
+          DaemonToolResultParser.RefusalDisposition.WAIT -> Unit
+          DaemonToolResultParser.RefusalDisposition.ACQUIRE_NEW_SESSION ->
+            throw IllegalStateException(
               "The device session held for AI recovery was released by the daemon's idle window " +
                 "before recovery's first call ($message)",
               error,

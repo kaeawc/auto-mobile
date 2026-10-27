@@ -52,57 +52,64 @@ final class AutoMobileEnvironmentSocketPathTests: XCTestCase {
     /// A sub-second timeout must survive as microseconds. Pre-fix `Int(0.5)` gave `tv_sec == 0`
     /// with a hardcoded `tv_usec == 0`, i.e. `{0, 0}` — which Darwin reads as "no timeout".
     func testReceiveTimeoutPreservesSubSecondValue() {
-        let tv = DaemonManager.receiveTimeout(forSeconds: 0.5)
-        XCTAssertEqual(tv.tv_sec, 0)
-        XCTAssertEqual(tv.tv_usec, 500_000)
+        let receiveTimeout = DaemonManager.receiveTimeout(forSeconds: 0.5)
+        XCTAssertEqual(receiveTimeout.tv_sec, 0)
+        XCTAssertEqual(receiveTimeout.tv_usec, 500_000)
     }
 
     /// The fractional part must be carried alongside whole seconds, not dropped.
     func testReceiveTimeoutCarriesFractionAlongsideWholeSeconds() {
-        let tv = DaemonManager.receiveTimeout(forSeconds: 1.25)
-        XCTAssertEqual(tv.tv_sec, 1)
-        XCTAssertEqual(tv.tv_usec, 250_000)
+        let receiveTimeout = DaemonManager.receiveTimeout(forSeconds: 1.25)
+        XCTAssertEqual(receiveTimeout.tv_sec, 1)
+        XCTAssertEqual(receiveTimeout.tv_usec, 250_000)
     }
 
     /// The common integral path is unchanged.
     func testReceiveTimeoutWholeSecondsHasNoMicroseconds() {
-        let tv = DaemonManager.receiveTimeout(forSeconds: 30)
-        XCTAssertEqual(tv.tv_sec, 30)
-        XCTAssertEqual(tv.tv_usec, 0)
+        let receiveTimeout = DaemonManager.receiveTimeout(forSeconds: 30)
+        XCTAssertEqual(receiveTimeout.tv_sec, 30)
+        XCTAssertEqual(receiveTimeout.tv_usec, 0)
     }
 
     /// A zero or tiny timeout must clamp to a non-zero `timeval` so `SO_RCVTIMEO` is never
     /// disabled (which would let `read` block forever waiting on an unresponsive daemon).
     func testReceiveTimeoutClampsToNonZero() {
         for seconds in [0.0, 0.0005] {
-            let tv = DaemonManager.receiveTimeout(forSeconds: seconds)
-            XCTAssertFalse(tv.tv_sec == 0 && tv.tv_usec == 0, "timeout \(seconds) must not disable SO_RCVTIMEO")
+            let receiveTimeout = DaemonManager.receiveTimeout(forSeconds: seconds)
+            XCTAssertFalse(
+                receiveTimeout.tv_sec == 0 && receiveTimeout.tv_usec == 0,
+                "timeout \(seconds) must not disable SO_RCVTIMEO"
+            )
         }
     }
 
     func testReceiveTimeoutCarriesRoundedMicrosecondsIntoSeconds() {
         for seconds in [0.9999996, 1.9999996] {
-            let tv = DaemonManager.receiveTimeout(forSeconds: seconds)
-            XCTAssertEqual(tv.tv_sec, Int(seconds.rounded()))
-            XCTAssertEqual(tv.tv_usec, 0)
-            XCTAssertLessThan(tv.tv_usec, 1_000_000)
-            XCTAssertEqual(Double(tv.tv_sec) + Double(tv.tv_usec) / 1_000_000, seconds, accuracy: 0.000001)
+            let receiveTimeout = DaemonManager.receiveTimeout(forSeconds: seconds)
+            XCTAssertEqual(receiveTimeout.tv_sec, Int(seconds.rounded()))
+            XCTAssertEqual(receiveTimeout.tv_usec, 0)
+            XCTAssertLessThan(receiveTimeout.tv_usec, 1_000_000)
+            XCTAssertEqual(
+                Double(receiveTimeout.tv_sec) + Double(receiveTimeout.tv_usec) / 1_000_000,
+                seconds,
+                accuracy: 0.000001
+            )
         }
     }
 
     func testReceiveTimeoutInvalidAndNonPositiveValuesUseFloor() {
         for seconds in [Double.nan, -Double.infinity, -1.0, 0.0] {
-            let tv = DaemonManager.receiveTimeout(forSeconds: seconds)
-            XCTAssertEqual(tv.tv_sec, 0)
-            XCTAssertEqual(tv.tv_usec, 1000)
+            let receiveTimeout = DaemonManager.receiveTimeout(forSeconds: seconds)
+            XCTAssertEqual(receiveTimeout.tv_sec, 0)
+            XCTAssertEqual(receiveTimeout.tv_usec, 1000)
         }
     }
 
     func testReceiveTimeoutExcessiveValuesClampTo24Hours() {
         for seconds in [Double.infinity, 1e30] {
-            let tv = DaemonManager.receiveTimeout(forSeconds: seconds)
-            XCTAssertEqual(tv.tv_sec, 24 * 60 * 60)
-            XCTAssertEqual(tv.tv_usec, 0)
+            let receiveTimeout = DaemonManager.receiveTimeout(forSeconds: seconds)
+            XCTAssertEqual(receiveTimeout.tv_sec, 24 * 60 * 60)
+            XCTAssertEqual(receiveTimeout.tv_usec, 0)
         }
     }
 }

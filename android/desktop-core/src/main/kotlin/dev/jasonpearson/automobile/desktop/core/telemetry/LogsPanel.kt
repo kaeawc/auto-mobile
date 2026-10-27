@@ -2,7 +2,6 @@ package dev.jasonpearson.automobile.desktop.core.telemetry
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,8 +14,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -42,17 +39,16 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.SearchBar
+import dev.jasonpearson.automobile.desktop.core.components.SearchBarOptions
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
@@ -64,16 +60,6 @@ import java.util.Locale
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.filter
 import kotlinx.serialization.Serializable
-
-/** Merge each pane's mutation against the provider's latest persisted value. */
-internal fun mutateLogsSavedViews(
-  settingsProvider: SettingsProvider,
-  transform: (List<LogsSavedView>) -> List<LogsSavedView>,
-): List<LogsSavedView> {
-  val updated = transform(deserializeLogsSavedViews(settingsProvider.logsSavedViews))
-  settingsProvider.logsSavedViews = serializeLogsSavedViews(updated)
-  return updated
-}
 
 /**
  * Exact Android logcat tags emitted by CtrlProxy itself, hidden by default to expose app logs.
@@ -101,11 +87,6 @@ val AUTO_MOBILE_INTERNAL_TAGS: Set<String> =
     "PerfProvider",
   )
 
-fun isAutoMobileInternalTag(tag: String): Boolean = tag in AUTO_MOBILE_INTERNAL_TAGS
-
-private fun defaultEnabledLevels(minimum: LogLevel?): Set<LogLevel> =
-  LogLevel.entries.filter { it.ordinal >= (minimum ?: LogLevel.Info).ordinal }.toSet()
-
 /**
  * A log severity bucket surfaced as an always-on filter chip. Android's raw priority ints
  * (`Log.VERBOSE`=2 .. `Log.ASSERT`=7) collapse into these five canonical buckets via [logLevelOf];
@@ -132,100 +113,10 @@ enum class LogPlatform {
 }
 
 /**
- * Maps a raw log-priority int to its [LogLevel] bucket for the given [platform]. Every int maps to
- * exactly one bucket so that "all chips enabled" is a true no-op filter.
- *
- * Android uses `Log.VERBOSE`=2 .. `Log.ASSERT`=7; iOS's `LogLevel` uses `verbose`=0 .. `fault`=5
- * (see `ios/auto-mobile-sdk/.../Events/SdkEvent.swift`). Both fold their top severities (Android
- * Assert, iOS Fault) into [Error], and unknown/low priorities into [Verbose].
- */
-fun logLevelOf(level: Int, platform: LogPlatform = LogPlatform.Android): LogLevel =
-  when (platform) {
-    LogPlatform.Android ->
-      when {
-        level <= 2 -> LogLevel.Verbose
-        level == 3 -> LogLevel.Debug
-        level == 4 -> LogLevel.Info
-        level == 5 -> LogLevel.Warn
-        else -> LogLevel.Error
-      }
-    LogPlatform.Ios ->
-      when {
-        level <= 0 -> LogLevel.Verbose
-        level == 1 -> LogLevel.Debug
-        level == 2 -> LogLevel.Info
-        level == 3 -> LogLevel.Warn
-        else -> LogLevel.Error // 4 = error, 5 = fault
-      }
-  }
-
-/**
- * Client-side filter over already-streamed log rows. A row survives when its [LogLevel] (bucketed
- * for [platform]) is in [enabledLevels], its tag matches [tag] when set, and its message or tag
- * matches [query]. Both text predicates use case-insensitive substring matching.
- */
-fun filterLogs(
-  logs: List<TelemetryDisplayEvent.Log>,
-  enabledLevels: Set<LogLevel>,
-  query: String,
-  platform: LogPlatform = LogPlatform.Android,
-  tag: String? = null,
-  showInternalTags: Boolean = true,
-): List<TelemetryDisplayEvent.Log> {
-  val filter = LogsSavedView("", enabledLevels, tag, query)
-  return logs.filter {
-    (showInternalTags || !isAutoMobileInternalTag(it.tag)) && matchesSavedView(it, filter, platform)
-  }
-}
-
-/**
- * Whether a scroll delta should clear the panel's tail-follow intent. True only for a **user**
- * scroll ([NestedScrollSource.UserInput] — touch drag or mouse wheel) moving toward older rows
- * (positive `y`, i.e. content moving down / away from the tail).
- *
- * Deliberately excludes the panel's own programmatic re-anchor scrolls, which dispatch as
- * [NestedScrollSource.SideEffect]: the upward `scrollToItem` after a filter narrows the list must
- * not be mistaken for the user scrolling away, or tail-follow would defeat itself. Kept pure so the
- * discrimination is unit-testable without Compose.
- */
-fun clearsTailFollow(available: Offset, source: NestedScrollSource): Boolean =
-  source == NestedScrollSource.UserInput && available.y > 0f
-
-/**
  * Upper bound on retained live log rows. A high-volume device can stream logs indefinitely; without
  * a cap the buffer — and the per-append [filterLogs] cost over it — would grow until the UI stalls.
  */
 const val MAX_LOG_ROWS = 5000
-
-/**
- * Appends [event] to [logs] with ring-buffer semantics: once the buffer exceeds [max] the oldest
- * rows are dropped, so only the most recent [max] rows are retained. Kept pure (operates on any
- * [MutableList]) so the bound is unit-testable without Compose.
- */
-fun appendBounded(
-  logs: MutableList<TelemetryDisplayEvent.Log>,
-  event: TelemetryDisplayEvent.Log,
-  max: Int = MAX_LOG_ROWS,
-) {
-  logs.add(event)
-  while (logs.size > max) {
-    logs.removeAt(0)
-  }
-}
-
-/**
- * Human-readable status for a non-healthy telemetry [ConnectionState], or `null` when
- * [ConnectionState.Connected] (nothing to surface). Pure so the mapping is unit-testable and the
- * panel never mislabels a connecting/errored socket as an empty-but-healthy stream.
- */
-fun connectionStatusText(state: ConnectionState): String? =
-  when (state) {
-    is ConnectionState.Connecting -> "Connecting..."
-    is ConnectionState.Reconnecting -> "Reconnecting (attempt ${state.attempt})..."
-    is ConnectionState.Disconnected -> "Disconnected" + (state.reason?.let { ": $it" } ?: "")
-    is ConnectionState.Error -> "Error: ${state.message}"
-    is ConnectionState.Connected -> null
-  }
 
 /**
  * Logs facet body: a logs-only event stream with an always-on filter bar (per-level chips +
@@ -250,437 +141,80 @@ fun connectionStatusText(state: ConnectionState): String? =
 fun LogsPanel(
   telemetryPushClient: TelemetryPushClient?,
   settingsProvider: SettingsProvider = LocalAutoMobileGraph.current.settingsProvider,
-  activeDeviceId: String? = null,
-  platform: LogPlatform = LogPlatform.Android,
-  maxRows: Int = MAX_LOG_ROWS,
   modifier: Modifier = Modifier,
-  listState: LazyListState? = null,
-  onFollowTailChange: (Boolean) -> Unit = {},
+  options: LogsPanelOptions = LogsPanelOptions(),
 ) {
-  val colors = SharedTheme.globalColors
-  val logs = remember(activeDeviceId) { mutableStateListOf<TelemetryDisplayEvent.Log>() }
-  val timeFormat = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) }
-  // Pane-local selected row; cleared on device switch (a switch also swaps the buffer for a fresh
-  // list, so a stale selection could never re-match anyway). Holds the row instance for referential
-  // identity — filterLogs preserves instances, so `===` stays valid across recompositions.
-  var selectedEvent by remember(activeDeviceId) { mutableStateOf<TelemetryDisplayEvent.Log?>(null) }
-  var query by remember { mutableStateOf("") }
-  var tag by remember { mutableStateOf("") }
-  var enabledLevels by
-    remember(activeDeviceId) {
-      val savedLevels = activeDeviceId?.let { deviceId ->
-        deserializeLogsEnabledLevelsByDevice(settingsProvider.logsEnabledLevelsByDevice)[deviceId]
-      }
-      val minimum =
-        if (savedLevels == null) {
-          activeDeviceId?.let { deviceId ->
-            deserializeLogsMinLevelByDevice(settingsProvider.logsMinLevelByDevice)[deviceId]?.let {
-              name ->
-              LogLevel.entries.firstOrNull { it.name == name }
-            }
-          }
-        } else {
-          null
-        }
-      mutableStateOf(savedLevels ?: defaultEnabledLevels(minimum))
-    }
-  var showInternalTags by remember(activeDeviceId) { mutableStateOf(false) }
-  var savedViews by
-    remember(settingsProvider) {
-      mutableStateOf(deserializeLogsSavedViews(settingsProvider.logsSavedViews))
-    }
-  var connectionState by remember(activeDeviceId) { mutableStateOf<ConnectionState?>(null) }
-  // Monotonic append counter: unlike filtered.size it keeps advancing once the buffer is pinned at
-  // maxRows, so the tail-follow effect below still re-fires on every appended row at the cap.
-  var appendCount by remember(activeDeviceId) { mutableStateOf(0) }
-  // Tail-follow *intent*: preserved across filter changes and reset only when the user scrolls away
-  // from the bottom, so clearing a filter that had anchored the list on an old row still follows
-  // the next live row.
-  var followTail by remember(activeDeviceId) { mutableStateOf(true) }
-
-  // Keyed on `platform` (new scale) and `activeDeviceId` (a device switch swaps `logs` for a fresh
-  // remembered list, so the derived state must re-capture it — otherwise it keeps reading the old
-  // device's buffer). `enabledLevels` and `query` are Compose State reads that derivedStateOf
-  // tracks on its own, so they are intentionally not remember keys.
-  val filtered by
-    remember(platform, activeDeviceId) {
-      derivedStateOf { filterLogs(logs, enabledLevels, query, platform, tag, showInternalTags) }
-    }
-  // Per-device scroll state: recreated on a device switch so a device left scrolled up does not
-  // carry its scroll offset (and suppress auto-follow) into the next device.
-  val resolvedListState = listState ?: remember(activeDeviceId) { LazyListState() }
-
-  // Clear follow intent on the first user upward-scroll delta (see [clearsTailFollow]), so a row
-  // arriving mid-fling no longer yanks the viewport back to the tail. The settle observer below
-  // re-arms it once the user returns to the bottom. Remembered per device, like [listState].
-  val tailFollowScrollConnection =
-    remember(activeDeviceId) {
-      object : NestedScrollConnection {
-        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-          if (clearsTailFollow(available, source)) followTail = false
-          return Offset.Zero
-        }
-      }
-    }
-
-  LaunchedEffect(telemetryPushClient, activeDeviceId, maxRows) {
-    val client = telemetryPushClient ?: return@LaunchedEffect
-    client.telemetryEvents.collect { event ->
-      if (event is TelemetryDisplayEvent.Log) {
-        // The append can drop the oldest row (front) once the buffer is at its cap. If that
-        // dropped row is the current selection, clear it — otherwise its highlight/detail vanish
-        // from view while `selectedEvent` keeps a stale, now-invisible reference the user can no
-        // longer toggle off. Steady-state eviction is a single front row (maxRows is fixed per
-        // panel), so this O(1) identity check is enough.
-        val evicted = if (logs.size >= maxRows) logs.firstOrNull() else null
-        appendBounded(logs, event, maxRows)
-        appendCount++
-        if (evicted != null && evicted === selectedEvent) {
-          selectedEvent = null
-        }
-      }
-    }
-  }
-
-  // Keyed on activeDeviceId as well as the client: the client is recreated per device by the
-  // facet (so identity already changes on switch), but keying on the device id too makes the reset
-  // explicit and re-seeds the remembered connectionState for the new device.
-  LaunchedEffect(telemetryPushClient, activeDeviceId) {
-    val client = telemetryPushClient ?: return@LaunchedEffect
-    client.connectionState.collect { connectionState = it }
-  }
-
-  // Re-arm follow intent whenever a scroll settles: we follow iff the viewport now rests at the
-  // bottom. Immediate clearing on a user upward scroll is handled by [tailFollowScrollConnection];
-  // this settle pass re-arms once the user returns to the bottom. Filter changes do not scroll, so
-  // they never clear the intent. Keyed on activeDeviceId so a device switch restarts the observer.
-  LaunchedEffect(resolvedListState, activeDeviceId) {
-    snapshotFlow { resolvedListState.isScrollInProgress }
-      .collect { inProgress ->
-        if (!inProgress) followTail = !resolvedListState.canScrollForward
-      }
-  }
-
-  // Surface follow-intent transitions to the caller (observation seam; see [onFollowTailChange]).
-  LaunchedEffect(followTail) { onFollowTailChange(followTail) }
-
-  // Keep one collector alive across appends: restarting a frame-waiting effect for every row can
-  // starve tail-follow while rows arrive faster than frames. The append signal also changes when
-  // the bounded buffer is full and its size and measured item count stay constant.
-  LaunchedEffect(
-    resolvedListState,
-    activeDeviceId,
-    query,
-    tag,
-    enabledLevels,
-    showInternalTags,
-    platform,
-    followTail,
-  ) {
-    if (followTail) {
-      snapshotFlow {
-        Triple(appendCount, filtered.lastIndex, resolvedListState.layoutInfo.totalItemsCount)
-      }
-        .filter { (_, lastIndex, measuredCount) ->
-          lastIndex >= 0 && measuredCount > lastIndex
-        }
-        .conflate()
-        .collect {
-          // LayoutInfo changes during measure; defer until the next frame to avoid a nested
-          // measure. Read the tail after waiting so an append during this frame wait is included.
-          withFrameNanos {}
-          val lastIndex = filtered.lastIndex
-          if (lastIndex >= 0) resolvedListState.scrollToItem(lastIndex)
-        }
-    }
-  }
-
-  val statusText = connectionState?.let { connectionStatusText(it) }
-
-  Column(modifier = modifier.fillMaxSize()) {
-    LogsFilterBar(
-      query = query,
-      onQueryChange = { query = it },
-      tag = tag,
-      onTagChange = { tag = it },
-      enabledLevels = enabledLevels,
-      onToggleLevel = { level ->
-        enabledLevels = if (level in enabledLevels) enabledLevels - level else enabledLevels + level
-        if (activeDeviceId != null) {
-          val byDevice =
-            deserializeLogsEnabledLevelsByDevice(settingsProvider.logsEnabledLevelsByDevice)
-              .toMutableMap()
-          byDevice[activeDeviceId] = enabledLevels
-          settingsProvider.logsEnabledLevelsByDevice = serializeLogsEnabledLevelsByDevice(byDevice)
-        }
-      },
-      showInternalTags = showInternalTags,
-      onToggleInternalTags = { showInternalTags = !showInternalTags },
-      savedViews = savedViews,
-      onOpenViews = {
-        savedViews = deserializeLogsSavedViews(settingsProvider.logsSavedViews)
-      },
-      onSaveView = { name ->
-        val view = LogsSavedView(name, enabledLevels, tag.ifBlank { null }, query)
-        savedViews =
-          mutateLogsSavedViews(settingsProvider) { current ->
-            current.filterNot { it.name == name } + view
-          }
-      },
-      onApplyView = { view ->
-        enabledLevels = view.enabledLevels
-        tag = view.tag.orEmpty()
-        query = view.query
-      },
-      onDeleteView = { view ->
-        savedViews =
-          mutateLogsSavedViews(settingsProvider) { current ->
-            current.filterNot { it.name == view.name }
-          }
-      },
-    )
-
-    if (statusText != null) {
-      Row(
-        modifier =
-          Modifier.fillMaxWidth()
-            .background(Color(0xFF5C4033).copy(alpha = 0.3f))
-            .padding(horizontal = 8.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Text(statusText, fontSize = 10.sp, color = Color(0xFFE0A040))
-        if (connectionState is ConnectionState.Error && telemetryPushClient != null) {
-          TextButton(onClick = { telemetryPushClient.connect(activeDeviceId) }) { Text("Retry") }
-        }
-      }
-    }
-
-    if (filtered.isEmpty()) {
-      Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        val message =
-          when {
-            // A non-healthy socket is why there are no rows — say so instead of the misleading
-            // "No logs yet" (which implies a healthy but quiet stream).
-            statusText != null -> statusText
-            query.isBlank() && tag.isBlank() && enabledLevels == defaultEnabledLevels(null) ->
-              "No logs yet"
-            else -> "No logs match the filter"
-          }
-        Text(message, fontSize = 12.sp, color = colors.text.normal.copy(alpha = 0.4f))
-      }
-    } else {
-      LazyColumn(
-        state = resolvedListState,
-        modifier = Modifier.fillMaxSize().nestedScroll(tailFollowScrollConnection),
-      ) {
-        items(
-          count = filtered.size,
-          key = { index ->
-            val event = filtered[index]
-            "${event.timestamp}_${System.identityHashCode(event)}"
-          },
-        ) { index ->
-          val event = filtered[index]
-          val isSelected = event === selectedEvent
-          Column {
-            LogRow(
-              event = event,
-              textColor = colors.text.normal,
-              platform = platform,
-              isSelected = isSelected,
-              onClick = { selectedEvent = if (isSelected) null else event },
+  return with(options) {
+    val colors = SharedTheme.globalColors
+    val panel = rememberLogsPanelState(activeDeviceId, settingsProvider)
+    with(panel) {
+      // Keyed on `platform` (new scale) and `activeDeviceId` (a device switch swaps `logs` for a
+      // fresh
+      // remembered list, so the derived state must re-capture it — otherwise it keeps reading the
+      // old
+      // device's buffer). `enabledLevels` and `query` are Compose State reads that derivedStateOf
+      // tracks on its own, so they are intentionally not remember keys.
+      val filteredState =
+        remember(platform, activeDeviceId) {
+          derivedStateOf {
+            filterLogs(
+              logs = logs,
+              options =
+                LogFilter(
+                  enabledLevels = enabledLevels,
+                  query = query,
+                  platform = platform,
+                  tag = tag,
+                  showInternalTags = showInternalTags,
+                ),
             )
-            if (isSelected) {
-              LogEventDetail(event, colors.text.normal, platform, timeFormat)
+          }
+        }
+      // Per-device scroll state: recreated on a device switch so a device left scrolled up does not
+      // carry its scroll offset (and suppress auto-follow) into the next device.
+      val resolvedListState = listState ?: remember(activeDeviceId) { LazyListState() }
+
+      // Clear follow intent on the first user upward-scroll delta (see [clearsTailFollow]), so a
+      // row
+      // arriving mid-fling no longer yanks the viewport back to the tail. The settle observer below
+      // re-arms it once the user returns to the bottom. Remembered per device, like [listState].
+      val tailFollowScrollConnection =
+        remember(activeDeviceId) {
+          object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+              if (clearsTailFollow(available, source)) followTail = false
+              return Offset.Zero
             }
           }
         }
-      }
-    }
-  }
-}
 
-/**
- * Always-on filter bar: a full-width free-text search field over a horizontally-scrollable row of
- * per-[LogLevel] toggle chips. Keeping the chips on their own scrolling row means they can never
- * clip or squeeze the search field in a narrow device column — the search stays fully usable and
- * the overflowing chips scroll instead.
- */
-@Composable
-private fun LogsFilterBar(
-  query: String,
-  onQueryChange: (String) -> Unit,
-  tag: String,
-  onTagChange: (String) -> Unit,
-  enabledLevels: Set<LogLevel>,
-  onToggleLevel: (LogLevel) -> Unit,
-  showInternalTags: Boolean,
-  onToggleInternalTags: () -> Unit,
-  savedViews: List<LogsSavedView>,
-  onOpenViews: () -> Unit,
-  onSaveView: (String) -> Unit,
-  onApplyView: (LogsSavedView) -> Unit,
-  onDeleteView: (LogsSavedView) -> Unit,
-) {
-  var extrasExpanded by remember { mutableStateOf(false) }
-  var viewsOpen by remember { mutableStateOf(false) }
-  var namingView by remember { mutableStateOf(false) }
-  var viewName by remember { mutableStateOf("") }
-  Column(
-    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-    verticalArrangement = Arrangement.spacedBy(4.dp),
-  ) {
-    SearchBar(
-      query = query,
-      onQueryChange = onQueryChange,
-      placeholder = "Filter logs...",
-      modifier = Modifier.fillMaxWidth(),
-    )
-    Row(
-      modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-      Text(
-        "Views",
-        fontSize = 11.sp,
-        modifier =
-          Modifier.clickable { extrasExpanded = !extrasExpanded }
-            .semantics { contentDescription = "Toggle Logs filters and views" }
-            .padding(horizontal = 6.dp, vertical = 4.dp),
-      )
-      LogLevel.entries.forEach { level ->
-        LevelChip(
-          level = level,
-          isEnabled = level in enabledLevels,
-          onToggle = { onToggleLevel(level) },
-        )
-      }
-    }
-    if (extrasExpanded) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-      ) {
-        SearchBar(
-          query = tag,
-          onQueryChange = onTagChange,
-          placeholder = "Tag contains...",
-          modifier = Modifier.weight(1f).semantics { contentDescription = "Filter Logs by tag" },
-        )
-        Text(
-          "AutoMobile",
-          fontSize = 11.sp,
-          modifier =
-            Modifier.background(
-                if (showInternalTags) Color(0xFF74C0FC).copy(alpha = 0.18f) else Color.Transparent,
-                RoundedCornerShape(4.dp),
-              )
-              .clickable(onClick = onToggleInternalTags)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .semantics {
-                contentDescription = "Toggle AutoMobile internal logs"
-                stateDescription = if (showInternalTags) "Shown" else "Hidden"
-                selected = showInternalTags
-                role = Role.Switch
-              }
-              .padding(horizontal = 6.dp, vertical = 4.dp),
-        )
-        Box {
-          TextButton(
-            onClick = {
-              onOpenViews()
-              viewsOpen = true
-            },
+      CollectLogEvents(panel, telemetryPushClient)
+      FollowLogTail(panel, telemetryPushClient, resolvedListState, filteredState)
+      val statusText = connectionState?.let { connectionStatusText(it) }
+
+      Column(modifier = modifier.fillMaxSize()) {
+        PanelFilters(panel, settingsProvider)
+
+        if (statusText != null) {
+          Row(
+            modifier =
+              Modifier.fillMaxWidth()
+                .background(Color(0xFF5C4033).copy(alpha = 0.3f))
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
           ) {
-            Text("Saved views", fontSize = 11.sp)
-          }
-          DropdownMenu(expanded = viewsOpen, onDismissRequest = { viewsOpen = false }) {
-            DropdownMenuItem(
-              text = { Text("Save current view…") },
-              onClick = { namingView = true },
-            )
-            if (namingView) {
-              Row(
-                modifier = Modifier.width(240.dp).padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-              ) {
-                SearchBar(
-                  query = viewName,
-                  onQueryChange = { viewName = it },
-                  placeholder = "View name",
-                  modifier =
-                    Modifier.weight(1f).semantics { contentDescription = "Saved view name" },
-                )
-                TextButton(
-                  enabled = viewName.isNotBlank(),
-                  onClick = {
-                    onSaveView(viewName.trim())
-                    viewName = ""
-                    namingView = false
-                    viewsOpen = false
-                  },
-                ) {
-                  Text("Save")
-                }
+            Text(statusText, fontSize = 10.sp, color = Color(0xFFE0A040))
+            if (connectionState is ConnectionState.Error && telemetryPushClient != null) {
+              TextButton(onClick = { telemetryPushClient.connect(activeDeviceId) }) {
+                Text("Retry")
               }
-            }
-            savedViews.forEach { view ->
-              DropdownMenuItem(
-                text = { Text(view.name) },
-                onClick = {
-                  onApplyView(view)
-                  viewsOpen = false
-                },
-                trailingIcon = {
-                  TextButton(
-                    onClick = { onDeleteView(view) },
-                    modifier =
-                      Modifier.semantics { contentDescription = "Delete view ${view.name}" },
-                  ) {
-                    Text("Delete", fontSize = 10.sp)
-                  }
-                },
-              )
             }
           }
         }
+
+        LogRows(panel, filteredState, resolvedListState, tailFollowScrollConnection, statusText)
       }
     }
-  }
-}
-
-/** A single toggle chip for one [LogLevel], with switch-role selected semantics for a11y. */
-@Composable
-private fun LevelChip(level: LogLevel, isEnabled: Boolean, onToggle: () -> Unit) {
-  Box(
-    modifier =
-      Modifier.background(
-          if (isEnabled) Color(level.color).copy(alpha = 0.18f) else Color.Transparent,
-          RoundedCornerShape(4.dp),
-        )
-        .clickable { onToggle() }
-        .pointerHoverIcon(PointerIcon.Hand)
-        .padding(horizontal = 6.dp, vertical = 4.dp)
-        .clearAndSetSemantics {
-          // Stable label so tests/AT can find the chip, plus role + selected/state so its on/off
-          // state is announced rather than a bare static "Toggle …" label.
-          contentDescription = "Toggle ${level.label} logs"
-          stateDescription = if (isEnabled) "Shown" else "Hidden"
-          selected = isEnabled
-          role = Role.Switch
-        },
-  ) {
-    Text(
-      level.letter,
-      fontSize = 11.sp,
-      fontFamily = FontFamily.Monospace,
-      fontWeight = FontWeight.SemiBold,
-      color =
-        if (isEnabled) Color(level.color)
-        else SharedTheme.globalColors.text.normal.copy(alpha = 0.35f),
-    )
   }
 }
 
@@ -781,6 +315,380 @@ private fun LogEventDetail(
         fontSize = 11.sp,
         fontFamily = FontFamily.Monospace,
         color = textColor.copy(alpha = 0.9f),
+      )
+    }
+  }
+}
+
+data class LogsPanelOptions(
+  val activeDeviceId: String? = null,
+  val platform: LogPlatform = LogPlatform.Android,
+  val maxRows: Int = MAX_LOG_ROWS,
+  val listState: LazyListState? = null,
+  val onFollowTailChange: (Boolean) -> Unit = {},
+)
+
+internal data class LogsFilterActions(
+  val onQueryChange: (String) -> Unit,
+  val onTagChange: (String) -> Unit,
+  val onToggleLevel: (LogLevel) -> Unit,
+  val onToggleInternalTags: () -> Unit,
+  val savedViews: List<LogsSavedView>,
+  val onOpenViews: () -> Unit,
+  val onSaveView: (String) -> Unit,
+  val onApplyView: (LogsSavedView) -> Unit,
+  val onDeleteView: (LogsSavedView) -> Unit,
+)
+
+data class LogFilter(
+  val enabledLevels: Set<LogLevel>,
+  val query: String,
+  val platform: LogPlatform = LogPlatform.Android,
+  val tag: String? = null,
+  val showInternalTags: Boolean = true,
+)
+
+internal data class LogsPanelState(
+  val logs: androidx.compose.runtime.snapshots.SnapshotStateList<TelemetryDisplayEvent.Log>,
+  val timeFormat: SimpleDateFormat,
+  private val selectedEventState: androidx.compose.runtime.MutableState<TelemetryDisplayEvent.Log?>,
+  private val queryState: androidx.compose.runtime.MutableState<String>,
+  private val tagState: androidx.compose.runtime.MutableState<String>,
+  private val enabledLevelsState: androidx.compose.runtime.MutableState<Set<LogLevel>>,
+  private val showInternalTagsState: androidx.compose.runtime.MutableState<Boolean>,
+  private val savedViewsState: androidx.compose.runtime.MutableState<List<LogsSavedView>>,
+  private val connectionStateState: androidx.compose.runtime.MutableState<ConnectionState?>,
+  private val appendCountState: androidx.compose.runtime.MutableState<Int>,
+  private val followTailState: androidx.compose.runtime.MutableState<Boolean>,
+) {
+  var selectedEvent by selectedEventState
+  var query by queryState
+  var tag by tagState
+  var enabledLevels by enabledLevelsState
+  var showInternalTags by showInternalTagsState
+  var savedViews by savedViewsState
+  var connectionState by connectionStateState
+  var appendCount by appendCountState
+  var followTail by followTailState
+}
+
+@Composable
+private fun rememberLogsPanelState(
+  activeDeviceId: String?,
+  settingsProvider: SettingsProvider,
+): LogsPanelState =
+  LogsPanelState(
+    logs = remember(activeDeviceId) { mutableStateListOf<TelemetryDisplayEvent.Log>() },
+    timeFormat = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) },
+    selectedEventState =
+      remember(activeDeviceId) { mutableStateOf<TelemetryDisplayEvent.Log?>(null) },
+    queryState = remember { mutableStateOf("") },
+    tagState = remember { mutableStateOf("") },
+    enabledLevelsState =
+      remember(activeDeviceId) {
+        val savedLevels = activeDeviceId?.let { deviceId ->
+          deserializeLogsEnabledLevelsByDevice(settingsProvider.logsEnabledLevelsByDevice)[deviceId]
+        }
+        val minimum =
+          if (savedLevels == null) {
+            activeDeviceId?.let { deviceId ->
+              deserializeLogsMinLevelByDevice(settingsProvider.logsMinLevelByDevice)[deviceId]
+                ?.let { name ->
+                  LogLevel.entries.firstOrNull { it.name == name }
+                }
+            }
+          } else {
+            null
+          }
+        mutableStateOf(savedLevels ?: defaultEnabledLevels(minimum))
+      },
+    showInternalTagsState = remember(activeDeviceId) { mutableStateOf(false) },
+    savedViewsState =
+      remember(settingsProvider) {
+        mutableStateOf(deserializeLogsSavedViews(settingsProvider.logsSavedViews))
+      },
+    connectionStateState = remember(activeDeviceId) { mutableStateOf<ConnectionState?>(null) },
+    appendCountState = remember(activeDeviceId) { mutableStateOf(0) },
+    followTailState = remember(activeDeviceId) { mutableStateOf(true) },
+  )
+
+@Composable
+private fun LogsPanelOptions.CollectLogEvents(
+  panel: LogsPanelState,
+  telemetryPushClient: TelemetryPushClient?,
+) {
+  with(panel) {
+    LaunchedEffect(telemetryPushClient, activeDeviceId, maxRows) {
+      val client = telemetryPushClient ?: return@LaunchedEffect
+      client.telemetryEvents.collect { event ->
+        if (event is TelemetryDisplayEvent.Log) {
+          // The append can drop the oldest row (front) once the buffer is at its cap. If that
+          // dropped row is the current selection, clear it — otherwise its highlight/detail vanish
+          // from view while `selectedEvent` keeps a stale, now-invisible reference the user can no
+          // longer toggle off. Steady-state eviction is a single front row (maxRows is fixed per
+          // panel), so this O(1) identity check is enough.
+          val evicted = if (logs.size >= maxRows) logs.firstOrNull() else null
+          appendBounded(logs, event, maxRows)
+          appendCount++
+          if (evicted != null && evicted === selectedEvent) {
+            selectedEvent = null
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun LogsPanelOptions.FollowLogTail(
+  panel: LogsPanelState,
+  telemetryPushClient: TelemetryPushClient?,
+  resolvedListState: LazyListState,
+  filteredState: androidx.compose.runtime.State<List<TelemetryDisplayEvent.Log>>,
+) {
+  val filtered by filteredState
+  with(panel) {
+    // Keyed on activeDeviceId as well as the client: the client is recreated per device by the
+    // facet (so identity already changes on switch), but keying on the device id too makes the
+    // reset
+    // explicit and re-seeds the remembered connectionState for the new device.
+    LaunchedEffect(telemetryPushClient, activeDeviceId) {
+      val client = telemetryPushClient ?: return@LaunchedEffect
+      client.connectionState.collect { connectionState = it }
+    }
+
+    // Re-arm follow intent whenever a scroll settles: we follow iff the viewport now rests at the
+    // bottom. Immediate clearing on a user upward scroll is handled by
+    // [tailFollowScrollConnection];
+    // this settle pass re-arms once the user returns to the bottom. Filter changes do not scroll,
+    // so
+    // they never clear the intent. Keyed on activeDeviceId so a device switch restarts the
+    // observer.
+    LaunchedEffect(resolvedListState, activeDeviceId) {
+      snapshotFlow { resolvedListState.isScrollInProgress }
+        .collect { inProgress ->
+          if (!inProgress) followTail = !resolvedListState.canScrollForward
+        }
+    }
+
+    // Surface follow-intent transitions to the caller (observation seam; see [onFollowTailChange]).
+    LaunchedEffect(followTail) { onFollowTailChange(followTail) }
+
+    // Keep one collector alive across appends: restarting a frame-waiting effect for every row can
+    // starve tail-follow while rows arrive faster than frames. The append signal also changes when
+    // the bounded buffer is full and its size and measured item count stay constant.
+    LaunchedEffect(
+      resolvedListState,
+      activeDeviceId,
+      query,
+      tag,
+      enabledLevels,
+      showInternalTags,
+      platform,
+      followTail,
+    ) {
+      if (followTail) {
+        snapshotFlow {
+          Triple(appendCount, filtered.lastIndex, resolvedListState.layoutInfo.totalItemsCount)
+        }
+          .filter { (_, lastIndex, measuredCount) ->
+            lastIndex >= 0 && measuredCount > lastIndex
+          }
+          .conflate()
+          .collect {
+            // LayoutInfo changes during measure; defer until the next frame to avoid a nested
+            // measure. Read the tail after waiting so an append during this frame wait is included.
+            withFrameNanos {}
+            val lastIndex = filtered.lastIndex
+            if (lastIndex >= 0) resolvedListState.scrollToItem(lastIndex)
+          }
+      }
+    }
+  }
+}
+
+@Composable
+private fun LogsPanelOptions.PanelFilters(
+  panel: LogsPanelState,
+  settingsProvider: SettingsProvider,
+) {
+  with(panel) {
+    LogsFilterBar(
+      query = query,
+      tag = tag,
+      enabledLevels = enabledLevels,
+      showInternalTags = showInternalTags,
+      options =
+        LogsFilterActions(
+          onQueryChange = { query = it },
+          onTagChange = { tag = it },
+          onToggleLevel = { level ->
+            enabledLevels =
+              if (level in enabledLevels) enabledLevels - level else enabledLevels + level
+            if (activeDeviceId != null) {
+              val byDevice =
+                deserializeLogsEnabledLevelsByDevice(settingsProvider.logsEnabledLevelsByDevice)
+                  .toMutableMap()
+              byDevice[activeDeviceId] = enabledLevels
+              settingsProvider.logsEnabledLevelsByDevice =
+                serializeLogsEnabledLevelsByDevice(byDevice)
+            }
+          },
+          onToggleInternalTags = { showInternalTags = !showInternalTags },
+          savedViews = savedViews,
+          onOpenViews = {
+            savedViews = deserializeLogsSavedViews(settingsProvider.logsSavedViews)
+          },
+          onSaveView = { name ->
+            val view = LogsSavedView(name, enabledLevels, tag.ifBlank { null }, query)
+            savedViews =
+              mutateLogsSavedViews(settingsProvider) { current ->
+                current.filterNot { it.name == name } + view
+              }
+          },
+          onApplyView = { view ->
+            enabledLevels = view.enabledLevels
+            tag = view.tag.orEmpty()
+            query = view.query
+          },
+          onDeleteView = { view ->
+            savedViews =
+              mutateLogsSavedViews(settingsProvider) { current ->
+                current.filterNot { it.name == view.name }
+              }
+          },
+        ),
+    )
+  }
+}
+
+@Composable
+private fun LogsPanelOptions.LogRows(
+  panel: LogsPanelState,
+  filteredState: androidx.compose.runtime.State<List<TelemetryDisplayEvent.Log>>,
+  resolvedListState: LazyListState,
+  tailFollowScrollConnection: NestedScrollConnection,
+  statusText: String?,
+) {
+  val filtered by filteredState
+  val colors = SharedTheme.globalColors
+  with(panel) {
+    if (filtered.isEmpty()) {
+      Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val message =
+          when {
+            // A non-healthy socket is why there are no rows — say so instead of the misleading
+            // "No logs yet" (which implies a healthy but quiet stream).
+            statusText != null -> statusText
+            query.isBlank() && tag.isBlank() && enabledLevels == defaultEnabledLevels(null) ->
+              "No logs yet"
+            else -> "No logs match the filter"
+          }
+        Text(message, fontSize = 12.sp, color = colors.text.normal.copy(alpha = 0.4f))
+      }
+    } else {
+      LazyColumn(
+        state = resolvedListState,
+        modifier = Modifier.fillMaxSize().nestedScroll(tailFollowScrollConnection),
+      ) {
+        items(
+          count = filtered.size,
+          key = { index ->
+            val event = filtered[index]
+            "${event.timestamp}_${System.identityHashCode(event)}"
+          },
+        ) { index ->
+          val event = filtered[index]
+          val isSelected = event === selectedEvent
+          Column {
+            LogRow(
+              event = event,
+              textColor = colors.text.normal,
+              platform = platform,
+              isSelected = isSelected,
+              onClick = { selectedEvent = if (isSelected) null else event },
+            )
+            if (isSelected) {
+              LogEventDetail(event, colors.text.normal, platform, timeFormat)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+internal fun LogsFilterActions.SavedViewsMenu(menu: LogsMenuState) {
+  with(menu) {
+    Box {
+      TextButton(
+        onClick = {
+          onOpenViews()
+          viewsOpen = true
+        },
+      ) {
+        Text("Saved views", fontSize = 11.sp)
+      }
+      DropdownMenu(expanded = viewsOpen, onDismissRequest = { viewsOpen = false }) {
+        DropdownMenuItem(
+          text = { Text("Save current view…") },
+          onClick = { namingView = true },
+        )
+        if (namingView) {
+          Row(
+            modifier = Modifier.width(240.dp).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            SearchBar(
+              query = viewName,
+              onQueryChange = { viewName = it },
+              modifier = Modifier.weight(1f).semantics { contentDescription = "Saved view name" },
+              options = SearchBarOptions(placeholder = "View name"),
+            )
+            TextButton(
+              enabled = viewName.isNotBlank(),
+              onClick = {
+                onSaveView(viewName.trim())
+                viewName = ""
+                namingView = false
+                viewsOpen = false
+              },
+            ) {
+              Text("Save")
+            }
+          }
+        }
+        SavedViewItems(menu)
+      }
+    }
+  }
+}
+
+internal class LogsMenuState {
+  var viewsOpen by mutableStateOf(false)
+  var namingView by mutableStateOf(false)
+  var viewName by mutableStateOf("")
+}
+
+@Composable
+private fun LogsFilterActions.SavedViewItems(menu: LogsMenuState) {
+  with(menu) {
+    savedViews.forEach { view ->
+      DropdownMenuItem(
+        text = { Text(view.name) },
+        onClick = {
+          onApplyView(view)
+          viewsOpen = false
+        },
+        trailingIcon = {
+          TextButton(
+            onClick = { onDeleteView(view) },
+            modifier = Modifier.semantics { contentDescription = "Delete view ${view.name}" },
+          ) {
+            Text("Delete", fontSize = 10.sp)
+          }
+        },
       )
     }
   }

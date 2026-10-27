@@ -2,6 +2,7 @@ import {
   CtrlProxyIosManager,
   CtrlProxyIosSetupResult,
 } from "../../src/ctrlProxy/IOSCtrlProxyManager";
+import type { ExistingIosManager } from "../../src/ctrlProxy/ios/ExistingIosManager";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 import { ForcedRestartBudget } from "../../src/ctrlProxy/ForcedRestartBudget";
 import type { Timer } from "../../src/utils/SystemTimer";
@@ -11,7 +12,7 @@ import { FakeTimer } from "./FakeTimer";
  * Fake implementation of CtrlProxyIosManager for testing
  * Allows configuring service state and asserting operations
  */
-export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
+export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager, ExistingIosManager {
   private readonly forcedRestartBudget: ForcedRestartBudget;
 
   constructor(timer: Timer = new FakeTimer()) {
@@ -22,7 +23,18 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.forcedRestartBudget;
   }
 
+  removalGeneration = 0;
+  private rearmedRemovalGeneration = 0;
+
+  supersededSinceRemoval(removalGeneration: number): boolean {
+    return (
+      this.removalGeneration !== removalGeneration ||
+      this.rearmedRemovalGeneration >= removalGeneration
+    );
+  }
+
   async suspendForDeviceRemoval(): Promise<void> {
+    this.removalGeneration++;
     this.executedOperations.push("suspendForDeviceRemoval");
     this.forcedRestartBudget.suspend("device disappeared from discovery");
     await this.stop();
@@ -30,6 +42,7 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
 
   async rearmAfterDeviceReappearance(): Promise<void> {
     this.executedOperations.push("rearmAfterDeviceReappearance");
+    this.rearmedRemovalGeneration = this.removalGeneration;
     if (this.forcedRestartBudget.snapshot().state === "suspended") {
       this.forcedRestartBudget.rearm("device reappeared");
     }

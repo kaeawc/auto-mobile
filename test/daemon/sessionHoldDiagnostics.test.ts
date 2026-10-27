@@ -11,6 +11,7 @@ import {
   sessionHoldDiagnostics,
   vetoedIdleReleaseAt,
   type SessionHoldSnapshot,
+  type SessionHolderKind,
 } from "../../src/daemon/sessionHoldDiagnostics";
 import {
   UNSETTLED_EXECUTION_DEADLINE_GRACE_MS,
@@ -18,7 +19,7 @@ import {
 } from "../../src/daemon/unsettledExecutionVeto";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DaemonRequest } from "../../src/daemon/types";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -63,7 +64,7 @@ function stateFor(manager: SessionManager, observers?: ObserverSessionRegistry):
 }
 
 describe("classifySessionHolderKind", () => {
-  test.each([
+  test.each<[Parameters<typeof classifySessionHolderKind>[0], SessionHolderKind]>([
     [{ livenessPolicy: "cli-idle" as const, livenessOwnerToken: "t" }, "cli"],
     [{ livenessPolicy: "heartbeat" as const, livenessOwnerToken: "t" }, "stdio-proxy"],
     [{ livenessPolicy: "heartbeat" as const, clientName: "AutoMobile Desktop" }, "desktop"],

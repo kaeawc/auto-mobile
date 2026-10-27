@@ -1,4 +1,12 @@
+import { AdbAndroidFoldPostureRestore } from "./androidFoldPostureRestore";
+import {
+  InMemoryMutationRecordingGaps,
+  type MutationRecordingGaps,
+} from "./mutations/recordingGaps";
+import { ENV } from "../../config/env";
+import { readEnvInt } from "../../utils/envNumbers";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
+import type { BootedDevice } from "../../models/DeviceInfo";
 import {
   readAndroidSessionDeviceCatalog,
   readIosSessionDeviceCatalog,
@@ -8,11 +16,13 @@ import {
   listDevices,
   listInstalledSystemImages,
 } from "../../utils/android-cmdline-tools/avdmanager";
+import { bootAdmissionServices } from "../../devices/bootAdmissionServices";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../../utils/fileLock";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultLockOwnerGenerationProbe } from "../lockOwnerGeneration";
 import type { BrokerDeviceAcquisition } from "./provisioning/deviceAcquisition";
 import { defaultBindingToolInvoker } from "./provisioning/daemonDeviceAcquisition";
@@ -23,13 +33,64 @@ import {
   defaultBindingRegistryPath,
   type SqliteBindingRegistry,
 } from "./registry/sqliteBindingRegistry";
-import { computeBindingScopeKey, type BindingProcessIdentity } from "./registry/bindingRegistry";
+import {
+  computeBindingScopeKey,
+  type BindingAssignmentRecord,
+  type BindingProcessIdentity,
+} from "./registry/bindingRegistry";
 import { RECEIPT_PRUNE_BATCH, SessionBroker, type SessionBrokerOptions } from "./broker";
 import { ManagedDevicePort } from "./managedDevicePort";
-import { SESSION_BROKER_SCOPE, type SessionBrokerHostConfig } from "./hostConfig";
+import { SESSION_BROKER_SCOPE, iosReusePolicy, type SessionBrokerHostConfig } from "./hostConfig";
 import { IosBaselineReset } from "./iosBaselineReset";
+import { IosKeepBootedReset } from "./iosKeepBootedReset";
+import { nativeIosMutationResetPort, nativeIosResetHealth } from "./iosResetNativePorts";
+import { captureFirstDeviceBaseline } from "./mutations/reset";
+import type { ManagedDevicePortDependencies } from "./managedDevicePort";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
 import type { BrokerResourceRecord } from "./store";
+import { SESSION_BROKER_RECOVERY_INTERVAL_MS } from "./timing";
+import {
+  AndroidBaselineReset,
+  DEFAULT_ANDROID_RESET_TIMEOUT_MS,
+  watchAndroidResetSession,
+  type AndroidBaselineResetDependencies,
+  type AndroidResetStrategy,
+} from "./androidBaselineReset";
+import {
+  AndroidKeepBootedReset,
+  type AndroidKeepBootedResetDependencies,
+} from "./androidKeepBootedReset";
+import { AndroidDeviceMutationResetPort } from "./androidDeviceMutationResetPort";
+import type { DeviceMutationJournal } from "./mutations/types";
+import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
+import { executionTracker } from "../executionTracker";
+import type { Session } from "../sessionManager/sessionTypes";
+import { HeartbeatTaskLeaseKeepalive } from "../tasks/taskLeaseKeepalive";
+import {
+  brokerSessionMutationScope,
+  SessionMutationRecorder,
+  type MutationRecorder,
+} from "./mutations/recorder";
+import type { DeviceMutationScope } from "./mutations/types";
+import { nativeProfile } from "./profile";
+import { readFile, rm } from "node:fs/promises";
+import { resolve } from "node:path";
+import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
+import { getAndroidHomeWithSystemImages } from "../../utils/android-cmdline-tools/detection";
+import { defaultEmulatorConsoleBusyRegistry } from "../../utils/android-cmdline-tools/EmulatorConsoleBusyRegistry";
+import { reserveBootCapacity } from "../../features/bootAdmission/sharedBootAdmissionGates";
+import { invalidateDisplayCaches } from "../../features/observe/DisplayTransition";
+import { AndroidSnapshotReset } from "./androidSnapshotReset";
+import {
+  NativeAndroidSnapshotResetPort,
+  type AndroidSnapshotReadiness,
+} from "./androidSnapshotResetNativePort";
+import { deviceSnapshotIncarnationInvalidator } from "../deviceSnapshotIncarnationInvalidator";
+import { defaultDeviceClockRestoreRegistry } from "../../features/utility/DeviceClock";
+import { getHostEmulatorProcessStopper } from "../../devices/hostEmulatorProcessStopper";
+import { AVD_DEFAULT_BOOT_SNAPSHOT } from "../../utils/android-cmdline-tools/AvdSnapshotService";
+import { AVD_SNAPSHOTS_DIRNAME } from "../../utils/android-cmdline-tools/AvdConfigReader";
 
 export interface SessionBrokerHostLock {
   acquire(): void;
@@ -60,6 +121,18 @@ export function sessionBrokerHostLock(
 }
 
 export interface OpenSessionBrokerServiceOptions {
+  recordingGaps?: MutationRecordingGaps;
+  mutationSessions?: {
+    peekSession(
+      sessionUuid: string,
+    ): Pick<
+      Session,
+      "sessionId" | "assignedDevice" | "stableDeviceId" | "mutationRecorder" | "heartbeatTimeoutMs"
+    > | null;
+    recordHeartbeat(sessionId: string): void;
+  };
+  /** Daemon startup starts the loop explicitly after binding its control socket. */
+  deferStart?: boolean;
   config: SessionBrokerHostConfig;
   registry: SqliteBindingRegistry;
   acquisition: Pick<BrokerDeviceAcquisition, "acquire">;
@@ -73,6 +146,15 @@ export interface OpenSessionBrokerServiceOptions {
   /** Tests supply a fake host lock; production shares the registry's physical namespace. */
   hostLock?: SessionBrokerHostLock;
   catalog?: (platform: "ios" | "android", signal?: AbortSignal) => Promise<SessionDeviceCatalog>;
+  androidReset?: {
+    inventory(options: {
+      signal?: AbortSignal;
+      timeoutMs: number;
+      targetDeviceId: string;
+    }): Promise<BootedDevice[]>;
+    ctrlProxyReady: AndroidBaselineResetDependencies["ctrlProxyReady"];
+    snapshot?: AndroidSnapshotReadiness;
+  };
 }
 
 function nativeCatalogReader(config: SessionBrokerHostConfig) {
@@ -96,6 +178,14 @@ function nativeCatalogReader(config: SessionBrokerHostConfig) {
   };
 }
 
+/** Share one gap tracker between service recovery and both platform resets. */
+function serviceDependencies(options: OpenSessionBrokerServiceOptions) {
+  return {
+    recordingGaps: options.recordingGaps ?? new InMemoryMutationRecordingGaps(),
+    lock: options.hostLock ?? sessionBrokerHostLock(options.owner),
+  };
+}
+
 /**
  * Opens one exclusive host service using the existing native assignment/journal authority.
  * Legacy binding/free-pool inventory must be drained before opting in; it cannot disappear from cap
@@ -104,8 +194,9 @@ function nativeCatalogReader(config: SessionBrokerHostConfig) {
 export async function openSessionBrokerService(
   options: OpenSessionBrokerServiceOptions,
 ): Promise<SessionBrokerService> {
-  const lock = options.hostLock ?? sessionBrokerHostLock(options.owner);
+  const { recordingGaps, lock } = serviceDependencies(options);
   lock.acquire();
+  let broker: SessionBroker | undefined;
   try {
     const scopeKey = computeBindingScopeKey(SESSION_BROKER_SCOPE);
     await assertBrokerInventoryOwned(options.registry, scopeKey);
@@ -117,23 +208,98 @@ export async function openSessionBrokerService(
       );
     }
     const store = options.registry.sessionBrokerStore(scopeKey);
-    const reset = options.config.reuseCleanDevices ? nativeIosBaselineReset() : undefined;
+    const reuse = iosReusePolicy(options.config);
+    const journal = options.registry.deviceMutationJournal();
+    const reset = nativeBaselineReset(
+      options.config,
+      options.androidReset,
+      options.timer,
+      journal,
+      recordingGaps,
+    );
+    const iosReset = reset?.ios;
+    let resetIosBaseline: NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"] =
+      iosReset
+        ? (device, profile, assertOwned, signal, context) => {
+            const operation = () => iosReset.resetWithTiming(device, profile, assertOwned, signal);
+            return context?.runResetBoot ? context.runResetBoot(operation) : operation();
+          }
+        : undefined;
+    let captureIosBaseline: ManagedDevicePortDependencies["captureIosBaseline"];
+    if (reuse.mode === "keep-booted" && iosReset) {
+      const mutations = nativeIosMutationResetPort(new SimCtlClient(null), options.timer);
+      const fast = new IosKeepBootedReset({
+        recordingGaps,
+        journal,
+        mutations,
+        simctl: new SimCtlClient(null),
+        timer: options.timer,
+        health: nativeIosResetHealth(options.timer),
+        erase: iosReset,
+        maxUses: reuse.maxUses,
+        fallback: reuse.fallback,
+        budgetMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MS),
+        budgetCeilingMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MAX_MS),
+      });
+      captureIosBaseline = (context) => captureFirstDeviceBaseline(journal, mutations, context);
+      resetIosBaseline = async (device, profile, assertOwned, signal, context) => {
+        const request = context?.resource.requestId
+          ? await store.getRequest(context.resource.requestId)
+          : undefined;
+        if (!context || !request?.sessionId) {
+          throw new ActionableError(
+            "iOS keep-booted reset requires its durable released session identity",
+          );
+        }
+        return fast.resetWithTiming(
+          device,
+          profile,
+          assertOwned,
+          { ...context.scope, sessionUuid: request.sessionId },
+          context.resource.reuseCount ?? 0,
+          { signal, runResetBoot: context.runResetBoot },
+        );
+      };
+    }
+    const bindMutationRecorder = options.mutationSessions
+      ? (scope: DeviceMutationScope) => {
+          const session = options.mutationSessions!.peekSession(scope.sessionUuid);
+          if (
+            !session ||
+            session.sessionId !== scope.sessionUuid ||
+            session.assignedDevice !== scope.deviceId
+          ) {
+            throw new ActionableError(
+              "Broker mutation scope must match the live native session and device",
+            );
+          }
+          session.mutationRecorder = new SessionMutationRecorder(journal, scope);
+        }
+      : undefined;
     const devices = new ManagedDevicePort({
       scope: SESSION_BROKER_SCOPE,
+      timer: options.timer,
+      leaseKeepalive: preparationLeaseKeepalive(options),
       brokerDeviceAcquisition: options.acquisition,
       brokerExecutionRelease: options.release,
       registry: options.registry,
       bindingJournal: options.journal,
+      bindMutationRecorder,
       ...(reset
         ? {
-            resetIosBaseline: reset.reset.bind(reset),
+            resetBaseline: {
+              ios: resetIosBaseline,
+              android: reset.android,
+            },
+            captureIosBaseline,
             isCurrentReset: (resource: BrokerResourceRecord) => isCurrentReset(store, resource),
           }
         : {}),
     });
-    const broker = new SessionBroker({
+    broker = new SessionBroker({
       store,
       devices,
+      timer: options.timer,
       owner: options.owner,
       limits: options.config.limits,
       catalog: options.catalog ?? nativeCatalogReader(options.config),
@@ -146,22 +312,176 @@ export async function openSessionBrokerService(
         }
         return defaults;
       },
+      capabilities: options.config.capabilities,
       sessionDisposition: options.sessionDisposition,
-      reuseCleanDevices: options.config.reuseCleanDevices,
+      reuseCleanDevices: reuse.mode !== "off",
+      reuseAndroidCleanDevices: options.config.reuseAndroidCleanDevices,
     });
-    await broker.recover();
-    const service = new SessionBrokerService(broker, scopeKey, lock, options.timer);
-    service.start();
+    await broker.recoverReceipts();
+    const recoverMutationRecorder = (sessionUuid: string) =>
+      recoverSessionMutationRecorder(options, store, scopeKey, bindMutationRecorder, sessionUuid);
+    await recoverActiveMutationRecorders(store, recoverMutationRecorder, recordingGaps);
+    const service = new SessionBrokerService(
+      broker,
+      scopeKey,
+      lock,
+      options.timer,
+      recordingGaps,
+      recoverMutationRecorder,
+    );
+    if (!options.deferStart) {
+      service.start();
+    }
     return service;
   } catch (error) {
-    lock.release();
+    await closeFailedStartupBroker(broker, lock);
     throw toActionableError(error, "Session broker startup failed");
   }
+}
+
+async function closeFailedStartupBroker(
+  broker: SessionBroker | undefined,
+  lock: SessionBrokerHostLock,
+): Promise<void> {
+  try {
+    await broker?.close();
+  } catch (error) {
+    logger.warn("Failed to close broker after startup failure", error);
+  } finally {
+    lock.release();
+  }
+}
+
+async function recoverActiveMutationRecorders(
+  store: Pick<SqliteSessionBrokerStore, "listRecoverableRequests">,
+  recover: (sessionUuid: string) => Promise<MutationRecorder | undefined>,
+  recordingGaps: Pick<MutationRecordingGaps, "mark">,
+): Promise<void> {
+  let requests: Awaited<ReturnType<typeof store.listRecoverableRequests>>;
+  try {
+    requests = await store.listRecoverableRequests();
+  } catch (error) {
+    logger.warn("Cannot list recoverable session requests for mutation recorder recovery", error);
+    return;
+  }
+  for (const request of requests) {
+    if (request.state !== "active" || !request.sessionId) {
+      continue;
+    }
+    try {
+      await recover(request.sessionId!);
+    } catch (error) {
+      recordingGaps.mark(request.sessionId, `recorder recovery: ${errorMessage(error)}`);
+      logger.warn(`Cannot recover mutation recorder for session ${request.sessionId}`, error);
+    }
+  }
+}
+
+async function recoverSessionMutationRecorder(
+  options: Pick<OpenSessionBrokerServiceOptions, "mutationSessions" | "registry">,
+  store: Pick<SqliteSessionBrokerStore, "getSession" | "getResource">,
+  scopeKey: string,
+  bindMutationRecorder: ((scope: DeviceMutationScope) => void) | undefined,
+  sessionUuid: string,
+): Promise<MutationRecorder | undefined> {
+  if (!bindMutationRecorder || !options.mutationSessions) {
+    return undefined;
+  }
+  const session = options.mutationSessions.peekSession(sessionUuid);
+  if (!session) {
+    return undefined;
+  }
+  const request = await store.getSession(sessionUuid);
+  if (request?.state !== "active" || !request.resourceId) {
+    return undefined;
+  }
+  const resource = await store.getResource(request.resourceId);
+  const assignment = resource
+    ? await options.registry.getAssignment({ scopeKey, bindingIndex: resource.allocationIndex })
+    : null;
+  assertRecoveredMutationAssignment(
+    assignment,
+    sessionUuid,
+    session.stableDeviceId ?? session.assignedDevice,
+  );
+  bindMutationRecorder(
+    recoveredMutationScope(sessionUuid, session.assignedDevice, resource, assignment),
+  );
+  const recorder = options.mutationSessions.peekSession(sessionUuid)?.mutationRecorder;
+  if (!recorder) {
+    throw new ActionableError(
+      "Broker mutation recorder recovery did not attach a recorder to the active session",
+    );
+  }
+  return recorder;
+}
+
+/** An iOS journal shares the reset scope's incarnation, or the keep-booted reset cannot find it. */
+function recoveredMutationScope(
+  sessionUuid: string,
+  assignedDevice: string,
+  resource: BrokerResourceRecord | null | undefined,
+  assignment: BindingAssignmentRecord,
+): DeviceMutationScope {
+  if (!resource) {
+    throw new ActionableError("Recovered broker session has no resource");
+  }
+  return brokerSessionMutationScope({
+    platform: nativeProfile(resource).platform,
+    sessionUuid,
+    resource,
+    stableDeviceId: assignment.stableDeviceId ?? assignedDevice,
+    transportId: assignedDevice,
+    assignmentGeneration: assignment.generation,
+    // Android has no boot ID or in-memory baseline after restart; reset already fails closed
+    // with "lacks the original session baseline".
+    bootId: null,
+  });
+}
+
+function assertRecoveredMutationAssignment(
+  assignment: BindingAssignmentRecord | null,
+  sessionUuid: string,
+  stableDeviceId: string,
+): asserts assignment is BindingAssignmentRecord {
+  if (
+    !assignment ||
+    assignment.state !== "ready" ||
+    assignment.execOwner?.sessionUuid !== sessionUuid ||
+    assignment.stableDeviceId !== stableDeviceId
+  ) {
+    throw new ActionableError(
+      "Cannot recover broker mutation recording without the exact native assignment",
+    );
+  }
+}
+
+function nativeBaselineReset(
+  config: SessionBrokerHostConfig,
+  androidReset: OpenSessionBrokerServiceOptions["androidReset"],
+  timer: Timer,
+  journal: DeviceMutationJournal,
+  recordingGaps: MutationRecordingGaps,
+) {
+  if (config.reuseAndroidCleanDevices && config.defaults.android && !androidReset) {
+    throw new ActionableError("Android baseline reset requires the daemon readiness ports");
+  }
+  const reuseIos = iosReusePolicy(config).mode !== "off";
+  return reuseIos || config.reuseAndroidCleanDevices
+    ? {
+        ios: reuseIos ? nativeIosBaselineReset() : undefined,
+        android:
+          config.reuseAndroidCleanDevices && config.defaults.android
+            ? nativeAndroidBaselineReset(androidReset!, timer, config, journal, recordingGaps)
+            : undefined,
+      }
+    : undefined;
 }
 
 function nativeIosBaselineReset(): IosBaselineReset {
   return new IosBaselineReset({
     simctl: new SimCtlClient(null),
+    iosBootInstrumentation: bootAdmissionServices.iosBootInstrumentation(),
     stopDevice: async (device) => {
       // The ordinary lifecycle handler joins device controllers and invalidates caches before
       // erasure. A raw simctl shutdown would skip that provider bookkeeping.
@@ -177,13 +497,175 @@ function nativeIosBaselineReset(): IosBaselineReset {
   });
 }
 
+function nativeAndroidBaselineReset(
+  ports: NonNullable<OpenSessionBrokerServiceOptions["androidReset"]>,
+  timer: Timer,
+  config: SessionBrokerHostConfig,
+  journal: DeviceMutationJournal,
+  recordingGaps: MutationRecordingGaps,
+): AndroidBaselineReset {
+  const configReader = new FileAvdConfigReader();
+  const inventory = boundAndroidResetInventory(ports.inventory, timer);
+  let snapshot: AndroidSnapshotReset | undefined;
+  if (
+    config.androidResetMode === "snapshot" ||
+    (config.androidResetMode === "keep-booted" && config.androidKeepBootedFallback === "snapshot")
+  ) {
+    if (!ports.snapshot) {
+      throw new ActionableError(
+        "Android snapshot reset requires daemon readiness and identity ports",
+      );
+    }
+    snapshot = new AndroidSnapshotReset(
+      new NativeAndroidSnapshotResetPort({
+        emulator: new AndroidEmulatorClient({ timer }),
+        adb: defaultAdbClientFactory,
+        config: configReader,
+        console: defaultEmulatorConsoleBusyRegistry,
+        clockRegistry: defaultDeviceClockRestoreRegistry,
+        processStopper: getHostEmulatorProcessStopper(timer),
+        clearQuickBoot: async (device, step) => {
+          const directory = await configReader.resolveAvdDirectory(device.name);
+          await step.assertOwned();
+          if (!directory) {
+            throw new ActionableError(
+              "Android reset cannot locate its owned AVD to remove dirty quick-boot state",
+            );
+          }
+          await rm(resolve(directory, AVD_SNAPSHOTS_DIRNAME, AVD_DEFAULT_BOOT_SNAPSHOT), {
+            recursive: true,
+            force: true,
+          });
+          await step.assertOwned();
+        },
+        capacity: {
+          reserveBoot: (options) => {
+            if (!bootAdmissionServices.androidColdBootAdmitter()) {
+              throw new ActionableError(
+                "Android snapshot replacement requires boot admission before stopping",
+              );
+            }
+            return reserveBootCapacity("android", options);
+          },
+        },
+        admitColdBoot: async (device, step) => {
+          const admitter = bootAdmissionServices.androidColdBootAdmitter();
+          if (!admitter) {
+            throw new ActionableError(
+              "Android snapshot wipe-data reset requires boot admission wiring",
+            );
+          }
+          await step.assertOwned();
+          return admitter.admit({
+            avdName: device.name,
+            timeoutMs: step.timeoutMs,
+            signal: step.signal,
+          });
+        },
+        readiness: ports.snapshot,
+        inventory,
+        ctrlProxyReady: ports.ctrlProxyReady,
+        imageMetadata: async (imagePath, signal) => {
+          const sdk = getAndroidHomeWithSystemImages();
+          if (!sdk) {
+            throw new ActionableError(
+              "Android snapshot reset requires installed system-image metadata",
+            );
+          }
+          return readFile(resolve(sdk.androidHome, imagePath, "source.properties"), {
+            encoding: "utf8",
+            signal,
+          });
+        },
+        timer,
+        invalidate: (deviceId) =>
+          invalidateDisplayCaches(deviceId, "Android broker baseline reset"),
+      }),
+      timer,
+      deviceSnapshotIncarnationInvalidator,
+    );
+  }
+  const strategy = createAndroidResetStrategy(config, {
+    recordingGaps,
+    journal,
+    timer,
+    snapshot,
+    port: (device) => new AndroidDeviceMutationResetPort(defaultAdbClientFactory.create(device)),
+  });
+  return new AndroidBaselineReset({
+    postureReset: new AdbAndroidFoldPostureRestore(defaultAdbClientFactory),
+    timer,
+    resetTimeoutMs: config.androidResetTimeoutMs,
+    inventory: async (options) => {
+      const devices = await inventory(options);
+      return Promise.all(
+        devices.map(async (device) => {
+          options?.signal?.throwIfAborted();
+          const config = await configReader.readConfig(device.name);
+          options?.signal?.throwIfAborted();
+          return {
+            ...device,
+            isRunning: true,
+            runtimeId: config?.systemImagePackage,
+            deviceType: config?.deviceName,
+            apiLevel: config?.apiLevel,
+          };
+        }),
+      );
+    },
+    adb: (device) => defaultAdbClientFactory.create(device),
+    watchSession: (sessionId) => watchAndroidResetSession(executionTracker, sessionId),
+    ctrlProxyReady: ports.ctrlProxyReady,
+    strategy,
+  });
+}
+
+export function createAndroidResetStrategy(
+  config: SessionBrokerHostConfig,
+  {
+    snapshot,
+    ...dependencies
+  }: Pick<AndroidKeepBootedResetDependencies, "journal" | "timer" | "port" | "recordingGaps"> & {
+    snapshot?: AndroidResetStrategy;
+  },
+): AndroidResetStrategy | undefined {
+  return config.androidResetMode === "keep-booted"
+    ? new AndroidKeepBootedReset({
+        ...dependencies,
+        maxUses: config.androidKeepBootedMaxUses,
+        fallback: snapshot,
+        fallbackBudgetMs: snapshot
+          ? (config.androidResetTimeoutMs ?? DEFAULT_ANDROID_RESET_TIMEOUT_MS)
+          : undefined,
+      })
+    : snapshot;
+}
+
+export function boundAndroidResetInventory(
+  inventory: NonNullable<OpenSessionBrokerServiceOptions["androidReset"]>["inventory"],
+  timer: Timer,
+): NonNullable<OpenSessionBrokerServiceOptions["androidReset"]>["inventory"] {
+  return (options) => {
+    options.signal?.throwIfAborted();
+    const controller = new AbortController();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+    return raceWithDeadline(() => inventory({ ...options, signal }), {
+      timer,
+      timeoutMs: options.timeoutMs,
+      signal: options.signal,
+      label: "Android baseline reset inventory",
+      onTimeout: () => controller.abort(),
+    });
+  };
+}
+
 async function isCurrentReset(
   store: SqliteSessionBrokerStore,
   expected: BrokerResourceRecord,
 ): Promise<boolean> {
-  const current = (await store.listResources()).find(
-    (resource) => resource.resourceId === expected.resourceId,
-  );
+  const current = await store.getResource(expected.resourceId);
   return (
     current?.state === "resetting" &&
     current.revision === expected.revision &&
@@ -221,7 +703,7 @@ async function assertBrokerInventoryOwned(
   registry: SqliteBindingRegistry,
   scopeKey: string,
 ): Promise<void> {
-  const resources = await registry.sessionBrokerStore(scopeKey).listResources();
+  const resources = await registry.sessionBrokerStore(scopeKey).listLiveResources();
   const occupied = new Set(
     resources
       .filter((resource) => resource.state !== "destroyed")
@@ -260,9 +742,38 @@ export class SessionBrokerService {
     readonly scopeKey: string,
     private readonly lock: SessionBrokerHostLock,
     private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout" | "now">,
+    private readonly recordingGaps: Pick<MutationRecordingGaps, "mark">,
+    private readonly recorderFor: (
+      sessionUuid: string,
+    ) => Promise<MutationRecorder | undefined> = async () => undefined,
   ) {}
 
+  markMutationUnrecorded(sessionUuid: string, reason: string): void {
+    this.recordingGaps.mark(sessionUuid, reason);
+  }
+
+  async recoverMutationRecorder(sessionUuid: string): Promise<MutationRecorder | undefined> {
+    try {
+      if (this.stopped) {
+        throw new ActionableError(
+          "Cannot recover mutation recording from a stopped session broker",
+        );
+      }
+      return await this.recorderFor(sessionUuid);
+    } catch (error) {
+      this.markMutationUnrecorded(sessionUuid, `recorder recovery: ${errorMessage(error)}`);
+      logger.warn(
+        `Cannot recover mutation recorder for session ${sessionUuid}; proceeding without recording`,
+        error,
+      );
+      return undefined;
+    }
+  }
+
   start(): void {
+    if (this.stopped) {
+      return;
+    }
     this.running ??= this.loop();
   }
 
@@ -274,6 +785,12 @@ export class SessionBrokerService {
   private async stop(): Promise<void> {
     this.stopped = true;
     this.wake?.();
+    try {
+      await this.broker.markRestartHandoff();
+    } catch (error) {
+      // Preparations are already aborted; close retries the best-effort handoff after recovery.
+      logger.warn(`Session broker restart handoff failed: ${errorMessage(error)}`, error);
+    }
     await this.running;
     await this.broker.close();
     // Keep ownership if broker shutdown throws: the process's eventual exit makes the lock
@@ -282,17 +799,28 @@ export class SessionBrokerService {
   }
 
   private async loop(): Promise<void> {
+    let firstPass = true;
     while (!this.stopped) {
-      await this.wait();
+      if (!firstPass) {
+        await this.wait();
+      }
       if (this.stopped) {
         return;
       }
       try {
-        await this.broker.recover();
+        await this.broker.recoverReceipts();
+        await this.broker.recoverCleanup();
       } catch (error) {
         logger.warn(`Session broker recovery remains pending: ${errorMessage(error)}`);
       }
-      await this.pruneIfDue();
+      if (this.stopped) {
+        return;
+      }
+      // Recovery is urgent at bind; retention keeps its existing delayed first pass.
+      if (!firstPass) {
+        await this.pruneIfDue();
+      }
+      firstPass = false;
     }
   }
 
@@ -319,11 +847,20 @@ export class SessionBrokerService {
         this.wake = undefined;
         resolve();
       };
-      const timeout = this.timer.setTimeout(done, 5_000);
+      const timeout = this.timer.setTimeout(done, SESSION_BROKER_RECOVERY_INTERVAL_MS);
       this.wake = () => {
         this.timer.clearTimeout(timeout);
         done();
       };
     });
   }
+}
+
+function preparationLeaseKeepalive(
+  options: Pick<OpenSessionBrokerServiceOptions, "mutationSessions" | "timer">,
+): HeartbeatTaskLeaseKeepalive | undefined {
+  const { mutationSessions, timer } = options;
+  return mutationSessions
+    ? new HeartbeatTaskLeaseKeepalive({ sessions: () => mutationSessions, timer })
+    : undefined;
 }

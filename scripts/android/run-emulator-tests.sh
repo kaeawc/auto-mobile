@@ -16,7 +16,6 @@
 #     "control-proxy/build/outputs/apk/debug/control-proxy-debug.apk" \
 #     "./gradlew :junit-runner:test"
 #
-# shellcheck disable=SC2012 # Using ls for readable debug output is appropriate here
 
 set -euo pipefail
 
@@ -51,7 +50,7 @@ cleanup_retry_logs() {
   fi
   exit "$original_status"
 }
-trap cleanup_retry_logs EXIT
+trap 'cleanup_retry_logs' EXIT
 
 if [ -n "$APK_PATH" ]; then
   export AUTOMOBILE_CTRL_PROXY_APK_PATH="$APK_PATH"
@@ -237,12 +236,12 @@ else
     echo ""
 
     echo "Current directory:"
-    ls -la | head -20
+    find . -prune -exec ls -la {} + | head -20
     echo ""
 
     echo "control-proxy/ directory:"
     if [ -d "control-proxy" ]; then
-      ls -la control-proxy/ | head -20
+      find control-proxy/ -prune -exec ls -la {} + | head -20
     else
       print_warning "(directory not found)"
     fi
@@ -250,7 +249,7 @@ else
 
     echo "control-proxy/build/ directory:"
     if [ -d "control-proxy/build" ]; then
-      ls -la control-proxy/build/ | head -20
+      find control-proxy/build/ -prune -exec ls -la {} + | head -20
     else
       print_warning "(directory not found)"
     fi
@@ -258,7 +257,7 @@ else
 
     echo "control-proxy/build/outputs/ directory:"
     if [ -d "control-proxy/build/outputs" ]; then
-      ls -la control-proxy/build/outputs/ | head -20
+      find control-proxy/build/outputs/ -prune -exec ls -la {} + | head -20
     else
       print_warning "(directory not found)"
     fi
@@ -266,7 +265,7 @@ else
 
     echo "control-proxy/build/outputs/apk/ directory:"
     if [ -d "control-proxy/build/outputs/apk" ]; then
-      ls -la control-proxy/build/outputs/apk/ | head -20
+      find control-proxy/build/outputs/apk/ -prune -exec ls -la {} + | head -20
     else
       print_warning "(directory not found)"
     fi
@@ -274,7 +273,7 @@ else
 
     echo "control-proxy/build/outputs/apk/debug/ directory:"
     if [ -d "control-proxy/build/outputs/apk/debug" ]; then
-      ls -la control-proxy/build/outputs/apk/debug/ | head -20
+      find control-proxy/build/outputs/apk/debug/ -prune -exec ls -la {} + | head -20
     else
       print_warning "(directory not found)"
     fi
@@ -282,7 +281,7 @@ else
 
     echo "Parent directory of APK: $(dirname "$APK_PATH")"
     if [ -d "$(dirname "$APK_PATH")" ]; then
-      ls -la "$(dirname "$APK_PATH")" | head -20
+      find "$(dirname "$APK_PATH")" -prune -exec ls -la {} + | head -20
     else
       print_warning "(directory not found)"
     fi

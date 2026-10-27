@@ -3,7 +3,7 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { BootedDevice } from "../models";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { Platform } from "../models";
-import { DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHelpers";
+import { DEVICE_LABEL_DESCRIPTION } from "../utils/schemaHelpers";
 import { registerDeviceGestureRecordingTools } from "./deviceGestureRecordingTools";
 import { registerToolCallRecordingTools } from "./toolCallRecordingTools";
 import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecutionOrchestrator";
@@ -20,7 +20,7 @@ import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
-} from "../daemon/constants";
+} from "../daemon/wire/constants";
 
 const testMetadataSchema = z.object({
   testClass: z.string(),

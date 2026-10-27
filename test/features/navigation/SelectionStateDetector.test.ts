@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import {
   SelectionStateDetector,
@@ -16,12 +17,13 @@ const createHierarchy = (node: Record<string, any>): ViewHierarchyResult =>
     },
   }) as ViewHierarchyResult;
 
-const createObservation = (viewHierarchy: ViewHierarchyResult): ObserveResult => ({
-  updatedAt: Date.now(),
-  screenSize: { width: 100, height: 100 },
-  systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  viewHierarchy,
-});
+const createObservation = (viewHierarchy: ViewHierarchyResult): ObserveResult =>
+  buildObserveResult({
+    updatedAt: Date.now(),
+    screenSize: { width: 100, height: 100 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    viewHierarchy,
+  });
 
 describe("SelectionStateDetector", () => {
   test("prefers accessibility-selected elements when available", async () => {

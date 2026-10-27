@@ -8,7 +8,7 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import type { ChildProcess, SpawnOptions } from "node:child_process";
+import type { SpawnOptions } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
@@ -24,7 +24,7 @@ import {
   DEFAULT_PID_FILE_PATH,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_FORCED_STOP_TIMEOUT_MS,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import type { DaemonStatus, PidFileData } from "../../src/daemon/types";
 import { ActionableError } from "../../src/models";
 import { darwinProcessGenerationToken } from "../../src/daemon/processGeneration";
@@ -177,13 +177,13 @@ function createHarness(
   let spawnedPid = 202;
   let spawnedRecord: Partial<PidFileData> = {};
   const spawner: DaemonProcessSpawner = {
-    spawn(_command, args, options): ChildProcess {
+    spawn(_command, args, options) {
       calls.push({ args: [...args], options });
       const child = new FakeChildProcess(timer);
       child.pid = spawnedPid;
       identity.record = { ...makeRecord(spawnedPid), ...spawnedRecord };
       processes.livePids.add(spawnedPid);
-      return child as ChildProcess;
+      return child;
     },
   };
   const ports: number[] = [];
@@ -211,7 +211,7 @@ function createHarness(
     launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
     processSignaler: signaler,
     idGenerator: { next: () => "namespace-test-owner" },
-    peerSocketReachability: { isReachable: async () => false },
+    peerSocketReachability: { probe: async () => "absent" },
     portAvailabilityChecker: {
       isPortFree: async (port) => {
         ports.push(port);

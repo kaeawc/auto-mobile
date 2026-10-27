@@ -3,6 +3,7 @@ import { describe, expect, test, spyOn } from "bun:test";
 import fs from "node:fs";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
+import { logStreamFactory, type LogStream } from "../../src/utils/loggingConfig";
 import * as io from "../../src/utils/io";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -13,7 +14,7 @@ useRealLogSinks();
 const STALL_MS = 5_000;
 const ABANDON_MS = 30_000;
 
-class HeldStream extends EventEmitter {
+class HeldStream extends EventEmitter implements LogStream {
   writable = true;
   destroyed = false;
   closed = false;
@@ -69,10 +70,10 @@ describe("logger sink stall watchdog", () => {
     const stderr: string[] = [];
     const stdout: string[] = [];
     const timer = new FakeTimer();
-    const create = spyOn(fs, "createWriteStream").mockImplementation(() => {
+    const create = spyOn(logStreamFactory, "create").mockImplementation(() => {
       const stream = new HeldStream();
       streams.push(stream);
-      return stream as fs.WriteStream;
+      return stream;
     });
     const sync = spyOn(fs, "writeSync").mockImplementation(((fd: number, chunk: unknown) => {
       if (fd === process.stderr.fd) {
@@ -129,10 +130,15 @@ describe("logger sink stall watchdog", () => {
     let releaseStat: (() => void) | undefined;
     let rejectStat: ((error: Error) => void) | undefined;
     let rotationSize = 0;
-    const stat = spyOn(io, "statAsync").mockImplementation(
+    const logIo: { statAsync(path: fs.PathLike): Promise<fs.Stats> } = io;
+    const stat = spyOn(logIo, "statAsync").mockImplementation(
       () =>
         new Promise((resolve, reject) => {
-          releaseStat = () => resolve(Object.assign(fs.statSync(dir), { size: rotationSize }));
+          releaseStat = () => {
+            const stats = fs.statSync(dir);
+            stats.size = rotationSize;
+            resolve(stats);
+          };
           rejectStat = reject;
         }),
     );
@@ -451,6 +457,27 @@ describe("logger sink stall watchdog", () => {
       await drain();
       h.timer.advanceTime(STALL_MS);
       expect(h.emergency.filter((line) => line.includes("stalled:"))).toHaveLength(2);
+    } finally {
+      await h.dispose();
+    }
+  });
+
+  test("remembers a reported stall for a window after the live flag clears (#11990)", async () => {
+    const h = await harness();
+    try {
+      h.mod.logger.info("held A");
+      await drain();
+      expect(h.mod.logSinkStalledWithin(60_000)).toBeFalse();
+      h.timer.advanceTime(STALL_MS);
+      expect(h.mod.logSinkStalledWithin(0)).toBeTrue();
+      h.streams[0].prompt = true;
+      h.streams[0].release();
+      h.mod.logger.info("resumed B");
+      await expectFlushed(h.mod);
+      // The live flag is clear again, but the stall was reported moments ago.
+      expect(h.mod.logSinkStalledWithin(60_000)).toBeTrue();
+      h.timer.advanceTime(60_001);
+      expect(h.mod.logSinkStalledWithin(60_000)).toBeFalse();
     } finally {
       await h.dispose();
     }

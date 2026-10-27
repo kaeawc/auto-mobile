@@ -34,7 +34,7 @@ class Executor extends DefaultHostCommandExecutor {
     this.args = args;
     const child = new FakeChildProcess(this.timer);
     this.children.push(child);
-    return child as unknown as ChildProcess;
+    return child;
   }
 }
 function setup() {

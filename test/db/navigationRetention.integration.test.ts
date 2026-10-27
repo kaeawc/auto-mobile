@@ -17,6 +17,7 @@ import {
   DEFAULT_EVICTION_CHUNK_SIZE,
   MAX_EVICTION_CHUNK_SIZE,
   MAX_INTERVAL_MS,
+  type NavigationRetentionConfig,
 } from "../../src/db/navigationRetention";
 
 const APP = "com.example.app";
@@ -151,7 +152,7 @@ describe("NavigationRetention prune", () => {
   });
 
   function retention(
-    config = CONFIG,
+    config: Partial<NavigationRetentionConfig> = CONFIG,
     // These tests drive batch boundaries explicitly; no host I/O scheduling needed.
     yieldBetweenBatches: () => Promise<void> = async () => {},
     protectedBuildKeyResolver?: typeof computeProtectedBuildKeyIds,
@@ -1014,20 +1015,20 @@ describe("NavigationRetention prune", () => {
     for (let version = 1; version <= 7; version++) {
       aKeys.push(await buildKey(APP, version));
     }
-    let bKey: number | undefined;
+    const lateKeys: number[] = [];
     const summary = await retention({ ...CONFIG, evictionChunkSize: 2 }, async () => {
       if (
-        bKey === undefined &&
+        lateKeys.length === 0 &&
         (await db.selectFrom("navigation_build_keys").select("id").execute()).length === 5
       ) {
-        bKey = await buildKey(APP2, 1);
+        lateKeys.push(await buildKey(APP2, 1));
       }
     }).prune(1_000_000);
 
-    expect(bKey).toBeDefined();
+    expect(lateKeys).toHaveLength(1);
     expect(summary.buildKeysDeleted).toBe(6);
     const keys = await db.selectFrom("navigation_build_keys").select("id").execute();
-    expect(keys.map((key) => key.id).sort()).toEqual([aKeys[6], bKey].sort());
+    expect(keys.map((key) => key.id).sort()).toEqual([aKeys[6], ...lateKeys].sort());
   });
 
   test("refreshes the sweep anchor after it is deleted between chunks", async () => {
@@ -1035,21 +1036,21 @@ describe("NavigationRetention prune", () => {
     for (let version = 1; version <= 7; version++) {
       aKeys.push(await buildKey(APP, version));
     }
-    let bKey: number | undefined;
+    const lateKeys: number[] = [];
     const summary = await retention({ ...CONFIG, evictionChunkSize: 2 }, async () => {
       if (
-        bKey === undefined &&
+        lateKeys.length === 0 &&
         (await db.selectFrom("navigation_build_keys").select("id").execute()).length === 5
       ) {
         await db.deleteFrom("navigation_build_keys").where("id", "=", aKeys[6]).execute();
-        bKey = await buildKey(APP2, 1);
+        lateKeys.push(await buildKey(APP2, 1));
       }
     }).prune(1_000_000);
 
-    expect(bKey).toBeDefined();
+    expect(lateKeys).toHaveLength(1);
     expect(summary.buildKeysDeleted).toBe(5);
     const keys = await db.selectFrom("navigation_build_keys").select("id").execute();
-    expect(keys.map((key) => key.id).sort()).toEqual([aKeys[5], bKey].sort());
+    expect(keys.map((key) => key.id).sort()).toEqual([aKeys[5], ...lateKeys].sort());
   });
 
   test("refreshes the sweep anchor after it loses its observations between chunks", async () => {
@@ -1059,24 +1060,24 @@ describe("NavigationRetention prune", () => {
       aKeys.push(await buildKey(APP, version));
     }
     await nodeObs(nodeId, aKeys[0], "active", 100_000);
-    let bKey: number | undefined;
+    const lateKeys: number[] = [];
     const summary = await retention({ ...CONFIG, evictionChunkSize: 2 }, async () => {
       if (
-        bKey === undefined &&
+        lateKeys.length === 0 &&
         (await db.selectFrom("navigation_build_keys").select("id").execute()).length === 5
       ) {
         await db
           .deleteFrom("navigation_node_observations")
           .where("build_key_id", "=", aKeys[0])
           .execute();
-        bKey = await buildKey(APP2, 1);
+        lateKeys.push(await buildKey(APP2, 1));
       }
     }).prune(100_000);
 
-    expect(bKey).toBeDefined();
+    expect(lateKeys).toHaveLength(1);
     expect(summary.buildKeysDeleted).toBe(6);
     const keys = await db.selectFrom("navigation_build_keys").select("id").execute();
-    expect(keys.map((key) => key.id).sort()).toEqual([aKeys[6], bKey].sort());
+    expect(keys.map((key) => key.id).sort()).toEqual([aKeys[6], ...lateKeys].sort());
   });
 
   test("bounds full protection reads across orphan chunks", async () => {

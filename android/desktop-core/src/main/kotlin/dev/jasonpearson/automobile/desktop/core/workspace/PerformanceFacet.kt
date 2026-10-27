@@ -48,18 +48,22 @@ fun PerformanceFacet(
     key(sessionUuidProvider, sessionUuid) {
       if (sessionUuidProvider == null || sessionUuid != null)
         rememberReconnectingObservationState(
-          deviceId = column.deviceId,
-          streamFactory = { observationStreamFactory(column.deviceId) },
-          backoffDelay = backoffDelay,
-          socketAvailable = socketAvailable,
+          dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+            deviceId = column.deviceId,
+            streamFactory = { observationStreamFactory(column.deviceId) },
+            backoffDelay = backoffDelay,
+            socketAvailable = socketAvailable,
+          ),
         )
       else ReconnectingObservationState(null, 0)
     }
   PerformanceDashboard(
-    dataSourceMode = DataSourceMode.Real,
-    clientProvider = { graph.autoMobileClient },
-    observationStreamClient = observation.stream,
-    connectionGeneration = observation.connectionGeneration,
-    deviceId = column.deviceId,
+    dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboardOptions(
+      dataSourceMode = DataSourceMode.Real,
+      clientProvider = { graph.autoMobileClient },
+      observationStreamClient = observation.stream,
+      connectionGeneration = observation.connectionGeneration,
+      deviceId = column.deviceId,
+    ),
   )
 }

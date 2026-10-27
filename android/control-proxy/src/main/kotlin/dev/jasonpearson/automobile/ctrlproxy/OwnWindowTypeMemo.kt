@@ -3,6 +3,10 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 
+// AccessibilityEvent constants introduced in API 28; these values were already inlined.
+private const val WINDOW_CHANGE_ADDED = 1 // WINDOWS_CHANGE_ADDED.
+private const val WINDOW_CHANGE_REMOVED = 2 // WINDOWS_CHANGE_REMOVED.
+
 /**
  * Memoises accessibility window types by window id. Thread-safe. The own-window filter does no memo
  * or prototype-state work for foreign packages. Prototype foreground tracking also memoises foreign
@@ -37,11 +41,11 @@ internal class OwnWindowTypeMemo(
     val entry = entries[windowId]
     if (entry != null) {
       val ttlMs = if (entry.type == null) unresolvedRetryMs else resolvedTtlMs
-      if (
+      val canReuseEntry =
         (entry.type != null || !retryUnresolvedImmediately) &&
           now >= entry.atMs &&
           now - entry.atMs < ttlMs
-      ) {
+      if (canReuseEntry) {
         return entry.type
       }
     }
@@ -67,13 +71,15 @@ internal class OwnWindowTypeMemo(
 internal data class OwnWindowEventDecision(val skip: Boolean, val windowType: Int?)
 
 internal fun ownWindowEventDecision(
-  eventPackage: String?,
-  ownPackage: String,
-  windowId: Int,
+  event: OwnWindowEvent,
   memo: OwnWindowTypeMemo,
   appLayerShowing: () -> Boolean,
   resolve: () -> Int?,
 ): OwnWindowEventDecision {
+  val eventPackage = event.eventPackage
+  val ownPackage = event.ownPackage
+  val windowId = event.windowId
+
   if (eventPackage != ownPackage) return OwnWindowEventDecision(false, null)
   val type = memo.windowType(windowId, resolve = resolve)
   val showing = type == AccessibilityWindowInfo.TYPE_SYSTEM && appLayerShowing()
@@ -89,7 +95,6 @@ internal fun ownWindowEventDecision(
  */
 internal fun invalidatesOwnWindowTypes(eventType: Int, windowChanges: Int?): Boolean {
   if (eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return false
-  val invalidatingChanges =
-    AccessibilityEvent.WINDOWS_CHANGE_ADDED or AccessibilityEvent.WINDOWS_CHANGE_REMOVED
+  val invalidatingChanges = WINDOW_CHANGE_ADDED or WINDOW_CHANGE_REMOVED
   return windowChanges == null || windowChanges and invalidatingChanges != 0
 }

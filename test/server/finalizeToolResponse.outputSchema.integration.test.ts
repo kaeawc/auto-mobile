@@ -1,6 +1,18 @@
+import { z } from "zod/v4";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import type { ValidateFunction } from "ajv";
+import type { JsonSchemaValidator } from "@modelcontextprotocol/client";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/ajv";
+import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/client/validators/cf-worker";
+import { advertisedOutputSchema } from "../helpers/advertisedOutputSchemas";
+import {
+  OUTPUT_SCHEMA_FIXTURES,
+  finalizedSchemaFixture,
+  invalidSchemaFixtures,
+} from "../helpers/outputSchemaFixtureCases";
+import { addSpillArtifactToAdvertisedOutputSchema } from "../../src/server/pipeline/advertisedSchema";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { createMcpServer } from "../../src/server/index";
 import {
@@ -65,6 +77,8 @@ function minimalFieldValue(schema: unknown): unknown {
       return definition.values?.[0];
     case "array":
       return [];
+    case "record":
+      return {};
     case "object":
       return Object.fromEntries(
         Object.entries(definition.shape ?? {})
@@ -96,6 +110,127 @@ const OBJECT_OUTPUT_TOOLS = ToolRegistry.getToolDefinitions()
   .filter((tool): tool is NonNullable<typeof tool> => tool?.outputSchema !== undefined)
   .map((tool) => ({ tool, requiredKeys: requiredTopLevelKeys(tool.outputSchema) }))
   .filter(({ requiredKeys }) => requiredKeys.length > 0);
+
+const fixtureValidators = new Map<
+  string,
+  {
+    inline: ValidateFunction;
+    referenced: ValidateFunction;
+    sdk: JsonSchemaValidator<unknown>;
+    cfworker: JsonSchemaValidator<unknown>;
+  }
+>();
+const finalizedFixtures = new Map<string, Record<string, unknown>>();
+const residueValidators = new Map<
+  string,
+  { inline: ValidateFunction; referenced: ValidateFunction }
+>();
+// Compiles two Ajv validators per registered tool plus every fixture, so the
+// cost grows with the registry and crosses bun's 5s hook default on a loaded
+// runner.
+const VALIDATOR_COMPILE_TIMEOUT_MS = 30_000;
+beforeAll(() => {
+  const sdk = new AjvJsonSchemaValidator();
+  const cfworker = new CfWorkerJsonSchemaValidator();
+  for (const definition of ToolRegistry.getToolDefinitions({ includeUnavailable: true })) {
+    const source = ToolRegistry.getRegisteredTool(definition.name)?.outputSchema;
+    if (definition.outputSchema && source) {
+      residueValidators.set(definition.name, {
+        inline: compileAjv2020(advertisedOutputSchema(source, "inline")),
+        referenced: compileAjv2020(definition.outputSchema),
+      });
+    }
+  }
+  for (const fixture of OUTPUT_SCHEMA_FIXTURES) {
+    if (!fixtureValidators.has(fixture.name)) {
+      const registered = ToolRegistry.getRegisteredTool(fixture.name)!;
+      const schema = ToolRegistry.getToolDefinitions({ includeUnavailable: true }).find(
+        (tool) => tool.name === fixture.name,
+      )!.outputSchema!;
+      fixtureValidators.set(fixture.name, {
+        inline: compileAjv2020(advertisedOutputSchema(registered.outputSchema!, "inline")),
+        referenced: compileAjv2020(schema),
+        sdk: sdk.getValidator(schema),
+        cfworker: cfworker.getValidator(schema),
+      });
+    }
+    for (const project of ["full", "skeleton"] as const) {
+      finalizedFixtures.set(
+        `${fixture.label}:${project}`,
+        finalizedSchemaFixture(fixture, project),
+      );
+    }
+  }
+}, VALIDATOR_COMPILE_TIMEOUT_MS);
+
+describe("referenced output schemas preserve captured structuredContent validation", () => {
+  for (const project of ["full", "skeleton"] as const) {
+    test.each(OUTPUT_SCHEMA_FIXTURES)(
+      `$label (${project}) has identical inline, ref, SDK Ajv and cfworker verdicts`,
+      (fixture) => {
+        const payload = finalizedFixtures.get(`${fixture.label}:${project}`)!;
+        const validators = fixtureValidators.get(fixture.name)!;
+        expect(validators.inline(payload), JSON.stringify(validators.inline.errors)).toBe(true);
+        for (const [value, expected] of [
+          [payload, true],
+          ...invalidSchemaFixtures(fixture.name, payload).map((mutant) => [mutant, false] as const),
+        ] as const) {
+          const oldVerdict = validators.inline(value);
+          expect(oldVerdict).toBe(expected);
+          expect(validators.referenced(value)).toBe(oldVerdict);
+          expect(validators.sdk(value).valid).toBe(oldVerdict);
+          expect(validators.cfworker(value).valid).toBe(oldVerdict);
+        }
+      },
+    );
+  }
+});
+
+test("spill advertisement visits every referenced response arm without adding nested artifacts", () => {
+  const strictArm = () => ({
+    type: "object",
+    properties: { nested: { type: "object", additionalProperties: false } },
+    additionalProperties: false,
+  });
+  const schema = {
+    anyOf: [{ $ref: "#/$defs/left" }, { oneOf: [{ $ref: "#/$defs/right" }] }],
+    $defs: { left: strictArm(), right: strictArm() },
+  };
+  addSpillArtifactToAdvertisedOutputSchema(schema);
+  expect(schema.anyOf[0]).toHaveProperty("properties.artifact");
+  expect(schema.anyOf[1]).toHaveProperty("oneOf.0.properties.artifact");
+  for (const arm of Object.values(schema.$defs)) {
+    expect(arm.properties).not.toHaveProperty("artifact");
+  }
+  expect(schema.anyOf[0]).not.toHaveProperty("properties.nested.properties.artifact");
+});
+
+test("spill response overrides do not loosen a definition also used by a nested observation", () => {
+  const schema = {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    anyOf: [
+      { $ref: "#/$defs/arm" },
+      {
+        type: "object",
+        properties: { observation: { $ref: "#/$defs/arm" } },
+        required: ["observation"],
+        additionalProperties: false,
+      },
+    ],
+    $defs: {
+      arm: {
+        type: "object",
+        properties: { success: { type: "boolean" } },
+        required: ["success"],
+        additionalProperties: false,
+      },
+    },
+  };
+  addSpillArtifactToAdvertisedOutputSchema(schema);
+  const validate = compileAjv2020(schema);
+  expect(validate({ observation: { success: true } })).toBe(true);
+  expect(validate({ observation: { success: true, artifact: {} } })).toBe(false);
+});
 
 describe("spilled output-schema residue contract (#6950)", () => {
   test("covers multiple registered object output schemas", () => {
@@ -153,7 +288,10 @@ describe("spilled output-schema residue contract (#6950)", () => {
   )(
     "%s preserves every required top-level output field after a spill",
     (_name, tool, requiredKeys) => {
-      const shape = (tool.outputSchema as ObjectOutputSchema).shape;
+      if (!(tool.outputSchema instanceof z.ZodObject)) {
+        throw new Error("Expected object output schema");
+      }
+      const shape = tool.outputSchema.shape;
       const payload = Object.fromEntries(
         requiredKeys.map((key) => [key, minimalFieldValue(shape[key])]),
       );
@@ -180,6 +318,10 @@ describe("spilled output-schema residue contract (#6950)", () => {
         expect(residue[key]).toBe(payload[key]);
       }
       expect(residue.padding).toBeUndefined();
+      const validators = residueValidators.get(tool.name)!;
+      // These minimal synthetic payloads preserve the runtime-required fields;
+      // parity also covers wire overrides that require additional metadata.
+      expect(validators.referenced(residue)).toBe(validators.inline(residue));
     },
   );
 });

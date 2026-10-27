@@ -1,0 +1,51 @@
+{
+  "spec": {
+    "id": "secure",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "secret": "",
+      "password": "",
+      "public": "ok"
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "secret",
+          "secure": true
+        },
+        {
+          "type": "textField",
+          "stateKey": "password",
+          "keyboardType": "password"
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "request",
+              "url": "https://example.com",
+              "via": "device",
+              "query": {
+                "token": {
+                  "state": "secret"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "root.children[2].onTap[0].query.token.state",
+  "expectedMessage": "Secure value cannot be bound into a request"
+}

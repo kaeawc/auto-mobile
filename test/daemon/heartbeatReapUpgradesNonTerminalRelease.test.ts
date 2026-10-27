@@ -15,8 +15,7 @@ import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
-} from "../../src/daemon/sessionLivenessWindows";
-import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -49,6 +48,7 @@ const CLOCK_RESTORE_MS = 11_000;
 
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
+  releaseDevice: async () => {},
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
 };
 
@@ -165,9 +165,11 @@ describe("a non-terminal release whose teardown outlasts lease + grace, owner st
 class ParkablePersistence extends FakeDeviceSessionPersistence {
   parkUpsert: Promise<void> | undefined;
 
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  override async upsertActiveSession(
+    ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+  ): Promise<number> {
     await this.parkUpsert;
-    await super.upsertActiveSession(record);
+    return super.upsertActiveSession(...args);
   }
 }
 

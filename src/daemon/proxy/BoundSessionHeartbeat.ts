@@ -1,7 +1,7 @@
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import type { DaemonClientLike } from "../client";
-import { DAEMON_HEARTBEAT_METHOD } from "../constants";
+import { DAEMON_HEARTBEAT_METHOD } from "../wire/constants";
 import {
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
   DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
@@ -13,7 +13,8 @@ import {
   runWithoutDaemonLifecycle,
   type ReportedOwnerHold,
 } from "../proxyLivenessRecovery";
-import { DaemonBoundSessionExpiredError, daemonInternalErrors } from "./daemonErrors";
+import { DaemonBoundSessionExpiredError } from "./DaemonBoundSessionExpiredError";
+import { HeldSessionNotFoundError } from "./HeldSessionNotFoundError";
 import type { HeldSessionHeartbeatOutcomes } from "./HeldSessionHeartbeatOutcomes";
 import type { HeldSessionLosses } from "./HeldSessionLosses";
 import type { HeartbeatKeeperPort } from "./HeartbeatKeeper";
@@ -24,8 +25,6 @@ import {
   type NotFoundAnswerOutcome,
 } from "./notFoundDecision";
 import type { LatestHeartbeatAsk, ProxySessionState } from "./ProxySessionState";
-
-const { HeldSessionNotFoundError } = daemonInternalErrors;
 
 const NO_HANDOFFS: ReadonlySet<string> = new Set();
 

@@ -1,4 +1,5 @@
-import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import { MockLocationClearRegistry } from "../../../src/features/utility/MockLocationClear";
 import { DeviceState } from "../../../src/features/utility/DeviceState";
@@ -23,9 +24,11 @@ const flush = async () => {
     await Promise.resolve();
   }
 };
-const warn = spyOn(logger, "warn").mockImplementation(() => {});
-afterEach(() => warn.mockClear());
-afterAll(() => warn.mockRestore());
+let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+beforeEach(() => {
+  warn = spyOn(logger, "warn").mockImplementation(() => {});
+});
+afterEach(() => warn.mockRestore());
 
 function harness(simctl = new FakeSimctl()) {
   const timer = new FakeTimer();
@@ -56,14 +59,20 @@ function harness(simctl = new FakeSimctl()) {
     pending,
     unbound,
     release: (sessionId: string, deviceId = ios.deviceId) =>
-      release(sessionId, deviceId, "test", {
+      release(
         sessionId,
         deviceId,
-        releaseReason: "test",
-        releasedAtMs: 0,
-        terminal: true,
-        heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 1000, ageMs: 0 },
-      }),
+        "test",
+        {
+          sessionId,
+          deviceId,
+          releaseReason: "test",
+          releasedAtMs: 0,
+          terminal: true,
+          heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 1000, ageMs: 0 },
+        },
+        {},
+      ),
   };
 }
 
@@ -251,10 +260,28 @@ describe("session mock location clear", () => {
     expect(h.simctl.getMethodCalls("executeCommandArgs")[1].args).toEqual(clearArgs(other));
   });
 
-  for (const device of [
-    { ...ios, platform: "android" as const },
-    { ...ios, deviceId: "00008110-0012345678901234" },
-  ]) {
+  test("a physical iOS fix is cleared through the runner on release, never simctl (#14091)", async () => {
+    const runner = new FakeIOSCtrlProxy();
+    const physical = { ...ios, deviceId: "00008110-0012345678901234" };
+    const h = harness();
+    h.clears.markSet("s", physical, runner);
+    h.release("s", physical.deviceId);
+    await h.pending[0].promise;
+    expect(runner.locationHistory).toEqual([{ clear: true }]);
+    expect(h.simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+  });
+
+  test("a physical iOS fix with no runner to clear it is not tracked (#14091)", async () => {
+    const physical = { ...ios, deviceId: "00008110-0012345678901234" };
+    const h = harness();
+    h.clears.markSet("s", physical);
+    h.release("s", physical.deviceId);
+    await flush();
+    expect(h.pending).toEqual([]);
+    expect(h.simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+  });
+
+  for (const device of [{ ...ios, platform: "android" as const }]) {
     test(`never marks ${device.platform} ${device.deviceId}`, async () => {
       const h = harness();
       h.clears.markSet("s", device);

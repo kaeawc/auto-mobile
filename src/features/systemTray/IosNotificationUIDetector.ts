@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import {
   ActionableError,
   BootedDevice,
@@ -9,6 +10,7 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
 import {
   getHierarchyRoots,
+  hasIosCoverSheetNotificationCenter,
   nodeHasIosNotificationCenterHint,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
   traverseForHint,
@@ -27,6 +29,7 @@ export interface IosGestureResult {
 }
 
 export interface IosNotificationUIDetectorDeps {
+  pressHome?(): Promise<IosGestureResult>;
   requestSwipe(
     x1: number,
     y1: number,
@@ -34,7 +37,7 @@ export interface IosNotificationUIDetectorDeps {
     y2: number,
     duration?: number,
   ): Promise<IosGestureResult>;
-  requestTapCoordinates(x: number, y: number): Promise<IosGestureResult>;
+  requestTapCoordinates(request: TapCoordinatesRequest): Promise<IosGestureResult>;
   /** Host-side monotonic clock used as the iOS observation timestamp. */
   now(): number;
 }
@@ -46,12 +49,11 @@ const IOS_CLOSE_SWIPE_DURATION_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS;
  * iOS implementation of {@link NotificationUIDetector}. NotificationCenter
  * is hosted by SpringBoard, so the predicate first gates on the
  * observation's `packageName` containing "springboard" before scanning
- * for any of the known NotificationCenter class / identifier hints.
+ * for legacy NotificationCenter hints or the captured cover-sheet list structure.
  *
- * Expand and collapse are vertical swipes anchored at the screen's
- * mid-X. The detector requires the caller to pass the most recent
- * observation so it can read `screenSize` — without dimensions there
- * is no safe gesture path on iOS and the operation aborts.
+ * Expand and legacy collapse use vertical swipes anchored at the screen's
+ * mid-X and require `screenSize` from the most recent observation. The iOS 27
+ * cover sheet collapses via HOME instead and does not require dimensions.
  */
 export class IosNotificationUIDetector implements NotificationUIDetector {
   readonly device: BootedDevice;
@@ -66,7 +68,7 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
     if (!viewHierarchy) {
       return false;
     }
-    const packageName = (viewHierarchy as any).packageName ?? "";
+    const packageName = viewHierarchy.packageName ?? "";
     if (!packageName.includes("springboard")) {
       return false;
     }
@@ -87,6 +89,17 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
   }
 
   async collapseTray(observation?: ObserveResult): Promise<void> {
+    if (
+      observation?.viewHierarchy &&
+      hasIosCoverSheetNotificationCenter(observation.viewHierarchy)
+    ) {
+      if (!this.deps.pressHome) {
+        throw new ActionableError("Failed to close Notification Center: home press unavailable");
+      }
+      const result = await this.deps.pressHome();
+      this.requireGestureSuccess(result, "close Notification Center");
+      return;
+    }
     const { width, height } = this.requireScreenSize(observation, "close");
     const result = await this.deps.requestSwipe(
       Math.floor(width * 0.5),
@@ -105,7 +118,7 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
   async tapElement(element: Element): Promise<void> {
     const geometry = new DefaultElementGeometry();
     const center = geometry.getElementCenter(element);
-    const result = await this.deps.requestTapCoordinates(center.x, center.y);
+    const result = await this.deps.requestTapCoordinates({ x: center.x, y: center.y });
     this.requireGestureSuccess(result, "tap notification");
   }
 

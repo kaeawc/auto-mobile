@@ -1,5 +1,10 @@
+import {
+  emulatorProcessArguments,
+  isEmulatorQemuProcess,
+} from "../../src/utils/android-cmdline-tools/EmulatorProcessStop";
 import type {
   EmulatorHostProcessRow,
+  EmulatorSerialDescription,
   EmulatorProcessIdentity,
   EmulatorProcessSignaler,
   EmulatorProcessStopOutcome,
@@ -11,8 +16,11 @@ export class FakeEmulatorProcessStopper implements EmulatorProcessStopper {
   readonly identifyCalls: Parameters<EmulatorProcessStopper["identify"]>[] = [];
   readonly stopCalls: Parameters<EmulatorProcessStopper["stop"]>[] = [];
   readonly describeCalls: Parameters<EmulatorProcessStopper["describeSerial"]>[] = [];
+  readonly describeAvdCalls: Parameters<EmulatorProcessStopper["describeAvd"]>[] = [];
+  avdDescription?: Exclude<EmulatorSerialDescription, { kind: "read" }>;
   identity: EmulatorProcessIdentity = { kind: "absent" };
   outcome: EmulatorProcessStopOutcome = { kind: "unidentified", identity: { kind: "absent" } };
+  avdCandidates: { pid: number; command: string }[] = [];
   candidates: { pid: number; command: string }[] = [];
   /** When set, describeSerial reports an unreadable process table instead of `candidates`. */
   describeUnreadable?: string;
@@ -33,6 +41,19 @@ export class FakeEmulatorProcessStopper implements EmulatorProcessStopper {
     return this.describeUnreadable === undefined
       ? { kind: "read" as const, candidates: this.candidates }
       : { kind: "unreadable" as const, detail: this.describeUnreadable };
+  }
+  async describeAvd(...args: Parameters<EmulatorProcessStopper["describeAvd"]>) {
+    args[1].signal?.throwIfAborted();
+    this.describeAvdCalls.push(args);
+    return (
+      this.avdDescription ?? {
+        kind: "read" as const,
+        candidates: this.avdCandidates.filter(
+          (row) =>
+            isEmulatorQemuProcess(row) && emulatorProcessArguments(row.command).avdName === args[0],
+        ),
+      }
+    );
   }
   async stop(
     ...args: Parameters<EmulatorProcessStopper["stop"]>

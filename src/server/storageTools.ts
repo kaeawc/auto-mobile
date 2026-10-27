@@ -1,3 +1,7 @@
+import type {
+  KeychainDeleteOutcome,
+  KeychainItemSelector,
+} from "../features/observe/ios/CtrlProxyStorage";
 import { errorMessage } from "../utils/describeUnknownError";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
@@ -7,12 +11,13 @@ import {
   addDeviceTargetingToSchema,
   withAppIdAliases,
   withPostFlattenJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import {
   clearKeyValueFileResultSchema,
   getDataStoreResultSchema,
   listDataStoresResultSchema,
+  deleteKeychainItemResultSchema,
   removeKeyValueResultSchema,
   setKeyValueResultSchema,
 } from "./storageToolOutputSchemas";
@@ -24,7 +29,8 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { ResourceRegistry } from "./resourceRegistry";
 import type { KeyValueType, PreferenceStoreResolution } from "../features/storage/storageTypes";
-import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "./storageSdkErrors";
+import { preferenceSetWarning, validateTypeForPlatform } from "../features/storage/storageChecks";
+import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../utils/storageSdkErrors";
 import {
   clearAndroidKeyValueFileDirect,
   dataStoreInspectionDisabledReason,
@@ -54,6 +60,11 @@ export interface AndroidKeyValueClient {
 
 /** The subset of IOSCtrlProxyClient the key-value tool handlers depend on. */
 export interface IosKeyValueClient {
+  deleteKeychainItemForIos(
+    appId: string,
+    selector: KeychainItemSelector,
+    confirm: boolean,
+  ): Promise<KeychainDeleteOutcome>;
   setPreference(
     appId: string,
     fileName: string,
@@ -107,30 +118,56 @@ const KEY_VALUE_TYPES = [
   "UNKNOWN",
 ] as const;
 
-// Types only valid on Android
-const ANDROID_ONLY_TYPES = new Set<string>(["LONG", "STRING_SET"]);
-
-// Types only valid on iOS
-const IOS_ONLY_TYPES = new Set<string>(["DOUBLE", "DATA", "DATE", "ARRAY", "DICTIONARY"]);
-
-// Guidance messages for cross-platform type errors
-const TYPE_GUIDANCE: Record<string, string> = {
-  // Android-only types on iOS
-  "ios:LONG": "LONG is Android-only. On iOS, use INT for integer values.",
-  "ios:STRING_SET": "STRING_SET is Android-only. On iOS, use ARRAY for collections of strings.",
-  // iOS-only types on Android
-  "android:DOUBLE": "DOUBLE is iOS-only. On Android, use FLOAT for decimal values.",
-  "android:DATA":
-    "DATA is iOS-only and stores raw binary data (base64 encoded). Not available on Android.",
-  "android:DATE":
-    "DATE is iOS-only and stores ISO 8601 date strings. On Android, store dates as STRING or LONG (epoch millis).",
-  "android:ARRAY":
-    "ARRAY is iOS-only. On Android, use STRING_SET for string collections, or store JSON as STRING.",
-  "android:DICTIONARY": "DICTIONARY is iOS-only. On Android, store JSON objects as STRING.",
-};
-
 const STORAGE_NAME_DESCRIPTION =
   'Storage name. iOS: empty string, "standard" (any case) or the app bundle id select the app\'s standard UserDefaults; any other value is a UserDefaults suite name (e.g. an app group) and must be a valid suite with no leading or trailing whitespace. Android: SharedPreferences file name without the .xml extension (letters, digits, underscore, dash, dot).';
+
+export const deleteKeychainItemSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z
+      .object({
+        appId: z.string().min(1),
+        selector: z
+          .object({
+            itemClass: z.string().min(1),
+            service: z.string().min(1),
+            account: z.string().min(1),
+            accessGroup: z.string().min(1),
+          })
+          .strict(),
+        confirm: z
+          .literal(true)
+          .describe("Explicit confirmation to delete this exact Keychain item"),
+      })
+      .strict(),
+  ),
+);
+
+async function deleteKeychainItemHandler(
+  device: BootedDevice,
+  args: z.output<typeof deleteKeychainItemSchema>,
+  deps: StorageToolsDependencies,
+) {
+  if (device.platform !== "ios") {
+    throw new ActionableError("deleteKeychainItem requires iOS with the in-app AutoMobile SDK");
+  }
+  if (args.confirm !== true) {
+    throw new ActionableError("deleteKeychainItem requires confirm:true");
+  }
+  try {
+    const result = await deps
+      .iosClientFactory(device)
+      .deleteKeychainItemForIos(args.appId, args.selector, args.confirm);
+    if (result.outcome !== "deleted") {
+      return {
+        ...createStructuredToolResponse({ success: false, appId: args.appId, ...result }),
+        isError: true as const,
+      };
+    }
+    return createStructuredToolResponse({ appId: args.appId, ...result });
+  } catch (error) {
+    throw toActionableError(error, "Failed to delete scoped iOS Keychain item");
+  }
+}
 
 const ADAPTER_NAME_DESCRIPTION =
   "Name the host app registered its DataStore adapter under (AutoMobile SDK)";
@@ -331,49 +368,6 @@ function withSharedPreferencesInspectionFallback(
   );
 }
 
-/**
- * Validate that the type is supported on the given platform. Throws ActionableError with guidance if not.
- *
- * Exported so the daemon `ide/*` socket key-value handlers can enforce the same
- * cross-platform type guidance as the MCP-tool path, without duplicating the
- * platform-specific type sets (issue #5022).
- */
-export function validateTypeForPlatform(platform: string, type: KeyValueType): void {
-  if (type === "UNKNOWN") {
-    throw new ActionableError(
-      "UNKNOWN type is read-only and cannot be used for write operations. " +
-        "Specify an explicit type (STRING, INT, BOOLEAN, etc.).",
-    );
-  }
-
-  if (platform === "ios" && ANDROID_ONLY_TYPES.has(type)) {
-    const guidance = TYPE_GUIDANCE[`ios:${type}`] || `${type} is not supported on iOS.`;
-    throw new ActionableError(guidance);
-  }
-
-  if (platform === "android" && IOS_ONLY_TYPES.has(type)) {
-    const guidance = TYPE_GUIDANCE[`android:${type}`] || `${type} is not supported on Android.`;
-    throw new ActionableError(guidance);
-  }
-}
-
-/** @internal Preserve any existing warning before adding the set-only override guidance. */
-export function preferenceSetWarning(
-  existingWarning: string | undefined,
-  effectiveValueDiffers?: boolean,
-): string | undefined {
-  return (
-    [
-      existingWarning,
-      effectiveValueDiffers === true
-        ? "The value was written to the app's persistent store but the effective value read by the app differs (for example a launch argument, managed configuration or other override). The write persisted."
-        : undefined,
-    ]
-      .filter(Boolean)
-      .join(" ") || undefined
-  );
-}
-
 // setKeyValue handler
 async function setKeyValueHandler(
   device: BootedDevice,
@@ -414,12 +408,12 @@ async function setKeyValueHandler(
             : setAndroidKeyValueDirect(
                 adb,
                 device.deviceId,
-                args.appId,
-                storageName,
-                args.key,
-                value,
-                args.type,
-                args.userId,
+                {
+                  appId: args.appId,
+                  fileName: storageName,
+                  userId: args.userId,
+                },
+                { key: args.key, value, type: args.type },
               ),
         deps,
       ));
@@ -662,6 +656,13 @@ async function getDataStoreHandler(
  */
 export function registerStorageTools(overrides: Partial<StorageToolsDependencies> = {}): void {
   const deps = { ...defaultStorageToolsDependencies, ...overrides };
+  ToolRegistry.registerDeviceAware(
+    "deleteKeychainItem",
+    "Delete one exact, host-allowlisted, app-owned iOS generic-password Keychain item. Requires SDK opt-in, mutation authorization and explicit confirmation; never exports values.",
+    deleteKeychainItemSchema,
+    (device, args) => deleteKeychainItemHandler(device, args, deps),
+    { defaultEnabled: false, outputSchema: deleteKeychainItemResultSchema, embeddedSdkOnly: true },
+  );
   ToolRegistry.registerDeviceAware(
     "setKeyValue",
     "Set app key-value storage entry.",

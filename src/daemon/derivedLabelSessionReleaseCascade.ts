@@ -12,7 +12,7 @@ import {
 import type { SessionReleaseCallback } from "./sessionManager";
 import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { executionTracker } from "../server/executionTracker";
+import { executionTracker } from "./executionTracker";
 
 /** The slice of the session manager the cascade needs. */
 export interface DerivedLabelSessionSource extends SessionReleaseManager {

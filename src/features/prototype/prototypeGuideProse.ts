@@ -41,6 +41,19 @@ shows while it is true. A pull sets the key to true and runs \`onRefresh\` like 
 \`baseRevision\`) sets it back to false to hide the indicator. Declare the key in \`state\` as a
 boolean; a horizontal scroll with \`refresh\` is rejected. The pull is a swipe down from the top of
 the scroll (\`swipeOn\` with the prototype layer) and \`observe\` reports the scroll as usual.
+
+### Chat lists
+
+A vertical \`scroll\` can be a conversation view (needs \`prototype_chat_scroll_v1\`, Android only for
+now): \`reverse: true\` anchors it at the end of its content, so the newest row sits at the bottom;
+\`stickToEnd: true\` follows rows appended while it is at the end; \`atEndKey\` names a declared
+boolean state key the runtime keeps true while it is at the end (show a "new messages" pill with
+\`visibleWhen {key, equals: false}\`); \`onStartReached\` runs each time the start is reached, to load
+older history. \`scrollTo {scroll, to: "start" | "end" | {key: <repeat.key value>}, animated?}\` moves
+the scroll whose \`id\` is \`scroll\` (exactly one); \`{key}\` scrolls to that repeat row. A composer is a
+row with a \`textField\` (\`imeAction: "send"\`, \`onSubmit\`) and a send \`iconButton\`, with
+\`safeAreaPadding {edges: ["bottom"], types: ["ime", "systemBars"]}\`. Rows off screen are absent from
+\`observe\`; \`swipeOn lookFor\` still finds them.
 `;
 
 /**
@@ -65,8 +78,15 @@ existing screen. Actions \`push {stack, screen}\`, \`pop {stack}\`, \`popToRoot 
 Push is ignored at depth 32; pop at depth 1 does nothing. \`screen_changed\` has name = stack id
 and payload \`{screen, depth}\`, emitted only when the top screen or depth changes. Requires
 \`prototype_stack_v1\`; every screen counts toward node limits, including hidden screens.
-Android Back and the iOS edge swipe pop a stack above depth 1. No transitions yet; per-screen
-scroll position is not restored. A stack cannot appear inside a repeat template.
+Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optional
+\`transition: "platform" | "slide" | "fade" | "none"\` selects screen navigation animation
+(default \`platform\`); \`push\` and \`replace\` can override it with their own \`transition\`.
+Any explicit value needs \`prototype_stack_transitions_v1\`; pop/popToRoot take no override.
+Transitions honour \`motion: "none"\`, animator scale 0 and system reduced motion. A stack's
+\`transition\` accepts only those four values and no longer animates the stack's own visibility
+(earlier specs using \`expand\`, \`scale\`, \`slideStart\`, \`slideEnd\` or \`blurReplace\` on a stack
+are now refused): wrap the stack in a \`box\` with \`visibleWhen\` and a visibility transition for
+that. Each entry's scroll position is restored on pop. A stack cannot appear inside a repeat template.
 
 On Android, \`show replaceOthers: false\` retains other prototype windows, up to four distinct ids
 (requires \`prototype_multi_surface_v1\`); a fifth is refused listing the shown ids. A same-id show
@@ -135,6 +155,76 @@ before device requests when it is absent. The Android and iOS implementations sh
 iOS uses a drawn field with SF Symbol icons, not SwiftUI \`.searchable\`; these differences
 are reported in \`platformNotes\`.
 
+## Loading, empty and error states
+
+(needs \`prototype_loading_states_v1\`) \`{data: "/feed", empty: true}\` holds when the value is
+missing, \`[]\`, \`{}\` or \`""\`; \`empty: false\` is its inverse. It replaces the comparison, so
+it cannot be combined with \`equals\`, \`notEquals\`, \`gt\` or \`lt\`, and it applies to data
+conditions only. Style \`shimmer: true\` on a \`box\`, \`row\`, \`column\` or \`card\` sweeps an
+animated highlight over its background and reads "Loading" to accessibility; it is static under
+\`motion: "none"\` or animator scale 0. The canonical trio uses a request's \`statusKey\`:
+
+- **Loading:** a column with \`visibleWhen: {key: "feedStatus", equals: "loading"}\` that repeats a
+  few literal placeholder rows styled \`{shimmer: true, height: {dp: 56}, background:
+  "surfaceVariant", cornerRadius: "medium"}\`.
+- **Empty:** \`visibleWhen: {all: [{key: "feedStatus", equals: "success"}, {data: "/feed",
+  empty: true}]}\`, with the "No posts yet" copy.
+- **Error:** \`visibleWhen: {key: "feedStatus", equals: "error"}\`, with a retry button that runs
+  the request again.
+
+The rows themselves repeat over \`{path: "/feed"}\`. The iOS agent draws shimmer too.
+
+## Style effects
+
+(needs \`prototype_effects_v1\`; no connected device advertises it yet, so the host refuses a spec
+with \`style.effects\` until a renderer ships) \`style.effects\` is 1 to 4 paint-only looks drawn in
+order inside the node's own bounds: \`noise\`, \`gradientMesh\`, \`shimmer\`, \`glow\`,
+\`vignette\`, \`blur\`, \`pixelate\`, \`chromaticAberration\`, \`wave\` and \`ripple\`, each with typed,
+bounded params. Shader source is never accepted. Any effect may loop with \`animate:
+{periodMs: 400-20000}\` and start at \`phase\` 0-1; a spec has at most 64 effects and 8 animated ones
+across its expanded \`repeat\` tree, counting every \`styleWhen\` style's list too.
+
+## Motion v2
+
+(needs \`prototype_motion_v2\`) A node's \`animate: {durationMs?, easing?}\` (0-2000 ms, default
+300; \`standard\`, \`emphasized\`, \`linear\` or \`spring\`) animates changes to its \`alpha\`,
+\`offset\`, \`scale\`, \`rotation\`, \`background\` and \`color\`, typically from \`styleWhen\`; without
+it they are instant. Style \`scale\` (0-4) and \`rotation\` (degrees, -360..360) draw about the
+node's centre without moving siblings. \`transition\` also takes \`slideStart\` / \`slideEnd\`
+(slide in from that edge, mirrored right to left: drawers) and \`scale\`. An \`image\` with
+\`zoomable: {maxScale}\` (1-8) pinches, pans when zoomed and toggles 1x/2x on a double tap, with
+accessibility zoom actions; it cannot also have \`onDoubleTap\`. Everything snaps under
+\`motion: "none"\` or animator scale 0. The iOS agent does not support it yet (#14684).
+
+## Choreography
+
+(needs \`prototype_choreography_v1\`) On nodes other than stacks, \`transition\` also takes \`{type, delayMs?}\` (\`delayMs\` 0-600 ms, the wait
+before the enter starts) besides the plain names, and \`blurReplace\`: a blur-and-fade enter and exit
+(iOS \`.blurReplace\`; Android 12 and later blur, Android 11 and earlier fade only). A \`box\`, \`row\` or \`column\` takes \`stagger: {ms, order?}\` (\`ms\` 0-100 per child;
+\`order\` \`forward\` (default), \`reverse\` or \`center\`): its direct children with \`visibleWhen\`
+enter one after another in layout order, each \`ms\` apart, including the children a \`repeat\` makes.
+A child's own \`transition.delayMs\` adds to its stagger wait, and no child may wait more than 600 ms
+in all (a literal \`repeat\` is counted; a data-bound one is clamped on the device). Delays are zero
+under \`motion: "none"\` or animator scale 0. Delays apply to enters only. The iOS agent does not
+support it yet.
+
+## Charts
+
+\`{type: "chart", variant, series, yRange?, xLabels?, goal?}\` draws a \`line\`, \`area\`, \`bar\` or
+\`ring\` chart (needs \`prototype_chart_v1\`). \`series\` holds 1-4 \`{path, x?, y, label, color?}\`
+entries: \`path\` is a \`/data\` pointer to an array of objects (empty is valid, at most 500 items as
+for any data array), \`y\` names each point's numeric member and \`x\` its optional label member;
+\`color\` is a hex or theme role, or a \`{light, dark}\` pair. Points are drawn in array order, so
+\`appendData\`, a \`request\` \`into\` or a \`/data\` patch re-renders the chart. \`yRange {min, max}\`
+fixes the axis (max above min); otherwise it spans the values and the goal, and bars rise from zero.
+\`xLabels\` is \`none\` (default), \`ends\` or \`all\` of the first series' x labels. \`goal\` draws a
+dashed reference line; a \`ring\` takes exactly one series and a positive \`goal\`, and draws that
+series' latest value against it. The chart is one accessible node labelled with its summary, such as
+"Line chart, Heart rate, 24 points, min 58, max 141, latest 72" or "Ring chart, Steps, 6500 of
+10000"; \`observe\` reports it, and an authored \`contentDescription\` replaces it. A literal path that
+does not resolve to an array, a point that is not an object, or a point whose \`y\` is not a number
+fails at \`<path>.series[i].path\` or \`.y\`. The iOS agent draws charts with Swift Charts.
+
 ## Rich text
 
 A text node has exactly one of \`text\` or \`spans\`; plain \`text: ""\` remains valid.
@@ -155,6 +245,19 @@ Use \`tapAt\` on the span bounds as the fallback.
 On iOS, links are drawn as links and tap-through is by \`tapAt\` only; show reports the
 \`rich-text-links\` platform note for tappable spans because there are no separate accessibility elements or semantic links.
 
+### Linkify
+
+\`linkify: {kinds, style?, onTap}\` on a text node with \`text\` (not \`spans\`) turns @mentions,
+#hashtags and URLs in the resolved text (for example \`{item.body}\`) into links. \`kinds\` lists 1-3 of
+\`mention\`, \`hashtag\`, \`url\`; \`style\` takes the span style fields. A match starts at the start of
+the text or after whitespace: a mention is \`@\` + 1-30 of \`[A-Za-z0-9_]\` (\`ana@example.com\` is not
+one), a hashtag \`#\` + up to 100 letters, digits or \`_\` (not all digits), a URL \`http(s)://\` up to
+whitespace without trailing punctuation. Inside \`onTap\` only, \`{match: "text"}\` (the tapped
+\`@ana\`) and \`{match: "kind"}\` work as a \`setState\` value, a \`setData\`/\`appendData\` value or an emit
+context entry: \`[{type:"setState",key:"profileHandle",value:{match:"text"}},{type:"push",stack:"nav",screen:"profile"}]\`.
+Repeat bindings are refused inside linkify \`onTap\`. URL taps never open a browser. Requires
+\`prototype_linkify_v1\`.
+
 ## Saved prototypes
 
 Use \`save\` with \`spec\`, optional \`assets\`, \`label\` (defaults to \`spec.id\`) and
@@ -167,6 +270,17 @@ app icon is already on the home screen. \`listSaved\` on iOS returns bundle ids 
 \`deleteSaved\`, with \`pinned:false\` and no \`savedAt\` (the save time cannot be recovered).
 \`deleteSaved\` also accepts the authored id; it removes the iOS app icon, so
 \`removeIcon:true\` is ignored with a warning.
+
+On Android or an iOS simulator with the ProtoViewer app installed, \`save\` without \`pin\` or \`icon\` imports
+the prototype into the ProtoViewer library instead, and does not need CtrlProxy or
+\`prototype_saved_v1\`. It returns \`viewer\` \`{app, libraryId, label}\`; every save is a new
+library entry, which \`listSaved\` and \`deleteSaved\` do not see. ProtoViewer treats the entry
+as imported: its requests stay off until the user allows network in ProtoViewer, and it is not
+attached to this host (no \`awaitEvent\`, \`patch\` or \`inspect\`). \`{action:"open",id}\` with
+that \`libraryId\` launches it on Android or an iOS simulator. It needs ProtoViewer installed.
+If ProtoViewer is absent, too old for this route, or its inbox cannot be used, \`save\`
+keeps the platform save path. A timeout after delivery may still have saved the entry; check
+ProtoViewer before retrying.
 
 ## Fullscreen host chrome
 
@@ -184,11 +298,19 @@ show and subsequent host-local status report the effective value as \`lastResult
 it is absent for sheet/floating windows, dismiss, failed show and adopted prototypes.
 
 
+## Tooltip and drawer
+
+\`tooltip\` requires \`prototype_tooltip_v1\`, boolean \`openWhen: {key, equals}\`, nonblank \`text\`, and exactly one of \`anchorTo\` (a unique node id in the same spec, other than itself) or \`anchor\` (the existing element selector or bounds anchor). Element anchors are resolved by the host to a target rect; native renderers hoist the tooltip as an overlay, not ordinary anchored content. IDs are literal: repeated targets with multiple instances and duplicate component-instance ids are ambiguous and rejected; a repeat with no items supplies no target.
+
+Optional \`caret\` is \`auto\` (default), \`top\`, \`bottom\`, \`start\` or \`end\`: it names the bubble edge pointing at the target, so \`top\` places the bubble below the target. Auto chooses a side with room; auto and explicit sides flip to the opposite side when needed to stay inside the window. Optional strict \`spotlight: {padding?, cornerRadius?}\` draws the scrim role with a rounded hole around the target: integer dp 0..64, defaults 8 and 12 respectively. Without spotlight there is no scrim. Tapping outside the bubble on the spotlight scrim, or tapping the bubble without \`onTap\`, writes \`!equals\` to the open key, then runs optional \`onDismiss\` (1..32 actions). Bubble and scrim tags are \`<testTag>\` and \`<testTag>.close\`. Use one boolean per step for a coach-mark tour; a step's \`onTap\` uses \`setState\` to close its key and open the next step's key. Numeric equality is not supported by \`openWhen\`.
+
+\`drawer\` requires \`prototype_drawer_v1\`, \`edge: "start"|"end"\`, boolean \`openWhen: {key, equals}\` and a \`child\` node. Start/end follow layout direction. The renderer fixes panel width; there is no width field. Optional \`scrim\` accepts the same color value (including mode pairs) as bottomSheet and defaults to the scrim role. Optional \`dismissOnSwipe\` defaults to true, as for bottomSheet. Both nodes accept the common node fields, including \`onTap\`, but no long-press or double-tap handlers.
+
 ## Menu and select
 
 \`menu\` and \`select\` require \`prototype_menus_v1\`; the host refuses them before showing or uploading assets when the connected renderer lacks it.
 
-A \`menu\` requires \`openWhen: {key, equals}\` with a boolean equality and 1–16 strict \`items\`. Each item is \`{label, icon?, trailingText?, enabled?, onTap?}\` or exactly \`{type:"divider"}\`. Labels and trailing text are nonempty, icons use the existing icon names, and \`onTap\` has 1–32 existing actions. A disabled item is dimmed, cannot be tapped and does not close the menu. Dividers are neither focusable nor tappable. The elevated surface is anchored to its parent’s bottom end and clamped inside the window. An enabled item or outside tap writes \`!equals\` to the open key; item actions run after closing.
+A \`menu\` requires \`openWhen: {key, equals}\` with a boolean equality and 1–16 strict \`items\`. Each item is \`{label, icon?, trailingText?, enabled?, onTap?}\` or exactly \`{type:"divider"}\`. Labels and trailing text are nonempty, icons use the existing icon names, and \`onTap\` has 1–32 existing actions. A disabled item is dimmed, cannot be tapped and does not close the menu. Dividers are neither focusable nor tappable. The elevated surface is anchored to its parent’s bottom end and clamped inside the window; it opens above its anchor when it does not fit below. An enabled item or outside tap writes \`!equals\` to the open key; item actions run after closing.
 
 A \`select\` requires a string \`stateKey\` and 2–32 \`{value,label}\` options with unique nonempty values and nonempty labels; its optional label is nonempty. It shows the current option’s label, or empty text when no option matches, and a trailing expand indicator. Expansion is local view state. Choosing an option writes the string key, emits the same \`change\` payload as \`radioGroup\`, and collapses the list. Tapping the field again or outside also collapses it. Both nodes support repeat templates and reusable \`use\` components: state keys, menu item labels/trailing text/actions and select labels/option labels bind placeholders.
 
@@ -252,7 +374,8 @@ Grammar:
 - Placeholders are bound in a template child's \`text\`, the label/title/text fields of components
   (button, fab, segmentedButton options, topAppBar, dialog, menu item labels/trailingText, select labels/options, snackbar), state condition operands
   (\`equals\`/\`notEquals\` strings), \`setState.value\` and \`emit.name\`. \`emit.payload\` is not bound.
-  Anything else, including a \`{key}\` state placeholder and other braces, is left untouched.
+  Anything else, including a \`{key}\` state placeholder and other braces, is left untouched. A show or patch lists a placeholder
+  in such a field as \`placeholderFindings\` (for example \`chip.label\` or \`badge.text\`).
 - State keys bind too: \`stateKey\`, \`hourKey\`/\`minuteKey\`, a list item's trailing \`stateKey\`,
   \`openWhen.key\`, condition \`key\`s and the \`key\` of \`setState\`, \`toggle\`, \`increment\` and
   \`decrement\`, so \`"key": "liked_{item.id}"\` gives each row its own state. Every bound key must
@@ -401,9 +524,9 @@ post real content without the agent answering each tap. It requires \`prototype_
 (\`prototype_network_device_v1\` as well for \`via: "device"\`); a show or patch result containing
 one is refused on a device without them.
 
-- \`url\` is any absolute \`http\` or \`https\` URL (at most 2048 characters). There is no host
-  allowlist: localhost, loopback and private addresses are allowed. It takes the text placeholders of
-  any text field (\`{key}\` state, \`{data:/pointer}\`, repeat \`{item.field}\` / \`{index}\`). Without a
+- \`url\` is an absolute \`http\` or \`https\` URL (at most 2048 characters). Host requests apply an
+  egress policy: local destinations and daemon ports on private addresses are not permitted.
+  It takes the text placeholders of any text field (\`{key}\` state, \`{data:/pointer}\`, repeat \`{item.field}\` / \`{index}\`). Without a
   placeholder it must parse as an http(s) URL; with one, it must start with a literal \`http://\` or
   \`https://\`. (\`{state:key}\` is not a placeholder: write \`{key}\`.)
 - \`method\` is GET (default), POST, PUT, PATCH, DELETE or HEAD. A GET or HEAD cannot have a \`body\`.
@@ -438,7 +561,7 @@ a sibling whose key is the last segment of \`into\` plus \`__meta\` (\`/data/fee
 failure. A non-2xx status leaves \`into\` untouched, writes the metadata with
 \`error: {code: "http_error", message: "HTTP 404"}\` and counts as an error. If the metadata would not fit
 the data write limit, \`headers\` is dropped. Other \`error.code\` values: \`timeout\`, \`too_large\`,
-\`connection_refused\`, \`cancelled\`, \`invalid_url\`, \`invalid_request\`, \`network\`, \`too_many_in_flight\`,
+\`connection_refused\`, \`blocked_destination\` (the destination is not permitted), \`cancelled\`, \`invalid_url\`, \`invalid_request\`, \`network\`, \`too_many_in_flight\`,
 \`invalid_response\`.
 
 **Order.** On completion the device writes \`into\`, then \`<into>__meta\`, then \`statusKey\`, then sends the
@@ -571,7 +694,13 @@ every limit counts the expanded tree.
   \`root.children[2] (use postCard) → components.postCard.root.children[1].label\`.
 `;
 
-export const GUIDE_APPEARANCE = `## Light and dark mode
+export const GUIDE_APPEARANCE = `## Style polish
+
+Layered style.shadows (1-3 strict {color,radius,spread?,offset?,inner?}, radius 0-1000 dp, spread and offset axes -1000..1000; omitted spread/offset/inner mean 0/{x:0,y:0}/false), style.cornerStyle circular|continuous (default circular), style.border {width,color? ,gradient?} with exactly one of color or gradient, scroll.fadeEdges {top?,bottom?,start?,end?} (0-1000 dp, at least one), and image.filter {saturation?,tint?} (saturation 0-2, at least one) require prototype_style_polish_v2. shadows excludes elevation and shadowColor. Fades appear only where scrolling remains; start/end mirror in RTL. Colour pairs in shadows and tint, and pairs or role names in border gradient stops also require prototype_theme_modes_v1.
+
+Rendering order: transform, press scale, size, alpha, drop shadows (shadows/elevation before the clip), clip (cornerRadius + cornerStyle), background, gradient, shimmer, border (color or gradient), inner shadows.
+
+## Light and dark mode
 
 A shown prototype has exactly one resolved mode, light or dark. Roles, per-mode values and the
 scheme all read that one mode, on Android and on iOS.
@@ -745,13 +874,15 @@ export const GUIDE_ERRORS = `## Common validation errors
 | \`Repeat path does not resolve to an array\` / \`Repeat path resolves to more than 128 items\` / \`Repeat path item <i> is not an object\` | Point to an array of objects within the repeat item limit. |
 | \`Duplicate repeat key "x" (items <i> and <j>)\` | Give every item a unique rendered identity. |
 | \`Bound state key "x" is invalid (repeat item <i>)\` | A path-bound key must form a valid state key; error is at repeat.items.path. |
-| \`Requires key or data\` | Supply one condition source with exactly one comparison. |
+| \`Requires key or data or platform\` | Supply one condition source with exactly one comparison. |
 | \`Repeat path cell limit exceeded\` | Reduce path-bound repeats or the scalar members projected per item; see \`MAX_PROTOTYPE_REPEAT_PATH_CELLS\`. |
 | \`Substituted text total limit exceeded\` | Reduce bindable fields, replacement lengths or repeat items; see \`MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL\`. |
 | \`Repeat placeholder in a data condition operand is not supported\` | Use a literal operand; state conditions still bind repeat operands. |
 | \`Unknown repeat field "x"\` | Every item needs the field the placeholder names. |
 | \`Missing component prop "x"\` / \`Unused component prop\` | Pass exactly the props the component's \`{props.*}\` placeholders name. |
 | \`Expanded node limit exceeded\` | Fewer items or a smaller template; the limit counts every instance. |
+| \`maxRuns requires everyMs\` | Supply everyMs or remove maxRuns. |
+| \`Too many distinct timer ids\` | Use at most eight distinct startTimer ids, including nested actions and components. |
 | a \`stateKey\` rejected | The key must be initialised in \`state\` with the type the node binds (string, boolean, number). |
 | an unknown property | Nodes and actions are strict: only the fields listed above are accepted. |
 
@@ -886,5 +1017,35 @@ existed alone. A failed reverse never fails the show; \`inspect\` reports it as 
 A port that is a binding (\`http://localhost:{port}/feed\`) cannot be reversed, because it is only
 known when the request runs. \`inspect\` lists such URLs as \`unreversiblePorts\`. Use \`via: "host"\` for
 those requests. A saved prototype launched with no host connected gets no reverse either.
-iOS simulators share the Mac's network, so nothing is reversed there.
+On iOS nothing is reversed, and \`localhost\`, \`127.0.0.1\` and \`[::1]\` are refused as
+\`blocked_destination\` for \`via: "device"\`: call a Mac-local service by the Mac's LAN address instead.
+`;
+
+export const GUIDE_TIMERS = `### Timers
+
+Both timer actions require \`prototype_timers_v1\`. Start a timer from any action list:
+\`{type:"startTimer",id:"tick",afterMs:100,everyMs:1000,maxRuns:10,actions:[{type:"emit",name:"tick"}]}\`.
+\`afterMs\` is required; it and optional \`everyMs\` are integers 100..3600000 ms.
+\`maxRuns\` is 1..10000 total fires, including the first, and requires \`everyMs\`.
+Without maxRuns, repeats continue until cancelled or dismissed. Actions contain 1..32 entries,
+with the same validation and nesting limit as request follow-ups. IDs are literal strings of
+1..64 characters, never repeat-bound; at most eight distinct startTimer ids per spec.
+\`{type:"cancelTimer",id:"tick"}\` removes a timer; unknown ids are no-ops. The host warns
+on show and patch if no startTimer declares the cancelled id; devices do not validate that advisory.
+
+Starting a live id replaces its schedule and resets runs. Each fire is one atomic interaction:
+invalid planned writes drop the whole fire but count the run; a net state change emits one change.
+Self-cancellation stops repeats, and a replacement started during a fire wins. Repeats schedule
+from planned fire time without drift. Timers pause while hidden or inactive, retaining remaining
+time (screenshot capture does not pause); dismiss, teardown and any replacing show cancel them.
+Patch preserves them. Fires never restart idle TTL.
+
+\`prototype {action:"simulate",id,advanceTimeMs:1000}\` advances without waiting (integer
+1..3600000), requiring the same capability. It returns \`fired\`; paused timers fire zero times.
+Due timers run chronologically, ties by start order, including timers started during advancement.
+Exactly 10000 due fires succeed. If another fire is still due, advance stops at the last fire with
+an error and fired=10000, keeping pending timers for the next call. Real scheduling continues from the shifted clock.
+Inspect reports \`timers:[{id,nextFireInMs,runs}]\`, ordered by remaining time then start order;
+remaining time is nonnegative and frozen while paused. A capable device yields an empty array
+when no timers are live.
 `;

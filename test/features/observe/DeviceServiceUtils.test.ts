@@ -36,7 +36,7 @@ describe("DeviceServiceUtils", () => {
         totalTimeMs: 150,
         gestureTimeMs: 100,
         error: undefined,
-        perfTiming: [{ operation: "tap", durationMs: 50 }], // Android-style array
+        perfTiming: [{ name: "tap", durationMs: 50 }], // Android-style array
       };
 
       const result = toGestureResult(platformResult);
@@ -54,7 +54,7 @@ describe("DeviceServiceUtils", () => {
         success: false,
         totalTimeMs: 5000,
         error: "Gesture failed: element not found",
-        perfTiming: { start: 0, end: 5000 }, // iOS-style object
+        perfTiming: { name: "gesture", durationMs: 5000 }, // iOS-style object
       };
 
       const result = toGestureResult(platformResult);
@@ -72,7 +72,11 @@ describe("DeviceServiceUtils", () => {
         success: true,
         totalTimeMs: 200,
         gestureTimeMs: 150,
-        perfTiming: { detailed: "platform-specific-data", timestamps: [1, 2, 3] },
+        perfTiming: {
+          name: "platform-specific-data",
+          durationMs: 3,
+          children: [{ name: "nested", durationMs: 1 }],
+        },
       };
 
       const result = toGestureResult(platformResult);
@@ -88,7 +92,11 @@ describe("DeviceServiceUtils", () => {
       const platformResult: PlatformTextResult = {
         success: true,
         totalTimeMs: 50,
-        perfTiming: { inputDelay: 10, render: 40 },
+        perfTiming: {
+          name: "input",
+          durationMs: 50,
+          children: [{ name: "render", durationMs: 40 }],
+        },
       };
 
       const result = toTextResult(platformResult);
@@ -123,7 +131,7 @@ describe("DeviceServiceUtils", () => {
         success: true,
         action: "done",
         totalTimeMs: 30,
-        perfTiming: [{ stage: "dispatch", ms: 30 }],
+        perfTiming: [{ name: "dispatch", durationMs: 30 }],
       };
 
       const result = toImeActionResult(platformResult);

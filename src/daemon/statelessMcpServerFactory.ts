@@ -1,11 +1,11 @@
 import type { IncomingHttpHeaders } from "node:http";
 import { createMcpServer, type McpServerOptions } from "../server";
-import { daemonTaskLeaseKeepalive } from "../server/tasks/daemonTaskManager";
+import { daemonTaskLeaseKeepalive } from "./tasks/daemonTaskManager";
 import {
   DAEMON_RELEASED_SESSION_HEADER,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_HEADER,
-} from "./constants";
+} from "./wire/constants";
 import type { StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
 
 /**
@@ -37,7 +37,11 @@ export interface McpRequestSessionContext {
 /** The daemon-wide part of a request server's options, fixed when the daemon starts. */
 export type StatelessMcpServerBase = Pick<
   McpServerOptions,
-  "iosDependencies" | "debug" | "acceptanceDiscoveryCapability" | "sessionToolBindingStore"
+  | "deviceReadiness"
+  | "iosDependencies"
+  | "debug"
+  | "acceptanceDiscoveryCapability"
+  | "sessionToolBindingStore"
 >;
 
 // Fetch's `Headers` strips leading and trailing HTTP whitespace from a value before sending it,
@@ -109,3 +113,6 @@ export function createStatelessMcpServer(
     taskLeaseKeepalive: daemonTaskLeaseKeepalive(),
   });
 }
+
+/** The resource-list freshness hook shared by the MCP handler and control discovery cache. */
+export { refreshMcpResourceList } from "../server";

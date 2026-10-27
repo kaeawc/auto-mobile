@@ -26,6 +26,7 @@ import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models";
 import type { SdkEvent, SdkEventIngestor } from "../interfaces/SdkEventIngestor";
 import type { CtrlProxyScreenshotResult } from "./types";
 import { decodeSdkNetworkVersion, IOS_SDK_NETWORK_DIAGNOSTIC_TAG } from "./IosSdkNetworkWire";
+import { buildIosLayoutTelemetryTree, hashIosLayoutTelemetryTree } from "./IosLayoutTelemetryTree";
 
 import {
   getSdkFrameMetricsStore,
@@ -35,6 +36,12 @@ import {
 export const IOS_SDK_NETWORK_DIAGNOSTIC_WINDOW_MS = 10 * 60 * 1000;
 const MAX_NETWORK_DIAGNOSTIC_KEYS = 64;
 const MAX_RECEIVED_VERSION_LENGTH = 32;
+
+interface LayoutCapture {
+  key: string;
+  updatedAt: number | undefined;
+  sequence: number;
+}
 
 /**
  * The subset of `TelemetryRecorder` the ingestor depends on. Narrow so tests can
@@ -111,6 +118,9 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
   private readonly failureRecorderOverride?: FailureRecorderService;
   private readonly navigationScreenshotsEnabled: () => boolean;
   private readonly navigationScreenshotStoreOverride?: NavigationScreenshotStore;
+  private lastLayoutCapture?: LayoutCapture;
+  private readonly pendingLayoutCaptures = new Map<number, LayoutCapture>();
+  private layoutCaptureSequence = 0;
 
   constructor(deps: IosSdkEventIngestorDeps) {
     this.deviceId = deps.deviceId;
@@ -651,50 +661,115 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     try {
       prevContext = recorder.getContext();
       recorder.setContext(this.deviceId, null);
+      const previous = this.latestLayoutCapture();
+      // Deduplicate consecutive captures per device/ingestor, never a global set:
+      // hash the full display tree + node/package/window counts, not updatedAt
+      // (which changes on every poll). An equal defined timestamp is also a replay.
+      if (hierarchy.updatedAt !== undefined && hierarchy.updatedAt === previous?.updatedAt) {
+        return;
+      }
+      const windowCount = hierarchy.windows?.length ?? 0;
       const nodeCount = this.countViewHierarchyNodes(hierarchy.hierarchy.node);
-      // Use the converted ViewHierarchyResult format — same data as the observation stream
+      const key = hashIosLayoutTelemetryTree(
+        hierarchy.hierarchy.node,
+        hierarchy.packageName,
+        windowCount,
+        nodeCount,
+      );
+      if (key === previous?.key) {
+        return;
+      }
+      const compact = buildIosLayoutTelemetryTree(hierarchy.hierarchy.node);
+      const screenName = hierarchy.packageName ?? null;
       const hierarchyJson = JSON.stringify({
+        screenName,
+        windowCount,
+        foregroundActivity: null,
         nodeCount,
         packageName: hierarchy.packageName,
-        hierarchy: hierarchy.hierarchy,
-        windows: hierarchy.windows,
+        hierarchy: { node: compact.node },
         updatedAt: hierarchy.updatedAt,
+        // undefined is omitted by JSON.stringify; a spread here trips the wire-parity emit scan.
+        truncated: compact.truncated ? true : undefined,
       });
-      void recorder.recordLayoutEvent({
+      const recording = recorder.recordLayoutEvent({
         timestamp: this.timer.now(),
-        applicationId: hierarchy.packageName ?? null,
+        applicationId: screenName,
         subType: "hierarchy_change",
         composableName: null,
         composableId: null,
         recompositionCount: nodeCount,
         durationMs: null,
         likelyCause: null,
-        detailsJson:
-          hierarchyJson.length < 200000
-            ? hierarchyJson
-            : JSON.stringify({ nodeCount, truncated: true }),
-        screenName: hierarchy.packageName ?? null,
+        detailsJson: hierarchyJson,
+        screenName,
       });
+      const capture = {
+        key,
+        updatedAt: hierarchy.updatedAt,
+        sequence: ++this.layoutCaptureSequence,
+      };
+      this.trackLayoutRecording(recording, capture);
     } catch (error) {
       logger.warn(
         `[IosSdkEventIngestor] Layout telemetry recording failed: ${errorMessage(error)}`,
         error,
       );
     } finally {
-      // Restore previous context so Android events aren't mis-attributed, even
-      // when the body threw after setContext (getContext throwing leaves
-      // prevContext undefined — nothing to restore). The restore runs in the
-      // finally, OUTSIDE the catch above, so it must guard its own throw or the
-      // exception would escape this best-effort method and break observation
-      // (processMessage calls it).
-      if (prevContext) {
-        try {
-          recorder.setContext(prevContext.deviceId, prevContext.sessionId);
-        } catch (error) {
-          logger.warn(`[IosSdkEventIngestor] Failed to restore telemetry context: ${error}`);
-        }
+      this.restoreLayoutTelemetryContext(recorder, prevContext);
+    }
+  }
+
+  private restoreLayoutTelemetryContext(
+    recorder: IosTelemetryRecorder,
+    previous: ReturnType<IosTelemetryRecorder["getContext"]> | undefined,
+  ): void {
+    // Restore even when recording threw, so Android events aren't mis-attributed.
+    // getContext throwing leaves nothing to restore. A restore failure must also
+    // stay non-fatal because this runs outside the recording catch, in finally.
+    if (previous) {
+      try {
+        recorder.setContext(previous.deviceId, previous.sessionId);
+      } catch (error) {
+        logger.warn(
+          `[IosSdkEventIngestor] Failed to restore telemetry context: ${errorMessage(error)}`,
+          error,
+        );
       }
     }
+  }
+
+  private trackLayoutRecording(recording: Promise<boolean>, capture: LayoutCapture): void {
+    // Pending writes suppress immediate duplicate calls. Only confirmed writes
+    // become committed state; failures and unconfirmed writes are retryable. The
+    // receipt is never awaited inline: in buffered mode it settles on the next
+    // TelemetryEventBuffer flush (#14625), and awaiting it would stall this poll.
+    this.pendingLayoutCaptures.set(capture.sequence, capture);
+    void recording.then(
+      (persisted) => {
+        this.pendingLayoutCaptures.delete(capture.sequence);
+        if (
+          persisted &&
+          (!this.lastLayoutCapture || capture.sequence > this.lastLayoutCapture.sequence)
+        ) {
+          this.lastLayoutCapture = capture;
+        }
+      },
+      (error: unknown) => {
+        this.pendingLayoutCaptures.delete(capture.sequence);
+        logger.warn(
+          `[IosSdkEventIngestor] Layout telemetry recording failed: ${errorMessage(error)}`,
+          error,
+        );
+      },
+    );
+  }
+
+  private latestLayoutCapture(): LayoutCapture | undefined {
+    const pending = Array.from(this.pendingLayoutCaptures.values()).at(-1);
+    return pending && pending.sequence > (this.lastLayoutCapture?.sequence ?? 0)
+      ? pending
+      : this.lastLayoutCapture;
   }
 
   /** Counts converted nodes; the converter emits a lone child as an object, not a one-item array. */

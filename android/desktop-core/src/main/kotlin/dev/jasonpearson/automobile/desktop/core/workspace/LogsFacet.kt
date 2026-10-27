@@ -11,6 +11,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.telemetry.LogPlatform
 import dev.jasonpearson.automobile.desktop.core.telemetry.LogsPanel
+import dev.jasonpearson.automobile.desktop.core.telemetry.LogsPanelOptions
 
 /**
  * The log-level numeric scale this device's logs use (Android and iOS number levels differently).
@@ -59,7 +60,10 @@ fun LogsFacet(
   LogsPanel(
     telemetryPushClient = client,
     settingsProvider = graph.settingsProvider,
-    activeDeviceId = column.deviceId,
-    platform = column.platform.toLogPlatform(),
+    options =
+      LogsPanelOptions(
+        activeDeviceId = column.deviceId,
+        platform = column.platform.toLogPlatform(),
+      ),
   )
 }

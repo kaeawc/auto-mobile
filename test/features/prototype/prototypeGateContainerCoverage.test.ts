@@ -13,10 +13,28 @@ import { prototypeChecksFields } from "../../../src/features/prototype/prototype
 
 type Node = Record<string, unknown>;
 const label = { type: "text", text: "Hello" };
+const platformCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "test.echo", args: { message: { value: "hi" } } }],
+};
+const deviceRead = { ...label, visibleWhen: { platform: "/device/os", equals: "android" } };
 // Minimal feature nodes mirrored from the server parity fixtures. Keeping them here avoids
 // editing the server test outside this lane's permitted paths. No gate/container exceptions:
 // every current gate can be activated by a node, including theme and data via inline values.
 const fixtures: Record<string, Node> = {
+  prototype_style_polish_v2: { ...label, style: { cornerStyle: "continuous" } },
+  prototype_tooltip_v1: {
+    type: "tooltip",
+    text: "Tip",
+    anchorTo: "target",
+    openWhen: { key: "liked", equals: true },
+  },
+  prototype_drawer_v1: {
+    type: "drawer",
+    edge: "start",
+    openWhen: { key: "liked", equals: true },
+    child: { type: "spacer" },
+  },
   prototype_theme_modes_v1: {
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },
@@ -54,7 +72,32 @@ const fixtures: Record<string, Node> = {
     activeKey: "active",
     child: label,
   },
+  prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
+  prototype_effects_v1: { ...label, style: { effects: [{ type: "noise" }] } },
+  prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
+  prototype_stack_transitions_v1: {
+    ...label,
+    onTap: [{ type: "push", stack: "nav", screen: "home", transition: "slide" }],
+  },
+  prototype_choreography_v1: { ...label, transition: { type: "fade", delayMs: 100 } },
+  prototype_chart_v1: {
+    type: "chart",
+    variant: "line",
+    series: [{ path: "/points", y: "y", label: "Points" }],
+  },
   prototype_rich_text_v1: { type: "text", spans: [{ text: "Hello" }] },
+  prototype_linkify_v1: {
+    type: "text",
+    text: "@ana",
+    linkify: { kinds: ["mention"], onTap: [{ type: "emit", name: "link" }] },
+  },
+  prototype_timers_v1: {
+    ...label,
+    onTap: [
+      { type: "startTimer", id: "tick", afterMs: 100, actions: [{ type: "emit", name: "tick" }] },
+    ],
+  },
+  prototype_chat_scroll_v1: { type: "scroll", reverse: true, child: label },
   prototype_menus_v1: {
     type: "menu",
     openWhen: { key: "liked", equals: true },
@@ -82,6 +125,9 @@ const fixtures: Record<string, Node> = {
     ...label,
     onTap: [{ type: "request", url: "http://localhost:8080/feed", via: "device" }],
   },
+  prototype_platform_v1: platformCall,
+  prototype_platform_test_v1: platformCall,
+  prototype_platform_device_v1: deviceRead,
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.
@@ -92,7 +138,7 @@ const containers: {
   wrap: (node: Node) => Node;
 }[] = [
   { name: "root", prefix: "root", wrap: (root) => ({ root }) },
-  ...["scroll", "dialog", "bottomSheet", "searchBar"].map((type) => ({
+  ...["scroll", "dialog", "bottomSheet", "searchBar", "drawer"].map((type) => ({
     name: type,
     field: "child",
     prefix: "root.child",

@@ -1,3 +1,5 @@
+import type { SimulatorContainerOwnershipOptions } from "../../utils/ios-cmdline-tools/simulatorOwnContainer";
+import { SimulatorContainerOwnershipError } from "../../utils/ios-cmdline-tools/simulatorOwnContainer";
 import type { CaptureSnapshotArgs, CaptureSnapshotResult } from "../../models/DeviceSnapshot";
 export type { CaptureSnapshotArgs, CaptureSnapshotResult } from "../../models/DeviceSnapshot";
 import {
@@ -43,7 +45,7 @@ import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { logger } from "../../utils/logger";
 import { promises as fs } from "fs";
 import * as path from "path";
-import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { type Timer } from "../../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import type { SettingsNamespace } from "../observe/android";
 import {
@@ -53,6 +55,23 @@ import {
 
 export const VM_SNAPSHOT_SAVE_DISPATCHED = "isVmSnapshotSaveDispatched";
 
+export interface IosCaptureContainerFiles {
+  mkdir(path: string): Promise<void>;
+  cp(source: string, destination: string): Promise<void>;
+  pathExists(path: string): Promise<boolean>;
+}
+
+export interface CaptureSnapshotOptions {
+  iosCaptureContainerFiles?: IosCaptureContainerFiles;
+  containerOwnership?: SimulatorContainerOwnershipOptions;
+  adbFactory?: AdbClientFactory;
+  emulator?: AndroidEmulatorClient;
+  timer?: Timer;
+  store?: DeviceSnapshotStorePort;
+  simctl?: IosSnapshotBackendDeps["simctl"];
+  consoleBusyRegistry?: EmulatorConsoleBusyRegistry;
+}
+
 /**
  * Capture device state snapshot, dispatching on device platform.
  *
@@ -61,27 +80,37 @@ export const VM_SNAPSHOT_SAVE_DISPATCHED = "isVmSnapshotSaveDispatched";
  * - **iOS**: app container backups via `simctl` (portable across restores).
  */
 export class CaptureSnapshot implements SnapshotCaptureProvider {
+  private readonly iosCaptureContainerFiles: IosCaptureContainerFiles;
+  private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
   private device: BootedDevice;
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorClient;
   private store: DeviceSnapshotStorePort;
   private iosSnapshotBackend: IosSnapshotBackend;
 
-  constructor(
-    device: BootedDevice,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    emulator?: AndroidEmulatorClient,
-    _timer: Timer = defaultTimer,
-    store: DeviceSnapshotStorePort = new DeviceSnapshotStore(),
-    simctl?: IosSnapshotBackendDeps["simctl"],
-    private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
-  ) {
+  constructor(device: BootedDevice, options: CaptureSnapshotOptions = {}) {
+    const {
+      adbFactory = defaultAdbClientFactory,
+      emulator,
+      store = new DeviceSnapshotStore(),
+      simctl,
+      consoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
+    } = options;
+    this.iosCaptureContainerFiles = options.iosCaptureContainerFiles ?? {
+      mkdir: async (directory) => {
+        await fs.mkdir(directory, { recursive: true });
+      },
+      cp: (source, destination) => fs.cp(source, destination, { recursive: true }),
+      pathExists,
+    };
+    this.consoleBusyRegistry = consoleBusyRegistry;
     this.device = device;
     this.adb = adbFactory.create(device);
     this.emulator = emulator || new AndroidEmulatorClient();
     this.store = store;
     this.iosSnapshotBackend = resolveIosSnapshotBackend(device.deviceId, {
       simctl: simctl || new SimCtlClient(device),
+      containerOwnership: options.containerOwnership,
     });
   }
 
@@ -544,6 +573,11 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
         backedUpPackages.push(bundleId);
         bundleStatuses.push({ bundleId, status: "captured" });
       } catch (error) {
+        // Even partial captures abort on unproven ownership: publishing a snapshot
+        // after an unsafe source lookup would hide a device identity failure.
+        if (error instanceof SimulatorContainerOwnershipError) {
+          throw error;
+        }
         // A container that resolved but failed to copy is a genuine capture
         // failure, not a missing app; count it as failed so strict mode rejects.
         logger.warn(`[iOS] Failed to backup app data for ${bundleId}: ${error}`);
@@ -628,18 +662,18 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     bundleId: string,
   ): Promise<void> {
     const targetRoot = path.join(appDataPath, bundleId);
-    await fs.mkdir(targetRoot, { recursive: true });
+    await this.iosCaptureContainerFiles.mkdir(targetRoot);
 
     for (const folder of IOS_APP_DATA_FOLDERS) {
       const sourcePath = path.join(containerPath, folder);
       const destinationPath = path.join(targetRoot, folder);
-      if (await pathExists(sourcePath)) {
-        await fs.cp(sourcePath, destinationPath, { recursive: true });
+      if (await this.iosCaptureContainerFiles.pathExists(sourcePath)) {
+        await this.iosCaptureContainerFiles.cp(sourcePath, destinationPath);
       }
     }
   }
 
-  private async getIosDeviceMetadata(): Promise<{ deviceType?: string; osVersion?: string }> {
+  async getIosDeviceMetadata(): Promise<{ deviceType?: string; osVersion?: string }> {
     try {
       const deviceInfo = await this.simulatorSnapshotBackend.getDeviceInfo();
       if (!deviceInfo) {

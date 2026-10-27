@@ -20,6 +20,10 @@ type SessionDeviceRequirement =
       platform: "android";
       hardware: AndroidHardwareSelector;
       os: OsSelector;
+      deviceProfile?: {
+        manufacturerProfile: ManufacturerProfileId;
+        requires?: NonEmulatableCapability[];
+      };
     };
 ```
 
@@ -37,9 +41,32 @@ iOS hardware has four explicit selector kinds:
 - `archetype` is `phone`, `tablet`, or `duo`;
 - `omitted` requests the configured default archetype.
 
-Android hardware is `phone`, `tablet`, or `omitted`. Exact Android profiles,
-OEM selectors, foldables, and other categories are not accepted at this
-boundary.
+Android hardware is `phone`, `tablet`, `foldable`, or `omitted`. Exact Android profiles
+and other categories are not accepted at this boundary. Hosts map each archetype through
+`defaults.android.hardware.profiles` and classify its installed profile in
+`androidProfileArchetypes`; a foldable never falls back to a phone. An unmapped or
+uninstalled foldable profile is refused with non-retryable `unsupported_hardware`.
+Each profile mapping may set `memoryMb` (an integer of at least 2048 MB), carried
+into AVD creation, binding fingerprints and pool matching. Fold profiles default
+to about 11.4 GiB, so a RAM override bounds guest memory on shared hosts. Omission
+preserves the existing unconstrained AVD RAM behavior; idle resources retain their
+override identity. Foldable release reset restores `opened` posture and a 180-degree
+hinge angle after the reset strategy and before final health verification; failure
+keeps the device out of the clean pool.
+
+An Android request may name an OEM manufacturer profile as `deviceProfile`
+(owner decision on #14058). It is a simulated effect, not a firmware guarantee:
+the profile's keyboard, display and background-kill behaviour are applied to the
+session's stock emulator after readiness, and nothing about the OEM's firmware,
+SystemUI or vendor services is present. It is not a hardware selector: it never
+chooses, matches or fingerprints pool devices, and it is distinct from the
+resolved hardware `profile.profileId`. The kill facet needs the app it targets,
+so it is deferred until the caller applies it. Releasing the session restores
+everything the profile changed, keyboard included. `requires` lists OEM
+capabilities the task needs; one the profile cannot emulate refuses the request
+with non-retryable `requires_real_device` before anything is reserved. Selecting
+a matching hardware profile or emulator skin, and routing to real OEM devices,
+are not part of this boundary yet.
 
 OS selectors are `exact`, `major`, `minimum`, and `omitted`. Their kind is
 always explicit. Values are positive dotted numeric releases. Android API
@@ -104,7 +131,7 @@ requested iPad size matches exactly; an omitted size accepts any size in the
 requested iPad family.
 
 iOS releases carry runtime identifier and numeric OS version. Android catalogs
-carry classified phone/tablet profile identifiers and releases with system
+carry classified phone/tablet/foldable profile identifiers and releases with system
 image package, OS version, evidence precision, API level, ABI, and image
 flavor. ABI and flavor therefore remain explicit provider policy in the
 resolved profile.
@@ -152,12 +179,27 @@ invalid catalog metadata.
 Duo is a recognized iOS archetype and model type. It is distinct from phone,
 including when a catalog name or identifier begins with `iPhone`.
 
-Execution is disabled in this milestone. Normalization returns
-`capability_disabled` for an explicit Duo archetype, Duo model type, exact model
-classified as Duo, omitted default archetype of Duo, or known Duo model farther
-down the applicable default path. This check occurs before pool matching or
-creation resolution. A direct Duo request/default needs no installed Duo model,
+Duo is detected by the `.iPhone-Duo` simulator device-type identifier suffix,
+because Xcode reports its product family as `iPhone`. The catalog, inventory
+form factor, display panels and `setPosture` share that one predicate, and
+inventories report a Duo as `foldable`.
+
+Execution is a host capability, `capabilities.iosDuo` in the session broker
+host configuration, and is off by default. While it is off, normalization
+returns non-retryable `capability_disabled` for an explicit Duo archetype, Duo
+model type, exact model classified as Duo, omitted default archetype of Duo, or
+known Duo model farther down the applicable default path, and resolution
+refuses any model that resolves to Duo. These checks occur before pool matching
+or creation resolution, so a refused request needs no installed Duo model,
 runtime, or creation default.
+
+When it is on, Duo requests resolve like any other iOS hardware and need an
+iOS 27.1+ runtime. Enabling it never widens other selectors: a configured
+default must belong to the requested model type, so a phone or tablet request
+cannot resolve to a Duo. The policy is checked only at admission. A stored Duo
+resource stays readable for recovery, baseline reset and destroy after the
+capability is turned off. A broker with the capability enabled advertises
+`session-broker/ios-duo/v1` from `daemon/capabilities`.
 
 ## Pure API and provenance
 
@@ -165,9 +207,9 @@ The public module exports:
 
 ```ts
 parseSessionDeviceRequirement(input);
-normalizeSessionDeviceRequirement(request, defaults, catalog);
+normalizeSessionDeviceRequirement(request, defaults, catalog, capabilities?);
 matchSessionDevice(normalized, candidate);
-resolveSessionDeviceProfile(normalized, defaults, catalog);
+resolveSessionDeviceProfile(normalized, defaults, catalog, capabilities?);
 ```
 
 Parsing and resolution return `RequirementResult<T>`, with a typed error code

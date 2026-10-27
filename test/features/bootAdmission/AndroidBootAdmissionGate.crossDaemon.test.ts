@@ -41,7 +41,7 @@ function incomplete(error: unknown, code = "failed"): void {
   if (error instanceof AndroidBootedDeviceDiscoveryIncompleteError) {
     expect(error.code).toBe("discovery_incomplete");
     expect(error.retryable).toBe(true);
-    expect(error.discoveryError?.code).toBe(code);
+    expect<unknown>(error.discoveryError?.code).toBe(code);
     expect(error.message).toMatch(/registry|admission.lock/);
   }
 }
@@ -360,4 +360,130 @@ test("6: unexpected lock infrastructure errors are mapped to discovery_incomplet
     throw new Error("admission.lock unavailable");
   };
   incomplete(await rejected(gates[0].admit(request)));
+});
+
+test("replacement reservation blocks a peer across deletion and transfers one admission", async () => {
+  const { source, gates, host } = setup("2");
+  source.emulatorSerials = ["OLD", "OTHER"];
+  source.emulatorProcessRssBytes = [2 * 1024 ** 3, 2 * 1024 ** 3];
+  const reservation = await gates[0].reserveBoot({ replacingDeviceId: "OLD", timeoutMs: 60_000 });
+  expect(await gates[0].describeCapacity()).toMatchObject({ booted: 2, inFlight: 0 });
+  expect(await gates[1].describeCapacity()).toMatchObject({ booted: 2, inFlight: 0 });
+  expect(host.records.size).toBe(1);
+  exhausted(await rejected(gates[1].admit(request)), 2);
+  source.emulatorSerials = ["OTHER"];
+  source.emulatorProcessRssBytes = [2 * 1024 ** 3];
+  expect(await gates[0].describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  expect(await gates[1].describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  exhausted(await rejected(gates[1].admit(request)), 2);
+  const admission = await reservation.run(async () => {
+    await gates[0].assertCapacityAvailable();
+    return await gates[0].admit(request);
+  });
+  reservation.release();
+  expect(host.records.size).toBe(1);
+  expect(await gates[0].describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  admission.handOff("NEW", 500);
+  source.emulatorSerials = ["OTHER", "NEW"];
+  source.emulatorProcessRssBytes = [2 * 1024 ** 3, 2 * 1024 ** 3];
+  source.emulatorProcessPids = [400, 500];
+  expect(await gates[1].describeCapacity()).toMatchObject({ booted: 2, inFlight: 0 });
+  admission.release();
+  admission.release();
+  expect(host.records.size).toBe(0);
+});
+
+test("releasing an unused replacement reservation removes its peer publication once", async () => {
+  const { source, gates, host } = setup("1");
+  source.emulatorSerials = ["OLD"];
+  const reservation = await gates[0].reserveBoot({ replacingDeviceId: "OLD", timeoutMs: 60_000 });
+  reservation.release();
+  reservation.release();
+  expect(host.records.size).toBe(0);
+  source.emulatorSerials = [];
+  (await gates[1].admit(request)).release();
+  await expect(reservation.run(async () => gates[0].admit(request))).rejects.toThrow("released");
+});
+
+test("serial reuse after verified deletion preserves replacement admission locally and for peers", async () => {
+  const { source, gates, host } = setup("2");
+  source.emulatorSerials = ["emulator-5554"];
+  const bootB = await gates[1].admit(request);
+  const replacement = await gates[0].reserveBoot({
+    replacingDeviceId: "emulator-5554",
+    timeoutMs: 60_000,
+  });
+  source.emulatorSerials = [];
+  // Optional invocation lets the old-source regression run reach the incorrect capacity count.
+  replacement.markReplacedDeviceGone?.();
+  replacement.markReplacedDeviceGone?.();
+  bootB.handOff("emulator-5554");
+  source.emulatorSerials = ["emulator-5554"];
+  bootB.release();
+  for (const gate of gates) {
+    expect(await gate.describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+    exhausted(await rejected(gate.admit(request)), 2);
+  }
+  expect([...host.records.values()][0].deviceId).toBeUndefined();
+  const admission = await replacement.run(() => gates[0].admit(request));
+  admission.handOff(undefined);
+  for (const gate of gates) {
+    expect(await gate.describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  }
+  admission.release();
+});
+
+test("provisioning failure cannot release the boot's consumed peer admission", async () => {
+  const { source, gates, host, timer } = setup("1");
+  source.emulatorSerials = ["OLD"];
+  const replacement = await gates[0].reserveBoot({ replacingDeviceId: "OLD", timeoutMs: 1000 });
+  source.emulatorSerials = [];
+  let release = () => {};
+  await expect(
+    replacement.run(async () => {
+      const boot = await gates[0].admit(request);
+      boot.handOff("emulator-5554");
+      release = boot.release;
+      throw new Error("provision failed after spawn");
+    }),
+  ).rejects.toThrow("provision failed after spawn");
+  replacement.release();
+  expect(host.records.size).toBe(1);
+  for (const gate of gates) {
+    expect(await gate.describeCapacity()).toMatchObject({ booted: 0, inFlight: 1 });
+    exhausted(await rejected(gate.admit(request)));
+  }
+  timer.advanceTime(1000);
+  for (const gate of gates) {
+    expect((await gate.describeCapacity()).inFlight).toBe(0);
+  }
+  release();
+  expect(host.records.size).toBe(0);
+});
+
+test("registry clear failure keeps the replacement reservation usable and counted", async () => {
+  const { source, gates, registries, host } = setup("1");
+  source.emulatorSerials = ["OLD"];
+  const replacement = await gates[0].reserveBoot({ replacingDeviceId: "OLD", timeoutMs: 1000 });
+  source.emulatorSerials = [];
+  registries[0].failWrites = true;
+  expect(() => replacement.markReplacedDeviceGone()).not.toThrow();
+  expect([...host.records.values()][0].deviceId).toBe("OLD");
+  for (const gate of gates) {
+    expect(await gate.describeCapacity()).toMatchObject({ booted: 0, inFlight: 1 });
+    exhausted(await rejected(gate.admit(request)));
+  }
+  // Serial reuse cannot hide the rebound local slot even while the peer record is stale.
+  source.emulatorSerials = ["OLD"];
+  expect(await gates[0].describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  source.emulatorSerials = [];
+  const admission = await replacement.run(() => gates[0].admit(request));
+  replacement.release();
+  expect((await gates[0].describeCapacity()).inFlight).toBe(1);
+  registries[0].failWrites = false;
+  admission.handOff("NEW");
+  expect([...host.records.values()][0]).toMatchObject({ deviceId: "NEW", replacement: false });
+  admission.release();
+  expect((await gates[0].describeCapacity()).inFlight).toBe(0);
+  expect(host.records.size).toBe(0);
 });

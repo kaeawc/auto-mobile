@@ -1,4 +1,6 @@
-import { expect, spyOn, test } from "bun:test";
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { expect, spyOn, test, afterEach, mock, beforeEach } from "bun:test";
 import type { ObserveResult } from "../../../src/models";
 import { OpenURL, waitForIosForegroundChange } from "../../../src/features/action/OpenURL";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
@@ -7,13 +9,14 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-const observation = (appId: string, isFresh = true): ObserveResult => ({
-  updatedAt: 0,
-  screenSize: { width: 200, height: 200 },
-  systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  activeWindow: { appId, activityName: "Main", layoutSeqSum: 0 },
-  freshness: { isFresh, verified: isFresh },
-});
+const observation = (appId: string, isFresh = true): ObserveResult =>
+  buildObserveResult({
+    updatedAt: 0,
+    screenSize: { width: 200, height: 200 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    activeWindow: { appId, activityName: "Main", layoutSeqSum: 0 },
+    freshness: { isFresh, verified: isFresh },
+  });
 
 const safari = "com.apple.mobilesafari";
 const springboard = "com.apple.springboard";
@@ -24,16 +27,20 @@ const simulator = {
   deviceId: "ABCDEF01-1234-1234-1234-1234567890AB",
 };
 
+let interactionSpy: ReturnType<
+  typeof spyOn<typeof BaseVisualChange.prototype, "observedInteraction">
+>;
+beforeEach(() => {
+  interactionSpy = spyOn(BaseVisualChange.prototype, "observedInteraction");
+});
+
 const openWithForeground = async (url: string, before: string, after: string[]) => {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const simctl = new FakeSimctl();
   const observe = new FakeObserveScreen();
   observe.setObserveSequence(after.map((appId) => observation(appId)));
-  const interactionSpy = spyOn(
-    BaseVisualChange.prototype,
-    "observedInteraction",
-  ).mockImplementation(async (block) => block(observation(before)));
+  interactionSpy.mockImplementation(runBlockWith(() => observation(before)));
   const action = new OpenURL(simulator, new FakeAdbExecutor(), simctl, null, timer);
   action.observeScreen = observe;
   try {
@@ -205,4 +212,8 @@ test("https universal link: SpringBoard only waits the full timeout and warns", 
     expect.stringContaining("foreground app change was not confirmed"),
   ]);
   expect(timer.now()).toBe(5_000);
+});
+
+afterEach(() => {
+  mock.restore();
 });

@@ -69,6 +69,9 @@ describe("sdkCapabilityResources", () => {
     if (!match) {
       throw new Error(`no template matched: ${uri}`);
     }
+    if (!("handler" in match.template)) {
+      throw new Error("Expected a context-free capability template");
+    }
     return JSON.parse((await match.template.handler(match.params)).text ?? "{}");
   }
 

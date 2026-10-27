@@ -1,20 +1,21 @@
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../../src/utils/logger";
 import {
   decideAttestation,
   defaultPolicy,
   resolvePolicy,
   type PolicyConfig,
+  type IgnoreReason,
 } from "../../../../scripts/ci/attestation/validators/trustPolicy";
 import { fixture, NOW } from "./helpers";
 
 afterEach(() => {
-  warn?.mockRestore();
+  warn.mockRestore();
 });
 let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
-function suppressWarnings() {
+beforeEach(() => {
   warn = spyOn(logger, "warn").mockImplementation(() => {});
-}
+});
 
 test("defaults are fresh independent policy objects", () => {
   const first = defaultPolicy();
@@ -136,23 +137,24 @@ test("all independent failures are collected without duplicate codes", () => {
   const result = decideAttestation(f.envelope, f.ctx, defaultPolicy());
   expect(result.decision).toBe("ignore");
   expect([...result.reasons].sort()).toEqual(
-    [
-      "signature-algorithm-unsupported",
-      "signature-unverified",
-      "identity-mismatch",
-      "hash-mismatch",
-      "stale-base",
-      "result-not-success",
-      "stale-attestation",
-      "environment-mismatch",
-      "key-revoked",
-      "key-expired",
-    ].sort(),
+    (
+      [
+        "signature-algorithm-unsupported",
+        "signature-unverified",
+        "identity-mismatch",
+        "hash-mismatch",
+        "stale-base",
+        "result-not-success",
+        "stale-attestation",
+        "environment-mismatch",
+        "key-revoked",
+        "key-expired",
+      ] satisfies IgnoreReason[]
+    ).sort(),
   );
 });
 
 test.each(["verifier", "registry", "hostile-error"])("never throws when %s throws", (seam) => {
-  suppressWarnings();
   const f = fixture();
   const failure =
     seam === "hostile-error"
@@ -277,7 +279,6 @@ test("a getter-free proxy is copied before validation and verification", () => {
 });
 
 test("a failed snapshot read is malformed and never reaches the verifier", () => {
-  suppressWarnings();
   const f = fixture();
   f.envelope.payload.environment.toolVersions = new Proxy(
     f.envelope.payload.environment.toolVersions,
@@ -451,7 +452,6 @@ test("accessors are malformed without evaluating the getter", () => {
 });
 
 test("a throwing proxy still returns a typed failure", () => {
-  suppressWarnings();
   const raw = new Proxy(
     {},
     {

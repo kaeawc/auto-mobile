@@ -6,23 +6,27 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PickerFiltersTest {
+  private data class DeviceSpec(
+    val id: String,
+    val platform: Platform,
+    val state: DeviceState,
+    val osKey: String? = null,
+    val osLabel: String? = null,
+    val arch: String? = null,
+    val formFactor: String? = null,
+  )
 
-  private fun dev(
-    id: String,
-    platform: Platform,
-    state: DeviceState,
-    osKey: String? = null,
-    osLabel: String? = null,
-    arch: String? = null,
-    formFactor: String? = null,
-  ) = PickerDevice(id, "name-$id", platform, state, osKey, osLabel, arch, formFactor = formFactor)
+  private fun dev(spec: DeviceSpec) =
+    with(spec) {
+      PickerDevice(id, "name-$id", platform, state, osKey, osLabel, arch, formFactor = formFactor)
+    }
 
   private val devices =
     listOf(
-      dev("a", Platform.Android, DeviceState.Booted, "34", "API 34"),
-      dev("b", Platform.Android, DeviceState.Shutdown, "33", "API 33"),
-      dev("c", Platform.Ios, DeviceState.Booted, "17", "iOS 17", "arm64"),
-      dev("d", Platform.Ios, DeviceState.Shutdown, "16", "iOS 16", "x86_64"),
+      dev(DeviceSpec("a", Platform.Android, DeviceState.Booted, "34", "API 34")),
+      dev(DeviceSpec("b", Platform.Android, DeviceState.Shutdown, "33", "API 33")),
+      dev(DeviceSpec("c", Platform.Ios, DeviceState.Booted, "17", "iOS 17", "arm64")),
+      dev(DeviceSpec("d", Platform.Ios, DeviceState.Shutdown, "16", "iOS 16", "x86_64")),
     )
 
   @Test
@@ -79,10 +83,10 @@ class PickerFiltersTest {
   fun `form factor options count known values under sibling filters`() {
     val withFormFactors =
       listOf(
-        dev("a", Platform.Android, DeviceState.Booted, formFactor = "phone"),
-        dev("b", Platform.Android, DeviceState.Shutdown, formFactor = "tablet"),
-        dev("c", Platform.Ios, DeviceState.Booted, formFactor = "phone"),
-        dev("d", Platform.Ios, DeviceState.Shutdown),
+        dev(DeviceSpec("a", Platform.Android, DeviceState.Booted, formFactor = "phone")),
+        dev(DeviceSpec("b", Platform.Android, DeviceState.Shutdown, formFactor = "tablet")),
+        dev(DeviceSpec("c", Platform.Ios, DeviceState.Booted, formFactor = "phone")),
+        dev(DeviceSpec("d", Platform.Ios, DeviceState.Shutdown)),
       )
 
     assertEquals(

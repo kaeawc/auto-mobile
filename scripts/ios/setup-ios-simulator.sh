@@ -202,12 +202,13 @@ local run_rc=0
 RUN_STATUS="${run_rc}"
 }
 
-# shellcheck disable=SC2329,SC2317 # invoked through run_capture_status
 version_gte() {
     local version=$1
     local min=$2
     [ "$(printf '%s\n' "$min" "$version" | sort -V | head -1)" = "$min" ]
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then version_gte "$@"; fi
 
 # Find the best available iOS runtime (highest version >= minimum, <= max SDK)
 find_best_ios_runtime() {

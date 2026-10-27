@@ -5,6 +5,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+data class IcTraceSelection(
+  val selectionStart: Int,
+  val selectionEnd: Int,
+  val composingStart: Int,
+  val composingEnd: Int,
+)
+
 class IcTraceRecorder(
   captureText: Boolean = false,
   private val nowMs: () -> Long = { SystemClock.elapsedRealtime() },
@@ -22,10 +29,7 @@ class IcTraceRecorder(
   fun record(
     call: String,
     args: String,
-    selectionStart: Int,
-    selectionEnd: Int,
-    composingStart: Int,
-    composingEnd: Int,
+    selection: IcTraceSelection,
     result: Boolean? = null,
     readValue: String? = null,
   ) {
@@ -39,10 +43,10 @@ class IcTraceRecorder(
         (nowMs() - startedMs).coerceAtLeast(0),
         call,
         args,
-        selectionStart,
-        selectionEnd,
-        composingStart,
-        composingEnd,
+        selection.selectionStart,
+        selection.selectionEnd,
+        selection.composingStart,
+        selection.composingEnd,
         result,
         readValue,
         droppedEvents,
@@ -81,55 +85,63 @@ class IcTraceRecorder(
 
   // Callers must use this for every text-bearing argument before record().
   fun textArg(text: CharSequence?, capture: Boolean = includeText): String =
-    if (text == null) "null"
-    else if (!capture) "length=${text.length}"
-    else {
-      var serializedLength = 2 // Opening and closing quotes.
-      for (index in 0 until text.length) {
-        val char = text[index]
-        serializedLength +=
-          when (char) {
-            '"',
-            '\\',
-            '\n',
-            '\r',
-            '\t' -> 2
-            else -> if (char.code < 0x20) 6 else 1
-          }
-        if (serializedLength > MAX_CAPTURED_ARG_LENGTH) break
-      }
-      val truncationMarker =
-        if (serializedLength > MAX_CAPTURED_ARG_LENGTH) "…[truncated length=${text.length}]" else ""
-      buildString {
-        append('"')
-        for (index in 0 until text.length) {
-          val char = text[index]
-          val escaped =
-            when (char) {
-              '"' -> "\\\""
-              '\\' -> "\\\\"
-              '\n' -> "\\n"
-              '\r' -> "\\r"
-              '\t' -> "\\t"
-              else ->
-                if (char.code < 0x20) String.format(java.util.Locale.ROOT, "\\u%04x", char.code)
-                else char.toString()
-            }
-          if (length + escaped.length + truncationMarker.length + 1 > MAX_CAPTURED_ARG_LENGTH) {
-            append(truncationMarker)
-            break
-          }
-          append(escaped)
-        }
-        append('"')
-      }
-    }
+    if (text == null) "null" else if (!capture) "length=${text.length}" else capturedTraceText(text)
 
   fun safeText(text: CharSequence?, capture: Boolean = includeText): String? =
     if (text == null) null else if (capture) textArg(text, true) else "length=${text.length}"
 
   private companion object {
     const val CAPACITY = 500
-    const val MAX_CAPTURED_ARG_LENGTH = 4096
+  }
+}
+
+private const val MAX_CAPTURED_ARG_LENGTH = 4096
+
+private fun escapeTraceChar(char: Char): String =
+  when (char) {
+    '"' -> "\\\""
+    '\\' -> "\\\\"
+    '\n' -> "\\n"
+    '\r' -> "\\r"
+    '\t' -> "\\t"
+    else ->
+      if (char.code < 0x20) String.format(java.util.Locale.ROOT, "\\u%04x", char.code)
+      else char.toString()
+  }
+
+private fun traceTextNeedsTruncation(text: CharSequence): Boolean {
+  var serializedLength = 2 // Opening and closing quotes.
+  for (index in 0 until text.length) {
+    val char = text[index]
+    serializedLength +=
+      when (char) {
+        '"',
+        '\\',
+        '\n',
+        '\r',
+        '\t' -> 2
+        else -> if (char.code < 0x20) 6 else 1
+      }
+    if (serializedLength > MAX_CAPTURED_ARG_LENGTH) break
+  }
+
+  return serializedLength > MAX_CAPTURED_ARG_LENGTH
+}
+
+private fun capturedTraceText(text: CharSequence): String {
+  val truncationMarker =
+    if (traceTextNeedsTruncation(text)) "…[truncated length=${text.length}]" else ""
+  return buildString {
+    append('"')
+    for (index in 0 until text.length) {
+      val char = text[index]
+      val escaped = escapeTraceChar(char)
+      if (length + escaped.length + truncationMarker.length + 1 > MAX_CAPTURED_ARG_LENGTH) {
+        append(truncationMarker)
+        break
+      }
+      append(escaped)
+    }
+    append('"')
   }
 }

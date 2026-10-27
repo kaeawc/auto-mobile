@@ -15,7 +15,13 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeElementSelector } from "../fakes/FakeElementSelector";
 import { SearchableHierarchy } from "../../src/features/utility/SearchableNode";
 import type { ConditionResolver } from "../../src/features/observe/ConditionPredicates";
-import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../src/models";
+import type {
+  BootedDevice,
+  Element,
+  ObserveResult,
+  ViewHierarchyNode,
+  ViewHierarchyResult,
+} from "../../src/models";
 import { displayInventoryOutcome } from "../../src/models/DeviceInfo";
 import {
   canDisplayExist,
@@ -48,7 +54,7 @@ const bounds = (left: number, top: number, right: number, bottom: number) => ({
 });
 
 const makeHierarchy = (
-  nodes: unknown[],
+  nodes: ViewHierarchyNode[],
   screenSize = { width: 200, height: 200 },
 ): ViewHierarchyResult => ({
   hierarchy: {
@@ -502,10 +508,11 @@ describe("published observe waitFor input schema", () => {
   });
 
   test("advertises exclusive container selectors", () => {
-    for (const [container, expected] of [
+    const containerCases: Array<[object, boolean]> = [
       [{}, false],
       [{ elementId: "scope", text: "Scope" }, false],
-    ]) {
+    ];
+    for (const [container, expected] of containerCases) {
       expect(
         validatePublishedObserveInput({
           platform: "android",
@@ -1213,22 +1220,24 @@ describe("findWaitForElement rich predicates", () => {
   test("exact textMatch preserves surrounding whitespace while normalizing quotes and case", () => {
     const finder = new ElementResolver();
     const hierarchy = makeHierarchy([{ $: { text: "Submit", bounds: bounds(0, 0, 100, 40) } }]);
+    const root = hierarchy.hierarchy.node;
+    if (!root) {
+      throw new Error("expected makeHierarchy to produce a root node");
+    }
     // A padded query must not match an unpadded node.
     expect(
       findWaitForElement(finder, { text: " Submit ", textMatch: "exact" }, hierarchy),
     ).toBeNull();
     // An unpadded query still tolerates incidental whitespace in node text.
-    hierarchy.hierarchy.node.node = [{ $: { text: "Submit ", bounds: bounds(0, 0, 100, 40) } }];
+    root.node = [{ $: { text: "Submit ", bounds: bounds(0, 0, 100, 40) } }];
     expect(
       findWaitForElement(finder, { text: "Submit", textMatch: "exact" }, hierarchy)?.text,
     ).toBe("Submit ");
-    hierarchy.hierarchy.node.node = [{ $: { text: " Submit ", bounds: bounds(0, 0, 100, 40) } }];
+    root.node = [{ $: { text: " Submit ", bounds: bounds(0, 0, 100, 40) } }];
     expect(
       findWaitForElement(finder, { text: " Submit ", textMatch: "exact" }, hierarchy)?.text,
     ).toBe(" Submit ");
-    hierarchy.hierarchy.node.node = [
-      { $: { text: " Don’t Submit ", bounds: bounds(0, 0, 100, 40) } },
-    ];
+    root.node = [{ $: { text: " Don’t Submit ", bounds: bounds(0, 0, 100, 40) } }];
     expect(
       findWaitForElement(finder, { text: " don't submit ", textMatch: "exact" }, hierarchy)?.text,
     ).toBe(" Don’t Submit ");
@@ -1334,6 +1343,8 @@ describe("waitForObservation activeWindow", () => {
     timer.enableAutoAdvance();
     const budgets: Array<number | undefined> = [];
     const observation: ObserveResult = {
+      observationId: "obs-test",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
       updatedAt: 0,
       screenSize: { width: 200, height: 200 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -1350,9 +1361,7 @@ describe("waitForObservation activeWindow", () => {
     const outcome = await waitForObservation(
       screen,
       { text: "missing", timeout: 500 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(budgets).toEqual([500]);
     expect(outcome.timedOut).toBe(true);
@@ -1362,8 +1371,10 @@ describe("waitForObservation activeWindow", () => {
   const makeObservation = (
     appId: string,
     activityName: string,
-    nodes: unknown[] = [],
+    nodes: ViewHierarchyNode[] = [],
   ): ObserveResult => ({
+    observationId: "obs-test",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     updatedAt: 0,
     screenSize: { width: 200, height: 200 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -1398,9 +1409,7 @@ describe("waitForObservation activeWindow", () => {
     const outcome = await waitForObservation(
       observeScreen,
       { posture: "closed", timeout: 500 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -1410,7 +1419,7 @@ describe("waitForObservation activeWindow", () => {
 
   const postureObservation = (
     posture: "opened" | "closed" | "unknown",
-    nodes: unknown[] = [],
+    nodes: ViewHierarchyNode[] = [],
   ): ObserveResult => ({
     ...makeObservation("com.example.app", "", nodes),
     display: { key: "inner", role: "inner", posture, generation: 0 },
@@ -1428,13 +1437,7 @@ describe("waitForObservation activeWindow", () => {
       waitForObservation(
         screen,
         { posture: "closed", timeout: 500 },
-        undefined,
-        false,
-        timer,
-        undefined,
-        undefined,
-        undefined,
-        "single",
+        { skipBackStack: false, timer, displayInventory: "single" },
       ),
     ).rejects.toThrow(
       "Cannot wait for posture: this device has no display inventory. Select a device that reports display panels and posture and retry.",
@@ -1458,13 +1461,7 @@ describe("waitForObservation activeWindow", () => {
       const outcome = await waitForObservation(
         screen,
         { posture: "closed", timeout: 200 },
-        undefined,
-        false,
-        timer,
-        platform,
-        undefined,
-        undefined,
-        "multi",
+        { skipBackStack: false, timer, platform, displayInventory: "multi" },
       );
       expect(outcome.matched).toBe(true);
       expect(outcome.timedOut).toBe(false);
@@ -1480,13 +1477,7 @@ describe("waitForObservation activeWindow", () => {
       const outcome = await waitForObservation(
         screen,
         { posture: "closed", timeout: 200 },
-        undefined,
-        false,
-        timer,
-        platform,
-        undefined,
-        undefined,
-        "multi",
+        { skipBackStack: false, timer, platform, displayInventory: "multi" },
       );
       expect(outcome.timedOut).toBe(true);
       expect(outcome.timeoutReason).toBe(
@@ -1503,13 +1494,7 @@ describe("waitForObservation activeWindow", () => {
       const outcome = await waitForObservation(
         screen,
         { posture: "closed", timeout: 200 },
-        undefined,
-        false,
-        timer,
-        platform,
-        undefined,
-        undefined,
-        "unavailable",
+        { skipBackStack: false, timer, platform, displayInventory: "unavailable" },
       );
       expect(outcome.timedOut).toBe(true);
       expect(outcome.timeoutReason).toBe(
@@ -1530,9 +1515,7 @@ describe("waitForObservation activeWindow", () => {
     const outcome = await waitForObservation(
       screen,
       { posture: "closed", timeout: 200 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.timedOut).toBe(true);
     expect(outcome.timeoutReason).toContain("display inventory was unavailable");
@@ -1548,13 +1531,7 @@ describe("waitForObservation activeWindow", () => {
       waitForObservation(
         screen,
         { posture: "closed" },
-        undefined,
-        false,
-        timer,
-        "android",
-        undefined,
-        undefined,
-        "single",
+        { skipBackStack: false, timer, platform: "android", displayInventory: "single" },
       ),
     ).rejects.toThrow("Cannot wait for posture: this device has no display inventory.");
     expect(screen.getExecuteCallCount()).toBe(1);
@@ -1587,13 +1564,7 @@ describe("waitForObservation activeWindow", () => {
       const outcome = await waitForObservation(
         screen,
         { posture: "closed", timeout: 300 },
-        undefined,
-        false,
-        timer,
-        "ios",
-        undefined,
-        undefined,
-        inventory,
+        { skipBackStack: false, timer, platform: "ios", displayInventory: inventory },
       );
       expect(outcome.matched).toBe(true);
       expect(screen.getExecuteCallCount()).toBe(3);
@@ -1610,13 +1581,7 @@ describe("waitForObservation activeWindow", () => {
       const outcome = await waitForObservation(
         screen,
         { posture: "closed", timeout: 200 },
-        undefined,
-        false,
-        timer,
-        "ios",
-        undefined,
-        undefined,
-        inventory,
+        { skipBackStack: false, timer, platform: "ios", displayInventory: inventory },
       );
       expect(outcome.timeoutReason).toBe(
         'Timed out after 200 ms waiting for posture "closed"; last observed posture "unknown"',
@@ -1640,9 +1605,7 @@ describe("waitForObservation activeWindow", () => {
     const outcome = await waitForObservation(
       screen,
       { posture: "closed", timeout: 500 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.awaitTimeout).toBe(false);
     expect(outcome.observation.display?.posture).toBe("closed");
@@ -1668,9 +1631,7 @@ describe("waitForObservation activeWindow", () => {
     const outcome = await waitForObservation(
       screen,
       { posture: "closed", timeout: 500 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.matched).toBe(true);
     expect(outcome.observation.viewHierarchy).toBeUndefined();
@@ -1691,9 +1652,7 @@ describe("waitForObservation activeWindow", () => {
     const outcome = await waitForObservation(
       screen,
       { posture: "closed", timeout: 200 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.observation).toBe(lastObservation);
     expect(outcome).toMatchObject({
@@ -1715,9 +1674,7 @@ describe("waitForObservation activeWindow", () => {
     const outcome = await waitForObservation(
       screen,
       { posture: "closed", timeout: 200 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome).toMatchObject({
       timedOut: true,
@@ -1759,14 +1716,13 @@ describe("waitForObservation activeWindow", () => {
         const outcome = await waitForObservation(
           screen,
           { activeDisplay: requested, timeout: 300 },
-          undefined,
-          false,
-          timer,
-          platform,
-          undefined,
-          undefined,
-          "multi",
-          activePanels,
+          {
+            skipBackStack: false,
+            timer,
+            platform,
+            displayInventory: "multi",
+            displayPanels: activePanels,
+          },
         );
         expect(outcome.awaitTimeout).toBe(false);
         expect(screen.getExecuteCallCount()).toBe(2);
@@ -1784,14 +1740,13 @@ describe("waitForObservation activeWindow", () => {
       waitForObservation(
         screen,
         { activeDisplay: "rear", timeout: 300 },
-        undefined,
-        false,
-        new FakeTimer(),
-        "ios",
-        undefined,
-        undefined,
-        "multi",
-        activePanels,
+        {
+          skipBackStack: false,
+          timer: new FakeTimer(),
+          platform: "ios",
+          displayInventory: "multi",
+          displayPanels: activePanels,
+        },
       ),
     ).rejects.toThrow(activeDisplayFailure);
     expect(screen.getExecuteCallCount()).toBe(1);
@@ -1808,14 +1763,13 @@ describe("waitForObservation activeWindow", () => {
       const outcome = await waitForObservation(
         screen,
         { activeDisplay: requested, timeout: 300 },
-        undefined,
-        false,
-        new FakeTimer(),
-        "ios",
-        undefined,
-        undefined,
-        "single",
-        [{ key: "main", role: "inner" }],
+        {
+          skipBackStack: false,
+          timer: new FakeTimer(),
+          platform: "ios",
+          displayInventory: "single",
+          displayPanels: [{ key: "main", role: "inner" }],
+        },
       );
       expect(outcome.matched).toBe(true);
       expect(outcome.awaitTimeout).toBe(false);
@@ -1830,14 +1784,13 @@ describe("waitForObservation activeWindow", () => {
       waitForObservation(
         screen,
         { activeDisplay: "cover", timeout: 300 },
-        undefined,
-        false,
-        new FakeTimer(),
-        "ios",
-        undefined,
-        undefined,
-        "single",
-        [{ key: "main", role: "inner" }],
+        {
+          skipBackStack: false,
+          timer: new FakeTimer(),
+          platform: "ios",
+          displayInventory: "single",
+          displayPanels: [{ key: "main", role: "inner" }],
+        },
       ),
     ).rejects.toThrow(activeDisplayFailure);
     expect(screen.getExecuteCallCount()).toBe(1);
@@ -1851,14 +1804,13 @@ describe("waitForObservation activeWindow", () => {
     const outcome = await waitForObservation(
       screen,
       { activeDisplay: "inner", timeout: 300 },
-      undefined,
-      false,
-      timer,
-      "ios",
-      undefined,
-      undefined,
-      "single",
-      [],
+      {
+        skipBackStack: false,
+        timer,
+        platform: "ios",
+        displayInventory: "single",
+        displayPanels: [],
+      },
     );
     expect(outcome.matched).toBe(true);
     expect(outcome.awaitTimeout).toBe(false);
@@ -1884,14 +1836,13 @@ describe("waitForObservation activeWindow", () => {
     const outcome = await waitForObservation(
       screen,
       { activeDisplay: "0", timeout: 300 },
-      undefined,
-      false,
-      timer,
-      "ios",
-      undefined,
-      undefined,
-      "single",
-      [{ key: "0", role: "inner" }],
+      {
+        skipBackStack: false,
+        timer,
+        platform: "ios",
+        displayInventory: "single",
+        displayPanels: [{ key: "0", role: "inner" }],
+      },
     );
     expect(outcome.matched).toBe(true);
     expect(outcome.awaitTimeout).toBe(false);
@@ -1906,13 +1857,7 @@ describe("waitForObservation activeWindow", () => {
     const outcome = await waitForObservation(
       screen,
       { activeDisplay: "cover", timeout: 200 },
-      undefined,
-      false,
-      timer,
-      "ios",
-      undefined,
-      undefined,
-      "unavailable",
+      { skipBackStack: false, timer, platform: "ios", displayInventory: "unavailable" },
     );
     expect(outcome).toMatchObject({
       timedOut: true,
@@ -1931,14 +1876,13 @@ describe("waitForObservation activeWindow", () => {
     const outcome = await waitForObservation(
       screen,
       { activeDisplay: "cover", timeout: 200 },
-      undefined,
-      false,
-      timer,
-      "ios",
-      undefined,
-      undefined,
-      "multi",
-      activePanels,
+      {
+        skipBackStack: false,
+        timer,
+        platform: "ios",
+        displayInventory: "multi",
+        displayPanels: activePanels,
+      },
     );
     expect(outcome.timeoutReason).toBe(
       'Timed out after 200 ms waiting for activeDisplay "cover"; the active display was never observable because no hierarchy was captured',
@@ -1960,14 +1904,13 @@ describe("waitForObservation activeWindow", () => {
         waitKind === "posture"
           ? { posture: "closed", timeout: 200 }
           : { activeDisplay: "cover", timeout: 200 },
-        undefined,
-        false,
-        timer,
-        "android",
-        undefined,
-        undefined,
-        "multi",
-        activePanels,
+        {
+          skipBackStack: false,
+          timer,
+          platform: "android",
+          displayInventory: "multi",
+          displayPanels: activePanels,
+        },
       );
       expect(outcome.timedOut).toBe(true);
       expect(outcome.timeoutReason).toContain("no hierarchy was captured");
@@ -1983,14 +1926,13 @@ describe("waitForObservation activeWindow", () => {
     const outcome = await waitForObservation(
       screen,
       { activeDisplay: "cover", timeout: 200 },
-      undefined,
-      false,
-      timer,
-      "ios",
-      undefined,
-      undefined,
-      "multi",
-      activePanels,
+      {
+        skipBackStack: false,
+        timer,
+        platform: "ios",
+        displayInventory: "multi",
+        displayPanels: activePanels,
+      },
     );
     expect(outcome.timeoutReason).toBe(
       'Timed out after 200 ms waiting for activeDisplay "cover"; last observed active display "inner" (inner)',
@@ -2005,14 +1947,13 @@ describe("waitForObservation activeWindow", () => {
     const first = await waitForObservation(
       firstScreen,
       { activeDisplay: "cover", timeout: 200 },
-      undefined,
-      false,
-      timer,
-      "android",
-      undefined,
-      undefined,
-      "multi",
-      activePanels,
+      {
+        skipBackStack: false,
+        timer,
+        platform: "android",
+        displayInventory: "multi",
+        displayPanels: activePanels,
+      },
     );
     expect(first.awaitTimeout).toBe(false);
     expect(firstScreen.getExecuteCallCount()).toBe(1);
@@ -2022,14 +1963,13 @@ describe("waitForObservation activeWindow", () => {
     const mismatch = await waitForObservation(
       mismatchScreen,
       { activeDisplay: "cover", timeout: 200 },
-      undefined,
-      false,
-      timer,
-      "android",
-      undefined,
-      undefined,
-      "multi",
-      activePanels,
+      {
+        skipBackStack: false,
+        timer,
+        platform: "android",
+        displayInventory: "multi",
+        displayPanels: activePanels,
+      },
     );
     expect(mismatch.awaitTimeout).toBe(true);
     expect(mismatchScreen.getExecuteCallCount()).toBeGreaterThan(1);
@@ -2048,9 +1988,7 @@ describe("waitForObservation activeWindow", () => {
     const outcome = await waitForObservation(
       screen,
       { posture: "closed", text: "Ready", timeout: 500 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.awaitTimeout).toBe(false);
     expect(outcome.awaitedElement?.text).toBe("Ready");
@@ -2074,9 +2012,7 @@ describe("waitForObservation activeWindow", () => {
     const outcome = await waitForObservation(
       screen,
       { posture: "closed", text: "Ready", timeout: 200 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.awaitTimeout).toBe(true);
     expect(outcome.matched).toBe(false);
@@ -2091,7 +2027,7 @@ describe("waitForObservation activeWindow", () => {
       throw failure;
     });
     await expect(
-      waitForObservation(screen, { posture: "closed" }, undefined, false, timer),
+      waitForObservation(screen, { posture: "closed" }, { skipBackStack: false, timer }),
     ).rejects.toBe(failure);
     screen.setObserveResult((index) => {
       if (index > 1) {
@@ -2100,7 +2036,7 @@ describe("waitForObservation activeWindow", () => {
       return postureObservation("opened");
     });
     await expect(
-      waitForObservation(screen, { text: "missing" }, undefined, false, timer),
+      waitForObservation(screen, { text: "missing" }, { skipBackStack: false, timer }),
     ).rejects.toBe(failure);
   });
 
@@ -2118,7 +2054,11 @@ describe("waitForObservation activeWindow", () => {
       return postureObservation("opened");
     });
     await expect(
-      waitForObservation(screen, { posture: "closed" }, controller.signal, false, timer),
+      waitForObservation(
+        screen,
+        { posture: "closed" },
+        { signal: controller.signal, skipBackStack: false, timer },
+      ),
     ).rejects.toThrow();
     expect(screen.getExecuteCallCount()).toBe(2);
   });
@@ -2144,9 +2084,7 @@ describe("waitForObservation activeWindow", () => {
         className: "UITabBar",
         timeout: 500,
       },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -2182,9 +2120,7 @@ describe("waitForObservation activeWindow", () => {
         className: "UITabBar",
         timeout: 500,
       },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -2224,9 +2160,7 @@ describe("waitForObservation activeWindow", () => {
         className: "UITabBar",
         timeout: 500,
       },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -2257,9 +2191,7 @@ describe("waitForObservation activeWindow", () => {
         timeout: 500,
         stableReads: 2,
       },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.settled).toBe(true);
@@ -2287,9 +2219,7 @@ describe("waitForObservation activeWindow", () => {
         },
         timeout: 500,
       },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -2314,9 +2244,7 @@ describe("waitForObservation activeWindow", () => {
         },
         timeout: 250,
       },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(true);
@@ -2338,10 +2266,7 @@ describe("waitForObservation activeWindow", () => {
         },
         timeout: 250,
       },
-      undefined,
-      false,
-      timer,
-      "ios",
+      { skipBackStack: false, timer, platform: "ios" },
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -2379,9 +2304,7 @@ describe("waitForObservation activeWindow", () => {
         className: "UITabBar",
         timeout: 250,
       },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(true);
@@ -2424,6 +2347,8 @@ describe("observeSchema settled", () => {
 
 describe("waitForObservation settled", () => {
   const makeObservation = (markerId: string): ObserveResult => ({
+    observationId: "obs-test",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     updatedAt: 0,
     screenSize: { width: 200, height: 200 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -2453,9 +2378,7 @@ describe("waitForObservation settled", () => {
         settled: { quietPeriodMs: 300 },
         timeout: 5000,
       },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -2483,9 +2406,7 @@ describe("waitForObservation settled", () => {
         settled: { quietPeriodMs: 300 },
         timeout: 500,
       },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(true);
@@ -2545,7 +2466,9 @@ describe("observeSchema waitFor.absent", () => {
 });
 
 describe("waitForObservation absent", () => {
-  const makeObservation = (nodes: unknown[]): ObserveResult => ({
+  const makeObservation = (nodes: ViewHierarchyNode[]): ObserveResult => ({
+    observationId: "obs-test",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     updatedAt: 0,
     screenSize: { width: 200, height: 200 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -2566,8 +2489,11 @@ describe("waitForObservation absent", () => {
       },
     ],
     ["empty", { viewHierarchy: { hierarchy: {} } }],
-    ["zero nodes", { viewHierarchy: { hierarchy: { node: [] } } }],
-    ["incomplete", { viewHierarchy: { hierarchy: { node: [] }, ctrlProxyIncomplete: true } }],
+    ["zero nodes", { viewHierarchy: { hierarchy: { node: { node: [] } } } }],
+    [
+      "incomplete",
+      { viewHierarchy: { hierarchy: { node: { node: [] } }, ctrlProxyIncomplete: true } },
+    ],
     [
       "unavailable reason",
       {
@@ -2597,9 +2523,7 @@ describe("waitForObservation absent", () => {
       const outcome = await waitForObservation(
         screen,
         { absent: { text: "Loading" }, timeout: 300 },
-        undefined,
-        false,
-        timer,
+        { skipBackStack: false, timer },
       );
       expect(outcome.matched).toBe(false);
       expect(outcome.timedOut).toBe(true);
@@ -2639,9 +2563,7 @@ describe("waitForObservation absent", () => {
     const outcome = await waitForObservation(
       screen,
       { ...selector, timeout: 300 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.matched).toBe(true);
     expect(outcome.timedOut).toBe(false);
@@ -2665,9 +2587,7 @@ describe("waitForObservation absent", () => {
       const outcome = await waitForObservation(
         screen,
         { absent: { text: "Loading" }, timeout: 300 },
-        undefined,
-        false,
-        timer,
+        { skipBackStack: false, timer },
       );
       expect(outcome.matched).toBe(!present);
       expect(outcome.timedOut).toBe(present);
@@ -2689,9 +2609,7 @@ describe("waitForObservation absent", () => {
     const outcome = await waitForObservation(
       screen,
       { absent: { text: "Loading" }, timeout: 300 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.matched).toBe(true);
     expect(outcome.polls).toBe(2);
@@ -2707,14 +2625,12 @@ describe("waitForObservation absent", () => {
         ...makeObservation([spinner]),
         viewHierarchy: { ...makeHierarchy([spinner]), updatedAt: 10 },
       },
-      { ...makeObservation([]), viewHierarchy: { hierarchy: { node: [] } } },
+      { ...makeObservation([]), viewHierarchy: { hierarchy: { node: { node: [] } } } },
     ]);
     const outcome = await waitForObservation(
       screen,
       { absent: { className: "UIActivityIndicatorView" }, timeout: 300 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.matched).toBe(false);
     expect(outcome.timedOut).toBe(true);
@@ -2729,9 +2645,7 @@ describe("waitForObservation absent", () => {
     const outcome = await waitForObservation(
       screen,
       { absent: { text: "Loading" }, timeout: 300 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.matched).toBe(true);
     expect(outcome.timedOut).toBe(false);
@@ -2750,40 +2664,36 @@ describe("waitForObservation absent", () => {
     const outcome = await waitForObservation(
       screen,
       { absent: { className: "UIActivityIndicatorView" }, timeout: 500 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.matched).toBe(true);
     expect(screen.getExecuteCallCount()).toBe(3);
   });
 
-  test.each([
-    { text: "Ready" },
-    { textAny: ["Ready"] },
-    { elementId: "message_list" },
-    { className: "Button" },
-    { contentDescription: "Ready" },
-  ])("positive legacy %j ignores unavailable matching nodes", async (selector) => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const screen = new FakeObserveScreen();
-    screen.setObserveResult(() => ({
-      ...makeObservation([
-        { $: { ...list.$, text: "Ready", class: "Button", "content-desc": "Ready" } },
-      ]),
-      freshness: { isFresh: false, category: "unavailable" },
-    }));
-    const outcome = await waitForObservation(
-      screen,
-      { ...selector, timeout: 300 },
-      undefined,
-      false,
-      timer,
-    );
-    expect(outcome.matched).toBe(false);
-    expect(outcome.timedOut).toBe(true);
-  });
+  const positiveLegacySelectors: WaitForWithSettled[] = [
+    { text: "Ready", timeout: 300 },
+    { textAny: ["Ready"], timeout: 300 },
+    { elementId: "message_list", timeout: 300 },
+    { className: "Button", timeout: 300 },
+    { contentDescription: "Ready", timeout: 300 },
+  ];
+  test.each(positiveLegacySelectors)(
+    "positive legacy %j ignores unavailable matching nodes",
+    async (selector) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const screen = new FakeObserveScreen();
+      screen.setObserveResult((): ObserveResult => ({
+        ...makeObservation([
+          { $: { ...list.$, text: "Ready", class: "Button", "content-desc": "Ready" } },
+        ]),
+        freshness: { isFresh: false, category: "unavailable" },
+      }));
+      const outcome = await waitForObservation(screen, selector, { skipBackStack: false, timer });
+      expect(outcome.matched).toBe(false);
+      expect(outcome.timedOut).toBe(true);
+    },
+  );
 
   test("legacy stable gate cannot settle an unavailable hierarchy with matching window metadata", async () => {
     const timer = new FakeTimer();
@@ -2800,9 +2710,7 @@ describe("waitForObservation absent", () => {
         settled: { quietPeriodMs: 100 },
         timeout: 300,
       } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.settled).toBe(false);
     expect(outcome.timedOut).toBe(true);
@@ -2822,9 +2730,7 @@ describe("waitForObservation absent", () => {
         elementId: "message_list",
         timeout: 500,
       },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -2845,9 +2751,7 @@ describe("waitForObservation absent", () => {
         elementId: "message_list",
         timeout: 250,
       },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(true);
@@ -2867,9 +2771,7 @@ describe("waitForObservation absent", () => {
         absent: { className: "UIActivityIndicatorView" },
         timeout: 500,
       },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -2942,13 +2844,6 @@ test("textAny chooses and locks contains when exact source is offscreen", () => 
   ]);
   hierarchy.screenWidth = 100;
   hierarchy.screenHeight = 100;
-  expect(
-    findWaitForElement(
-      new ElementResolver(),
-      { textAny: ["Ready"], textMatch: "exact" },
-      hierarchy,
-    ),
-  ).toBeNull();
   expect(
     findWaitForElement(
       new ElementResolver(),

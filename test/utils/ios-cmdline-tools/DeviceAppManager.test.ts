@@ -322,6 +322,45 @@ describe("DeviceAppManager", () => {
     expect(hash).toBe(fixtureHash);
   });
 
+  // #14094: getDeepLinks on a physical device needs the copy failure, not a null.
+  test.each([false, true])(
+    "withInstalledAppBundle copy failure (surfaceLookupErrors=%s)",
+    async (surfaceLookupErrors) => {
+      const exec = async (command: string) => {
+        const jsonPath = parseDevicectlJsonOutputPath(command);
+        if (jsonPath && command.includes("device info apps")) {
+          const apps = [{ bundleIdentifier: bundleId, bundleURL: "file:///private/var/A.app" }];
+          await fs.writeFile(jsonPath, JSON.stringify({ apps }), "utf-8");
+        }
+        if (command.includes("device copy from")) {
+          throw Object.assign(new Error("Command failed: xcrun devicectl device copy from"), {
+            stderr: "ERROR: The device is locked.",
+          });
+        }
+        return createExecResult("", "");
+      };
+      const inspector = new DeviceAppManager({
+        platform: () => "darwin",
+        execute: (file, args) => exec([file, ...args].join(" ")),
+        readFile: async (path) => fs.readFile(path, "utf-8"),
+        mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+        rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+        readdir: async (path) => fs.readdir(path),
+        stat: async (path) => fs.stat(path),
+        tmpdir,
+        logger: createFakeLogger(),
+      });
+      const read = inspector.withInstalledAppBundle("device-udid", bundleId, async () => "read", {
+        surfaceLookupErrors,
+      });
+      if (surfaceLookupErrors) {
+        await expect(read).rejects.toThrow("ERROR: The device is locked.");
+      } else {
+        expect(await read).toBeNull();
+      }
+    },
+  );
+
   test("computes simulator app hash via simctl get_app_container", async () => {
     const workDir = await createTempDir();
     const fixtureApp = await createFixtureApp(workDir);
@@ -387,19 +426,7 @@ describe("DeviceAppManager", () => {
         if (command.includes("simctl get_app_container")) {
           throw new Error("No such file or directory");
         }
-        return {
-          stdout: "",
-          stderr: "",
-          toString() {
-            return this.stdout;
-          },
-          trim() {
-            return this.stdout.trim();
-          },
-          includes(searchString: string) {
-            return this.stdout.includes(searchString);
-          },
-        };
+        return createExecResult("", "");
       },
       readFile: async (path) => fs.readFile(path, "utf-8"),
       mkdtemp: async (prefix) => fs.mkdtemp(prefix),
@@ -433,19 +460,7 @@ describe("DeviceAppManager", () => {
         if (command.includes("simctl get_app_container")) {
           throw new Error("Invalid device: simulator is not booted");
         }
-        return {
-          stdout: "",
-          stderr: "",
-          toString() {
-            return this.stdout;
-          },
-          trim() {
-            return this.stdout.trim();
-          },
-          includes(searchString: string) {
-            return this.stdout.includes(searchString);
-          },
-        };
+        return createExecResult("", "");
       },
       readFile: async (path) => fs.readFile(path, "utf-8"),
       mkdtemp: async (prefix) => fs.mkdtemp(prefix),
@@ -479,19 +494,7 @@ describe("DeviceAppManager", () => {
         if (command.includes("devicectl device info apps")) {
           throw new Error("devicectl unavailable");
         }
-        return {
-          stdout: "",
-          stderr: "",
-          toString() {
-            return this.stdout;
-          },
-          trim() {
-            return this.stdout.trim();
-          },
-          includes(searchString: string) {
-            return this.stdout.includes(searchString);
-          },
-        };
+        return createExecResult("", "");
       },
       readFile: async (path) => fs.readFile(path, "utf-8"),
       mkdtemp: async (prefix) => fs.mkdtemp(prefix),
@@ -517,33 +520,9 @@ describe("DeviceAppManager", () => {
       execute: async (_file, args) => {
         const command = [_file, ...args].join(" ");
         if (command.includes("simctl get_app_container")) {
-          return {
-            stdout: "/tmp/missing/ExistingApp.app\n",
-            stderr: "",
-            toString() {
-              return this.stdout;
-            },
-            trim() {
-              return this.stdout.trim();
-            },
-            includes(searchString: string) {
-              return this.stdout.includes(searchString);
-            },
-          };
+          return createExecResult("/tmp/missing/ExistingApp.app\n", "");
         }
-        return {
-          stdout: "",
-          stderr: "",
-          toString() {
-            return this.stdout;
-          },
-          trim() {
-            return this.stdout.trim();
-          },
-          includes(searchString: string) {
-            return this.stdout.includes(searchString);
-          },
-        };
+        return createExecResult("", "");
       },
       readFile: async (path) => fs.readFile(path, "utf-8"),
       mkdtemp: async (prefix) => fs.mkdtemp(prefix),
@@ -757,19 +736,7 @@ describe("DeviceAppManager", () => {
         if (file === "xcrun" && args.slice(0, 4).join(" ") === "devicectl device info apps") {
           throw new Error("bundle lookup failed");
         }
-        return {
-          stdout: "",
-          stderr: "",
-          toString() {
-            return this.stdout;
-          },
-          trim() {
-            return this.stdout.trim();
-          },
-          includes(searchString: string) {
-            return this.stdout.includes(searchString);
-          },
-        };
+        return createExecResult("", "");
       },
       readFile: async () => {
         throw new Error("bundle lookup should fail before reading JSON");
@@ -1466,6 +1433,104 @@ describe("DeviceAppManager terminate (devicectl)", () => {
     expect(result).toEqual({ wasInstalled: false, wasRunning: false });
     expect(commands.some((c) => c.includes("device info processes"))).toBe(false);
     expect(commands.some((c) => c.includes("device process terminate"))).toBe(false);
+  });
+
+  // #14096: crashApp's PID lookup. A bundle id that is a prefix of another installed app's id
+  // must resolve only its own process (the Simulator path's #6000 guarantee).
+  test("findRunningAppPid resolves only the exact bundle id's main process", async () => {
+    const superset = `${bundleId}.extra`;
+    const supersetPath = "/private/var/containers/Bundle/Application/DEF/Extra.app";
+    const exec = async (command: string) => {
+      const jsonPath = parseDevicectlJsonOutputPath(command);
+      if (jsonPath && command.includes("device info apps")) {
+        const apps = [
+          { bundleIdentifier: superset, bundleURL: `file://${supersetPath}` },
+          ...(command.includes(`--bundle-id ${superset}`)
+            ? []
+            : [{ bundleIdentifier: bundleId, bundleURL: `file://${bundlePath}` }]),
+        ];
+        await fs.writeFile(jsonPath, JSON.stringify({ result: { apps } }), "utf-8");
+      }
+      if (jsonPath && command.includes("device info processes")) {
+        const runningProcesses = [
+          { processIdentifier: 1111, executable: `${supersetPath}/Extra` },
+          { processIdentifier: 4321, executable: `${bundlePath}/AutoMobileTest` },
+        ];
+        await fs.writeFile(jsonPath, JSON.stringify({ result: { runningProcesses } }), "utf-8");
+      }
+      return makeExecResult();
+    };
+
+    const inspector = createInspector({ exec });
+    expect(await inspector.findRunningAppPid("device-udid", bundleId)).toBe(4321);
+  });
+
+  test("findRunningAppPid distinguishes not installed (undefined) from not running (null)", async () => {
+    const running = (installed: boolean) => async (command: string) => {
+      if (command.includes("device info apps")) {
+        await writeAppsJson(command, installed);
+      }
+      const jsonPath = parseDevicectlJsonOutputPath(command);
+      if (jsonPath && command.includes("device info processes")) {
+        await fs.writeFile(jsonPath, JSON.stringify({ result: { runningProcesses: [] } }), "utf-8");
+      }
+      return makeExecResult();
+    };
+    expect(
+      await createInspector({ exec: running(false) }).findRunningAppPid("device-udid", bundleId),
+    ).toBeUndefined();
+    expect(
+      await createInspector({ exec: running(true) }).findRunningAppPid("device-udid", bundleId),
+    ).toBeNull();
+  });
+
+  test("signalProcess sends the signal to the PID with devicectl process signal", async () => {
+    const commands: string[] = [];
+    const inspector = createInspector({
+      exec: async (command) => {
+        commands.push(command);
+        return makeExecResult();
+      },
+    });
+    expect(await inspector.signalProcess("device-udid", 4321, "SIGABRT")).toBe("signalled");
+    expect(commands).toEqual([
+      "xcrun devicectl device process signal --device device-udid --pid 4321 --signal SIGABRT --quiet",
+    ]);
+  });
+
+  test("signalProcess reports an ESRCH reply as already exited", async () => {
+    const inspector = createInspector({
+      exec: async () => {
+        throw Object.assign(new Error("Command failed: xcrun devicectl"), {
+          stderr: "ERROR: No such process (NSPOSIXErrorDomain error 3)",
+        });
+      },
+    });
+    expect(await inspector.signalProcess("device-udid", 4321, "SIGABRT")).toBe("already_exited");
+  });
+
+  test("signalProcess turns any other failure into an actionable error carrying stderr", async () => {
+    const inspector = createInspector({
+      exec: async () => {
+        throw Object.assign(new Error("Command failed: xcrun devicectl"), {
+          stderr: "ERROR: The device is locked.",
+        });
+      },
+    });
+    const thrown = await inspector.signalProcess("device-udid", 4321, "SIGABRT").then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect((thrown as Error).message).toContain("The device is locked.");
+    expect((thrown as Error).message).toContain("PID 4321");
+  });
+
+  test("findRunningAppPid refuses non-macOS hosts", async () => {
+    const inspector = createInspector({ platform: "linux", exec: async () => makeExecResult() });
+    await expect(inspector.findRunningAppPid("device-udid", bundleId)).rejects.toThrow(
+      "requires macOS",
+    );
   });
 
   const writeTerminateDetailsJson = async (command: string, osVersion: string) => {

@@ -15,13 +15,13 @@ STUB
 }
 @test "default compile uses exactly the task rerun and opt-in property" {
   isolated="$BATS_TEST_TMPDIR/repo"
-  mkdir -p "$isolated/scripts/android" "$isolated/android/control-proxy/build/compose-compiler-reports"
+  mkdir -p "$isolated/scripts/android" "$isolated/android/prototype-compose/build/compose-compiler-reports"
   cp "$SCRIPT" "$isolated/scripts/android/"
-  cp -R "$FIXTURE/." "$isolated/android/control-proxy/build/compose-compiler-reports/"
+  cp -R "$FIXTURE/." "$isolated/android/prototype-compose/build/compose-compiler-reports/"
   run "$isolated/scripts/android/compose-compiler-report.sh"
   [ "$status" -eq 0 ]
   [ "$(cat "$CALLS.cwd")" = "$isolated/android" ]
-  [ "$(cat "$CALLS")" = $':control-proxy:compileReleaseKotlin\n--rerun\n-Pautomobile.composeCompilerReports=true' ]
+  [ "$(cat "$CALLS")" = $':prototype-compose:compileReleaseKotlin\n--rerun\n-Pautomobile.composeCompilerReports=true' ]
 }
 @test "captured functions have stability columns and package filter" {
   run "$SCRIPT" --reports-dir "$FIXTURE"
@@ -75,9 +75,9 @@ STUB
   run "$SCRIPT" --reports-dir "$BATS_TEST_TMPDIR"
   [ "$status" -eq 2 ]; [[ "$output" == *'missing report'* ]]
   mkdir "$BATS_TEST_TMPDIR/release"
-  cp "$FIXTURE/control-proxy-composables.txt" "$BATS_TEST_TMPDIR/"
+  cp "$FIXTURE/prototype-compose-composables.txt" "$BATS_TEST_TMPDIR/"
   run "$SCRIPT" --reports-dir "$BATS_TEST_TMPDIR"
-  [ "$status" -eq 2 ]; [[ "$output" == *'release/control-proxy-module.json'* ]]
+  [ "$status" -eq 2 ]; [[ "$output" == *'release/prototype-compose-module.json'* ]]
   run "$SCRIPT" --bogus
   [ "$status" -eq 2 ]; [[ "$output" == *'unknown option'* ]]
 }
@@ -87,7 +87,7 @@ STUB
   mkdir -p "$copied"
   cp -R "$FIXTURE/." "$copied/"
   # Derive a parser edge case from the captured block, leaving the fixture byte-exact.
-  sed 's/unstable theme: PrototypeThemeSpec/unstable theme: PrototypeThemeSpec | Other/' "$FIXTURE/control-proxy-composables.txt" > "$copied/control-proxy-composables.txt"
+  sed 's/unstable theme: PrototypeThemeSpec/unstable theme: PrototypeThemeSpec | Other/' "$FIXTURE/prototype-compose-composables.txt" > "$copied/prototype-compose-composables.txt"
   run "$SCRIPT" --reports-dir "$copied"
   [ "$status" -eq 0 ]
   [[ "$output" == *'`theme: PrototypeThemeSpec \| Other`'* ]]

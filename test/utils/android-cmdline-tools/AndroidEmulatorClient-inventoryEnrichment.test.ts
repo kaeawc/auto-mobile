@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import {
+  AndroidEmulatorClient,
+  type AndroidEmulatorClientOptions,
+} from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { createExecResult as execResult } from "../../../src/utils/execResult";
 import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -10,9 +13,8 @@ import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const createExecResult = (stdout: string) => execResult(stdout, "");
-function hermetic(client: AndroidEmulatorClient): AndroidEmulatorClient {
-  Object.defineProperty(client, "ensureEmulatorPath", { value: async () => "emulator" });
-  return client;
+function hermetic(options: AndroidEmulatorClientOptions): AndroidEmulatorClient {
+  return new AndroidEmulatorClient({ emulatorPathLocator: async () => "emulator", ...options });
 }
 
 const inventory = { coalesceInventoryEnrichment: true, readinessOnly: false };
@@ -38,14 +40,12 @@ function fixture() {
     createExecResult(text("fold-states.txt")),
   );
   const clients = Array.from({ length: 4 }, () =>
-    hermetic(
-      new AndroidEmulatorClient({
-        execAsync: async () => createExecResult("Pixel_9"),
-        timer,
-        adbFactory: new FakeAdbClientFactory(adb),
-        avdConfigReader: new FakeAvdConfigReader(),
-      }),
-    ),
+    hermetic({
+      execAsync: async () => createExecResult("Pixel_9"),
+      timer,
+      adbFactory: new FakeAdbClientFactory(adb),
+      avdConfigReader: new FakeAvdConfigReader(),
+    }),
   );
   return { timer, adb, clients };
 }
@@ -144,13 +144,11 @@ describe("inventory-only Android enrichment", () => {
       return createExecResult("Pixel_9");
     };
     const clients = Array.from({ length: 4 }, () =>
-      hermetic(
-        new AndroidEmulatorClient({
-          execAsync: exec,
-          timer,
-          avdConfigReader: new FakeAvdConfigReader(),
-        }),
-      ),
+      hermetic({
+        execAsync: exec,
+        timer,
+        avdConfigReader: new FakeAvdConfigReader(),
+      }),
     );
     const options = { coalesceInventoryEnrichment: true, timeoutMs: 2000 };
     await Promise.all(clients.map((client) => client.listAvds(options)));
@@ -172,13 +170,11 @@ describe("inventory-only Android enrichment", () => {
       signal?.throwIfAborted();
       return createExecResult("Pixel_9");
     };
-    const client = hermetic(
-      new AndroidEmulatorClient({
-        execAsync: exec,
-        timer,
-        avdConfigReader: new FakeAvdConfigReader(),
-      }),
-    );
+    const client = hermetic({
+      execAsync: exec,
+      timer,
+      avdConfigReader: new FakeAvdConfigReader(),
+    });
     const leader = new AbortController();
     const options = { coalesceInventoryEnrichment: true, timeoutMs: 2000 };
     const first = runWithAbortSignal(leader.signal, () => client.listAvds(options)).then(
@@ -199,17 +195,15 @@ describe("inventory-only Android enrichment", () => {
   test("a 2s listAvds waiter leaves the generous shared flight alive for 5s success", async () => {
     const timer = new FakeTimer();
     let calls = 0;
-    const client = hermetic(
-      new AndroidEmulatorClient({
-        execAsync: async () => {
-          calls++;
-          await timer.sleep(5_000);
-          return createExecResult("Pixel_9");
-        },
-        timer,
-        avdConfigReader: new FakeAvdConfigReader(),
-      }),
-    );
+    const client = hermetic({
+      execAsync: async () => {
+        calls++;
+        await timer.sleep(5_000);
+        return createExecResult("Pixel_9");
+      },
+      timer,
+      avdConfigReader: new FakeAvdConfigReader(),
+    });
     const short = client.listAvds({ coalesceInventoryEnrichment: true, timeoutMs: 2_000 }).then(
       () => "resolved",
       () => "timeout",

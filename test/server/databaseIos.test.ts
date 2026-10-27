@@ -1,3 +1,5 @@
+import { SdkCapabilityQueryError } from "../../src/features/observe/ios/SdkCapabilityQueryError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import { registerDatabaseResources } from "../../src/server/databaseResources";
@@ -5,12 +7,46 @@ import { registerDatabaseTools } from "../../src/server/databaseTools";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
+import type {
+  IosDatabaseClient,
+  IosDatabaseClientResolver,
+} from "../../src/server/iosDatabaseClient";
+import type { SQLResult } from "../../src/features/database/DatabaseInspector";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { serverConfig } from "../../src/utils/ServerConfig";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, Platform } from "../../src/models";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { toolText } from "../helpers/toolResponse";
+
+/** Awaits a promise that must reject with an Error and returns that Error. */
+async function rejectionOf(pending: Promise<unknown>): Promise<Error> {
+  try {
+    await pending;
+  } catch (caught: unknown) {
+    if (caught instanceof Error) {
+      return caught;
+    }
+    throw new Error(`expected an Error rejection, got ${String(caught)}`);
+  }
+  throw new Error("expected the call to reject");
+}
 
 isolateToolRegistry();
+
+class AndroidDiscoveryFailsDevices extends FakeDeviceUtils {
+  constructor(iosDevice: BootedDevice) {
+    super();
+    this.setBootedDevices("ios", [iosDevice]);
+  }
+
+  override async getBootedDevices(platform: Platform): Promise<BootedDevice[]> {
+    if (platform === "android") {
+      throw new Error("adb unavailable");
+    }
+    return super.getBootedDevices(platform);
+  }
+}
 
 describe("iOS database inspection server integration", function () {
   const iosDevice: BootedDevice = {
@@ -19,19 +55,37 @@ describe("iOS database inspection server integration", function () {
     name: "iPhone 16 Simulator",
   };
 
-  let originalGetInstance: typeof IOSCtrlProxyClient.getInstance;
+  let iosClient: IosDatabaseClientResolver | undefined;
+  const unusedIos = async (): Promise<never> => {
+    throw new Error("iOS database call not stubbed by this test");
+  };
+  const useIosClient = (overrides: Partial<IosDatabaseClient>): void => {
+    const client: IosDatabaseClient = {
+      executeSQLForIos: unusedIos,
+      listDatabasesForIos: unusedIos,
+      listTablesForIos: unusedIos,
+      getTableDataForIos: unusedIos,
+      getTableStructureForIos: unusedIos,
+      ...overrides,
+    };
+    iosClient = () => client;
+  };
+  const iosOnlyDevices = (): FakeDeviceUtils => {
+    const devices = new FakeDeviceUtils();
+    devices.setBootedDevices("ios", [iosDevice]);
+    return devices;
+  };
 
   beforeEach(function () {
+    iosClient = undefined;
     ToolRegistry.clearTools();
     ResourceRegistry.clearResources();
     PlatformDeviceManagerFactory.reset();
     IOSCtrlProxyClient.resetInstances();
     serverConfig.setEmbeddedSdkEnabled(true);
-    originalGetInstance = IOSCtrlProxyClient.getInstance;
   });
 
   afterEach(function () {
-    IOSCtrlProxyClient.getInstance = originalGetInstance;
     ToolRegistry.clearTools();
     ResourceRegistry.clearResources();
     PlatformDeviceManagerFactory.reset();
@@ -39,17 +93,46 @@ describe("iOS database inspection server integration", function () {
     serverConfig.setEmbeddedSdkEnabled(false);
   });
 
+  test.each(["timeout", "not_connected", "sdk_capability_query_failed"] as const)(
+    "sqlQuery preserves SDK probe %s through tool error shaping",
+    async (code) => {
+      const failure = new SdkCapabilityQueryError(code, "SDK probe failed");
+      useIosClient({
+        executeSQLForIos: async () => {
+          throw failure;
+        },
+      });
+      registerDatabaseTools(iosClient);
+      const tool = ToolRegistry.getTool("sqlQuery")!;
+      const error = await rejectionOf(
+        tool.deviceAwareHandler!(iosDevice, {
+          appId: "com.example.app",
+          databasePath: "app.db",
+          query: "SELECT 1",
+        }),
+      );
+      expect(error).toBe(failure);
+      const result = shapeToolCallError(error, { toolName: "sqlQuery", source: "MCP" });
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: false,
+        error: "SDK probe failed",
+        code,
+        retryable: true,
+      });
+    },
+  );
+
   test("sqlQuery executes SELECT on iOS through CtrlProxy and keeps Android response shape", async function () {
     const executeSQLForIos = mock(async () => ({
       type: "query" as const,
       columns: ["id", "payload"],
       rows: [["1", "0xCAFE"]],
     }));
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    useIosClient({
       executeSQLForIos,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
 
-    registerDatabaseTools();
+    registerDatabaseTools(iosClient);
     const tool = ToolRegistry.getTool("sqlQuery");
     expect(tool?.deviceAwareHandler).toBeDefined();
 
@@ -66,7 +149,7 @@ describe("iOS database inspection server integration", function () {
       undefined,
       true,
     );
-    const payload = JSON.parse(response.content[0].text);
+    const payload = JSON.parse(toolText(response));
     expect(payload).toEqual({
       message: "Query returned 1 row(s)",
       type: "query",
@@ -80,15 +163,15 @@ describe("iOS database inspection server integration", function () {
       type: "mutation" as const,
       rowsAffected: 1,
     }));
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    useIosClient({
       executeSQLForIos,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     const notifyResourceUpdated = mock(async (_uri: string) => {});
     const originalNotify = ResourceRegistry.notifyResourceUpdated;
     ResourceRegistry.notifyResourceUpdated = notifyResourceUpdated;
 
     try {
-      registerDatabaseTools();
+      registerDatabaseTools(iosClient);
       const tool = ToolRegistry.getTool("sqlQuery");
       const response = await tool!.deviceAwareHandler!(iosDevice, {
         appId: "com.example.app",
@@ -96,7 +179,7 @@ describe("iOS database inspection server integration", function () {
         query: "INSERT INTO notes (title) VALUES ('new')",
       });
 
-      const payload = JSON.parse(response.content[0].text);
+      const payload = JSON.parse(toolText(response));
       expect(payload.type).toBe("mutation");
       expect(payload.rowsAffected).toBe(1);
       expect(notifyResourceUpdated).toHaveBeenCalledWith(
@@ -155,22 +238,22 @@ describe("iOS database inspection server integration", function () {
   test.each(sdkErrorCases)(
     "sqlQuery maps the SDK %s refusal without double-wrapping",
     async (code, expectedMessage, includesSetupAdvice) => {
-      IOSCtrlProxyClient.getInstance = mock(() => ({
+      useIosClient({
         executeSQLForIos: mock(async () => {
           // SdkDatabaseRouteHandler.error encodes {error: code}; SdkDatabaseClient.requestData
           // prefixes that field with its unavailableMessage when CtrlProxy returns non-2xx.
           throw new Error(`${SDK_UNAVAILABLE_PREFIX}: ${code}`);
         }),
-      })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+      });
 
-      registerDatabaseTools();
+      registerDatabaseTools(iosClient);
       const tool = ToolRegistry.getTool("sqlQuery");
       const thrown = tool!.deviceAwareHandler!(iosDevice, {
         appId: "com.example.app",
         databasePath: "sessions.sqlite",
         query: "BEGIN",
       });
-      const error = await thrown.catch((caught: unknown) => caught as Error);
+      const error = await rejectionOf(thrown);
       expect(error.message).toBe(expectedMessage);
       expect(error.message.includes("setEnabled(true)")).toBe(includesSetupAdvice);
       expect(error.message).not.toContain("database inspection unavailable");
@@ -189,13 +272,13 @@ describe("iOS database inspection server integration", function () {
     ["HTTP status without route code", `${SDK_UNAVAILABLE_PREFIX}: HTTP 503`],
     ["CtrlProxy connection failure", "Failed to connect to CtrlProxy"],
   ] as const)("sqlQuery keeps setup advice for %s", async (_label, detail) => {
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    useIosClient({
       executeSQLForIos: mock(async () => {
         throw new Error(detail);
       }),
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
 
-    registerDatabaseTools();
+    registerDatabaseTools(iosClient);
     const tool = ToolRegistry.getTool("sqlQuery");
     await expect(
       tool!.deviceAwareHandler!(iosDevice, {
@@ -216,22 +299,24 @@ describe("iOS database inspection server integration", function () {
   ] as const)(
     "sqlQuery words an unanswered %s by what the host sent",
     async (query, expectedFragment) => {
-      IOSCtrlProxyClient.getInstance = mock(() => ({
+      useIosClient({
         executeSQLForIos: mock(async () => {
           // The runner's SdkDatabaseError.indeterminateMessage, passed through verbatim.
           throw new Error(
             "database request was sent but no answer arrived in time; the outcome is indeterminate (a write may still have been applied). Do not retry automatically; query the data to confirm first",
           );
         }),
-      })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+      });
 
-      registerDatabaseTools();
+      registerDatabaseTools(iosClient);
       const tool = ToolRegistry.getTool("sqlQuery");
-      const error = await tool!.deviceAwareHandler!(iosDevice, {
-        appId: "com.example.app",
-        databasePath: "/app/Documents/app.db",
-        query,
-      }).catch((caught: unknown) => caught as Error);
+      const error = await rejectionOf(
+        tool!.deviceAwareHandler!(iosDevice, {
+          appId: "com.example.app",
+          databasePath: "/app/Documents/app.db",
+          query,
+        }),
+      );
       expect(error.message).toContain(expectedFragment);
     },
   );
@@ -250,12 +335,12 @@ describe("iOS database inspection server integration", function () {
       "The target app is not in the foreground; bring it to the foreground and retry.",
     ],
   ])("sqlQuery reports definite foreground failure: %s", async (detail, message) => {
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    useIosClient({
       executeSQLForIos: mock(async () => {
         throw new Error(detail);
       }),
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
-    registerDatabaseTools();
+    });
+    registerDatabaseTools(iosClient);
     await expect(
       ToolRegistry.getTool("sqlQuery")!.deviceAwareHandler!(iosDevice, {
         appId: "com.example.app",
@@ -266,14 +351,14 @@ describe("iOS database inspection server integration", function () {
   });
 
   test("sqlQuery explains the ambiguous unverified SDK capability", async () => {
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    useIosClient({
       executeSQLForIos: mock(async () => {
         throw new Error(
           "The foreground iOS app does not expose the AutoMobile SDK capability database.",
         );
       }),
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
-    registerDatabaseTools();
+    });
+    registerDatabaseTools(iosClient);
     await expect(
       ToolRegistry.getTool("sqlQuery")!.deviceAwareHandler!(iosDevice, {
         appId: "com.example.app",
@@ -297,15 +382,13 @@ describe("iOS database inspection server integration", function () {
     ],
     ["unrelated failure", "unrelated failure"],
   ])("database listing preserves its error shape with guidance: %s", async (detail, message) => {
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    useIosClient({
       listDatabasesForIos: mock(async () => {
         throw new Error(detail);
       }),
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevices: mock(async () => [iosDevice]),
-    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
-    registerDatabaseResources();
+    });
+    PlatformDeviceManagerFactory.setInstance(iosOnlyDevices());
+    registerDatabaseResources(iosClient);
     const match = ResourceRegistry.matchTemplate(
       "automobile:devices/ios-1/databases?appId=com.example.app",
     )!;
@@ -330,20 +413,20 @@ describe("iOS database inspection server integration", function () {
   ] as const)(
     "sqlQuery invalidation follows the returned %s result type",
     async (query, type, shouldNotify) => {
-      const executeSQLForIos = mock(async () =>
+      const executeSQLForIos = mock(async (): Promise<SQLResult> =>
         type === "mutation"
-          ? ({ type, rowsAffected: 1 } as const)
-          : ({ type, columns: ["id"], rows: [["1"]] } as const),
+          ? { type: "mutation", rowsAffected: 1 }
+          : { type: "query", columns: ["id"], rows: [["1"]] },
       );
-      IOSCtrlProxyClient.getInstance = mock(() => ({
+      useIosClient({
         executeSQLForIos,
-      })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+      });
       const notifyResourceUpdated = mock(async (_uri: string) => {});
       const originalNotify = ResourceRegistry.notifyResourceUpdated;
       ResourceRegistry.notifyResourceUpdated = notifyResourceUpdated;
 
       try {
-        registerDatabaseTools();
+        registerDatabaseTools(iosClient);
         const tool = ToolRegistry.getTool("sqlQuery");
         await tool!.deviceAwareHandler!(iosDevice, {
           appId: "com.example.app",
@@ -370,14 +453,12 @@ describe("iOS database inspection server integration", function () {
 
   test("database resources resolve iOS devices through CtrlProxy", async function () {
     const listDatabases = mock(async () => [{ name: "app.db", path: "/app/Documents/app.db" }]);
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    useIosClient({
       listDatabasesForIos: listDatabases,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevices: mock(async () => [iosDevice]),
-    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    });
+    PlatformDeviceManagerFactory.setInstance(iosOnlyDevices());
 
-    registerDatabaseResources();
+    registerDatabaseResources(iosClient);
     const uri = "automobile:devices/ios-1/databases?appId=com.example.app";
     const match = ResourceRegistry.matchTemplate(uri);
     expect(match).toBeDefined();
@@ -392,19 +473,12 @@ describe("iOS database inspection server integration", function () {
 
   test("database resources still resolve iOS when Android discovery fails", async function () {
     const listDatabases = mock(async () => [{ name: "app.db", path: "/app/Documents/app.db" }]);
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    useIosClient({
       listDatabasesForIos: listDatabases,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevices: mock(async (platform) => {
-        if (platform === "android") {
-          throw new Error("adb unavailable");
-        }
-        return [iosDevice];
-      }),
-    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    });
+    PlatformDeviceManagerFactory.setInstance(new AndroidDiscoveryFailsDevices(iosDevice));
 
-    registerDatabaseResources();
+    registerDatabaseResources(iosClient);
     const uri = "automobile:devices/ios-1/databases?appId=com.example.app";
     const match = ResourceRegistry.matchTemplate(uri);
     const content = await invokeResourceTemplate(match!);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DAEMON_REGISTER_SESSION_METHOD } from "../../src/daemon/constants";
+import { DAEMON_REGISTER_SESSION_METHOD } from "../../src/daemon/wire/constants";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -32,6 +32,7 @@ async function steppedDaemon() {
     getSessionManager: () => manager,
     getDevicePool: () => ({
       refreshDevices: async () => 0,
+      releaseDevice: async () => {},
       getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
     }),
     getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
@@ -131,6 +132,7 @@ describe("session reports in wall-clock ms after a wall step (#11243)", () => {
       getSessionManager: () => manager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),

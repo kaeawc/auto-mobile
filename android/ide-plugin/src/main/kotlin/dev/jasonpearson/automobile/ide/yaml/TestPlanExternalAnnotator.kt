@@ -87,48 +87,9 @@ class TestPlanExternalAnnotator : ExternalAnnotator<PsiFile, TestPlanValidationR
 
     val document = file.viewProvider.document ?: return TextRange(0, 0)
 
-    // If we have line/column information, use it
     val line = error.line
-    if (line != null && line > 0) {
-      val lineIndex = line - 1
-      if (lineIndex < document.lineCount) {
-        val lineStartOffset = document.getLineStartOffset(lineIndex)
-        val lineEndOffset = document.getLineEndOffset(lineIndex)
-        val lineText = document.getText(TextRange(lineStartOffset, lineEndOffset))
-
-        // For tool name errors, highlight the tool value (e.g., "bop") not the key "tool"
-        if (error.message.contains("Unknown tool")) {
-          val toolMatch = Regex("Unknown tool '([^']+)'").find(error.message)
-          val toolName = toolMatch?.groupValues?.getOrNull(1)
-          if (toolName != null) {
-            val toolIndex = lineText.indexOf(toolName)
-            if (toolIndex >= 0) {
-              val startOffset = lineStartOffset + toolIndex
-              val endOffset = startOffset + toolName.length
-              return TextRange(startOffset, endOffset)
-            }
-          }
-        }
-
-        // Find the field name in the line
-        val fieldName = error.field.substringAfterLast('.').substringAfterLast(']')
-        val fieldIndex = lineText.indexOf(fieldName)
-
-        if (fieldIndex >= 0) {
-          val startOffset = lineStartOffset + fieldIndex
-          val endOffset = startOffset + fieldName.length
-          return TextRange(startOffset, endOffset)
-        }
-
-        // If we can't find the field, highlight the whole line (excluding whitespace)
-        val trimmedStart = lineText.indexOfFirst { !it.isWhitespace() }
-        if (trimmedStart >= 0) {
-          val startOffset = lineStartOffset + trimmedStart
-          return TextRange(startOffset, lineEndOffset)
-        }
-
-        return TextRange(lineStartOffset, lineEndOffset)
-      }
+    if (line != null && line > 0 && line - 1 < document.lineCount) {
+      return lineErrorRange(document, line - 1, error)
     }
 
     // Fallback: highlight the first line
@@ -137,5 +98,48 @@ class TestPlanExternalAnnotator : ExternalAnnotator<PsiFile, TestPlanValidationR
     }
 
     return TextRange(0, 0)
+  }
+
+  private fun lineErrorRange(
+    document: com.intellij.openapi.editor.Document,
+    lineIndex: Int,
+    error: TestPlanValidationError,
+  ): TextRange {
+    val lineStartOffset = document.getLineStartOffset(lineIndex)
+    val lineEndOffset = document.getLineEndOffset(lineIndex)
+    val lineText = document.getText(TextRange(lineStartOffset, lineEndOffset))
+
+    // For tool name errors, highlight the tool value (e.g., "bop") not the key "tool"
+    if (error.message.contains("Unknown tool")) {
+      val toolMatch = Regex("Unknown tool '([^']+)'").find(error.message)
+      val toolName = toolMatch?.groupValues?.getOrNull(1)
+      if (toolName != null) {
+        val toolIndex = lineText.indexOf(toolName)
+        if (toolIndex >= 0) {
+          val startOffset = lineStartOffset + toolIndex
+          val endOffset = startOffset + toolName.length
+          return TextRange(startOffset, endOffset)
+        }
+      }
+    }
+
+    // Find the field name in the line
+    val fieldName = error.field.substringAfterLast('.').substringAfterLast(']')
+    val fieldIndex = lineText.indexOf(fieldName)
+
+    if (fieldIndex >= 0) {
+      val startOffset = lineStartOffset + fieldIndex
+      val endOffset = startOffset + fieldName.length
+      return TextRange(startOffset, endOffset)
+    }
+
+    // If we can't find the field, highlight the whole line (excluding whitespace)
+    val trimmedStart = lineText.indexOfFirst { !it.isWhitespace() }
+    if (trimmedStart >= 0) {
+      val startOffset = lineStartOffset + trimmedStart
+      return TextRange(startOffset, lineEndOffset)
+    }
+
+    return TextRange(lineStartOffset, lineEndOffset)
   }
 }

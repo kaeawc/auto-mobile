@@ -1,11 +1,11 @@
+import { recordPlanCall } from "../../helpers/recordPlanCall";
 import { expect, describe, test } from "bun:test";
 import {
   ToolCallRecorder,
-  PLAN_RELEVANT_TOOLS,
   stripInternalParams,
 } from "../../../src/features/record/ToolCallRecorder";
 
-import { INTERNAL_TOOL_PARAM_NAMES } from "../../../src/daemon/constants";
+import { INTERNAL_TOOL_PARAM_NAMES } from "../../../src/daemon/wire/constants";
 
 describe("ToolCallRecorder", () => {
   describe("recording lifecycle", () => {
@@ -24,8 +24,10 @@ describe("ToolCallRecorder", () => {
     test("stop returns recorded steps and disables recording", () => {
       const recorder = new ToolCallRecorder();
       recorder.start();
-      recorder.record("tapOn", { text: "Login" });
-      recorder.record("sendKeys", { commands: [{ action: "type", text: "user@test.com" }] });
+      recordPlanCall(recorder, "tapOn", { text: "Login" });
+      recordPlanCall(recorder, "sendKeys", {
+        commands: [{ action: "type", text: "user@test.com" }],
+      });
 
       const steps = recorder.stop();
       expect(recorder.isRecording()).toBe(false);
@@ -40,7 +42,7 @@ describe("ToolCallRecorder", () => {
     test("start clears previous steps", () => {
       const recorder = new ToolCallRecorder();
       recorder.start();
-      recorder.record("tapOn", { text: "Login" });
+      recordPlanCall(recorder, "tapOn", { text: "Login" });
       expect(recorder.stepCount).toBe(1);
 
       recorder.start();
@@ -50,7 +52,7 @@ describe("ToolCallRecorder", () => {
     test("stop returns a copy, not a reference to internal state", () => {
       const recorder = new ToolCallRecorder();
       recorder.start();
-      recorder.record("tapOn", { text: "Login" });
+      recordPlanCall(recorder, "tapOn", { text: "Login" });
       const steps = recorder.stop();
 
       expect(steps).toHaveLength(1);
@@ -67,13 +69,13 @@ describe("ToolCallRecorder", () => {
       const recorder = new ToolCallRecorder();
       recorder.start();
 
-      recorder.record("launchApp", { appId: "com.test" });
-      recorder.record("observe", {});
-      recorder.record("tapOn", { text: "Login" });
-      recorder.record("sendKeys", { commands: [{ action: "type", text: "test" }] });
-      recorder.record("pressButton", { button: "back" });
-      recorder.record("swipeOn", { direction: "up" });
-      recorder.record("terminateApp", { appId: "com.test" });
+      recordPlanCall(recorder, "launchApp", { appId: "com.test" });
+      recordPlanCall(recorder, "observe", {});
+      recordPlanCall(recorder, "tapOn", { text: "Login" });
+      recordPlanCall(recorder, "sendKeys", { commands: [{ action: "type", text: "test" }] });
+      recordPlanCall(recorder, "pressButton", { button: "back" });
+      recordPlanCall(recorder, "swipeOn", { direction: "up" });
+      recordPlanCall(recorder, "terminateApp", { appId: "com.test" });
 
       expect(recorder.stepCount).toBe(7);
     });
@@ -82,7 +84,7 @@ describe("ToolCallRecorder", () => {
       const recorder = new ToolCallRecorder();
       recorder.start();
 
-      recorder.record("crashApp", {
+      recordPlanCall(recorder, "crashApp", {
         appId: "com.test",
         platform: "android",
         deviceId: "emulator-5554",
@@ -95,8 +97,8 @@ describe("ToolCallRecorder", () => {
       const recorder = new ToolCallRecorder();
       recorder.start();
 
-      recorder.record("sendKeys", { commands: [{ action: "clear" }] });
-      recorder.record("dragAndDrop", { from: "source", to: "destination" });
+      recordPlanCall(recorder, "sendKeys", { commands: [{ action: "clear" }] });
+      recordPlanCall(recorder, "dragAndDrop", { from: "source", to: "destination" });
 
       expect(recorder.stop()).toEqual([
         { tool: "sendKeys", params: { commands: [{ action: "clear" }] } },
@@ -123,7 +125,7 @@ describe("ToolCallRecorder", () => {
 
     test("does not record when not in recording state", () => {
       const recorder = new ToolCallRecorder();
-      recorder.record("tapOn", { text: "Login" });
+      recordPlanCall(recorder, "tapOn", { text: "Login" });
       expect(recorder.stepCount).toBe(0);
     });
   });
@@ -140,7 +142,7 @@ describe("ToolCallRecorder", () => {
         __foo: "reserved",
         _oneUnderscore: "keep",
       };
-      recorder.record("launchApp", args);
+      recordPlanCall(recorder, "launchApp", args);
       expect(recorder.stop()).toEqual([
         {
           tool: "launchApp",
@@ -154,7 +156,7 @@ describe("ToolCallRecorder", () => {
       const recorder = new ToolCallRecorder();
       recorder.start();
 
-      recorder.record("tapOn", {
+      recordPlanCall(recorder, "tapOn", {
         text: "Login",
         action: "tap",
         platform: "android",
@@ -187,7 +189,7 @@ describe("ToolCallRecorder", () => {
       const recorder = new ToolCallRecorder();
       recorder.start();
 
-      recorder.record("tapOn", { text: "keep-me", [internalParam]: "leak" });
+      recordPlanCall(recorder, "tapOn", { text: "keep-me", [internalParam]: "leak" });
 
       const steps = recorder.stop();
       expect(steps).toHaveLength(1);
@@ -198,7 +200,7 @@ describe("ToolCallRecorder", () => {
       const recorder = new ToolCallRecorder();
       recorder.start();
 
-      recorder.record("tapOn", {
+      recordPlanCall(recorder, "tapOn", {
         text: "My Inbox",
         timeout: 10000,
         containerElementId: "com.test:id/container",
@@ -252,21 +254,70 @@ describe("stripInternalParams", () => {
   });
 });
 
-describe("PLAN_RELEVANT_TOOLS", () => {
-  test("excludes infrastructure tools", () => {
-    const excluded = [
-      "listDevices",
-      "startDevice",
-      "killDevice",
-      "setActiveDevice",
-      "installApp",
-      "recordDeviceGestures",
-      "exportPlan",
-      "executePlan",
-      "screenshot",
-    ];
-    for (const tool of excluded) {
-      expect(PLAN_RELEVANT_TOOLS.has(tool)).toBe(false);
-    }
+describe("planRelevant trait gate", () => {
+  test("records nothing for a tool that does not declare planRelevant", () => {
+    const recorder = new ToolCallRecorder();
+    recorder.start();
+    recorder.record("listDevices", {});
+    recorder.record("installApp", { appPath: "/tmp/a.apk" }, {});
+    expect(recorder.stepCount).toBe(0);
+  });
+});
+
+describe("credentials", () => {
+  test("a recorded keystore password is replaced and the author is told to restore it", () => {
+    const recorder = new ToolCallRecorder();
+    recorder.start();
+    recordPlanCall(recorder, "installApp", {
+      artifactPath: "/apps/app.aab",
+      bundle: {
+        keystore: { path: "/k.jks", alias: "a", storePassword: "hunter2", keyPassword: "hunter3" },
+      },
+    });
+
+    const { steps, warnings } = recorder.stopWithWarnings();
+    expect(steps).toEqual([
+      {
+        tool: "installApp",
+        params: {
+          artifactPath: "/apps/app.aab",
+          bundle: {
+            keystore: {
+              path: "/k.jks",
+              alias: "a",
+              storePassword: "<redacted>",
+              keyPassword: "<redacted>",
+            },
+          },
+        },
+      },
+    ]);
+    expect(JSON.stringify(steps)).not.toContain("hunter");
+    expect(warnings).toEqual([
+      "installApp was recorded with its credentials replaced by <redacted>: set them in the plan by hand before a replay",
+    ]);
+  });
+});
+
+describe("screen lock credentials", () => {
+  test("a recorded setDeviceState screenLock credential is replaced and the author is told", () => {
+    const recorder = new ToolCallRecorder();
+    recorder.start();
+    recordPlanCall(recorder, "setDeviceState", { screenLock: { type: "pin", credential: "7391" } });
+    recordPlanCall(recorder, "setDeviceState", {
+      screenLock: { type: "none", currentCredential: "7391" },
+    });
+
+    const { steps, warnings } = recorder.stopWithWarnings();
+    expect(steps).toEqual([
+      { tool: "setDeviceState", params: { screenLock: { type: "pin", credential: "<redacted>" } } },
+      {
+        tool: "setDeviceState",
+        params: { screenLock: { type: "none", currentCredential: "<redacted>" } },
+      },
+    ]);
+    expect(JSON.stringify(steps)).not.toContain("7391");
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain("setDeviceState was recorded with its credentials replaced");
   });
 });

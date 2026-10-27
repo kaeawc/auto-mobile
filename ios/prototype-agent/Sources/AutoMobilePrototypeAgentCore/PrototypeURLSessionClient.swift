@@ -14,13 +14,30 @@ import Foundation
 final class PrototypeURLSessionClient: PrototypeHttpClient, @unchecked Sendable {
     private let session: URLSession
     private let delegate: PrototypeURLSessionDelegate
+    private let egress: PrototypeRequestEgressCheck
     private let nowMs: @Sendable () -> Double
 
     /// `protocolClasses` lets a test stub the network with a `URLProtocol`.
     init(
         protocolClasses: [AnyClass]? = nil,
+        policy: PrototypeEgressPolicy = PrototypeEgressPolicy(),
+        resolver: any HostResolving = PrototypeSystemHostResolver(),
+        metrics: any PrototypeConnectionMetricsProviding = PrototypeConnectionMetrics(),
         nowMs: @escaping @Sendable () -> Double = { ProcessInfo.processInfo.systemUptime * 1000 }
     ) {
+        let configuration = Self.configuration(protocolClasses: protocolClasses)
+        let egress = PrototypeRequestEgressCheck(policy: policy, resolver: resolver)
+        let delegate = PrototypeURLSessionDelegate(egress: egress, metrics: metrics)
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        queue.name = "dev.jasonpearson.automobile.prototype-agent.request"
+        session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: queue)
+        self.delegate = delegate
+        self.egress = egress
+        self.nowMs = nowMs
+    }
+
+    static func configuration(protocolClasses: [AnyClass]? = nil) -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.ephemeral
         let ceiling = Double(PrototypeLimits.maxRequestTimeoutMs) / 1000
         configuration.timeoutIntervalForRequest = ceiling
@@ -32,13 +49,8 @@ final class PrototypeURLSessionClient: PrototypeHttpClient, @unchecked Sendable 
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.httpMaximumConnectionsPerHost = PrototypeLimits.maxRequestsInFlight
         if let protocolClasses { configuration.protocolClasses = protocolClasses }
-        let delegate = PrototypeURLSessionDelegate()
-        let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 1
-        queue.name = "dev.jasonpearson.automobile.prototype-agent.request"
-        session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: queue)
-        self.delegate = delegate
-        self.nowMs = nowMs
+        configuration.connectionProxyDictionary = [:]
+        return configuration
     }
 
     deinit {
@@ -55,7 +67,7 @@ final class PrototypeURLSessionClient: PrototypeHttpClient, @unchecked Sendable 
         }
         let task = session.dataTask(with: urlRequest)
         let call = PrototypeURLSessionCall(
-            maxBytes: request.maxResponseBytes, timeoutMs: request.timeoutMs, url: request.url
+            maxBytes: request.maxResponseBytes, timeoutMs: request.timeoutMs, request: urlRequest
         )
         let handle = PrototypeURLSessionTaskHandle(task)
         do {
@@ -65,7 +77,18 @@ final class PrototypeURLSessionClient: PrototypeHttpClient, @unchecked Sendable 
                     delegate.register(call, for: handle)
                     call.armDeadline(cancelling: handle)
                     if Task.isCancelled { call.cancelByCaller(handle) }
-                    task.resume()
+                    // DNS suspends here while a bounded worker resolves. A late answer cannot
+                    // resume a call stopped by its total deadline or caller cancellation.
+                    Task { [egress] in
+                        guard call.canProceed else { return }
+                        do {
+                            try await egress.validate(urlRequest)
+                            if call.canProceed { task.resume() }
+                        } catch {
+                            call.reject(Self.preflightError(error))
+                            handle.cancel()
+                        }
+                    }
                 }
             } onCancel: {
                 call.cancelByCaller(handle)
@@ -80,8 +103,14 @@ final class PrototypeURLSessionClient: PrototypeHttpClient, @unchecked Sendable 
         }
     }
 
+    private static func preflightError(_ error: Error) -> PrototypeRequestError {
+        if let error = error as? PrototypeRequestError { return error }
+        return .init(.network, "Destination resolution failed.")
+    }
+
     static func urlRequest(for request: PrototypeHttpRequest) -> URLRequest? {
-        guard let url = URL(string: request.url) else { return nil }
+        guard let url = URL(string: request.url), let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https", let host = url.host, !host.isEmpty else { return nil }
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = request.method.rawValue
         urlRequest.timeoutInterval = Double(request.timeoutMs) / 1000
@@ -161,6 +190,10 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
     private var status = 0
     private var headers: [String: String] = [:]
     private var metricsMs: Int?
+    private var inspectedMetrics = false
+    private var policyError: PrototypeRequestError?
+    private var currentRequest: URLRequest
+    private var redirectCount = 0
     private var tooLarge = false
     /// A non-2xx status ends the call at the headers: the outcome is `http_error`, so its body is
     /// never read and the size cap does not apply to it.
@@ -169,10 +202,85 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
     private var cancelledByCaller = false
     private var deadline: DispatchWorkItem?
 
-    init(maxBytes: Int, timeoutMs: Int, url: String) {
+    init(maxBytes: Int, timeoutMs: Int, request: URLRequest) {
         self.maxBytes = maxBytes
         self.timeoutMs = timeoutMs
-        self.url = url
+        url = request.url?.absoluteString ?? ""
+        currentRequest = request
+    }
+
+    var canProceed: Bool {
+        lock.withLock { continuation != nil && !timedOut && !cancelledByCaller && policyError == nil }
+    }
+
+    func reject(_ error: PrototypeRequestError = PrototypeRequestEgressCheck.blocked) {
+        lock.withLock {
+            policyError = error
+            body.removeAll()
+        }
+    }
+
+    func inspectConnection(address: String, url: URL, port: Int?, egress: PrototypeRequestEgressCheck) -> Bool {
+        guard egress.checkConnected(address: address, url: url, port: port) else {
+            reject()
+            return false
+        }
+        return true
+    }
+
+    func inspectMetrics(_ transactions: [PrototypeConnectionMetric], egress: PrototypeRequestEgressCheck) -> Bool {
+        lock.withLock { inspectedMetrics = true }
+        var networkLoad = false
+        for transaction in transactions {
+            if transaction.isProxyConnection { reject(); return false }
+            guard transaction.isNetworkLoad else { continue }
+            networkLoad = true
+            guard let address = transaction.remoteAddress, let url = transaction.url,
+                  inspectConnection(address: address, url: url, port: transaction.remotePort, egress: egress)
+            else { reject(); return false }
+        }
+        if !networkLoad { reject() }
+        return networkLoad
+    }
+
+    func inspectMissingMetrics(
+        using provider: any PrototypeConnectionMetricsProviding, egress: PrototypeRequestEgressCheck
+    ) {
+        let needsMetrics = lock.withLock { status != 0 && !inspectedMetrics }
+        if needsMetrics { _ = inspectMetrics(provider.transactions(for: nil), egress: egress) }
+    }
+
+    /// Builds redirects from the previous authored request rather than trusting Foundation's
+    /// proposed method, body or credentials. Only the proposed URL is used.
+    func redirect(to url: URL, status: Int, egress: PrototypeRequestEgressCheck) async throws -> URLRequest {
+        var next = try lock.withLock {
+            guard redirectCount < 5, let previous = currentRequest.url,
+                  !(previous.scheme?.lowercased() == "https" && url.scheme?.lowercased() == "http")
+            else {
+                throw PrototypeRequestEgressCheck.blocked
+            }
+            redirectCount += 1
+            var next = currentRequest
+            next.url = url
+            if !PrototypeRequestEgressCheck.sameOrigin(previous, url) {
+                next.setValue(nil, forHTTPHeaderField: "Authorization")
+            }
+            return next
+        }
+        // Fetch's rule, matching the host executor: POST becomes GET on 301/302, any method but
+        // HEAD becomes GET on 303, and 307/308 keep the method and body.
+        let method = next.httpMethod ?? "GET"
+        if (status == 303 && method != "HEAD") || ([301, 302].contains(status) && method == "POST") {
+            next.httpMethod = "GET"
+            next.httpBody = nil
+            next.httpBodyStream = nil
+            for name in ["Content-Type", "Content-Length", "Content-Encoding", "Content-Language", "Content-Location"] {
+                next.setValue(nil, forHTTPHeaderField: name)
+            }
+        }
+        try await egress.validate(next)
+        lock.withLock { currentRequest = next }
+        return next
     }
 
     func install(_ continuation: CheckedContinuation<PrototypeHttpResponse, Error>) {
@@ -213,7 +321,7 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
     func append(_ data: Data) -> Bool {
         lock.withLock {
             // A cancelled non-2xx body can still deliver chunks; none of it is kept or counted.
-            if skippedBody { return false }
+            if skippedBody || policyError != nil { return false }
             body.append(data)
             if body.count > maxBytes { tooLarge = true }
             return !tooLarge
@@ -234,9 +342,16 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
                 let continuation = self.continuation
                 self.continuation = nil
                 let durationMs = metricsMs ?? measuredMs
+                // The caller's cancel and the total deadline outrank a policy rejection that races
+                // them, so a late DNS, redirect or metrics refusal cannot turn the promised
+                // `cancelled` or `timeout` into `blocked_destination` or `network` (#14557).
+                let interrupted = timedOut || cancelledByCaller
+                if let policyError, !interrupted {
+                    return (continuation, .failure(PrototypeHttpFailure(error: policyError, durationMs: durationMs)))
+                }
                 // Cancelling a non-2xx body ends the task with a cancel error that is ours, not a failure.
-                let skipped = skippedBody && !timedOut && !cancelledByCaller
-                if tooLarge || (error != nil && !skipped) {
+                let skipped = skippedBody && !interrupted
+                if tooLarge || policyError != nil || (error != nil && !skipped) {
                     let mapped = PrototypeURLErrorMapping.map(
                         error ?? URLError(.cancelled), url: url, timeoutMs: timeoutMs, timedOut: timedOut,
                         tooLarge: tooLarge, cancelledByCaller: cancelledByCaller, maxBytes: maxBytes
@@ -262,6 +377,14 @@ final class PrototypeURLSessionDelegate: NSObject, URLSessionDataDelegate, @unch
     private let lock = NSLock()
     private var calls: [Int: PrototypeURLSessionCall] = [:]
     private var starts: [Int: Double] = [:]
+    private let egress: PrototypeRequestEgressCheck
+
+    private let metrics: any PrototypeConnectionMetricsProviding
+
+    init(egress: PrototypeRequestEgressCheck, metrics: any PrototypeConnectionMetricsProviding) {
+        self.egress = egress
+        self.metrics = metrics
+    }
 
     func register(_ call: PrototypeURLSessionCall, for handle: PrototypeURLSessionTaskHandle) {
         lock.withLock {
@@ -272,6 +395,23 @@ final class PrototypeURLSessionDelegate: NSObject, URLSessionDataDelegate, @unch
 
     private func call(for task: URLSessionTask) -> PrototypeURLSessionCall? {
         lock.withLock { calls[task.taskIdentifier] }
+    }
+
+    func urlSession(
+        _: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        guard let call = call(for: task), let url = request.url else { return completionHandler(nil) }
+        Task { [egress] in
+            do {
+                let next = try await call.redirect(to: url, status: response.statusCode, egress: egress)
+                completionHandler(call.canProceed ? next : nil)
+            } catch {
+                call.reject()
+                completionHandler(nil)
+                task.cancel()
+            }
+        }
     }
 
     func urlSession(
@@ -297,16 +437,21 @@ final class PrototypeURLSessionDelegate: NSObject, URLSessionDataDelegate, @unch
     }
 
     func urlSession(_: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        if let call = call(for: task), !call.inspectMetrics(self.metrics.transactions(for: metrics), egress: egress) {
+            task.cancel()
+        }
         let seconds = metrics.taskInterval.duration
         if seconds > 0 { call(for: task)?.record(metricsMs: Int((seconds * 1000).rounded())) }
     }
 
     func urlSession(_: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        let (call, start) = lock.withLock { (
-            calls.removeValue(forKey: task.taskIdentifier),
-            starts.removeValue(forKey: task.taskIdentifier)
-        ) }
+        let (call, start) = lock.withLock {
+            let call = calls.removeValue(forKey: task.taskIdentifier)
+            let start = starts.removeValue(forKey: task.taskIdentifier)
+            return (call, start)
+        }
         let measured = start.map { max(0, Int((ProcessInfo.processInfo.systemUptime * 1000 - $0).rounded())) } ?? 0
+        call?.inspectMissingMetrics(using: metrics, egress: egress)
         call?.finish(error: error, measuredMs: measured)
     }
 }

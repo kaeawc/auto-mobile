@@ -1,3 +1,5 @@
+import { raceWithDeadline } from "../raceWithDeadline";
+import { combineAbortSignals } from "../AbortContext";
 import { logger } from "../logger";
 import { BootedDevice, DeviceInfo, ActionableError } from "../../models";
 import {
@@ -40,6 +42,12 @@ export interface BootedDeviceScan {
 }
 
 export interface BootedDeviceScanOptions {
+  foreignSerials?: ReadonlySet<string>;
+  /** Resolve ownership after the single serial-only listing, before enrichment. */
+  resolveForeignSerials?: (
+    serials: readonly string[],
+    signal?: AbortSignal,
+  ) => Promise<ReadonlySet<string>>;
   coalesceInventoryEnrichment?: boolean;
   /** Read listings only: briefly reuse names proven on the same ADB connection. */
   memoizeReadAvdNames?: boolean;
@@ -50,6 +58,8 @@ export interface BootedDeviceScanOptions {
   targetDeviceId?: string;
   deadlineMs?: number;
   readinessOnly?: boolean;
+  /** Keep identity probes, but skip metadata and display I/O unused by liveness. */
+  skipProfileEnrichment?: boolean;
   /**
    * List what is attached and stop there: no `emu avd name`, no
    * `getprop ro.boot.qemu.avd_name`, no `getprop ro.product.model`. Every
@@ -73,6 +83,7 @@ export type InventoryNameResult = {
   name: string;
   diagnostic?: ReadinessDiagnostic;
   consoleBusyDuringProbe?: boolean;
+  nameProbeTimedOut?: boolean;
 };
 export type InventoryDisplayResult = Awaited<ReturnType<typeof readAndroidDeviceDisplaysChecked>>;
 export interface ReadNameConnection {
@@ -216,6 +227,24 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
           timeoutMs: this.deviceListScanTimeout(options),
           signal,
         }));
+      const scanDeadlineMs = Math.min(
+        options.deadlineMs ?? Infinity,
+        this.deps.timer().now() +
+          Math.min(options.timeoutMs ?? READINESS_NAME_TIMEOUT_MS, READINESS_NAME_TIMEOUT_MS),
+      );
+      const ownershipController = new AbortController();
+      const ownershipSignal = combineAbortSignals(signal, ownershipController.signal);
+      const foreignSerials = await raceWithDeadline(
+        () => this.foreignScanSerials(devices, options, ownershipSignal),
+        {
+          timer: this.deps.timer(),
+          signal,
+          timeoutMs: Math.max(0, scanDeadlineMs - this.deps.timer().now()),
+          label: "Android inventory ownership lookup",
+          onTimeout: () =>
+            ownershipController.abort(new Error("Android inventory scan deadline expired")),
+        },
+      );
       perf.endOperation("adbDeviceScan");
       this.invalidateReadNameConnections(devices, options);
       this.invalidateInventorySerials(devices, options);
@@ -236,13 +265,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       );
 
       const remainingScanMs = () =>
-        Math.max(
-          0,
-          Math.min(
-            READINESS_NAME_TIMEOUT_MS,
-            (options.deadlineMs ?? Infinity) - this.deps.timer().now(),
-          ),
-        );
+        Math.max(0, Math.min(READINESS_NAME_TIMEOUT_MS, scanDeadlineMs - this.deps.timer().now()));
       const infoTimeoutMs = Math.min(
         remainingScanMs(),
         options.timeoutMs ?? READINESS_NAME_TIMEOUT_MS,
@@ -251,6 +274,9 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       perf.startOperation("avdNameResolution");
       const emulatorResults = await Promise.all(
         emulatorDevices.map(async (device) => {
+          if (foreignSerials?.has(device.deviceId)) {
+            return { device: this.foreignDevice(device, options), diagnostic: undefined };
+          }
           const deadlineMs = this.deps.timer().now() + remainingScanMs();
           const nameTimeoutMs = Math.min(infoTimeoutMs, remainingScanMs());
           const avdName =
@@ -266,7 +292,9 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
             remainingScanMs(),
           );
           const model =
-            modelRemainingMs > 0 && !(options.readinessOnly && options.coalesceInventoryEnrichment)
+            modelRemainingMs > 0 &&
+            !options.skipProfileEnrichment &&
+            !(options.readinessOnly && options.coalesceInventoryEnrichment)
               ? await this.modelForBootedEmulator(
                   device,
                   avdName,
@@ -280,7 +308,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
             remainingScanMs(),
           );
           const architecture =
-            architectureRemainingMs > 0 && !options.readinessOnly
+            architectureRemainingMs > 0 && this.includesFullMetadata(options)
               ? await this.resolveEmulatorArchitecture(
                   device,
                   avdName,
@@ -303,31 +331,21 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
         }
       }
 
-      for (const device of physicalDevices) {
-        const physicalTimeoutMs = this.physicalScanTimeout(options, remainingScanMs());
-        if (physicalTimeoutMs <= 0) {
-          runningDevices.push(this.discoveredPhysicalDevice(device, undefined, undefined));
-          continue;
-        }
-        const [model, architecture] = await Promise.all([
-          this.resolveDeviceModel(
-            device,
-            physicalTimeoutMs,
-            options.skipNameEnrichment === true,
-            signal,
-          ),
-          this.resolvePhysicalDeviceArchitecture(
-            device,
-            physicalTimeoutMs,
-            options.skipNameEnrichment === true,
-            signal,
-          ),
-        ]);
-        runningDevices.push(this.discoveredPhysicalDevice(device, model, architecture));
-      }
-      if (!options.readinessOnly) {
+      runningDevices.push(
+        ...(await this.scanPhysicalDevices(
+          physicalDevices,
+          options,
+          foreignSerials,
+          remainingScanMs,
+          signal,
+        )),
+      );
+      if (this.includesFullMetadata(options)) {
         await Promise.all(
           runningDevices.map(async (device) => {
+            if (device.foreignOwned || remainingScanMs() <= 0) {
+              return;
+            }
             const snapshotDevice = devices.find(
               (snapshot) => snapshot.deviceId === device.deviceId,
             );
@@ -348,7 +366,87 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
     }
   }
 
+  private foreignScanSerials(
+    devices: BootedDevice[],
+    options: BootedDeviceScanOptions,
+    signal?: AbortSignal,
+  ): Promise<ReadonlySet<string> | undefined> {
+    return options.foreignSerials
+      ? Promise.resolve(options.foreignSerials)
+      : (options.resolveForeignSerials?.(
+          devices.map((device) => device.deviceId),
+          signal,
+        ) ?? Promise.resolve(undefined));
+  }
+
+  private async scanPhysicalDevices(
+    physicalDevices: BootedDevice[],
+    options: BootedDeviceScanOptions,
+    foreignSerials: ReadonlySet<string> | undefined,
+    remainingScanMs: () => number,
+    signal?: AbortSignal,
+  ): Promise<BootedDevice[]> {
+    const runningDevices: BootedDevice[] = [];
+    for (const device of physicalDevices) {
+      if (foreignSerials?.has(device.deviceId)) {
+        runningDevices.push(this.foreignDevice(device, options));
+        continue;
+      }
+      const physicalTimeoutMs = this.physicalScanTimeout(options, remainingScanMs());
+      if (physicalTimeoutMs <= 0) {
+        runningDevices.push(this.discoveredPhysicalDevice(device, undefined, undefined));
+        continue;
+      }
+      const [model, architecture] = await Promise.all([
+        this.resolveDeviceModel(
+          device,
+          physicalTimeoutMs,
+          options.skipNameEnrichment === true,
+          signal,
+        ),
+        this.resolvePhysicalDeviceArchitecture(
+          device,
+          physicalTimeoutMs,
+          options.skipNameEnrichment === true,
+          signal,
+        ),
+      ]);
+      runningDevices.push(this.discoveredPhysicalDevice(device, model, architecture));
+    }
+    return runningDevices;
+  }
+
+  private foreignDevice(device: BootedDevice, options: BootedDeviceScanOptions): BootedDevice {
+    const state = inventoryEnrichmentState(this.deps.timer());
+    const inventoryKey = this.inventoryCacheKey(device, options);
+    const transportId = transportIdFor(device);
+    const cachedName =
+      (inventoryKey ? state.names.get(inventoryKey)?.name : undefined) ??
+      (transportId ? state.readNames.get(`${device.deviceId}\0${transportId}`)?.name : undefined);
+    const emulator = device.deviceId.startsWith("emulator-");
+    const cacheKey = this.deviceInfoCacheKey(
+      device.deviceId,
+      emulator ? (cachedName ?? "") : undefined,
+    );
+    const model = cacheKey ? this.modelNameCache.get(cacheKey) : undefined;
+    const architecture = cacheKey ? this.architectureCache.get(cacheKey) : undefined;
+    const result = emulator
+      ? this.discoveredEmulatorDevice(device, { name: cachedName ?? "" }, model, architecture)
+      : this.discoveredPhysicalDevice(device, model, architecture);
+    // Deliberately skipped identity is not a failed or timed-out console probe.
+    delete result.consoleBusyDuringProbe;
+    delete result.nameProbeTimedOut;
+    return { ...result, foreignOwned: true };
+  }
+
+  private includesFullMetadata(options: BootedDeviceScanOptions): boolean {
+    return !options.readinessOnly && !options.skipProfileEnrichment;
+  }
+
   private physicalScanTimeout(options: BootedDeviceScanOptions, timeoutMs: number): number {
+    if (options.skipProfileEnrichment) {
+      return 0;
+    }
     // Inventory overlays consume only emulator names; handset metadata cannot contribute.
     return options.readinessOnly && options.coalesceInventoryEnrichment ? 0 : timeoutMs;
   }
@@ -506,6 +604,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
             result.name.trim() &&
             !result.diagnostic &&
             !result.consoleBusyDuringProbe &&
+            !result.nameProbeTimedOut &&
             !flightSignal?.aborted &&
             state.readNameConnections.get(device.deviceId) === currentConnection
           ) {
@@ -708,7 +807,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
 
   private async modelForBootedEmulator(
     device: BootedDevice,
-    avdName: { name: string; consoleBusyDuringProbe?: boolean },
+    avdName: { name: string; consoleBusyDuringProbe?: boolean; nameProbeTimedOut?: boolean },
     infoTimeoutMs: number,
     skipNameEnrichment: boolean,
     signal?: AbortSignal,
@@ -729,7 +828,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
 
   private async resolveEmulatorArchitecture(
     device: BootedDevice,
-    avdName: { name: string; consoleBusyDuringProbe?: boolean },
+    avdName: { name: string; consoleBusyDuringProbe?: boolean; nameProbeTimedOut?: boolean },
     infoTimeoutMs: number,
     skipNameEnrichment: boolean,
     signal?: AbortSignal,
@@ -761,12 +860,13 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
 
   private discoveredEmulatorDevice(
     device: BootedDevice,
-    avdName: { name: string; consoleBusyDuringProbe?: boolean },
+    avdName: { name: string; consoleBusyDuringProbe?: boolean; nameProbeTimedOut?: boolean },
     model: string | undefined,
     architecture: string | undefined,
   ): BootedDevice {
     return {
       ...device,
+      foreignOwned: undefined,
       name: avdName.name || this.deps.unknownEmulatorName(device.deviceId),
       platform: "android",
       deviceId: device.deviceId,
@@ -775,6 +875,10 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       ...(avdName.name === "" &&
         avdName.consoleBusyDuringProbe === true && {
           consoleBusyDuringProbe: avdName.consoleBusyDuringProbe,
+        }),
+      ...(avdName.name === "" &&
+        avdName.nameProbeTimedOut === true && {
+          nameProbeTimedOut: true,
         }),
       ...(model ? { model } : {}),
       ...(architecture ? { architecture } : {}),
@@ -788,6 +892,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
   ): BootedDevice {
     return {
       ...device,
+      foreignOwned: undefined,
       name: model ?? device.deviceId,
       platform: "android",
       deviceId: device.deviceId,

@@ -4,7 +4,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import {
   SESSION_CREATION_TIMEOUT_CODE,
   SessionCreationTimeoutError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { forceStuckSessionRelease } from "../../src/daemon/releaseSessionAndDevice";
 import {
   STUCK_REAP_WARN_MS,
@@ -15,8 +15,7 @@ import {
   SESSION_RELEASE_TEARDOWN_CAP_MS,
   SessionManager,
 } from "../../src/daemon/sessionManager";
-import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
-import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
+import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import type { DeviceSessionStatus } from "../../src/db/types";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -44,9 +43,11 @@ class ParkablePersistence extends FakeDeviceSessionPersistence {
   parkCreate: Promise<void> | undefined;
   parkRelease: Promise<void> | undefined;
 
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  override async upsertActiveSession(
+    ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+  ): Promise<number> {
     await this.parkCreate;
-    await super.upsertActiveSession(record);
+    return super.upsertActiveSession(...args);
   }
 
   override async markReleased(

@@ -84,16 +84,7 @@ describe("AdbClient transport restart marking", () => {
         seen.push(registry.isRestarting(PHONE));
         return createExecResult("", "");
       },
-      null,
-      new DefaultRetryExecutor(timer),
-      timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      registry,
+      { retryExecutor: new DefaultRetryExecutor(timer), timer, transportRestartRegistry: registry },
     );
   }
 

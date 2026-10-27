@@ -7,14 +7,17 @@ import {
   resetStoppedDeviceGestureRecordings,
   startDeviceGestureRecording,
   stopDeviceGestureRecording,
-} from "../../src/server/deviceGestureRecordingManager";
+} from "../../src/daemon/deviceGestureRecordingManager";
 import {
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
   type RecordingSessionCleanupDeps,
-} from "../../src/server/recordingSessionCleanup";
-import type { SessionManager } from "../../src/daemon/sessionManager";
+} from "../../src/daemon/recordingSessionCleanup";
+import type {
+  AbandonablePendingDeviceCleanup,
+  SessionManager,
+} from "../../src/daemon/sessionManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -92,7 +95,11 @@ describe("releasing a session whose device gesture recording stop is in flight (
     expect(ownedDeviceGestureRecordingId("session-b", device.deviceId)).toBeUndefined();
 
     const releaseCallbacks: ReleaseCallback[] = [];
-    const pending: Array<{ deviceId: string; cleanup: Promise<unknown>; capMs?: number }> = [];
+    const pending: Array<{
+      deviceId: string;
+      cleanup: Promise<unknown>;
+      capMs?: number | AbandonablePendingDeviceCleanup;
+    }> = [];
     const manager: CleanupManager = {
       onSessionRelease: (callback) => void releaseCallbacks.push(callback),
       onSessionDeviceUnbound: () => undefined,
@@ -110,7 +117,20 @@ describe("releasing a session whose device gesture recording stop is in flight (
     };
     registerRecordingSessionCleanup(manager, deps);
 
-    releaseCallbacks[0]("session-a", device.deviceId, "idle-timeout", {} as never, undefined);
+    releaseCallbacks[0]?.(
+      "session-a",
+      device.deviceId,
+      "idle-timeout",
+      {
+        sessionId: "session-a",
+        deviceId: device.deviceId,
+        releaseReason: "idle-timeout",
+        releasedAtMs: 0,
+        terminal: false,
+        heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
+      },
+      {},
+    );
 
     expect(pending).toHaveLength(1);
     expect(pending[0].deviceId).toBe(device.deviceId);

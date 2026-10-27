@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { BootedDevice } from "../../../../src/models";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
@@ -27,11 +27,11 @@ describe("AndroidCtrlProxyClient input delivery", () => {
     });
     closedSpy = spyOn(client, "onConnectionClosed").mockImplementation(() => {});
     client.connectionTestHooks.socket = socket;
-    client["autoReconnectEnabled"] = false;
+    client.connectionTestHooks.autoReconnectEnabled = false;
     socket.on("message", (data: string) => {
-      void client["handleMessage"](data);
+      void client.testHooks.handleMessage(data);
     });
-    socket.on("close", () => client["finishEstablishedConnection"](socket));
+    socket.on("close", () => client.testHooks.finishEstablishedConnection(socket));
     connectionSpy = spyOn(client, "connectWebSocket").mockResolvedValue(true);
   });
 
@@ -113,4 +113,8 @@ describe("AndroidCtrlProxyClient input delivery", () => {
       send.mockRestore();
     });
   }
+});
+
+afterEach(() => {
+  mock.restore();
 });

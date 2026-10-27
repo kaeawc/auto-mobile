@@ -13,7 +13,7 @@ import { validatePrototypeSpec } from "../../../src/features/prototype/prototype
 
 const spec = (root: unknown) => ({
   id: "r",
-  window: { placement: { type: "fullscreen" } },
+  window: { placement: { type: "fullscreen" }, opacity: 1 },
   root,
 });
 const list = (children: unknown[], items: unknown[] = [{ a: 1 }], as = "item") => ({
@@ -425,7 +425,7 @@ describe("substituted text length", () => {
   const text = (value: string) => ({ type: "text", text: value });
   test("data amplification is rejected without building the replacement", () => {
     const input = { ...spec(text("{data:/b}".repeat(80_000))), data: { b: "x".repeat(200_000) } };
-    expect(validatePrototypeSpec(input)).toEqual(error("root.text"));
+    expect<unknown>(validatePrototypeSpec(input)).toEqual(error("root.text"));
   });
   test.each([16_384, 16_385])("data boundary %i", (length) => {
     const input = { ...spec(text("{data:/b}")), data: { b: "x".repeat(length) } };
@@ -446,7 +446,7 @@ describe("substituted text length", () => {
       "onTap[0].value",
     ],
   ] as const)("repeat %s is capped", (_name, child, field) => {
-    expect(
+    expect<unknown>(
       validatePrototypeSpec({
         ...spec(list([child], [{ b: "x".repeat(8193) }])),
         state: { k: "" },
@@ -455,12 +455,12 @@ describe("substituted text length", () => {
   });
   test("repeat key amplification uses the fixed error before binding", () => {
     const child = { ...text("tap"), onTap: [{ type: "toggle", key: "{item.b}".repeat(2000) }] };
-    expect(validatePrototypeSpec(spec(list([child], [{ b: "x".repeat(100_000) }])))).toEqual(
-      error("root.children[0].onTap[0].key"),
-    );
+    expect<unknown>(
+      validatePrototypeSpec(spec(list([child], [{ b: "x".repeat(100_000) }]))),
+    ).toEqual(error("root.children[0].onTap[0].key"));
   });
   test("repeat counts index and each item's own rendered length", () => {
-    expect(
+    expect<unknown>(
       validatePrototypeSpec(
         spec(
           list(
@@ -470,7 +470,7 @@ describe("substituted text length", () => {
         ),
       ),
     ).toEqual(error("root.children[0].text"));
-    expect(
+    expect<unknown>(
       validatePrototypeSpec(
         spec(list([text("{item.b}{item.b}")], [{ b: "s" }, { b: "x".repeat(8193) }])),
       ),
@@ -478,10 +478,10 @@ describe("substituted text length", () => {
   });
   test("data cascades into repeat and path items use the same bound", () => {
     const root = list([text("{data:/t}")], [{ b: "x".repeat(8193) }]);
-    expect(validatePrototypeSpec({ ...spec(root), data: { t: "{item.b}{item.b}" } })).toEqual(
-      error("root.children[0].text"),
-    );
-    expect(
+    expect<unknown>(
+      validatePrototypeSpec({ ...spec(root), data: { t: "{item.b}{item.b}" } }),
+    ).toEqual(error("root.children[0].text"));
+    expect<unknown>(
       validatePrototypeSpec({
         ...spec({
           ...root,
@@ -535,7 +535,7 @@ describe("substituted text total", () => {
     if (count === 1) {
       expect(result.success).toBe(true);
     } else {
-      expect(result).toEqual(totalError("root.children[1].text"));
+      expect<unknown>(result).toEqual(totalError("root.children[1].text"));
     }
   });
   test("literal text inside a repeat is not charged", () => {
@@ -583,7 +583,9 @@ describe("substituted text total", () => {
       ...spec(list([child, { ...text("t"), visibleWhen: operand }], [{ b: "x".repeat(16375) }])),
       state: { k: "" },
     };
-    expect(validatePrototypeSpec(input)).toEqual(totalError("root.children[1].visibleWhen.equals"));
+    expect<unknown>(validatePrototypeSpec(input)).toEqual(
+      totalError("root.children[1].visibleWhen.equals"),
+    );
   });
   test.each([64, 65])("repeat total charges each item in order with %i fields", (count) => {
     const input = spec(
@@ -598,7 +600,7 @@ describe("substituted text total", () => {
     if (count === 64) {
       expect(result.success).toBe(true);
     } else {
-      expect(result).toEqual(totalError("root.children[64].text"));
+      expect<unknown>(result).toEqual(totalError("root.children[64].text"));
     }
   });
   test("per-field error wins on the first item before its total charge", () => {

@@ -39,7 +39,7 @@ describe("failed recovery release caller ordering", () => {
           events.push(["attempt.done", id]);
           return id;
         },
-        { expiryOrigin },
+        { expiryOrigin: expiryOrigin ? "cleanup-expired" : undefined },
       );
       await started.promise;
       expect(events).toEqual([["retry", "s1", "d1", "cleanup-expired"], ["attempt"]]);
@@ -74,7 +74,7 @@ describe("failed recovery release caller ordering", () => {
           events.push(["attempt", null]);
           return null;
         },
-        { expiryOrigin: true },
+        { expiryOrigin: "cleanup-expired" },
       ),
     ).toBeNull();
     expect(events).toEqual([
@@ -108,7 +108,7 @@ describe("failed recovery release caller ordering", () => {
             }
             return "returned-device";
           },
-          { expiryOrigin: true },
+          { expiryOrigin: "cleanup-expired" },
         )!,
       ).rejects.toThrow(`Failed to release recovery-fenced session s1: ${failure} failed`);
       expect(events).toEqual([

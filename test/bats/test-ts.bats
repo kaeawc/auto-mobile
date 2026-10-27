@@ -59,6 +59,12 @@ write_junit_report_with_lines() {
 setup() {
   # scripts/test-ts.sh resolves ROOT with pwd -P; a checkout reached through a
   # symlink (macOS /tmp -> /private/tmp) makes $PWD differ from what it prints.
+  # Stubbed lanes own their own pool and load source. Defaults/retry tests must
+  # not inherit the invoking host's limits or consume another lane's slots.
+  export AUTOMOBILE_COORDINATION_DIR="$BATS_TEST_TMPDIR/coordination"
+  export AUTOMOBILE_TEST_LOADAVG_FILE="$BATS_TEST_TMPDIR/loadavg"
+  echo 0 > "$AUTOMOBILE_TEST_LOADAVG_FILE"
+  unset AUTOMOBILE_HOST_TEST_SLOTS AUTOMOBILE_UNIT_SHARD_RETRIES AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
   ROOT_PHYS="$(pwd -P)"
   SHARD_SCRATCH="$BATS_TEST_TMPDIR/scratch"
   export AUTOMOBILE_TEST_TS_SCRATCH_DIR="$SHARD_SCRATCH"
@@ -68,6 +74,9 @@ setup() {
   # into stubbed invocations; tests that need an OS set RUNNER_OS themselves.
   unset RUNNER_OS AUTOMOBILE_TEST_TIMEOUT_MS AUTOMOBILE_UNIT_TEST_WORKERS \
     AUTOMOBILE_INTEGRATION_TEST_WORKERS AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE
+  # Host load limits must not override the defaults asserted by stubbed lanes.
+  # Tests that exercise retries or wall budgets set their own values explicitly.
+  unset AUTOMOBILE_UNIT_SHARD_RETRIES AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
   # Chunking and shared-process knobs are lane tuning that a caller shell (CI job env,
   # orchestrator) may export; every test that depends on them sets them explicitly.
   unset AUTOMOBILE_UNIT_TEST_CHUNK_FILES AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE \
@@ -75,6 +84,10 @@ setup() {
   # The portable watchdog's TERM-to-KILL grace is 2s in production; every
   # timeout test would pay it, so tests shrink it (the escalation still runs).
   export AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS=0.2
+  # Stubbed lanes assert the full discovered file set on every OS. The macOS-only
+  # (iOS) skip has its own tests at the end of this file, which set
+  # AUTOMOBILE_MACOS_ONLY_TESTS=skip.
+  export AUTOMOBILE_MACOS_ONLY_TESTS=include
   STUB_BIN="$(mktemp -d)"
   REAL_BUN="$(command -v bun)"
   export REAL_BUN
@@ -128,6 +141,14 @@ printf '%b' "${TIMING_CHANGED_FILES:-}"
 EOF
 cat > "$STUB_BIN/bun" <<'EOF'
 #!/usr/bin/env bash
+if [[ "$1" == */scripts/lib/macOsOnlyTests.ts ]]; then
+  exec "$REAL_BUN" "$@"
+fi
+if [[ "$1" == */scripts/lib/changedUnitTests.ts ]]; then
+  printf '%s\n' "$2" > "$BUN_ARGS_FILE.selection"
+  for ((i=0; i<${STUB_SELECTED_COUNT:-12}; i+=1)); do printf 'test/fixture%02d.test.ts\n' "$i"; done
+  exit 0
+fi
 if [[ "$1" == "run" && "$2" == "scripts/lib/junit-testcase-timings.ts" ]]; then
   exec "$REAL_BUN" "$@"
 fi
@@ -197,6 +218,14 @@ if [[ "$1" == test && -n "${STUB_SHARED_FAIL:-}" && " $* " != *" --isolate "* ]]
 fi
 if [[ "$1" == test && -n "${STUB_BUN_TEST_MODE_FILE:-}" ]]; then
   printf '%s\n' "${AUTOMOBILE_TEST_MODE:-unset}" >> "$STUB_BUN_TEST_MODE_FILE"
+fi
+# Coverage now records process groups through the portable watchdog. Inject
+# the command's timeout status while asserting its inherited wall budget.
+if [[ ( "$1" == test || ( "$1" == --config=* && "${2:-}" == test ) ) && -n "${STUB_BUN_WALL_EXIT:-}" ]]; then
+  if [[ -n "${STUB_BUN_WALL_FILE:-}" ]]; then
+    printf '%s\n' "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" >> "$STUB_BUN_WALL_FILE"
+  fi
+  exit "$STUB_BUN_WALL_EXIT"
 fi
 if [[ -n "${STUB_BUN_EXIT:-}" ]]; then exit "$STUB_BUN_EXIT"; fi
 if [[ -n "${STUB_BUN_WALL_FILE:-}" ]]; then
@@ -268,7 +297,8 @@ while [[ "$#" -gt 0 ]]; do
   esac
   shift
 done
-if [[ -n "$shard" && "$shard" == "${STUB_CHANGED_FAIL_SHARD:-}" ]]; then
+if [[ ( -n "$shard" && "$shard" == "${STUB_CHANGED_FAIL_SHARD:-}" ) ||
+  ( -n "${STUB_CHANGED_FAIL_SHARD:-}" && "${AUTOMOBILE_WATCHDOG_LABEL:-}" == "changed shard ${STUB_CHANGED_FAIL_SHARD}" ) ]]; then
   echo "simulated shard failure" >&2
   exit 7
 fi
@@ -343,7 +373,7 @@ EOF
 
 teardown() {
   rm -rf "$STUB_BIN"
-  rm -f "$BUN_ARGS_FILE" "$STUB_RECHECK_INDEX"
+  rm -f "$BUN_ARGS_FILE" "$BUN_ARGS_FILE.selection" "$STUB_RECHECK_INDEX"
 }
 
 run_lane() {
@@ -1386,15 +1416,14 @@ EOF
   [[ "$output" != *"--timeout 5000"* ]]
 }
 
-@test "changed lane delegates affected selection to Bun" {
+@test "changed lane resolves explicit files before round-robin sharding" {
   run env PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
     AUTOMOBILE_UNIT_TEST_WORKERS=3 bash "$SCRIPT" changed
   [ "$status" -eq 0 ]
   [[ "$output" != *"test-ts: unit lane cores="* ]]
-  [ "$(printf '%s\n' "$output" | grep -c -- '--changed=origin/main')" -eq 3 ]
-  for shard in 1 2 3; do
-    [[ "$output" == *"--shard=$shard/3"* ]]
-  done
+  [[ "$output" != *"--changed="* && "$output" != *"--shard="* ]]
+  [ "$(cat "$BUN_ARGS_FILE.selection")" = origin/main ]
+  [ "$(printf '%s\n' "$output" | grep -c 'fixture.*test.ts')" -eq 3 ]
 }
 
 @test "changed shards use a per-shard 180s budget and write separate JUnit reports" {
@@ -1404,28 +1433,28 @@ EOF
     AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir" STUB_BUN_WALL_FILE="$wall_file" \
     bash "$SCRIPT" changed
   [ "$status" -eq 0 ]
-  [ -s "$report_dir/changed-shard-1.xml" ]
-  [ -s "$report_dir/changed-shard-2.xml" ]
+  [ -s "$report_dir/shard-0.xml" ]
+  [ -s "$report_dir/shard-1.xml" ]
   [ -f "$SHARD_SCRATCH/test-ts-changed-shards/shard-0.log" ]
-  grep -q -- '--changed=origin/main --shard=1/2' "$BUN_ARGS_FILE"
+  ! grep -q -- '--changed=' "$BUN_ARGS_FILE"
   [ "$(grep -c '^180$' "$wall_file")" -eq 2 ]
 }
 
 @test "changed lane names a failing shard" {
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 \
-    STUB_CHANGED_FAIL_SHARD=2/2 bash "$SCRIPT" changed
+    STUB_CHANGED_FAIL_SHARD=2 bash "$SCRIPT" changed
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL: changed shard 2 exited with status 7"* ]]
 }
 
-@test "changed lane accepts a shard with no selected files" {
+@test "changed lane accepts no selected files without launching shards" {
   report_dir="$BATS_TEST_TMPDIR/changed-reports"
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 \
-    STUB_CHANGED_EMPTY_SHARD=2/2 AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir" \
+    STUB_SELECTED_COUNT=0 AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir" \
     bash "$SCRIPT" changed
   [ "$status" -eq 0 ]
-  [ -s "$report_dir/changed-shard-1.xml" ]
-  [ ! -e "$report_dir/changed-shard-2.xml" ]
+  [[ "$output" == *'No changed unit tests'* ]]
+  [ ! -e "$report_dir/shard-0.xml" ]
 }
 
 @test "changed lane keeps explicit paths and passthrough args in one process" {
@@ -1454,7 +1483,7 @@ EOF
     AUTOMOBILE_UNIT_TEST_BASE_REF=refs/remotes/origin/release \
     bash "$SCRIPT" changed
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--changed=refs/remotes/origin/release"* ]]
+  [ "$(cat "$BUN_ARGS_FILE.selection")" = refs/remotes/origin/release ]
 }
 
 @test "integration lane selects the canonical suffix conservatively" {
@@ -1695,30 +1724,21 @@ EOF
 }
 
 @test "coverage wall timeout is 720 seconds" {
-  cat > "$STUB_BIN/timeout" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$*" > "$BATS_TEST_TMPDIR/timeout-args"
-exit 124
-EOF
-  chmod +x "$STUB_BIN/timeout"
-
-  run env -u AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
+  wall_file="$BATS_TEST_TMPDIR/wall-budgets"
+  run env -u AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS PATH="$STUB_BIN:$PATH" \
+    STUB_BUN_WALL_EXIT=124 STUB_BUN_WALL_FILE="$wall_file" bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
-  grep -q -- '-k 2 720 ' "$BATS_TEST_TMPDIR/timeout-args"
+  [ "$(sort -u "$wall_file")" = 720 ]
 
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=33 bash "$SCRIPT" coverage
+  : > "$wall_file"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=33 \
+    STUB_BUN_WALL_EXIT=124 STUB_BUN_WALL_FILE="$wall_file" bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
-  grep -q -- '-k 2 33 ' "$BATS_TEST_TMPDIR/timeout-args"
+  [ "$(sort -u "$wall_file")" = 33 ]
 }
 
 @test "coverage wall timeout prints a diagnostic on deadline" {
-  cat > "$STUB_BIN/timeout" <<'EOF'
-#!/usr/bin/env bash
-exit 124
-EOF
-  chmod +x "$STUB_BIN/timeout"
-
-  run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
+  run env PATH="$STUB_BIN:$PATH" STUB_BUN_WALL_EXIT=124 bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
   [[ "$output" == *"Coverage test run exceeded its 720s wall-clock budget"* ]]
   [[ "$output" == *"shard 1/2"* ]]
@@ -1752,7 +1772,7 @@ EOF
       coverage) label="Coverage"; expected_budget=720 ;;
       stress) label="Stress"; expected_budget=300 ;;
     esac
-    run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" "$mode"
+    run env PATH="$STUB_BIN:$PATH" STUB_BUN_WALL_EXIT=124 bash "$SCRIPT" "$mode"
     [ "$status" -eq 124 ]
     [[ "$output" != *"bad substitution"* ]]
     [[ "$output" == *"${label} test run exceeded its ${expected_budget}s wall-clock budget"* ]]
@@ -1804,8 +1824,8 @@ EOF
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 0 ]
   [[ "$output" == *"measuring Bun-affected unit tests"* ]]
-  grep -q -- "--changed=origin/main" "$BUN_ARGS_FILE"
-  grep -q -- "--shard=3/3" "$BUN_ARGS_FILE"
+  [ "$(cat "$BUN_ARGS_FILE.selection")" = origin/main ]
+  grep -q -- 'test/fixture00.test.ts' "$BUN_ARGS_FILE"
 }
 
 @test "timing gate treats grouping runners and the shared-process allowlist as lane inputs" {
@@ -1822,10 +1842,10 @@ EOF
   done
 }
 
-@test "timing gate accepts successful empty changed shards without JUnit files" {
+@test "timing gate accepts an empty changed selection without JUnit files" {
   run env PATH="$STUB_BIN:$PATH" BUN_TEST_TIMING_BASE_REF=origin/main \
     TIMING_CHANGED_FILES='src/example.ts\n' AUTOMOBILE_UNIT_TEST_WORKERS=2 \
-    STUB_CHANGED_EMPTY_SHARD=all bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/empty-timings.xml"
+    STUB_SELECTED_COUNT=0 bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/empty-timings.xml"
   [ "$status" -eq 0 ]
   [[ "$output" == *"No changed unit tests to validate"* ]]
 }
@@ -1838,8 +1858,8 @@ EOF
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 0 ]
   [[ "$output" == *"measuring Bun-affected unit tests"* ]]
-  grep -q -- "--changed=origin/main" "$BUN_ARGS_FILE"
-  grep -q -- "--shard=3/3" "$BUN_ARGS_FILE"
+  [ "$(cat "$BUN_ARGS_FILE.selection")" = origin/main ]
+  grep -q -- 'test/fixture00.test.ts' "$BUN_ARGS_FILE"
 }
 
 @test "timing gate reuses complete unit-lane reports for source changes" {
@@ -2406,7 +2426,8 @@ repeat_stub_times() {
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 0 ]
   [[ "$output" == *"measuring Bun-affected unit tests"* ]]
-  grep -q -- "--changed=origin/main" "$BUN_ARGS_FILE"
+  [ "$(cat "$BUN_ARGS_FILE.selection")" = origin/main ]
+  grep -q -- 'test/fixture00.test.ts' "$BUN_ARGS_FILE"
 }
 
 @test "timing gate selects Bun-affected unit tests for runtime changes" {
@@ -2417,7 +2438,8 @@ repeat_stub_times() {
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 0 ]
   [[ "$output" == *"measuring Bun-affected unit tests"* ]]
-  grep -q -- "--changed=origin/main" "$BUN_ARGS_FILE"
+  [ "$(cat "$BUN_ARGS_FILE.selection")" = origin/main ]
+  grep -q -- 'test/fixture00.test.ts' "$BUN_ARGS_FILE"
 }
 
 # Bun 1.2.x writes the source path ONLY on <testcase>; reading just the
@@ -2736,7 +2758,8 @@ EOF
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 0 ]
   [[ "$output" == *"measuring Bun-affected unit tests"* ]]
-  grep -q -- '--changed=origin/main' "$BUN_ARGS_FILE"
+  [ "$(cat "$BUN_ARGS_FILE.selection")" = origin/main ]
+  grep -q -- 'test/fixture00.test.ts' "$BUN_ARGS_FILE"
 }
 
 
@@ -3397,4 +3420,148 @@ EOF
     [ "$status" -eq 2 ]
     [[ "$output" == *"$name must be a positive integer without leading zeros"* ]]
   done
+}
+
+# macOS-only (iOS) tests: owner rule 2026-10-23, classified in test/macos-only-tests.txt.
+
+@test "macOS-only skip exits cleanly when every explicit unit target is an iOS file" {
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip \
+    bash "$SCRIPT" unit test/utils/ios-cmdline-tools/simctl.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"all 1 requested test file(s) are macOS-only"* ]]
+  ! grep -q '^test ' "$BUN_ARGS_FILE"
+}
+
+@test "macOS-only skip keeps portable files among explicit unit targets" {
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" unit test/utils/ios-cmdline-tools/simctl.test.ts test/lint/iosDeviceKindRouting.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/lint/iosDeviceKindRouting.test.ts"* ]]
+  [[ "$output" != *"simctl.test.ts"* ]]
+}
+
+@test "macOS hosts run iOS files by default" {
+  run env PATH="$STUB_BIN:$PATH" RUNNER_OS=macOS UNAME_S=Darwin AUTOMOBILE_MACOS_ONLY_TESTS=auto \
+    TEST_TS_PRINT_CMD=1 bash "$SCRIPT" unit test/utils/ios-cmdline-tools/simctl.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/utils/ios-cmdline-tools/simctl.test.ts"* ]]
+}
+
+@test "non-macOS hosts skip iOS files by default" {
+  run env PATH="$STUB_BIN:$PATH" RUNNER_OS=Linux UNAME_S=Linux AUTOMOBILE_MACOS_ONLY_TESTS=auto \
+    bash "$SCRIPT" unit test/utils/ios-cmdline-tools/simctl.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"macOS-only"* ]]
+}
+
+@test "unit discovery on a skipping host removes macOS-only files from the shard file list" {
+  cat > "$STUB_BIN/find" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == "test -type f -name *.test.ts -print" ]]; then
+  printf '%s\n' test/utils/ios-cmdline-tools/simctl.test.ts test/lint/iosDeviceKindRouting.test.ts test/server/toolRegistry.test.ts
+  exit 0
+fi
+exec "$REAL_FIND" "$@"
+EOF
+  chmod +x "$STUB_BIN/find"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_SHARD_RETRIES=0 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  files="$(grep '^test ' "$BUN_ARGS_FILE" | tr ' ' '\n' | grep '\.test\.ts$' | sort)"
+  [ "$files" = $'test/lint/iosDeviceKindRouting.test.ts\ntest/server/toolRegistry.test.ts' ]
+  [[ "$output" == *"skipping "*" macOS-only (iOS) test files on this host"* ]]
+}
+
+@test "Windows unit shards get a bunfig that also ignores macOS-only files" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  config="$SHARD_SCRATCH/bunfig.macos-only.toml"
+  [[ "$output" == *"--config=$config"* ]]
+  grep -q '"test/utils/ios-cmdline-tools/simctl.test.ts"' "$config"
+  grep -q '"scratch/\*\*"' "$config"
+  ! grep -q '"test/lint/iosDeviceKindRouting.test.ts"' "$config"
+}
+
+# #15237: Bun REPLACES the config's pathIgnorePatterns with any --path-ignore-patterns
+# flag, so the Windows unit lane (which carried the lane's two flags) ran ~300 iOS files
+# while logging that it skipped them. The skip list and the lane's own patterns must
+# travel in the config alone.
+@test "Windows unit shards carry no --path-ignore-patterns flag that would replace the skip config" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--config=$SHARD_SCRATCH/bunfig.macos-only.toml"* ]]
+  [[ "$output" != *"--path-ignore-patterns"* ]]
+  config="$SHARD_SCRATCH/bunfig.macos-only.toml"
+  grep -q '"\*\*/\*.integration.test.ts"' "$config"
+  grep -q '"test/stress/\*\*"' "$config"
+  grep -q '"test/utils/ios-cmdline-tools/simctl.test.ts"' "$config"
+}
+
+@test "Windows explicit-target and changed unit commands also keep the lane patterns in the config only" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" unit test/lint/iosDeviceKindRouting.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--config=$SHARD_SCRATCH/bunfig.macos-only.toml"* ]]
+  [[ "$output" != *"--path-ignore-patterns"* ]]
+  grep -q '"test/stress/\*\*"' "$SHARD_SCRATCH/bunfig.macos-only.toml"
+}
+
+@test "Windows safe integration shards re-state the macOS-only files next to their own ignore flags" {
+  windows_tier_fixture
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -- '--shard=' <<< "$output")" -eq 2 ]
+  while IFS= read -r shard_line; do
+    [[ "$shard_line" == *"--path-ignore-patterns $UNSAFE_ONE "* ]]
+    [[ "$shard_line" == *"--path-ignore-patterns test/integration/iosVideoRecordingStartStop.integration.test.ts "* ]]
+  done < <(grep -- '--shard=' <<< "$output")
+}
+
+@test "Bun with every ignore pattern in the config skips iOS files even when handed them by path" {
+  dir="$BATS_TEST_TMPDIR/bunproj2"
+  mkdir -p "$dir/test"
+  printf 'import { test } from "bun:test";\ntest("ios", () => { throw new Error("must not run"); });\n' > "$dir/test/ios.test.ts"
+  printf 'import { test } from "bun:test";\ntest("slow", () => { throw new Error("must not run"); });\n' > "$dir/test/slow.integration.test.ts"
+  printf 'import { test } from "bun:test";\ntest("ok", () => {});\n' > "$dir/test/ok.test.ts"
+  printf '[test]\npathIgnorePatterns = ["**/*.integration.test.ts", "test/ios.test.ts"]\n' > "$dir/skip.toml"
+  run bash -c 'cd "$1" && "$REAL_BUN" test --config=skip.toml' _ "$dir"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 pass"* ]]
+}
+
+@test "macOS-only integration files are ignored through the same bunfig" {
+  windows_tier_fixture
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--config=$SHARD_SCRATCH/bunfig.macos-only.toml"* ]]
+  grep -q '"test/integration/iosVideoRecordingStartStop.integration.test.ts"' "$SHARD_SCRATCH/bunfig.macos-only.toml"
+}
+
+@test "include mode never consults the classification and writes no bunfig" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=include TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"bunfig.macos-only"* ]]
+  [ ! -e "$SHARD_SCRATCH/bunfig.macos-only.toml" ]
+}
+
+@test "an unknown AUTOMOBILE_MACOS_ONLY_TESTS value is rejected" {
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=maybe bash "$SCRIPT" unit
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"AUTOMOBILE_MACOS_ONLY_TESTS must be auto, include or skip"* ]]
+}
+
+@test "Bun honors the skip config over explicit file arguments, in the --config= form the lane uses" {
+  dir="$BATS_TEST_TMPDIR/bunproj"
+  mkdir -p "$dir/test"
+  printf 'import { test } from "bun:test";\ntest("ios", () => { throw new Error("must not run"); });\n' > "$dir/test/ios.test.ts"
+  printf 'import { test } from "bun:test";\ntest("ok", () => {});\n' > "$dir/test/ok.test.ts"
+  printf '[test]\npathIgnorePatterns = ["test/ios.test.ts"]\n' > "$dir/skip.toml"
+  run bash -c 'cd "$1" && "$REAL_BUN" test --config=skip.toml test/ios.test.ts test/ok.test.ts' _ "$dir"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 pass"* ]]
 }

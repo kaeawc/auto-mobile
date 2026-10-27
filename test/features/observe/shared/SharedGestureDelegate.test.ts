@@ -1,3 +1,4 @@
+import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 import { describe, it, expect } from "bun:test";
 import { SharedGestureDelegate } from "../../../../src/features/observe/shared/SharedGestureDelegate";
 import type { DelegateContext } from "../../../../src/features/observe/shared/types";
@@ -15,12 +16,9 @@ function createFakeContext(overrides?: Partial<DelegateContext>): {
   const sent: string[] = [];
   const context: DelegateContext = {
     getWebSocket: () =>
-      ({
-        send: (data: string) => {
-          sent.push(data);
-        },
-        readyState: 1,
-      }) as any,
+      new FakeOpenSocket((data) => {
+        sent.push(data);
+      }),
     requestManager: new RequestManager(timer),
     timer,
     ensureConnected: async () => true,
@@ -98,8 +96,14 @@ describe("SharedGestureDelegate", () => {
     const sentCounts: number[] = [];
 
     await callAndResolve(sent, context.requestManager, () =>
-      delegate.requestTapCoordinates(10, 20, 0, 5000, undefined, undefined, undefined, () => {
-        sentCounts.push(sent.length);
+      delegate.requestTapCoordinates({
+        x: 10,
+        y: 20,
+        duration: 0,
+        timeoutMs: 5000,
+        onDispatch: () => {
+          sentCounts.push(sent.length);
+        },
       }),
     );
 
@@ -178,15 +182,13 @@ describe("SharedGestureDelegate", () => {
       });
       const controller = new AbortController();
 
-      const resultPromise = delegate.requestTapCoordinates(
-        10,
-        20,
-        50,
-        5000,
-        undefined,
-        undefined,
-        controller.signal,
-      );
+      const resultPromise = delegate.requestTapCoordinates({
+        x: 10,
+        y: 20,
+        duration: 50,
+        timeoutMs: 5000,
+        signal: controller.signal,
+      });
       // Simulate the caller's deadline firing WHILE the slow reconnect is
       // still in flight, then let the (now-stale) reconnect finish.
       controller.abort(new Error("outer deadline exceeded"));
@@ -207,7 +209,13 @@ describe("SharedGestureDelegate", () => {
       const controller = new AbortController();
 
       const { result } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestTapCoordinates(10, 20, 50, 5000, undefined, undefined, controller.signal),
+        delegate.requestTapCoordinates({
+          x: 10,
+          y: 20,
+          duration: 50,
+          timeoutMs: 5000,
+          signal: controller.signal,
+        }),
       );
 
       expect(result.success).toBe(true);
@@ -224,7 +232,7 @@ describe("SharedGestureDelegate", () => {
       });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestTapCoordinates(10.7, 20.3),
+        delegate.requestTapCoordinates({ x: 10.7, y: 20.3 }),
       );
 
       expect(sentMsg.x).toBe(11);
@@ -239,7 +247,7 @@ describe("SharedGestureDelegate", () => {
       });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestTapCoordinates(10.7, 20.3),
+        delegate.requestTapCoordinates({ x: 10.7, y: 20.3 }),
       );
 
       expect(sentMsg.x).toBe(10.7);
@@ -271,7 +279,13 @@ describe("SharedGestureDelegate", () => {
       });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestPinch(50.1, 50.9, 100.3, 200.7, 0),
+        delegate.requestPinch({
+          centerX: 50.1,
+          centerY: 50.9,
+          distanceStart: 100.3,
+          distanceEnd: 200.7,
+          rotationDegrees: 0,
+        }),
       );
 
       expect(sentMsg.centerX).toBe(50);
@@ -290,7 +304,7 @@ describe("SharedGestureDelegate", () => {
       });
 
       await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestTapCoordinates(10, 20),
+        delegate.requestTapCoordinates({ x: 10, y: 20 }),
       );
       expect(cancelCalls()).toBe(1);
 
@@ -314,7 +328,13 @@ describe("SharedGestureDelegate", () => {
       expect(cancelCalls()).toBe(3);
 
       await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestPinch(50, 50, 100, 200, 0),
+        delegate.requestPinch({
+          centerX: 50,
+          centerY: 50,
+          distanceStart: 100,
+          distanceEnd: 200,
+          rotationDegrees: 0,
+        }),
       );
       expect(cancelCalls()).toBe(4);
     });
@@ -329,7 +349,7 @@ describe("SharedGestureDelegate", () => {
       });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestTapCoordinates(10, 20, 50),
+        delegate.requestTapCoordinates({ x: 10, y: 20, duration: 50 }),
       );
 
       expect(sentMsg.type).toBe("request_tap_coordinates");
@@ -392,7 +412,14 @@ describe("SharedGestureDelegate", () => {
       });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestPinch(50, 60, 100, 200, 45, 500),
+        delegate.requestPinch({
+          centerX: 50,
+          centerY: 60,
+          distanceStart: 100,
+          distanceEnd: 200,
+          rotationDegrees: 45,
+          duration: 500,
+        }),
       );
 
       expect(sentMsg.type).toBe("request_pinch");
@@ -413,7 +440,7 @@ describe("SharedGestureDelegate", () => {
         roundCoordinates: false,
       });
 
-      const tap = await delegate.requestTapCoordinates(10, 20);
+      const tap = await delegate.requestTapCoordinates({ x: 10, y: 20 });
       expect(tap.success).toBe(false);
       expect(tap.error).toBe("Not connected");
 
@@ -434,7 +461,13 @@ describe("SharedGestureDelegate", () => {
       expect(drag.success).toBe(false);
       expect(drag.error).toBe("Not connected");
 
-      const pinch = await delegate.requestPinch(50, 50, 100, 200, 0);
+      const pinch = await delegate.requestPinch({
+        centerX: 50,
+        centerY: 50,
+        distanceStart: 100,
+        distanceEnd: 200,
+        rotationDegrees: 0,
+      });
       expect(pinch.success).toBe(false);
       expect(pinch.error).toBe("Not connected");
 
@@ -452,7 +485,7 @@ describe("SharedGestureDelegate", () => {
         roundCoordinates: false,
       });
 
-      const promise = delegate.requestTapCoordinates(10, 20, 0, 100);
+      const promise = delegate.requestTapCoordinates({ x: 10, y: 20, duration: 0, timeoutMs: 100 });
 
       // Let async ensureConnected resolve
       await Promise.resolve();

@@ -1,14 +1,15 @@
+import { taskEligibleByName } from "../../../src/server/tasks/toolCallTasks";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import {
   DefaultTaskManager,
   TASK_INTERRUPTED_MESSAGE,
-} from "../../../src/server/tasks/TaskManager";
-import { TASKS_EXTENSION_ID } from "../../../src/server/tasks/mcpTasksExtension";
-import type { TaskLeaseHoldRequest } from "../../../src/server/tasks/taskLeaseKeepalive";
+} from "../../../src/daemon/tasks/TaskManager";
+import { TASKS_EXTENSION_ID } from "../../../src/daemon/tasks/mcpTasksExtension";
+import type { TaskLeaseHoldRequest } from "../../../src/daemon/tasks/taskLeaseKeepalive";
 import { currentTaskContext } from "../../../src/server/tasks/runAsTask";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { executionTracker } from "../../../src/server/executionTracker";
+import { executionTracker } from "../../../src/daemon/executionTracker";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeMcpTaskStore } from "../../fakes/FakeMcpTaskStore";
 import { FakeTaskManager } from "../../fakes/FakeTaskManager";
@@ -25,7 +26,7 @@ import { connect } from "../../helpers/mcpTaskWire";
 const ECHO = "__task_echo__";
 const WAIT = "__task_wait__";
 const UNKNOWN = "__task_unregistered__";
-const ELIGIBLE = new Set([ECHO, WAIT, UNKNOWN]);
+const ELIGIBLE = taskEligibleByName(new Set([ECHO, WAIT, UNKNOWN]));
 
 let releaseWait: (() => void) | undefined;
 const leaseHolds: TaskLeaseHoldRequest[] = [];

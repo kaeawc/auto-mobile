@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { Server as HttpServer } from "node:http";
+import type { HttpListener } from "../../src/daemon/daemonHttpIngress";
 import { afterEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -23,12 +23,8 @@ import { ActionableError } from "../../src/models/ActionableError";
  * EADDRINUSE, with no real socket involved.
  */
 
-interface DaemonHttpBindInternals {
-  httpIngress: { start(): Promise<void>; closeListener(): Promise<void> };
-}
-
-function bindInternals(daemon: Daemon): DaemonHttpBindInternals {
-  return daemon as unknown as DaemonHttpBindInternals;
+function bindInternals(daemon: Daemon) {
+  return { httpIngress: daemon.testHooks.httpIngress };
 }
 
 /**
@@ -38,7 +34,7 @@ function bindInternals(daemon: Daemon): DaemonHttpBindInternals {
  * succeeds or reports the requested port as already in use — no real socket
  * is ever opened, so there is nothing for a competing process to race.
  */
-class FakeBindServer extends EventEmitter {
+class FakeBindServer extends EventEmitter implements HttpListener {
   listening = false;
   requestTimeout = 0;
   headersTimeout = 0;
@@ -74,7 +70,8 @@ function daemonWithFakeHttpServer(
   outcome: "bind-ok" | "bind-refused",
 ): Daemon {
   return new Daemon(options, {
-    httpServerFactory: () => new FakeBindServer(outcome) as unknown as HttpServer,
+    httpToken: "test-http-token",
+    httpServerFactory: () => new FakeBindServer(outcome),
   });
 }
 
@@ -128,7 +125,7 @@ describe("Daemon strict-port bind (issue #6260)", () => {
 
     // No port+1..3 fallback: the daemon must still be configured for the
     // exact requested port, not a substitute one.
-    expect((daemon as unknown as { port: number }).port).toBe(port);
+    expect(daemon.testHooks.port()).toBe(port);
 
     await bindInternals(daemon).httpIngress.closeListener();
   });

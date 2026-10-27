@@ -25,7 +25,7 @@
 
 set -euo pipefail
 
-# shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+# shellcheck source=scripts/ios/run_with_timeout.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/ios/run_with_timeout.sh"
 
 gradle_cmd="${GRADLE_CMD:-./gradlew}"

@@ -1,19 +1,37 @@
-import { deleteOrphanFailureGroups } from "./failureGroupRetention";
-import { errorMessage } from "../utils/describeUnknownError";
 import { sql, type Kysely, type SelectQueryBuilder } from "kysely";
-import { getDatabase } from "./database";
 import type {
-  Database,
-  NewFailureOccurrence,
-  NewFailureOccurrenceScreen,
-  NewFailureCapture,
-  NewFailureNotification,
-} from "./types";
+  AggregatedToolCallInfo,
+  DeviceBreakdown,
+  FailureCapture,
+  FailureGroup,
+  FailureOccurrence,
+  FailureSeverity,
+  FailureType,
+  PeriodTotals,
+  ScreenBreakdown,
+  TimelineDataPoint,
+  VersionBreakdown,
+} from "../models/failureAnalytics";
+import { errorMessage } from "../utils/describeUnknownError";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
-import { decodeStackTrace, decodeToolCallInfo } from "./failureAggregateJson";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
-import { nowIso } from "./nowIso";
+import { getDatabase } from "./database";
+import { getDbWriteBarrier, type DbWriteBarrier } from "./dbWriteBarrier";
+import { decodeStackTrace, decodeToolCallInfo } from "./failureAggregateJson";
+import {
+  type FailureNotificationEntry,
+  type FailureScreenCountRow,
+  type FailuresQuery,
+  type FailuresStreamQuery,
+  type FailuresStreamResponse,
+  mergeScreenBreakdownRows,
+  type RecordFailureInput,
+  type TimelineQuery,
+  type VisitScreenCountRow,
+} from "./failureAnalyticsQueries";
+import { deleteOrphanFailureGroups } from "./failureGroupRetention";
 import {
   formatTimelineBucketLabel,
   timelineBucketMs,
@@ -21,157 +39,24 @@ import {
   timelineBucketStart,
   timelineBucketStartFromIndex,
 } from "./failureTimelineBuckets";
-import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
-import { type DbWriteBarrier, getDbWriteBarrier } from "./dbWriteBarrier";
-import { appendToBucket, chunkBySqliteParameterLimit } from "./sqliteBatch";
+import { nowIso } from "./nowIso";
 import {
   createRowCapRetentionState,
   pruneTableByRowCap,
   runAmortizedRetention,
 } from "./rowCapRetention";
+import { appendToBucket, chunkBySqliteParameterLimit } from "./sqliteBatch";
 import type {
-  FailureType,
-  FailureSeverity,
-  StackTraceElement,
-  AggregatedToolCallInfo,
-  DeviceBreakdown,
-  VersionBreakdown,
-  ScreenBreakdown,
-  FailureGroup,
-  FailureOccurrence,
-  FailureCapture,
-  TimelineDataPoint,
-  PeriodTotals,
-} from "../models/failureAnalytics";
+  Database,
+  NewFailureCapture,
+  NewFailureNotification,
+  NewFailureOccurrence,
+  NewFailureOccurrenceScreen,
+} from "./types";
+export { mergeScreenBreakdownRows, type RecordFailureInput } from "./failureAnalyticsQueries";
 
 const RETENTION_MAX_ROWS = 10_000;
 const retentionState = createRowCapRetentionState();
-
-interface FailureScreenCountRow {
-  screenName: string;
-  failureCount: number;
-}
-
-interface VisitScreenCountRow {
-  screenName: string;
-  visitCount: number;
-}
-
-export function mergeScreenBreakdownRows(
-  failureScreens: readonly FailureScreenCountRow[],
-  visitedScreens: readonly VisitScreenCountRow[],
-): ScreenBreakdown[] {
-  const visitMap = new Map(visitedScreens.map((screen) => [screen.screenName, screen.visitCount]));
-  const totalVisits = visitedScreens.reduce((sum, screen) => sum + screen.visitCount, 0);
-
-  const result: ScreenBreakdown[] = [];
-  const processedScreens = new Set<string>();
-
-  for (const row of failureScreens) {
-    const visitCount = visitMap.get(row.screenName) ?? 0;
-    result.push({
-      screenName: row.screenName,
-      visitCount,
-      failureCount: row.failureCount,
-      visitPercentage: totalVisits > 0 ? (visitCount / totalVisits) * 100 : 0,
-    });
-    processedScreens.add(row.screenName);
-  }
-
-  const visitOnlyScreens = visitedScreens
-    .filter((screen) => !processedScreens.has(screen.screenName))
-    .sort((a, b) => b.visitCount - a.visitCount || a.screenName.localeCompare(b.screenName))
-    .slice(0, 5);
-
-  for (const screen of visitOnlyScreens) {
-    result.push({
-      screenName: screen.screenName,
-      visitCount: screen.visitCount,
-      failureCount: 0,
-      visitPercentage: totalVisits > 0 ? (screen.visitCount / totalVisits) * 100 : 0,
-    });
-  }
-
-  return result
-    .map((screen, index) => ({ screen, index }))
-    .sort((a, b) => b.screen.visitCount - a.screen.visitCount || a.index - b.index)
-    .map(({ screen }) => screen);
-}
-
-// Types for recording failures
-
-export interface RecordFailureInput {
-  type: FailureType;
-  signature: string;
-  title: string;
-  message: string;
-  severity: FailureSeverity;
-  stackTrace?: StackTraceElement[];
-  toolCallInfo?: AggregatedToolCallInfo;
-  occurrence: {
-    deviceId?: string;
-    deviceModel: string;
-    os: string;
-    appVersion: string;
-    sessionId: string;
-    screenAtFailure?: string;
-    screensVisited?: string[];
-    testName?: string;
-    testExecutionId?: number;
-    errorCode?: string;
-    durationMs?: number;
-    toolArgs?: Record<string, unknown>;
-  };
-  capture?: {
-    type: "screenshot" | "video";
-    path: string;
-  };
-}
-
-// Types for querying failures
-
-interface FailuresQuery {
-  type?: FailureType;
-  severity?: FailureSeverity;
-  startTime?: number;
-  endTime?: number;
-  limit?: number;
-  offset?: number;
-}
-
-interface TimelineQuery {
-  startTime: number;
-  endTime: number;
-  aggregation: "minute" | "hour" | "day" | "week";
-}
-
-interface FailuresStreamQuery {
-  sinceTimestamp?: number;
-  sinceId?: number;
-  startTime?: number;
-  endTime?: number;
-  limit?: number;
-  type?: FailureType;
-  severity?: FailureSeverity;
-  acknowledged?: boolean;
-}
-
-interface FailureNotificationEntry {
-  id: number;
-  occurrenceId: string;
-  groupId: string;
-  type: FailureType;
-  severity: FailureSeverity;
-  title: string;
-  timestamp: number;
-  acknowledged: boolean;
-}
-
-interface FailuresStreamResponse {
-  notifications: FailureNotificationEntry[];
-  lastTimestamp?: number;
-  lastId?: number;
-}
 
 const STREAM_LIMIT_MAX = 500;
 

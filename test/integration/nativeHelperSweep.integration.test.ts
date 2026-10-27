@@ -10,6 +10,7 @@ import {
 import { DefaultNativeHelperProcessControl } from "../../src/utils/nativeHelpers/NativeHelperProcessControl";
 import { sweepNativeHelperOrphans } from "../../src/utils/nativeHelpers/sweepNativeHelperOrphans";
 import { SystemTimer } from "../../src/utils/SystemTimer";
+import { daemonProcessEnvironment } from "../../src/daemon/daemonOptionScopes";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { useScratchRoot } from "../helpers/scratchRoot";
 
@@ -167,10 +168,12 @@ describe.skipIf(unsupported)("real native helper orphan sweep", () => {
       });
       setInterval(() => {}, 1000);
     `;
-    // Subscribe before spawn completes so a fast child cannot lose its readiness line.
+    // Subscribe before spawn completes so a fast child cannot lose its readiness line. The owner
+    // gets the real daemon's env: under Bun 1.4 an inherited no-orphans flag (from
+    // `bun test --no-orphans`) would SIGKILL its helper with it on Linux, leaving nothing to reap.
     const owner = spawn(process.execPath, ["-e", script], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, AUTOMOBILE_DATA_DIR: dataDir },
+      env: { ...daemonProcessEnvironment(process.env), AUTOMOBILE_DATA_DIR: dataDir },
     });
     const ready = new Promise<number>((resolvePid, reject) => {
       let output = "";

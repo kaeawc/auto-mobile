@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DaemonBoundSessionExpiredError } from "../../../src/daemon/proxy/daemonErrors";
+import { DaemonBoundSessionExpiredError } from "../../../src/daemon/proxy/DaemonBoundSessionExpiredError";
 import {
   HeldSessionLosses,
   type HeldSessionLossesPort,

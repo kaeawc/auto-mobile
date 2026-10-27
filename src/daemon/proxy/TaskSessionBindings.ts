@@ -2,7 +2,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
-import { DEFAULT_TASK_RETENTION_MS } from "../../server/tasks/TaskManager";
+import { DEFAULT_TASK_RETENTION_MS } from "../tasks/TaskManager";
 
 /**
  * How long a device-binding task may go unpolled before the proxy stops waiting to bind from it:

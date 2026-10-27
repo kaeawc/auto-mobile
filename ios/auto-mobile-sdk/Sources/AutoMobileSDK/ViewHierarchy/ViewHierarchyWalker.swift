@@ -194,9 +194,9 @@
             }
             let candidates = content.isEmpty ? visible : content
             return candidates
-                .max(by: { a, b in
-                    if a.windowLevel != b.windowLevel { return a.windowLevel < b.windowLevel }
-                    return !a.isKeyWindow && b.isKeyWindow
+                .max(by: { first, second in
+                    if first.windowLevel != second.windowLevel { return first.windowLevel < second.windowLevel }
+                    return !first.isKeyWindow && second.isKeyWindow
                 })
         }
 
@@ -274,10 +274,10 @@
             let bounds = sdkBounds(from: frameInRoot)
             let traits = traitNames(for: view.accessibilityTraits)
             let customActions = (view.accessibilityCustomActions ?? []).map(\.name)
-            let gestures = (view.gestureRecognizers ?? []).map { gr in
+            let gestures = (view.gestureRecognizers ?? []).map { gesture in
                 SdkGestureInfo(
-                    type: String(describing: type(of: gr)),
-                    isEnabled: gr.isEnabled
+                    type: String(describing: type(of: gesture)),
+                    isEnabled: gesture.isEnabled
                 )
             }
             let hasTap = hasOwnInteractiveAction(view)
@@ -318,21 +318,9 @@
 
             // Walk layer-only sublayers (SwiftUI shapes render as CALayer without backing UIView).
             // Exclude layers that belong to subviews since those are already represented as SdkViewNodes.
-            let subviewLayerIds = Set(subviews.map { ObjectIdentifier($0.layer) })
-            if let sublayers = view.layer.sublayers {
-                for sublayer in sublayers {
-                    if subviewLayerIds.contains(ObjectIdentifier(sublayer)) { continue }
-                    if let layerNode = walkLayer(
-                        sublayer,
-                        hostLayer: view.layer,
-                        rootView: rootView,
-                        rootBounds: rootBounds,
-                        depth: depth + 1
-                    ) {
-                        childNodes.append(layerNode)
-                    }
-                }
-            }
+            childNodes.append(contentsOf: layerNodes(
+                of: view, subviews: subviews, rootView: rootView, rootBounds: rootBounds, depth: depth
+            ))
 
             // Propagate any new opaque overlays discovered in children
             opaqueOverlays = childOpaqueOverlays
@@ -372,6 +360,31 @@
                 semanticLinks: semanticLinks,
                 children: childNodes.isEmpty ? nil : childNodes
             )
+        }
+
+        private static func layerNodes(
+            of view: UIView, subviews: [UIView], rootView: UIView, rootBounds: CGRect, depth: Int
+        )
+            -> [SdkViewNode]
+        {
+            var childNodes: [SdkViewNode] = []
+            let subviewLayerIds = Set(subviews.map { ObjectIdentifier($0.layer) })
+            if let sublayers = view.layer.sublayers {
+                for sublayer in sublayers {
+                    if subviewLayerIds.contains(ObjectIdentifier(sublayer)) { continue }
+                    if let layerNode = walkLayer(
+                        sublayer,
+                        hostLayer: view.layer,
+                        rootView: rootView,
+                        rootBounds: rootBounds,
+                        depth: depth + 1
+                    ) {
+                        childNodes.append(layerNode)
+                    }
+                }
+            }
+
+            return childNodes
         }
 
         // MARK: - Semantic Links
@@ -751,7 +764,7 @@
 
         private static func isOpaqueOverlay(_ view: UIView) -> Bool {
             guard !view.isHidden, view.alpha == 1.0 else { return false }
-            if let bg = view.backgroundColor, isOpaque(bg) { return true }
+            if let background = view.backgroundColor, isOpaque(background) { return true }
             if let layerBg = view.layer.backgroundColor, isOpaque(UIColor(cgColor: layerBg)) { return true }
             return false
         }
@@ -786,24 +799,26 @@
         // MARK: - Accessibility Traits
 
         private static func traitNames(for traits: UIAccessibilityTraits) -> [String] {
-            var names: [String] = []
-            if traits.contains(.button) { names.append("button") }
-            if traits.contains(.link) { names.append("link") }
-            if traits.contains(.header) { names.append("header") }
-            if traits.contains(.searchField) { names.append("searchField") }
-            if traits.contains(.image) { names.append("image") }
-            if traits.contains(.selected) { names.append("selected") }
-            if traits.contains(.playsSound) { names.append("playsSound") }
-            if traits.contains(.keyboardKey) { names.append("keyboardKey") }
-            if traits.contains(.staticText) { names.append("staticText") }
-            if traits.contains(.summaryElement) { names.append("summaryElement") }
-            if traits.contains(.notEnabled) { names.append("notEnabled") }
-            if traits.contains(.updatesFrequently) { names.append("updatesFrequently") }
-            if traits.contains(.startsMediaSession) { names.append("startsMediaSession") }
-            if traits.contains(.adjustable) { names.append("adjustable") }
-            if traits.contains(.allowsDirectInteraction) { names.append("allowsDirectInteraction") }
-            if traits.contains(.causesPageTurn) { names.append("causesPageTurn") }
-            if traits.contains(.tabBar) { names.append("tabBar") }
+            let orderedTraits: [(UIAccessibilityTraits, String)] = [
+                (.button, "button"),
+                (.link, "link"),
+                (.header, "header"),
+                (.searchField, "searchField"),
+                (.image, "image"),
+                (.selected, "selected"),
+                (.playsSound, "playsSound"),
+                (.keyboardKey, "keyboardKey"),
+                (.staticText, "staticText"),
+                (.summaryElement, "summaryElement"),
+                (.notEnabled, "notEnabled"),
+                (.updatesFrequently, "updatesFrequently"),
+                (.startsMediaSession, "startsMediaSession"),
+                (.adjustable, "adjustable"),
+                (.allowsDirectInteraction, "allowsDirectInteraction"),
+                (.causesPageTurn, "causesPageTurn"),
+                (.tabBar, "tabBar"),
+            ]
+            var names = orderedTraits.compactMap { trait, name in traits.contains(trait) ? name : nil }
             if #available(iOS 17.0, *) {
                 if traits.contains(.toggleButton) { names.append("toggleButton") }
             }
@@ -820,11 +835,11 @@
 
         private static func hexColor(_ color: UIColor?) -> String? {
             guard let color = color else { return nil }
-            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-            color.getRed(&r, green: &g, blue: &b, alpha: &a)
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
             // Failed extraction or non-finite components omit the colour.
-            guard a > 0 else { return nil }
-            return ColorHex.rgbaHex(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
+            guard alpha > 0 else { return nil }
+            return ColorHex.rgbaHex(red: Double(red), green: Double(green), blue: Double(blue), alpha: Double(alpha))
         }
     }
 #endif

@@ -1,4 +1,4 @@
-import type { ActiveExecution } from "../../server/executionTracker";
+import type { ActiveExecution } from "../executionTracker";
 
 /** One device-mutating `ide/*` route in flight; its ownership gate hands it the execution. */
 export interface IdeMutationCall {

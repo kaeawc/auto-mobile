@@ -1,0 +1,31 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "h": ""
+    },
+    "root": {
+      "type": "text",
+      "text": "@ana",
+      "linkify": {
+        "kinds": ["url"],
+        "onTap": [
+          {
+            "type": "setState",
+            "key": "h",
+            "value": {
+              "match": "url"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.linkify.onTap[0].value.match",
+  "expectedMessage": "Invalid enum value"
+}

@@ -1,5 +1,9 @@
 import type { Platform } from "../models";
-import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
+import {
+  didSourceSucceedForDevice,
+  discoverySourceFor,
+  type DiscoverySource,
+} from "../utils/discoverySource";
 import { isPhysicalAndroidUsbSerial } from "../utils/androidSerial";
 import type { AdbTransportRestartLookup } from "../utils/android-cmdline-tools/AdbTransportRestartRegistry";
 import { MISSING_DEVICE_MISS_THRESHOLD, observeMissingDevice } from "./missingDeviceLiveness";
@@ -45,6 +49,9 @@ export function recordingCandidateIncarnations(
  */
 export const OFFLINE_DEVICE_DISCONNECT_BUDGET_MS = 60_000;
 
+/** Bound simulator absence after a successful miss, even if later simctl sweeps fail. */
+export const MISSING_SIMULATOR_DISCONNECT_BUDGET_MS = 60_000;
+
 /**
  * The `adb devices` states that mean "attached and settling": the transport is
  * re-attaching (`offline`) or waiting on the authorization prompt
@@ -71,15 +78,16 @@ export function selectTransitionalDeviceIds(
   return new Set([...(transitionalAdbDeviceIds ?? []), ...transitionalSimulatorIds]);
 }
 
-/** Start of a candidate's current transitional-state episode, keyed to its incarnation. */
+/** Independent transitional and simulator-absence clocks, keyed to the candidate incarnation. */
 export interface OfflineEpisode {
-  sinceMs: number;
+  sinceMs?: number;
+  missingSinceMs?: number;
   incarnation: DisconnectCandidateIncarnation | undefined;
 }
 
 export interface DisconnectMonitorEvaluation {
   disconnected: string[];
-  /** `budgetExhausted` marks a candidate released from a transitional hold, not an absent one. */
+  /** `budgetExhausted` marks a candidate released by a time bound rather than miss counting. */
   missed: Array<{ deviceId: string; misses: number; budgetExhausted?: true }>;
   /** Candidates held in a transitional platform state this sweep instead of counting a miss. */
   transitional: Array<{ deviceId: string; transitionalForMs: number }>;
@@ -120,6 +128,8 @@ export interface DisconnectMonitorEvaluationInput {
   offlineEpisodes?: Map<string, OfflineEpisode>;
   nowMs?: number;
   offlineBudgetMs?: number;
+  /** Simulator-only bound from the first successful miss; unknown-only sweeps never start it. */
+  missingSimulatorBudgetMs?: number;
 }
 
 /**
@@ -238,6 +248,46 @@ function pruneOfflineEpisodes(
   }
 }
 
+function candidateSourceSucceeded(
+  input: DisconnectMonitorEvaluationInput,
+  deviceId: string,
+): boolean {
+  // Forced detached sessions originate from Android ADB recovery. Unknown
+  // candidates without that evidence cannot be attributed to a source.
+  const platform =
+    input.candidatePlatforms.get(deviceId) ??
+    (input.forceDisconnectedDeviceIds?.has(deviceId) ? "android" : undefined);
+  return platform !== undefined && didSourceSucceedForDevice(input, platform, deviceId);
+}
+
+function simulatorAbsenceBudgetExhausted(
+  input: DisconnectMonitorEvaluationInput,
+  deviceId: string,
+  sourceSucceeded: boolean,
+): boolean {
+  const platform = input.candidatePlatforms.get(deviceId);
+  if (
+    !platform ||
+    discoverySourceFor(platform, deviceId) !== "ios-simulator" ||
+    input.offlineEpisodes === undefined ||
+    input.nowMs === undefined
+  ) {
+    return false;
+  }
+  const episode = input.offlineEpisodes.get(deviceId) ?? {
+    incarnation: input.candidateIncarnations?.get(deviceId),
+  };
+  if (sourceSucceeded) {
+    episode.missingSinceMs ??= input.nowMs;
+    input.offlineEpisodes.set(deviceId, episode);
+  }
+  return (
+    episode.missingSinceMs !== undefined &&
+    input.nowMs - episode.missingSinceMs >=
+      (input.missingSimulatorBudgetMs ?? MISSING_SIMULATOR_DISCONNECT_BUDGET_MS)
+  );
+}
+
 export function evaluateDeviceDisconnects(
   input: DisconnectMonitorEvaluationInput,
 ): DisconnectMonitorEvaluation {
@@ -269,6 +319,13 @@ export function evaluateDeviceDisconnects(
     }
 
     for (const deviceId of input.candidateDeviceIds) {
+      const countedIncarnation = deviceDisconnectMissIncarnations.get(deviceId);
+      if (
+        countedIncarnation !== undefined &&
+        countedIncarnation !== candidateIncarnations.get(deviceId)
+      ) {
+        clearMiss(deviceId);
+      }
       if (input.bootedDeviceIds.has(deviceId)) {
         clearMiss(deviceId);
         input.confirmedDisconnectedDeviceIds.delete(deviceId);
@@ -278,16 +335,14 @@ export function evaluateDeviceDisconnects(
     }
   };
 
+  const confirmBudgetExhausted = (deviceId: string): void => {
+    input.deviceDisconnectMisses.set(deviceId, MISSING_DEVICE_MISS_THRESHOLD);
+    missed.push({ deviceId, misses: MISSING_DEVICE_MISS_THRESHOLD, budgetExhausted: true });
+    disconnected.push(deviceId);
+  };
+
   const recordMiss = (deviceId: string): void => {
     const candidateIncarnation = candidateIncarnations.get(deviceId);
-    const countedIncarnation = deviceDisconnectMissIncarnations.get(deviceId);
-    const priorMisses =
-      countedIncarnation === undefined || candidateIncarnation === countedIncarnation
-        ? (input.deviceDisconnectMisses.get(deviceId) ?? 0)
-        : 0;
-    if (priorMisses === 0) {
-      input.deviceDisconnectMisses.delete(deviceId);
-    }
     const observed = observeMissingDevice(input.deviceDisconnectMisses, deviceId, "missing");
     const immediate = input.immediateDisconnectDeviceIds?.has(deviceId) === true;
     if (immediate) {
@@ -320,18 +375,16 @@ export function evaluateDeviceDisconnects(
     episodes: Map<string, OfflineEpisode>,
   ) => {
     const episode = episodes.get(deviceId) ?? {
-      sinceMs: nowMs,
       incarnation: candidateIncarnations.get(deviceId),
     };
+    episode.sinceMs ??= nowMs;
     episodes.set(deviceId, episode);
     const transitionalForMs = nowMs - episode.sinceMs;
     if (transitionalForMs < (input.offlineBudgetMs ?? OFFLINE_DEVICE_DISCONNECT_BUDGET_MS)) {
       transitional.push({ deviceId, transitionalForMs });
       return;
     }
-    input.deviceDisconnectMisses.set(deviceId, MISSING_DEVICE_MISS_THRESHOLD);
-    missed.push({ deviceId, misses: MISSING_DEVICE_MISS_THRESHOLD, budgetExhausted: true });
-    disconnected.push(deviceId);
+    confirmBudgetExhausted(deviceId);
   };
 
   const evaluateCandidate = (deviceId: string): void => {
@@ -353,15 +406,12 @@ export function evaluateDeviceDisconnects(
     // Only the source that would have listed this device can call it missing:
     // a failed simctl sweep must not age out a devicectl-confirmed iPhone, and
     // a failed devicectl sweep must not age out a booted simulator (#5683).
-    //
-    // Forced detached sessions originate from Android ADB recovery. Unknown
-    // candidates without that evidence still cannot be attributed to a source.
-    const platform =
-      input.candidatePlatforms.get(deviceId) ??
-      (forceDisconnectedDeviceIds.has(deviceId) ? "android" : undefined);
-    if (!platform || !didSourceSucceedForDevice(input, platform, deviceId)) {
+    const sourceSucceeded = candidateSourceSucceeded(input, deviceId);
+    if (!sourceSucceeded) {
       observeMissingDevice(input.deviceDisconnectMisses, deviceId, "source-unavailable");
-      deviceDisconnectMissIncarnations.delete(deviceId);
+      if (simulatorAbsenceBudgetExhausted(input, deviceId, false)) {
+        confirmBudgetExhausted(deviceId);
+      }
       return;
     }
 
@@ -374,26 +424,29 @@ export function evaluateDeviceDisconnects(
       return;
     }
 
+    if (simulatorAbsenceBudgetExhausted(input, deviceId, true)) {
+      confirmBudgetExhausted(deviceId);
+      return;
+    }
     recordMiss(deviceId);
   };
 
   clearStaleCandidates();
   pruneOfflineEpisodes(offlineEpisodes, input, candidateIncarnations);
-  if (
+  const allDiscoveryFailed =
     input.bootedDeviceIds.size === 0 &&
     input.candidateDeviceIds.size > 0 &&
     input.succeededPlatforms.size === 0 &&
-    (input.succeededSources?.size ?? 0) === 0
-  ) {
-    for (const deviceId of input.candidateDeviceIds) {
-      clearMiss(deviceId);
-    }
-    return { disconnected, missed, transitional, skippedAllDiscoveryFailed: true };
-  }
+    (input.succeededSources?.size ?? 0) === 0;
 
   for (const deviceId of input.candidateDeviceIds) {
     evaluateCandidate(deviceId);
   }
 
-  return { disconnected, missed, transitional, skippedAllDiscoveryFailed: false };
+  return {
+    disconnected,
+    missed,
+    transitional,
+    skippedAllDiscoveryFailed: allDiscoveryFailed && disconnected.length === 0,
+  };
 }

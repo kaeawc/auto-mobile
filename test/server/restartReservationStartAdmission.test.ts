@@ -1,14 +1,13 @@
-import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
+import { toolJson } from "../helpers/toolResponse";
 import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, expect, spyOn } from "bun:test";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
-import { McpSessionRecoveryInProgressError } from "../../src/daemon/deviceAutolockManager";
+import { McpSessionRecoveryInProgressError } from "../../src/daemon/McpSessionRecoveryInProgressError";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
-import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -21,7 +20,7 @@ import {
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -29,7 +28,6 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
-import type { HostChildProcess } from "../../src/utils/HostCommandExecutor";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
   drainMicrotasks,
@@ -43,17 +41,6 @@ isolateEmptyToolRegistry();
 
 const HOLDER = "restart-holder";
 const CONNECTION = "holder-connection";
-interface Internals {
-  releaseDisconnectedRecoverySessionWithRetry(
-    id: string,
-    deviceId: string,
-    reason: SessionReleaseReason,
-  ): Promise<void>;
-  rehydrationReservations: Map<string, { restartHandoff?: boolean; scheduledDeadlineMs?: number }>;
-  intentionalShutdowns: Map<string, number>;
-  restartReadiness: ReadonlySet<unknown>;
-}
-
 class RestartDeviceManager extends FakeDeviceUtils {
   beforeReady?: () => Promise<void>;
   override async waitForDeviceReady(...args: Parameters<FakeDeviceUtils["waitForDeviceReady"]>) {
@@ -134,7 +121,7 @@ describe("start admission and owner resume for restart reservations", () => {
             autolockWrites.push({ sessionId: id, mcpSessionId: metadata.mcpSessionId ?? null });
             const row = (await persistence.getSession!(id))!;
             row.autolock_enabled = 1;
-            row.mcp_session_id = metadata.mcpSessionId;
+            row.mcp_session_id = metadata.mcpSessionId ?? null;
           },
         },
       }),
@@ -144,9 +131,9 @@ describe("start admission and owner resume for restart reservations", () => {
       displayInventory: new FakeDisplayInventoryProvider(),
     });
     const previousCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    const deviceSessions = new FakeDeviceSessionManager();
+    const deviceSessions = new FakeDeviceReadiness();
     deviceSessions.setConnectedDevices([device]);
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessions });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: deviceSessions });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { recordToolCall: async () => {} },
     });
@@ -209,7 +196,7 @@ describe("start admission and owner resume for restart reservations", () => {
         await sessions.claimLivenessOwnership(options.label ? HOLDER : holder, options.ownerToken),
       ).toBe("claimed");
     }
-    const internals = pool as unknown as Internals;
+    const internals = pool.testHooks;
     if (options.serialReuse) {
       const replacement = { ...device, name: "AVD-B", observedAt: timer.now() };
       manager.setBootedDevices(platform, [replacement]);
@@ -227,10 +214,14 @@ describe("start admission and owner resume for restart reservations", () => {
       await pool.releaseDevice(device.deviceId, holder);
       if (!options.running) {
         manager.setBootedDevices(platform, []);
-        await pool.removeDevice(device.deviceId, true, pool.getDevice(device.deviceId));
+        await pool.removeDevice(
+          device.deviceId,
+          true,
+          pool.getDevice(device.deviceId) ?? undefined,
+        );
       }
     }
-    await drainMicrotasks();
+    await drainMicrotasks(0);
     registerDeviceTools();
     ToolRegistry.registerDeviceAware(
       "restartControl",
@@ -439,7 +430,7 @@ describe("start admission and owner resume for restart reservations", () => {
     const adoption = spyOn(f.pool, "adoptResumedAutolockSession").mockImplementation(
       async (...args) => {
         expect(f.sessions.getSession(HOLDER)?.assignedDevice).toBe(f.device.deviceId);
-        const leases = Reflect.get(f.pool, "mcpSessionRecoveryDevices") as Map<string, unknown>;
+        const leases = f.pool.testHooks.mcpSessionRecoveryDevices as Map<string, unknown>;
         leases.set("owner-conn", {
           device: { ...f.pool.getDevice(f.device.deviceId)!, deviceId: "other" },
           token: Symbol("adoption-refusal"),
@@ -557,13 +548,13 @@ describe("start admission and owner resume for restart reservations", () => {
       expect(f.pool.resolveAutolockSessionForMcpSession("owner-conn")).toBeUndefined();
       expect(child.killed).toBe(true);
       f.timer.advanceTime(0);
-      await drainMicrotasks();
+      await drainMicrotasks(0);
     });
   }
 
   function coldBoot(f: Fixture) {
     const child = new FakeChildProcess(f.timer);
-    const process = child as unknown as HostChildProcess;
+    const process = child;
     f.manager.setMockChildProcess(f.device.name, process);
     cleanups.push(() => {
       child.simulateExit();
@@ -781,7 +772,7 @@ describe("start admission and owner resume for restart reservations", () => {
       status: "active",
       release_reason: null,
     });
-    expect(await f.persistence.getSession!("rival-session")).toEqual(rivalRow);
+    expect<unknown>(await f.persistence.getSession!("rival-session")).toEqual(rivalRow);
     expect(f.sessions.getSession(HOLDER)).toBeNull();
     expect(await f.persistence.getSession!(HOLDER)).toMatchObject({
       status: "expired",
@@ -1100,7 +1091,7 @@ describe("start admission and owner resume for restart reservations", () => {
 
   test("token restore waiting for assignment cannot record a connection that closed", async () => {
     const f = await fixture({ connection: CONNECTION, ownerToken: "holder-token" });
-    const mutex = poolInternals(f.pool).assignmentMutex;
+    const mutex = f.pool.testHooks.assignmentMutex;
     const gate = Promise.withResolvers<void>();
     const blocked = mutex.runExclusive(() => gate.promise);
     const restore = f.pool.restoreOwnedDeviceSessionsForMcpSession(
@@ -1206,7 +1197,7 @@ describe("start admission and owner resume for restart reservations", () => {
   test("owner admitted then terminally released during boot never mints a replacement", async () => {
     const f = await fixture();
     const child = new FakeChildProcess(f.timer);
-    f.manager.setMockChildProcess(f.device.name, child as unknown as HostChildProcess);
+    f.manager.setMockChildProcess(f.device.name, child);
     f.manager.beforeReady = async () => {
       await f.sessions.releaseSession(HOLDER, "explicit-release");
     };
@@ -1214,7 +1205,7 @@ describe("start admission and owner resume for restart reservations", () => {
     expect(f.sessions.getAllSessions()).toHaveLength(0);
     expect(child.killed).toBe(true);
     f.timer.advanceTime(0);
-    await drainMicrotasks();
+    await drainMicrotasks(0);
   });
   test("provisionDevice exact existing AVD refuses before boot and carries the remaining retry window", async () => {
     const f = await fixture();
@@ -1229,7 +1220,7 @@ describe("start admission and owner resume for restart reservations", () => {
       readiness: "automation",
     });
     expect(result).toMatchObject({ isError: true });
-    const wire = JSON.parse(result.content[0].text);
+    const wire = toolJson(result);
     expect(wire).toMatchObject({
       error: { code: "device_owned_by_other_session", retryable: true, retryAfterMs: 167_655 },
     });
@@ -1238,7 +1229,7 @@ describe("start admission and owner resume for restart reservations", () => {
   test("ended reservation permits an ordinary rival acquisition", async () => {
     const f = await fixture();
     f.timer.advanceTime(180_001);
-    await drainMicrotasks();
+    await drainMicrotasks(0);
     const result = await f.start();
     expect(result).toMatchObject({
       structuredContent: { runtime: { deviceId: f.device.deviceId } },
@@ -1298,14 +1289,14 @@ describe("start admission and owner resume for restart reservations", () => {
   test("owner resume records its cold-boot process and source AVD", async () => {
     const f = await fixture();
     const child = new FakeChildProcess(f.timer);
-    const process = child as unknown as HostChildProcess;
+    const process = child;
     f.manager.setMockChildProcess(f.device.name, process);
     await resumed(f, () => f.start(undefined, HOLDER));
     expect(f.pool.hasStartedDeviceProcess(f.device.deviceId, process)).toBe(true);
     expect(f.pool.getDevice(f.device.deviceId)?.androidImage?.name).toBe(f.device.name);
     child.simulateExit();
     f.timer.advanceTime(0);
-    await drainMicrotasks();
+    await drainMicrotasks(0);
   });
   test("retry hint uses the earlier idle deadline", async () => {
     const f = await fixture({ idleMs: 60_000 });
@@ -1334,7 +1325,7 @@ describe("start admission and owner resume for restart reservations", () => {
     test(`owner ${selector ? "selector" : "exact"} window expires during boot without a replacement mint`, async () => {
       const f = await fixture();
       const child = new FakeChildProcess(f.timer);
-      f.manager.setMockChildProcess(f.device.name, child as unknown as HostChildProcess);
+      f.manager.setMockChildProcess(f.device.name, child);
       f.manager.beforeReady = async () => {
         f.timer.advanceTime(180_001);
         await drainMicrotasks(40);
@@ -1355,7 +1346,7 @@ describe("start admission and owner resume for restart reservations", () => {
       expect(f.sessions.getAllSessions()).toHaveLength(0);
       expect(child.killed).toBe(true);
       f.timer.advanceTime(0);
-      await drainMicrotasks();
+      await drainMicrotasks(0);
     });
   }
   test("a live peer claim during boot refuses owner resume without a replacement mint", async () => {

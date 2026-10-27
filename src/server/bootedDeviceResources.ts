@@ -1,17 +1,26 @@
+import { BOOTED_DEVICE_RESOURCE_URIS } from "../constants/deviceResourceUris";
+export { BOOTED_DEVICE_RESOURCE_URIS };
 import { holderOf } from "../daemon/deviceBinding";
-import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
+import { registerDeviceResourceInvalidation } from "../daemon/deviceResourceInvalidation";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "../daemon/adbOfflineHeldDevices";
 import {
   describeInventoryDevice,
   type AdbOfflineHold,
   type SimulatorTransitionHold,
-} from "./inventoryDeviceDescription";
+} from "../daemon/inventoryDeviceDescription";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
 import { errorMessage } from "../utils/describeUnknownError";
 import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import * as traitsProbe from "./bootedDeviceTraits";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
+import type {
+  DeviceLockStateInfo,
+  DeviceLockStatesResourceContent,
+} from "./deviceLockStatesResourceContent";
+export type { DeviceLockStatesResourceContent } from "./deviceLockStatesResourceContent";
 import {
   type BootedDeviceDiscovery,
   type DeviceDiscoveryError,
@@ -42,7 +51,7 @@ import {
   poolHoldFor,
   type BootedDeviceDescription,
   type DeviceDescription,
-} from "./deviceDescription";
+} from "../daemon/deviceDescription";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
@@ -52,6 +61,7 @@ import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import type { ForcedRestartSnapshot } from "../ctrlProxy/ForcedRestartBudget";
 import {
   NotifyutilIosLockStateProbe,
+  lockStateOf,
   type IosLockStateProbe,
 } from "../features/observe/ios/IosLockStateProbe";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
@@ -96,10 +106,6 @@ import {
 } from "../devices/deviceBootService";
 
 // Resource URIs
-export const BOOTED_DEVICE_RESOURCE_URIS = {
-  ALL_BOOTED: "automobile:devices/booted",
-  PLATFORM_TEMPLATE: "automobile:devices/booted/{platform}",
-} as const;
 
 // A lightweight per-device lock-state resource. The full booted-devices resource also carries
 // `locked`, but computing it there recomputes service status (isInstalled/isEnabled/sha256) for
@@ -130,22 +136,6 @@ export function resetBootedDevicesResourceCache(): void {
   bootedDevicesResourceCache = null;
   bootedDevicesResourceSingleFlight = new SingleFlight();
   bootedDevicesResourcePublishedGeneration = ++bootedDevicesResourceGeneration;
-}
-
-// Per-device lock state for Android and iOS simulators. Omitted for physical iOS devices or
-// when the advisory probe could not read the state.
-interface DeviceLockStateInfo {
-  deviceId: string;
-  locked?: boolean;
-}
-
-export interface DeviceLockStatesResourceContent {
-  lastUpdated: string; // ISO 8601
-  lockStates: DeviceLockStateInfo[];
-  /** True only when both platform discovery sweeps completed. */
-  observationComplete: boolean;
-  /** Platform-specific discovery failures; an empty object means both sweeps completed. */
-  discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>>;
 }
 
 export interface CtrlProxyVersionInfo {
@@ -211,7 +201,7 @@ export interface ServiceStatusDiagnostic {
 }
 
 // The resource keeps resource-specific metadata alongside the full canonical description.
-interface BootedDeviceInfo extends BootedDeviceDescription {
+interface BootedDeviceInfo extends BootedDeviceDescription, traitsProbe.WithTraits {
   recoveryEligibility?: DeviceRecoveryEligibility | null;
   /**
    * Set when the bounded service-status probe for this observation timed out or
@@ -357,13 +347,14 @@ export function setInFlightAndroidColdBootReader(
 let serviceStatusEnabled = true;
 
 // A fake factory opts resource tests into the same narrow probe without touching real adb.
-export interface BootedDeviceResourceDependencies {
+export interface BootedDeviceResourceDependencies extends traitsProbe.Dependencies {
   injectedBootCompletionAdbFactory?: AdbClientFactory | null;
   injectedOrientationReaderFactory?: OrientationReaderFactory | null;
 }
 
 /** Probes a device's lock state; returns `undefined` when it can't be determined. */
-export type DeviceLockProbe = (device: BootedDevice) => Promise<boolean | undefined>;
+type LockState = boolean | undefined;
+export type DeviceLockProbe = (device: BootedDevice, signal?: AbortSignal) => Promise<LockState>;
 
 // Injected only by tests, which need a deterministic lock state without real device transports.
 // A fake device manager disables production probes unless the test injects a probe explicitly.
@@ -386,14 +377,13 @@ export function setIosLockStateProbe(probe: IosLockStateProbe | null): void {
  * via notifyutil (issue #5106). Physical iOS remains unknown. The caller bounds and handles
  * failures — lock state is advisory, never fatal to the resource.
  */
-async function realDeviceLockProbe(device: BootedDevice): Promise<boolean | undefined> {
+async function realDeviceLockProbe(device: BootedDevice, signal?: AbortSignal): Promise<LockState> {
   if (device.platform !== "android") {
     if (resolveIosDeviceKind({ deviceId: device.deviceId }) !== "simulator") {
       return undefined;
     }
     const probe = injectedIosLockStateProbe ?? new NotifyutilIosLockStateProbe();
-    const lock = await probe.read(device.deviceId, getAbortSignal());
-    return lock?.locked;
+    return lockStateOf(await probe.read(device.deviceId, signal))?.locked;
   }
   const lock = await defaultAdbClientFactory.create(device).getDeviceLock();
   return lock?.locked;
@@ -407,7 +397,8 @@ function activeLockProbe(): DeviceLockProbe | null {
     return injectedLockProbe ?? realDeviceLockProbe;
   }
   return injectedIosLockStateProbe
-    ? async (device) => (device.platform === "ios" ? realDeviceLockProbe(device) : undefined)
+    ? async (device, signal) =>
+        device.platform === "ios" ? realDeviceLockProbe(device, signal) : undefined
     : null;
 }
 
@@ -434,14 +425,14 @@ function activeOrientationReaderFactory(
  */
 async function probeDeviceLock(
   device: BootedDevice,
-  options: { lockProbe: DeviceLockProbe; timer?: Timer },
+  options: { lockProbe: DeviceLockProbe; timer?: Timer; signal?: AbortSignal },
 ): Promise<boolean | undefined> {
-  const { lockProbe, timer = defaultTimer } = options;
+  const { lockProbe, timer = defaultTimer, signal } = options;
   const deadline = new Error("Lock-state probe timed out");
   try {
-    return await raceWithDeadline(lockProbe(device), {
+    return await raceWithDeadline(lockProbe(device, signal), {
       timer,
-      signal: getAbortSignal(),
+      signal,
       timeoutMs: LOCK_STATE_TIMEOUT_MS,
       label: "Lock-state probe",
       timeoutError: () => deadline,
@@ -501,7 +492,9 @@ function platformObservation(
  * run ONLY the keyguard probe (no service-status), so the desktop's frequent lock poll doesn't pay
  * for isInstalled/isEnabled/sha256 every cycle (issue #5056).
  */
-async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceContent> {
+async function computeDeviceLockStates(
+  signal?: AbortSignal,
+): Promise<DeviceLockStatesResourceContent> {
   const devices: BootedDevice[] = [];
   const succeededPlatforms = new Set<Platform>();
   const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
@@ -545,7 +538,7 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
   const lockProbe = activeLockProbe();
   if (lockProbe) {
     const results = await Promise.allSettled(
-      devices.map((device) => probeDeviceLock(device, { lockProbe })),
+      devices.map((device) => probeDeviceLock(device, { lockProbe, signal })),
     );
     for (let i = 0; i < devices.length; i++) {
       const result = results[i];
@@ -564,7 +557,7 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
 }
 
 async function getDeviceLockStates(): Promise<ResourceContent> {
-  const content = await computeDeviceLockStates();
+  const content = await computeDeviceLockStates(getAbortSignal());
   return {
     uri: DEVICE_LOCK_STATES_RESOURCE_URI,
     mimeType: "application/json",
@@ -667,13 +660,7 @@ interface AdbOfflineHeldInput {
 async function adbOfflineHeldDeviceDescriptions(
   input: AdbOfflineHeldInput,
 ): Promise<BootedDeviceInfo[]> {
-  const held = await adbOfflineHeldDevices({
-    platform: input.platform,
-    discovered: input.discovered,
-    devicePool: input.devicePool,
-    deviceManager: input.deviceManager,
-    onProbeFailure: input.onProbeFailure,
-  });
+  const held = await adbOfflineHeldDevices({ ...input, signal: getAbortSignal() });
   return held.map(({ device, avdName, adbState }) =>
     toBootedDeviceInfo(
       device,
@@ -1497,9 +1484,9 @@ export function readinessFromServiceStatus(
 
 async function enrichDeviceLockStates(
   devices: BootedDeviceInfo[],
-  options: { timer?: Timer } = {},
+  options: { timer?: Timer; signal?: AbortSignal } = {},
 ): Promise<void> {
-  const timer = options.timer ?? defaultTimer;
+  const { timer = defaultTimer, signal } = options;
   const lockProbe = activeLockProbe();
   if (!lockProbe) {
     return;
@@ -1508,7 +1495,7 @@ async function enrichDeviceLockStates(
   const lockResults = await Promise.allSettled(
     devices.map(async (device) =>
       isProbeableDevice(device)
-        ? await probeDeviceLock(probeTarget(device), { lockProbe, timer })
+        ? await probeDeviceLock(probeTarget(device), { lockProbe, timer, signal })
         : undefined,
     ),
   );
@@ -1642,11 +1629,13 @@ async function computeBootedDevicesForPlatforms(
       finishedPlatforms.add(platform);
     }
     pending.clear();
+    const target = (d: BootedDeviceInfo) => (isProbeableDevice(d) ? probeTarget(d) : null);
     const probes = [
       ["bootCompletion", () => enrichDeviceBootCompletion(devices, timer, deps)],
       ["serviceStatus", () => enrichDeviceServiceStatuses(devices, timer)],
-      ["lock", () => enrichDeviceLockStates(devices, { timer })],
+      ["lock", () => enrichDeviceLockStates(devices, { timer, signal: controller.signal })],
       ["orientation", () => enrichDeviceOrientations(devices, timer, deps)],
+      ["traits", () => traitsProbe.enrich(devices, { target, timer, deps, serviceStatusEnabled })],
     ] as const;
     for (const [name] of probes) {
       pending.add(name);
@@ -2112,3 +2101,8 @@ export async function notifyBootedDeviceResourcesUpdated(): Promise<void> {
     DEVICE_LOCK_STATES_RESOURCE_URI,
   ]);
 }
+
+registerDeviceResourceInvalidation({
+  resetBootedDevicesResourceCache,
+  notifyBootedDeviceResourcesUpdated,
+});

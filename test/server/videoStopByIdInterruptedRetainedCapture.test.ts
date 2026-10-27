@@ -5,9 +5,9 @@ import type {
 import { HybridVideoCaptureBackend } from "../../src/features/video/HybridVideoCaptureBackend";
 import { FfmpegVideoProcessingBackend } from "../../src/features/video/FfmpegVideoProcessingBackend";
 import { FakeHostRecorderProcessControl } from "../fakes/FakeHostRecorderProcessControl";
-import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
-import * as videoManager from "../../src/server/videoRecordingManager";
-import { redriveUnconfirmedCaptureTeardowns } from "../../src/server/recordingTeardownRedrive";
+import { OrphanRecorderActiveError } from "../../src/daemon/orphanRecorderRefusal";
+import * as videoManager from "../../src/daemon/videoRecordingManager";
+import { redriveUnconfirmedCaptureTeardowns } from "../../src/daemon/recordingTeardownRedrive";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -22,7 +22,7 @@ import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { VideoRecorderService } from "../../src/features/video";
 import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -33,7 +33,7 @@ import {
   startVideoRecording,
   forceStopVideoRecording,
   heldVideoRecordingOwner,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { createVideoRecordingDeviceIncarnationListener } from "../../src/server/videoRecordingIncarnationListener";
 import {
   DEVICE_OWNED_BY_OTHER_SESSION_CODE,
@@ -45,6 +45,7 @@ import type { BootedDevice } from "../../src/models";
 
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
+import { toolText } from "../helpers/toolResponse";
 
 const videoRecording = createVideoRecordingToolsHarness();
 
@@ -86,7 +87,7 @@ beforeEach(async () => {
     spyOn(fsPromises, "stat").mockRejectedValue(new Error("fake file has no disk stat")),
     spyOn(logger, "warn").mockImplementation(() => {}),
   ];
-  const sessions = new FakeDeviceSessionManager();
+  const sessions = new FakeDeviceReadiness();
   sessions.setConnectedDevices([device]);
   videoRecording.configure({ deviceDetector: sessions });
   service = new VideoRecorderService({
@@ -187,7 +188,7 @@ async function expectRealStop(
   expect(error).toBeUndefined();
   expect(backend.stopCalls.length).toBe(stopsBefore + 1);
   expect(service.listActiveRecordingIds()).toEqual([]);
-  const payload = JSON.parse(response!.content[0].text);
+  const payload = JSON.parse(toolText(response));
   expect(payload.action).toBe("stop");
   expect(payload.count).toBe(1);
   expect(payload.recordings[0].recordingId).toBe(recordingId);
@@ -206,12 +207,12 @@ test("2: VM restore cannot let another session stop a retained interrupted captu
   backend.setForceStopFailures([new Error("capture PID 123 exit unconfirmed")]);
   try {
     await expect(listener.prepareForIncarnationChange!(device.deviceId)).rejects.toThrow();
-    await listener.onDeviceIncarnationChanged!(device.deviceId);
+    await listener.onDeviceIncarnationChanged(device.deviceId);
     expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
     expect((await repository.getRecording(active.recordingId))?.status).toBe("interrupted");
     await expectRefused(active.recordingId, { sessionUuid: OTHER });
   } finally {
-    listener.onIncarnationChangeSettled?.(device.deviceId);
+    void listener.onIncarnationChangeSettled?.(device.deviceId, { ready: false });
   }
 });
 
@@ -261,7 +262,7 @@ for (const [label, requester] of [
     const stopsBefore = backend.stopCalls.length;
     const { error, response } = await outcome({ action: "stop", recordingId, ...requester });
     expect(error).toBeUndefined();
-    const payload = JSON.parse(response!.content[0].text);
+    const payload = JSON.parse(toolText(response));
     expect(payload.alreadyStopped).toBe(true);
     expect(payload.recordings[0].recordingId).toBe(recordingId);
     expect(backend.stopCalls.length).toBe(stopsBefore);
@@ -293,7 +294,7 @@ test("6: an ownerless finalized interrupted artifact is unscoped for another ses
     sessionUuid: OTHER,
   });
   expect(error).toBeUndefined();
-  expect(JSON.parse(response!.content[0].text).alreadyStopped).toBe(true);
+  expect(JSON.parse(toolText(response)).alreadyStopped).toBe(true);
   expect(backend.stopCalls.length).toBe(stopsBefore);
 });
 
@@ -386,7 +387,7 @@ test("R6b owner stops its pre-restart recording by id", async () => {
     sessionUuid: OWNER,
   });
   expect(error?.message).toBeUndefined();
-  const payload = JSON.parse(response!.content[0].text);
+  const payload = JSON.parse(toolText(response));
   expect(payload.action).toBe("stop");
   expect(payload.count).toBe(1);
   expect(stops).toBe(1);
@@ -401,7 +402,7 @@ test("R6b owner stops its pre-restart recording by id", async () => {
     sessionUuid: OWNER,
   });
   expect(normal.error).toBeUndefined();
-  const normalEntry = JSON.parse(normal.response!.content[0].text).recordings[0];
+  const normalEntry = JSON.parse(toolText(normal.response)).recordings[0];
   expect(Object.keys(orphanEntry).sort()).toEqual(
     [...Object.keys(normalEntry), "status", "warning"].sort(),
   );
@@ -439,7 +440,7 @@ for (const status of ["recording", "interrupted"] as const) {
       expect(result.error).toBeDefined();
     } else {
       expect(result.error).toBeUndefined();
-      expect(JSON.parse(result.response!.content[0].text).alreadyStopped).toBe(true);
+      expect(JSON.parse(toolText(result.response)).alreadyStopped).toBe(true);
     }
     expect((await repository.getRecording("startup-orphan"))?.captureTeardown).toEqual(
       orphanDescriptor,
@@ -548,19 +549,11 @@ test("iOS host startup orphan is stopped by id through redrive and permits a fol
   control.onSignal = () => {
     control.running = false;
   };
-  const ffmpeg = new FfmpegVideoProcessingBackend(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+  const ffmpeg = new FfmpegVideoProcessingBackend(undefined, {
     timer,
-    undefined,
-    undefined,
-    undefined,
-    () => "generation-a",
-    control,
-  );
+    readHostStartToken: () => "generation-a",
+    hostRecorderControl: control,
+  });
   const hybrid = new HybridVideoCaptureBackend(ffmpeg, backend);
   await retainStartupOrphan(async (target, descriptor, options) => {
     expect(target).toBeUndefined();
@@ -573,7 +566,7 @@ test("iOS host startup orphan is stopped by id through redrive and permits a fol
     iosDevice,
   );
   expect(stopped.error).toBeUndefined();
-  const payload = JSON.parse(stopped.response!.content[0].text);
+  const payload = JSON.parse(toolText(stopped.response));
   expect(payload.recordings[0]).toMatchObject({
     recordingId: "startup-orphan",
     status: "interrupted",

@@ -22,7 +22,8 @@ enum PrototypeKeyboardLift {
     }
 
     /// Points to raise the sheet: how far the keyboard's top edge reaches into the window, both in
-    /// screen coordinates. Zero without a keyboard, for a keyboard below the window's bottom (a
+    /// screen coordinates. Zero while a native presentation is up (it avoids the keyboard itself), without a keyboard,
+    /// for a keyboard below the window's bottom (a
     /// hardware keyboard reports a frame at or past the screen edge), or for a placement that
     /// does not move. Never more than the window is tall.
     static func amount(
@@ -30,11 +31,15 @@ enum PrototypeKeyboardLift {
         edge: String?,
         keyboardFrame: PrototypeRect?,
         windowOriginY: Double,
-        windowHeight: Double
+        windowHeight: Double,
+        nativePresentationActive: Bool = false
     )
         -> Double
     {
-        guard appliesTo(placementType: placementType, edge: edge), let keyboardFrame,
+        // A native SwiftUI/UIKit presentation (`.sheet`, `.popover`, #15464) does its own keyboard
+        // avoidance, so the agent's lift must not stack on it (#11042 is the same double-move).
+        guard !nativePresentationActive,
+              appliesTo(placementType: placementType, edge: edge), let keyboardFrame,
               keyboardFrame.height > 0, windowHeight > 0 else { return 0 }
         let windowBottom = windowOriginY + windowHeight
         return Swift.min(Swift.max(windowBottom - keyboardFrame.y, 0), windowHeight)

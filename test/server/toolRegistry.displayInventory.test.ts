@@ -8,7 +8,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -16,6 +16,7 @@ import { FakeDisplayInventorySource } from "../fakes/FakeDisplayInventoryProvide
 import { CachingDisplayInventoryProvider } from "../../src/devices/DisplayInventoryProvider";
 import { stubCtrlProxySetup, type CtrlProxySetupStub } from "../helpers/stubCtrlProxySetup";
 import type { DeviceSession } from "../../src/db/types";
+import { sessionRow } from "../helpers/sessionManagerSuite";
 
 const android: BootedDevice = {
   name: "Pixel Fold",
@@ -35,13 +36,13 @@ describe("ToolRegistry display inventory resolution", () => {
   let restoreInventory: () => void;
   let ctrlProxyStub: CtrlProxySetupStub;
   let sessionManager: SessionManager | undefined;
-  let fakeManager: FakeDeviceSessionManager;
+  let fakeManager: FakeDeviceReadiness;
 
   beforeEach(() => {
     ToolRegistry.clearTools();
-    fakeManager = new FakeDeviceSessionManager();
+    fakeManager = new FakeDeviceReadiness();
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeManager });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { recordToolCall: async () => {} },
     });
@@ -236,7 +237,7 @@ describe("ToolRegistry display inventory resolution", () => {
       fakeManager.setConnectedDevices([target]);
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const persisted: DeviceSession = {
+      const persisted: DeviceSession = sessionRow({
         session_uuid: "display-session",
         device_id: target.deviceId,
         stable_device_id: target.platform === "ios" ? target.deviceId : target.name,
@@ -256,7 +257,7 @@ describe("ToolRegistry display inventory resolution", () => {
         has_received_heartbeat: 1,
         created_at: "2026-09-03T00:00:00.000Z",
         updated_at: "2026-09-03T00:00:00.000Z",
-      };
+      });
       sessionManager = new SessionManager(
         timer,
         Object.assign(new FakeDeviceSessionPersistence(), {

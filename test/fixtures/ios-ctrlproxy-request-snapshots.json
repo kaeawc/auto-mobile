@@ -15,7 +15,7 @@
   "snapshots": [
     {
       "name": "get_sdk_capabilities",
-      "builder": "IOSCtrlProxyClient.requestSdkCapabilities",
+      "builder": "CtrlProxySdkCapabilities.requestSdkCapabilities",
       "wire": {
         "type": "get_sdk_capabilities",
         "requestId": "fixture-request-id"
@@ -30,6 +30,16 @@
         "text": "Details",
         "occurrence": 2,
         "ownerResourceId": "owner-42"
+      }
+    },
+    {
+      "name": "request_accessibility_audit",
+      "builder": "requestAccessibilityAudit",
+      "wire": {
+        "type": "request_accessibility_audit",
+        "requestId": "fixture-request-id",
+        "appId": "com.example.audited",
+        "checks": ["contrast", "hitRegion"]
       }
     },
     {
@@ -61,7 +71,7 @@
     },
     {
       "name": "set_network_error_simulation",
-      "builder": "IOSCtrlProxyClient.setNetworkErrorSimulation",
+      "builder": "CtrlProxyNetworkSync.setNetworkErrorSimulation",
       "wire": {
         "type": "set_network_error_simulation",
         "requestId": "fixture-request-id",
@@ -189,9 +199,21 @@
         "type": "request_path_gesture",
         "requestId": "fixture-request-id",
         "points": [
-          { "x": 12.5, "y": 24.25, "offsetMs": 0 },
-          { "x": 12.5, "y": 24.25, "offsetMs": 300 },
-          { "x": 40.75, "y": 80.5, "offsetMs": 700 }
+          {
+            "x": 12.5,
+            "y": 24.25,
+            "offsetMs": 0
+          },
+          {
+            "x": 12.5,
+            "y": 24.25,
+            "offsetMs": 300
+          },
+          {
+            "x": 40.75,
+            "y": 80.5,
+            "offsetMs": 700
+          }
         ],
         "frameContext": "frame-42"
       }
@@ -373,12 +395,33 @@
       }
     },
     {
+      "name": "request_location",
+      "builder": "CtrlProxyNavigation.requestLocation",
+      "wire": {
+        "type": "request_location",
+        "requestId": "fixture-request-id",
+        "latitude": 37.33,
+        "longitude": -122.03,
+        "altitude": 12,
+        "horizontalAccuracy": 5
+      }
+    },
+    {
       "name": "set_hinge_angle",
       "builder": "CtrlProxyNavigation.requestSetHingeAngle",
       "wire": {
         "type": "set_hinge_angle",
         "requestId": "fixture-request-id",
         "angle": 130
+      }
+    },
+    {
+      "name": "request_appearance",
+      "builder": "CtrlProxyNavigation.requestAppearance",
+      "wire": {
+        "type": "request_appearance",
+        "requestId": "fixture-request-id",
+        "appearance": "dark"
       }
     },
     {
@@ -501,6 +544,24 @@
         "fileName": "Standard",
         "key": "launch_count",
         "sessionId": "fixture-session-id"
+      }
+    },
+    {
+      "name": "delete_keychain_item",
+      "builder": "CtrlProxyStorage.deleteKeychainItemForIos",
+      "wire": {
+        "type": "delete_keychain_item",
+        "requestId": "fixture-request-id",
+        "appId": "com.example.app",
+        "selector": {
+          "itemClass": "genericPassword",
+          "service": "test.service",
+          "account": "fixture",
+          "accessGroup": "TEAM.app"
+        },
+        "confirm": true,
+        "sessionId": "fixture-session-id",
+        "mutationToken": "fixture-mutation-token"
       }
     },
     {

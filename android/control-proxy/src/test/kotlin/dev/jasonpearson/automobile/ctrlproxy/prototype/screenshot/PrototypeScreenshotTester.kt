@@ -13,8 +13,12 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.mapPrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
+import io.mockk.every
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
 import java.io.File
 import java.time.Duration
+import java.time.LocalDate
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -28,6 +32,25 @@ import org.robolectric.Shadows.shadowOf
  * the fake looper clock only; no wall-clock time passes.
  */
 private val SETTLE: Duration = Duration.ofSeconds(1)
+
+/**
+ * The day every prototype render treats as "today". Material's date picker rings today's date and
+ * reads it from `LocalDate.now()` (material3 `CalendarModelImpl.today`) with no injectable clock,
+ * so an unpinned render follows the wall clock and its baseline breaks the next day. This is the
+ * date the committed baselines were recorded on.
+ */
+internal val PROTOTYPE_RENDER_TODAY: LocalDate = LocalDate.of(2026, 10, 21)
+
+/** Runs [block] with `LocalDate.now()` pinned to [PROTOTYPE_RENDER_TODAY]. */
+private inline fun <T> withPinnedToday(block: () -> T): T {
+  mockkStatic(LocalDate::class)
+  try {
+    every { LocalDate.now() } returns PROTOTYPE_RENDER_TODAY
+    return block()
+  } finally {
+    unmockkStatic(LocalDate::class)
+  }
+}
 
 /** Encodes PNGs through the platform codec, which Robolectric's native graphics mode provides. */
 internal object BitmapPngCodec : PrototypeScreenshotComparator.PngCodec {
@@ -61,11 +84,11 @@ internal fun validPrototypeFixture(
   resolveElementAnchors: Boolean = false,
   stateOverrides: Map<String, JsonElement> = emptyMap(),
   themeFrom: String? = null,
+  edit: ((JsonObject) -> JsonObject)? = null,
 ): PrototypeSpec {
   val file = validPrototypeFixtureFile(name)
-  if (!resolveElementAnchors && stateOverrides.isEmpty() && themeFrom == null) {
-    return loadPrototypeSpec(file)
-  }
+  val unedited = !resolveElementAnchors && stateOverrides.isEmpty()
+  if (unedited && themeFrom == null && edit == null) return loadPrototypeSpec(file)
   var edited = Json.parseToJsonElement(file.readText())
   if (resolveElementAnchors) edited = resolveElementAnchors(edited)
   if (stateOverrides.isNotEmpty()) edited = overrideInitialState(edited, stateOverrides)
@@ -76,6 +99,7 @@ internal fun validPrototypeFixture(
     check(theme is JsonObject) { "fixture $themeFrom has no theme object" }
     edited = JsonObject((edited as JsonObject) + ("theme" to theme))
   }
+  if (edit != null) edited = edit(edited as JsonObject)
   return loadPrototypeSpecText(file.path, Json.encodeToString(JsonElement.serializer(), edited))
 }
 
@@ -83,6 +107,32 @@ private fun validPrototypeFixtureFile(name: String): File =
   generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
     .map { File(it, "test/fixtures/prototype-spec/valid/$name.json") }
     .first { it.isFile }
+
+/**
+ * Replaces the root's single authored `background` with a `{light, dark}` pair of the same dark
+ * colour, so the device's `night`/`notnight` qualifier decides the appearance: a pair never takes
+ * part in appearance inference, while a single opaque colour decides it (#14583, #14589).
+ */
+internal fun withModeRootBackground(spec: JsonObject): JsonObject {
+  val root = spec["root"] as JsonObject
+  val style = root["style"] as JsonObject
+  val authored = style["background"]
+  check(authored is JsonPrimitive && authored.isString) {
+    "fixture root authors no single background"
+  }
+  val pair = JsonObject(mapOf("light" to JsonPrimitive("#FFFFFFFF"), "dark" to authored))
+  return JsonObject(
+    spec + ("root" to JsonObject(root + ("style" to JsonObject(style + ("background" to pair))))),
+  )
+}
+
+/** Drops the root child at [index], so a capture shows one of several overlays that share a key. */
+internal fun withoutRootChild(index: Int): (JsonObject) -> JsonObject = { spec ->
+  val root = spec["root"] as JsonObject
+  val children = (root["children"] as JsonArray).toMutableList()
+  children.removeAt(index)
+  JsonObject(spec + ("root" to JsonObject(root + ("children" to JsonArray(children)))))
+}
 
 /**
  * Replaces keys of the spec's initial `state`, so a gallery case can open a dialog or bottom sheet
@@ -153,24 +203,35 @@ internal fun renderPrototype(
   return renderComposable(name) { PrototypeSpecContent(model.root, theme = model.theme) }
 }
 
-/**
- * Draws [content] in a Robolectric activity and captures the composed view. Shared by
- * [renderPrototype] and the host-chrome screenshot test.
- */
+/** Preserves positional content calls while sharing the default settling behavior. */
 internal fun renderComposable(
   name: String,
   content: @Composable () -> Unit,
-): PrototypeScreenshotComparator.Image {
+): PrototypeScreenshotComparator.Image = renderComposable(name, settle = {}, content = content)
+
+/**
+ * Draws [content] in a Robolectric activity and captures the composed view. Shared by
+ * [renderPrototype] and the host-chrome screenshot test. [settle] optionally synchronizes Compose
+ * effects before the final main-looper drain and capture. The render runs with today pinned to
+ * [PROTOTYPE_RENDER_TODAY], so a date picker draws the same frame on any day.
+ */
+internal fun renderComposable(
+  name: String,
+  settle: () -> Unit = {},
+  content: @Composable () -> Unit,
+): PrototypeScreenshotComparator.Image = withPinnedToday {
   val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
   try {
     val activity = controller.get()
     activity.setContent(content = content)
     shadowOf(Looper.getMainLooper()).idleFor(SETTLE)
+    settle()
+    shadowOf(Looper.getMainLooper()).idle()
     val view = activity.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
     check(view.width > 0 && view.height > 0) { "$name: prototype view was not laid out" }
     val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
     view.draw(Canvas(bitmap))
-    return BitmapPngCodec.toImage(bitmap)
+    BitmapPngCodec.toImage(bitmap)
   } finally {
     controller.pause().stop().destroy()
   }

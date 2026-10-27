@@ -11,7 +11,7 @@ import {
 } from "../../src/db/keyedJsonConfigRepository";
 import type { Database } from "../../src/db/types";
 import type { AppearanceConfig } from "../../src/models";
-import { pruneSessionAppearanceConfigs } from "../../src/server/appearanceManager";
+import { pruneSessionAppearanceConfigs } from "../../src/daemon/appearanceManager";
 import { createTestDatabase } from "../db/testDbHelper";
 
 // #11076: per-session appearance rows outlived crashes, journal-terminalized UUIDs and pruned

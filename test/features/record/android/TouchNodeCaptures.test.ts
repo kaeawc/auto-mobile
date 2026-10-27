@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ScreenGeometryTimeline } from "../../../../src/features/record/android/ScreenGeometryTimeline";
-import {
-  discoverTouchNode,
-  parseTouchNodes,
-} from "../../../../src/features/record/android/TouchNodeDiscovery";
+import { discoverInputNodes } from "../../../../src/features/record/android/InputNodeDiscovery";
+import { parseTouchNodes } from "../../../../src/features/record/android/TouchNodeDiscovery";
 import { TouchFrameReconstructor } from "../../../../src/features/record/android/TouchFrameReconstructor";
 import type { RawTouchFrame, GestureEvent } from "../../../../src/features/record/android/types";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
@@ -59,15 +57,18 @@ describe("the touch node's axis ranges (getevent -p)", () => {
     axisXMax: 32767,
     axisYMin: 0,
     axisYMax: 32767,
+    kind: "touch",
+    pressureMin: 0,
+    pressureMax: 1024,
   };
 
   test("the repo's parser reads 0..32767 on both axes from the -p and -lp sections", () => {
     // The capture holds `getevent -p` (hex codes) then `getevent -lp` (named codes).
-    expect(parseTouchNodes(portrait)).toEqual([node, node]);
+    expect<unknown>(parseTouchNodes(portrait)).toEqual([node, node]);
   });
 
   test("the node reports the same range while the display is rotated", () => {
-    expect(parseTouchNodes(rotated)).toEqual([node]);
+    expect<unknown>(parseTouchNodes(rotated)).toEqual([node]);
   });
 
   test("the recorder's assumed range is the captured one", () => {
@@ -79,7 +80,7 @@ describe("the touch node's axis ranges (getevent -p)", () => {
   test("discovery picks the node from `getevent -p` and keeps the captured range", async () => {
     const adb = new FakeAdbClient();
     adb.setCommandResult("shell getevent -p", rotated);
-    expect(await discoverTouchNode(adb)).toEqual(node);
+    expect<unknown>((await discoverInputNodes(adb)).touch).toEqual(node);
   });
 
   test("the node has no BTN_TOUCH key (only BTN_TOOL_RUBBER and BTN_STYLUS)", () => {
@@ -314,7 +315,7 @@ describe("foldable: the same touch nodes in both postures (emulator-5602)", () =
     for (const capture of [opened, closed]) {
       const adb = new FakeAdbClient();
       adb.setCommandResult("shell getevent -p", capture);
-      expect((await discoverTouchNode(adb))?.path).toBe("/dev/input/event1");
+      expect((await discoverInputNodes(adb)).touch?.path).toBe("/dev/input/event1");
     }
   });
 

@@ -148,7 +148,12 @@ describe("real settle pipeline deferred back stack (#6598)", () => {
       expect(result.polls).toBe(4);
       expect(result.observation.activeWindow?.activityName).toBe("com.example.EndActivity");
       expect(result.observation.backStack?.currentActivity?.name).toBe("com.example.EndActivity");
-      expect(result.observation.freshness?.activityAttributionMismatch).toBeUndefined();
+      expect(
+        result.observation.freshness &&
+          "activityAttributionMismatch" in result.observation.freshness
+          ? result.observation.freshness.activityAttributionMismatch
+          : undefined,
+      ).toBeUndefined();
       expect(h.state.backStackCalls).toBe(multiDisplay ? 2 : 3);
       expect(h.cache.getPutCallCount()).toBe(1);
       expect(h.cache.getRecentInMemoryForDevice(h.device.deviceId)?.activeWindow).toEqual(
@@ -203,7 +208,11 @@ describe("real settle pipeline deferred back stack (#6598)", () => {
     expect(result.observation.backStack?.capturedAt).toBe(27);
     expect(result.observation.viewHierarchy?.updatedAt).toBe(30);
     expect(result.observation.activeWindow?.activityName).toBe("com.example.MainActivity");
-    expect(result.observation.freshness?.activityAttributionMismatch).toBeUndefined();
+    expect(
+      result.observation.freshness && "activityAttributionMismatch" in result.observation.freshness
+        ? result.observation.freshness.activityAttributionMismatch
+        : undefined,
+    ).toBeUndefined();
   });
 
   test("multi-display terminal scopes activeWindow just as an ordinary read does", async () => {

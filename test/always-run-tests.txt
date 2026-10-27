@@ -9,3 +9,4 @@ test/server/interactionTools.outputSchema.test.ts
 test/scripts/integrationSafeTier.test.ts
 test/bats/linux-qualification-workflow.bats
 test/lint/validToolsRegistryParity.test.ts
+test/lint/staleRepoPathReferences.test.ts

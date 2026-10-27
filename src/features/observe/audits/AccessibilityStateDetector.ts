@@ -1,11 +1,11 @@
 import { logger } from "../../../utils/logger";
 import { throwIfAborted } from "../../../utils/toolUtils";
-import { accessibilityDetector } from "../../accessibility/AccessibilityDetector";
-import type { AccessibilityDetector as AccessibilityDetectorContract } from "../../accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector } from "../../../ctrlProxy/accessibility/AccessibilityDetector";
+import type { AccessibilityDetector as AccessibilityDetectorContract } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { iosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
 import type { IosVoiceOverDetector as IosVoiceOverDetectorContract } from "../../accessibility/interfaces/IosVoiceOverDetector";
 import { FeatureFlagService, type FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../ios";
 import type { BootedDevice, ObserveResult } from "../../../models";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -18,7 +18,7 @@ export interface AccessibilityStateDetectorOptions {
   /** iOS VoiceOver detector seam; defaults to the shared singleton. */
   iosVoiceOverDetector?: IosVoiceOverDetectorContract;
   /** iOS CtrlProxy client seam; defaults to the device's shared client, resolved lazily. */
-  iosClient?: IOSCtrlProxy;
+  iosClient?: IosCtrlProxy;
 }
 
 /**
@@ -31,7 +31,7 @@ export class AccessibilityStateDetector {
   private readonly featureFlags: FeatureFlagReader | undefined;
   private readonly detector: AccessibilityDetectorContract;
   private readonly iosDetector: IosVoiceOverDetectorContract;
-  private readonly iosClient: IOSCtrlProxy | undefined;
+  private readonly iosClient: IosCtrlProxy | undefined;
 
   constructor(opts: AccessibilityStateDetectorOptions) {
     this.device = opts.device;

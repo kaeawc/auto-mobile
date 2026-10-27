@@ -8,11 +8,11 @@ import {
   resolveDaemonExitOptions,
   writeDaemonExitRecord,
   type DaemonExitRecord,
-  type DaemonExitRecordFileSystem,
 } from "../../src/daemon/daemonExitRecord";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { logger } from "../../src/utils/logger";
+import type { DaemonProcessRecord } from "../../src/daemon/processTable";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDaemonExitRecordFileSystem, SafeDaemonManager } from "../fakes/SafeDaemonManager";
 
@@ -41,28 +41,31 @@ function record(options: DaemonOptions = OPTIONS): DaemonExitRecord {
   return { reason: "database-health", exitedAtMs: 0, buildId: "build-a", options };
 }
 
-interface ManagerInternals {
-  inheritExitSettings(options: DaemonOptions): Promise<DaemonOptions>;
-  exitRecordFileSystem: DaemonExitRecordFileSystem;
-  currentBuildId: () => string;
-  portFreeProbe: (port: number) => Promise<boolean>;
-  removeConfirmedDeadPidFile(): Promise<void>;
-  stopRunningDaemon(): Promise<void>;
-  identityRecoveryIO: { socketExists(): boolean };
-  launchLogFileSystem: {
-    openSync(path: string, flags: "w", mode: number): number;
-    closeSync(fd: number): void;
-  };
-  launchWorkingDirectory: () => string;
-  verifyDaemonGenerationBeforeSignal(): Promise<boolean>;
-  prepareDaemonForConditionalRestart(status: DaemonStatus): Promise<{ accepted: boolean }>;
-  assertNoSurvivingDaemonBeforeRestart(options: DaemonOptions): Promise<void>;
-  stopNamespaceOrphansForExplicitRestart(pid?: number): Promise<void>;
-  recordedStatus(): DaemonStatus;
+/** Re-exposes the protected recovery steps as public so `spyOn` can stub them without a cast. */
+class SpyableManager extends SafeDaemonManager {
+  override verifyDaemonGenerationBeforeSignal(
+    expected: DaemonProcessRecord,
+    recoveryDeadline: number | undefined,
+    context?: string,
+  ): Promise<boolean> {
+    return super.verifyDaemonGenerationBeforeSignal(expected, recoveryDeadline, context);
+  }
+
+  override stopNamespaceOrphansForExplicitRestart(recordedPid?: number): Promise<void> {
+    return super.stopNamespaceOrphansForExplicitRestart(recordedPid);
+  }
+
+  override recordedStatus(): DaemonStatus {
+    return super.recordedStatus();
+  }
+
+  override removeConfirmedDeadPidFile(): Promise<void> {
+    return super.removeConfirmedDeadPidFile();
+  }
 }
 
 function manager(files: FakeDaemonExitRecordFileSystem, timer = new FakeTimer()) {
-  const instance = new SafeDaemonManager({
+  const instance = new SpyableManager({
     timer,
     socketPath: SOCKET,
     identityRecoveryIO: {
@@ -71,10 +74,10 @@ function manager(files: FakeDaemonExitRecordFileSystem, timer = new FakeTimer())
       probe: async () => ({ running: false }),
     },
   });
-  const internals = instance as unknown as ManagerInternals;
-  internals.exitRecordFileSystem = files;
-  internals.currentBuildId = () => "build-a";
-  internals.portFreeProbe = async () => true;
+  const internals = instance.getInternalsForTesting();
+  internals.seams.exitRecordFileSystem = files;
+  internals.seams.currentBuildId = () => "build-a";
+  internals.seams.portFreeProbe = async () => true;
   return { instance, internals };
 }
 
@@ -104,8 +107,8 @@ function launchingManager(files: FakeDaemonExitRecordFileSystem) {
       process.env.AUTOMOBILE_LOG_SINK = previousLogSink;
     }
   });
-  h.internals.launchLogFileSystem = { openSync: () => 42, closeSync: () => {} };
-  h.internals.launchWorkingDirectory = () => "/memory";
+  h.internals.seams.launchLogFileSystem = { openSync: () => 42, closeSync: () => {} };
+  h.internals.seams.launchWorkingDirectory = () => "/memory";
   const status = spyOn(h.instance, "status").mockResolvedValue({ running: false });
   const stderr = spyOn(process.stderr, "write").mockReturnValue(true);
   for (const spy of [
@@ -114,7 +117,7 @@ function launchingManager(files: FakeDaemonExitRecordFileSystem) {
     spyOn(h.instance, "acquireLock").mockReturnValue(true),
     spyOn(h.instance, "releaseLock").mockImplementation(() => {}),
     spyOn(h.instance, "waitForReady").mockResolvedValue(true),
-    spyOn(h.internals, "verifyDaemonGenerationBeforeSignal").mockResolvedValue(true),
+    spyOn(h.instance, "verifyDaemonGenerationBeforeSignal").mockResolvedValue(true),
   ]) {
     restores.push(() => spy.mockRestore());
   }
@@ -256,13 +259,13 @@ describe("daemon exit record", () => {
   function prepareRunningReplacement(h: ReturnType<typeof launchingManager>) {
     h.timer.enableAutoAdvance();
     for (const spy of [
-      spyOn(h.internals, "prepareDaemonForConditionalRestart").mockResolvedValue({
+      spyOn(h.instance, "prepareDaemonForConditionalRestart").mockResolvedValue({
         accepted: true,
       }),
-      spyOn(h.internals, "stopRunningDaemon").mockResolvedValue(undefined),
-      spyOn(h.internals, "assertNoSurvivingDaemonBeforeRestart").mockResolvedValue(undefined),
-      spyOn(h.internals, "stopNamespaceOrphansForExplicitRestart").mockResolvedValue(undefined),
-      spyOn(h.internals, "recordedStatus").mockReturnValue({ running: false }),
+      spyOn(h.instance, "stopRunningDaemon").mockResolvedValue(undefined),
+      spyOn(h.instance, "assertNoSurvivingDaemonBeforeRestart").mockResolvedValue(undefined),
+      spyOn(h.instance, "stopNamespaceOrphansForExplicitRestart").mockResolvedValue(undefined),
+      spyOn(h.instance, "recordedStatus").mockReturnValue({ running: false }),
     ]) {
       restores.push(() => spy.mockRestore());
     }
@@ -338,7 +341,7 @@ describe("daemon exit record", () => {
     const files = new FakeDaemonExitRecordFileSystem();
     writeDaemonExitRecord(SOCKET, record(), files);
     const { internals } = manager(files);
-    internals.portFreeProbe = async () => {
+    internals.seams.portFreeProbe = async () => {
       throw new Error("explicit port must not be probed");
     };
     const other = { ...OPTIONS };
@@ -480,7 +483,7 @@ describe("daemon exit record", () => {
     expect(await internals.inheritExitSettings({})).toEqual({ ...options, strictPort: true });
     expect(files.files.size).toBe(0);
     writeDaemonExitRecord(SOCKET, record(options), files);
-    internals.portFreeProbe = async () => false;
+    internals.seams.portFreeProbe = async () => false;
     expect(await internals.inheritExitSettings({})).toEqual(options);
     expect(files.files.size).toBe(0);
   });
@@ -489,7 +492,7 @@ describe("daemon exit record", () => {
     const files = new FakeDaemonExitRecordFileSystem();
     writeDaemonExitRecord(SOCKET, record(), files);
     const { internals } = manager(files);
-    internals.portFreeProbe = async () => false;
+    internals.seams.portFreeProbe = async () => false;
     expect(await internals.inheritExitSettings({})).toEqual({ ...OPTIONS, strictPort: false });
   });
 
@@ -500,7 +503,7 @@ describe("daemon exit record", () => {
     for (const spy of [
       spyOn(instance, "status").mockResolvedValue({ running: false }),
       spyOn(internals.identityRecoveryIO, "socketExists").mockReturnValue(false),
-      spyOn(internals, "removeConfirmedDeadPidFile").mockResolvedValue(undefined),
+      spyOn(instance, "removeConfirmedDeadPidFile").mockResolvedValue(undefined),
     ]) {
       restores.push(() => spy.mockRestore());
     }
@@ -512,8 +515,8 @@ describe("daemon exit record", () => {
   test("stop clears the record after stopping a running daemon", async () => {
     const files = new FakeDaemonExitRecordFileSystem();
     writeDaemonExitRecord(SOCKET, record(), files);
-    const { instance, internals } = manager(files);
-    const stop = spyOn(internals, "stopRunningDaemon").mockImplementation(async () => {
+    const { instance } = manager(files);
+    const stop = spyOn(instance, "stopRunningDaemon").mockImplementation(async () => {
       expect(files.files.size).toBe(1);
     });
     restores.push(() => stop.mockRestore());

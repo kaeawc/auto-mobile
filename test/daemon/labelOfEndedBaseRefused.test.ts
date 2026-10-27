@@ -1,3 +1,7 @@
+import {
+  deliverDaemonHeartbeat,
+  deliverDaemonHeartbeatIfKnown,
+} from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   SessionManager,
@@ -7,7 +11,7 @@ import {
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   SUSPECT_GRACE_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -121,7 +125,7 @@ describe("a label whose base is past its idle deadline and not yet scanned", () 
       w.manager.claimUnownedLivenessOwnership(LABEL, TOKEN),
     "CLI policy adoption": (w) => w.manager.adoptCliLivenessPolicy(LABEL),
     "liveness release": (w) => w.manager.releaseLivenessOwnership(LABEL, TOKEN),
-    "heartbeat recording": (w) => w.manager.recordHeartbeat(LABEL),
+    "heartbeat recording": (w) => deliverDaemonHeartbeatIfKnown(w.manager, LABEL),
     "heartbeat policy restoration": (w) => w.manager.restoreHeartbeatLivenessPolicy(LABEL),
   };
 
@@ -132,7 +136,8 @@ describe("a label whose base is past its idle deadline and not yet scanned", () 
     const found: unknown = await lookups[name](w);
     await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
 
-    expect([null, undefined, false, "not-found"]).toContain(found);
+    const notFound: unknown[] = [null, undefined, false, "not-found"];
+    expect(notFound).toContain(found);
     expect(w.released).toEqual([]);
     expect(w.manager.hasSession(BASE)).toBe(true);
     expect(w.manager.hasSession(LABEL)).toBe(true);
@@ -244,7 +249,7 @@ describe("a label whose base lost its owner's heartbeat lease, before the monito
   async function lapsedBaseLease(): Promise<World> {
     const w = await liveBaseAndLabel(LABEL_IDLE_MS);
     expect(await w.manager.claimLivenessOwnership(BASE, TOKEN)).toBe("claimed");
-    w.manager.recordHeartbeat(BASE);
+    await deliverDaemonHeartbeat(w.manager, BASE);
     w.timer.advanceTime(DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS + 1);
     expect(w.manager.getSessionLeaseState(BASE)?.phase).toBe("lapsed");
     return w;

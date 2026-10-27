@@ -29,10 +29,11 @@
 run_with_timeout() {
   local secs="$1"
   local status=0
+  local pgid_file="${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE:-}"
   shift
-  if [ -z "${AUTOMOBILE_FORCE_PORTABLE_TIMEOUT:-}" ] && command -v timeout > /dev/null 2>&1; then
+  if [ -z "${AUTOMOBILE_FORCE_PORTABLE_TIMEOUT:-}$pgid_file" ] && command -v timeout > /dev/null 2>&1; then
     timeout -k 2 "${secs}" "$@" || status=$?
-  elif [ -z "${AUTOMOBILE_FORCE_PORTABLE_TIMEOUT:-}" ] && command -v gtimeout > /dev/null 2>&1; then
+  elif [ -z "${AUTOMOBILE_FORCE_PORTABLE_TIMEOUT:-}$pgid_file" ] && command -v gtimeout > /dev/null 2>&1; then
     gtimeout -k 2 "${secs}" "$@" || status=$?
   else
     # The watchdog runs in a subshell and so cannot assign to a variable in this
@@ -42,7 +43,9 @@ run_with_timeout() {
     # requires a trailing XXXXXX and hard-errors on a bare prefix, which made
     # every fallback call return 125 on Ubuntu.
     local fired_marker
-    fired_marker="$(mktemp "${TMPDIR:-/tmp}/run_with_timeout.XXXXXX")" || return 125
+    fired_marker="$(mktemp "${TMPDIR:-/tmp}/run_with_timeout.XXXXXX")" || {
+      return 125
+    }
 
     # Monitor mode puts the child in its own process group (pgid == its pid),
     # which is what lets the group-directed kill below reach descendants.
@@ -50,12 +53,33 @@ run_with_timeout() {
     # the caller's setting before waiting on either job.
     local had_monitor=0
     case "$-" in *m*) had_monitor=1 ;; esac
+    local caller_pid
+    # $$ is the outer shell even inside a shard subshell on Bash 3.2. An exec'd
+    # child reports the actual caller's PID, which disappears when it is killed.
+    caller_pid="$(exec sh -c 'printf "%s\n" "$PPID"')"
     set -m
-    "$@" 3>&- &
+    # Hide the coordination variable from the timed command (so a nested call
+    # does not reuse it) in a subshell: this function runs in the caller's
+    # shell, so unsetting it here would drop it for every later call (#14497).
+    ( unset -v AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE; "$@" ) 3>&- &
     local cmd_pid=$!
 
     (
-      sleep "${secs}"
+      if [[ "$secs" =~ ^[0-9]+$ ]]; then
+        local deadline=$((SECONDS + 10#$secs))
+        while ((SECONDS < deadline)); do
+          if ! kill -0 "$caller_pid" 2>/dev/null; then
+            kill -TERM -"${cmd_pid}" 2>/dev/null || true
+            sleep "${AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS:-2}"
+            kill -KILL -"${cmd_pid}" 2>/dev/null || true
+            exit 0
+          fi
+          sleep 1
+        done
+      else
+        # Preserve sleep's fractional and platform-specific duration syntax.
+        sleep "$secs"
+      fi
       if kill -0 "${cmd_pid}" 2> /dev/null; then
         printf 'fired' > "${fired_marker}"
         # Capture the group before TERM removes the process we need to inspect.
@@ -113,6 +137,10 @@ run_with_timeout() {
     # open after the timed command has already exited.
     ) > /dev/null 2>&1 3>&- &
     local watcher_pid=$!
+    if [[ -n "$pgid_file" ]]; then
+      # One file per call: calibration and test watchdogs share this prefix.
+      printf '%s %s %s\n' "$cmd_pid" "$watcher_pid" "$caller_pid" > "${pgid_file}.${cmd_pid}"
+    fi
     if [ "${had_monitor}" -eq 0 ]; then set +m; fi
 
     wait "${cmd_pid}" 2> /dev/null || status=$?
@@ -130,6 +158,9 @@ run_with_timeout() {
       if [ -s "${fired_marker}" ]; then status=124; fi
     fi
     rm -f "${fired_marker}"
+    if [[ -n "$pgid_file" ]]; then
+      rm -f "${pgid_file}.${cmd_pid}"
+    fi
   fi
   if [ "$status" -eq 124 ] && [ -r "${AUTOMOBILE_WATCHDOG_TIMING_LOG:-}" ]; then
     local active_file=""

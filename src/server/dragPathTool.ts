@@ -3,12 +3,12 @@ import type { BootedDevice } from "../models";
 import { DragPath } from "../features/action/DragPath";
 import type { ProgressCallback } from "./toolRegistry";
 import { resolveTransportDeadlineMs } from "./formTools";
-import { hierarchyLayerSchema } from "./elementSelectorSchemas";
+import { hierarchyLayerSchema } from "../models/elementSelectorSchemas";
 import {
   addDeviceTargetingToSchema,
   responseShapeControlFields,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import {
   DRAG_PATH_DEFAULT_SEGMENT_MS,

@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_BOUND_SESSION_REPLAY_TTL_MS, DAEMON_VERSION } from "../../src/daemon/constants";
+import {
+  DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
+  DAEMON_VERSION,
+} from "../../src/daemon/wire/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
+import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";

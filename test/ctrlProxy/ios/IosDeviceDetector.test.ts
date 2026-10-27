@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import {
   IosDeviceDetector,
+  SIMULATOR_STATE_ABSENT,
   type RemoteDeviceListingRunner,
 } from "../../../src/ctrlProxy/ios/IosDeviceDetector";
 import { createExecResult } from "../../../src/utils/execResult";
@@ -228,4 +229,97 @@ describe("IosDeviceDetector (#11154)", () => {
       expect(await detector.isDeviceDetected()).toBe(true);
     });
   });
+});
+
+describe("positive-only simulator shutdown detection", () => {
+  const cases = [
+    ["Shutdown", true],
+    ["Shutting Down", true],
+    ["Booted", false],
+    ["Booting", false],
+    // A complete listing without this udid: the simulator was deleted (#15309).
+    ["absent", true],
+    ["empty", false],
+    ["malformed", false],
+    ["malformed runtime", false],
+    ["missing state", false],
+    ["empty state", false],
+    ["numeric state", false],
+    ["error", false],
+    ["remote failure", false],
+  ] as const;
+  for (const remote of [false, true]) {
+    test.each(cases)(`shutdown state %s (remote=${remote})`, async (state, expected) => {
+      const executor = new FakeProcessExecutor();
+      const stdout =
+        state === "empty"
+          ? ""
+          : state === "malformed"
+            ? "{"
+            : JSON.stringify({
+                devices: {
+                  runtime:
+                    state === "malformed runtime"
+                      ? { udid: SIMULATOR_UDID, state: "Shutdown" }
+                      : [
+                          {
+                            udid: state === "absent" ? "other" : SIMULATOR_UDID,
+                            state:
+                              state === "missing state"
+                                ? undefined
+                                : state === "empty state"
+                                  ? ""
+                                  : state === "numeric state"
+                                    ? 1
+                                    : state,
+                          },
+                        ],
+                },
+              });
+      const read = () => {
+        if (state === "error") {
+          throw new Error("simctl failed");
+        }
+        return stdout;
+      };
+      executor.setCommandHandler("xcrun", () => createExecResult(read(), ""));
+      const calls: string[][] = [];
+      const detector = new IosDeviceDetector({
+        deviceId: SIMULATOR_UDID,
+        processExecutor: executor,
+        timer: new FakeTimer(),
+        isSimulator: () => true,
+        useRemoteRunner: () => remote,
+        remoteRunner: {
+          ...unusedRemote(),
+          runSimctl: async (args) => {
+            calls.push(args);
+            return state === "remote failure"
+              ? { success: false }
+              : { success: true, data: { stdout: read() } };
+          },
+        },
+      });
+      const unknown =
+        [
+          "empty",
+          "malformed",
+          "malformed runtime",
+          "missing state",
+          "empty state",
+          "numeric state",
+          "error",
+        ].includes(state) ||
+        (remote && state === "remote failure");
+      expect(await detector.getSimulatorState()).toBe(
+        unknown ? undefined : state === "absent" ? SIMULATOR_STATE_ABSENT : state,
+      );
+      expect(await detector.isSimulatorShutDown()).toBe(expected);
+      if (remote) {
+        expect(calls).toEqual(Array(2).fill(["list", "devices", "--json"]));
+      } else {
+        expect(executor.wasCommandExecuted("list devices --json")).toBe(true);
+      }
+    });
+  }
 });

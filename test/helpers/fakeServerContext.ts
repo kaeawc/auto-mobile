@@ -12,11 +12,19 @@ export function fakeServerContext(
     notify?: (notification: unknown) => Promise<void>;
   } = {},
 ): ServerContext {
-  const context = {
+  const context: ServerContext = {
     mcpReq: {
       id: options.id ?? 1,
       method: "tools/call",
       _meta: undefined,
+      requestState: () => undefined,
+      log: async () => {},
+      elicitInput: async () => {
+        throw new Error("Unexpected elicitation");
+      },
+      requestSampling: async () => {
+        throw new Error("Unexpected sampling");
+      },
       signal: options.signal ?? new AbortController().signal,
       notify: options.notify ?? (async () => {}),
       send: async () => {
@@ -24,5 +32,5 @@ export function fakeServerContext(
       },
     },
   };
-  return context as ServerContext;
+  return context;
 }

@@ -1,3 +1,8 @@
+import { runBlockWithEnvelope } from "../../../helpers/observedInteractionStub";
+import type {
+  SwipeGestureRequest,
+  TalkBackSwipeRunner,
+} from "../../../../src/features/action/swipeon/types";
 import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import response from "../../../fixtures/ios/swipe-deadline-phases.json";
@@ -13,7 +18,6 @@ import {
   createPerformanceTracker,
   setDebugPerfEnabled,
 } from "../../../../src/utils/PerformanceTracker";
-import type { PerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import { logger } from "../../../../src/utils/logger";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { createSuccessWebSocketFactory } from "../../../fakes/FakeWebSocket";
@@ -23,10 +27,7 @@ import {
   getStructuredPayload,
   getStructuredField,
 } from "../../../../src/utils/toolUtils";
-import type { Element, SwipeDirection } from "../../../../src/models";
 import type { SwipeResult } from "../../../../src/models/SwipeResult";
-import type { TalkBackSwipeRunner } from "../../../../src/features/action/swipeon/types";
-import type { FencedGestureOptions } from "../../../../src/features/action/ExecuteGesture";
 import { loadIosRemindersNoiseObservePair } from "../../../fixtures/observe/observeFixture";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeScrollableElementsQuery } from "../../../fakes/FakeElementTraitQueries";
@@ -41,16 +42,7 @@ const device = { deviceId: "gesture-diagnostics", platform: "ios", name: "Fake i
 
 /** A gesture runner that records the runner's phase timing, then fails like the 5s deadline reply. */
 class ThrowingSwipeRunner implements TalkBackSwipeRunner {
-  async executeSwipeGesture(
-    _x1: number,
-    _y1: number,
-    _x2: number,
-    _y2: number,
-    _direction: SwipeDirection,
-    _container: Element | null,
-    _gestureOptions?: FencedGestureOptions,
-    perf?: PerformanceTracker,
-  ): Promise<SwipeResult> {
+  async executeSwipeGesture({ perf }: SwipeGestureRequest): Promise<SwipeResult> {
     perf?.addExternalTiming("iosPerf", response.perfTiming);
     throw new Error(`${message.error}; ${gesturePhaseSummary(message.perfTiming)}`);
   }
@@ -72,7 +64,7 @@ function swipeOnWithThrowingRunner(): SwipeOn {
     voiceOverExecutor: new ThrowingSwipeRunner(),
     accessibilityDetector: new FakeAccessibilityDetector(),
   });
-  action.observedInteraction = async (run) => ({ ...(await run(observation)), observation });
+  action.observedInteraction = runBlockWithEnvelope(() => observation, { observation });
   return action;
 }
 
@@ -208,6 +200,7 @@ describe("iOS gesture phase diagnostics", () => {
         message.requestId ?? "phase-swipe",
         "swipe",
         5000,
+        () => ({ success: false, error: "Swipe timed out" }),
       );
       void hooks.deliverMessage(JSON.stringify(message));
       expect(await pending).toMatchObject({ success: false, perfTiming: message.perfTiming });

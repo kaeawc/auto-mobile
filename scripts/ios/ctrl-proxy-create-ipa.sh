@@ -48,7 +48,7 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/ios/xcodegen_version.sh disable=SC1091
+# shellcheck source=scripts/ios/xcodegen_version.sh
 source "${SCRIPT_DIR}/xcodegen_version.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CTRL_PROXY_IOS_DIR="${PROJECT_ROOT}/ios/control-proxy"

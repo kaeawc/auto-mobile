@@ -14,8 +14,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class TelemetryModelsTest {
-
+internal class TelemetryModelsTest {
   @Test
   fun `OS event with null details retains the event`() {
     val data =
@@ -361,8 +360,6 @@ class TelemetryModelsTest {
     assertTrue(event.message.contains("from:object"))
   }
 
-  // --- Navigation with new fields ---
-
   @Test
   fun `parseTelemetryEvent parses navigation with triggeringInteraction`() {
     val envelope =
@@ -399,9 +396,9 @@ class TelemetryModelsTest {
     val event = parseTelemetryEvent(envelope) as TelemetryDisplayEvent.Navigation
     assertEquals("automobile:navigation/nodes/42/screenshot", event.screenshotUri)
   }
+}
 
-  // --- Failure with stackTrace ---
-
+internal class TelemetryFailureModelsTest {
   @Test
   fun `parseTelemetryEvent parses crash with stackTrace`() {
     val envelope =
@@ -436,14 +433,23 @@ class TelemetryModelsTest {
       )
     val event = parseTelemetryEvent(envelope) as TelemetryDisplayEvent.Failure
     assertNotNull(event.stackTrace)
-    assertEquals(2, event.stackTrace!!.size)
-    assertEquals("com.example.UserRepo", event.stackTrace!![0].className)
-    assertEquals("getUser", event.stackTrace!![0].methodName)
-    assertEquals("UserRepo.kt", event.stackTrace!![0].fileName)
-    assertEquals(42, event.stackTrace!![0].lineNumber)
-    assertTrue(event.stackTrace!![0].isAppCode)
-    assertFalse(event.stackTrace!![1].isAppCode)
-    assertNull(event.stackTrace!![1].fileName)
+    assertEquals(2, requireNotNull(event.stackTrace) { "Expected stack trace" }.size)
+    assertEquals(
+      "com.example.UserRepo",
+      requireNotNull(event.stackTrace) { "Expected stack trace" }[0].className,
+    )
+    assertEquals(
+      "getUser",
+      requireNotNull(event.stackTrace) { "Expected stack trace" }[0].methodName,
+    )
+    assertEquals(
+      "UserRepo.kt",
+      requireNotNull(event.stackTrace) { "Expected stack trace" }[0].fileName,
+    )
+    assertEquals(42, requireNotNull(event.stackTrace) { "Expected stack trace" }[0].lineNumber)
+    assertTrue(requireNotNull(event.stackTrace) { "Expected stack trace" }[0].isAppCode)
+    assertFalse(requireNotNull(event.stackTrace) { "Expected stack trace" }[1].isAppCode)
+    assertNull(requireNotNull(event.stackTrace) { "Expected stack trace" }[1].fileName)
   }
 
   @Test
@@ -462,8 +468,6 @@ class TelemetryModelsTest {
     val event = parseTelemetryEvent(envelope) as TelemetryDisplayEvent.Failure
     assertNull(event.stackTrace)
   }
-
-  // --- Storage with previousValue ---
 
   @Test
   fun `parseTelemetryEvent parses storage with previousValue`() {
@@ -505,8 +509,6 @@ class TelemetryModelsTest {
     assertEquals("old_token", event.previousValue)
   }
 
-  // --- Layout with screenName and detailsJson ---
-
   @Test
   fun `parseTelemetryEvent parses layout with screenName and detailsJson`() {
     val envelope =
@@ -524,8 +526,6 @@ class TelemetryModelsTest {
     assertEquals("HomeScreen", event.screenName)
     assertEquals("""{"windowCount":2}""", event.detailsJson)
   }
-
-  // --- Network with headers and bodies ---
 
   @Test
   fun `parseTelemetryEvent parses network with request and response headers`() {
@@ -557,8 +557,6 @@ class TelemetryModelsTest {
     assertEquals("""{"results":[]}""", event.responseBody)
     assertEquals("application/json", event.contentType)
   }
-
-  // --- matchesSearch tests ---
 
   @Test
   fun `matchesSearch returns true for blank query`() {
@@ -682,8 +680,6 @@ class TelemetryModelsTest {
     assertTrue(event.matchesSearch("excessive"))
     assertFalse(event.matchesSearch("button"))
   }
-
-  // --- eventSeverity tests ---
 
   @Test
   fun `eventSeverity classifies crash as Error`() {
@@ -817,7 +813,9 @@ class TelemetryModelsTest {
     assertEquals(EventSeverity.Info, event.classifyEventSeverity(1000)) // 500 < 1000
     assertEquals(EventSeverity.Warning, event.classifyEventSeverity(400)) // 500 >= 400
   }
+}
 
+internal class TelemetryEventSeverityTest {
   @Test
   fun `eventSeverity classifies excessive recomposition as Warning`() {
     val event =

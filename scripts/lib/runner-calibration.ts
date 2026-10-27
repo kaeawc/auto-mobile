@@ -143,10 +143,10 @@ export function attemptSlowdown(
 const SHARD_LABEL_PATTERN = /^(unit|changed) shard (\d+) attempt (\d+) (?:start|end)$/;
 
 /**
- * Worst slowdown per shard report key (`shard-N` for the unit lane,
- * `changed-shard-N` for the changed lane), using only the shard's FINAL
- * attempt: a discarded attempt-1 probe describes a report that was deleted, and
- * another shard's starvation says nothing about this shard's first samples.
+ * Worst slowdown per shard report key (`shard-N` for both lanes), using only
+ * the shard's FINAL attempt: a discarded attempt-1 probe describes a report
+ * that was deleted, and another shard's starvation says nothing about this
+ * shard's first samples.
  * Samples whose label is not a shard label are ignored.
  */
 export function shardSlowdowns(samples: readonly CalibrationSample[]): Map<string, number> {
@@ -156,7 +156,7 @@ export function shardSlowdowns(samples: readonly CalibrationSample[]): Map<strin
     if (!match) {
       return [];
     }
-    const key = match[1] === "unit" ? `shard-${match[2]}` : `changed-shard-${match[2]}`;
+    const key = `shard-${match[2]}`;
     const attempt = Number(match[3]);
     finalAttempt.set(key, Math.max(attempt, finalAttempt.get(key) ?? 0));
     return [{ key, attempt, slowdown: slowdownFactor(sample.elapsedMs, sample.baselineMs) }];

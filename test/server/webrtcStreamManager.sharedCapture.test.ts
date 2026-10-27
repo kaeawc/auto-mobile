@@ -11,7 +11,7 @@ import {
   setWebRtcStreamManagerDependencies,
   startWebRtcStream,
   stopWebRtcStream,
-} from "../../src/server/webrtcStreamManager";
+} from "../../src/daemon/webrtcStreamManager";
 import type { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 const device = { deviceId: "telemetry-device", platform: "ios", name: "iPhone" } as BootedDevice;
@@ -53,8 +53,19 @@ function install(telemetry?: H264CaptureSourceTelemetry) {
         getDescriptor: () => ({
           streamId: config.streamId,
           state: "idle",
+          whipEndpoint: config.whipEndpoint,
+          resourceUrl: null,
           iceServers: [],
-          readiness: { ...counters },
+          framesSent: 0,
+          packetsSent: 0,
+          audioPacketsSent: 0,
+          audioSamplesSent: 0,
+          readiness: {
+            ...counters,
+            publisherRtpPacketCount: null,
+            captureSourceState: "not_initialized",
+            lastSourceError: null,
+          },
         }),
       }) satisfies WebRtcStreamPublisher,
   });
@@ -83,12 +94,12 @@ test("manager replay feeds publisher without first-media evidence", async () => 
   });
   const sps = Buffer.from([0, 0, 0, 1, 7, 11]),
     pps = Buffer.from([0, 0, 0, 1, 8, 12]);
-  h.options[0].onReplayData?.(sps);
-  h.options[0].onReplayData?.(pps);
+  h.options[0]?.onReplayData?.(sps);
+  h.options[0]?.onReplayData?.(pps);
   expect(h.chunks).toEqual([sps, pps]);
-  expect(getWebRtcStreamDescriptor(stream.streamId)!.telemetry.firstMediaFrame).toBeUndefined();
-  h.options[0].onData(Buffer.from([0, 0, 0, 1, 5, 128]));
-  expect(getWebRtcStreamDescriptor(stream.streamId)!.telemetry.firstMediaFrame).toBe(
+  expect(getWebRtcStreamDescriptor(stream.streamId)!.telemetry?.firstMediaFrame).toBeUndefined();
+  h.options[0]?.onData(Buffer.from([0, 0, 0, 1, 5, 128]));
+  expect(getWebRtcStreamDescriptor(stream.streamId)!.telemetry?.firstMediaFrame).toBe(
     "2026-10-05T00:00:00.000Z",
   );
   await stopWebRtcStream(stream.streamId);

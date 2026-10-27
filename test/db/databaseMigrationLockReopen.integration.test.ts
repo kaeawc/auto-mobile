@@ -187,7 +187,9 @@ export async function down(db) {
 
       // No corruption: the write ran exactly once (single `probe` row, single
       // `0001` history row) — a stolen concurrent run would have collided.
-      const database = db.getDatabase();
+      const database = db
+        .getDatabase()
+        .withTables<{ probe: { id: number }; kysely_migration: { name: string } }>();
       const probeRows = await database.selectFrom("probe").selectAll().execute();
       expect(probeRows).toHaveLength(1);
       const historyRows = await database.selectFrom("kysely_migration").select("name").execute();

@@ -27,7 +27,7 @@ Run the lightest validation that covers the touched code, then widen only when n
 - Swift format: `ONLY_TOUCHED_FILES=false bash scripts/swiftformat/validate_swiftformat.sh`
 - Swift lint: `ONLY_TOUCHED_FILES=false bash scripts/swiftlint/validate_swiftlint.sh`
 - Other useful validators:
-  - `bash scripts/validate-bun-test-timings.sh`
+  - `bash scripts/validate-bun-test-timings.sh --run-unit-lane`, or pass an existing focused JUnit XML report to measure it directly
   - `bash scripts/detect-dead-code-ts.sh`
 
 ## Selection Rules

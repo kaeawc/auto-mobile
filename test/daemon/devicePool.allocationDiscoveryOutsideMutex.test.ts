@@ -1,5 +1,5 @@
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { makePool } from "../helpers/makePool";
-import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
 import {
@@ -8,7 +8,7 @@ import {
 } from "../../src/daemon/devicePoolRefresh";
 import { MissingDeviceLiveness } from "../../src/daemon/missingDeviceLiveness";
 import { ActionableError } from "../../src/models/ActionableError";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, SomePlatform } from "../../src/models";
 import type {
@@ -319,7 +319,7 @@ describe("allocation discovery outside assignmentMutex", () => {
         expect(pool.getRecoveryEligibility(device.deviceId).eligible).toBe(true);
       }
       const original = pool.getDevice(device.deviceId);
-      const internals = poolInternals(pool);
+      const internals = pool.testHooks;
       const releaseLock = Promise.withResolvers<void>();
       const holder = internals.assignmentMutex.runExclusive(() => releaseLock.promise);
       manager.setBootedDevices(device.platform, []);
@@ -473,8 +473,8 @@ describe("allocation discovery outside assignmentMutex", () => {
       ): Promise<boolean> {
         const present = await super.ensurePooledDevicePresent(...args);
         if (args[0].id === android[0].deviceId) {
-          args[0].status = "busy";
-          args[0].sessionId = "concurrent-owner";
+          patchDeviceBinding(args[0], { status: "busy" });
+          patchDeviceBinding(args[0], { sessionId: "concurrent-owner" });
         }
         return present;
       }

@@ -1,13 +1,13 @@
-import { poolInternals, recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
+import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect } from "bun:test";
 import type { ChildProcess } from "node:child_process";
-import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
+import { DevicePool } from "../../src/daemon/devicePool";
 import {
   InMemoryEmulatorLossIncidentStore,
   type EmulatorLossIncidentStore,
 } from "../../src/daemon/emulatorLossIncident";
-import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -58,7 +58,7 @@ export class LaggingShutdownManager extends FakeDeviceManager {
     super();
   }
 
-  override async killDevice(): Promise<void> {
+  override async killDevice(_device?: BootedDevice): Promise<void> {
     this.killAccepted.resolve();
   }
   override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
@@ -66,7 +66,7 @@ export class LaggingShutdownManager extends FakeDeviceManager {
     this.bootedDevices = [{ ...original, deviceId: this.replacementDeviceId }];
     return { pid: 0 } as ChildProcess;
   }
-  override async waitForDeviceReady(): Promise<BootedDevice> {
+  override async waitForDeviceReady(_device?: DeviceInfo): Promise<BootedDevice> {
     return this.bootedDevices[0];
   }
 }
@@ -75,7 +75,7 @@ export class KillTrackingShutdownManager extends LaggingShutdownManager {
 
   override async killDevice(device: BootedDevice): Promise<void> {
     this.kills.push(device.deviceId);
-    await super.killDevice();
+    await super.killDevice(device);
   }
 }
 export class BlockingRecoveryReadyManager extends LaggingShutdownManager {
@@ -160,8 +160,18 @@ export class FailingGetIncidentStore extends InMemoryEmulatorLossIncidentStore {
   }
 }
 
-export async function setup(
+export function setup(
   manager: LaggingShutdownManager = new LaggingShutdownManager(),
+  cancelDeviceSessionExecutions?: (sessionId: string, reason: string) => Promise<number>,
+  emulatorLossIncidentStore?: EmulatorLossIncidentStore,
+  apps = new FakeInstalledAppsRepository(),
+) {
+  return setupWith(manager, cancelDeviceSessionExecutions, emulatorLossIncidentStore, apps);
+}
+
+/** {@link setup} that keeps the concrete manager type, so its own recording members stay visible. */
+export async function setupWith<M extends LaggingShutdownManager>(
+  manager: M,
   cancelDeviceSessionExecutions?: (sessionId: string, reason: string) => Promise<number>,
   emulatorLossIncidentStore?: EmulatorLossIncidentStore,
   apps = new FakeInstalledAppsRepository(),
@@ -262,30 +272,8 @@ export async function setupAwaitingOwner(manager: LaggingShutdownManager) {
   return { timer, sessions, manager, pool, captured, persistence };
 }
 
-export interface DaemonDisconnectInternals {
-  devicePool: DevicePool;
-  sessionManager: SessionManager;
-  recordAndTryRecoverCapturedDisconnect(
-    deviceId: string,
-    pooledDevice: PooledDevice | null,
-    assignmentCount: number,
-    sessionId: string | null | undefined,
-    session: Session | null,
-    forceGeneration: number | undefined,
-  ): Promise<{ incidentId: string | undefined; handled: boolean }>;
-}
-
-export interface DaemonDeferredRecoverySweepInternals {
-  deferredSessionRecoverySweeps: Set<Promise<void>>;
-  trackDeferredSessionRecoverySweep(sweep: Promise<void>): void;
-}
-
-export interface DevicePoolProcessExitInternals {
-  trackStartedDeviceProcess(device: BootedDevice, child: ChildProcess): Promise<void>;
-}
-
 export function assertNoRecoveryReservationsRemain(pool: DevicePool, sessionId: string): void {
-  const internals = poolInternals(pool);
+  const internals = pool.testHooks;
   const recoveryState = recoveryInternals(pool);
   expect(pool.isSessionRecoveryInFlight(sessionId)).toBe(false);
   expect(recoveryState.sessionPreservingRecoveries.has(sessionId)).toBe(false);

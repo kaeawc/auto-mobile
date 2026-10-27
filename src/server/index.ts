@@ -1,3 +1,5 @@
+import { clientAdvertisesMcpApps } from "./mcpAppsSupport";
+import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import type { ListToolsResult, McpServer } from "@modelcontextprotocol/server";
 import { createSdkMcpServer } from "./sdkMcpServer";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
@@ -16,27 +18,35 @@ import {
   createReleaseSubscribedBindingStore,
   daemonSessionToolBindingStore,
 } from "./daemonSessionToolBindingStore";
-import { dropToolCallRecording } from "./toolCallRecordingManager";
+import { dropToolCallRecording } from "../daemon/toolCallRecordingManager";
 
 import { stripInternalToolParams } from "./internalToolParams";
 export { stripInternalToolParams } from "./internalToolParams";
 export { enrichAcquisitionResult } from "./pipeline/ingress/acquisition";
 import { createListSessionTools } from "./pipeline/ingress/listSessionTools";
 import { createToolCallExecutor } from "./pipeline/ingress/executeToolCall";
-import { daemonTaskManager } from "./tasks/daemonTaskManager";
+import { daemonTaskManager } from "../daemon/tasks/daemonTaskManager";
 import { installTasksProtocol } from "./tasks/installTasksProtocol";
-import type { TaskManager } from "./tasks/TaskManager";
-import type { TaskLeaseKeepalive } from "./tasks/taskLeaseKeepalive";
-import { createTaskAwareToolCallExecutor, TASK_ELIGIBLE_TOOLS } from "./tasks/toolCallTasks";
+import type { TaskManager } from "../daemon/tasks/TaskManager";
+import type { TaskLeaseKeepalive } from "../daemon/tasks/taskLeaseKeepalive";
+import {
+  createTaskAwareToolCallExecutor,
+  TASK_ELIGIBILITY,
+  type TaskEligibility,
+} from "./tasks/toolCallTasks";
 import { namesLiveSessionOfBoundPlan } from "./pipeline/ingress/namesLiveSessionOfBoundPlan";
 
 // Import the tool registry
 import { ToolRegistry } from "./toolRegistry";
+import { createRecording } from "./deviceMutationRecording";
+import { defaultDaemonContext } from "../daemon/daemonContext";
+import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 
 // Import the resource registry
 import { ResourceRegistry } from "./resourceRegistry";
 
 import { registerAllTools } from "./registerAllTools";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
 
 import { getMcpServerVersion } from "../utils/mcpVersion";
 
@@ -63,6 +73,7 @@ import { registerSdkCapabilityResources } from "./sdkCapabilityResources";
 import { registerDataStoreResources } from "./dataStoreResources";
 import { registerAppFileResources } from "./appFileResources";
 import { registerSessionLogResources } from "./sessionLogResources";
+import { registerCrashReportResources } from "./crashReportResources";
 import { registerSharedStorageResources } from "./sharedStorageResources";
 import { registerFeatureFlagResources } from "./featureFlagResources";
 import { registerPrototypeResources } from "./prototypeResources";
@@ -73,6 +84,7 @@ import { registerToolCatalogResources } from "./toolCatalogResource";
 import { registerNetworkResources } from "./networkResources";
 import { registerEmulatorLossIncidentResources } from "./emulatorLossIncidentResources";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
+import { registerDeviceConditionFeatureFlags } from "./deviceConditionTool";
 import { startupBenchmark } from "../utils/startupBenchmark";
 import {
   type SessionToolSelectionService,
@@ -85,9 +97,10 @@ import { redactTypedTextArguments } from "../utils/redactTypedTextArguments";
 import {
   defaultToolSelectionProfileRegistry,
   type ToolSelectionProfileRegistry,
-} from "./toolSelectionProfileRegistry";
+} from "../daemon/toolSelectionProfileRegistry";
 
 export interface McpServerOptions {
+  deviceReadiness?: DeviceReadiness;
   iosDependencies?: IosDoctorDependencies;
   debug?: boolean;
   sessionContext?: {
@@ -151,7 +164,7 @@ export interface McpServerOptions {
    * reconnects (a socket session id does not).
    */
   taskOwnerKey?: string;
-  taskEligibleTools?: ReadonlySet<string>;
+  taskEligibleTools?: TaskEligibility;
   taskLeaseKeepalive?: TaskLeaseKeepalive;
 }
 
@@ -182,7 +195,10 @@ export function registerMcpTools(daemonMode: boolean): void {
     lastToolRegistration?.daemonMode !== daemonMode ||
     lastToolRegistration.removalEpoch !== removalEpoch
   ) {
-    registerAllTools({ daemonMode });
+    registerAllTools({
+      daemonMode,
+      iosRunnerLocation: (device) => IOSCtrlProxyClient.getInstance(device),
+    });
     lastToolRegistration = { daemonMode, removalEpoch: ToolRegistry.removalEpochForRegistration };
   }
   validateConfiguredToolSelectionDefaults(new Set(ToolRegistry.getConfigurableToolNames()));
@@ -235,6 +251,7 @@ function registerAllResources(iosDependencies: IosDoctorDependencies): void {
   registerDataStoreResources();
   registerAppFileResources();
   registerSessionLogResources();
+  registerCrashReportResources();
   registerSharedStorageResources();
   registerFeatureFlagResources();
   registerPrototypeResources();
@@ -287,7 +304,7 @@ function installTasks(
     execute,
     taskManager,
     ownerKey,
-    eligibleTools: options.taskEligibleTools ?? TASK_ELIGIBLE_TOOLS,
+    eligibleTools: options.taskEligibleTools ?? TASK_ELIGIBILITY,
     ...(options.taskLeaseKeepalive && { keepalive: options.taskLeaseKeepalive }),
   });
 }
@@ -305,7 +322,23 @@ function resolveBindingStore(options: McpServerOptions): {
   return { store: createReleaseSubscribedBindingStore(), owned: true };
 }
 
+function installDeviceReadiness(options: McpServerOptions): void {
+  if (options.deviceReadiness) {
+    ToolRegistry.setDeviceReadiness(options.deviceReadiness);
+  } else if (!options.daemonMode && !ToolRegistry.hasDeviceReadiness()) {
+    // An embedded direct-mode server that injects none still needs one for setActiveDevice and
+    // device tools; the daemon and the stdio entrypoint install their own (#14843).
+    ToolRegistry.setDeviceReadiness(DeviceReadiness.createInstance());
+  }
+}
+
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
+  ToolRegistry.setMutationRecording(
+    createRecording(defaultDaemonContext, {
+      keyboardProfilesFor: (device) => AndroidCtrlProxyClient.getInstance(device),
+    }),
+  );
+  installDeviceReadiness(options);
   const bindingStore = resolveBindingStore(options);
   const sessionToolBinding = new SessionToolBinding(
     options.sessionContext?.initialSessionToolBinding,
@@ -322,6 +355,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   const daemonMode = options.daemonMode ?? false;
   const toolSelectionProfileRegistry =
     options.toolSelectionProfileRegistry ?? defaultToolSelectionProfileRegistry;
+  registerDeviceConditionFeatureFlags(FeatureFlagService.getInstance());
   void FeatureFlagService.getInstance()
     .initialize()
     .catch((error) => {
@@ -390,6 +424,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       ownsSession: (sessionUuid) => sessionToolBinding.ownsSession(bindingKey, sessionUuid),
       releasedSessionUuid: sessionToolBinding.releasedResourceSessionUuid(bindingKey),
       signal,
+      clientSupportsApps: clientAdvertisesMcpApps(server.server.getClientCapabilities()),
     }),
     registration,
   );
@@ -504,3 +539,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   return server;
 };
+
+/** Refresh externally changed resource rosters before a cached control-socket discovery reply. */
+export function refreshMcpResourceList(): Promise<void> {
+  return ResourceRegistry.refreshBeforeList();
+}

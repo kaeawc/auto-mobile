@@ -10,15 +10,41 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 cd "$ROOT"
 
+# Per-stage wall time goes to stderr so a slow CI run names the stage (#13565).
+stage_start=$SECONDS
+stage_done() {
+  printf '[scripts-referenced] stage %s: %ss\n' "$1" "$((SECONDS - stage_start))" >&2
+  stage_start=$SECONDS
+}
+
+# scan_tracked <pattern> <pathspec>...: print "path:token" for every -o match in tracked text files.
+# ripgrep's automata engine is ~15x faster than git grep's POSIX regex on this
+# unanchored pattern (git grep took 300 s on CI, #13565); fall back to git grep
+# when rg is absent (or SCRIPTS_REFERENCED_SCANNER=git-grep). Both emit path:token lines; binary files are skipped.
+scan_tracked() {
+  local pattern="$1"
+  shift
+  if [[ "${SCRIPTS_REFERENCED_SCANNER:-}" != "git-grep" ]] && command -v rg >/dev/null 2>&1; then
+    git ls-files -z -- "$@" 2>/dev/null \
+      | xargs -0 rg -o --no-heading --with-filename --no-line-number -e "$pattern" 2>/dev/null \
+      | grep -v ': binary file matches' || :
+  else
+    git grep -I -o -E "$pattern" -- "$@" 2>/dev/null || :
+  fi
+}
+
 git ls-files -- scripts | awk '/\.(sh|ts|py|mjs)$/ { print }' | sort -u > "$tmp/candidates"
-# git grep -o has no lookahead support; tokens ending in .ts can also be found
-# inside .tsx/.mts/.d.ts names. Keep the existing token scan and its limitation.
-# git grep -o emits path:token. Split at the first colon; repository paths cannot contain colons here.
-git grep -I -o -E '[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.(sh|ts|py|mjs)' -- . ':!scratch/**' ":!$ALLOWLIST" 2>/dev/null \
-  | awk 'index($0, ":") { file=substr($0,1,index($0,":")-1); token=substr($0,index($0,":")+1); print file "\t" token }' > "$tmp/refs" || :
+stage_done candidates
+# Tokens ending in .ts can also be found inside .tsx/.mts/.d.ts names. Keep the
+# existing token scan and its limitation.
+# The scan emits path:token. Split at the first colon; repository paths cannot contain colons here.
+scan_tracked '[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.(sh|ts|py|mjs)' . ':!scratch/**' ":!$ALLOWLIST" > "$tmp/refs.raw"
+awk 'index($0, ":") { file=substr($0,1,index($0,":")-1); token=substr($0,index($0,":")+1); print file "\t" token }' "$tmp/refs.raw" > "$tmp/refs" || :
+stage_done token-scan
 # Match quoted import forms in source-like paths; awk below extracts the specifier and keeps its importer.
-git grep -I -o -E '(from[[:space:]]+"[^" ]+"|import[[:space:]]*\("[^" ]+"[[:space:]]*\)|require\("[^" ]+"\)|^[[:space:]]*import[[:space:]]+"[^" ]+")' -- scripts test src .github package.json 2>/dev/null \
-  | awk 'index($0, ":") { file=substr($0,1,index($0,":")-1); text=substr($0,index($0,":")+1); if (match(text, /"[^" ]+"/)) { spec=substr(text,RSTART+1,RLENGTH-2); print file "\t" spec } }' > "$tmp/imports" || :
+scan_tracked '(from[[:space:]]+"[^" ]+"|import[[:space:]]*\("[^" ]+"[[:space:]]*\)|require\("[^" ]+"\)|^[[:space:]]*import[[:space:]]+"[^" ]+")' scripts test src .github package.json > "$tmp/imports.raw"
+awk 'index($0, ":") { file=substr($0,1,index($0,":")-1); text=substr($0,index($0,":")+1); if (match(text, /"[^" ]+"/)) { spec=substr(text,RSTART+1,RLENGTH-2); print file "\t" spec } }' "$tmp/imports.raw" > "$tmp/imports" || :
+stage_done import-scan
 if [[ ! -f "$ALLOWLIST" ]]; then : > "$tmp/allowlist"; else
   awk '/^[[:space:]]*#/ || /^[[:space:]]*$/ { next } { path=$1; reason=""; if (match($0, /#[[:space:]]*[^[:space:]].*/)) reason=substr($0,RSTART); print path "\t" reason }' "$ALLOWLIST" > "$tmp/allowlist"
 fi
@@ -68,6 +94,7 @@ awk -F '\t' -v allowfile="$tmp/allowlist" -v pythonroots="$tmp/python-roots" -v 
     for (p in state) if (state[p]=="UNREFERENCED" && !(p in allowed)) print "[scripts-referenced] UNREFERENCED " p ": reference it from a workflow, package.json script, other script, scripts/README.md, or docs, or add an allow-list line with a reason." > failures
   }
 ' "$tmp/python-roots" "$tmp/candidates" "$tmp/refs" "$tmp/imports" "$tmp/allowlist" > "$tmp/classification"
+stage_done classify
 
 if $REPORT; then
   for file in "$tmp/unreferenced" "$tmp/testonly" "$tmp/listed"; do [[ -f "$file" ]] && sort "$file"; done

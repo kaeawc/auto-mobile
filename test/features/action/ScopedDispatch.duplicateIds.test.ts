@@ -1,4 +1,7 @@
-import { expect, spyOn, test } from "bun:test";
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { capturedFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { expect, spyOn, test, afterEach, mock } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
@@ -15,7 +18,9 @@ import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigation
 import { FakeTimer } from "../../fakes/FakeTimer";
 import fixture from "../../fixtures/observe/ctrlproxy-notification-group-compact-bounds.json";
 
-const capture: ViewHierarchyResult = { hierarchy: { node: fixture.expanded } };
+const capture: ViewHierarchyResult = {
+  hierarchy: { node: capturedFlatNodeForTest(fixture.expanded) },
+};
 const nodes = new SearchableHierarchy().project(capture);
 const device = {
   name: "Captured duplicates",
@@ -107,19 +112,16 @@ for (const row of rows) {
             throw new Error("Captured target must have bounds");
           }
           expect(element["resource-id"]).toBe(targetId);
-          expect(element.bounds).toEqual(expectedNode?.bounds);
+          if (!expectedNode?.bounds) {
+            throw new Error("Captured target must have bounds");
+          }
+          expect(element.bounds).toEqual(expectedNode.bounds);
           const point = new DefaultElementGeometry().getElementCenter(element);
           expect(point).toEqual({ x, y });
-          await tap.executeAndroidTap(
-            "tap",
-            point.x,
-            point.y,
-            500,
-            element,
-            undefined,
-            options,
-            true,
-          );
+          await tap.executeAndroidTap("tap", point.x, point.y, 500, element, {
+            options: options,
+            isTalkBackEnabled: true,
+          });
         } else {
           const tap = new TapAnyElement(device, adb, {
             ...dependencies,
@@ -127,8 +129,14 @@ for (const row of rows) {
           });
           // Reuse the real capture for fresh lookup. After dispatch the fake
           // probe is unreadable, so retry cannot obscure the first dispatch.
-          tap.observedInteraction = (action) =>
-            action({ viewHierarchy: capture, screenSize: { width: 1080, height: 2400 } });
+          tap.observedInteraction = runBlockWith(() =>
+            buildObserveResult({
+              updatedAt: 0,
+              systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+              viewHierarchy: capture,
+              screenSize: { width: 1080, height: 2400 },
+            }),
+          );
           let dispatched = false;
           tap.testHooks.setBeforeAndroidTap(() => {
             dispatched = true;
@@ -147,7 +155,10 @@ for (const row of rows) {
         expect(nodes.filter((node) => node.nativeId === id)).toHaveLength(4);
         expect(direct.mock.calls).toHaveLength(1);
         expect(direct.mock.calls[0]?.[0]["resource-id"]).toBe(id);
-        expect(direct.mock.calls[0]?.[0].bounds).toEqual(expectedNode?.bounds);
+        if (!expectedNode?.bounds) {
+          throw new Error("Captured target must have bounds");
+        }
+        expect(direct.mock.calls[0]?.[0].bounds).toEqual(expectedNode.bounds);
         expect(await direct.mock.results[0]?.value).toMatchObject({
           success: false,
           error: `Selected resource-id "${id}" is shared by 4 elements; using coordinate fallback.`,
@@ -164,3 +175,7 @@ for (const row of rows) {
     });
   }
 }
+
+afterEach(() => {
+  mock.restore();
+});

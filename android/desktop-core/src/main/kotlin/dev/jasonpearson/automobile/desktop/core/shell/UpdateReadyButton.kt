@@ -33,7 +33,9 @@ import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.theme.DesktopTypography
 import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
 import java.awt.Desktop
+import java.io.IOException
 import java.net.URI
+import java.net.URISyntaxException
 
 private val LOG = LoggerFactory.getLogger("UpdateReadyButton")
 
@@ -41,7 +43,15 @@ private val LOG = LoggerFactory.getLogger("UpdateReadyButton")
 fun openReleaseNotesInBrowser(url: String) {
   try {
     Desktop.getDesktop().browse(URI(url))
-  } catch (error: Exception) {
+  } catch (error: IOException) {
+    LOG.warn("Failed to open release notes $url: ${error.message}", error)
+  } catch (error: URISyntaxException) {
+    LOG.warn("Failed to open release notes $url: ${error.message}", error)
+  } catch (error: UnsupportedOperationException) {
+    LOG.warn("Failed to open release notes $url: ${error.message}", error)
+  } catch (error: SecurityException) {
+    LOG.warn("Failed to open release notes $url: ${error.message}", error)
+  } catch (error: IllegalArgumentException) {
     LOG.warn("Failed to open release notes $url: ${error.message}", error)
   }
 }

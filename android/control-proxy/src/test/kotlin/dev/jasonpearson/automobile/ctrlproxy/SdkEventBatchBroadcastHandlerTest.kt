@@ -325,7 +325,9 @@ class SdkEventBatchBroadcastHandlerExtraTest {
         },
         log =
           object : SdkEventBatchBroadcastHandler.LogSink {
-            override fun debug(message: String) {}
+            override fun debug(message: String) {
+              // Intentionally no-op: debug logging is irrelevant to receiver behavior.
+            }
 
             override fun warn(message: String) = error(message)
           },
@@ -377,7 +379,9 @@ class CtrlProxyEventBatchReceiverTest {
           return true
         }
 
-        override fun quitSafely() {}
+        override fun quitSafely() {
+          // Intentionally no-op: this fake executes work inline and owns no thread.
+        }
       }
     }
     controller.create()

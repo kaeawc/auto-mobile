@@ -40,7 +40,10 @@ class LayoutInspectorStateFrameGenerationTest {
         """{"hierarchy":{"node":{"className":"XCUIApplication","bounds":{"left":0,"top":0,"right":100,"bottom":100}}}}""",
       )
     val parsed = requireNotNull(parseHierarchyFromJson(success))
-    state.applyHierarchyUpdateImmediate(parsed, emptySet())
+    state.applyHierarchyUpdateImmediate(
+      parsed = parsed,
+      changedIds = emptySet(),
+    )
     assertNull(state.hierarchyUnavailableReason)
   }
 
@@ -63,7 +66,10 @@ class LayoutInspectorStateFrameGenerationTest {
   fun `new iOS failure cancels an older debounced hierarchy success`() = runTest {
     val state = LayoutInspectorState(StandardTestDispatcher(testScheduler))
     val parsed = buildParsedHierarchy(LayoutInspectorMockData.mockHierarchy)
-    state.applyHierarchyUpdate(parsed, emptySet())
+    state.applyHierarchyUpdate(
+      parsed = parsed,
+      changedIds = emptySet(),
+    )
 
     val error =
       Json.parseToJsonElement(
@@ -85,8 +91,11 @@ class LayoutInspectorStateFrameGenerationTest {
       width = 1080,
       height = 2340,
       timestamp = 1L,
-      deviceId = deviceId,
-      generation = generation,
+      options =
+        ScreenshotUpdateOptions(
+          deviceId = deviceId,
+          generation = generation,
+        ),
     )
   }
 
@@ -111,7 +120,14 @@ class LayoutInspectorStateFrameGenerationTest {
       val state = LayoutInspectorState(StandardTestDispatcher(testScheduler))
       val parsed = buildParsedHierarchy(LayoutInspectorMockData.mockHierarchy)
 
-      state.applyHierarchyUpdate(parsed, emptySet(), deviceId = "emulator-5554")
+      state.applyHierarchyUpdate(
+        parsed = parsed,
+        changedIds = emptySet(),
+        options =
+          HierarchyUpdateOptions(
+            deviceId = "emulator-5554",
+          ),
+      )
       // Supersede it before the debounce fires (device change / stream disconnect).
       state.invalidateRenderedDeviceIdentity()
       advanceUntilIdle()
@@ -128,10 +144,13 @@ class LayoutInspectorStateFrameGenerationTest {
     val parsed = buildParsedHierarchy(LayoutInspectorMockData.mockHierarchy)
 
     state.applyHierarchyUpdate(
-      parsed,
-      emptySet(),
-      deviceId = "emulator-5554",
+      parsed = parsed,
+      changedIds = emptySet(),
       generation = state.frameGeneration,
+      options =
+        HierarchyUpdateOptions(
+          deviceId = "emulator-5554",
+        ),
     )
     advanceUntilIdle()
 
@@ -185,22 +204,28 @@ class LayoutInspectorStateFrameGenerationTest {
 
     // A prior Live Layout session rendered a live frame for this device.
     state.updateScreenshot(
-      byteArrayOf(1),
-      1080,
-      2340,
-      1L,
-      deviceId = device,
-      generation = state.frameGeneration,
-      captureSequence = 1L,
-      frameContext = "epoch:1",
-      rotation = 0,
+      data = byteArrayOf(1),
+      width = 1080,
+      height = 2340,
+      timestamp = 1L,
+      options =
+        ScreenshotUpdateOptions(
+          deviceId = device,
+          generation = state.frameGeneration,
+          captureSequence = 1L,
+          frameContext = "epoch:1",
+          rotation = 0,
+        ),
     )
     state.updateHierarchy(
-      rootBounds(),
-      deviceId = device,
-      captureSequence = 1L,
-      frameContext = "epoch:1",
-      captureRotation = 0,
+      newHierarchy = rootBounds(),
+      options =
+        HierarchyUpdateOptions(
+          deviceId = device,
+          captureSequence = 1L,
+          frameContext = "epoch:1",
+          captureRotation = 0,
+        ),
     )
     state.updateConnectionStatus(ConnectionStatus.Connected)
     assertTrue(gateFor(state, device), "control was active in the prior session")
@@ -212,22 +237,28 @@ class LayoutInspectorStateFrameGenerationTest {
 
     // Only genuinely fresh screenshot + hierarchy frames re-arm control.
     state.updateScreenshot(
-      byteArrayOf(2),
-      1080,
-      2340,
-      2L,
-      deviceId = device,
-      generation = state.frameGeneration,
-      captureSequence = 2L,
-      frameContext = "epoch:2",
-      rotation = 0,
+      data = byteArrayOf(2),
+      width = 1080,
+      height = 2340,
+      timestamp = 2L,
+      options =
+        ScreenshotUpdateOptions(
+          deviceId = device,
+          generation = state.frameGeneration,
+          captureSequence = 2L,
+          frameContext = "epoch:2",
+          rotation = 0,
+        ),
     )
     state.updateHierarchy(
-      rootBounds(),
-      deviceId = device,
-      captureSequence = 2L,
-      frameContext = "epoch:2",
-      captureRotation = 0,
+      newHierarchy = rootBounds(),
+      options =
+        HierarchyUpdateOptions(
+          deviceId = device,
+          captureSequence = 2L,
+          frameContext = "epoch:2",
+          captureRotation = 0,
+        ),
     )
     state.updateConnectionStatus(ConnectionStatus.Connected)
     assertTrue(gateFor(state, device), "fresh frames re-arm control")

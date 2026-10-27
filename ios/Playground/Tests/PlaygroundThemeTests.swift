@@ -9,22 +9,23 @@ import XCTest
 /// Android `PlaygroundContrastTest` / `PlaygroundShapesTest`.
 final class PlaygroundThemeTests: XCTestCase {
     private func luminance(_ color: Color) -> Double {
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
-        func ch(_ c: CGFloat) -> Double {
-            let d = Double(c)
-            return d <= 0.03928 ? d / 12.92 : pow((d + 0.055) / 1.055, 2.4)
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        func ch(_ channel: CGFloat) -> Double {
+            let component = Double(channel)
+            return component <= 0.03928 ? component / 12.92 : pow((component + 0.055) / 1.055, 2.4)
         }
-        return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+        return 0.2126 * ch(red) + 0.7152 * ch(green) + 0.0722 * ch(blue)
     }
 
-    private func contrast(_ fg: Color, _ bg: Color) -> Double {
-        let l1 = luminance(fg), l2 = luminance(bg)
-        return (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
+    private func contrast(_ foreground: Color, _ background: Color) -> Double {
+        let foregroundLuminance = luminance(foreground), backgroundLuminance = luminance(background)
+        return (max(foregroundLuminance, backgroundLuminance) + 0.05) /
+            (min(foregroundLuminance, backgroundLuminance) + 0.05)
     }
 
-    private func assertAA(_ name: String, _ fg: Color, _ bg: Color) {
-        XCTAssertGreaterThanOrEqual(contrast(fg, bg), 4.5, "\(name) must meet WCAG AA (>= 4.5:1)")
+    private func assertAA(_ name: String, _ foreground: Color, _ background: Color) {
+        XCTAssertGreaterThanOrEqual(contrast(foreground, background), 4.5, "\(name) must meet WCAG AA (>= 4.5:1)")
     }
 
     func testLightTextRolesMeetAA() {
@@ -85,14 +86,14 @@ final class PlaygroundThemeTests: XCTestCase {
     }
 
     func testShapeScaleIsChunkyHandDrawn() {
-        let s = PlaygroundShapes()
-        XCTAssertEqual(s.extraSmall, 6)
-        XCTAssertEqual(s.small, 12)
-        XCTAssertEqual(s.medium, 18)
-        XCTAssertEqual(s.large, 26)
-        XCTAssertEqual(s.extraLarge, 40)
-        XCTAssertEqual(s.button, 14)
-        XCTAssertEqual(s.card, 18)
-        XCTAssertEqual(s.textField, 12)
+        let shapes = PlaygroundShapes()
+        XCTAssertEqual(shapes.extraSmall, 6)
+        XCTAssertEqual(shapes.small, 12)
+        XCTAssertEqual(shapes.medium, 18)
+        XCTAssertEqual(shapes.large, 26)
+        XCTAssertEqual(shapes.extraLarge, 40)
+        XCTAssertEqual(shapes.button, 14)
+        XCTAssertEqual(shapes.card, 18)
+        XCTAssertEqual(shapes.textField, 12)
     }
 }

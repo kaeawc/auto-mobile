@@ -2,7 +2,7 @@
 # Best-effort Android emulator diagnostics collection for CI failures.
 set -euo pipefail
 
-# shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+# shellcheck source=scripts/ios/run_with_timeout.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../ios/run_with_timeout.sh"
 
 adb_timeout_seconds="${AUTOMOBILE_EMULATOR_DIAGNOSTICS_TIMEOUT_SECONDS:-10}"
@@ -25,9 +25,8 @@ printf '%s\n' "${reason}" > "${diagnostics_dir}/failure-reason.txt"
 
 # Match the executable name, not the argument string (which can contain this
 # script's name). Never signal or change any emulator process.
-# shellcheck disable=SC2016 # awk field references must remain literal.
 run_with_timeout "${adb_timeout_seconds}" ps -eo pid,ppid,comm,args \
-  | run_with_timeout "${adb_timeout_seconds}" awk 'NR == 1 || $3 ~ /(^|\/)(emulator|qemu[^/]*)$/' \
+  | run_with_timeout "${adb_timeout_seconds}" awk "NR == 1 || \$3 ~ /(^|\\/)(emulator|qemu[^/]*)\$/" \
   > "${diagnostics_dir}/host-processes.txt" 2>&1
 kvm_device="${AUTOMOBILE_KVM_DEVICE:-/dev/kvm}"
 {
@@ -75,8 +74,7 @@ if ! command -v adb >/dev/null 2>&1; then
 fi
 
 run_with_timeout "${adb_timeout_seconds}" adb devices -l > "${diagnostics_dir}/adb-devices.txt" 2>&1
-# shellcheck disable=SC2016 # awk field references must remain literal.
-serial="$(run_with_timeout "${adb_timeout_seconds}" awk '$2 == "device" { print $1; exit }' "${diagnostics_dir}/adb-devices.txt")"
+serial="$(run_with_timeout "${adb_timeout_seconds}" awk "\$2 == \"device\" { print \$1; exit }" "${diagnostics_dir}/adb-devices.txt")"
 if [[ -z "${serial}" ]]; then
   printf '%s\n' "No online adb device was available for on-device diagnostics." \
     > "${diagnostics_dir}/no-online-device.txt"

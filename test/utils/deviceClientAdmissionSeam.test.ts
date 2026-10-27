@@ -15,9 +15,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import {
-  DefaultDeviceClientProvider,
-  DeviceSessionManager,
-} from "../../src/devices/DeviceSessionManager";
+  createDefaultDeviceClientProvider,
+  DeviceReadiness,
+} from "../../src/daemon/readiness/DeviceReadiness";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
@@ -75,7 +75,7 @@ describe("device-client admission seam", () => {
     async (identity) => {
       const adb = new FakeAdbExecutor();
       adb.setDevices([{ ...DEVICE, name: SERIAL }]);
-      const provider = new DefaultDeviceClientProvider(new FakeAdbClientFactory(adb));
+      const provider = createDefaultDeviceClientProvider(new FakeAdbClientFactory(adb));
       const cached = provider.getWindow(DEVICE);
       const active = spyOn(cached, "getActive").mockResolvedValue({
         appId: "com.example.app",
@@ -83,7 +83,7 @@ describe("device-client admission seam", () => {
         layoutSeqSum: 0,
       });
       try {
-        const manager = DeviceSessionManager.createInstance(provider);
+        const manager = DeviceReadiness.createInstance(provider);
         await manager.verifyAndroidDevice(SERIAL, { readiness: "booted" }, DEVICE);
         expect(active).toHaveBeenCalledTimes(1);
         await quarantinedPool();
@@ -111,10 +111,10 @@ describe("device-client admission seam", () => {
       const window = new FakeWindow();
       window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
       const provider = new FakeDeviceClientProvider(adb, utils, undefined, { window });
-      const manager = DeviceSessionManager.createInstance(provider, new FakeAdbClientFactory(adb));
+      const manager = DeviceReadiness.createInstance(provider, new FakeAdbClientFactory(adb));
       await manager.verifyAndroidDevice(SERIAL, { readiness: "booted" });
       if (route === "current") {
-        manager.setCurrentDevice(DEVICE, "android");
+        manager.setExplicitDevicePin(DEVICE);
       }
       await quarantinedPool();
       const ready =
@@ -130,8 +130,12 @@ describe("device-client admission seam", () => {
 
   test("current quarantine refusal preserves selection and never discovers a replacement", async () => {
     const refusal = new DeviceIdentityQuarantinedError("identity unresolved");
-    const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(),
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([DEVICE]);
+    const utils = new FakeDeviceUtils();
+    utils.setBootedDevices("android", [DEVICE]);
+    const manager = DeviceReadiness.createInstance(
+      new FakeDeviceClientProvider(adb, utils),
       new FakeAdbClientFactory(),
       {
         admissionGate: {
@@ -141,7 +145,7 @@ describe("device-client admission seam", () => {
         },
       },
     );
-    manager.setCurrentDevice(DEVICE, "android");
+    manager.setExplicitDevicePin(DEVICE);
     const discovery = spyOn(manager, "findOrStartDevice").mockResolvedValue({
       ...DEVICE,
       deviceId: "emulator-5556",
@@ -151,8 +155,8 @@ describe("device-client admission seam", () => {
         manager.ensureDeviceReady("android", undefined, { readiness: "booted" }),
       ).rejects.toBe(refusal);
       expect(discovery).not.toHaveBeenCalled();
-      expect(manager.getCurrentDevice()).toBe(DEVICE);
-      expect(manager.getCurrentPlatform()).toBe("android");
+      expect(manager.getExplicitDevicePin()).toBe(DEVICE);
+      expect(manager.getExplicitDevicePin()?.platform).toBe("android");
     } finally {
       discovery.mockRestore();
     }
@@ -164,7 +168,7 @@ describe("device-client admission seam", () => {
     const window = new FakeWindow();
     window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
     const binding = new FakeDeviceExecutionBinding();
-    const manager = DeviceSessionManager.createInstance(
+    const manager = DeviceReadiness.createInstance(
       new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), undefined, { window }),
       new FakeAdbClientFactory(adb),
       { admissionGate: permissiveDeviceAdmissionGate, executionBinding: binding },

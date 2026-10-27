@@ -10,36 +10,8 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/Performa
 import type { BackStack } from "./interfaces/BackStack";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { parseResumedActivityForDisplay } from "../../utils/android-cmdline-tools/parseResumedActivity";
-
-/**
- * Legacy task header, printed by the pre-Android-10 `dumpsys` layout as either
- * "Task id #123" or `ActivityStack.dumpActivitiesLocked`'s `"    * " + task`,
- * i.e. "* TaskRecord{1d3813b #14418 A=com.example U=0 StackId=436 sz=2}".
- *
- * Anchored to the start of the line (issue #4263). `TaskRecord{...}` is printed
- * verbatim in at least two NON-header positions in real legacy output:
- *
- *     * Hist #1: ActivityRecord{...}
- *         frontOfTask=false task=TaskRecord{1d3813b #14418 A=... sz=2}
- *
- *     Running activities (most recent first):
- *       TaskRecord{1d3813b #14418 A=... sz=2}
- *
- * The first sits BETWEEN two `Hist` rows, so read as a header it splits one
- * task's activities across two headers and (before #4263) blanked the affinity
- * of every activity below it. Line-anchoring rejects it: it is always preceded
- * by `frontOfTask=<bool> task=`.
- *
- * The second IS at the start of its line, only without the bullet, so anchoring
- * alone cannot tell it apart from a real header -- and the bullet-less form is
- * itself pinned as a header by the #4223 suite. It is instead defused in
- * `parseTasks`, which resumes an already-seen task id rather than restarting
- * it, so a repeat cannot discard what was already parsed.
- *
- * The id is taken from the token right after the identity hash rather than by
- * the previous greedy scan, which captured the last "#number" on the line.
- */
-const LEGACY_TASK_HEADER = /^\s*(?:Task\s+id\s+#(\d+)\b|\*?\s*TaskRecord\{\S+\s+#(\d+)\b(.*))$/;
+import { LEGACY_TASK_HEADER, MODERN_TASK_HEADER } from "./taskHeaderPatterns";
+import { applyTaskWindowing, parseTaskWindowing } from "./TaskWindowing";
 
 /**
  * `A=` / `I=` / `aI=` out of a task-header tail. Space-anchored so "aI=" is not
@@ -101,28 +73,6 @@ function parseHistRow(line: string): HistRow | undefined {
     taskId: taskId ? parseInt(taskId[1], 10) : undefined,
   };
 }
-
-/**
- * Modern task header (issue #4223). `TaskFragment.dumpInner` prints
- *
- *     pw.print(prefix); pw.print("* "); pw.println(toFullString());
- *
- * and `Task.toString()` -- which `Task.toFullString()` extends -- opens with
- * "Task{" + hex identity hash + " #" + mTaskId before any optional field. The
- * id is therefore the only positionally stable token after the hash: `A=` /
- * `I=` / `aI=` are mutually exclusive and `rootTaskId=` appears only for
- * non-root tasks, so everything past the id is matched by key instead.
- *
- * The leading "* " is required. `Task{...}` also appears inline elsewhere in
- * dumpsys output (adjacent-task-fragment references, child lists), and an
- * unanchored match would invent tasks out of those references. `TaskFragment{`
- * is a different `toString()` with no "#id" and does not match "Task\{".
- *
- * Source: AOSP android15-release,
- * services/core/java/com/android/server/wm/Task.java (toString, toFullString)
- * and .../TaskFragment.java (dumpInner).
- */
-const MODERN_TASK_HEADER = /^\s*\*\s*Task\{\S+\s+#(\d+)\b(.*)$/;
 
 /** "* Hist  #0: ActivityRecord{...}" -- one printed activity. */
 const HIST_LINE = /\bHist\s+#\d+:/;
@@ -207,6 +157,149 @@ function fieldsFromTail(id: number, tail: string): TaskHeaderFields {
     affinity: affinity ? affinity[1] : undefined,
     component: component ? component[1] : undefined,
   };
+}
+
+function histRootEntry(histRoots: Map<number, HistRootEntry>, owner: number): HistRootEntry {
+  let entry = histRoots.get(owner);
+  if (entry === undefined) {
+    entry = {};
+    histRoots.set(owner, entry);
+  }
+  return entry;
+}
+function applyTaskHeader(task: TaskInfo, header: TaskHeaderFields): void {
+  if (header.userId !== undefined) {
+    task.userId = header.userId;
+  }
+  if (header.affinity) {
+    task.affinity = header.affinity;
+  }
+  if (header.component) {
+    task.rootActivity = header.component;
+    task.packageName = header.component.split("/")[0];
+  }
+}
+
+interface OpenHist extends Pick<HistRow, "component" | "histIndex"> {
+  owner: number;
+  launchedFromPackage?: string;
+}
+
+function updateHistRow(
+  line: string,
+  currentTaskId: number,
+  histCounts: Map<number, number>,
+  histRoots: Map<number, HistRootEntry>,
+  openHist: OpenHist | undefined,
+): OpenHist | undefined {
+  const hist = parseHistRow(line);
+  if (hist) {
+    // A row carrying its own tNN belongs to that task even when it is
+    // printed under another header.
+    const owner = hist.taskId ?? currentTaskId;
+    histCounts.set(owner, (histCounts.get(owner) ?? 0) + 1);
+    if (hist.histIndex === 0) {
+      histRootEntry(histRoots, owner).firstHist0 ??= hist.component;
+    }
+    // This row opens a new ActivityRecord block; its own rootOfTask= (if
+    // printed a few lines below) targets this row.
+    openHist = { owner, component: hist.component, histIndex: hist.histIndex };
+  } else if (HIST_LINE.test(line)) {
+    // A Hist row in a shape parseHistRow does not recognize still counts,
+    // and still ends the previous record's block.
+    histCounts.set(currentTaskId, (histCounts.get(currentTaskId) ?? 0) + 1);
+    openHist = undefined;
+  }
+
+  return openHist;
+}
+
+function updateHistRoot(
+  line: string,
+  histRoots: Map<number, HistRootEntry>,
+  openHist: OpenHist | undefined,
+): OpenHist | undefined {
+  const launchedFromPackage = line.match(/launchedFromPackage=([^\s]+)/);
+  if (launchedFromPackage && openHist) {
+    openHist.launchedFromPackage =
+      launchedFromPackage[1] === "null" ? undefined : launchedFromPackage[1];
+    if (openHist.histIndex === 0 && openHist.launchedFromPackage !== undefined) {
+      histRootEntry(histRoots, openHist.owner).firstHist0LaunchedFromPackage ??=
+        openHist.launchedFromPackage;
+    }
+  }
+
+  // The open record's own rootOfTask= field (see ROOT_OF_TASK_LINE / #4340).
+  // First rootOfTask=true wins, so the api34 double-`Hist #0` task resolves
+  // to the row the dump actually marks as the root.
+  const rootOfTask = line.match(ROOT_OF_TASK_LINE);
+  if (rootOfTask && openHist) {
+    if (rootOfTask[1] === "true") {
+      const entry = histRootEntry(histRoots, openHist.owner);
+      if (entry.authoritative === undefined) {
+        entry.authoritative = openHist.component;
+        entry.authoritativeLaunchedFromPackage = openHist.launchedFromPackage;
+      }
+    }
+    openHist = undefined;
+  }
+
+  return openHist;
+}
+
+function applyTaskFields(task: TaskInfo, line: string): void {
+  const affinityMatch = line.match(/affinity=([^\s]+)/);
+  if (affinityMatch) {
+    task.affinity = affinityMatch[1];
+  }
+
+  const realActivityMatch = line.match(/realActivity=([^\s]+)/);
+  if (realActivityMatch) {
+    const fullName = realActivityMatch[1];
+    task.packageName = fullName.split("/")[0];
+
+    if (!task.rootActivity) {
+      task.rootActivity = fullName;
+    }
+  }
+
+  const numActivitiesMatch = line.match(/numActivities=(\d+)/);
+  if (numActivitiesMatch) {
+    task.numActivities = parseInt(numActivitiesMatch[1], 10);
+  }
+}
+
+function applyHistFallbacks(
+  task: TaskInfo,
+  histCounts: Map<number, number>,
+  histRoots: Map<number, HistRootEntry>,
+): void {
+  if (task.numActivities === undefined) {
+    task.numActivities = histCounts.get(task.id) ?? 0;
+  }
+  const entry = histRoots.get(task.id);
+  const launchedFromPackage =
+    entry?.authoritative !== undefined
+      ? entry.authoritativeLaunchedFromPackage
+      : entry?.firstHist0LaunchedFromPackage;
+  if (launchedFromPackage !== undefined) {
+    task.launchedFromPackage = launchedFromPackage;
+  }
+  // No `Hist #0` row means nothing here resolves the task's root the way
+  // this fallback is scoped to. A rootOfTask=true row alone does NOT
+  // populate an otherwise-undefined root (issue #4359): the override only
+  // ever replaces the index-derived `firstHist0` value. Leaving both
+  // undefined is the honest answer; the affinity is not a package name.
+  if (entry === undefined || entry.firstHist0 === undefined) {
+    return;
+  }
+  const histRoot = entry.authoritative ?? entry.firstHist0;
+  if (task.rootActivity === undefined) {
+    task.rootActivity = histRoot;
+  }
+  if (task.packageName === undefined) {
+    task.packageName = histRoot.split("/")[0];
+  }
 }
 
 /**
@@ -326,7 +419,7 @@ export class GetBackStack implements BackStack {
     const lines = dumpsysOutput.split(/\r?\n/);
 
     let currentTaskId = -1;
-    let currentTask: Partial<TaskInfo> = {};
+    let currentTask: TaskInfo = { id: -1 };
     // Activities printed under the current header. Modern output has no
     // "numActivities=" line, and the header's "sz=" is getChildCount() -- child
     // *containers*, which for a non-leaf task counts child tasks rather than
@@ -357,35 +450,7 @@ export class GetBackStack implements BackStack {
     // field, if printed, we are waiting on. Mirrors parseActivities' openActivity
     // discipline (issue #4340) -- cleared at the next Hist row / task header /
     // consumed rootOfTask= so a value never bleeds across records.
-    let openHist:
-      | { owner: number; component: string; histIndex: number; launchedFromPackage?: string }
-      | undefined;
-
-    const histRootEntry = (owner: number): HistRootEntry => {
-      let entry = histRoots.get(owner);
-      if (entry === undefined) {
-        entry = {};
-        histRoots.set(owner, entry);
-      }
-      return entry;
-    };
-    // First `Hist #0` wins; first rootOfTask=true wins. Encapsulated so the scan
-    // loop stays flat (the max-depth ratchet caps nesting at 3).
-    const recordFirstHist0 = (owner: number, component: string): void => {
-      const entry = histRootEntry(owner);
-      entry.firstHist0 ??= component;
-    };
-    const recordAuthoritative = (
-      owner: number,
-      component: string,
-      launchedFromPackage?: string,
-    ): void => {
-      const entry = histRootEntry(owner);
-      if (entry.authoritative === undefined) {
-        entry.authoritative = component;
-        entry.authoritativeLaunchedFromPackage = launchedFromPackage;
-      }
-    };
+    let openHist: OpenHist | undefined;
 
     const flush = (): void => {
       if (currentTaskId === -1 || currentTask.id === undefined) {
@@ -394,7 +459,7 @@ export class GetBackStack implements BackStack {
       // Hist-derived fields are filled in one pass after the loop, not here: a
       // task can be flushed and then resumed by a later header for the same id,
       // and a value written here would be mistaken for an explicit one.
-      tasks.set(currentTaskId, currentTask as TaskInfo);
+      tasks.set(currentTaskId, currentTask);
     };
 
     for (let i = 0; i < lines.length; i++) {
@@ -412,18 +477,9 @@ export class GetBackStack implements BackStack {
         // "Running activities"; restarting there discarded everything already
         // parsed for that task (issue #4263).
         currentTask = tasks.get(currentTaskId) ?? { id: currentTaskId };
-        if (header.userId !== undefined) {
-          currentTask.userId = header.userId;
-        }
+        applyTaskHeader(currentTask, header);
         // A task header ends the previous record's block (see openHist).
         openHist = undefined;
-        if (header.affinity) {
-          currentTask.affinity = header.affinity;
-        }
-        if (header.component) {
-          currentTask.rootActivity = header.component;
-          currentTask.packageName = header.component.split("/")[0];
-        }
         logger.debug(`[BACK_STACK] Parsing task: ${currentTaskId}`);
       }
 
@@ -431,106 +487,16 @@ export class GetBackStack implements BackStack {
         continue;
       }
 
-      const hist = parseHistRow(line);
-      if (hist) {
-        // A row carrying its own tNN belongs to that task even when it is
-        // printed under another header.
-        const owner = hist.taskId ?? currentTaskId;
-        histCounts.set(owner, (histCounts.get(owner) ?? 0) + 1);
-        if (hist.histIndex === 0) {
-          recordFirstHist0(owner, hist.component);
-        }
-        // This row opens a new ActivityRecord block; its own rootOfTask= (if
-        // printed a few lines below) targets this row.
-        openHist = {
-          owner,
-          component: hist.component,
-          histIndex: hist.histIndex,
-        };
-      } else if (HIST_LINE.test(line)) {
-        // A Hist row in a shape parseHistRow does not recognize still counts,
-        // and still ends the previous record's block.
-        histCounts.set(currentTaskId, (histCounts.get(currentTaskId) ?? 0) + 1);
-        openHist = undefined;
-      }
-
-      const launchedFromPackage = line.match(/launchedFromPackage=([^\s]+)/);
-      if (launchedFromPackage && openHist) {
-        openHist.launchedFromPackage =
-          launchedFromPackage[1] === "null" ? undefined : launchedFromPackage[1];
-        if (openHist.histIndex === 0 && openHist.launchedFromPackage !== undefined) {
-          histRootEntry(openHist.owner).firstHist0LaunchedFromPackage ??=
-            openHist.launchedFromPackage;
-        }
-      }
-
-      // The open record's own rootOfTask= field (see ROOT_OF_TASK_LINE / #4340).
-      // First rootOfTask=true wins, so the api34 double-`Hist #0` task resolves
-      // to the row the dump actually marks as the root.
-      const rootOfTask = line.match(ROOT_OF_TASK_LINE);
-      if (rootOfTask && openHist) {
-        if (rootOfTask[1] === "true") {
-          recordAuthoritative(openHist.owner, openHist.component, openHist.launchedFromPackage);
-        }
-        openHist = undefined;
-      }
-
-      // Match affinity
-      const affinityMatch = line.match(/affinity=([^\s]+)/);
-      if (affinityMatch) {
-        currentTask.affinity = affinityMatch[1];
-      }
-
-      // Match realActivity or origActivity to get package name
-      const realActivityMatch = line.match(/realActivity=([^\s]+)/);
-      if (realActivityMatch) {
-        const fullName = realActivityMatch[1];
-        const packageName = fullName.split("/")[0];
-        currentTask.packageName = packageName;
-
-        // If this is the first activity, it's likely the root
-        if (!currentTask.rootActivity) {
-          currentTask.rootActivity = fullName;
-        }
-      }
-
-      // Match numActivities
-      const numActivitiesMatch = line.match(/numActivities=(\d+)/);
-      if (numActivitiesMatch) {
-        currentTask.numActivities = parseInt(numActivitiesMatch[1], 10);
-      }
+      openHist = updateHistRow(line, currentTaskId, histCounts, histRoots, openHist);
+      openHist = updateHistRoot(line, histRoots, openHist);
+      applyTaskFields(currentTask, line);
     }
 
     // Save last task
     flush();
 
     for (const task of tasks.values()) {
-      if (task.numActivities === undefined) {
-        task.numActivities = histCounts.get(task.id) ?? 0;
-      }
-      const entry = histRoots.get(task.id);
-      const launchedFromPackage =
-        entry?.authoritative !== undefined
-          ? entry.authoritativeLaunchedFromPackage
-          : entry?.firstHist0LaunchedFromPackage;
-      if (launchedFromPackage !== undefined) {
-        task.launchedFromPackage = launchedFromPackage;
-      }
-      // No `Hist #0` row means nothing here resolves the task's root the way
-      // this fallback is scoped to. A rootOfTask=true row alone does NOT
-      // populate an otherwise-undefined root (issue #4359): the override only
-      // ever replaces the index-derived `firstHist0` value. Leaving both
-      // undefined is the honest answer; the affinity is not a package name.
-      if (entry === undefined || entry.firstHist0 === undefined) {
-        continue;
-      }
-      const histRoot = entry.authoritative ?? entry.firstHist0;
-      if (task.rootActivity === undefined) {
-        task.rootActivity = histRoot;
-      }
-      if (task.packageName === undefined) {
-        task.packageName = histRoot.split("/")[0];
-      }
+      applyHistFallbacks(task, histCounts, histRoots);
     }
 
     return Array.from(tasks.values());
@@ -616,6 +582,8 @@ export class GetBackStack implements BackStack {
           Promise.resolve(this.getCurrentActivity(dumpsysOutput.stdout, displayId)),
         ]),
       );
+
+      applyTaskWindowing(tasks, parseTaskWindowing(dumpsysOutput.stdout));
 
       // Calculate depth: number of activities in current task minus 1 (the current activity).
       // This is the number of entries that can still be popped from the current task.

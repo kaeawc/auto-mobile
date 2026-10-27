@@ -37,7 +37,7 @@ final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
     }
 
     convenience init(port: UInt16 = 8766, endpointResolver: SdkEndpointResolver) {
-        let url = URL(string: "http://127.0.0.1:\(port)")! // swiftlint:disable:this force_unwrapping
+        let url = loopbackBaseURL(port: port)
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 2
         config.timeoutIntervalForResource = 5

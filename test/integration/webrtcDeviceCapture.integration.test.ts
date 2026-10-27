@@ -1,5 +1,6 @@
+import type { Readable } from "node:stream";
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn, type ChildProcessByStdio } from "node:child_process";
 import { once } from "node:events";
 import { createWriteStream, existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -48,6 +49,8 @@ import {
   subscribeWhepReaderForPlatform,
   type ChromeReader,
 } from "../helpers/whepSubscriptionRecovery";
+
+type CaptureChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 const execFileAsync = promisify(execFile);
 const runIntegration = process.env.AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION === "1";
@@ -112,7 +115,7 @@ interface ReaderDiagnostics {
   video: { frames: number; width: number; height: number; readyState: number };
 }
 
-type DeviceChromeReader = ChromeReader<ChildProcessWithoutNullStreams, CdpClient>;
+type DeviceChromeReader = ChromeReader<CaptureChildProcess, CdpClient>;
 
 class CdpClient {
   private nextId = 1;
@@ -202,7 +205,7 @@ class CdpClient {
   }
 }
 
-function start(command: string, args: string[], logFile: string): ChildProcessWithoutNullStreams {
+function start(command: string, args: string[], logFile: string): CaptureChildProcess {
   const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
   const log = createWriteStream(logFile, { flags: "a" });
   child.stdout.pipe(log, { end: false });
@@ -328,7 +331,7 @@ async function ensureWebRtcDaemon(
   await startWebRtcDaemon(daemonEnvironment, socketPath);
 }
 
-async function stop(child: ChildProcessWithoutNullStreams | undefined): Promise<void> {
+async function stop(child: CaptureChildProcess | undefined): Promise<void> {
   if (!child || child.exitCode !== null || child.signalCode !== null) {
     return;
   }
@@ -358,7 +361,7 @@ const CHROME_DEBUG_PORT = 9222;
 
 /** The Chrome process exit status + a tail of its log, for diagnosing a
  * headless-startup flake (the log was empty and unsurfaced before #4409). */
-function chromeDiagnostics(chrome: ChildProcessWithoutNullStreams, logFile: string): string {
+function chromeDiagnostics(chrome: CaptureChildProcess, logFile: string): string {
   let tail = "(empty)";
   try {
     const contents = readFileSync(logFile, "utf8").trim();
@@ -381,7 +384,7 @@ function chromeDiagnostics(chrome: ChildProcessWithoutNullStreams, logFile: stri
  */
 async function launchChromeReader(
   logFile: string,
-  onStarted: (chrome: ChildProcessWithoutNullStreams) => void,
+  onStarted: (chrome: CaptureChildProcess) => void,
 ): Promise<DeviceChromeReader> {
   const maxAttempts = 2;
   let lastError: Error | undefined;
@@ -416,10 +419,7 @@ async function launchChromeReader(
  * Chrome process exits during startup, and attaches the process exit status +
  * log tail to the error so a headless flake is diagnosable (#4409).
  */
-async function connectReader(
-  chrome: ChildProcessWithoutNullStreams,
-  logFile: string,
-): Promise<CdpClient> {
+async function connectReader(chrome: CaptureChildProcess, logFile: string): Promise<CdpClient> {
   let target: ChromeTarget | undefined;
   try {
     await waitFor(async () => {
@@ -1102,7 +1102,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       const webRtcSocketDir = await mkdtemp(join(tmpdir(), "am-ws-"));
       const webRtcSocketPath = join(webRtcSocketDir, "stream.sock");
       await mkdir(daemonDbDir);
-      const daemonEnvironment = {
+      const daemonEnvironment: NodeJS.ProcessEnv = {
         ...process.env,
         AUTOMOBILE_DATA_DIR: daemonDir,
         AUTOMOBILE_DB_DIR: daemonDbDir,
@@ -1133,8 +1133,8 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         ["examples/mediamtx/mediamtx.yml"],
         join(artifactDir, "mediamtx.log"),
       );
-      let chrome: ChildProcessWithoutNullStreams | undefined;
-      const rememberChrome = (nextChrome: ChildProcessWithoutNullStreams): void => {
+      let chrome: CaptureChildProcess | undefined;
+      const rememberChrome = (nextChrome: CaptureChildProcess): void => {
         chrome = nextChrome;
       };
       let cdp: CdpClient | undefined;
@@ -1256,7 +1256,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
             action: "start",
             id: streamId,
             streamId,
-            platform,
+            platform: platform === "android" || platform === "ios" ? platform : undefined,
             whipEndpoint: `http://127.0.0.1:${webRtcPort}/${streamId}/whip`,
             // Both peers are local to the CI worker. Suppress the public STUN
             // default so host-candidate negotiation cannot depend on runner DNS.
@@ -1273,7 +1273,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         if (!leaseId) {
           throw new Error("started device WebRTC stream did not return an ownership lease");
         }
-        const { WEBRTC_STREAM_LEASE_TTL_MS } = await import("../../src/server/webrtcStreamManager");
+        const { WEBRTC_STREAM_LEASE_TTL_MS } = await import("../../src/daemon/webrtcStreamManager");
         leaseHeartbeat = startStreamLeaseHeartbeat(
           streamId,
           leaseId,
@@ -1439,7 +1439,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
               );
             } catch (error) {
               // A non-timeout predicate failure is a distinct regression, not the catalogued IDR-recovery flake, and must not be relabeled or classify-failure would misdismiss it as the known flake.
-              if (!isKeyframeRecoveryTimeout(error, recoveryMessage)) {
+              if (!(error instanceof Error) || !isKeyframeRecoveryTimeout(error, recoveryMessage)) {
                 throw error;
               }
               const diagnostics = await readerDiagnostics(cdp!).catch(() => undefined);

@@ -1,23 +1,31 @@
+import { recordPlanCall } from "../../helpers/recordPlanCall";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import {
-  ToolCallRecorder,
-  PLAN_RELEVANT_TOOLS,
-} from "../../../src/features/record/ToolCallRecorder";
+import { ToolCallRecorder } from "../../../src/features/record/ToolCallRecorder";
 import { registerMcpTools } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
 
 isolateToolRegistry();
 
+/** The `stagesFiles` trait the registry hands the recorder for the file-staging tools (#11825). */
+const STAGES_FILES = { stagesFiles: true } as const;
+
 // Every tool the live registry lists in daemon mode (the superset surface).
 // Tools hidden from listing (startDevice, plan-only barrier/criticalSection) are
 // not enumerable, so they are classified below by name regardless.
 let registeredTools: string[] = [];
+// The tools declaring the `planRelevant` trait (#11825), derived from the live registry.
+let PLAN_RELEVANT_TOOLS: Set<string> = new Set();
 
 beforeAll(() => {
   ToolRegistry.clearTools();
   registerMcpTools(true);
   registeredTools = ToolRegistry.getAllTools({ includeUnavailable: true }).map((tool) => tool.name);
+  PLAN_RELEVANT_TOOLS = new Set(
+    [...ToolRegistry["tools"].values()]
+      .filter((tool) => tool.planRelevant === true)
+      .map((t) => t.name),
+  );
 });
 
 afterAll(() => {
@@ -57,7 +65,12 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   criticalSection: "Multi-device coordination primitive, handled by the plan executor",
   barrier: "Multi-device coordination primitive, handled by the plan executor",
   videoRecording: "Starts or stops a host-side capture; not part of the replayed interaction",
+  performanceTrace: "Starts or stops a diagnostic tracer; not part of the replayed interaction",
+  captureTrace:
+    "Starts or stops a diagnostic Perfetto capture; not part of the replayed interaction",
+  heapDump: "Pulls a diagnostic heap dump to the host; not part of the replayed interaction",
   explore: "Builds the navigation graph; an exploration run, not a scripted step",
+  measureStartup: "Performance measurement run over repeated launches, not an interaction step",
   navigateTo: "Resolves through a host-local navigation graph, so the step is not portable",
   prototype: HOST_LOCAL,
   highlight: HOST_LOCAL,
@@ -69,6 +82,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   getAppPermissions: READ_ONLY,
   inspectPackageSigning: READ_ONLY,
   getDeepLinks: READ_ONLY,
+  accessibilityAudit: READ_ONLY,
   getDeviceState: READ_ONLY,
   getIosSimulatorCapabilities: READ_ONLY,
   getNavigationGraph: READ_ONLY,
@@ -82,12 +96,83 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   setKeyValue: EMBEDDED_SDK_ONLY,
   removeKeyValue: EMBEDDED_SDK_ONLY,
   clearKeyValueFile: EMBEDDED_SDK_ONLY,
+  deleteKeychainItem: EMBEDDED_SDK_ONLY,
   network: EMBEDDED_SDK_ONLY,
   mockNetwork: EMBEDDED_SDK_ONLY,
   clearMockNetwork: EMBEDDED_SDK_ONLY,
 };
 
+/** The hand-kept PLAN_RELEVANT_TOOLS list the `planRelevant` trait replaced (#11825). */
+const FORMER_PLAN_RELEVANT_TOOLS = [
+  "accessibility",
+  // Added after the list was frozen: a semantic accessibility action replays as a plan step (#14077).
+  "accessibilityAction",
+  // Added after the list was frozen: an audit runs as a plan assertion step (#14075).
+  "audit",
+  "appLifecycle",
+  // Added after the list was frozen: a triggered job replays as a plan step (#14090).
+  "backgroundWork",
+  "biometricAuth",
+  "changeLocalization",
+  "clipboard",
+  "compareScreenshot",
+  "crashApp",
+  "displayConfig",
+  "displayProfile",
+  "dragAndDrop",
+  "dragPath",
+  "focusNavigate",
+  "homeScreen",
+  "getLogs",
+  "keyboard",
+  "killProfile",
+  "launchApp",
+  "manufacturerProfile",
+  "mediaSession",
+  "multiTouch",
+  "observe",
+  "openLink",
+  "phoneCall",
+  "pinchOn",
+  "postNotification",
+  "pressButton",
+  "putAppFile",
+  "recentApps",
+  "rotaryScroll",
+  "resetAppLogs",
+  "resetKeychain",
+  "rotate",
+  "selectAllText",
+  "sendBroadcast",
+  "sendKeys",
+  "sendSms",
+  "setAppLinks",
+  "setAppPermissions",
+  "setDeviceState",
+  "setNotificationPolicy",
+  "setPosture",
+  "setPreference",
+  "setSensor",
+  "setUIState",
+  "shake",
+  "statusBar",
+  "swipeAt",
+  "swipeOn",
+  "systemAlerts",
+  "systemTray",
+  "tapAny",
+  "tapAt",
+  "tapOn",
+  "terminateApp",
+  "wakeAndUnlock",
+  "windowMode",
+] as const;
+
 describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
+  test("planRelevant is declared by exactly the tools the former PLAN_RELEVANT_TOOLS list named", () => {
+    expect([...PLAN_RELEVANT_TOOLS].sort()).toEqual([...FORMER_PLAN_RELEVANT_TOOLS].sort());
+  });
+
   test("every registered tool is either recorded or excluded with a reason", () => {
     expect(registeredTools.length).toBeGreaterThan(60);
     const unclassified = registeredTools.filter(
@@ -111,19 +196,27 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
   test("a recorded tapAt step carries no snapshot reference and parses for replay", () => {
     const recorder = new ToolCallRecorder();
     recorder.start();
-    recorder.record("tapAt", { x: 10, y: 20, snapshotId: "snap-1", deviceId: "emulator-5554" });
+    recordPlanCall(recorder, "tapAt", {
+      x: 10,
+      y: 20,
+      snapshotId: "snap-1",
+      deviceId: "emulator-5554",
+    });
     const [step] = recorder.stop();
 
     expect(step).toEqual({ tool: "tapAt", params: { x: 10, y: 20 } });
     const schema = ToolRegistry.getToolForPlan("tapAt")?.schema;
     expect(schema).toBeDefined();
+    if (!schema) {
+      throw new Error("Missing tool schema");
+    }
     expect(() => schema.parse(step.params)).not.toThrow();
   });
 
   test("a recorded dragPath step carries no snapshot reference (#12811)", () => {
     const recorder = new ToolCallRecorder();
     recorder.start();
-    recorder.record("dragPath", {
+    recordPlanCall(recorder, "dragPath", {
       points: [
         { x: 10, y: 20 },
         { x: 30, y: 40 },
@@ -139,48 +232,63 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
   test("tools other than tapAt keep their params untouched", () => {
     const recorder = new ToolCallRecorder();
     recorder.start();
-    recorder.record("tapAny", { container: { text: "List" } });
+    recordPlanCall(recorder, "tapAny", { container: { text: "List" } });
     expect(recorder.stop()[0].params).toEqual({ container: { text: "List" } });
   });
 
   test("read-only actions of multi-action tools are not recorded", () => {
     const recorder = new ToolCallRecorder();
     recorder.start();
-    recorder.record("keyboard", { action: "detect" });
-    recorder.record("keyboard", { action: "listImes" });
-    recorder.record("clipboard", { action: "get" });
-    recorder.record("systemTray", { action: "list", appId: "com.example" });
-    recorder.record("systemTray", { action: "find", notification: { title: "Hi" } });
-    recorder.record("displayConfig", {});
+    recordPlanCall(recorder, "keyboard", { action: "detect" });
+    recordPlanCall(recorder, "keyboard", { action: "listImes" });
+    recordPlanCall(recorder, "clipboard", { action: "get" });
+    recordPlanCall(recorder, "systemTray", { action: "list", appId: "com.example" });
+    recordPlanCall(recorder, "systemTray", { action: "find", notification: { title: "Hi" } });
+    recordPlanCall(recorder, "displayConfig", {});
+    recordPlanCall(recorder, "systemAlerts", { action: "get" });
     expect(recorder.stop()).toEqual([]);
   });
 
   test("mutating actions of the same tools are recorded", () => {
     const recorder = new ToolCallRecorder();
     recorder.start();
-    recorder.record("keyboard", { action: "open" });
-    recorder.record("clipboard", { action: "copy", text: "x" });
-    recorder.record("systemTray", { action: "tap", notification: { title: "Hi" } });
-    recorder.record("displayConfig", { theme: "dark" });
-    recorder.record("displayConfig", { reset: true });
+    recordPlanCall(recorder, "keyboard", { action: "open" });
+    recordPlanCall(recorder, "clipboard", { action: "copy", text: "x" });
+    recordPlanCall(recorder, "systemTray", { action: "tap", notification: { title: "Hi" } });
+    recordPlanCall(recorder, "displayConfig", { theme: "dark" });
+    recordPlanCall(recorder, "displayConfig", { reset: true });
+    recordPlanCall(recorder, "displayConfig", { increaseContrast: true });
+    recordPlanCall(recorder, "displayConfig", { reduceMotion: false });
+    recordPlanCall(recorder, "displayConfig", { boldText: true });
+    recordPlanCall(recorder, "displayConfig", { size: { width: 720, height: 1600 } });
+    recordPlanCall(recorder, "displayConfig", { navigationMode: "threeButton" });
+    recordPlanCall(recorder, "displayConfig", { displayCutout: "hole" });
+    recordPlanCall(recorder, "systemAlerts", { action: "setPolicy", policy: "allow" });
     expect(recorder.stop().map((step) => step.tool)).toEqual([
       "keyboard",
       "clipboard",
       "systemTray",
       "displayConfig",
       "displayConfig",
+      "displayConfig",
+      "displayConfig",
+      "displayConfig",
+      "displayConfig",
+      "displayConfig",
+      "displayConfig",
+      "systemAlerts",
     ]);
   });
 
   test("records the action tools a session can run, in order (issue scenario)", () => {
     const recorder = new ToolCallRecorder();
     recorder.start();
-    recorder.record("launchApp", { appId: "com.example" });
-    recorder.record("tapAny", { container: { text: "List" } });
-    recorder.record("tapAt", { x: 1, y: 2 });
-    recorder.record("homeScreen", {});
-    recorder.record("openLink", { url: "https://example.com" });
-    recorder.record("rotate", { orientation: "landscape" });
+    recordPlanCall(recorder, "launchApp", { appId: "com.example" });
+    recordPlanCall(recorder, "tapAny", { container: { text: "List" } });
+    recordPlanCall(recorder, "tapAt", { x: 1, y: 2 });
+    recordPlanCall(recorder, "homeScreen", {});
+    recordPlanCall(recorder, "openLink", { url: "https://example.com" });
+    recordPlanCall(recorder, "rotate", { orientation: "landscape" });
 
     expect(recorder.stop().map((step) => step.tool)).toEqual([
       "launchApp",
@@ -226,6 +334,21 @@ const RECORDED_STEP_CALLS: ReadonlyArray<readonly [string, Record<string, unknow
   ["biometricAuth", { action: "error", errorCode: 7 }],
   ["phoneCall", { action: "call", phoneNumber: "5551234" }],
   ["sendSms", { phoneNumber: "5551234", message: "hello" }],
+  ["mediaSession", { action: { dispatch: "pause" } }],
+  ["mediaSession", { action: { volume: { stream: "music", level: 5 } } }],
+  ["mediaSession", { action: "get", waitFor: { mediaState: "playing", timeoutMs: 3000 } }],
+  [
+    "windowMode",
+    {
+      appId: "com.example",
+      mode: { freeform: { bounds: { left: 0, top: 0, right: 800, bottom: 1200 } } },
+    },
+  ],
+  [
+    "windowMode",
+    { appId: "com.example", mode: { splitScreen: { with: "com.other", position: "secondary" } } },
+  ],
+  ["windowMode", { appId: "com.example", mode: "fullscreen" }],
   ["setNotificationPolicy", { appId: "com.example", policyAccess: true }],
   [
     "setPreference",
@@ -258,10 +381,6 @@ const RECORDED_STEP_CALLS: ReadonlyArray<readonly [string, Record<string, unknow
       contentText: "hi",
     },
   ],
-  [
-    "stageSessionDownloads",
-    { directory: "fixtures", files: [{ destinationPath: "a.txt", contentText: "a" }] },
-  ],
 ];
 
 const RECORDED_TOOLS_9966 = [
@@ -269,12 +388,13 @@ const RECORDED_TOOLS_9966 = [
   "biometricAuth",
   "phoneCall",
   "sendSms",
+  "mediaSession",
+  "windowMode",
   "setNotificationPolicy",
   "setPreference",
   "resetKeychain",
   "resetAppLogs",
   "putAppFile",
-  "stageSessionDownloads",
 ];
 
 describe("tools recorded by #9966", () => {
@@ -282,7 +402,7 @@ describe("tools recorded by #9966", () => {
     const recorder = new ToolCallRecorder();
     recorder.start();
     // Session and routing params are injected by the registry and must be stripped.
-    recorder.record(tool, {
+    recordPlanCall(recorder, tool, {
       ...args,
       platform: "android",
       deviceId: "emulator-5554",
@@ -293,8 +413,11 @@ describe("tools recorded by #9966", () => {
     expect(steps).toEqual([{ tool, params: args }]);
     const schema = ToolRegistry.getToolForPlan(tool)?.schema;
     expect(schema).toBeDefined();
+    if (!schema) {
+      throw new Error("Missing tool schema");
+    }
     // PlanExecutor re-injects the session for device-aware tools before parsing;
-    // stageSessionDownloads declares it as required.
+    // putAppFile declares it as required.
     expect(() => schema.parse({ ...steps[0].params, sessionUuid: "session-2" })).not.toThrow();
   });
 
@@ -310,35 +433,57 @@ describe("tools recorded by #9966", () => {
   test("accessibility state queries are not recorded", () => {
     const recorder = new ToolCallRecorder();
     recorder.start();
-    recorder.record("accessibility", {});
-    recorder.record("accessibility", { deviceId: "emulator-5554" });
+    recordPlanCall(recorder, "accessibility", {});
+    recordPlanCall(recorder, "accessibility", { deviceId: "emulator-5554" });
     expect(recorder.stop()).toEqual([]);
+  });
+
+  test("a mediaSession read is not recorded unless it waits", () => {
+    const recorder = new ToolCallRecorder();
+    recorder.start();
+    recordPlanCall(recorder, "mediaSession", { action: "get" });
+    recordPlanCall(recorder, "mediaSession", { action: "get", appId: "com.example" });
+    recordPlanCall(recorder, "mediaSession", { action: "get", waitFor: { mediaState: "playing" } });
+    expect(recorder.stop()).toEqual([
+      { tool: "mediaSession", params: { action: "get", waitFor: { mediaState: "playing" } } },
+    ]);
   });
 
   test("a file-staging call that copies a host file is not recorded", () => {
     const recorder = new ToolCallRecorder();
     recorder.start();
-    recorder.record("putAppFile", {
-      target: { domain: "media_library" },
-      files: [{ destinationPath: "pic.png", sourcePath: "/Users/dev/pic.png" }],
-    });
-    recorder.record("putAppFile", {
-      appId: "com.example",
-      container: "documents",
-      destinationPath: "legacy.txt",
-      sourcePath: "fixtures/legacy.txt",
-    });
-    recorder.record("putAppFile", {
-      target: { domain: "user_files", namespace: "fixtures" },
-      files: [
-        { destinationPath: "a.txt", contentText: "a" },
-        { destinationPath: "b.txt", sourcePath: "/tmp/b.txt" },
-      ],
-    });
-    recorder.record("stageSessionDownloads", {
-      directory: "fixtures",
-      files: [{ destinationPath: "a.txt", sourcePath: "/tmp/a.txt" }],
-    });
+    recordPlanCall(
+      recorder,
+      "putAppFile",
+      {
+        target: { domain: "media_library" },
+        files: [{ destinationPath: "pic.png", sourcePath: "/Users/dev/pic.png" }],
+      },
+      STAGES_FILES,
+    );
+    recordPlanCall(
+      recorder,
+      "putAppFile",
+      {
+        appId: "com.example",
+        container: "documents",
+        destinationPath: "legacy.txt",
+        sourcePath: "fixtures/legacy.txt",
+      },
+      STAGES_FILES,
+    );
+    recordPlanCall(
+      recorder,
+      "putAppFile",
+      {
+        target: { domain: "user_files", namespace: "fixtures" },
+        files: [
+          { destinationPath: "a.txt", contentText: "a" },
+          { destinationPath: "b.txt", sourcePath: "/tmp/b.txt" },
+        ],
+      },
+      STAGES_FILES,
+    );
     expect(recorder.stop()).toEqual([]);
   });
 });

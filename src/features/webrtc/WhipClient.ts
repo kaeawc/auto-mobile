@@ -84,11 +84,17 @@ export class WhipClient implements WhipSignalingClient {
     }
     this.endpoint = options.endpoint;
     this.bearerToken = options.bearerToken;
-    // eslint-disable-next-line auto-mobile/no-unknown-cast -- global fetch's lib.dom types are wider than the narrow FetchLike we call (url,{method,headers,body,signal}) -> {status,ok,headers.get,text}.
-    this.fetchImpl = options.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
-    if (!this.fetchImpl) {
+    // The global fetch is wider than the narrow FetchLike this client calls, so
+    // adapt it by delegation rather than casting.
+    const fetchImpl: FetchLike | undefined =
+      options.fetchImpl ??
+      (typeof globalThis.fetch === "function"
+        ? (url, init) => globalThis.fetch(url, init)
+        : undefined);
+    if (!fetchImpl) {
       throw new ActionableError("No fetch implementation available for WHIP client.");
     }
+    this.fetchImpl = fetchImpl;
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_WHIP_REQUEST_TIMEOUT_MS;
     if (!Number.isFinite(this.requestTimeoutMs) || this.requestTimeoutMs <= 0) {
       throw new ActionableError("WHIP request timeout must be a positive number of milliseconds.");

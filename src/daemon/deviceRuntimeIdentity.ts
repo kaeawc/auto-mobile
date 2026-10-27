@@ -1,14 +1,3 @@
-import { holderOf } from "./deviceBinding";
-import { DeviceIdentityQuarantinedError } from "../models/DeviceIdentityQuarantinedError";
-import { ActionableError, type BootedDevice } from "../models";
-import { isAndroidEmulatorSerial } from "../utils/androidSerial";
-import { getAbortSignal } from "../utils/AbortContext";
-import type { PlatformDeviceManager } from "../devices/deviceUtils";
-import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
-import { logger } from "../utils/logger";
-import { DEFAULT_RETRY_OPTIONS, type RetryExecutor } from "../utils/retry/RetryExecutor";
-import type { Timer } from "../utils/SystemTimer";
-import { deviceLossCancellationReason } from "./emulatorLossIncident";
 import {
   compareIdentityEvidence,
   deriveEvidenceFromBootedDevice,
@@ -16,48 +5,41 @@ import {
   isUnresolvedAndroidEmulatorName,
   type IdentityEvidence,
 } from "../devices/deviceIdentityEvidence";
-import { DevicePoolError, type DiscoveryReconcileOptions, type PooledDevice } from "./devicePool";
+import {
+  ActionableError,
+  type AvdNameProbeObservation,
+  type BootedDevice,
+  type StampedAvdNameProbeObservation,
+} from "../models";
+import { DeviceIdentityQuarantinedError } from "../models/DeviceIdentityQuarantinedError";
+import { isAndroidEmulatorSerial } from "../utils/androidSerial";
+import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { logger } from "../utils/logger";
+import { DEFAULT_RETRY_OPTIONS } from "../utils/retry/RetryExecutor";
+import { holderOf } from "./deviceBinding";
+import { type DiscoveryReconcileOptions, type PooledDevice } from "./devicePool";
+import { DevicePoolError } from "./DevicePoolError";
+import {
+  type DeviceRetirementOptions,
+  type DeviceRuntimeIdentityPoolPort,
+} from "./deviceRuntimeIdentityPorts";
+import { deviceLossCancellationReason } from "./emulatorLossIncident";
+export {
+  type DeviceRetirementOptions,
+  type DeviceRuntimeIdentityPoolPort,
+} from "./deviceRuntimeIdentityPorts";
 
 const POOLED_IDENTITY_RECONCILE_MAX_ATTEMPTS = DEFAULT_RETRY_OPTIONS.maxAttempts;
 type MutableMetadataSource = "refresh" | "snapshot";
-
-export type DeviceRetirementOptions = Pick<DiscoveryReconcileOptions, "excludeExecutionId"> & {
-  /** ANR failure releases session work separately and retains sessionless work. */
-  cancelDeviceBoundExecutions?: boolean;
-};
 
 function unknownAndroidRuntimeName(deviceId: string): string {
   return `Unknown (${deviceId})`;
 }
 
-/** Mutable pool state is read at use time, including after every await. */
-export interface DeviceRuntimeIdentityPoolPort {
-  getAmbientExecutionId?(): string | undefined;
-  getDevices(): ReadonlyMap<string, PooledDevice>;
-  notifyDeviceFramesInvalidated?(deviceId: string): void;
-  getDeviceManager(): PlatformDeviceManager;
-  getRetryExecutor(): RetryExecutor;
-  getTimer(): Timer;
-  getRefreshGeneration(): number;
-  hasReusableSerial(device: PooledDevice): boolean;
-  isReservedForShutdown(device: PooledDevice): boolean;
-  cancelDeviceExecutions?(
-    deviceId: string,
-    reason: ReturnType<typeof deviceLossCancellationReason>,
-    options: { excludeExecutionId?: string },
-  ): Promise<number>;
-  cancelDeviceSessionExecutions(
-    sessionId: string,
-    reason: ReturnType<typeof deviceLossCancellationReason>,
-    options: { excludeExecutionId?: string },
-  ): Promise<number>;
-}
-
 /** Resolves and caches pooled runtime identity without deciding pool membership. */
 export class DeviceRuntimeIdentity {
-  // Quarantine still withholds identity trust during shutdown. Remember only
-  // its deferred cancellation, not another shutdown fence; the existing
-  // reservation decides when cancellation is safe. Removed entries are not held.
+  // Quarantine still withholds identity trust during shutdown. Remember only its deferred
+  // cancellation, not another shutdown fence; the reservation decides when it is safe.
   private readonly deferredQuarantineCancellations = new WeakSet<PooledDevice>();
   private readonly pendingIdentityReplacements = new Map<string, BootedDevice>();
   private readonly pendingIdentityReplacementUnresolvedObservations = new Map<
@@ -154,11 +136,7 @@ export class DeviceRuntimeIdentity {
     source: string,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
-    const signals = [options.signal, getAbortSignal()].filter(
-      (signal): signal is AbortSignal => signal !== undefined,
-    );
-    options = { ...options, signal: signals.length > 0 ? AbortSignal.any(signals) : undefined };
-    for (const device of devices) {
+    for (const device of devices.filter((observed) => observed.foreignOwned !== true)) {
       // A caller that settled its deadline/abort can no longer safely apply a
       // stale snapshot to pooled entries an unrelated acquisition may have bound
       // while this loop was draining (#6955 review).
@@ -201,12 +179,9 @@ export class DeviceRuntimeIdentity {
    * {@link quarantineDisagreeingPooledIdentity}: their serial is never reassigned
    * and their name is not identity.
    */
-  private async reconcileObservedPooledIdentity(
+  async reconcileObservedPooledIdentity(
     pooled: PooledDevice,
-    device: Pick<
-      BootedDevice,
-      "deviceId" | "name" | "platform" | "observedAt" | "consoleBusyDuringProbe"
-    >,
+    device: StampedAvdNameProbeObservation,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
     if (this.matchesRuntimeIdentity(pooled, device)) {
@@ -366,10 +341,7 @@ export class DeviceRuntimeIdentity {
    */
   async reconcilePooledIdentityResolution(
     pooled: PooledDevice,
-    discovered: Pick<
-      BootedDevice,
-      "deviceId" | "name" | "platform" | "observedAt" | "consoleBusyDuringProbe"
-    >,
+    discovered: StampedAvdNameProbeObservation,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
     if (options.namesResolved === false) {
@@ -430,14 +402,15 @@ export class DeviceRuntimeIdentity {
    */
   private shouldReconcileUnresolvedEmulatorName(
     pooled: PooledDevice,
-    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "consoleBusyDuringProbe">,
+    discovered: AvdNameProbeObservation,
   ): boolean {
     return (
       pooled.avdName !== undefined &&
       pooled.identityUnresolved !== true &&
       this.hasUnresolvedEmulatorName(discovered) &&
       discovered.name !== discovered.deviceId &&
-      !discovered.consoleBusyDuringProbe
+      !discovered.consoleBusyDuringProbe &&
+      !discovered.nameProbeTimedOut
     );
   }
 
@@ -451,10 +424,7 @@ export class DeviceRuntimeIdentity {
    */
   private async reconcileUnresolvedEmulatorName(
     pooled: PooledDevice,
-    discovered: Pick<
-      BootedDevice,
-      "deviceId" | "name" | "platform" | "observedAt" | "consoleBusyDuringProbe"
-    >,
+    discovered: StampedAvdNameProbeObservation,
     options: DiscoveryReconcileOptions,
   ): Promise<void> {
     if (pooled.identityReconcileAttempts !== undefined) {
@@ -497,7 +467,11 @@ export class DeviceRuntimeIdentity {
           if (!this.hasUnresolvedEmulatorName(observation)) {
             return { kind: "resolved", observation } as const;
           }
-          if (observation.name === observation.deviceId || observation.consoleBusyDuringProbe) {
+          if (
+            observation.name === observation.deviceId ||
+            observation.consoleBusyDuringProbe ||
+            observation.nameProbeTimedOut
+          ) {
             return { kind: "no-evidence" } as const;
           }
           latestUnresolved = observation;
@@ -568,7 +542,7 @@ export class DeviceRuntimeIdentity {
 
   private shouldQuarantineUnresolvedEmulatorName(
     pooled: PooledDevice,
-    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "consoleBusyDuringProbe">,
+    discovered: AvdNameProbeObservation,
   ): boolean {
     if (!this.hasUnresolvedEmulatorName(discovered)) {
       return false;
@@ -577,6 +551,12 @@ export class DeviceRuntimeIdentity {
       // ADB's serial-only listing did not probe an AVD label at all. It is
       // unresolved evidence, but not a failed identity probe that should
       // quarantine an otherwise labelled entry.
+      return false;
+    }
+    if (discovered.nameProbeTimedOut) {
+      logger.debug(
+        `[DevicePool] Retaining ${pooled.id}: the AVD-name probe timed out, so it supplies no identity evidence`,
+      );
       return false;
     }
     if (!discovered.consoleBusyDuringProbe) {
@@ -650,11 +630,14 @@ export class DeviceRuntimeIdentity {
     const evidence = this.identityEvidenceForBootedDevice(device);
     const pendingEvidence = this.identityEvidenceForBootedDevice(pending);
     if (evidence.unresolved) {
-      if (device.name === device.deviceId) {
-        // ADB's raw serial listing did not attempt an AVD-name probe, so it
-        // cannot supersede the identity evidence already pending replacement.
+      if (
+        device.name === device.deviceId ||
+        device.consoleBusyDuringProbe ||
+        device.nameProbeTimedOut
+      ) {
+        // Raw serials and failed name probes carry no identity evidence to replace.
         logger.debug(
-          `[DevicePool] Ignoring raw serial observation for pending replacement ${device.deviceId}`,
+          `[DevicePool] Ignoring no-evidence observation for pending replacement ${device.deviceId}`,
         );
         return;
       }

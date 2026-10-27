@@ -1,437 +1,51 @@
-import type { ResolutionAction } from "../../models/ResolutionAction";
-import {
-  STABLE_VIEW_ID_PREFIX,
-  STABLE_VIEW_ID_HASH_LENGTH,
-  STABLE_VIEW_ID_TEXT_HASH_LENGTH,
-  isSdkInjectedNode,
-} from "../observe/android/StableNodeIdentity";
-
-import type { ResolverSelector } from "../../server/elementSelectorSchemas";
+import type { ResolverSelector } from "../../models/elementSelectorSchemas";
 import { isImeKeyEntry, type SearchableEntry } from "./SearchableNode";
 import { normalizeQuotes } from "./TextMatcher";
-import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
-import type { ElementBounds } from "../../models/ElementBounds";
+import { boundsArea } from "../../utils/bounds";
 import { defaultRandom } from "../../utils/Random";
 import { isEditableElementProperties } from "./elementProperties";
-import type { Element } from "../../models/Element";
 import { compareSelectionRank, selectableCandidates } from "./selectionRank";
-import { hasVisibleScreenPart } from "./ElementGeometry";
+import type { ElementResolution, ResolutionIntent, ResolverSnapshot } from "./ElementResolverTypes";
 import {
-  ambiguousStableViewIdMessage,
-  legacyBareStableViewIdMessage,
-} from "./StableViewIdGuidance";
-
-const ordinalNodeKey = new RegExp(
-  `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}-\\d+$`,
-);
-const bareSyntheticNodeKey = new RegExp(
-  `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}$`,
-);
-const syntheticNodeKey = new RegExp(
-  `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}(?:-\\d+|~[0-9a-f]{${STABLE_VIEW_ID_TEXT_HASH_LENGTH}})?$`,
-);
+  syntheticNodeKey,
+  normalize,
+  matchTestTag,
+  guardNamespaceNodes,
+  matchId,
+} from "./ElementResolverMatching";
+import {
+  usesClickablePromotion,
+  hasVisibleBounds,
+  promoteClickableAncestor,
+  semanticActionsForIntent,
+  isFocusEditableElement,
+  eligible,
+  promotableFocusAncestor,
+  preferVisibleMatches,
+  isIdOnlySelector,
+  preferCapturedContainerMatches,
+  isWithin,
+  containerSource,
+  resolveReference,
+} from "./ElementResolverNodes";
+export type {
+  MatchMode,
+  ResolutionAction,
+  ResolverSnapshot,
+  ResolutionIntent,
+  ContainerFailure,
+  ElementResolution,
+} from "./ElementResolverTypes";
+export { matchedSourceNode } from "./ElementResolverMatching";
+export {
+  isMissingContainerError,
+  promoteClickableAncestor,
+  isFocusEditableElement,
+  isWithin,
+} from "./ElementResolverNodes";
 
 // Keep label promotion within a parent or grandparent, away from distant editable ancestors.
 const FOCUS_LABEL_ANCESTOR_HOP_LIMIT = 2;
-
-export type MatchMode = "exact" | "contains" | "regex";
-export type { ResolutionAction } from "../../models/ResolutionAction";
-
-function usesClickablePromotion(action: ResolutionAction): boolean {
-  return action === "tap" || action === "long-press" || action === "highlight";
-}
-export interface ResolverSnapshot {
-  id: string;
-  nodes: readonly SearchableEntry[];
-}
-export interface ElementReference {
-  snapshotId: string;
-  nodeKey: string;
-  bounds?: ElementBounds;
-  label?: string;
-  nativeId?: string;
-}
-export interface ResolutionIntent {
-  action: ResolutionAction;
-  /** Preserve tap ranking while inspect keeps bounded inert labels addressable. */
-  preferTap?: boolean;
-  /** Prefer bounded checkable matches and their checkable descendants. */
-  preferToggle?: boolean;
-  /**
-   * Leave the soft keyboard's keys out of the search and out of `index` numbering,
-   * as `observe` folds them into one `<ime>` row (issue #10225).
-   */
-  excludeImeKeys?: boolean;
-  /** An action lookup cannot use an unbounded ID match as its target. */
-  requireBounds?: boolean;
-  viewport?: { width: number; height: number };
-  requireResourceId?: boolean;
-  negative?: boolean;
-  /** Action targets may use Android editable hints only after primary text misses. */
-  allowHintFallback?: boolean;
-  matchMode?: MatchMode;
-  ref?: ElementReference;
-}
-export type MatchKind =
-  | "native-id-exact"
-  | "node-key-exact"
-  | "id-namespace"
-  | "text-exact"
-  | "test-tag-exact"
-  | "test-tag-resource-id"
-  | "contains"
-  | "regex"
-  | "class-exact"
-  | "all";
-export interface ContainerFailure {
-  level: number;
-  reason: "not-found" | "ambiguous";
-  selector: ResolverSelector;
-}
-
-export interface ResolvedScope {
-  selector: ResolverSelector;
-  node: SearchableEntry;
-  matchCount: number;
-}
-
-export interface ElementResolution {
-  chosen: SearchableEntry | null;
-  snapshotNodes?: readonly SearchableEntry[];
-  indexInMatches?: number;
-  candidates: SearchableEntry[];
-  matches: {
-    node: SearchableEntry;
-    kind: MatchKind;
-    sourceNodes?: SearchableEntry[];
-    textOrigin?: "raw" | "displayed";
-  }[];
-  matchMode: MatchMode;
-  scope?: SearchableEntry;
-  scopeChain?: ResolvedScope[];
-  containerFailure?: ContainerFailure;
-  error?: string;
-  /** Typed failure classification, set where selection fails. */
-  failureReason?: ContainerFailure["reason"];
-}
-
-export function isMissingContainerError(error: string | undefined): boolean {
-  return /^Container level \d+ not found:/.test(error ?? "");
-}
-
-/** The source that satisfied a selector, before action-target promotion. */
-export function matchedSourceNode(
-  result: ElementResolution,
-  selector?: Pick<ResolverSelector, "text" | "caseSensitive">,
-): SearchableEntry | undefined {
-  const candidate = result.candidates[result.indexInMatches ?? -1] ?? result.chosen;
-  const sources = result.matches.find(({ node }) => node === candidate)?.sourceNodes;
-  if (!sources?.length) {
-    return candidate ?? undefined;
-  }
-  if (selector?.text === undefined) {
-    return sources.find((source) => source !== candidate) ?? sources[0];
-  }
-  const query = normalize(selector.text, selector.caseSensitive);
-  return (
-    sources.find((source) =>
-      Object.values(source.textSources).some((value) => {
-        const actual = normalize(value, selector.caseSensitive);
-        return result.matchMode === "contains" ? actual.includes(query) : actual === query;
-      }),
-    ) ?? sources[0]
-  );
-}
-
-function normalize(value: string, caseSensitive = false, collapseWhitespace = true): string {
-  const normalized = normalizeQuotes(value).trim();
-  const text = collapseWhitespace ? normalized.replace(/\s+/g, " ") : normalized;
-  return caseSensitive ? text : text.toLowerCase();
-}
-
-function qualifiedId(id: string): { packageName: string; name: string } | undefined {
-  const separator = id.indexOf(":id/");
-  return separator > 0 && separator + 4 < id.length
-    ? { packageName: id.slice(0, separator), name: id.slice(separator + 4) }
-    : undefined;
-}
-
-/**
- * A test tag matches a node's `test-tag` first. When no node carries that tag, it falls back to
- * a node whose `resource-id` is exactly the tag and that has no `test-tag` of its own: Compose
- * with `testTagsAsResourceId` (including the AutoMobile prototype) reports `Modifier.testTag` only
- * as the bare `resource-id`, since CtrlProxy fills `test-tag` from accessibility extras (#10626).
- * The fallback is exact only (no `pkg:id/` suffix match), so a classic View id matches only
- * when the full id is given.
- */
-function matchTestTag(
-  nodes: readonly SearchableEntry[],
-  testTag: string,
-): { node: SearchableEntry; kind: MatchKind }[] {
-  const tagged = nodes.filter((node) => node.testTag === testTag);
-  if (tagged.length > 0) {
-    return tagged.map((node) => ({ node, kind: "test-tag-exact" }));
-  }
-  return nodes
-    .filter((node) => node.testTag === undefined && node.nativeId === testTag)
-    .map((node) => ({ node, kind: "test-tag-resource-id" }));
-}
-
-function centerWithinViewport(
-  bounds: ElementBounds,
-  viewport: { width: number; height: number },
-): boolean {
-  return hasVisibleScreenPart(bounds, viewport);
-}
-
-function hasVisibleBounds(
-  node: SearchableEntry,
-  intent: Pick<ResolutionIntent, "viewport">,
-): boolean {
-  return !!node.bounds && (!intent.viewport || centerWithinViewport(node.bounds, intent.viewport));
-}
-
-/** Choose the nearest actionable node, preserving the matched node separately. */
-export function promoteClickableAncestor(
-  node: SearchableEntry,
-  nodes: readonly SearchableEntry[],
-  intent: Pick<ResolutionIntent, "action" | "requireResourceId" | "viewport">,
-  scope?: SearchableEntry,
-): SearchableEntry | null {
-  const action = intent.action === "long-press" ? "long-press" : "tap";
-  let candidate: SearchableEntry | undefined = node;
-  while (candidate) {
-    if (
-      hasVisibleBounds(candidate, intent) &&
-      (!intent.requireResourceId || candidate.nativeId) &&
-      hasActionAffordance(candidate, { action })
-    ) {
-      return candidate;
-    }
-    if (candidate === scope) {
-      break;
-    }
-    candidate = candidate.parentIndex === undefined ? undefined : nodes[candidate.parentIndex];
-  }
-  return null;
-}
-
-function semanticActionsForIntent(intent: ResolutionIntent): SearchableEntry["affordances"] {
-  if (intent.action === "scroll") {
-    return ["scroll"];
-  }
-  if (intent.action === "inspect") {
-    return ["tap", "toggle"];
-  }
-  if (intent.action === "long-press") {
-    return ["long-press"];
-  }
-  return intent.action === "input" || intent.action === "focus-input"
-    ? ["input"]
-    : ["tap", "scroll"];
-}
-
-/** Native editable fields and iOS accessibility text-field roles can own focus labels. */
-export function isFocusEditableElement(element: Element): boolean {
-  return isEditableElementProperties(element) || element.role === "textfield";
-}
-
-function containsBounds(container: ElementBounds, contained: ElementBounds): boolean {
-  return (
-    container.left <= contained.left &&
-    container.top <= contained.top &&
-    container.right >= contained.right &&
-    container.bottom >= contained.bottom
-  );
-}
-
-function hasActionAffordance(
-  node: SearchableEntry,
-  intent: Pick<ResolutionIntent, "action">,
-): boolean {
-  if (intent.action === "focus-input") {
-    return isFocusEditableElement(node.properties);
-  }
-  if (intent.action === "long-press") {
-    return node.affordances.some(
-      (action) => action === "long-press" || action === "tap" || action === "toggle",
-    );
-  }
-  return node.affordances.some(
-    (action) => action === intent.action || (intent.action === "tap" && action === "toggle"),
-  );
-}
-
-function eligible(node: SearchableEntry, intent: ResolutionIntent): boolean {
-  if (intent.requireResourceId && !node.nativeId) {
-    return false;
-  }
-  if (intent.action === "inspect" && !intent.requireBounds) {
-    return true;
-  }
-  if (!hasVisibleBounds(node, intent)) {
-    return false;
-  }
-  if (intent.action === "inspect") {
-    return true;
-  }
-  if (
-    intent.action === "highlight" ||
-    intent.action === "drag" ||
-    intent.action === "accessibility-focus"
-  ) {
-    return true;
-  }
-  if (intent.action === "focus") {
-    return node.focusable || node.affordances.includes("input");
-  }
-  return hasActionAffordance(node, intent);
-}
-
-function promotableFocusAncestor(
-  label: SearchableEntry,
-  ancestor: SearchableEntry,
-  intent: ResolutionIntent,
-): boolean {
-  return (
-    !!label.bounds &&
-    !!ancestor.bounds &&
-    containsBounds(ancestor.bounds, label.bounds) &&
-    eligible(ancestor, intent)
-  );
-}
-
-/**
- * A node drawn wholly outside its nearest sized ancestor, or under an ancestor that
- * is, is parked out of sight — e.g. the iOS 26 `_UIFloatingTabBarItemView` copy UIKit
- * nests inside a compact tab bar button's image view, far from the button. Each node
- * is compared with its own nearest sized ancestor only, and window roots and scroll
- * containers never park a child: content merely scrolled past a viewport stays a
- * candidate exactly as before.
- */
-function parkedOutOfSight(node: SearchableEntry, nodes: readonly SearchableEntry[]): boolean {
-  const sized = (entry: SearchableEntry | undefined) =>
-    entry?.bounds && boundsArea(entry.bounds) > 0 ? entry.bounds : undefined;
-  const parentOf = (entry: SearchableEntry) =>
-    entry.parentIndex === undefined ? undefined : nodes[entry.parentIndex];
-  let current: SearchableEntry | undefined = node;
-  while (current) {
-    let ancestor = parentOf(current);
-    while (ancestor && !sized(ancestor)) {
-      ancestor = parentOf(ancestor);
-    }
-    const own = sized(current);
-    const outer = sized(ancestor);
-    if (
-      own &&
-      outer &&
-      ancestor?.parentIndex !== undefined &&
-      !ancestor.affordances.includes("scroll") &&
-      !intersectBounds(own, outer)
-    ) {
-      return true;
-    }
-    current = ancestor;
-  }
-  return false;
-}
-
-/**
- * Prefer matches that can be seen: when some matches are parked out of sight and
- * others are not, drop the parked ones so a visible duplicate (the tab button that
- * carries the same label) wins. With no visible match, keep them all so the caller
- * still reports the matched element's missing tap area. Applied with and without
- * `index` so skeleton replay indexes and indexed selection count the same set.
- */
-function preferVisibleMatches(
-  matches: ElementResolution["matches"],
-  nodes: readonly SearchableEntry[],
-): ElementResolution["matches"] {
-  const visible = matches.filter(({ node }) => !parkedOutOfSight(node, nodes));
-  return visible.length > 0 && visible.length < matches.length ? visible : matches;
-}
-
-/** Whether the selector names an element by identifier alone, with no text to match. */
-function isIdOnlySelector(selector: ResolverSelector): boolean {
-  return (
-    (selector.elementId !== undefined || selector.testTag !== undefined) &&
-    selector.text === undefined &&
-    selector.contentDescription === undefined
-  );
-}
-
-/**
- * An iOS capture merges the in-app SDK snapshot into the XCUITest tree; SDK nodes no
- * XCUITest node matched are injected beside it. That snapshot can lag the screen (it
- * still held the pre-keyboard layout right after a focus tap, #10266), so a container
- * with an identifier shows up again as an SDK node at its old position. When XCUITest
- * captured a node with that identifier, the SDK copies are duplicates of it; drop them
- * so they cannot make the container ambiguous.
- */
-function preferCapturedContainerMatches<T extends { node: SearchableEntry }>(matches: T[]): T[] {
-  const captured = matches.filter(({ node }) => !isSdkInjectedNode(node.source));
-  return captured.length > 0 && captured.length < matches.length ? captured : matches;
-}
-
-export function isWithin(
-  node: SearchableEntry,
-  ancestor: SearchableEntry,
-  nodes: readonly SearchableEntry[],
-): boolean {
-  let parent = node.parentIndex;
-  while (parent !== undefined) {
-    if (parent === ancestor.index) {
-      return true;
-    }
-    parent = nodes[parent]?.parentIndex;
-  }
-  return false;
-}
-
-function containerSource(
-  selector: ResolverSelector,
-  resolution: ElementResolution,
-): SearchableEntry | undefined {
-  const sources = resolution.matches.find(({ node }) => node === resolution.chosen)?.sourceNodes;
-  const query = selector.text ?? selector.contentDescription;
-  if (query === undefined) {
-    return sources?.[0];
-  }
-  const wanted = normalize(query, selector.caseSensitive);
-  return (
-    sources?.find((node) => {
-      const values =
-        selector.contentDescription === undefined
-          ? Object.values(node.textSources)
-          : [node.textSources["content-desc"]];
-      return values.some((value) => {
-        const actual = normalize(value ?? "", selector.caseSensitive);
-        return resolution.matchMode === "contains" ? actual.includes(wanted) : actual === wanted;
-      });
-    }) ?? sources?.[0]
-  );
-}
-
-function sameReferenceProof(node: SearchableEntry, ref: ElementReference): boolean {
-  if (ref.bounds === undefined && ref.label === undefined) {
-    return false;
-  }
-  const sameBounds =
-    node.bounds && ref.bounds ? boundsEqual(node.bounds, ref.bounds) : node.bounds === ref.bounds;
-  return sameBounds && node.label === ref.label && node.nativeId === ref.nativeId;
-}
-
-/** Pure selection over projected capture data. No hierarchy acquisition. */
-/**
- * Bare ids are unique per namespace (app vs IME), so when IME keys are excluded
- * the synthetic-id guard must not count them as family peers.
- */
-function guardNamespaceNodes(
-  nodes: readonly SearchableEntry[],
-  intent: ResolutionIntent,
-): readonly SearchableEntry[] {
-  return intent.excludeImeKeys ? nodes.filter((node) => !isImeKeyEntry(node)) : nodes;
-}
 
 export class ElementResolver {
   constructor(private readonly random: () => number = () => defaultRandom.next()) {}
@@ -444,9 +58,10 @@ export class ElementResolver {
     // Keyboard keys are not part of what `observe` presents, so an action's selector
     // cannot see them (issue #10225). Indices stay snapshot indices, so only the
     // searched list shrinks.
+    const available = snapshot.searchedNodes ?? snapshot.nodes;
     const searched = intent.excludeImeKeys
-      ? snapshot.nodes.filter((node) => !isImeKeyEntry(node))
-      : snapshot.nodes;
+      ? available.filter((node) => !isImeKeyEntry(node))
+      : available;
     return this.resolveInNodes(snapshot, selector, intent, searched);
   }
 
@@ -570,7 +185,7 @@ export class ElementResolver {
       return result;
     }
     if (intent.ref) {
-      return this.resolveReference(result, snapshot, intent);
+      return resolveReference(result, snapshot, intent);
     }
     const actionTarget = (node: SearchableEntry | undefined) =>
       intent.action === "highlight" &&
@@ -1101,13 +716,13 @@ export class ElementResolver {
     usedHintFallback?: boolean;
   } {
     if (selector.elementId !== undefined) {
-      return this.matchId(
+      return matchId(
         nodes,
         selector.elementId,
         selector.match ?? "exact",
         intent,
         selector.caseSensitive,
-        guardNamespaceNodes(snapshot.nodes, intent),
+        guardNamespaceNodes(snapshot.nodes, intent, snapshot.searchedNodes),
       );
     }
     if (selector.testTag !== undefined) {
@@ -1255,204 +870,5 @@ export class ElementResolver {
     return intent.action === "input" || intent.action === "focus"
       ? exact.some((node) => eligible(node, intent))
       : exact.length > 0;
-  }
-
-  private matchId(
-    nodes: SearchableEntry[],
-    query: string,
-    matchMode: MatchMode,
-    intent: ResolutionIntent,
-    caseSensitive?: boolean,
-    captureNodes: readonly SearchableEntry[] = nodes,
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
-    if (matchMode === "regex") {
-      return {
-        matches: [],
-        matchMode,
-        error: "Element ID selectors do not support regular expressions",
-      };
-    }
-    if (matchMode === "contains") {
-      const normalizedQuery = normalize(query, caseSensitive, false);
-      return {
-        matches: nodes
-          .filter((node) =>
-            normalize(node.elementId ?? "", caseSensitive, false).includes(normalizedQuery),
-          )
-          .map((node) => ({ node, kind: "contains" })),
-        matchMode,
-      };
-    }
-    const native = nodes.filter((node) => node.nativeId === query);
-    const usableNative = intent.requireBounds ? native.filter((node) => node.bounds) : native;
-    if (usableNative.length > 0) {
-      return {
-        matches: usableNative.map((node) => ({ node, kind: "native-id-exact" })),
-        matchMode,
-      };
-    }
-    const guard = this.bareSyntheticIdGuard(captureNodes, query);
-    if (guard) {
-      return { matches: [], matchMode, failureReason: "ambiguous", error: guard };
-    }
-    return this.matchNodeKeyOrNamespace(nodes, query, matchMode, intent, native);
-  }
-
-  private matchNodeKeyOrNamespace(
-    nodes: SearchableEntry[],
-    query: string,
-    matchMode: MatchMode,
-    intent: ResolutionIntent,
-    native: SearchableEntry[],
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
-    const qualified = qualifiedId(query);
-    const direct = nodes.filter(
-      (node) => node.nodeKey === query && (!intent.requireBounds || node.bounds),
-    );
-    if (
-      direct.length > 1 &&
-      !syntheticNodeKey.test(query) &&
-      direct.every((node) => !node.nativeId)
-    ) {
-      return {
-        matches: [],
-        matchMode,
-        failureReason: "ambiguous",
-        error: `Skeleton element id "${query}" is ambiguous: ${direct.length} id-less nodes share this view-id. Use text with index instead.`,
-      };
-    }
-    if (direct.length) {
-      return {
-        matches: direct.map((node) => ({
-          node,
-          kind: node.nativeId === query ? "native-id-exact" : "node-key-exact",
-        })),
-        matchMode,
-      };
-    }
-    const namespace = nodes.filter(
-      (node) =>
-        node.nativeId &&
-        (!intent.requireBounds || node.bounds) &&
-        (qualified ? node.nativeId === qualified.name : qualifiedId(node.nativeId)?.name === query),
-    );
-    if (namespace.length === 0 && native.length > 0) {
-      return {
-        matches: native.map((node) => ({ node, kind: "native-id-exact" })),
-        matchMode,
-      };
-    }
-    const candidates = [...new Set([...direct, ...namespace])];
-    const packages = new Set(
-      candidates
-        .map((node) => node.nativeId && qualifiedId(node.nativeId)?.packageName)
-        .filter(Boolean),
-    );
-    const matches = candidates
-      .sort((a, b) => a.windowRank - b.windowRank || a.index - b.index)
-      .map((node) => ({
-        node,
-        kind: (node.nativeId === query
-          ? "native-id-exact"
-          : node.nodeKey === query
-            ? "node-key-exact"
-            : "id-namespace") as MatchKind,
-      }));
-    return {
-      matches,
-      matchMode,
-      ...(packages.size > 1
-        ? {
-            failureReason: "ambiguous" as const,
-            error: `Ambiguous element ID ${query}: ${candidates.map((node) => node.nativeId).join(", ")}. Use a full resource ID.`,
-          }
-        : {}),
-    };
-  }
-
-  /** Distinct synthetic keys in the capture sharing `base`, bare or suffixed. */
-  private stableViewIdFamilyKeys(captureNodes: readonly SearchableEntry[], base: string): string[] {
-    // The same element can appear in the main hierarchy and a window copy; count
-    // it once (same object, or same key at the same bounds).
-    const seen = new Set<string>();
-    const seenSources = new Set<unknown>();
-    const keys: string[] = [];
-    for (const node of captureNodes) {
-      const key = node.nodeKey;
-      if (
-        key === undefined ||
-        !syntheticNodeKey.test(key) ||
-        !(key === base || key.startsWith(`${base}-`) || key.startsWith(`${base}~`)) ||
-        seenSources.has(node.source)
-      ) {
-        continue;
-      }
-      seenSources.add(node.source);
-      const placement = `${key}|${JSON.stringify(node.bounds ?? null)}`;
-      if (!seen.has(placement)) {
-        seen.add(placement);
-        keys.push(key);
-      }
-    }
-    return keys;
-  }
-
-  /**
-   * Guidance for a bare `s2-<hash>` selector that cannot name one element:
-   * a legacy bare-plus-later-ordinal family, or several peers sharing the base
-   * (the producer suffixes every duplicate, so the bare id matches none of
-   * them). Counted over the whole capture (#10476).
-   */
-  private bareSyntheticIdGuard(
-    captureNodes: readonly SearchableEntry[],
-    query: string,
-  ): string | null {
-    if (!bareSyntheticNodeKey.test(query)) {
-      return null;
-    }
-    const keys = this.stableViewIdFamilyKeys(captureNodes, query);
-    const hasBare = keys.includes(query);
-    const hasFirstOrdinal = keys.includes(`${query}-1`);
-    const hasLaterOrdinal = keys.some((key) => key.startsWith(`${query}-`) && key !== `${query}-1`);
-    if (hasBare && hasLaterOrdinal && !hasFirstOrdinal) {
-      return legacyBareStableViewIdMessage(query);
-    }
-    if (keys.length > 1) {
-      const suffixed = [...new Set(keys.filter((key) => key !== query))];
-      return ambiguousStableViewIdMessage(query, query, keys.length, suffixed);
-    }
-    return null;
-  }
-
-  private resolveReference(
-    result: ElementResolution,
-    snapshot: ResolverSnapshot,
-    intent: ResolutionIntent,
-  ): ElementResolution {
-    const ref = intent.ref!;
-    const matches = result.candidates.filter((node) => node.nodeKey === ref.nodeKey);
-    const node = matches.length === 1 ? matches[0] : undefined;
-    // A positional -k id is unsafe under reorder even when reference proof
-    // succeeds: another peer can move into its ordinal. A ~text suffix follows
-    // the same proof as a bare stable id, though its text can still change.
-    const uniqueNativeId =
-      node?.nativeId &&
-      new Set(
-        snapshot.nodes
-          .filter((entry) => entry.nativeId === node.nativeId)
-          .map((entry) => entry.source),
-      ).size === 1;
-    const valid =
-      node &&
-      (snapshot.id === ref.snapshotId ||
-        ((!ordinalNodeKey.test(ref.nodeKey) || uniqueNativeId) && sameReferenceProof(node, ref)));
-    if (!valid) {
-      return { ...result, error: `Stale reference ${ref.nodeKey}; observe again before acting.` };
-    }
-    return {
-      ...result,
-      chosen: eligible(node, intent) ? node : null,
-      indexInMatches: result.candidates.indexOf(node),
-    };
   }
 }

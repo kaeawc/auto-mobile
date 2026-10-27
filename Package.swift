@@ -2,8 +2,9 @@
 import PackageDescription
 
 /// This root manifest is the published SPM entry point (consumers add the repo URL and pick the
-/// `XCTestRunner` / `AutoMobileSDK` products). The `XCTestRunner` target compiles the same sources as
-/// ios/XCTestRunner, which now depend on Tachikoma for AI-assisted recovery — so the dependency,
+/// `XCTestRunner` / `AutoMobileSDK` / `AutoMobilePrototype` products). The `XCTestRunner` target
+/// compiles the same sources as ios/XCTestRunner, which now depend on Tachikoma for AI-assisted
+/// recovery — so the dependency,
 /// Swift 6.0 tools, and the iOS 17 / macOS 15 floor are declared here too. Every target compiles in
 /// the Swift 6 language mode (the default under swift-tools-version 6.3), matching the per-package
 /// manifests under ios/ (#5839).
@@ -14,6 +15,10 @@ let package = Package(
         .macOS(.v15),
     ],
     products: [
+        .library(
+            name: "AutoMobilePrototype",
+            targets: ["AutoMobilePrototype"]
+        ),
         .library(
             name: "AutoMobileSDK",
             targets: ["AutoMobileSDK"]
@@ -32,6 +37,18 @@ let package = Package(
         .package(url: "https://github.com/jpsim/Yams.git", exact: "6.2.2"),
     ],
     targets: [
+        // Core and renderer share a module, preserving the embedded API's existing visibility.
+        .target(
+            name: "AutoMobilePrototype",
+            path: "ios/prototype-agent/Sources",
+            exclude: [
+                "AutoMobilePrototypeAgent/Loader.c",
+                "AutoMobilePrototypeAgent/PrototypeAgent.swift",
+                "AutoMobilePrototypeAgent/PrototypeServer.swift",
+            ],
+            // Required-reason API declarations travel with the library so embedders inherit them (#14151).
+            resources: [.process("PrivacyInfo.xcprivacy")]
+        ),
         .target(
             name: "AutoMobileHighlightCore",
             path: "ios/highlight-core/Sources/AutoMobileHighlightCore"

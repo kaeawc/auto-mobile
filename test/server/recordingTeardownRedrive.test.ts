@@ -12,7 +12,7 @@ import type {
 } from "../../src/features/video/VideoRecorderService";
 import { HybridVideoCaptureBackend } from "../../src/features/video/HybridVideoCaptureBackend";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
-import * as videoManager from "../../src/server/videoRecordingManager";
+import * as videoManager from "../../src/daemon/videoRecordingManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
@@ -47,7 +47,7 @@ const row = {
   config: DEFAULT_VIDEO_RECORDING_CONFIG,
   captureTeardown: descriptor,
 };
-const redriveModule = () => import("../../src/server/recordingTeardownRedrive");
+const redriveModule = () => import("../../src/daemon/recordingTeardownRedrive");
 class DescribingBackend extends FakeVideoCaptureBackend {
   descriptor: VideoCaptureTeardownDescriptor | undefined = { ...descriptor, devicePid: undefined };
   describeCaptureTeardown(_handle: RecordingHandle) {

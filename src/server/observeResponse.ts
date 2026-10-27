@@ -13,12 +13,15 @@ import { type ObserveScreenshotOptions } from "../features/observe/screenshot/sc
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY } from "../features/observe/android/ctrlProxyProtocol";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
+import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/wire/constants";
 import { assertAllDisplayObserveSupported } from "../features/observe/DisplaySelection";
 import { type DeviceObservationAccess } from "./deviceObservationAccess";
 import { ActionableError } from "../models/ActionableError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
+import {
+  snapshotReferences,
+  type SnapshotReferenceStore,
+} from "../features/observe/SnapshotReferenceStore";
 import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
 import { createStructuredToolResponse, StructuredToolResponse } from "../utils/toolUtils";
 import { BootedDevice, ObserveResult, ObserveToolPayload } from "../models";
@@ -47,6 +50,7 @@ import type { ObserveArgs } from "./observeTools";
 import { assertActiveWindowWaitForSupportedOnPlatform } from "../features/observe/wait/WaitForSchemas";
 
 export interface ObserveToolDependencies {
+  snapshotReferences?: Pick<SnapshotReferenceStore, "capture">;
   crop?: ObserveCropDependencies;
   pathProtection?: ScreenshotPathProtection;
   timer?: Timer;
@@ -187,8 +191,12 @@ function requestedScreenshotMode(args: ObserveArgs): ScreenshotMode | undefined 
   return args.crop || args.includeScreenshotImage ? "settled" : args.screenshot;
 }
 
-export function attachSnapshotReference(deviceId: string, result: ObserveResult): void {
-  const capture = snapshotReferences.capture(deviceId, result);
+export function attachSnapshotReference(
+  deviceId: string,
+  result: ObserveResult,
+  references: Pick<SnapshotReferenceStore, "capture"> = snapshotReferences,
+): void {
+  const capture = references.capture(deviceId, result);
   if (capture.status === "captured") {
     result.snapshotReference = capture.reference;
     delete result.snapshotReferenceUnavailable;

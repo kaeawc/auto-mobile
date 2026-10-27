@@ -90,9 +90,12 @@ object DeviceKeyboardEventTranslator {
           meta = event.isMetaPressed,
           shift = event.isShiftPressed,
         ),
-      isMac = isMac,
-      isLinux = isLinux,
-      isAltGraphDown = event.nativeAltGraphDown(),
+      host =
+        KeyboardHost(
+          isMac = isMac,
+          isLinux = isLinux,
+          isAltGraphDown = event.nativeAltGraphDown(),
+        ),
     )
 
   /**
@@ -115,16 +118,15 @@ object DeviceKeyboardEventTranslator {
     key: Key,
     utf16CodePoint: Int,
     modifiers: DeviceKeyModifiers,
-    isMac: Boolean = IS_MAC,
-    isLinux: Boolean = IS_LINUX,
-    isAltGraphDown: Boolean? = null,
+    host: KeyboardHost = KeyboardHost(),
   ): DeviceKeyStroke =
     DeviceKeyStroke(
       key = DEVICE_KEYS[key],
       character =
         utf16CodePoint.takeIf { it in Char.MIN_VALUE.code..Char.MAX_VALUE.code }?.toChar(),
       modifiers = modifiers,
-      altComposesText = resolvesAltComposition(modifiers, isMac, isLinux, isAltGraphDown),
+      altComposesText =
+        resolvesAltComposition(modifiers, host.isMac, host.isLinux, host.isAltGraphDown),
     )
 
   /**
@@ -163,3 +165,9 @@ object DeviceKeyboardEventTranslator {
     }
   }
 }
+
+data class KeyboardHost(
+  val isMac: Boolean = IS_MAC,
+  val isLinux: Boolean = IS_LINUX,
+  val isAltGraphDown: Boolean? = null,
+)

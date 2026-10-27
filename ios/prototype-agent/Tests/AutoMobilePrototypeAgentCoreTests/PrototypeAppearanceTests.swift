@@ -269,7 +269,7 @@ final class PrototypeAppearanceTests: XCTestCase {
 
         let toggle = try action(#"{"type":"toggle","key":"night"}"#)
         let events = session.transition { $0.run([toggle]) }
-        XCTAssertEqual(events.map(\.kind), ["emit", "appearance_changed"])
+        XCTAssertEqual(events.map(\.wireKind), ["emit", "appearance_changed"])
         XCTAssertEqual(events.map(\.name), ["change", nil])
         XCTAssertEqual(events.map(\.sequence), [1, 2])
         XCTAssertEqual(events.last?.payload, darkPayload)
@@ -278,7 +278,7 @@ final class PrototypeAppearanceTests: XCTestCase {
 
         // A change that leaves the mode alone, and a repeat, emit no appearance event.
         let increment = try action(#"{"type":"increment","key":"count"}"#)
-        XCTAssertEqual(session.transition { $0.run([increment]) }.map(\.kind), ["emit"])
+        XCTAssertEqual(session.transition { $0.run([increment]) }.map(\.wireKind), ["emit"])
         XCTAssertEqual(session.transition { _ in [] }.count, 0)
         XCTAssertEqual(session.transition { $0.run([toggle]) }.last?.payload, lightPayload)
         XCTAssertEqual(session.lastSequence, 5)
@@ -289,11 +289,11 @@ final class PrototypeAppearanceTests: XCTestCase {
         let pager = #"{"type":"pager","id":"pg","children":[\#(box(lightHex)),\#(box(darkHex)),\#(box(darkHex))]}"#
         try session.show(spec(root: pager))
         let events = session.transition { $0.setPage("pg", 1) }
-        XCTAssertEqual(events.map(\.kind), ["page_changed", "appearance_changed"])
+        XCTAssertEqual(events.map(\.wireKind), ["page_changed", "appearance_changed"])
         XCTAssertEqual(events.last?.payload, darkPayload)
         XCTAssertEqual(events.last?.pages, ["pg": 1])
         // Dark page to dark page: the page changes, the mode does not.
-        XCTAssertEqual(session.transition { $0.setPage("pg", 2) }.map(\.kind), ["page_changed"])
+        XCTAssertEqual(session.transition { $0.setPage("pg", 2) }.map(\.wireKind), ["page_changed"])
         XCTAssertEqual(session.transition { $0.setPage("pg", 0) }.last?.payload, lightPayload)
     }
 
@@ -303,7 +303,7 @@ final class PrototypeAppearanceTests: XCTestCase {
         let tree = box(children: [box(darkHex, extra: hidden), box(lightHex)])
         try session.show(spec(root: tree, state: #"{"shown":false}"#))
         let events = session.transition { $0.change(key: "shown", value: .bool(true)) }
-        XCTAssertEqual(events.map(\.kind), ["emit", "appearance_changed"])
+        XCTAssertEqual(events.map(\.wireKind), ["emit", "appearance_changed"])
         XCTAssertEqual(events.last?.payload, darkPayload)
     }
 
@@ -325,14 +325,14 @@ final class PrototypeAppearanceTests: XCTestCase {
         for theme in [#"{"mode":"light"}"#, #"{"mode":"system"}"#, ##"{"colors":{"surface":"#FFFFFF"}}"##] {
             var session = PrototypeSession()
             try session.show(spec(root: box(lightHex, extra: night), theme: theme, state: #"{"night":false}"#))
-            XCTAssertEqual(session.transition { $0.run([toggle]) }.map(\.kind), ["emit"], theme)
+            XCTAssertEqual(session.transition { $0.run([toggle]) }.map(\.wireKind), ["emit"], theme)
         }
     }
 
     func testADismissalEmitsNoAppearanceEventAndTheNextShowStartsClean() throws {
         var session = PrototypeSession()
         try session.show(spec(root: box(darkHex)))
-        XCTAssertEqual(session.transition { $0.dismiss(reason: .user) }.map(\.kind), ["dismissed"])
+        XCTAssertEqual(session.transition { $0.dismiss(reason: .user) }.map(\.wireKind), ["dismissed"])
         try session.show(spec(root: box(lightHex)))
         XCTAssertEqual(session.transition { _ in [] }.count, 0)
         // A same-id re-show into the other mode is reported by its result, not by an event.
@@ -362,7 +362,7 @@ final class PrototypeAppearanceTests: XCTestCase {
         let events = session.setDeviceDark(true)
         XCTAssertEqual(events.count, 1)
         let event = try XCTUnwrap(events.first)
-        XCTAssertEqual(event.kind, "appearance_changed")
+        XCTAssertEqual(event.wireKind, "appearance_changed")
         XCTAssertNil(event.name)
         XCTAssertEqual(event.payload, .object(["mode": .string("dark"), "source": .string("system")]))
         XCTAssertEqual(event.sequence, 2)

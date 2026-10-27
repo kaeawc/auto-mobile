@@ -8,28 +8,42 @@ testing with automatic refresh when screen content changes.
 - **Automatic View Hierarchy Capture**: Automatically detects when screen content changes and marks
   hierarchy for refresh
 - **On-Demand Extraction**: Extracts fresh hierarchy only when requested after content changes
-- **Synchronous File Access**: Writes hierarchy to app-scoped storage accessible via ADB
+- **Wrapper Pruning (API 30+)**: Bounds-only wrapper nodes are promoted or dropped before the tree
+  is sent. Baseline accessibility actions (select, accessibility focus) and compat span extras do
+  not count as content. A node with a resource id, text, content description, test tag, click or
+  long-click handler is never dropped. `adb shell setprop debug.automobile.prune_wrappers false`
+  turns it off (or `true` turns it on below API 30); restart the service to apply it.
+- **Optional Debug Dump**: Writes hierarchy to app-scoped storage accessible via ADB when enabled
 - **Broadcast Communication**: Alternative broadcast-based communication
 - **Single Command Interface**: Only exposes one operation - get latest view hierarchy
 
 ## Usage
 
-### Synchronous File Access (Recommended)
+### Optional Hierarchy Debug Dump
 
-The easiest way to get view hierarchy data synchronously is to trigger the sync action and then read
-the file:
+The dump is off by default. Enable it by creating a marker in the app's files directory.
+The service reads its own user's files directory, and `run-as` without `--user` targets user 0,
+so pass the foreground user on a device with a work profile or secondary user:
 
 ```bash
-# Step 1: Trigger hierarchy extraction to file
-adb shell am broadcast -a dev.jasonpearson.automobile.GET_HIERARCHY_SYNC
-
-# Step 2: Read the result file
-adb shell run-as dev.jasonpearson.automobile.ctrlproxy cat files/latest_hierarchy.json
+CTRL_PROXY_USER=$(adb shell am get-current-user | tr -d '\r')
+adb shell run-as dev.jasonpearson.automobile.ctrlproxy --user "$CTRL_PROXY_USER" touch files/dump_hierarchy
 ```
 
-**One-liner for convenience:**
+On a single-user device `CTRL_PROXY_USER` is `0`, which matches plain `run-as`. The commands
+below reuse it.
+
+Use the WebSocket `request_hierarchy` request or the daemon's `observe` to request a fresh
+hierarchy. After delivery completes, read the dump:
+
 ```bash
-adb shell "am broadcast -a dev.jasonpearson.automobile.GET_HIERARCHY_SYNC && sleep 0.5 && run-as dev.jasonpearson.automobile.ctrlproxy cat files/latest_hierarchy.json"
+adb shell run-as dev.jasonpearson.automobile.ctrlproxy --user "$CTRL_PROXY_USER" cat files/latest_hierarchy.json
+```
+
+Disable further writes by removing the marker (the last dump remains on disk):
+
+```bash
+adb shell run-as dev.jasonpearson.automobile.ctrlproxy --user "$CTRL_PROXY_USER" rm files/dump_hierarchy
 ```
 
 **Debugging commands if the above doesn't work:**
@@ -42,18 +56,18 @@ adb shell pm list packages | grep dev.jasonpearson.automobile.ctrlproxy
 adb shell settings get secure enabled_accessibility_services
 
 # Check if the file exists in app storage
-adb shell run-as dev.jasonpearson.automobile.ctrlproxy ls -la files/
+adb shell run-as dev.jasonpearson.automobile.ctrlproxy --user "$CTRL_PROXY_USER" ls -la files/
 
 # Check recent logs for both receiver and service
 adb logcat -s AccessibilityCommandReceiver CtrlProxy
 
-# Trigger broadcast and check logs in real-time
-adb shell am broadcast -a dev.jasonpearson.automobile.GET_HIERARCHY_SYNC && adb logcat -s AccessibilityCommandReceiver CtrlProxy
+# Request a hierarchy via WebSocket request_hierarchy or daemon observe, then inspect logs
+adb logcat -s CtrlProxy
 ```
 
 **Benefits:**
 
-- Synchronous response after brief delay
+- Inspect the latest delivered hierarchy after enabling the marker
 - Returns JSON directly to stdout
 - No broadcast receivers needed
 - Works with any shell scripting
@@ -114,8 +128,11 @@ For errors (via broadcasts):
 ### Shell Script
 ```bash
 #!/bin/bash
-# Get view hierarchy synchronously
-HIERARCHY=$(adb shell "am broadcast -a dev.jasonpearson.automobile.GET_HIERARCHY_SYNC && sleep 0.5 && run-as dev.jasonpearson.automobile.ctrlproxy cat files/latest_hierarchy.json")
+# Enable the dump, then request a hierarchy via WebSocket request_hierarchy or daemon observe.
+CTRL_PROXY_USER=$(adb shell am get-current-user | tr -d '\r')
+adb shell run-as dev.jasonpearson.automobile.ctrlproxy --user "$CTRL_PROXY_USER" touch files/dump_hierarchy
+# After delivery completes:
+HIERARCHY=$(adb shell run-as dev.jasonpearson.automobile.ctrlproxy --user "$CTRL_PROXY_USER" cat files/latest_hierarchy.json)
 echo "Current screen hierarchy: $HIERARCHY"
 ```
 
@@ -123,18 +140,16 @@ echo "Current screen hierarchy: $HIERARCHY"
 ```python
 import subprocess
 import json
-import time
 
 def get_view_hierarchy():
-    # Trigger extraction
-    subprocess.run(['adb', 'shell', 'am', 'broadcast', '-a', 'dev.jasonpearson.automobile.GET_HIERARCHY_SYNC'])
-    
-    # Wait briefly for file write
-    time.sleep(0.5)
-    
-    # Read the result
+    # Enable files/dump_hierarchy first (see above), then request a hierarchy via
+    # WebSocket request_hierarchy or daemon observe and wait for delivery before calling.
+    # Read the latest debug dump from the foreground user's files directory.
+    user = subprocess.run(
+        ['adb', 'shell', 'am', 'get-current-user'], capture_output=True, text=True
+    ).stdout.strip()
     result = subprocess.run([
-        'adb', 'shell', 'run-as', 'dev.jasonpearson.automobile.ctrlproxy', 
+        'adb', 'shell', 'run-as', 'dev.jasonpearson.automobile.ctrlproxy', '--user', user,
         'cat', 'files/latest_hierarchy.json'
     ], capture_output=True, text=True)
     
@@ -169,15 +184,18 @@ context.registerReceiver(receiver, filter)
 ## App Package Information
 
 - **Package Name**: `dev.jasonpearson.automobile.ctrlproxy`
-- **Hierarchy File Location**: `files/latest_hierarchy.json` (within app's private directory)
-- **ADB Access**: Use `run-as dev.jasonpearson.automobile.ctrlproxy` to access app-scoped files
+- **Hierarchy File Location**: `files/latest_hierarchy.json` (within app's private directory;
+  written only while `files/dump_hierarchy` exists)
+- **ADB Access**: Use `run-as dev.jasonpearson.automobile.ctrlproxy --user <current user>` to access
+  app-scoped files
 
 ## How It Works
 
 1. **Content Change Detection**: Service monitors for window state and content changes
 2. **Lazy Extraction**: Hierarchy is only extracted when requested after a content change
 3. **Memory Storage**: Latest hierarchy is cached in memory for fast repeated access
-4. **File Output**: Sync command writes to app-scoped storage accessible via ADB
+4. **File Output**: Changed pushes and `request_hierarchy` replies write to app-scoped storage only
+   while the `files/dump_hierarchy` marker exists
 
 ## Optimized Architecture
 
@@ -186,7 +204,7 @@ The service uses an optimized approach for minimal overhead:
 1. **Event-Driven Refresh**: Only marks hierarchy as needing refresh when content actually changes
 2. **Lazy Extraction**: Hierarchy extraction only happens on-demand after content changes
 3. **Memory Caching**: Repeated requests return cached data if no content changes occurred
-4. **Secure Storage**: Files written to app-scoped storage accessible via ADB
+4. **Secure Storage**: Optional debug dumps use app-scoped storage accessible via ADB
 
 This design minimizes CPU usage and battery impact while ensuring fresh data is always available.
 

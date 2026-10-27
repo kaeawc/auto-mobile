@@ -88,6 +88,18 @@ export class CriticalSectionCoordinator {
       : lock;
   }
 
+  /** Read-only view of a barrier: devices that arrived and waiters still parked at it. */
+  public getBarrierState(
+    lock: string,
+    namespace?: string,
+  ): { arrivedDeviceIds: string[]; waiterCount: number } {
+    const key = this.scopedKey(lock, namespace);
+    return {
+      arrivedDeviceIds: [...(this.barrierCounts.get(key) ?? [])],
+      waiterCount: this.barrierResolvers.get(key)?.length ?? 0,
+    };
+  }
+
   /**
    * Registers the expected number of devices for a lock.
    * Must be called before any device arrives at the barrier.

@@ -1,3 +1,4 @@
+import { FakeDaemonHttpTokenStore } from "../../src/daemon/FakeDaemonHttpTokenStore";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
@@ -6,7 +7,7 @@ import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/se
 import { DaemonClient } from "../../src/daemon/client";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DAEMON_VERSION, MCP_STREAMABLE_PATH } from "../../src/daemon/constants";
+import { DAEMON_VERSION, MCP_STREAMABLE_PATH } from "../../src/daemon/wire/constants";
 import { registerMcpTools } from "../../src/server";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -128,6 +129,16 @@ function normalize(message: unknown): unknown {
   return parsed;
 }
 
+/** The `tools` array of the first `tools/list` result frame the server sent. */
+function listToolsFrameTools(sent: JSONRPCMessage[]): unknown[] {
+  for (const message of sent) {
+    if ("result" in message && Array.isArray(message.result.tools)) {
+      return message.result.tools;
+    }
+  }
+  throw new Error("no tools/list result frame was sent");
+}
+
 describe("tools/list through the proxy matches schemas/tool-definitions.json", () => {
   interface CommittedTool {
     name: string;
@@ -165,9 +176,16 @@ describe("tools/list through the proxy matches schemas/tool-definitions.json", (
     "automobile/planOnly",
   ];
 
-  test("the wire frame carries the committed definitions byte for byte", async () => {
-    expect(expectedNames.length).toBeGreaterThan(0);
+  interface ServedTool {
+    name: string;
+    description?: string;
+    inputSchema: unknown;
+    outputSchema?: unknown;
+    _meta?: Record<string, unknown>;
+  }
 
+  /** One client's tools/list through the proxy over a fake daemon: the tools of the frame sent. */
+  async function listThroughProxy(): Promise<ServedTool[]> {
     const availability = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const { server, proxy } = createProxyMcpServer({
       proxyConfig: {
@@ -189,32 +207,37 @@ describe("tools/list through the proxy matches schemas/tool-definitions.json", (
       await server.connect(serverTransport);
       await client.connect(clientTransport);
       await client.listTools();
-
-      const frame = sent.find((message) => "result" in message && "tools" in message.result);
-      const tools = (frame as { result: { tools: unknown[] } }).result.tools;
-      const served = tools as Array<{
-        name: string;
-        description?: string;
-        inputSchema: unknown;
-        outputSchema?: unknown;
-        _meta?: Record<string, unknown>;
-      }>;
-      expect(served.map((tool) => tool.name)).toEqual(expectedNames);
-      for (const tool of served) {
-        const source = committed.find((candidate) => candidate.name === tool.name)!;
-        const meta = Object.fromEntries(
-          Object.entries(source._meta ?? {}).filter(([key]) => !GATING_META_KEYS.includes(key)),
-        );
-        expect(tool.outputSchema).toBeUndefined();
-        expect(JSON.stringify(tool.inputSchema)).toBe(JSON.stringify(source.inputSchema));
-        expect(tool.description).toBe(source.description);
-        expect(JSON.stringify(tool._meta ?? {})).toBe(JSON.stringify(meta));
-      }
+      return listToolsFrameTools(sent) as ServedTool[];
     } finally {
       await client.close();
       await server.close();
       await proxy.close();
       availability.mockRestore();
+    }
+  }
+
+  // The SDK builds its protocol schemas on the first client handshake and the proxy loads the
+  // static catalog on the first listing; that one-time cost belongs outside the 100 ms budget.
+  beforeAll(async () => {
+    await listThroughProxy();
+  });
+
+  test("the wire frame carries the committed definitions byte for byte", async () => {
+    expect(expectedNames.length).toBeGreaterThan(0);
+
+    const served = await listThroughProxy();
+
+    expect(served.map((tool) => tool.name)).toEqual(expectedNames);
+    const committedByName = new Map(committed.map((tool) => [tool.name, tool]));
+    for (const tool of served) {
+      const source = committedByName.get(tool.name)!;
+      const meta = Object.fromEntries(
+        Object.entries(source._meta ?? {}).filter(([key]) => !GATING_META_KEYS.includes(key)),
+      );
+      expect(tool.outputSchema).toBeUndefined();
+      expect(JSON.stringify(tool.inputSchema)).toBe(JSON.stringify(source.inputSchema));
+      expect(tool.description).toBe(source.description);
+      expect(JSON.stringify(tool._meta ?? {})).toBe(JSON.stringify(meta));
     }
   });
 });
@@ -222,13 +245,18 @@ describe("tools/list through the proxy matches schemas/tool-definitions.json", (
 describe("desktop handshake against the real daemon streamable endpoint", () => {
   async function captureHandshake(): Promise<HandshakeFixture> {
     const port = await freePort();
-    const daemon = new Daemon({ port, host: "127.0.0.1" }, { timer: new FakeTimer() });
+    const daemon = new Daemon(
+      { port, host: "127.0.0.1" },
+      {
+        timer: new FakeTimer(),
+        httpToken: "test-http-token",
+        httpTokenStore: new FakeDaemonHttpTokenStore(),
+      },
+    );
     // The HTTP listener lifecycle is private; Daemon.start() would also boot devices and the DB.
-    const call = async (method: string): Promise<void> => {
-      await Reflect.get(daemon, method).call(daemon);
-    };
+    daemon.testHooks.publishHttpToken();
     await Reflect.get(daemon, "httpIngress").start();
-    await call("resolveStartupCompletion");
+    daemon.testHooks.resolveStartupCompletion();
     await Promise.resolve();
 
     const exchanges: FixtureExchange[] = [];
@@ -236,6 +264,7 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
     try {
       for (const frame of DESKTOP_FRAMES) {
         const headers: Record<string, string> = {
+          authorization: "Bearer test-http-token",
           "content-type": "application/json",
           accept: "application/json, text/event-stream",
         };
@@ -272,8 +301,23 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
     };
   }
 
-  test("answers match the checked-in fixture", async () => {
-    const captured = await captureHandshake();
+  // One handshake against a real HTTP listener serves both tests: the first capture pays the cold
+  // listener start (about 110 ms on a Linux runner), so it runs in beforeAll, outside the 100 ms
+  // budget (#11574).
+  let captured: HandshakeFixture;
+  beforeAll(async () => {
+    // beforeAll runs before the file's beforeEach, so install the same host-free device manager.
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([]));
+    try {
+      captured = await captureHandshake();
+    } finally {
+      PlatformDeviceManagerFactory.reset();
+      DaemonState.getInstance().reset();
+      ToolRegistry.clearTools();
+    }
+  });
+
+  test("answers match the checked-in fixture", () => {
     if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {
       writeFileSync(FIXTURE_PATH, `${JSON.stringify(captured, null, 2)}\n`);
     }
@@ -285,8 +329,7 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
     expect(captured).toEqual(JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as HandshakeFixture);
   });
 
-  test("the legacy initialize is answered with a negotiated protocol version", async () => {
-    const captured = await captureHandshake();
+  test("the legacy initialize is answered with a negotiated protocol version", () => {
     const init = captured.exchanges[0].response;
     expect(init.status).toBe(200);
     const result = (init.message as { result: { protocolVersion: string } }).result;

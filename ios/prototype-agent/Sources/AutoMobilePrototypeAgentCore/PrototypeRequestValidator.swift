@@ -8,9 +8,19 @@ enum PrototypeRequestValidator {
     /// Every key under which a node holds an action list.
     private static let actionLists: Set<String> = ["onTap", "onLongPress", "onDoubleTap", "onSubmit", "onRefresh"]
     private static let methods = Set(PrototypeRequestMethod.allCases.map(\.rawValue))
-    private static let bindingKeys: Set<String> = ["state", "data", "value", "item", "index"]
+    private static let bindingKeys: Set<String> = ["state", "data", "value", "item", "index", "platform", "event"]
     private static let headerName = try? NSRegularExpression(pattern: "^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
     private static let templatedURL = try? NSRegularExpression(pattern: "^https?://", options: .caseInsensitive)
+
+    private static let forbiddenHeaders: Set<String> = [
+        "host", "connection", "upgrade", "transfer-encoding", "content-length", "te", "trailer",
+        "keep-alive", "cookie", "origin", "expect",
+    ]
+
+    static func isForbiddenHeader(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return forbiddenHeaders.contains(lower) || lower.hasPrefix("proxy-")
+    }
 
     /// Throws the first request rule the authored `root` breaks. `state` is the spec's declared state.
     static func validate(_ root: JSONValue, state: [String: JSONValue]) throws {
@@ -58,6 +68,12 @@ enum PrototypeRequestValidator {
     {
         if action["type"] == .string("emit"), action["name"] == .string(PrototypeRequestEvent.name) {
             throw fail("\(path).name", "The emit name \(PrototypeRequestEvent.name) is reserved for request events")
+        }
+        if action["type"] == .string("startTimer"), case let .array(nested)? = action["actions"] {
+            guard depth < PrototypeLimits.maxActionDepth else {
+                throw fail("\(path).actions", "Action nesting depth limit exceeded")
+            }
+            try validateList(nested, path: "\(path).actions", depth: depth + 1, state: state)
         }
         guard action["type"] == .string("request") else { return }
         try validateUnrepeated(action, path: path, state: state)
@@ -159,6 +175,9 @@ enum PrototypeRequestValidator {
         var seenHeaders = Set<String>()
         for name in fields.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
             let entryPath = PrototypeLimits.dataMemberPath(path, key: name)
+            if isHeader, isForbiddenHeader(name) {
+                throw fail(entryPath, "Forbidden request header")
+            }
             let range = NSRange(name.startIndex..., in: name)
             // Header names are case-insensitive, so `X-Test` and `x-test` are one header given twice.
             if isHeader, !seenHeaders.insert(name.lowercased()).inserted {
@@ -166,6 +185,10 @@ enum PrototypeRequestValidator {
             }
             if name.isEmpty || (isHeader && headerName?.firstMatch(in: name, range: range) == nil) {
                 throw fail(entryPath, isHeader ? "Invalid header name" : "Invalid query name")
+            }
+            let literal = fields[name]?.stringValue ?? fields[name]?.objectFields?["value"]?.stringValue
+            if isHeader, let literal, literal.unicodeScalars.contains(where: { $0.value == 13 || $0.value == 10 }) {
+                throw fail(entryPath, "CR/LF in header value")
             }
             switch fields[name] {
             case let .string(text)?:
@@ -183,11 +206,12 @@ enum PrototypeRequestValidator {
         }
     }
 
-    /// Exactly one of `state`, `data`, `value`, `item`, `index: true`.
+    /// One structured value binding, including platform state and handler-scoped event data.
     private static func binding(_ raw: JSONValue, path: String) throws {
         guard case let .object(form) = raw, form.count == 1, let key = form.keys.first,
               bindingKeys.contains(key), key != "index" || form[key] == .bool(true)
-        else { throw fail(path, "Expected one value binding: state, data, value, item or index") }
+        else { throw fail(path, "Expected one value binding: state, data, value, item, index, platform or event")
+        }
     }
 
     private static func fail(_ path: String, _ message: String) -> DecodingError {

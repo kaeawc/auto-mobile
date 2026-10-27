@@ -83,9 +83,10 @@ describe("MCP Tools Registry", () => {
       const tool = toolDefinitions.find((definition) => definition.name === toolName);
       expect(tool).toBeDefined();
       expect(tool).toHaveProperty("outputSchema");
-      expect(tool!.outputSchema).toHaveProperty("type", "object");
-      expect(tool!.outputSchema.properties).toHaveProperty("success");
-      expect(tool!.outputSchema.required).toContain("success");
+      const outputSchema = tool?.outputSchema;
+      expect(outputSchema).toHaveProperty("type", "object");
+      expect(outputSchema?.properties).toHaveProperty("success");
+      expect(outputSchema?.required).toContain("success");
     }
   });
 

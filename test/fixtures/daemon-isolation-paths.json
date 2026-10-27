@@ -1,6 +1,53 @@
 {
-  "description": "Shared daemon state-path vectors (#10906). Generated from src/daemon/constants.ts resolveDaemonStatePath; the TypeScript, JUnit runner, desktop and XCTestRunner resolvers are all tested against it. uid is the user id the paths are computed for; posixOnly vectors resolve relative paths and hold on POSIX hosts only.",
+  "description": "Shared daemon state-path vectors (#10906). Generated from src/daemon/wire/constants.ts resolveDaemonStatePath; the TypeScript, JUnit runner, desktop and XCTestRunner resolvers are all tested against it. uid is the user id the paths are computed for; posixOnly vectors resolve relative paths and hold on POSIX hosts only.",
   "uid": "501",
+  "windowsCases": [
+    {
+      "name": "Windows resident token uses LOCALAPPDATA",
+      "env": { "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local" },
+      "suffix": "",
+      "windowsTokenFilePath": "C:\\Users\\u\\AppData\\Local\\auto-mobile\\daemon.token"
+    },
+    {
+      "name": "Windows isolated token uses the aux directory suffix",
+      "env": {
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local",
+        "AUTOMOBILE_AUX_SOCKET_DIR": "C:\\lanes\\one\\aux"
+      },
+      "suffix": "-f8feb4c207",
+      "windowsTokenFilePath": "C:\\Users\\u\\AppData\\Local\\auto-mobile\\daemon-f8feb4c207.token"
+    },
+    {
+      "name": "Windows relative aux directory resolves against the launch cwd",
+      "env": {
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local",
+        "AUTOMOBILE_AUX_SOCKET_DIR": ".\\x\\..\\aux\\",
+        "AUTOMOBILE_DAEMON_LAUNCH_CWD": "C:\\lanes\\one"
+      },
+      "suffix": "-f8feb4c207",
+      "windowsTokenFilePath": "C:\\Users\\u\\AppData\\Local\\auto-mobile\\daemon-f8feb4c207.token"
+    },
+    {
+      "name": "Windows explicit token override wins",
+      "env": {
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local",
+        "AUTOMOBILE_AUX_SOCKET_DIR": "C:\\lanes\\one\\aux",
+        "AUTOMOBILE_DAEMON_TOKEN_FILE_PATH": "D:\\state\\daemon.token"
+      },
+      "suffix": "-f8feb4c207",
+      "windowsTokenFilePath": "D:\\state\\daemon.token"
+    },
+    {
+      "name": "Windows relative token override uses the launch cwd",
+      "env": {
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local",
+        "AUTOMOBILE_DAEMON_TOKEN_FILE_PATH": "state\\..\\daemon.token",
+        "AUTOMOBILE_DAEMON_LAUNCH_CWD": "C:\\lanes\\one"
+      },
+      "suffix": "",
+      "windowsTokenFilePath": "C:\\lanes\\one\\daemon.token"
+    }
+  ],
   "cases": [
     {
       "name": "no aux dir keeps the resident paths",
@@ -9,7 +56,8 @@
       "suffix": "",
       "socketPath": "/tmp/auto-mobile-daemon-501.sock",
       "pidFilePath": "/tmp/auto-mobile-daemon-501.pid",
-      "lockFilePath": "/tmp/auto-mobile-daemon-501.lock"
+      "lockFilePath": "/tmp/auto-mobile-daemon-501.lock",
+      "tokenFilePath": "/tmp/auto-mobile-daemon-501.token"
     },
     {
       "name": "blank aux dir keeps the resident paths",
@@ -20,7 +68,8 @@
       "suffix": "",
       "socketPath": "/tmp/auto-mobile-daemon-501.sock",
       "pidFilePath": "/tmp/auto-mobile-daemon-501.pid",
-      "lockFilePath": "/tmp/auto-mobile-daemon-501.lock"
+      "lockFilePath": "/tmp/auto-mobile-daemon-501.lock",
+      "tokenFilePath": "/tmp/auto-mobile-daemon-501.token"
     },
     {
       "name": "absolute aux dir",
@@ -31,7 +80,8 @@
       "suffix": "-edf7a04020",
       "socketPath": "/tmp/auto-mobile-daemon-501-edf7a04020.sock",
       "pidFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.pid",
-      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock"
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock",
+      "tokenFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.token"
     },
     {
       "name": "absolute aux dir is trimmed",
@@ -42,7 +92,8 @@
       "suffix": "-edf7a04020",
       "socketPath": "/tmp/auto-mobile-daemon-501-edf7a04020.sock",
       "pidFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.pid",
-      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock"
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock",
+      "tokenFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.token"
     },
     {
       "name": "absolute aux dir is hashed verbatim (trailing slash kept)",
@@ -53,7 +104,8 @@
       "suffix": "-88e10361a8",
       "socketPath": "/tmp/auto-mobile-daemon-501-88e10361a8.sock",
       "pidFilePath": "/tmp/auto-mobile-daemon-501-88e10361a8.pid",
-      "lockFilePath": "/tmp/auto-mobile-daemon-501-88e10361a8.lock"
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-88e10361a8.lock",
+      "tokenFilePath": "/tmp/auto-mobile-daemon-501-88e10361a8.token"
     },
     {
       "name": "non-ASCII aux dir hashes its UTF-8 bytes",
@@ -64,7 +116,8 @@
       "suffix": "-8bbe0de50f",
       "socketPath": "/tmp/auto-mobile-daemon-501-8bbe0de50f.sock",
       "pidFilePath": "/tmp/auto-mobile-daemon-501-8bbe0de50f.pid",
-      "lockFilePath": "/tmp/auto-mobile-daemon-501-8bbe0de50f.lock"
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-8bbe0de50f.lock",
+      "tokenFilePath": "/tmp/auto-mobile-daemon-501-8bbe0de50f.token"
     },
     {
       "name": "relative aux dir resolves against the launch cwd",
@@ -76,7 +129,8 @@
       "suffix": "-94b54a3ac2",
       "socketPath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.sock",
       "pidFilePath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.pid",
-      "lockFilePath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.lock"
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.lock",
+      "tokenFilePath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.token"
     },
     {
       "name": "relative aux dir is normalized",
@@ -88,7 +142,8 @@
       "suffix": "-94b54a3ac2",
       "socketPath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.sock",
       "pidFilePath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.pid",
-      "lockFilePath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.lock"
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.lock",
+      "tokenFilePath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.token"
     },
     {
       "name": "explicit socket and pid paths win over the aux dir",
@@ -101,7 +156,8 @@
       "suffix": "-edf7a04020",
       "socketPath": "/tmp/lane/d.sock",
       "pidFilePath": "/tmp/lane/d.pid",
-      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock"
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock",
+      "tokenFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.token"
     },
     {
       "name": "legacy override aliases are honoured",
@@ -114,7 +170,8 @@
       "suffix": "-edf7a04020",
       "socketPath": "/tmp/legacy/d.sock",
       "pidFilePath": "/tmp/legacy/d.pid",
-      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock"
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock",
+      "tokenFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.token"
     },
     {
       "name": "AUTOMOBILE_ override wins over the legacy alias",
@@ -126,7 +183,8 @@
       "suffix": "",
       "socketPath": "/tmp/new/d.sock",
       "pidFilePath": "/tmp/auto-mobile-daemon-501.pid",
-      "lockFilePath": "/tmp/auto-mobile-daemon-501.lock"
+      "lockFilePath": "/tmp/auto-mobile-daemon-501.lock",
+      "tokenFilePath": "/tmp/auto-mobile-daemon-501.token"
     },
     {
       "name": "relative override resolves against the launch cwd",
@@ -139,7 +197,8 @@
       "suffix": "",
       "socketPath": "/work/lane/d.sock",
       "pidFilePath": "/work/lane/d.pid",
-      "lockFilePath": "/tmp/auto-mobile-daemon-501.lock"
+      "lockFilePath": "/tmp/auto-mobile-daemon-501.lock",
+      "tokenFilePath": "/tmp/auto-mobile-daemon-501.token"
     },
     {
       "name": "an override for one file leaves the others isolated",
@@ -151,7 +210,8 @@
       "suffix": "-edf7a04020",
       "socketPath": "/tmp/lane/d.sock",
       "pidFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.pid",
-      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock"
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock",
+      "tokenFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.token"
     }
   ]
 }

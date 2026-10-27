@@ -36,76 +36,100 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 fun SearchBar(
   query: String,
   onQueryChange: (String) -> Unit,
-  placeholder: String = "Search...",
-  showRegexToggle: Boolean = false,
-  isRegexEnabled: Boolean = false,
-  onRegexToggle: (() -> Unit)? = null,
   modifier: Modifier = Modifier,
+  options: SearchBarOptions = SearchBarOptions(),
+) {
+  return with(options) {
+    val colors = SharedTheme.globalColors
+
+    Row(
+      modifier =
+        modifier
+          .height(28.dp)
+          .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+          .padding(horizontal = 8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        "\uD83D\uDD0D", // 🔍
+        fontSize = 12.sp,
+        color = colors.text.normal.copy(alpha = 0.4f),
+      )
+      Spacer(Modifier.width(6.dp))
+      SearchField(query, onQueryChange, placeholder)
+      RegexToggle()
+      if (query.isNotEmpty()) {
+        Text(
+          "\u2715", // ✕
+          fontSize = 10.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
+          modifier =
+            Modifier.clickable { onQueryChange("") }
+              .pointerHoverIcon(PointerIcon.Hand)
+              .padding(4.dp),
+        )
+      }
+    }
+  }
+}
+
+data class SearchBarOptions(
+  val placeholder: String = "Search...",
+  val showRegexToggle: Boolean = false,
+  val isRegexEnabled: Boolean = false,
+  val onRegexToggle: (() -> Unit)? = null,
+)
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.SearchField(
+  query: String,
+  onQueryChange: (String) -> Unit,
+  placeholder: String,
 ) {
   val colors = SharedTheme.globalColors
-
-  Row(
-    modifier =
-      modifier
-        .height(28.dp)
-        .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-        .padding(horizontal = 8.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    Text(
-      "\uD83D\uDD0D", // 🔍
-      fontSize = 12.sp,
-      color = colors.text.normal.copy(alpha = 0.4f),
-    )
-    Spacer(Modifier.width(6.dp))
-    BasicTextField(
-      value = query,
-      onValueChange = onQueryChange,
-      textStyle =
-        TextStyle(
-          fontSize = 12.sp,
-          color = colors.text.normal,
-        ),
-      cursorBrush = SolidColor(colors.text.normal),
-      singleLine = true,
-      modifier = Modifier.weight(1f),
-      decorationBox = { innerTextField ->
-        Box {
-          if (query.isEmpty()) {
-            Text(
-              placeholder,
-              fontSize = 12.sp,
-              color = colors.text.normal.copy(alpha = 0.4f),
-            )
-          }
-          innerTextField()
+  BasicTextField(
+    value = query,
+    onValueChange = onQueryChange,
+    textStyle =
+      TextStyle(
+        fontSize = 12.sp,
+        color = colors.text.normal,
+      ),
+    cursorBrush = SolidColor(colors.text.normal),
+    singleLine = true,
+    modifier = Modifier.weight(1f),
+    decorationBox = { innerTextField ->
+      Box {
+        if (query.isEmpty()) {
+          Text(
+            placeholder,
+            fontSize = 12.sp,
+            color = colors.text.normal.copy(alpha = 0.4f),
+          )
         }
-      },
+        innerTextField()
+      }
+    },
+  )
+}
+
+@Composable
+private fun SearchBarOptions.RegexToggle() {
+  val colors = SharedTheme.globalColors
+  if (showRegexToggle && onRegexToggle != null) {
+    Text(
+      "/re/",
+      fontSize = 10.sp,
+      color = if (isRegexEnabled) colors.text.normal else colors.text.normal.copy(alpha = 0.35f),
+      modifier =
+        Modifier.background(
+            if (isRegexEnabled) colors.text.normal.copy(alpha = 0.12f) else Color.Transparent,
+            RoundedCornerShape(3.dp),
+          )
+          .clickable { onRegexToggle() }
+          .pointerHoverIcon(PointerIcon.Hand)
+          .padding(horizontal = 4.dp, vertical = 2.dp),
     )
-    if (showRegexToggle && onRegexToggle != null) {
-      Text(
-        "/re/",
-        fontSize = 10.sp,
-        color = if (isRegexEnabled) colors.text.normal else colors.text.normal.copy(alpha = 0.35f),
-        modifier =
-          Modifier.background(
-              if (isRegexEnabled) colors.text.normal.copy(alpha = 0.12f) else Color.Transparent,
-              RoundedCornerShape(3.dp),
-            )
-            .clickable { onRegexToggle() }
-            .pointerHoverIcon(PointerIcon.Hand)
-            .padding(horizontal = 4.dp, vertical = 2.dp),
-      )
-      Spacer(Modifier.width(4.dp))
-    }
-    if (query.isNotEmpty()) {
-      Text(
-        "\u2715", // ✕
-        fontSize = 10.sp,
-        color = colors.text.normal.copy(alpha = 0.5f),
-        modifier =
-          Modifier.clickable { onQueryChange("") }.pointerHoverIcon(PointerIcon.Hand).padding(4.dp),
-      )
-    }
+    Spacer(Modifier.width(4.dp))
   }
 }

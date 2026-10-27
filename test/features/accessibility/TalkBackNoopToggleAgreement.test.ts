@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { DefaultAccessibilityDetector } from "../../../src/features/accessibility/AccessibilityDetector";
+import { DefaultAccessibilityDetector } from "../../../src/ctrlProxy/accessibility/AccessibilityDetector";
 import { TalkBackToggle } from "../../../src/features/accessibility/TalkBackToggle";
 import { AndroidTapStrategy } from "../../../src/features/action/strategies/AndroidTapStrategy";
 import type { ScreenReaderRestoreState } from "../../../src/features/accessibility/ScreenReaderRestore";
 import type { BootedDevice } from "../../../src/models";
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeSecureSettingsRpc } from "../../fakes/FakeSecureSettingsRpc";
 import { FakeTalkBackDialogProbe } from "../../fakes/FakeTalkBackDialogProbe";
@@ -23,11 +24,11 @@ const CTRL_PROXY = "dev.jasonpearson.automobile.ctrlproxy/.CtrlProxy";
  */
 function harness(enabledServices: string) {
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("enabled_accessibility_services", { stdout: enabledServices, stderr: "" });
-  adb.setCommandResponse("pm list packages", {
-    stdout: "package:com.google.android.marvin.talkback\n",
-    stderr: "",
-  });
+  adb.setCommandResponse("enabled_accessibility_services", createExecResult(enabledServices, ""));
+  adb.setCommandResponse(
+    "pm list packages",
+    createExecResult("package:com.google.android.marvin.talkback\n", ""),
+  );
   const timer = new FakeTimer();
   const detector = new DefaultAccessibilityDetector(timer);
   const probe = new FakeTalkBackDialogProbe();

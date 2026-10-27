@@ -9,7 +9,7 @@ import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { VideoRecorderService } from "../../src/features/video";
 import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -18,10 +18,12 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import type { BootedDevice } from "../../src/models";
 import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
+import { toolJson } from "../helpers/toolResponse";
+import { z } from "zod/v4";
 
 const videoRecording = createVideoRecordingToolsHarness();
 
@@ -68,7 +70,7 @@ describe("videoRecording stop by id from a caller with no session", () => {
     timer = new FakeTimer();
     backend = new FakeVideoCaptureBackend();
     backend.setNowProvider(() => new Date(timer.now()));
-    const sessions = new FakeDeviceSessionManager();
+    const sessions = new FakeDeviceReadiness();
     sessions.setConnectedDevices([device]);
     videoRecording.configure({ deviceDetector: sessions });
     await setVideoRecordingManagerDependencies({
@@ -138,7 +140,9 @@ describe("videoRecording stop by id from a caller with no session", () => {
 
   test("a sessionless segmented stop by handle is refused and the session keeps recording", async () => {
     const started = await outcome({ action: "start", maxDuration: 181, sessionUuid: HOLDER });
-    const handle = JSON.parse(started.response!.content[0].text).recordings[0].recordingId;
+    const handle = z
+      .object({ recordings: z.array(z.object({ recordingId: z.string() })) })
+      .parse(toolJson(started.response)).recordings[0].recordingId;
     const stopsBefore = backend.stopCalls.length;
 
     const { error } = await outcome({ action: "stop", recordingId: handle });

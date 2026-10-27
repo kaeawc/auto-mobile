@@ -152,6 +152,16 @@ export function sessionRow(overrides: Partial<DeviceSession> = {}): DeviceSessio
     daemon_session_id: "old-daemon",
     created_at_ms: 1,
     last_used_at_ms: 20,
+    activity_seq: 0,
+    stable_device_id: null,
+    stable_identity_generation: 0,
+    liveness_contract_generation: 0,
+    heartbeat_timeout_source: null,
+    liveness_policy: null,
+    pre_cli_heartbeat_timeout_ms: null,
+    pre_cli_heartbeat_timeout_source: null,
+    pre_cli_session_timeout_ms: null,
+    liveness_owner_token: null,
     expires_at_ms: 30,
     released_at_ms: 25,
     release_reason: "daemon-restart",
@@ -313,17 +323,6 @@ export function recordingBiometricRestorer(
       restored.push({ deviceId: device.deviceId, enrollment });
     },
   });
-}
-
-/** A manager with the timer and persistence it was built over, for tests that drive all three. */
-export function makeSessionManagerHarness(): {
-  timer: FakeTimer;
-  persistence: FakeDeviceSessionPersistence;
-  manager: SessionManager;
-} {
-  const timer = new FakeTimer();
-  const persistence = new FakeDeviceSessionPersistence();
-  return { timer, persistence, manager: makeSessionManager({ timer, persistence }) };
 }
 
 /**

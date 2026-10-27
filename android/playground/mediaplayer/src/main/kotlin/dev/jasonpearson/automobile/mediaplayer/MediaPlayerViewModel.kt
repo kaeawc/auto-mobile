@@ -18,10 +18,10 @@ import kotlinx.coroutines.launch
  * ViewModel for managing ExoPlayer instances and media playback state. Handles video and audio
  * playback with proper lifecycle management.
  */
-class MediaPlayerViewModel : ViewModel() {
+class MediaPlayerViewModel : ViewModel(), MediaPlaybackControls {
 
   private val _playerState = MutableStateFlow<ExoPlayer?>(null)
-  val playerState: StateFlow<ExoPlayer?> = _playerState.asStateFlow()
+  override val playerState: StateFlow<ExoPlayer?> = _playerState.asStateFlow()
 
   private val _isPlaying = MutableStateFlow(false)
   val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
@@ -86,7 +86,7 @@ class MediaPlayerViewModel : ViewModel() {
                   object : Player.Listener {
                     override fun onPlayerError(error: PlaybackException) {
                       Log.e("MediaPlayerVM", "Player error: ${error.message}", error)
-                      handlePlaybackError(error)
+                      _playbackError.value = playbackErrorMessage(error)
                     }
 
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -114,6 +114,9 @@ class MediaPlayerViewModel : ViewModel() {
                           _duration.value = player.duration
                           Log.d("MediaPlayerVM", "Duration: ${player.duration}")
                         }
+                        Player.STATE_IDLE,
+                        Player.STATE_BUFFERING,
+                        Player.STATE_ENDED -> Unit
                       }
                     }
 
@@ -191,39 +194,10 @@ class MediaPlayerViewModel : ViewModel() {
     }
   }
 
-  /** Play or pause media playback. */
-  fun togglePlayPause() {
-    _playerState.value?.let { player ->
-      if (player.isPlaying) {
-        player.pause()
-      } else {
-        player.play()
-      }
-    }
-  }
-
-  /** Playground scenarios are foreground-only; returning to the host does not auto-resume. */
-  fun onHostStopped() {
-    val player = _playerState.value ?: return
-    val playback =
-      object : HostPlayback {
-        override val playWhenReady: Boolean
-          get() = player.playWhenReady
-
-        override fun pause() = player.pause()
-      }
-    playback.onHostStopped()
-  }
-
   /** Seek to a specific position in the media. */
   fun seekTo(positionMs: Long) {
     _playerState.value?.seekTo(positionMs)
     _currentPosition.value = positionMs
-  }
-
-  /** Set playback volume (0.0 to 1.0). */
-  fun setVolume(volume: Float) {
-    _playerState.value?.volume = volume.coerceIn(0f, 1f)
   }
 
   /** Save current playback state for configuration changes. */
@@ -256,64 +230,12 @@ class MediaPlayerViewModel : ViewModel() {
     _duration.value = 0L
   }
 
-  /** Handle playback errors and provide user-friendly messages. */
-  private fun handlePlaybackError(error: PlaybackException) {
-    Log.e("MediaPlayerVM", "Detailed error: ${error.errorCodeName}, cause: ${error.cause?.message}")
-
-    val errorMessage =
-      when (error.errorCode) {
-        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED -> {
-          "Network connection failed. Please check your internet connection."
-        }
-
-        PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> {
-          "Media file not found. The content may have been moved or deleted."
-        }
-
-        PlaybackException.ERROR_CODE_DECODER_INIT_FAILED -> {
-          if (
-            error.cause?.message?.contains("vp9", ignoreCase = true) == true ||
-              error.cause?.message?.contains("webm", ignoreCase = true) == true
-          ) {
-            "This video codec (WebM/VP9) is not supported on this device. Please try a different video format."
-          } else {
-            "Unable to play this media format. Decoder initialization failed."
-          }
-        }
-
-        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> {
-          "Unable to load media. Server returned an error."
-        }
-
-        PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED -> {
-          "Media file is corrupted or in an unsupported format."
-        }
-
-        else -> {
-          // Check if it's a codec-related error in the cause chain
-          val causeMessage = error.cause?.message ?: ""
-          if (
-            causeMessage.contains("codec", ignoreCase = true) ||
-              causeMessage.contains("decoder", ignoreCase = true) ||
-              causeMessage.contains("vp9", ignoreCase = true)
-          ) {
-            "Video codec not supported on this device. The video format may not be compatible."
-          } else {
-            "Playback error occurred: ${error.message ?: "Unknown error"}"
-          }
-        }
-      }
-
-    _playbackError.value = errorMessage
-  }
-
   /** Clear playback error state. */
   fun clearError() {
     _playbackError.value = null
   }
 
   override fun onCleared() {
-    super.onCleared()
     releasePlayer()
   }
 }

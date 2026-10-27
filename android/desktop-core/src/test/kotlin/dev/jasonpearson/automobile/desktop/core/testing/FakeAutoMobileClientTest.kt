@@ -7,9 +7,14 @@ import dev.jasonpearson.automobile.desktop.core.daemon.McpResource
 import dev.jasonpearson.automobile.desktop.core.daemon.McpTool
 import dev.jasonpearson.automobile.desktop.core.daemon.ObserveResult
 import dev.jasonpearson.automobile.desktop.core.daemon.ObserveScreenSize
+import dev.jasonpearson.automobile.desktop.core.daemon.RemoveKeyValueRequest
+import dev.jasonpearson.automobile.desktop.core.daemon.SetKeyValueRequest
 import dev.jasonpearson.automobile.desktop.core.daemon.SetKeyValueResult
 import dev.jasonpearson.automobile.desktop.core.daemon.StartDeviceResult
 import dev.jasonpearson.automobile.desktop.core.daemon.StartDeviceRuntime
+import dev.jasonpearson.automobile.desktop.core.daemon.SwipeInput
+import dev.jasonpearson.automobile.desktop.core.daemon.TapInput
+import dev.jasonpearson.automobile.desktop.core.daemon.TextInput
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -24,7 +29,13 @@ class FakeAutoMobileClientTest {
     client.ping()
     client.listTools()
     client.observe()
-    client.inputTap(x = 10.0, y = 20.0)
+    client.inputTap(
+      input =
+        TapInput(
+          x = 10.0,
+          y = 20.0,
+        ),
+    )
     client.close()
 
     assertEquals(listOf("ping", "listTools", "observe", "inputTap", "close"), client.calls)
@@ -112,7 +123,17 @@ class FakeAutoMobileClientTest {
   fun `records setKeyValue calls with arguments`() {
     val client = FakeAutoMobileClient()
 
-    client.setKeyValue("device-1", "com.app", "prefs", "key", "value", "STRING")
+    client.setKeyValue(
+      input =
+        SetKeyValueRequest(
+          deviceId = "device-1",
+          appId = "com.app",
+          fileName = "prefs",
+          key = "key",
+          value = "value",
+          type = "STRING",
+        ),
+    )
 
     val call = client.setKeyValueCalls.single()
     assertEquals("device-1", call.deviceId)
@@ -128,7 +149,15 @@ class FakeAutoMobileClientTest {
   fun `records removeKeyValue calls with arguments`() {
     val client = FakeAutoMobileClient()
 
-    client.removeKeyValue("device-1", "com.app", "prefs", "old_key")
+    client.removeKeyValue(
+      input =
+        RemoveKeyValueRequest(
+          deviceId = "device-1",
+          appId = "com.app",
+          fileName = "prefs",
+          key = "old_key",
+        ),
+    )
 
     val call = client.removeKeyValueCalls.single()
     assertEquals("device-1", call.deviceId)
@@ -153,71 +182,46 @@ class FakeAutoMobileClientTest {
   fun `records typed input calls with arguments`() {
     val client = FakeAutoMobileClient()
 
-    client.inputTap(x = 10.0, y = 20.0, platform = "android", deviceId = "device-1", duration = 50)
+    client.inputTap(
+      input =
+        TapInput(
+          x = 10.0,
+          y = 20.0,
+          platform = "android",
+          deviceId = "device-1",
+          duration = 50,
+        ),
+    )
     client.inputSwipe(
-      startX = 1.0,
-      startY = 2.0,
-      endX = 3.0,
-      endY = 4.0,
-      platform = "ios",
-      deviceId = "device-2",
-      durationMs = 500,
+      input =
+        SwipeInput(
+          startX = 1.0,
+          startY = 2.0,
+          endX = 3.0,
+          endY = 4.0,
+          platform = "ios",
+          deviceId = "device-2",
+          durationMs = 500,
+        ),
     )
     client.inputPressButton(button = "back", platform = "android", deviceId = "device-3")
-    client.inputTypeText(text = "hello", platform = "ios", deviceId = "device-4", submit = true)
+    client.inputTypeText(
+      input =
+        TextInput(
+          text = "hello",
+          platform = "ios",
+          deviceId = "device-4",
+          submit = true,
+        ),
+    )
     client.inputKey(key = "enter", platform = "android", deviceId = "device-5")
 
     assertEquals(
       listOf("inputTap", "inputSwipe", "inputPressButton", "inputTypeText", "inputKey"),
       client.calls,
     )
-    assertEquals(
-      FakeAutoMobileClient.InputTapCall(
-        x = 10.0,
-        y = 20.0,
-        platform = "android",
-        deviceId = "device-1",
-        duration = 50,
-      ),
-      client.inputTapCalls.single(),
-    )
-    assertEquals(
-      FakeAutoMobileClient.InputSwipeCall(
-        startX = 1.0,
-        startY = 2.0,
-        endX = 3.0,
-        endY = 4.0,
-        platform = "ios",
-        deviceId = "device-2",
-        durationMs = 500,
-      ),
-      client.inputSwipeCalls.single(),
-    )
-    assertEquals(
-      FakeAutoMobileClient.InputPressButtonCall(
-        button = "back",
-        platform = "android",
-        deviceId = "device-3",
-      ),
-      client.inputPressButtonCalls.single(),
-    )
-    assertEquals(
-      FakeAutoMobileClient.InputTypeTextCall(
-        text = "hello",
-        platform = "ios",
-        deviceId = "device-4",
-        submit = true,
-      ),
-      client.inputTypeTextCalls.single(),
-    )
-    assertEquals(
-      FakeAutoMobileClient.InputKeyCall(
-        key = "enter",
-        platform = "android",
-        deviceId = "device-5",
-      ),
-      client.inputKeyCalls.single(),
-    )
+    assertGestureCalls(client)
+    assertKeyboardCalls(client)
   }
 
   @Test
@@ -232,7 +236,14 @@ class FakeAutoMobileClientTest {
         coordinates = InputCoordinates(x = 10.0, y = 20.0),
       )
 
-    val result = client.inputTap(x = 10.0, y = 20.0)
+    val result =
+      client.inputTap(
+        input =
+          TapInput(
+            x = 10.0,
+            y = 20.0,
+          ),
+      )
 
     assertEquals(true, result.success)
     assertEquals("input/tap", result.action)
@@ -244,7 +255,18 @@ class FakeAutoMobileClientTest {
     val client = FakeAutoMobileClient()
     client.setKeyValueResult = SetKeyValueResult(success = false, message = "Write failed")
 
-    val result = client.setKeyValue("d", "a", "f", "k", "v", "STRING")
+    val result =
+      client.setKeyValue(
+        input =
+          SetKeyValueRequest(
+            deviceId = "d",
+            appId = "a",
+            fileName = "f",
+            key = "k",
+            value = "v",
+            type = "STRING",
+          ),
+      )
     assertEquals(false, result.success)
     assertEquals("Write failed", result.message)
   }
@@ -284,5 +306,58 @@ class FakeAutoMobileClientTest {
     client.killDevice("name", "id", "android", force = true)
 
     assertEquals(listOf(false, true), client.killDeviceForceRequests)
+  }
+
+  private fun assertGestureCalls(client: FakeAutoMobileClient) {
+    assertEquals(
+      FakeAutoMobileClient.InputTapCall(
+        x = 10.0,
+        y = 20.0,
+        platform = "android",
+        deviceId = "device-1",
+        duration = 50,
+      ),
+      client.inputTapCalls.single(),
+    )
+    assertEquals(
+      FakeAutoMobileClient.InputSwipeCall(
+        startX = 1.0,
+        startY = 2.0,
+        endX = 3.0,
+        endY = 4.0,
+        platform = "ios",
+        deviceId = "device-2",
+        durationMs = 500,
+      ),
+      client.inputSwipeCalls.single(),
+    )
+  }
+
+  private fun assertKeyboardCalls(client: FakeAutoMobileClient) {
+    assertEquals(
+      FakeAutoMobileClient.InputPressButtonCall(
+        button = "back",
+        platform = "android",
+        deviceId = "device-3",
+      ),
+      client.inputPressButtonCalls.single(),
+    )
+    assertEquals(
+      FakeAutoMobileClient.InputTypeTextCall(
+        text = "hello",
+        platform = "ios",
+        deviceId = "device-4",
+        submit = true,
+      ),
+      client.inputTypeTextCalls.single(),
+    )
+    assertEquals(
+      FakeAutoMobileClient.InputKeyCall(
+        key = "enter",
+        platform = "android",
+        deviceId = "device-5",
+      ),
+      client.inputKeyCalls.single(),
+    )
   }
 }

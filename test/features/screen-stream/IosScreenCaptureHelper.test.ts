@@ -1,8 +1,9 @@
+import type { NativeFrameMetrics } from "../../../src/features/screen-stream/IosScreenCaptureHelper";
 import { NativeHelperRegistry } from "../../../src/utils/nativeHelpers/NativeHelperRegistry";
 import { FakeNativeHelperRecordStore } from "../../fakes/FakeNativeHelperRecordStore";
 import { FakeNativeHelperProcessControl } from "../../fakes/FakeNativeHelperProcessControl";
 import { FakeLogger } from "../../fakes/FakeLogger";
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -334,7 +335,7 @@ describe("IosScreenCaptureHelper", () => {
 
   test("emits native capture metrics carried over stderr without logging them", async () => {
     const { fake, helper } = withFakeSpawner();
-    const metrics = [];
+    const metrics: NativeFrameMetrics[] = [];
     const stderr: string[] = [];
     helper.on("captureMetrics", (value) => metrics.push(value));
     helper.on("stderr", (line) => stderr.push(line));
@@ -371,7 +372,7 @@ describe("IosScreenCaptureHelper", () => {
 
   test("accepts the real nil-optionals native frame metrics line", async () => {
     const { fake, helper } = withFakeSpawner();
-    const metrics = [];
+    const metrics: NativeFrameMetrics[] = [];
     const stderr: string[] = [];
     helper.on("captureMetrics", (value) => metrics.push(value));
     helper.on("stderr", (line) => stderr.push(line));
@@ -400,7 +401,7 @@ describe("IosScreenCaptureHelper", () => {
 
   test("accepts the real all-fields native frame metrics line", async () => {
     const { fake, helper } = withFakeSpawner();
-    const metrics = [];
+    const metrics: NativeFrameMetrics[] = [];
     const stderr: string[] = [];
     helper.on("captureMetrics", (value) => metrics.push(value));
     helper.on("stderr", (line) => stderr.push(line));
@@ -429,7 +430,7 @@ describe("IosScreenCaptureHelper", () => {
 
   test("reassembles a real nil-optionals metrics line split across stderr chunks", async () => {
     const { fake, helper } = withFakeSpawner();
-    const metrics = [];
+    const metrics: NativeFrameMetrics[] = [];
     const stderr: string[] = [];
     helper.on("captureMetrics", (value) => metrics.push(value));
     helper.on("stderr", (line) => stderr.push(line));
@@ -708,7 +709,7 @@ describe("IosScreenCaptureHelper", () => {
 
     expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
     if (process.platform === "darwin") {
-      expect(processGroupSignals).toEqual([{ pid: fake.pid, signal: "SIGKILL" }]);
+      expect<unknown>(processGroupSignals).toEqual([{ pid: fake.pid, signal: "SIGKILL" }]);
     } else {
       expect(processGroupSignals).toEqual([]);
     }
@@ -736,7 +737,7 @@ describe("IosScreenCaptureHelper", () => {
         },
       });
       helper.start();
-      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      const warning = cleanupWarning.mockImplementation(() => {});
 
       try {
         const stopped = helper.stop();
@@ -835,4 +836,12 @@ test("tracks capture helper with the detached process-group flag on darwin", () 
   child.simulateExit();
   timer.advanceTime(0);
   expect(store.list()).toEqual([]);
+});
+
+let cleanupWarning: ReturnType<typeof spyOn<typeof logger, "warn">>;
+beforeEach(() => {
+  cleanupWarning = spyOn(logger, "warn");
+});
+afterEach(() => {
+  cleanupWarning.mockRestore();
 });

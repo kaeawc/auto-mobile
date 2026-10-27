@@ -1,6 +1,8 @@
+import { buildObserveResult } from "../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { DeviceLostError, deviceLostErrorFromAbortSignal } from "../../src/models/DeviceLostError";
+import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { deviceLostErrorFromAbortSignal } from "../../src/utils/deviceLossAbortRegistry";
 import type { AbortStrategy, Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
@@ -61,11 +63,11 @@ async function checkDeviceLoss(
         }
         throw loss;
       }
-      return {
+      return buildObserveResult({
         updatedAt: index,
         screenSize: { width: 200, height: 200 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      };
+      });
     });
   }
 
@@ -83,9 +85,7 @@ async function checkDeviceLoss(
               return await waitForObservation(
                 screen,
                 { posture: "closed", timeout: 40_000 },
-                signal,
-                false,
-                timer,
+                { signal, skipBackStack: false, timer },
               );
             }
             throw loss;

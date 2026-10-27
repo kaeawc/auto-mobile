@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile, rename, rm, access } from "node:fs/promises";
 import { posix } from "node:path";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
@@ -16,6 +15,7 @@ import {
   MAX_PROTOTYPE_ASSET_COUNT,
   MAX_PROTOTYPE_ASSET_TOTAL_BYTES,
 } from "./prototypeAssets";
+import { NodeSavedPrototypeLayoutFileSystem } from "./NodeSavedPrototypeLayoutFileSystem";
 
 // Simulator and prototype container paths are POSIX on every host OS.
 const { dirname, join } = posix;
@@ -74,32 +74,6 @@ export interface SavedPrototypeLayoutFileSystem {
   rename(from: string, to: string): Promise<void>;
   remove(path: string): Promise<void>;
   exists(path: string): Promise<boolean>;
-}
-export class NodeSavedPrototypeLayoutFileSystem implements SavedPrototypeLayoutFileSystem {
-  async ensureDir(path: string): Promise<void> {
-    await mkdir(path, { recursive: true });
-  }
-  async writeFile(path: string, bytes: Uint8Array): Promise<void> {
-    await writeFile(path, bytes);
-  }
-  async rename(from: string, to: string): Promise<void> {
-    await rename(from, to);
-  }
-  async remove(path: string): Promise<void> {
-    await rm(path, { recursive: true, force: true });
-  }
-  async exists(path: string): Promise<boolean> {
-    try {
-      await access(path);
-      return true;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return false;
-      }
-      logger.warn("Could not check saved prototype destination", error);
-      throw error;
-    }
-  }
 }
 function rejected(reason: SavedPrototypeLayoutRejection): SavedPrototypeLayoutWriteResult {
   return { kind: "rejected", reason, message: `Saved prototype rejected: ${reason}.` };

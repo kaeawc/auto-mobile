@@ -1,0 +1,42 @@
+{
+  "id": "platform-repeat",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["test"]
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "items": [
+        {
+          "title": "a"
+        },
+        {
+          "title": "b"
+        }
+      ],
+      "as": "item"
+    },
+    "children": [
+      {
+        "type": "button",
+        "label": "{item.title}",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "test.echo",
+            "args": {
+              "message": {
+                "item": "title"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

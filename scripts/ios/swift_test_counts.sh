@@ -21,7 +21,6 @@
 #
 # This file is meant to be sourced; it only defines a function and a variable.
 
-# shellcheck disable=SC2034  # consumed by sourcing scripts (swift-test.sh, bats)
 EXECUTED_TESTS=0
 
 executed_test_count() {
@@ -32,6 +31,6 @@ executed_test_count() {
     swifttesting="$(printf '%s\n' "${output}" \
         | sed -n 's/.*Test run with \([0-9][0-9]*\) tests* in .*/\1/p' \
         | sort -n | tail -1)"
-    # shellcheck disable=SC2034  # read by the sourcing script
     EXECUTED_TESTS=$(( ${xctest:-0} + ${swifttesting:-0} ))
+    : "$EXECUTED_TESTS"
 }

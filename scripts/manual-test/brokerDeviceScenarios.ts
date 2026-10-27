@@ -1,6 +1,9 @@
 import { strict as assert } from "node:assert";
 import { osSelectorMatchesVersion } from "../../src/devices/sessionRequirements/version";
-import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
+import {
+  NO_PREPARATION_BUDGET_REASON,
+  type SessionBrokerResult,
+} from "../../src/devices/sessionBrokerResult";
 import { BROKER_CLEANUP_TIMEOUT_MS } from "./brokerDaemonClient";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
 import type { LedgerDevicesView } from "./brokerDeviceLedger";
@@ -355,7 +358,7 @@ async function crossClientIsolation(ctx: BrokerScenarioContext) {
     [a, b],
     [b, a],
   ]) {
-    const refusal = await ctx.record(
+    const refusal: Awaited<ReturnType<typeof control>> = await ctx.record(
       "proxy/foreign-control",
       { client: from.name, to: to.name },
       () => control(from, to),
@@ -486,6 +489,23 @@ export const PREPARATION_TIMEOUT_CODES: readonly string[] = [
   "daemon_unavailable",
   "provision_failed",
 ];
+/**
+ * Whether a preparation-timeout failure has settled. With no request receipt, only a failure that
+ * never sent `daemon/prepareSession` is settled: an unreachable daemon, or a timeout with no
+ * preparation budget left to send it (#14410). A later timeout leaves a receipt to wait on.
+ */
+export function preparationTimeoutSettled(
+  failure: { code?: string; message?: string },
+  statusResult: { failure?: { code?: string }; cleanupPending?: boolean } | undefined,
+): boolean {
+  if (statusResult === undefined) {
+    return (
+      failure.code === "daemon_unavailable" ||
+      (failure.code === "timeout" && (failure.message ?? "").includes(NO_PREPARATION_BUDGET_REASON))
+    );
+  }
+  return statusResult.failure?.code === failure.code && !statusResult.cleanupPending;
+}
 async function timeout(ctx: BrokerScenarioContext) {
   const c = successor(ctx, first(ctx));
   c.config = { ...c.config, preparationTimeoutMs: 1 };
@@ -496,14 +516,16 @@ async function timeout(ctx: BrokerScenarioContext) {
     code !== undefined && PREPARATION_TIMEOUT_CODES.includes(code),
     `Preparation timeout yielded ${String(code)}; expected one of ${PREPARATION_TIMEOUT_CODES.join(", ")}.`,
   );
-  assert.equal(failure.failure?.retryable, true);
   const settled = await poll(
     ctx,
     "Preparation timeout cleanup",
     () => status(ctx, c),
-    (r) => r?.failure?.code === code && !r.cleanupPending,
+    (r) => preparationTimeoutSettled(failure.failure ?? {}, r),
   );
-  assert.equal(settled?.failure?.retryable, true);
+  assert.equal(failure.failure?.retryable, true);
+  if (settled !== undefined) {
+    assert.equal(settled.failure?.retryable, true);
+  }
   await poll(
     ctx,
     "Preparation timeout capacity",

@@ -1,12 +1,12 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test, beforeEach } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import {
   DaemonClient,
   DaemonUnavailableError,
   type DaemonClientLike,
 } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -95,14 +95,17 @@ function mintingClient(mintedSession: () => string): FakeDaemonClient {
 }
 
 describe("stdio proxy: keeper fence, not-delivered retry and result-minted discovery", () => {
-  let isAvailableSpy: ReturnType<typeof spyOn> | undefined;
+  let isAvailableSpy: ReturnType<typeof spyOn>;
   let proxy: DaemonMcpProxy | undefined;
 
   afterEach(async () => {
-    isAvailableSpy?.mockRestore();
-    isAvailableSpy = undefined;
+    isAvailableSpy.mockRestore();
     await proxy?.close();
     proxy = undefined;
+  });
+
+  beforeEach(() => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
   });
 
   function createProxy(
@@ -110,7 +113,6 @@ describe("stdio proxy: keeper fence, not-delivered retry and result-minted disco
     clients: DaemonClientLike[],
     fallback: () => DaemonClientLike,
   ): DaemonMcpProxy {
-    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     proxy = new DaemonMcpProxy({
       clientFactory: () => clients.shift() ?? fallback(),
       daemonManager: matchingDaemonManager(),

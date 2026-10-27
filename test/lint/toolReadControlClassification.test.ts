@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { registerMcpTools } from "../../src/server";
 import { registerDoctorTools } from "../../src/server/doctorTools";
@@ -40,10 +41,12 @@ const PROTOTYPE_ARGS = {
 
 const CLASSIFICATION: Classification = {
   read: [
+    "compareScreenshot",
     "getAppPermissions",
     "getDataStore",
     "getDeepLinks",
     "getDeviceState",
+    "getLogs",
     "getNavigationGraph",
     "getNetworkGraph",
     "getNotificationPolicy",
@@ -58,6 +61,14 @@ const CLASSIFICATION: Classification = {
   ],
   perArgs: {
     accessibility: { reads: [{}], controls: [{ talkback: true }, { voiceover: false }] },
+    backgroundWork: {
+      reads: [{ action: "list" }, { action: { listAlarms: true } }],
+      controls: [
+        { action: { runJob: { jobId: 7 } } },
+        { action: { runJob: { worker: "SyncWorker", force: true } } },
+        { action: { workManagerDiagnostics: true } },
+      ],
+    },
     clipboard: {
       reads: [{ action: "get" }],
       controls: [{ action: "copy", text: "x" }, { action: "paste" }, { action: "clear" }],
@@ -76,35 +87,72 @@ const CLASSIFICATION: Classification = {
         { action: "tapImeKey" },
       ],
     },
+    mediaSession: {
+      reads: [{ action: "get" }, { action: "get", waitFor: { mediaState: "playing" } }],
+      controls: [
+        { action: { dispatch: "pause" } },
+        { action: { volume: { stream: "music", level: 3 } } },
+      ],
+    },
+    killProfile: {
+      reads: [{ action: "list" }],
+      controls: [{ action: "apply" }, { action: "reset" }],
+    },
+    manufacturerProfile: {
+      reads: [{ action: "list" }, { action: "describe", manufacturerProfile: "samsung-oneui" }],
+      controls: [{ action: "apply" }, { action: "reset" }],
+    },
+    systemAlerts: {
+      reads: [{ action: "get" }],
+      controls: [{ action: "setPolicy", policy: "allow" }, { action: "clear" }],
+    },
     prototype: PROTOTYPE_ARGS,
     sqlQuery: {
       reads: [{ query: "SELECT * FROM t" }],
       controls: [{ query: "DELETE FROM t" }, { query: "SELECT 1; DELETE FROM t" }],
     },
+    statusBar: {
+      reads: [{ action: "get" }],
+      controls: [{ action: "override", time: "9:41" }, { action: "clear" }],
+    },
   },
   control: [
+    "accessibilityAction",
     "accessibilityFocus",
+    // Drives an XCUITest audit of the app under test, so it is held to the owner.
+    "accessibilityAudit",
+    // The performance and memory audits drive the app, and a baseline record writes state.
+    "audit",
     "appLifecycle",
     "barrier",
     "biometricAuth",
     "changeLocalization",
     "clearKeyValueFile",
+    "deleteKeychainItem",
     "clearMockNetwork",
     "crashApp",
     "criticalSection",
     "deviceSnapshot",
+    "displayProfile",
     "dragAndDrop",
     "dragPath",
     "executePlan",
     "explore",
+    "focusNavigate",
     "highlight",
     "homeScreen",
     "installApp",
     "launchApp",
+    "measureStartup",
     "mockNetwork",
     "navigateTo",
     "network",
     "openLink",
+    // Starts and stops an on-device tracer (perfetto) or a device-attached xctrace.
+    "performanceTrace",
+    // Starts and stops an on-device Perfetto recorder from typed categories; heapDump makes the app write a dump.
+    "captureTrace",
+    "heapDump",
     "phoneCall",
     "pinchOn",
     "multiTouch",
@@ -112,6 +160,7 @@ const CLASSIFICATION: Classification = {
     "pressButton",
     "putAppFile",
     "recentApps",
+    "rotaryScroll",
     "reconcileDeviceResources",
     "recordDeviceGestures",
     "removeKeyValue",
@@ -119,8 +168,10 @@ const CLASSIFICATION: Classification = {
     "resetKeychain",
     "rotate",
     "selectAllText",
+    "sendBroadcast",
     "sendKeys",
     "sendSms",
+    "setAppLinks",
     "setAppPermissions",
     "setDeviceResources",
     "setDeviceState",
@@ -128,9 +179,9 @@ const CLASSIFICATION: Classification = {
     "setNotificationPolicy",
     "setPosture",
     "setPreference",
+    "setSensor",
     "setUIState",
     "shake",
-    "stageSessionDownloads",
     "swipeAt",
     "swipeOn",
     // Pulls the notification shade down, even to list or find.
@@ -143,6 +194,8 @@ const CLASSIFICATION: Classification = {
     // Starts a device-side recorder.
     "videoRecording",
     "wakeAndUnlock",
+    // Moves an app's task between window modes; may turn on freeform settings.
+    "windowMode",
   ],
 };
 
@@ -301,9 +354,15 @@ describe("device-aware tool read/control classification (#10965)", () => {
 
     test("an unclassified hidden device tool in a scratch registry fails (#11353)", () => {
       const scratch = new ToolRegistryClass();
-      scratch.registerDeviceAware("hiddenNewTool", "x", {}, async () => ({ content: [] }), {
-        hidden: true,
-      });
+      scratch.registerDeviceAware(
+        "hiddenNewTool",
+        "x",
+        z.object({}),
+        async () => ({ content: [] }),
+        {
+          hidden: true,
+        },
+      );
       const tools = registeredTools(scratch).filter((tool) => tool.requiresDevice);
       expect(tools.map((tool) => tool.name)).toEqual(["hiddenNewTool"]);
       expect(classificationViolations(tools, { read: [], perArgs: {}, control: [] })).toEqual([

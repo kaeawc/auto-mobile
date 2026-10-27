@@ -59,6 +59,7 @@ const COMMON_NODE_FIELDS = [
   "styleWhen",
   "visibleWhen",
   "transition",
+  "animate",
   "anchor",
   "safeAreaPadding",
 ];
@@ -67,7 +68,7 @@ const GESTURE_NODE_TYPES = ["box", "row", "column", "text", "image", "icon", "ca
 const GESTURE_NODE_FIELDS = ["onLongPress", "onDoubleTap"];
 
 function spec(root: Record<string, unknown>, state: Record<string, unknown> = {}) {
-  return { id: "panel", window: { placement: { type: "fullscreen" } }, state, root };
+  return { id: "panel", window: { placement: { type: "fullscreen" }, opacity: 1 }, state, root };
 }
 
 describe("prototype node contract parity", () => {
@@ -104,7 +105,11 @@ describe("prototype node contract parity", () => {
   test("style has the same fields in Zod and the contract", () => {
     const box = zodNodeOptions()[0];
     const style = expectSchema(
-      expectSchema(box.shape.style, z.ZodOptional, "the style field").unwrap(),
+      expectSchema(
+        expectSchema(box.shape.style, z.ZodOptional, "the style field").unwrap(),
+        z.ZodEffects,
+        "the refined style schema",
+      ).innerType(),
       z.ZodObject,
       "the style schema",
     );
@@ -178,11 +183,17 @@ describe("prototype node contract parity", () => {
       ...spec({ type: "text", text: "x" }),
       theme: { colors },
     });
-    for (const colors of [{ primary: "#B3261E" }, { seed: "#6750A4", surface: "#FFFFFF" }]) {
+    for (const colors of Array.of<Record<string, string>>(
+      { primary: "#B3261E" },
+      { seed: "#6750A4", surface: "#FFFFFF" },
+    )) {
       expect(validatePrototypeSpec(themed(colors))).toMatchObject({ success: true });
       expect(prototypeSpecSchema.safeParse(themed(colors)).success).toBe(true);
     }
-    for (const colors of [{ primary: "onSurface" }, { brand: "#6750A4" }]) {
+    for (const colors of Array.of<Record<string, string>>(
+      { primary: "onSurface" },
+      { brand: "#6750A4" },
+    )) {
       expect(validatePrototypeSpec(themed(colors))).toMatchObject({ success: false });
       expect(prototypeSpecSchema.safeParse(themed(colors)).success).toBe(false);
     }
@@ -195,7 +206,7 @@ test("spec, repeat, and condition field sets stay in step with the data contract
   );
   const valid = {
     id: "orders",
-    window: { placement: { type: "fullscreen" } },
+    window: { placement: { type: "fullscreen" }, opacity: 1 },
     data: { orders: [{ id: 7 }] },
     root: {
       type: "column",

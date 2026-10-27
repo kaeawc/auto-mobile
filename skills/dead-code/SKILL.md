@@ -28,4 +28,4 @@ Use this when the user wants dead-code analysis or cleanup.
 - `bun run lint`
 - `bun run build`
 - `bun test`
-- `bash scripts/validate-bun-test-timings.sh` when test changes may affect the 100ms expectation
+- `bash scripts/validate-bun-test-timings.sh --run-unit-lane` when test changes may affect the 100ms expectation, or pass an existing focused JUnit XML report to measure it directly

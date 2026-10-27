@@ -68,7 +68,9 @@ const opened: Array<net.Server | net.Socket> = [];
 
 afterEach(() => {
   for (const handle of opened.splice(0)) {
-    handle.destroy?.();
+    if (handle instanceof net.Socket) {
+      handle.destroy();
+    }
     if (handle instanceof net.Server) {
       handle.close();
     }

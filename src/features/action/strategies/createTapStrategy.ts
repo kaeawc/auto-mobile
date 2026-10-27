@@ -1,6 +1,6 @@
 import type { BootedDevice } from "../../../models";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
+import type { AccessibilityDetector } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import type { IosVoiceOverDetector } from "../../accessibility/interfaces/IosVoiceOverDetector";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
 import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";

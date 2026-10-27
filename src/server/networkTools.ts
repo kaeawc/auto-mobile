@@ -1,21 +1,27 @@
 import { z } from "zod/v4";
 import { validateHeaderName } from "node:http";
 import { ToolRegistry } from "./toolRegistry";
-import { createJSONToolResponse } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import {
+  clearMockNetworkResultSchema,
+  getNetworkGraphResultSchema,
+  mockNetworkResultSchema,
+  networkResultSchema,
+} from "./networkToolOutputSchemas";
+import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
 import {
   NetworkState,
   simulationRemainingMs,
   type SimulatedErrorType,
   type SimulationConfig,
-} from "./NetworkState";
+} from "../utils/NetworkState";
 import {
   buildNetworkMockRules,
   describeInvalidMockPattern,
   type NetworkMockRuleSync,
   type NetworkMockSyncReport,
   type RejectedMockRule,
-} from "./networkMockRules";
+} from "../utils/networkMockRules";
 import { getNetworkEvents } from "../db/networkEventRepository";
 import { buildNetworkGraph } from "./networkGraph";
 import { serverConfig } from "../utils/ServerConfig";
@@ -483,7 +489,7 @@ function createNetworkHandler(state: NetworkState) {
       state.setSlowThresholdMs(args.slowThresholdMs);
     }
 
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       ...state.getSnapshot(device.deviceId),
       ...deviceSyncFields(syncResult),
     });
@@ -519,7 +525,7 @@ export function registerNetworkTools(): void {
     "Control network capture and error simulation.",
     networkSchema,
     createNetworkHandler(state),
-    { defaultEnabled: false, embeddedSdkOnly: true },
+    { defaultEnabled: false, embeddedSdkOnly: true, outputSchema: networkResultSchema },
   );
 
   // --- mockNetwork ---
@@ -546,13 +552,13 @@ export function registerNetworkTools(): void {
 
       const syncResult = await syncMockRulesToDevice(device, state);
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         mockId: mock.mockId,
         mocked: state.getMockSummary(device.deviceId),
         ...deviceSyncFields(syncResult),
       });
     },
-    { defaultEnabled: false, embeddedSdkOnly: true },
+    { defaultEnabled: false, embeddedSdkOnly: true, outputSchema: mockNetworkResultSchema },
   );
 
   // --- clearMockNetwork ---
@@ -582,13 +588,13 @@ export function registerNetworkTools(): void {
 
       const syncResult = await syncMockRulesToDevice(device, state);
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         cleared,
         remaining: state.getMockSummary(device.deviceId),
         ...deviceSyncFields(syncResult),
       });
     },
-    { defaultEnabled: false, embeddedSdkOnly: true },
+    { defaultEnabled: false, embeddedSdkOnly: true, outputSchema: clearMockNetworkResultSchema },
   );
 
   // --- getNetworkGraph ---
@@ -614,7 +620,7 @@ export function registerNetworkTools(): void {
         minRequests: args.minRequests,
       });
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         ...graph,
         ...(truncated ? { truncated: true, maxEvents: NETWORK_GRAPH_MAX_EVENTS } : {}),
       });
@@ -625,6 +631,7 @@ export function registerNetworkTools(): void {
       // Reads only the host's captured events; open to any watcher (#10830).
       deviceReadOnly: true,
       loudArtifactWrites: true,
+      outputSchema: getNetworkGraphResultSchema,
     },
   );
 }

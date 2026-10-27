@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  simulatorOwnership,
+  simulatorDataContainer,
+} from "../../helpers/simulatorContainerFixture";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { ClearAppData } from "../../../src/features/action/ClearAppData";
 import { InstallApp } from "../../../src/features/action/InstallApp";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -38,10 +42,12 @@ const execResult = (stdout: string): ExecResult => ({
   includes: (value) => stdout.includes(value),
 });
 const staleResult = (timer: FakeTimer): ObserveResult => ({
+  observationId: "restart-cache",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   updatedAt: timer.now(),
   screenSize: { width: 100, height: 100 },
   systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-  viewHierarchy: { node: {} },
+  viewHierarchy: { hierarchy: {} },
 });
 
 class OrderedAdb extends FakeAdbExecutor {
@@ -121,11 +127,14 @@ function iosInstallHarness(device = simulator, downgrade = false) {
       events.push(args[1]);
       return execResult("");
     },
-    timer,
+    { timer },
   );
   const plist = {
     extractString: async () => appId,
     readXmlBytes: async () => "",
+    readJsonFile: async () => ({}),
+    readJsonBytes: async () => ({}),
+    readXmlFile: async () => "",
     extractRawFile: async () => appId,
   };
   const makeAction = (invalidator: FakeDeviceWindowCacheInvalidator) =>
@@ -149,12 +158,15 @@ function iosInstallHarness(device = simulator, downgrade = false) {
 
 describe("app restart cache generation", () => {
   // The installed-app query falls back to the fake ADB; never connect to a device.
-  let proxySpy: ReturnType<typeof spyOn> | undefined;
+  let proxySpy: ReturnType<typeof spyOn>;
   afterEach(() => {
-    proxySpy?.mockRestore();
+    proxySpy.mockRestore();
+  });
+  beforeEach(() => {
+    proxySpy = spyOn(AndroidCtrlProxyClient, "getInstance");
   });
   function fakeAndroidProxy() {
-    proxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+    proxySpy.mockImplementation(() => {
       throw new Error("fake proxy unavailable");
     });
   }
@@ -192,13 +204,14 @@ describe("app restart cache generation", () => {
       for (const fails of [false, true]) {
         const events: string[] = [];
         const simctl = new FakeSimctl();
-        simctl.setContainerPath(appId, "/fake/container");
+        simctl.setContainerPath(appId, simulatorDataContainer(device.deviceId));
         const { invalidator, store } = clearInvalidationHarness(events);
         const action = new ClearAppData(device, undefined, {
           cacheInvalidator: invalidator,
           backendResolver: (id, deps) =>
             resolveIosClearDataBackend(id, {
               ...deps,
+              containerOwnership: simulatorOwnership,
               simctl,
               rm: async () => {
                 events.push("wipe");

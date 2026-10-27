@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { warmedTests } from "../../helpers/warmedTests";
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { TapOnElement, tapResolvedLayer } from "../../../src/features/action/TapOnElement";
@@ -35,8 +36,8 @@ function createCommand(viewHierarchy: ViewHierarchyResult) {
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     },
   );
-  spyOn(command, "observedInteraction").mockImplementation(async (block) =>
-    block(recordObservationRead(observation)),
+  spyOn(command, "observedInteraction").mockImplementation(
+    runBlockWith(() => recordObservationRead(observation)),
   );
   return { command, service, viewHierarchy, timer };
 }

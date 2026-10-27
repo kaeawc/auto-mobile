@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<trace-query-result>
+<node xpath='//trace-toc[1]/run[1]/data[1]/table[1]'>
+<schema name="potential-hangs"><col><mnemonic>start</mnemonic><name>Start</name><engineering-type>start-time</engineering-type></col><col><mnemonic>duration</mnemonic><name>Duration</name><engineering-type>duration</engineering-type></col><col><mnemonic>hang-type</mnemonic><name>Hang Type</name><engineering-type>string</engineering-type></col></schema>
+<row><start-time id="1" fmt="00:01.200.000">1200000000</start-time><duration id="2" fmt="312.45 ms">312450000</duration><hang-type id="3" fmt="Hang">Hang</hang-type><thread id="4" fmt="Main Thread 0x1"><tid id="5" fmt="0x1">1</tid></thread></row>
+<row><start-time id="6" fmt="00:03.000.000">3000000000</start-time><duration id="7" fmt="1.20 s">1200000000</duration><hang-type ref="3"/><thread ref="4"/></row>
+<row><start-time id="8" fmt="00:04.500.000">4500000000</start-time><duration ref="2"/><hang-type id="9" fmt="Microhang">Microhang</hang-type><thread ref="4"/></row>
+</node></trace-query-result>

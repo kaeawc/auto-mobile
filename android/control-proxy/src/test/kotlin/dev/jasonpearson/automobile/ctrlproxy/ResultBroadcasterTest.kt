@@ -51,7 +51,7 @@ class ResultBroadcasterTest {
       ResultBroadcaster(broadcastError = { broadcasts.add(it) }, logError = { _, _ -> })
 
     broadcaster.guard(requestId = "req-1", action = "swipe_result") {
-      throw RuntimeException("socket closed")
+      throw IllegalStateException("socket closed")
     }
 
     assertEquals("exactly one fallback error frame should be broadcast", 1, broadcasts.size)
@@ -97,7 +97,7 @@ class ResultBroadcasterTest {
       }
       fail("guard should re-throw CancellationException")
     } catch (e: CancellationException) {
-      // expected
+      assertEquals("scope shutting down", e.message)
     }
 
     assertTrue("cancellation must not produce an error frame", broadcasts.isEmpty())
@@ -122,14 +122,14 @@ class ResultBroadcasterTest {
     val logged = mutableListOf<String>()
     val broadcaster =
       ResultBroadcaster(
-        broadcastError = { throw RuntimeException("socket still closed") },
+        broadcastError = { throw IllegalStateException("socket still closed") },
         logError = { message, _ -> logged.add(message) },
       )
 
     // A broadcast failure during fallback reporting must not escape guard (which would defeat the
     // fix by letting the exception bubble to the launched coroutine). It is logged and swallowed.
     broadcaster.guard(requestId = "req-2", action = "drag_result") {
-      throw RuntimeException("original broadcast failure")
+      throw IllegalStateException("original broadcast failure")
     }
 
     // Exactly two: the original broadcast failure, then the failure raised while reporting it.
@@ -152,11 +152,11 @@ class ResultBroadcasterTest {
     // propagate rather than being swallowed as a generic broadcast failure.
     try {
       broadcaster.guard(requestId = "req-3", action = "tap_coordinates_result") {
-        throw RuntimeException("original broadcast failure")
+        throw IllegalStateException("original broadcast failure")
       }
       fail("guard should re-throw a CancellationException raised during fallback")
     } catch (e: CancellationException) {
-      // expected
+      assertEquals("scope shutting down mid-fallback", e.message)
     }
   }
 }

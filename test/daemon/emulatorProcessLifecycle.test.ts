@@ -3,9 +3,9 @@ import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import {
   EmulatorProcessLifecycle,
-  EmulatorProcessOutputTail,
   type EmulatorProcessLifecyclePoolPort,
 } from "../../src/daemon/emulatorProcessLifecycle";
+import { EmulatorProcessOutputTail } from "../../src/daemon/EmulatorProcessOutputTail";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -32,11 +32,14 @@ async function flushUntil(condition: () => boolean): Promise<void> {
   throw new Error("Condition did not settle within 100 microtasks");
 }
 
-function child(): ChildProcess & { exitCode: number | null; signalCode: NodeJS.Signals | null } {
-  const process = new EventEmitter() as ChildProcess & {
-    exitCode: number | null;
-    signalCode: NodeJS.Signals | null;
-  };
+type MutableChild = ChildProcess & {
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+  pid: number | undefined;
+};
+
+function child(): MutableChild {
+  const process = new EventEmitter() as MutableChild;
   process.exitCode = null;
   process.signalCode = null;
   process.stdout = null;
@@ -78,7 +81,7 @@ function harness() {
     getStartedDeviceProcesses: () => processes,
     getStartedDeviceProcessOutput: () => outputs,
     getDevices: () => devices,
-    getSessionManager: () => ({ getSession: () => null }) as unknown as SessionManager,
+    getSessionManager: () => ({ getSession: () => null }),
     isReservedForShutdown: () => reserved,
     prepareSessionPreservingRecovery: () => {
       calls.push("prepare");
@@ -367,7 +370,9 @@ describe("EmulatorProcessLifecycle", () => {
   test("settles incident when pool ownership changes during record", async () => {
     const h = harness();
     h.devices.set(deviceId, pooled());
-    h.onRecord(() => h.devices.set(deviceId, pooled()));
+    h.onRecord(() => {
+      h.devices.set(deviceId, pooled());
+    });
     const process = child();
     await h.lifecycle.trackStartedDeviceProcess(booted, process);
     process.emit("exit", 1, null);

@@ -7,8 +7,22 @@ import {
   nodeHasIosNotificationCenterHint,
   SYSTEM_TRAY_PACKAGE,
   matchesNotificationResourceId,
+  notificationResourceId,
 } from "../../../src/features/systemTray/notificationHints";
 import { wireCapture } from "../../helpers/wireCapture";
+import { readFileSync } from "node:fs";
+
+const ios27NotificationCenterHierarchy = wireCapture(
+  JSON.parse(
+    readFileSync(
+      new URL(
+        "../../fixtures/ios-notification-center/ios27-notification-center-hierarchy.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ),
+);
 
 /** A capture wrapping an arbitrary hierarchy shape, as it would arrive off the wire. */
 function viewHierarchy(hierarchy: object) {
@@ -133,6 +147,19 @@ describe("nodeHasSystemTrayHint", () => {
 });
 
 describe("nodeHasIosNotificationCenterHint", () => {
+  it("matches the captured cover-sheet list, not its generic cells or date subtree", () => {
+    const matchedIds: string[] = [];
+    for (const root of getHierarchyRoots(ios27NotificationCenterHierarchy)) {
+      traverseForHint(root, (node) => {
+        if (nodeHasIosNotificationCenterHint(node)) {
+          matchedIds.push(notificationResourceId(node));
+        }
+        return false;
+      });
+    }
+    expect(matchedIds).toEqual(["SBCoverSheetWindow"]);
+  });
+
   const cases: Array<[string, Record<string, unknown>, boolean]> = [
     ["matches a NotificationCenter class", { class: "NotificationCenterView" }, true],
     ["matches a hint in the content-desc", { "content-desc": "NCNotificationShortLookView" }, true],
@@ -177,5 +204,5 @@ it("enumerates separate notification windows topmost first without repeated root
       { windowLayer: 1, hierarchy: { node: app } },
     ],
   };
-  expect(getHierarchyRoots(capture)).toEqual([tray, app]);
+  expect(getHierarchyRoots(wireCapture(capture))).toEqual([tray, app]);
 });

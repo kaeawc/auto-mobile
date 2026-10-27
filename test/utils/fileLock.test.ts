@@ -41,15 +41,15 @@ describe("fileLock primitive", () => {
   test("publication never rewrites a lock through a leftover hard-linked tmp", () => {
     const raw = "500\nlive-foreign-owner\nmetadata  ";
     writeFileSync(lockPath, raw);
-    const realStat = fs.statSync;
+    const realStat = nodeLockFileSystem.stat;
     let sampled = false;
-    const stat = spyOn(fs, "statSync").mockImplementation((path, options) => {
+    const stat = spyOn(nodeLockFileSystem, "stat").mockImplementation((path) => {
       if (path === lockPath && !sampled) {
         sampled = true;
         // Exercise publication even after the initial-sample optimisation is added.
         throw Object.assign(new Error("sample unavailable"), { code: "EACCES" });
       }
-      return realStat(path, options);
+      return realStat(path);
     });
     const realWrite = fs.writeFileSync;
     const realUnlink = fs.unlinkSync;

@@ -176,7 +176,7 @@ describe("classifyContinuity — distinguishes the required states (AC5)", () =>
   });
 
   it("junk or role-incomplete process ids → incomplete-evidence", () => {
-    const bad = [
+    const bad: Readonly<Record<string, number>>[] = [
       { daemon: 0, runner: 4310, coreSimulatorService: 512 }, // non-positive PID
       { daemon: 1.5, runner: 4310, coreSimulatorService: 512 }, // non-integer PID
       { placeholder: 1 }, // unrelated role, none of the required ones

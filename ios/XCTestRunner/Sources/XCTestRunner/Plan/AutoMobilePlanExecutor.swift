@@ -8,6 +8,9 @@ import Foundation
 /// Immutable dependencies refine Sendable; execution state and wire arguments remain local to a run.
 /// Concurrent runs require distinct transport clients if their session lifetimes must be independent.
 public final class AutoMobilePlanExecutor: Sendable {
+    /// Keep in sync with MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS in src/daemon/mcpRequestTimeout.ts.
+    private static let minExecutePlanTimeoutSeconds: TimeInterval = 600
+
     private let configuration: Configuration
     private let planLoader: AutoMobilePlanLoading
     private let mcpClient: AutoMobileMCPClient
@@ -256,18 +259,7 @@ public final class AutoMobilePlanExecutor: Sendable {
         try Task.checkCancellation()
         PerfTimer
             .log("executeAttempt START (startStep=\(startStep), recoveryAlreadyAttempted=\(recoveryAlreadyAttempted))")
-        let planContent: String
-        do {
-            planContent = try PerfTimer.measure("loadPlan") {
-                try planLoader.loadPlan(at: configuration.planPath, bundle: configuration.planBundle)
-            }
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let error as PlanLoaderError {
-            throw ExecutorError.planNotFound(error.description)
-        } catch {
-            throw ExecutorError.planNotFound(error.localizedDescription)
-        }
+        let planContent = try loadPlanContent()
         PerfTimer.log("planContent loaded, length=\(planContent.count) chars")
 
         let substituted = try PerfTimer.measure("substituteParameters") {
@@ -340,7 +332,8 @@ public final class AutoMobilePlanExecutor: Sendable {
             do {
                 executePlanDispatch?.sent = true
                 let response = try await mcpClient.callTool(
-                    name: "executePlan", arguments: arguments, timeout: configuration.timeoutSeconds
+                    name: "executePlan", arguments: arguments,
+                    timeout: max(configuration.timeoutSeconds, Self.minExecutePlanTimeoutSeconds)
                 )
                 try Task.checkCancellation()
                 PerfTimer.log("executePlan response received, length=\(response.text.count) chars")
@@ -388,6 +381,20 @@ public final class AutoMobilePlanExecutor: Sendable {
         } catch {
             PerfTimer.log("executeAttempt ERROR: \(error.localizedDescription)")
             throw ExecutorError.executionFailed(error.localizedDescription)
+        }
+    }
+
+    private func loadPlanContent() throws -> String {
+        do {
+            return try PerfTimer.measure("loadPlan") {
+                try planLoader.loadPlan(at: configuration.planPath, bundle: configuration.planBundle)
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as PlanLoaderError {
+            throw ExecutorError.planNotFound(error.description)
+        } catch {
+            throw ExecutorError.planNotFound(error.localizedDescription)
         }
     }
 

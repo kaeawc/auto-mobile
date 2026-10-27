@@ -1,6 +1,12 @@
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import os from "node:os";
-import type { BootedDevice, CrashAppEvidence, CrashAppResult, ExecResult } from "../../models";
+import type {
+  BootedDevice,
+  CrashAppCrashReport,
+  CrashAppEvidence,
+  CrashAppResult,
+  ExecResult,
+} from "../../models";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
@@ -15,12 +21,14 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
-  PHYSICAL_IOS_CRASH_UNSUPPORTED_MESSAGE,
   resolveIosCrashBackend,
   type IosCrashBackend,
   type SimulatorCrashCommandRunner,
 } from "../../utils/ios-cmdline-tools/IosCrashBackend";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
+import { PhysicalIosAppCrasher } from "../../utils/ios-cmdline-tools/PhysicalIosAppCrasher";
+import { crashPhysicalIosApp, type PhysicalIosCrashControl } from "./crashPhysicalIosApp";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -29,6 +37,21 @@ import {
   type DeviceWindowCacheInvalidator,
 } from "./TerminateApp";
 import { resolveSignalCall, type ActionCall } from "./ActionCall";
+import { getFailureRecorder } from "../failures/FailureRecorder";
+import {
+  describeFrame,
+  type NativeCrashReport,
+  type NativeCrashReportLookup,
+} from "../crashReports/NativeCrashReport";
+import {
+  createNativeCrashReportFinder,
+  nodeCrashReportFileSystem,
+  type NativeCrashReportFinder,
+} from "../crashReports/NativeCrashReportFinder";
+import {
+  recordNativeCrashReport,
+  type CrashReportRecorder,
+} from "../crashReports/recordNativeCrashReport";
 
 export type { SimulatorCrashCommandRunner } from "../../utils/ios-cmdline-tools/IosCrashBackend";
 
@@ -40,6 +63,8 @@ const CRASH_COMMAND_TIMEOUT_MS = 15_000;
 const CONFIRMATION_COMMAND_TIMEOUT_MS = 2_000;
 
 const ANDROID_CRASH_LOG_COMMAND = "shell logcat -b crash -d -v epoch -t 200";
+/** Crashing-thread frames shown in tool output; the failures entry keeps the full bounded stack. */
+const CRASH_REPORT_SUMMARY_FRAMES = 8;
 
 export interface IosSimulatorAppProcess {
   pid: number;
@@ -70,9 +95,14 @@ export interface CrashAppDependencies {
   adbFactory?: AdbClientFactory;
   simctl?: SimulatorCrashCommandRunner;
   crashBackend?: IosCrashBackend;
+  /** Physical iOS devicectl crash control (#14096); built on first use when omitted. */
+  physicalIosCrasher?: PhysicalIosCrashControl;
   uid?: () => number;
   timer?: Timer;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
+  /** OS crash reports (`.ips`, dropbox) used as confirming evidence and recorded as failures. */
+  crashReports?: NativeCrashReportFinder;
+  crashReportRecorder?: CrashReportRecorder;
 }
 
 export class CrashApp {
@@ -81,6 +111,9 @@ export class CrashApp {
   private readonly uid: () => number;
   private readonly timer: Timer;
   private readonly cacheInvalidator: DeviceWindowCacheInvalidator;
+  private readonly physicalIosCrasher?: PhysicalIosCrashControl;
+  private readonly crashReports: NativeCrashReportFinder;
+  private readonly crashReportRecorder: () => CrashReportRecorder;
 
   constructor(
     private readonly device: BootedDevice,
@@ -97,6 +130,16 @@ export class CrashApp {
     this.timer = dependencies.timer ?? defaultTimer;
     this.cacheInvalidator =
       dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
+    this.physicalIosCrasher = dependencies.physicalIosCrasher;
+    this.crashReports =
+      dependencies.crashReports ??
+      createNativeCrashReportFinder(device, {
+        adb: this.adb,
+        fileSystem: nodeCrashReportFileSystem,
+        timer: this.timer,
+      });
+    const recorder = dependencies.crashReportRecorder;
+    this.crashReportRecorder = () => recorder ?? getFailureRecorder();
   }
 
   async execute(appId: string, call?: ActionCall): Promise<CrashAppResult>;
@@ -127,7 +170,7 @@ export class CrashApp {
             ? "android_am_crash"
             : this.crashBackend.kind === "simulator"
               ? "ios_simulator_sigabrt"
-              : "unsupported",
+              : "ios_device_sigabrt",
         timestamp,
         confirmed: false,
         error: message,
@@ -234,26 +277,34 @@ export class CrashApp {
       signal,
     );
     if (!crashMatch) {
-      return {
+      return this.withCrashReport(
+        {
+          ...attemptBase,
+          success: false,
+          supported: true,
+          wasRunning: true,
+          processId: preferredProcess.pid,
+          userId,
+          error: "Crash command was dispatched, but no fresh OS crash evidence was found",
+        },
+        notBeforeTimestampMs,
+        signal,
+      );
+    }
+    return this.withCrashReport(
+      {
         ...attemptBase,
-        success: false,
+        success: true,
         supported: true,
         wasRunning: true,
-        processId: preferredProcess.pid,
+        processId: crashMatch.processId,
         userId,
-        error: "Crash command was dispatched, but no fresh OS crash evidence was found",
-      };
-    }
-    return {
-      ...attemptBase,
-      success: true,
-      supported: true,
-      wasRunning: true,
-      processId: crashMatch.processId,
-      userId,
-      confirmed: true,
-      evidence: crashMatch.evidence,
-    };
+        confirmed: true,
+        evidence: crashMatch.evidence,
+      },
+      notBeforeTimestampMs,
+      signal,
+    );
   }
 
   private async prepareAndroidDispatch(
@@ -317,13 +368,16 @@ export class CrashApp {
     };
 
     if (this.crashBackend.kind === "physical") {
-      return {
-        ...base,
-        success: false,
-        supported: false,
-        mechanism: "unsupported",
-        error: PHYSICAL_IOS_CRASH_UNSUPPORTED_MESSAGE,
-      };
+      return crashPhysicalIosApp({
+        deviceId: this.device.deviceId,
+        appId,
+        crasher:
+          this.physicalIosCrasher ??
+          new PhysicalIosAppCrasher(this.device.deviceId, new DeviceAppManager()),
+        timer: this.timer,
+        signal,
+        onDispatched: () => this.cacheInvalidator.invalidate(this.device),
+      });
     }
 
     const initialProcesses = await this.listIosSimulatorProcesses(signal);
@@ -384,26 +438,104 @@ export class CrashApp {
       signal,
     );
     if (!evidence) {
-      return {
+      return this.withCrashReport(
+        {
+          ...attemptBase,
+          success: false,
+          supported: true,
+          mechanism: "ios_simulator_sigabrt",
+          wasRunning: true,
+          processId: appProcess.pid,
+          error: "Crash signal was dispatched, but no fresh OS crash evidence was found",
+        },
+        inductionTimestampMs,
+        signal,
+      );
+    }
+    return this.withCrashReport(
+      {
         ...attemptBase,
-        success: false,
+        success: true,
         supported: true,
         mechanism: "ios_simulator_sigabrt",
         wasRunning: true,
         processId: appProcess.pid,
-        error: "Crash signal was dispatched, but no fresh OS crash evidence was found",
-      };
+        confirmed: true,
+        evidence,
+      },
+      inductionTimestampMs,
+      signal,
+    );
+  }
+
+  /**
+   * Attach the OS crash report for the crashed process and record it in
+   * `automobile:failures`. A report for the exact process confirms a crash the
+   * log heuristic missed; a missing report never fails a confirmed crash.
+   */
+  private async withCrashReport(
+    result: CrashAppResult,
+    notBeforeTimestampMs: number,
+    signal?: AbortSignal,
+  ): Promise<CrashAppResult> {
+    if (result.processId === undefined) {
+      return result;
     }
+    let lookup: NativeCrashReportLookup;
+    try {
+      lookup = await this.crashReports.find({
+        appId: result.appId,
+        processId: result.processId,
+        notBeforeTimestampMs,
+        signal,
+      });
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(`[CrashApp] crash report lookup failed: ${errorMessage(error)}`, error);
+      return result;
+    }
+    if (lookup.status !== "found") {
+      return { ...result, crashReport: lookup };
+    }
+    const crashReport = summarizeCrashReport(
+      lookup.report,
+      await this.recordCrashReport(lookup.report),
+    );
+    if (result.confirmed) {
+      return { ...result, crashReport };
+    }
+    const confirmed: CrashAppResult = { ...result };
+    // The report is the fresh evidence the heuristic missed, so the "no evidence" error no longer applies.
+    delete confirmed.error;
     return {
-      ...attemptBase,
+      ...confirmed,
       success: true,
-      supported: true,
-      mechanism: "ios_simulator_sigabrt",
-      wasRunning: true,
-      processId: appProcess.pid,
       confirmed: true,
-      evidence,
+      evidence: {
+        source: lookup.report.platform === "ios" ? "ios_crash_report" : "android_dropbox",
+        summary: crashReport.exceptionMessage
+          ? `${crashReport.exceptionType}: ${crashReport.exceptionMessage}`
+          : crashReport.exceptionType,
+      },
+      crashReport,
     };
+  }
+
+  private async recordCrashReport(report: NativeCrashReport): Promise<string | undefined> {
+    try {
+      return await recordNativeCrashReport(
+        this.crashReportRecorder(),
+        this.device.deviceId,
+        report,
+      );
+    } catch (error) {
+      // The crash itself is confirmed; failing to persist the report must not fail crashApp.
+      logger.warn(
+        `[CrashApp] failed to record crash report ${report.id}: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   private async confirmAndroidCrash(
@@ -684,4 +816,23 @@ function parseLogTimestampMs(line: string): number | null {
   const timezone = formatted[4] ? `${formatted[4].slice(0, 3)}:${formatted[4].slice(3)}` : "Z";
   const timestampMs = Date.parse(`${formatted[1]}T${formatted[2]}.${fractionMs}${timezone}`);
   return Number.isNaN(timestampMs) ? null : timestampMs;
+}
+
+function summarizeCrashReport(
+  report: NativeCrashReport,
+  failureOccurrenceId: string | undefined,
+): Extract<CrashAppCrashReport, { status: "found" }> {
+  return {
+    status: "found",
+    source: report.source,
+    reportId: report.id,
+    reportPath: report.reportPath,
+    exceptionType: report.exceptionType,
+    ...(report.exceptionCode ? { exceptionCode: report.exceptionCode } : {}),
+    ...(report.exceptionMessage ? { exceptionMessage: report.exceptionMessage } : {}),
+    ...(report.terminationReason ? { terminationReason: report.terminationReason } : {}),
+    ...(report.appVersion ? { appVersion: report.appVersion } : {}),
+    frames: report.frames.slice(0, CRASH_REPORT_SUMMARY_FRAMES).map(describeFrame),
+    ...(failureOccurrenceId ? { failureOccurrenceId } : {}),
+  };
 }

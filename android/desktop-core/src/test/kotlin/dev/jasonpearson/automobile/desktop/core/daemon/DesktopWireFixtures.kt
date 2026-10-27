@@ -164,10 +164,12 @@ private fun sameJson(a: JsonElement, b: JsonElement): Boolean =
       a.keys == b.keys && a.keys.all { key -> sameJson(a.getValue(key), b.getValue(key)) }
     a is JsonArray && b is JsonArray -> a.size == b.size && a.indices.all { sameJson(a[it], b[it]) }
     a is JsonPrimitive && b is JsonPrimitive ->
-      if (!a.isString && !b.isString && a.doubleOrNull != null && b.doubleOrNull != null) {
+      if (a.isNumeric() && b.isNumeric()) {
         a.doubleOrNull == b.doubleOrNull
       } else {
         a == b
       }
     else -> a == b
   }
+
+private fun JsonPrimitive.isNumeric(): Boolean = !isString && doubleOrNull != null

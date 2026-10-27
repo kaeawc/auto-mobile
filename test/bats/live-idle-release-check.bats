@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=parallel-within-file
 #
 # Tests for scripts/live-idle-release-check.sh (#10671).
 #

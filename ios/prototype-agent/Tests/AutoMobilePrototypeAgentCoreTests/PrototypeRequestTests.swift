@@ -41,11 +41,11 @@ final class PrototypeRequestTests: XCTestCase {
             #""onSuccess":[{"type":"setState","key":"loaded","value":true}],"onError":[{"type":"emit","name":"failed"}]}]"#
 
     private func labels(_ events: [PrototypeEvent]) -> [String] {
-        events.map { "\($0.kind):\($0.name ?? "-")" }
+        events.map { "\($0.wireKind):\($0.name ?? "-")" }
     }
 
     private func requestEvent(_ events: [PrototypeEvent]) throws -> [String: JSONValue] {
-        let event = try XCTUnwrap(events.first { $0.kind == "emit" && $0.name == PrototypeRequestEvent.name })
+        let event = try XCTUnwrap(events.first { $0.wireKind == "emit" && $0.name == PrototypeRequestEvent.name })
         guard case let .object(payload) = event.payload else { throw XCTSkip("payload is not an object") }
         return payload
     }
@@ -602,7 +602,7 @@ final class PrototypeRequestTests: XCTestCase {
             ),
             (
                 #"[{"type":"request","url":"http://h","query":{"q":{"state":"a","data":"/b"}}}]"#,
-                "root.onTap[0].query.q: Expected one value binding: state, data, value, item or index"
+                "root.onTap[0].query.q: Expected one value binding: state, data, value, item, index, platform or event"
             ),
             (
                 #"[{"type":"request","url":"http://h","onSuccess":[]}]"#,
@@ -616,6 +616,39 @@ final class PrototypeRequestTests: XCTestCase {
         for (tap, expected) in cases {
             XCTAssertEqual(rejection(tap), expected, tap)
         }
+    }
+
+    func testForbiddenHeadersAreRejectedDuringSpecValidation() {
+        for name in [
+            "hOsT",
+            "cOnNeCtIoN",
+            "uPgRaDe",
+            "tRaNsFeR-EnCoDiNg",
+            "cOnTeNt-LeNgTh",
+            "tE",
+            "tRaIlEr",
+            "kEeP-AlIvE",
+            "cOoKiE",
+            "eXpEcT",
+            "oRiGiN",
+            "pRoXy-AuThOrIzAtIoN",
+            "PrOxY-Custom",
+        ] {
+            XCTAssertNotNil(rejection(
+                #"[{"type":"request","url":"https://public.example/","headers":{"\#(name)":"x"}}]"#
+            ), name)
+        }
+    }
+
+    func testBlockedDestinationWireCodeIsPreserved() throws {
+        let decoded = try XCTUnwrap(PrototypeRequestWire.decodeResponse([
+            "type": "prototype_response", "requestId": "r-1", "ok": false,
+            "error": ["code": "blocked_destination", "message": "Blocked destination"], "durationMs": 0,
+        ]))
+        XCTAssertEqual(decoded.response, .failed(.init(.blockedDestination, "Blocked destination"), durationMs: 0))
+        XCTAssertEqual(PrototypeRequestError(.blockedDestination, "Blocked destination").json, .object([
+            "code": .string("blocked_destination"), "message": .string("Blocked destination"),
+        ]))
     }
 
     func testMoreThanSixteenHeadersAreRefused() {

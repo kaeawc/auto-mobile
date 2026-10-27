@@ -1,1189 +1,77 @@
-import { BROKER_DEVICE_NAME_PREFIX, isProductBrokerDevice } from "../persistedIdentity";
-import { BindingJournalRemovalRegistryTimeout } from "../registry/bindingJournal";
-import { createHash } from "node:crypto";
+import type { BootSlotReservation } from "../../../devices/bootAdmission/BootSlotReservation";
 import { classifySqliteError } from "../../../db/databaseFailureClassification";
-import { raceWithDeadline } from "../../../utils/raceWithDeadline";
-import {
-  evaluateIosPairCompatibility,
-  iosDeviceSpecificationMismatch,
-  matchesAndroidDeviceSpecification,
-  resolveDisplayCutoutPreference,
-} from "../../../devices/deviceSpecMatching";
-import {
-  ProvisionDeviceError,
-  type AndroidDeviceSpecification,
-  type ExactDeviceSpecification,
-  type ExactIosRuntimeCatalog,
-  type IosDeviceSpecification,
-  type ResolvedExactDeviceSpecification,
-} from "../../../devices/exactDeviceProvisioning";
-import type { BindingResourceBudget, BindingResourceAdmission } from "./resourceBudget";
-import { budgetRefusal } from "./resourceBudget";
 import type { DeviceInfo } from "../../../models/index";
-import type { BindingBudgetEvidence } from "./acquisitionResult";
-import type { FormFactor } from "../../../models/DeviceMatchCriteria";
-import { androidProfileFormFactor } from "../../../models/formFactor";
-import type { BindingDeviceFamily } from "../../../server/provisionDeviceSpecSchemas";
-import { inferIosFormFactor } from "../../../utils/ios-cmdline-tools/iosDeviceType";
-import { evaluateRuntimeCompatibility } from "../../../utils/ios-cmdline-tools/runtimeCompatibility";
-import type {
-  AppleDeviceRuntime,
-  AppleDeviceType,
-} from "../../../utils/ios-cmdline-tools/SimCtlClient";
-import { OCCUPYING_SIMULATOR_STATES } from "../../../features/iosSimFleet/FleetCostCollector";
-import { BootCapacityExhaustedError } from "../../../models/BootCapacityExhaustedError";
-import type { AvdConfigReader } from "../../../utils/android-cmdline-tools/AvdConfigReader";
-import { parseAndroidSystemImageRuntime } from "../../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator";
-import {
-  defaultBindingExecOwnerLiveness,
-  type InFlightBindingReservations,
-  inFlightBindingReservations,
-} from "../registry/ownerLiveness";
-import type { BackoffInput } from "../../../utils/Backoff";
-import { currentDaemonProcessGenerationToken } from "../../processGeneration";
+import { logger } from "../../../utils/logger";
+import { raceWithDeadline } from "../../../utils/raceWithDeadline";
+import { stableStringify } from "../../../utils/stableStringify";
+import { isProductBrokerDevice } from "../persistedIdentity";
+import { BindingJournal, BindingJournalRemovalRegistryTimeout } from "../registry/bindingJournal";
+import type {
+  BindingAssignmentRecord,
+  BindingExecOwnerLiveness,
+  BindingJournalEntry,
+  BindingKey,
+} from "../registry/bindingRegistry";
 import { deviceStableId } from "../registry/deviceIdentity";
 import {
-  BindingJournal,
-  type BindingJournalInFlight,
-  type BindingJournalOwnerLiveness,
-  type BindingJournalRedriveRecord,
-} from "../registry/bindingJournal";
-import { logger } from "../../../utils/logger";
-import { stableStringify } from "../../../utils/stableStringify";
-import type { Timer } from "../../../utils/SystemTimer";
+  defaultBindingExecOwnerLiveness,
+  inFlightBindingReservations,
+  type InFlightBindingReservations,
+} from "../registry/ownerLiveness";
+import { BindingDeviceCreation } from "./BindingDeviceCreation";
+import { provisionableSpec } from "./DefaultManagedSpecResolver";
+import { ReconcileAbort, type BindingReconcileFailure } from "./ReconcileAbort";
 import {
-  bindingMatches,
-  type BindingAssignmentRecord,
-  type BindingBindingExpectation,
-  type BindingCasFailure,
-  type BindingExecOwner,
-  type BindingExecOwnerLiveness,
-  type BindingJournalEntry,
-  type BindingJournalOwner,
-  type BindingKey,
-  type BindingPlatform,
-  type BindingRegistry,
-} from "../registry/bindingRegistry";
+  bindingId,
+  processJournalOwner,
+  type BindingDisposition,
+  type BindingInventorySnapshot,
+  type BindingProvisionedDevice,
+  type BindingReconcileEvidence,
+  type BindingReconcileRequest,
+  type BindingReconcileResult,
+  type BindingReconcilerDependencies,
+  type BindingResolvedSpec,
+} from "./reconcilerContracts";
+import {
+  bindingDeviceNameSuffix,
+  casFailure,
+  claimFailure,
+  encodeManagedSpecFingerprint,
+  expectationOf,
+  failure,
+  provisionFailure,
+  withCreateDeadline,
+  type ReadyResult,
+  type ReconcileContext,
+} from "./reconcilerSupport";
+export {
+  processJournalOwner,
+  type BindingBootCapacity,
+  type BindingCapacityCheck,
+  type BindingDeletionResult,
+  type BindingDeletionTarget,
+  type BindingDeviceClaim,
+  type BindingDeviceClaims,
+  type BindingDeviceDeleter,
+  type BindingDeviceProvisioner,
+  type BindingDisposition,
+  type BindingInventory,
+  type BindingInventorySnapshot,
+  type BindingProvisionRequest,
+  type BindingProvisionedDevice,
+  type BindingReconcileEvidence,
+  type BindingReconcileRequest,
+  type BindingReconcileResult,
+  type BindingReconcilerDependencies,
+  type BindingResolvedSpec,
+} from "./reconcilerContracts";
 
-/**
- * Declarative spec reconciler for one managed device binding (#11175, epic #11172).
- *
- * Given a scoped binding, a requested spec, the host-wide binding registry and the device inventory, it
- * decides between four dispositions and carries the decision out:
- *
- * - `reused`: the binding's assigned device satisfies the spec; it gets a fresh session.
- * - `adopted`: an empty binding takes a matching device that no valid binding holds (the free pool of
- *   invalidated scopes, or this binding's own uncommitted leftover from an interrupted create).
- * - `created`: no eligible device; a new one is provisioned under a generated name.
- * - `replaced`: the assigned device does not satisfy the spec; it is deleted, its absence is
- *   verified, a new one is created, and the result is committed into the same binding.
- *
- * Safety rules:
- * - Omitted spec fields are unconstrained (owner decision Q4); the resolved spec is recorded.
- * - Only this binding's own assigned device is ever deleted, and only after the spec is resolved,
- *   discovery is complete, no live owner or claim holds it and the binding binding still holds.
- * - Partial inventory or an unreadable device configuration is never authoritative absence or
- *   mismatch; it fails retryable `discovery_incomplete` without destructive work.
- * - Every registry mutation compare-and-sets `(generation, stableDeviceId)`, so a lost race never
- *   overwrites a newer binding. A deletion that fails leaves the old binding as `cleanup_pending`;
- *   a replacement creation that fails after verified deletion leaves the binding empty (`provisioning`).
- *   A failed fresh creation removes its never-bound row only after journal rollback proves absence;
- *   an open journal retains the row for redrive.
- * - Boot capacity fails immediately with retryable `capacity_exhausted` (owner decision): the
- *   reconciler never waits for capacity, never creates a device it could not boot, and checks
- *   before it deletes the device a replacement would not be able to boot.
- * - Every create and replace is journaled (`slot_journal`, #11179) with its exact devices, and each
- *   acquisition first redrives the binding's unfinished work of a dead owner (see `bindingJournal.ts`),
- *   so a retry after an interruption converges instead of repeating destructive work.
- *
- * Not yet wired into the acquire RPC (step 5 of the epic); callers inject the ports below.
- */
-
-export const BINDING_SPEC_FINGERPRINT_VERSION = 1;
-/** Generated device names start with this; a prefix alone is never deletion authority. */
-
-export interface BindingSpecFingerprint {
-  version: typeof BINDING_SPEC_FINGERPRINT_VERSION;
-  hash: string;
-}
-
-export type BindingDisposition = "reused" | "adopted" | "created" | "replaced";
-
-type WithOptionalDeviceType<T extends { deviceType: string }> = Omit<T, "deviceType"> & {
-  deviceType?: string;
-  deviceFamily?: BindingDeviceFamily;
-};
-
-/**
- * A binding's requested spec: an exact spec whose `deviceType` (the model or hardware
- * profile) may be omitted. Omitted means "any model" (owner decision Q4), constrained only by an
- * optional `deviceFamily`: matching retains the requested constraints, and a device that must be
- * created gets a compatible model the resolver picks and records in the resolved spec.
- */
-export type BindingRequestedSpec =
-  | WithOptionalDeviceType<AndroidDeviceSpecification>
-  | WithOptionalDeviceType<IosDeviceSpecification>;
-
-/** Known device metadata; an Android AVD may have no configured hardware profile. */
-export interface BindingResolvedSpec {
-  runtime: string;
-  deviceType?: string;
-  displayCutout?: ResolvedExactDeviceSpecification["displayCutout"];
-  configuration?: AndroidDeviceSpecification["configuration"];
-}
-
-/**
- * The Android hardware profile created for a spec that omits `deviceType` (a current Pixel with a
- * known cutout class). Override per resolver.
- */
-export const BINDING_DEFAULT_ANDROID_DEVICE_TYPE = "pixel_8";
-
-export const BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY = {
-  phone: BINDING_DEFAULT_ANDROID_DEVICE_TYPE,
-  tablet: "pixel_tablet",
-  foldable: "pixel_fold",
-} as const satisfies Record<BindingDeviceFamily, string>;
-
-// ---------------------------------------------------------------------------------------------
-// Ports
-// ---------------------------------------------------------------------------------------------
-
-export interface BindingInventorySnapshot {
-  /** False when any part of discovery failed; a missing device then proves nothing. */
-  complete: boolean;
-  /**
-   * Set only when this platform's lister is verifiably not installed on the host. Complete
-   * stays false: a specific device's absence is not proven. Only the total-resource budget
-   * consumes this evidence, treating the platform as contributing zero inventory orphans.
-   */
-  toolchain?: "not_installed";
-  devices: DeviceInfo[];
-}
-
-/** Configured (not only booted) devices of one platform: AVDs or simulators. */
-export interface BindingInventory {
-  list(
-    platform: BindingPlatform,
-    options: { signal?: AbortSignal },
-  ): Promise<BindingInventorySnapshot>;
-}
-
-/** `unknown` means the device's configuration could not be read; it never justifies deletion. */
-export type ManagedSpecMatch = "match" | "mismatch" | "unknown";
-
-export interface ManagedSpecMatcher {
-  matches(device: DeviceInfo, spec: BindingRequestedSpec): Promise<ManagedSpecMatch>;
-}
-
-export type ManagedSpecResolution =
-  | {
-      kind: "resolved";
-      resolvedSpec: ResolvedExactDeviceSpecification;
-      fingerprint: BindingSpecFingerprint;
-    }
-  | { kind: "unsupported"; code: "spec_unsupported" | "runtime_incompatible"; message: string }
-  /** The spec could not be resolved yet (an unreadable catalog); retryable, nothing changed. */
-  | { kind: "unresolved"; message: string };
-
-export type ManagedSpecCreatability =
-  | { kind: "creatable" }
-  | { kind: "unsupported"; code: "spec_unsupported" | "runtime_incompatible"; message: string }
-  | { kind: "unresolved"; message: string };
-
-/** Validates and resolves a spec before any destructive work. */
-export interface ManagedSpecResolver {
-  resolve(
-    platform: BindingPlatform,
-    spec: BindingRequestedSpec,
-    options: { signal?: AbortSignal },
-  ): Promise<ManagedSpecResolution>;
-  /** Checks creation-only prerequisites without blocking reuse or adoption. */
-  checkCreatable?(
-    platform: BindingPlatform,
-    resolvedSpec: ResolvedExactDeviceSpecification,
-    options: { signal?: AbortSignal },
-  ): Promise<ManagedSpecCreatability>;
-}
-
-export interface BindingProvisionRequest {
-  platform: BindingPlatform;
-  /** Android: the AVD name (stable id). iOS: the simulator name. */
-  name: string;
-  /** iOS UDID of an existing simulator to adopt. */
-  deviceId?: string;
-  /**
-   * `create` always carries a concrete `deviceType` (the resolved model). `adopt` carries the
-   * requested spec, whose omitted `deviceType` accepts the existing device's model.
-   * Neither mode carries `deviceFamily`: the reconciler applies that request constraint before
-   * provisioning, and the provisionDevice schema accepts configuration fields only.
-   */
-  spec: BindingRequestedSpec;
-  /** `adopt` must never create; `create` provisions a new device under `name`. */
-  mode: "adopt" | "create";
-  deadlineMs: number;
-  signal?: AbortSignal;
-}
-
-export interface BindingDeviceIdentity {
-  /** AVD name or simulator UDID. */
-  stableId: string;
-  /** adb serial or UDID once booted. */
-  transportId: string | null;
-  name: string;
-}
-
-export interface BindingProvisionedDevice {
-  device: BindingDeviceIdentity;
-  created: boolean;
-  sessionUuid: string;
-  readiness: { mode: string; status: string };
-  /** The provision handler's lifecycle/cleanup evidence, passed through. */
-  lifecycle?: unknown;
-}
-
-/** Reads an existing device without applying the creation resolver's defaults. */
-export interface BindingExistingSpecReader {
-  /** The device's own metadata; null for unreadable config/runtime or an unknown iOS model. */
-  readExistingSpec(device: DeviceInfo): Promise<BindingResolvedSpec | null>;
-}
-
-/**
- * The `provisionDevice` path with `readiness: "automation"`: exact matching, creation, boot,
- * session bind and its own rollback of partial creations (#11125, #11182). Throws
- * `ProvisionDeviceError` or `BootCapacityExhaustedError` on failure.
- */
-export interface BindingDeviceProvisioner extends BindingExistingSpecReader {
-  provision(request: BindingProvisionRequest): Promise<BindingProvisionedDevice>;
-  /** Release a session this reconciler obtained but could not publish. */
-  releaseSession(sessionUuid: string): Promise<void>;
-}
-
-export interface BindingDeletionTarget {
-  platform: BindingPlatform;
-  stableId: string;
-  name: string | null;
-  deadlineMs: number;
-  signal?: AbortSignal;
-}
-
-export type BindingDeletionResult =
-  | { kind: "absent"; evidence?: unknown }
-  | {
-      kind: "failed";
-      message: string;
-      evidence?: unknown;
-      notAttempted?: {
-        reason:
-          | "workflow_unavailable"
-          | "device_assigned_to_binding"
-          | "device_owned_by_other_session"
-          | "device_owned_by_other_daemon"
-          | "inventory_incomplete"
-          | "booted_inventory_incomplete"
-          | "target_identity_conflict"
-          | "target_identity_unresolved"
-          | "target_not_destroyable";
-      };
-    };
-
-/** The verified permanent delete workflow (`deleteDevice`: stop, destroy, verify absence). */
-export interface BindingDeviceDeleter {
-  deleteAndVerifyAbsence(target: BindingDeletionTarget): Promise<BindingDeletionResult>;
-}
-
-export type BindingDeviceClaim =
-  | { kind: "free" }
-  | { kind: "held"; reason: string }
-  | { kind: "unknown"; reason: string };
-
-/** Live sessions and foreign-daemon claims on a device, checked before destructive work. */
-export interface BindingDeviceClaims {
-  describe(device: DeviceInfo): Promise<BindingDeviceClaim>;
-  /**
-   * The sessions this daemon holds on the device. Before a binding device is provisioned for a new
-   * execution, any of these is a leftover of an earlier one: the provision path's bind would hand
-   * it out again (bind-or-reuse), so it is released first and never reused.
-   */
-  sessionsOn?(device: DeviceInfo): string[];
-  /**
-   * Whether a session on the device is a live managed execution this daemon still holds (#11275).
-   * Such a session is never an earlier execution's leftover, whatever the registry's recorded
-   * owner says (a restart can leave it naming a dead daemon): the binding is in use.
-   */
-  isLiveExecution?(sessionUuid: string): boolean;
-}
-
-export type BindingCapacityCheck =
-  | { kind: "available" }
-  | {
-      kind: "exhausted";
-      limit: number;
-      booted: number;
-      retryAfterMs: number;
-      /** Counted devices AutoMobile did not start; present only when there are any (#11390). */
-      externalDevices?: string[];
-    }
-  /** The booted count could not be established; never read as free capacity. */
-  | { kind: "unknown"; message: string };
-
-/** Immediate boot capacity probe (no waiting). Absent means boots are not gated. */
-export interface BindingBootCapacity {
-  check(
-    platform: BindingPlatform,
-    options: { signal?: AbortSignal },
-  ): Promise<BindingCapacityCheck>;
-}
-
-export interface BindingReconcilerDependencies {
-  registry: BindingRegistry;
-  inventory: BindingInventory;
-  matcher: ManagedSpecMatcher;
-  resolver: ManagedSpecResolver;
-  provisioner: BindingDeviceProvisioner;
-  deleter: BindingDeviceDeleter;
-  claims: BindingDeviceClaims;
-  capacity?: BindingBootCapacity;
-  resourceBudget?: BindingResourceBudget;
-  isBusy?: (device: DeviceInfo) => string | undefined;
-  /** Whether a recorded execution owner is alive; default: PID plus process generation. */
-  isExecOwnerLive?: BindingExecOwnerLiveness;
-  timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
-  /** Execution-reservation ids (default: random UUIDs). */
-  idGenerator?: IdGenerator;
-  /** Reservations in flight, which the registry's owner liveness reads (default: process-wide). */
-  reservations?: Pick<InFlightBindingReservations, "add" | "delete">;
-  /** Journal ownership and redrive policy (#11179). */
-  journal?: BindingReconcilerJournalOptions;
-}
-
-export interface BindingReconcilerJournalOptions {
-  /** This process as a journal owner; default: this PID and its process-generation token. */
-  owner?: BindingJournalOwner;
-  /** Whether another journal owner is alive; default: PID plus process generation. */
-  isOwnerLive?: BindingJournalOwnerLiveness;
-  /** Shared with the drain and the redrive pass so one process never drives an entry twice. */
-  inFlight?: BindingJournalInFlight;
-  backoff?: BackoffInput;
-}
-
-/** The default journal owner: this process, by PID and process-generation token. */
-export function processJournalOwner(): BindingJournalOwner {
-  return {
-    daemonId: `pid-${process.pid}`,
-    pid: process.pid,
-    processGenerationToken: currentDaemonProcessGenerationToken() ?? null,
-  };
-}
-
-// ---------------------------------------------------------------------------------------------
-// Request and result
-// ---------------------------------------------------------------------------------------------
-
-export interface BindingReconcileRequest {
-  key: BindingKey;
-  role: string;
-  platform: BindingPlatform;
-  requestedSpec: BindingRequestedSpec;
-  /** Non-authoritative: preferred among adoption candidates, never trusted for deletion. */
-  priorDeviceHint?: { stableId: string };
-  /** Absolute deadline on the timer's clock for the whole preparation. */
-  deadlineMs: number;
-  signal?: AbortSignal;
-  /**
-   * The execution the prepared device is for. When set, the reconciler claims the binding for it
-   * atomically with the outcome: an assigned device is reserved BEFORE it is provisioned (so no
-   * concurrent replacement can mark it while a session is being bound), and the ready result
-   * names this owner with the provisioned session. Without it the caller claims afterwards.
-   */
-  owner?: Omit<BindingExecOwner, "sessionUuid">;
-}
-
-export type BindingReconcileFailureCode =
-  | "spec_unsupported"
-  | "runtime_incompatible"
-  | "scope_not_valid"
-  | "discovery_incomplete"
-  | "binding_in_use"
-  | "binding_settling"
-  | "device_busy"
-  | "reconcile_in_progress"
-  | "cleanup_pending"
-  | "capacity_exhausted"
-  | "binding_budget_exhausted"
-  | "concurrent_modification"
-  | "readiness_incomplete"
-  | "stale_session"
-  | "provision_failed"
-  | "timeout"
-  | "cancelled";
-
-const FAILURE_RETRYABILITY: Readonly<Record<BindingReconcileFailureCode, boolean>> = {
-  spec_unsupported: false,
-  runtime_incompatible: false,
-  scope_not_valid: false,
-  discovery_incomplete: true,
-  binding_in_use: true,
-  binding_settling: true,
-  device_busy: true,
-  reconcile_in_progress: true,
-  cleanup_pending: true,
-  capacity_exhausted: true,
-  binding_budget_exhausted: true,
-  concurrent_modification: true,
-  readiness_incomplete: true,
-  stale_session: true,
-  provision_failed: false,
-  timeout: true,
-  cancelled: true,
-};
-
-const FAILURE_NEXT_ACTION: Readonly<Record<BindingReconcileFailureCode, string>> = {
-  spec_unsupported: "Fix the requested spec; nothing was changed.",
-  runtime_incompatible: "Request a model/runtime pair the host supports; nothing was changed.",
-  scope_not_valid: "Use the current runner incarnation; this scope no longer accepts work.",
-  discovery_incomplete: "Retry once device discovery completes; nothing destructive was done.",
-  binding_in_use: "Wait for the binding's live execution to end, then retry.",
-  binding_settling: "Wait for the previous execution's released work to settle, then retry.",
-  device_busy: "Wait for the device's live session or foreign claim to end, then retry.",
-  reconcile_in_progress: "Another reconciliation of this binding is in progress; retry later.",
-  cleanup_pending: "The previous device could not be removed; retry after cleanup succeeds.",
-  binding_budget_exhausted:
-    "Free unused broker resources or raise limits.totalDeviceCap in the broker host configuration, then retry.",
-  capacity_exhausted: "Shut down a device or raise the boot limit, then retry.",
-  concurrent_modification: "The binding changed concurrently; retry to converge on its new state.",
-  readiness_incomplete: "Retry; the device did not reach automation readiness.",
-  stale_session:
-    "Retry; an earlier execution's session on the binding device could not be released.",
-  provision_failed: "Inspect the provision failure code; retry if it is retryable.",
-  timeout: "Retry with a longer preparation timeout.",
-  cancelled: "The preparation was cancelled; retry when needed.",
-};
-
-export interface BindingReconcileFailure {
-  code: BindingReconcileFailureCode;
-  retryable: boolean;
-  message: string;
-  nextAction: string;
-  /** Underlying provision failure, when the provision path refused. */
-  provision?: { code: string; retryable: boolean };
-  capacity?: BindingFailureCapacity;
-  budget?: BindingBudgetEvidence;
-}
-
-/** Same `externalDevices` name and shape as the non-binding `capacity_exhausted` refusal (#11390). */
-export interface BindingFailureCapacity {
-  limit: number;
-  booted: number;
-  retryAfterMs: number;
-  externalDevices?: string[];
-}
-
-export interface BindingReconcileEvidence {
-  /** Assignment as read before any mutation (null when the scope was not valid). */
-  initial: { generation: number; stableDeviceId: string | null; state: string } | null;
-  inventoryComplete: boolean | null;
-  /** Match verdict for the assigned device, when one was present. */
-  assignedMatch?: ManagedSpecMatch;
-  assignedMissing?: boolean;
-  adoptedFrom?: "orphan";
-  createdName?: string;
-  deletedStableId?: string;
-  deletion?: unknown;
-  /** Device created by this attempt that could not be committed, and what happened to it. */
-  uncommittedCleanup?: { stableId: string; removed: boolean; message?: string };
-  /** Unfinished journaled work of an earlier attempt this acquisition redrove first (#11179). */
-  redriven?: BindingJournalRedriveRecord[];
-  /** The journal entry this attempt opened, and the phase it reached. */
-  journal?: {
-    entryId: number;
-    kind: BindingJournalEntry["kind"];
-    phase: BindingJournalEntry["phase"];
-  };
-  /** Leftover sessions of earlier executions released before provisioning, so none is reused. */
-  releasedStaleSessions?: string[];
-}
-
-export type BindingReconcileResult =
-  | {
-      outcome: "ready";
-      disposition: BindingDisposition;
-      assignment: BindingAssignmentRecord;
-      device: BindingDeviceIdentity;
-      sessionUuid: string;
-      requestedSpec: BindingRequestedSpec;
-      resolvedSpec: BindingResolvedSpec;
-      specFingerprint: BindingSpecFingerprint;
-      readiness: { mode: string; status: string };
-      lifecycle?: unknown;
-      evidence: BindingReconcileEvidence;
-    }
-  | {
-      outcome: "failed";
-      failure: BindingReconcileFailure;
-      /** The binding's assignment after the attempt (consistent, possibly changed). */
-      assignment: BindingAssignmentRecord | null;
-      evidence: BindingReconcileEvidence;
-    };
-
-// ---------------------------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------------------------
-
-/**
- * `ambroker-<8 hex of scope key>-<binding>-g<generation>-<attempt nonce>`, valid as an AVD and
- * simulator name. The per-attempt nonce keeps two concurrent attempts on the same binding (another
- * daemon, or a retry while the first attempt still runs) from creating the same AVD name, whose
- * name is its stable id, so one attempt's cleanup can never delete the other's device.
- */
-export function bindingDeviceName(key: BindingKey, generation: number, nonce: string): string {
-  const safeNonce = nonce
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "")
-    .slice(0, 8);
-  if (safeNonce.length === 0) {
-    throw new Error(`Binding device name nonce '${nonce}' has no usable characters`);
-  }
-  return `${BROKER_DEVICE_NAME_PREFIX}${bindingDeviceNameSuffix(key)}${generation}-${safeNonce}`;
-}
-
-function bindingDeviceNameSuffix(key: BindingKey): string {
-  return `${key.scopeKey.slice(0, 8)}-${key.bindingIndex}-g`;
-}
-
-export function computeManagedSpecFingerprint(
-  platform: BindingPlatform,
-  resolvedSpec: ResolvedExactDeviceSpecification,
-): BindingSpecFingerprint {
-  const hash = createHash("sha256")
-    .update(stableStringify({ version: BINDING_SPEC_FINGERPRINT_VERSION, platform, resolvedSpec }))
-    .digest("hex");
-  return { version: BINDING_SPEC_FINGERPRINT_VERSION, hash };
-}
-
-/** The registry column form of a fingerprint: `v<version>:<hash>`. */
-export function encodeManagedSpecFingerprint(fingerprint: BindingSpecFingerprint): string {
-  return `v${fingerprint.version}:${fingerprint.hash}`;
-}
+export { bindingDeviceName, encodeManagedSpecFingerprint, failure } from "./reconcilerSupport";
 
 export { deviceStableId };
-
-/** Matches with the shared exact-provisioning matchers (#11100) — one definition of "matches". */
-export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
-  constructor(private readonly androidConfigReader: Pick<AvdConfigReader, "readConfig">) {}
-
-  async matches(device: DeviceInfo, spec: BindingRequestedSpec): Promise<ManagedSpecMatch> {
-    if (device.platform === "android") {
-      let config: Awaited<ReturnType<AvdConfigReader["readConfig"]>>;
-      try {
-        config = await this.androidConfigReader.readConfig(device.name);
-      } catch (error) {
-        logger.warn(
-          `[Bindings] cannot read AVD config for '${device.name}': ${errorMessage(error)}`,
-          error,
-        );
-        return "unknown";
-      }
-      if (!config) {
-        return "unknown";
-      }
-      // An omitted hardware profile is unconstrained: the AVD's own profile (even an unset one)
-      // satisfies it.
-      const constraints = {
-        ...(spec as WithOptionalDeviceType<AndroidDeviceSpecification>),
-        deviceType: (spec.deviceType ?? config.deviceName) as string,
-      };
-      if (!matchesAndroidDeviceSpecification(constraints, config)) {
-        return "mismatch";
-      }
-      return matchDeviceFamily(spec.deviceFamily, () =>
-        androidProfileFormFactor({
-          profileId: config.deviceName,
-          width: config.screenWidth,
-          height: config.screenHeight,
-          density: config.screenDensity,
-        }),
-      );
-    }
-    // An unavailable simulator (runtime unmounted, or listed under a different Xcode or
-    // DEVELOPER_DIR) proves nothing about its configuration, so it is never a mismatch to replace.
-    if (
-      device.isAvailable === false ||
-      device.runtime === undefined ||
-      (spec.deviceType !== undefined && device.deviceType === undefined)
-    ) {
-      return "unknown";
-    }
-    // An omitted model is unconstrained: the simulator's own model satisfies it.
-    const constraints = {
-      runtime: spec.runtime,
-      deviceType: spec.deviceType ?? device.deviceType!,
-    };
-    return iosDeviceSpecificationMismatch(constraints, device) === undefined
-      ? matchDeviceFamily(spec.deviceFamily, () => inferIosFormFactor(device.deviceType))
-      : "mismatch";
-  }
-}
-
-function matchDeviceFamily(
-  requested: BindingDeviceFamily | undefined,
-  infer: () => FormFactor | undefined,
-): ManagedSpecMatch {
-  if (requested === undefined) {
-    return "match";
-  }
-  const actual = infer();
-  if (actual === undefined || actual === "unknown") {
-    return "unknown";
-  }
-  return actual === requested ? "match" : "mismatch";
-}
-
-/** Request-only constraints must not enter provisionDevice or configuration fingerprints. */
-function provisionableSpec(spec: BindingRequestedSpec): BindingRequestedSpec {
-  const configuration = { ...spec };
-  delete configuration.deviceFamily;
-  return configuration;
-}
-
-function unsupportedModelFamily(
-  platform: BindingPlatform,
-  spec: BindingRequestedSpec,
-): string | undefined {
-  if (spec.deviceType === undefined || spec.deviceFamily === undefined) {
-    return undefined;
-  }
-  const actual =
-    platform === "ios"
-      ? inferIosFormFactor(spec.deviceType)
-      : androidProfileFormFactor({ profileId: spec.deviceType });
-  if (actual === undefined || actual === "unknown") {
-    return `The family of deviceType '${spec.deviceType}' cannot be verified before creation for deviceFamily '${spec.deviceFamily}'. Request either deviceType or deviceFamily, not both.`;
-  }
-  return actual === spec.deviceFamily
-    ? undefined
-    : `deviceType '${spec.deviceType}' is a ${actual}; it conflicts with deviceFamily '${spec.deviceFamily}'.`;
-}
-
-function unsupportedFamilyScreenOverrides(
-  platform: BindingPlatform,
-  spec: BindingRequestedSpec,
-): string | undefined {
-  if (platform !== "android" || spec.deviceFamily === undefined || !("configuration" in spec)) {
-    return undefined;
-  }
-  const overridden = (["screenWidth", "screenHeight", "screenDensity"] as const).some(
-    (field) => spec.configuration?.[field] !== undefined,
-  );
-  return overridden
-    ? "The family is classified from screen geometry, so it cannot be verified before creation when the geometry is overridden. Request deviceFamily without screen overrides, or an explicit deviceType without deviceFamily."
-    : undefined;
-}
-
-const IOS_RUNTIME_IDENTIFIER_PREFIX = "com.apple.CoreSimulator.SimRuntime.";
-
-/** The Android system-image packages installed in the SDK, as `system-images;...` identifiers. */
-export interface ManagedAndroidImageCatalog {
-  listInstalledPackages(signal?: AbortSignal): Promise<string[]>;
-}
-
-export interface ManagedAndroidProfileCatalog {
-  listProfileIds(signal?: AbortSignal): Promise<string[]>;
-}
-
-export interface DefaultManagedSpecResolverOptions {
-  /** Profile created for an Android spec that omits `deviceType`. */
-  androidDefaultDeviceType?: string;
-  androidDefaultDeviceTypesByFamily?: Partial<Record<BindingDeviceFamily, string>>;
-  /**
-   * With a catalog, an Android spec whose system image is not installed is refused as
-   * `spec_unsupported` before anything is created, instead of surfacing avdmanager's raw text.
-   */
-  androidImageCatalog?: ManagedAndroidImageCatalog;
-  androidProfileCatalog?: ManagedAndroidProfileCatalog;
-}
-
-/**
- * Resolves a spec with the shared exact-provisioning checks. Codes are aligned across platforms:
- * `spec_unsupported` for a malformed spec (an Android runtime that is not a system-image id, an iOS
- * runtime that is not a CoreSimulator id) or one naming what this host has not installed (an
- * Android image, an iOS runtime or device type, with a catalog); `runtime_incompatible` only for an
- * installed iOS model/runtime pair the catalog proves incompatible. Unreadable catalogs are
- * unknown, not unsupported, matching the provisioner.
- *
- * An omitted `deviceType` ("any model") resolves to the model a creation would use: on iOS the
- * newest iPhone the catalog lists as supporting the runtime (so a catalog is required), on Android
- * {@link BINDING_DEFAULT_ANDROID_DEVICE_TYPE} unless overridden. Matching still accepts any
- * model within an optional requested family; only creation uses the resolved one. Android family
- * defaults can be overridden individually. A cutout preference needs an explicit model.
- */
-export class DefaultManagedSpecResolver implements ManagedSpecResolver {
-  private readonly androidDefaultDeviceType: string;
-  private readonly androidDefaultDeviceTypesByFamily: Record<BindingDeviceFamily, string>;
-  private readonly androidImageCatalog?: ManagedAndroidImageCatalog;
-  private readonly androidProfileCatalog?: ManagedAndroidProfileCatalog;
-
-  constructor(
-    private readonly iosRuntimeCatalog?: ExactIosRuntimeCatalog,
-    options: DefaultManagedSpecResolverOptions = {},
-  ) {
-    this.androidDefaultDeviceType =
-      options.androidDefaultDeviceType ?? BINDING_DEFAULT_ANDROID_DEVICE_TYPE;
-    this.androidDefaultDeviceTypesByFamily = {
-      ...BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY,
-      phone: this.androidDefaultDeviceType,
-      ...options.androidDefaultDeviceTypesByFamily,
-    };
-    this.androidImageCatalog = options.androidImageCatalog;
-    this.androidProfileCatalog = options.androidProfileCatalog;
-  }
-
-  async checkCreatable(
-    platform: BindingPlatform,
-    resolvedSpec: ResolvedExactDeviceSpecification,
-    options: { signal?: AbortSignal },
-  ): Promise<ManagedSpecCreatability> {
-    if (platform !== "android" || !this.androidProfileCatalog) {
-      return { kind: "creatable" };
-    }
-    let profileIds: string[];
-    try {
-      profileIds = await this.androidProfileCatalog.listProfileIds(options.signal);
-    } catch (error) {
-      logger.warn(`[Bindings] Android profile catalog unreadable: ${errorMessage(error)}`, error);
-      return {
-        kind: "unresolved",
-        message: `The Android hardware profile catalog could not be read: ${errorMessage(error)}`,
-      };
-    }
-    if (profileIds.includes(resolvedSpec.deviceType)) {
-      return { kind: "creatable" };
-    }
-    return {
-      kind: "unsupported",
-      code: "spec_unsupported",
-      message: `Android hardware profile '${resolvedSpec.deviceType}' is not available on this host. List valid profile IDs with avdmanager list device.`,
-    };
-  }
-
-  async resolve(
-    platform: BindingPlatform,
-    spec: BindingRequestedSpec,
-    options: { signal?: AbortSignal },
-  ): Promise<ManagedSpecResolution> {
-    const unsupported = await this.findUnsupportedSpec(platform, spec, options.signal);
-    if (unsupported) {
-      return { kind: "unsupported", code: "spec_unsupported", message: unsupported };
-    }
-    const model = await this.resolveDeviceType(platform, spec, options.signal);
-    if (model.kind !== "resolved") {
-      return model.resolution;
-    }
-    const exact = {
-      ...provisionableSpec(spec),
-      deviceType: model.deviceType,
-    } as ExactDeviceSpecification;
-    const cutout = resolveDisplayCutoutPreference(platform, exact);
-    if (cutout.kind !== "resolved") {
-      return { kind: "unsupported", code: "spec_unsupported", message: cutout.message };
-    }
-    if (platform === "ios" && this.iosRuntimeCatalog && spec.deviceType !== undefined) {
-      const incompatible = await this.findIosIncompatibility(exact, options.signal);
-      if (incompatible) {
-        return { kind: "unsupported", code: "runtime_incompatible", message: incompatible };
-      }
-    }
-    const resolvedSpec = {
-      ...exact,
-      displayCutout: cutout.displayCutout,
-    } as ResolvedExactDeviceSpecification;
-    return {
-      kind: "resolved",
-      resolvedSpec,
-      fingerprint: computeManagedSpecFingerprint(platform, resolvedSpec),
-    };
-  }
-
-  /**
-   * Why the spec is `spec_unsupported` before any model is chosen: malformed (an Android runtime
-   * that is not a system-image id, an iOS runtime that is not a CoreSimulator id), or naming what
-   * the host has not installed. Undefined when it may proceed.
-   */
-  private async findUnsupportedSpec(
-    platform: BindingPlatform,
-    spec: BindingRequestedSpec,
-    signal: AbortSignal | undefined,
-  ): Promise<string | undefined> {
-    const familyConflict =
-      unsupportedFamilyScreenOverrides(platform, spec) ?? unsupportedModelFamily(platform, spec);
-    if (familyConflict !== undefined) {
-      return familyConflict;
-    }
-    if (platform === "android") {
-      return parseAndroidSystemImageRuntime(spec.runtime)
-        ? await this.findMissingAndroidImage(spec.runtime, signal)
-        : `Android runtime '${spec.runtime}' is not a system-image identifier.`;
-    }
-    return spec.runtime.startsWith(IOS_RUNTIME_IDENTIFIER_PREFIX)
-      ? await this.findMissingIosCatalogEntry(spec, signal)
-      : `iOS runtime '${spec.runtime}' is not a CoreSimulator runtime identifier (${IOS_RUNTIME_IDENTIFIER_PREFIX}...).`;
-  }
-
-  private async resolveDeviceType(
-    platform: BindingPlatform,
-    spec: BindingRequestedSpec,
-    signal: AbortSignal | undefined,
-  ): Promise<
-    | { kind: "resolved"; deviceType: string }
-    | { kind: "refused"; resolution: ManagedSpecResolution }
-  > {
-    if (spec.deviceType !== undefined) {
-      return { kind: "resolved", deviceType: spec.deviceType };
-    }
-    if (spec.displayCutout !== undefined && spec.displayCutout !== "any") {
-      return refused(
-        "spec_unsupported",
-        `A display cutout preference ('${spec.displayCutout}') needs an explicit deviceType.`,
-      );
-    }
-    if (platform === "android") {
-      return {
-        kind: "resolved",
-        deviceType:
-          spec.deviceFamily === undefined
-            ? this.androidDefaultDeviceType
-            : this.androidDefaultDeviceTypesByFamily[spec.deviceFamily],
-      };
-    }
-    if (!this.iosRuntimeCatalog) {
-      return refused(
-        "spec_unsupported",
-        "An iOS spec without deviceType needs the simulator catalog to choose a model.",
-      );
-    }
-    let runtimes: AppleDeviceRuntime[];
-    let deviceTypes: AppleDeviceType[];
-    try {
-      [runtimes, deviceTypes] = await Promise.all([
-        this.iosRuntimeCatalog.getRuntimesChecked(undefined, signal),
-        this.iosRuntimeCatalog.getDeviceTypesChecked(signal),
-      ]);
-    } catch (error) {
-      logger.warn(
-        `[Bindings] iOS catalog unreadable; cannot choose a model: ${errorMessage(error)}`,
-        error,
-      );
-      return {
-        kind: "refused",
-        resolution: {
-          kind: "unresolved",
-          message: `The simulator catalog could not be read to choose a model: ${errorMessage(error)}`,
-        },
-      };
-    }
-    const deviceType = chooseIosDeviceType(spec.runtime, runtimes, deviceTypes, spec.deviceFamily);
-    return deviceType
-      ? { kind: "resolved", deviceType }
-      : refused(
-          "runtime_incompatible",
-          `No installed ${spec.deviceFamily ?? "iPhone"} model supports runtime '${spec.runtime}', or the runtime is not available.`,
-        );
-  }
-
-  private async findMissingAndroidImage(
-    runtime: string,
-    signal: AbortSignal | undefined,
-  ): Promise<string | undefined> {
-    if (!this.androidImageCatalog) {
-      return undefined;
-    }
-    let installed: string[];
-    try {
-      installed = await this.androidImageCatalog.listInstalledPackages(signal);
-    } catch (error) {
-      // An unreadable SDK listing is not proof the image is missing; avdmanager stays the authority.
-      logger.warn(`[Bindings] Android image check skipped: ${errorMessage(error)}`, error);
-      return undefined;
-    }
-    if (installed.includes(runtime)) {
-      return undefined;
-    }
-    return `Android system image '${runtime}' is not installed. Install it with sdkmanager, or request an installed image (${installed.join(", ") || "none installed"}).`;
-  }
-
-  /**
-   * The refusal for an iOS runtime or device type the simulator catalog does not list (#11271),
-   * checked before anything is created instead of surfacing simctl's raw "Invalid device type" text
-   * or reporting a missing runtime as a model/runtime mismatch. Not installed is spec_unsupported,
-   * as for Android's uninstalled image (#11269); `runtime_incompatible` stays for an installed
-   * runtime that is unavailable or outside the model's range. No catalog, or an unreadable one, is
-   * not proof; simctl stays the authority.
-   */
-  private async findMissingIosCatalogEntry(
-    spec: BindingRequestedSpec,
-    signal: AbortSignal | undefined,
-  ): Promise<string | undefined> {
-    if (!this.iosRuntimeCatalog) {
-      return undefined;
-    }
-    let runtimes: AppleDeviceRuntime[];
-    let deviceTypes: AppleDeviceType[];
-    try {
-      [runtimes, deviceTypes] = await Promise.all([
-        this.iosRuntimeCatalog.getRuntimesChecked(undefined, signal),
-        this.iosRuntimeCatalog.getDeviceTypesChecked(signal),
-      ]);
-    } catch (error) {
-      logger.warn(`[Bindings] iOS catalog check skipped: ${errorMessage(error)}`, error);
-      return undefined;
-    }
-    if (!runtimes.some((entry) => entry.identifier === spec.runtime)) {
-      const installed = runtimes.map((entry) => entry.identifier);
-      return (
-        `iOS runtime '${spec.runtime}' is not installed on this host. Install it with Xcode, or ` +
-        `request an installed runtime (${installed.join(", ") || "none installed"}).`
-      );
-    }
-    if (
-      spec.deviceType === undefined ||
-      deviceTypes.some((entry) => entry.identifier === spec.deviceType)
-    ) {
-      return undefined;
-    }
-    const iphones = deviceTypes
-      .filter((entry) => entry.productFamily === "iPhone")
-      .map((entry) => entry.identifier);
-    return (
-      `iOS device type '${spec.deviceType}' is not installed on this host. Request an installed ` +
-      `device type (iPhone types: ${iphones.join(", ") || "none installed"}; all types: ` +
-      "xcrun simctl list devicetypes)."
-    );
-  }
-
-  private async findIosIncompatibility(
-    spec: ExactDeviceSpecification,
-    signal: AbortSignal | undefined,
-  ): Promise<string | undefined> {
-    const catalog = this.iosRuntimeCatalog!;
-    let runtimes: Awaited<ReturnType<ExactIosRuntimeCatalog["getRuntimesChecked"]>>;
-    let deviceTypes: Awaited<ReturnType<ExactIosRuntimeCatalog["getDeviceTypesChecked"]>>;
-    try {
-      [runtimes, deviceTypes] = await Promise.all([
-        catalog.getRuntimesChecked(undefined, signal),
-        catalog.getDeviceTypesChecked(signal),
-      ]);
-    } catch (error) {
-      // An unreadable catalog is not proof of incompatibility; creation keeps simctl as authority.
-      logger.warn(`[Bindings] iOS catalog check skipped: ${errorMessage(error)}`, error);
-      return undefined;
-    }
-    const incompatibility = evaluateIosPairCompatibility(spec, runtimes, deviceTypes);
-    if (!incompatibility) {
-      return undefined;
-    }
-    const alternatives =
-      incompatibility.compatibleRuntimes.map((entry) => entry.id).join(", ") || "none installed";
-    return incompatibility.unavailable
-      ? `Runtime '${spec.runtime}' is not available. Compatible installed runtimes: ${alternatives}.`
-      : `Device type '${spec.deviceType}' does not support runtime '${spec.runtime}'. Compatible installed runtimes: ${alternatives}.`;
-  }
-}
-
-function refused(
-  code: "spec_unsupported" | "runtime_incompatible",
-  message: string,
-): { kind: "refused"; resolution: ManagedSpecResolution } {
-  return { kind: "refused", resolution: { kind: "unsupported", code, message } };
-}
-
-/**
- * The model "any model" creates for an iOS runtime: a supported iPhone (excluding iPods),
- * else one with unknown runtime compatibility (simctl stays the authority). An explicit family
- * selects that family's types instead. Within each tier, parseable iPhone/iPad model identifiers
- * outrank unparseable ones: highest major generation, then lowest minor variant, then shortest
- * name, then ascending identifier wins. Unparseable entries retain last-in-catalog selection.
- * Undefined when the runtime is missing or unavailable, or no selected-family type fits.
- */
-export function chooseIosDeviceType(
-  runtimeId: string,
-  runtimes: readonly AppleDeviceRuntime[],
-  deviceTypes: readonly AppleDeviceType[],
-  family?: BindingDeviceFamily,
-): string | undefined {
-  const runtime = runtimes.find((entry) => entry.identifier === runtimeId);
-  if (!runtime?.isAvailable) {
-    return undefined;
-  }
-  const candidates = deviceTypes.filter((entry) =>
-    family === undefined
-      ? entry.productFamily === "iPhone" && !entry.modelIdentifier?.startsWith("iPod")
-      : inferIosFormFactor(entry.identifier) === family,
-  );
-  const statusOf = (entry: AppleDeviceType) =>
-    evaluateRuntimeCompatibility(entry, runtime.version).status;
-  const supported = candidates.filter((entry) => statusOf(entry) === "supported");
-  const unknown = candidates.filter((entry) => statusOf(entry) === "unknown");
-  return (
-    supported.toSorted(compareNewestDeviceType).at(-1) ??
-    unknown.toSorted(compareNewestDeviceType).at(-1)
-  )?.identifier;
-}
-
-/** Positive means preferred; stable sorting retains catalog order for unparseable models. */
-function compareNewestDeviceType(a: AppleDeviceType, b: AppleDeviceType): number {
-  const aModel = /^(iPhone|iPad)(\d+),(\d+)$/.exec(a.modelIdentifier ?? "");
-  const bModel = /^(iPhone|iPad)(\d+),(\d+)$/.exec(b.modelIdentifier ?? "");
-  if (!aModel || !bModel) {
-    return Number(Boolean(aModel)) - Number(Boolean(bModel));
-  }
-  return (
-    Number(aModel[2]) - Number(bModel[2]) ||
-    Number(bModel[3]) - Number(aModel[3]) ||
-    b.name.length - a.name.length ||
-    (a.identifier < b.identifier ? 1 : a.identifier > b.identifier ? -1 : 0)
-  );
-}
-
-class ReconcileAbort extends Error {
-  constructor(readonly failure: BindingReconcileFailure) {
-    super(failure.message);
-    this.name = "ReconcileAbort";
-  }
-}
-
-export function failure(
-  code: BindingReconcileFailureCode,
-  message: string,
-  extra: Partial<
-    Pick<BindingReconcileFailure, "provision" | "capacity" | "budget" | "retryable">
-  > = {},
-): BindingReconcileFailure {
-  return {
-    code,
-    retryable: extra.retryable ?? FAILURE_RETRYABILITY[code],
-    message,
-    nextAction: FAILURE_NEXT_ACTION[code],
-    ...(extra.provision ? { provision: extra.provision } : {}),
-    ...(extra.capacity ? { capacity: extra.capacity } : {}),
-    ...(extra.budget ? { budget: extra.budget } : {}),
-  };
-}
-
-function casFailure(result: BindingCasFailure, step: string): BindingReconcileFailure {
-  switch (result.kind) {
-    case "scope_not_valid":
-      return failure("scope_not_valid", `Binding scope is no longer valid (${step}).`);
-    case "binding_missing":
-      return failure("concurrent_modification", `Binding disappeared during ${step}.`);
-    case "stale_binding":
-      return failure(
-        "concurrent_modification",
-        `Binding binding changed during ${step} (now generation ${result.current.generation}).`,
-      );
-    case "device_assigned_elsewhere":
-      return failure(
-        "concurrent_modification",
-        `Device is already assigned to binding ${result.holder.bindingIndex} of another scope (${step}).`,
-      );
-  }
-}
-
-/** A refused execution claim or fence, as a reconcile failure. */
-function claimFailure(
-  result:
-    | BindingCasFailure
-    | { kind: "binding_in_use"; owner: BindingExecOwner }
-    | { kind: "binding_not_ready" },
-  step: string,
-): BindingReconcileFailure {
-  switch (result.kind) {
-    case "binding_in_use":
-      return failure(
-        "binding_in_use",
-        `Binding is held by live session ${result.owner.sessionUuid} (${step}).`,
-      );
-    case "binding_not_ready":
-      return failure("concurrent_modification", `Binding stopped being ready during ${step}.`);
-    default:
-      return casFailure(result, step);
-  }
-}
-
-function externalDevicesField(devices: readonly string[] | undefined): {
-  externalDevices?: string[];
-} {
-  return devices && devices.length > 0 ? { externalDevices: [...devices] } : {};
-}
-
-/** Map a provision-path error into a typed reconcile failure. */
-function provisionFailure(error: unknown): BindingReconcileFailure {
-  if (error instanceof BootCapacityExhaustedError) {
-    return failure("capacity_exhausted", error.message, {
-      capacity: {
-        limit: error.limit,
-        booted: error.booted,
-        retryAfterMs: error.retryAfterMs,
-        ...externalDevicesField(error.details.externalDevices),
-      },
-    });
-  }
-  if (error instanceof ProvisionDeviceError) {
-    if (error.code === "discovery_incomplete") {
-      return failure("discovery_incomplete", error.message);
-    }
-    if (error.code === "runtime_incompatible") {
-      return failure("runtime_incompatible", error.message);
-    }
-    const capacity = error.diagnostics.capacity;
-    if (error.code === "capacity_exhausted" && capacity) {
-      return failure("capacity_exhausted", error.message, {
-        capacity: {
-          limit: capacity.limit,
-          booted: capacity.booted,
-          retryAfterMs: error.diagnostics.retryAfterMs ?? 0,
-          ...externalDevicesField(capacity.externalDevices),
-        },
-      });
-    }
-    return failure("provision_failed", error.message, {
-      retryable: error.retryable,
-      provision: { code: error.code, retryable: error.retryable },
-    });
-  }
-  return failure("provision_failed", errorMessage(error), { retryable: false });
-}
-
-/**
- * Whether the device counts toward its platform's boot limit, by the gates' own definition: a
- * simulator that is booting or shutting down holds its binding although it is not listed as running.
- */
-function holdsBootBinding(device: DeviceInfo): boolean {
-  return (
-    device.isRunning ||
-    (device.platform === "ios" &&
-      device.state !== undefined &&
-      OCCUPYING_SIMULATOR_STATES.has(device.state))
-  );
-}
-
-function bindingId(key: BindingKey): string {
-  return `${key.scopeKey}#${key.bindingIndex}`;
-}
-
-function expectationOf(assignment: BindingAssignmentRecord): BindingBindingExpectation {
-  return { generation: assignment.generation, stableDeviceId: assignment.stableDeviceId };
-}
-
-interface ReconcileContext {
-  request: BindingReconcileRequest;
-  resolvedSpec: BindingResolvedSpec;
-  fingerprint: BindingSpecFingerprint;
-  evidence: BindingReconcileEvidence;
-  creatabilityChecked?: boolean;
-}
-
-type ReadyResult = Extract<BindingReconcileResult, { outcome: "ready" }>;
 
 // ---------------------------------------------------------------------------------------------
 // Reconciler
@@ -1195,6 +83,8 @@ export class BindingReconciler {
   private readonly isExecOwnerLive: BindingExecOwnerLiveness;
   private readonly idGenerator: IdGenerator;
   private readonly reservations: Pick<InFlightBindingReservations, "add" | "delete">;
+
+  private readonly creation: BindingDeviceCreation;
 
   readonly journal: BindingJournal;
 
@@ -1216,6 +106,29 @@ export class BindingReconciler {
       ...(deps.journal?.inFlight ? { inFlight: deps.journal.inFlight } : {}),
       ...(deps.journal?.backoff !== undefined ? { backoff: deps.journal.backoff } : {}),
     });
+    this.creation = new BindingDeviceCreation(
+      {
+        registry: deps.registry,
+        inventory: deps.inventory,
+        provisioner: deps.provisioner,
+        resolver: deps.resolver,
+        claims: deps.claims,
+        capacity: deps.capacity,
+        resourceBudget: deps.resourceBudget,
+        idGenerator: this.idGenerator,
+        timer: deps.timer,
+        journal: this.journal,
+      },
+      {
+        checkBudget: (request) => this.checkBudget(request),
+        isAutomationReady: (provisioned) => this.isAutomationReady(provisioned),
+        releaseSession: (sessionUuid) => this.releaseSession(sessionUuid),
+        readyOrReleaseOnBusy: (provisioned, publish) =>
+          this.readyOrReleaseOnBusy(provisioned, publish),
+        claimAndReady: (context, disposition, assignment, provisioned, reservation) =>
+          this.claimAndReady(context, disposition, assignment, provisioned, reservation),
+      },
+    );
   }
 
   async reconcile(request: BindingReconcileRequest): Promise<BindingReconcileResult> {
@@ -1630,7 +543,7 @@ export class BindingReconciler {
     // The binding's own device is excluded from every other caller and the registry records no live
     // execution, so any session on it is an earlier execution's leftover, unless this daemon still
     // holds it as a live execution (#11275), which refuses with binding_in_use instead.
-    const provisioned = await this.provisionExisting(context, device, { releaseStale: true });
+    const provisioned = await this.provisionExisting(context, device);
     return await this.readyOrReleaseOnBusy(provisioned, async () => {
       const expected = expectationOf(assignment);
       const fingerprint = encodeManagedSpecFingerprint(context.fingerprint);
@@ -1718,7 +631,7 @@ export class BindingReconciler {
     }
   }
 
-  // --- empty binding: adopt or create -------------------------------------------------------------
+  // --- empty binding: journaled orphan reclaim or create (#14788) ---------------------------------
 
   private async fillEmptyBinding(
     context: ReconcileContext,
@@ -1727,15 +640,15 @@ export class BindingReconciler {
   ): Promise<ReadyResult> {
     const candidate = await this.withEmptyBindingCleanup(context, assignment, async () => {
       if (!inventory.complete) {
-        // Without complete discovery we can neither find adoptable devices nor rule out a
+        // Without complete discovery we can neither find reclaimable orphans nor rule out a
         // leftover of this binding, so do nothing rather than create a duplicate.
         throw new ReconcileAbort(
           failure("discovery_incomplete", "Device discovery was incomplete for an empty binding."),
         );
       }
       const candidate = await this.findAdoptionCandidate(context, inventory.devices);
-      // Validate creation before moving an empty binding; adoption needs no creation catalog.
-      if (assignment.platform !== context.request.platform && !candidate) {
+      // Both fresh creation and orphan reclamation require a creatable resolved spec.
+      if (assignment.platform !== context.request.platform) {
         await this.assertCreatable(context);
       }
       return candidate;
@@ -1743,16 +656,19 @@ export class BindingReconciler {
     if (assignment.platform !== context.request.platform) {
       assignment = await this.emptyOnRequestedPlatform(context, assignment);
     }
+    // Both the journaled orphan replacement (#14799) and a fresh create make a new device, so
+    // both spend the create deadline's retry reserve (#14643).
+    const createContext = withCreateDeadline(context);
     if (candidate) {
-      return await this.adopt(context, assignment, candidate.device, candidate.source);
+      return await this.creation.replaceOrphan(createContext, assignment, candidate);
     }
-    return await this.createAndCommit(context, assignment, "created");
+    return await this.createAndCommit(createContext, assignment, "created");
   }
 
   private async findAdoptionCandidate(
     context: ReconcileContext,
     devices: DeviceInfo[],
-  ): Promise<{ device: DeviceInfo; source: "orphan" } | undefined> {
+  ): Promise<DeviceInfo | undefined> {
     const { request } = context;
     const suffix = bindingDeviceNameSuffix(request.key);
     const hint = request.priorDeviceHint?.stableId;
@@ -1766,74 +682,28 @@ export class BindingReconciler {
           a.stableId.localeCompare(b.stableId),
       );
     for (const { device, stableId } of listed) {
-      // Preserve the binding-specific adoption fence across both product name generations.
-      const source =
-        isProductBrokerDevice(device.name) &&
-        device.name.slice(device.name.indexOf("-") + 1).startsWith(suffix)
-          ? "orphan"
-          : undefined;
-      if (!source) {
+      // Preserve the binding-specific orphan fence across both product name generations.
+      if (
+        !isProductBrokerDevice(device.name) ||
+        !device.name.slice(device.name.indexOf("-") + 1).startsWith(suffix)
+      ) {
         continue;
       }
-      if (source === "orphan") {
-        // A leftover of this binding's interrupted create is adoptable only if nobody holds it: no
-        // binding, and no session (product names are excluded from generic clients).
-        const holder = await this.deps.registry.findDeviceHolder(request.platform, stableId);
-        if (holder || this.sessionsOn(device).length > 0) {
-          continue;
-        }
+      // Reclaim only an unheld orphan: no registry binding, local session or external claim.
+      // Unknown claim ownership must never authorize deletion.
+      const holder = await this.deps.registry.findDeviceHolder(request.platform, stableId);
+      if (
+        holder ||
+        this.sessionsOn(device).length > 0 ||
+        (await this.deps.claims.describe(device)).kind !== "free"
+      ) {
+        continue;
       }
       if ((await this.deps.matcher.matches(device, request.requestedSpec)) === "match") {
-        return { device, source };
+        return device;
       }
     }
     return undefined;
-  }
-
-  private async adopt(
-    context: ReconcileContext,
-    assignment: BindingAssignmentRecord,
-    device: DeviceInfo,
-    source: "orphan",
-  ): Promise<ReadyResult> {
-    context = { ...context, resolvedSpec: await this.existingSpec(device) };
-    const { request } = context;
-    const stableId = deviceStableId(device)!;
-    // Commit first: the CAS atomically takes the device out of the free pool and reserves it,
-    // so a failed provision leaves the binding bound (`provisioning`) and the next attempt reuses.
-    const reserved = await this.deps.registry.commitBinding(
-      request.key,
-      expectationOf(assignment),
-      {
-        stableDeviceId: stableId,
-        deviceName: device.name,
-        requestedSpec: request.requestedSpec,
-        resolvedSpec: context.resolvedSpec,
-        specFingerprint: encodeManagedSpecFingerprint(context.fingerprint),
-        state: "provisioning",
-      },
-    );
-    if (reserved.kind !== "committed") {
-      throw new ReconcileAbort(casFailure(reserved, "adoption"));
-    }
-    context.evidence.adoptedFrom = source;
-    // A free-pool device is excluded from generic clients, so a session on it is a leftover
-    // managed execution; an orphan's is not ours to end.
-    const provisioned = await this.provisionExisting(context, device, {
-      releaseStale: false,
-    });
-    return await this.readyOrReleaseOnBusy(provisioned, async () => {
-      const ready = await this.deps.registry.updateBindingState(
-        request.key,
-        expectationOf(reserved.assignment),
-        "ready",
-      );
-      if (ready.kind !== "updated") {
-        await this.releaseSession(provisioned.sessionUuid);
-        throw new ReconcileAbort(claimFailure(ready, "adoption"));
-      }
-      return await this.claimAndReady(context, "adopted", ready.assignment, provisioned, undefined);
-    });
   }
 
   private async existingSpec(device: DeviceInfo): Promise<BindingResolvedSpec> {
@@ -1849,258 +719,16 @@ export class BindingReconciler {
     return spec;
   }
 
-  /**
-   * Create a device under the binding's next generated name and commit it, journaled so an
-   * interruption at any boundary converges: `creating` (provision issued) → `created` (device
-   * exists) → `committed` together with the binding. `replacing` continues a replacement entry that
-   * already verified the old device's absence.
-   */
   private async createAndCommit(
     context: ReconcileContext,
     assignment: BindingAssignmentRecord,
     disposition: "created" | "replaced",
     replacing?: BindingJournalEntry,
-    options: { capacityAsserted?: boolean } = {},
+    options: {
+      bootReservation?: BootSlotReservation;
+    } = {},
   ): Promise<ReadyResult> {
-    const { request } = context;
-    if (replacing === undefined) {
-      try {
-        this.checkBudget(request);
-        await this.assertCreatable(context);
-        if (!options.capacityAsserted) {
-          await this.assertBootCapacity(request);
-        }
-      } catch (error) {
-        // No provisioning or journal entry exists yet; preserve the original refusal unchanged.
-        await this.removeNeverBoundBinding(context, assignment, "pre-provision refusal");
-        throw error;
-      }
-    } else {
-      this.checkBudget(request);
-      // A replacement asserted capacity before deleting, counting the binding its old device frees;
-      // asking again here could refuse after deletion while that device is still being counted.
-      if (!options.capacityAsserted) {
-        await this.assertBootCapacity(request);
-      }
-    }
-    const name = bindingDeviceName(request.key, assignment.generation + 1, this.idGenerator.next());
-    context.evidence.createdName = name;
-    let entry = replacing
-      ? await this.advanceToCreating(context, replacing, name)
-      : await this.openCreateEntry(context, assignment, name);
-    this.journal.inFlight.add(entry.id);
-    try {
-      if (replacing === undefined && this.deps.resourceBudget) {
-        await this.admitFreshCreation(context, assignment, entry);
-      }
-      let provisioned: BindingProvisionedDevice;
-      try {
-        provisioned = await this.deps.provisioner.provision({
-          platform: request.platform,
-          name,
-          // "Any model" creates the model the resolver chose (and recorded).
-          spec: {
-            ...provisionableSpec(request.requestedSpec),
-            deviceType: context.resolvedSpec.deviceType,
-          },
-          mode: "create",
-          deadlineMs: request.deadlineMs,
-          signal: request.signal,
-        });
-      } catch (error) {
-        // The provision path rolls back its own partial creation; settle the entry on proof of
-        // absence, or leave it open for redrive when a leftover may exist.
-        const settled = await this.settleFailedCreate(context, entry);
-        if (replacing === undefined) {
-          await this.removeFailedUnboundBinding(context, assignment, settled);
-        }
-        throw new ReconcileAbort(provisionFailure(error));
-      }
-      return await this.readyOrReleaseOnBusy(provisioned, async (release) => {
-        if (provisioned.created && !this.isAutomationReady(provisioned)) {
-          this.journal.markRemovalIntended(entry);
-        }
-        entry = await this.recordCreated(context, entry, provisioned, release);
-        if (!this.isAutomationReady(provisioned)) {
-          return await this.discardUncommitted(
-            context,
-            provisioned,
-            entry,
-            release,
-            failure("readiness_incomplete", `Device '${name}' did not reach automation readiness.`),
-          );
-        }
-        const committed = await this.journal.advance(entry, {
-          expectedPhase: "created",
-          phase: "committed",
-          assignment: {
-            kind: "commit",
-            expected: entry.binding,
-            next: {
-              stableDeviceId: provisioned.device.stableId,
-              deviceName: provisioned.device.name,
-              requestedSpec: request.requestedSpec,
-              resolvedSpec: context.resolvedSpec,
-              specFingerprint: encodeManagedSpecFingerprint(context.fingerprint),
-              state: "ready",
-            },
-          },
-        });
-        if (committed.kind === "journal_conflict") {
-          // Another driver took the entry over; it owns the device's fate now.
-          await this.releaseSession(provisioned.sessionUuid);
-          throw new ReconcileAbort(
-            failure("concurrent_modification", "The binding's journal entry was taken over."),
-          );
-        }
-        if (committed.kind !== "advanced") {
-          return await this.discardUncommitted(
-            context,
-            provisioned,
-            entry,
-            release,
-            claimFailure(committed, "create commit"),
-          );
-        }
-        this.noteJournal(context, committed.entry);
-        return await this.claimAndReady(
-          context,
-          disposition,
-          committed.assignment!,
-          provisioned,
-          undefined,
-        );
-      });
-    } finally {
-      this.journal.inFlight.delete(entry.id);
-    }
-  }
-
-  private async openCreateEntry(
-    context: ReconcileContext,
-    assignment: BindingAssignmentRecord,
-    name: string,
-  ): Promise<BindingJournalEntry> {
-    const { request } = context;
-    const opened = await this.deps.registry.openBindingJournal(request.key, {
-      kind: "create",
-      phase: "creating",
-      owner: this.journal.owner,
-      target: this.journalTarget(context, assignment, name),
-      assignment: { kind: "state", expected: expectationOf(assignment), state: "provisioning" },
-    });
-    if (opened.kind === "journal_open") {
-      throw new ReconcileAbort(
-        failure(
-          "reconcile_in_progress",
-          `Binding ${request.key.bindingIndex} has unfinished work.`,
-        ),
-      );
-    }
-    if (opened.kind !== "opened") {
-      throw new ReconcileAbort(claimFailure(opened, "create"));
-    }
-    this.noteJournal(context, opened.entry);
-    return opened.entry;
-  }
-
-  private async advanceToCreating(
-    context: ReconcileContext,
-    entry: BindingJournalEntry,
-    name: string,
-  ): Promise<BindingJournalEntry> {
-    const advanced = await this.journal.advance(entry, {
-      expectedPhase: "deleted",
-      phase: "creating",
-      target: { newName: name },
-    });
-    if (advanced.kind !== "advanced") {
-      throw new ReconcileAbort(
-        failure("concurrent_modification", `Replacement journal changed: ${advanced.kind}.`),
-      );
-    }
-    this.noteJournal(context, advanced.entry);
-    return advanced.entry;
-  }
-
-  private async recordCreated(
-    context: ReconcileContext,
-    entry: BindingJournalEntry,
-    provisioned: BindingProvisionedDevice,
-    release: () => Promise<void>,
-  ): Promise<BindingJournalEntry> {
-    const recorded = await this.journal
-      .advance(entry, {
-        expectedPhase: "creating",
-        phase: "created",
-        target: {
-          newStableId: provisioned.device.stableId,
-          newName: provisioned.device.name,
-          ...(provisioned.created && !this.isAutomationReady(provisioned)
-            ? { removalRequested: true }
-            : {}),
-        },
-      })
-      .catch(async (error: unknown) => {
-        logger.warn(`[Bindings] recording created device failed: ${errorMessage(error)}`, error);
-        await release();
-        throw error;
-      });
-    if (recorded.kind !== "advanced") {
-      // Another driver took the entry over and will settle the device by its recorded name.
-      await release();
-      throw new ReconcileAbort(
-        failure("concurrent_modification", "The binding's journal entry was taken over."),
-      );
-    }
-    this.noteJournal(context, recorded.entry);
-    return recorded.entry;
-  }
-
-  /** Reserve total-resource capacity before any native creation. */
-  private async admitFreshCreation(
-    context: ReconcileContext,
-    assignment: BindingAssignmentRecord,
-    entry: BindingJournalEntry,
-  ): Promise<void> {
-    let admission: BindingResourceAdmission;
-    try {
-      admission = await this.deps.resourceBudget!.admitCreation({
-        journalEntryId: entry.id,
-        deadlineMs: context.request.deadlineMs,
-        signal: context.request.signal,
-      });
-      // Admission can consume the remaining preparation time even when it finds room.
-      this.checkBudget(context.request);
-    } catch (error) {
-      const settled = await this.settleFailedCreate(context, entry, true);
-      await this.removeFailedUnboundBinding(context, assignment, settled);
-      // Cancellation retains its identity for the reconciler's existing handling.
-      throw error;
-    }
-    if (admission.kind === "admitted") {
-      return;
-    }
-    // Native creation has not been called: absence is already proven, including when discovery
-    // itself is incomplete. Close directly rather than rediscovering a device that never existed.
-    const settled = await this.settleFailedCreate(context, entry, true);
-    await this.removeFailedUnboundBinding(context, assignment, settled);
-    if (admission.kind === "unknown") {
-      throw new ReconcileAbort(failure("discovery_incomplete", admission.message));
-    }
-    const { message, budget } = budgetRefusal(admission);
-    throw new ReconcileAbort(failure("binding_budget_exhausted", message, { budget }));
-  }
-
-  private async removeFailedUnboundBinding(
-    context: ReconcileContext,
-    assignment: BindingAssignmentRecord,
-    settled: BindingJournalEntry | undefined,
-  ): Promise<void> {
-    if (settled?.phase !== "rolled_back") {
-      return;
-    }
-    await this.removeNeverBoundBinding(context, assignment, `failed creation entry ${settled.id}`);
+    return this.creation.createAndCommit(context, assignment, disposition, replacing, options);
   }
 
   private async withEmptyBindingCleanup<T>(
@@ -2108,183 +736,8 @@ export class BindingReconciler {
     assignment: BindingAssignmentRecord,
     operation: () => Promise<T>,
   ): Promise<T> {
-    try {
-      return await operation();
-    } catch (error) {
-      // removeNeverBoundBinding logs cleanup failures and preserves the original refusal.
-      await this.removeNeverBoundBinding(context, assignment, "empty-binding discovery refusal");
-      throw error;
-    }
+    return this.creation.withEmptyBindingCleanup(context, assignment, operation);
   }
-
-  private async removeNeverBoundBinding(
-    context: ReconcileContext,
-    assignment: BindingAssignmentRecord,
-    reason: string,
-  ): Promise<void> {
-    if (assignment.generation !== 0 || assignment.stableDeviceId !== null) {
-      return;
-    }
-    try {
-      await this.deps.registry.removeUnboundBinding(context.request.key, {
-        generation: assignment.generation,
-        stableDeviceId: null,
-      });
-    } catch (error) {
-      logger.warn(
-        `[Bindings] removing never-bound binding after ${reason} failed: ${errorMessage(error)}`,
-        error,
-      );
-    }
-  }
-
-  /** Roll back on proven absence; otherwise discover leftovers and retain cleanup for redrive. */
-  private async settleFailedCreate(
-    context: ReconcileContext,
-    entry: BindingJournalEntry,
-    absenceProven = false,
-  ): Promise<BindingJournalEntry | undefined> {
-    try {
-      if (absenceProven) {
-        const settled = (await this.journal.close(entry, "rolled_back")).entry;
-        this.noteJournal(context, settled);
-        return settled;
-      }
-      const settled = await this.journal.settleCreation(entry, {
-        adopt: false,
-        deadlineMs: context.request.deadlineMs,
-      });
-      this.noteJournal(context, settled.entry);
-      return settled.entry;
-    } catch (error) {
-      logger.warn(
-        `[Bindings] settling failed creation entry ${entry.id} failed; redrive will retry: ` +
-          errorMessage(error),
-        error,
-      );
-    }
-  }
-
-  /**
-   * A device this attempt created but could not publish: release its session and remove it, unless
-   * the registry says a binding (any scope) or the free pool now holds that stable id.
-   */
-  private async discardUncommitted(
-    context: ReconcileContext,
-    provisioned: BindingProvisionedDevice,
-    entry: BindingJournalEntry,
-    release: () => Promise<void>,
-    reason: BindingReconcileFailure,
-  ): Promise<never> {
-    try {
-      if (provisioned.created) {
-        this.journal.markRemovalIntended(entry);
-        entry = await this.journal.requestRemoval(entry, {
-          deadlineMs: context.request.deadlineMs,
-          signal: context.request.signal,
-        });
-      }
-    } finally {
-      await release();
-    }
-    try {
-      await this.cleanupUncommitted(context, provisioned, entry);
-    } catch (error) {
-      if (error instanceof BindingJournalRemovalRegistryTimeout) {
-        logger.warn(`[Bindings] uncommitted cleanup deferred: ${errorMessage(error)}`, error);
-        context.evidence.uncommittedCleanup = {
-          stableId: provisioned.device.stableId,
-          removed: false,
-          message: error.message,
-        };
-      } else if (classifySqliteError(error) !== "retryable") {
-        logger.warn(`[Bindings] uncommitted cleanup failed: ${errorMessage(error)}`, error);
-        throw error;
-      }
-      // The durable entry stays open for redrive; preserve the failure that required cleanup.
-      logger.debug(`[Bindings] uncommitted cleanup deferred: ${errorMessage(error)}`);
-    }
-    throw new ReconcileAbort(reason);
-  }
-
-  private async cleanupUncommitted(
-    context: ReconcileContext,
-    provisioned: BindingProvisionedDevice,
-    entry: BindingJournalEntry,
-  ): Promise<void> {
-    if (!provisioned.created) {
-      this.noteJournal(
-        context,
-        (
-          await this.journal.removalRegistryStage(
-            () => this.journal.close(entry, "rolled_back"),
-            context.request.deadlineMs,
-          )
-        ).entry,
-      );
-      return;
-    }
-    this.noteJournal(context, entry);
-    if (!entry.target.removalRequested) {
-      context.evidence.uncommittedCleanup = {
-        stableId: provisioned.device.stableId,
-        removed: false,
-        message: "Removal deferred to journal redrive or its current driver.",
-      };
-      // The first flag write was attempted; memory fences adoption until a later redrive.
-      return;
-    }
-    // Losing a compare-and-set never licenses deleting the device the winner committed.
-    const holder = await this.journal.removalRegistryStage(
-      () =>
-        this.deps.registry.findDeviceHolder(context.request.platform, provisioned.device.stableId),
-      context.request.deadlineMs,
-    );
-    if (holder) {
-      const heldBy =
-        holder.kind === "binding"
-          ? `binding ${holder.assignment.bindingIndex} of scope ${holder.assignment.scopeKey}`
-          : "the managed free pool";
-      context.evidence.uncommittedCleanup = {
-        stableId: provisioned.device.stableId,
-        removed: false,
-        message: `kept: held by ${heldBy}`,
-      };
-      logger.warn(
-        `[Bindings] not discarding '${provisioned.device.stableId}': it is held by ${heldBy}`,
-      );
-      this.noteJournal(
-        context,
-        (
-          await this.journal.removalRegistryStage(
-            () => this.journal.close(entry, "rolled_back"),
-            context.request.deadlineMs,
-          )
-        ).entry,
-      );
-      return;
-    }
-    const settled = await this.journal.settleCreation(entry, {
-      adopt: false,
-      deadlineMs: context.request.deadlineMs,
-    });
-    this.noteJournal(context, settled.entry);
-    const removed = settled.kind === "settled";
-    context.evidence.uncommittedCleanup = {
-      stableId: provisioned.device.stableId,
-      removed,
-      ...(settled.kind === "blocked" ? { message: settled.message } : {}),
-    };
-    if (!removed) {
-      // The entry stays open with the device's exact identity, so a redrive removes it later.
-      logger.warn(
-        `[Bindings] uncommitted device '${provisioned.device.stableId}' was not removed: ` +
-          (settled.kind === "blocked" ? settled.message : "unknown"),
-      );
-    }
-  }
-
-  // --- replace ---------------------------------------------------------------------------------
 
   private async replaceAssigned(
     context: ReconcileContext,
@@ -2292,158 +745,11 @@ export class BindingReconciler {
     device: DeviceInfo,
     inventoryComplete: boolean,
   ): Promise<ReadyResult> {
-    const { request, evidence } = context;
-    const oldId = assignment.stableDeviceId!;
-    // The slow catalog read must not sit between the claim checks and the journal open.
-    await this.assertCreatable(context);
-    await this.assertReplaceable(request, assignment, device, inventoryComplete);
-    // Journal the accepted deletion together with `replacing`: from here on, an interruption is
-    // redriven against this exact device and binding.
-    const opened = await this.deps.registry.openBindingJournal(request.key, {
-      kind: "replace",
-      phase: "deleting",
-      owner: this.journal.owner,
-      target: this.journalTarget(context, assignment, null),
-      assignment: { kind: "state", expected: expectationOf(assignment), state: "replacing" },
-    });
-    if (opened.kind === "journal_open") {
-      throw new ReconcileAbort(
-        failure(
-          "reconcile_in_progress",
-          `Binding ${request.key.bindingIndex} has unfinished work.`,
-        ),
-      );
-    }
-    if (opened.kind !== "opened") {
-      // A live execution (or another attempt's reservation) claimed the device after our checks.
-      throw new ReconcileAbort(claimFailure(opened, "replace"));
-    }
-    this.noteJournal(context, opened.entry);
-    this.journal.inFlight.add(opened.entry.id);
-    let deletedEntry: BindingJournalEntry;
-    let emptied: BindingAssignmentRecord;
-    try {
-      const deletion = await this.journal.driveDeletion(opened.entry, {
-        device,
-        deadlineMs: request.deadlineMs,
-        signal: request.signal,
-      });
-      this.noteJournal(context, deletion.entry);
-      if (deletion.kind !== "deleted") {
-        if (deletion.kind === "blocked") {
-          evidence.deletion = deletion.evidence;
-          throw new ReconcileAbort(failure(deletion.reason, deletion.message));
-        }
-        throw new ReconcileAbort(
-          failure(
-            "concurrent_modification",
-            `Device '${oldId}' is no longer this binding's device.`,
-          ),
-        );
-      }
-      evidence.deletion = deletion.evidence;
-      evidence.deletedStableId = oldId;
-      deletedEntry = deletion.entry;
-      emptied = deletion.assignment;
-    } finally {
-      this.journal.inFlight.delete(opened.entry.id);
-    }
-    return await this.createAndCommit(context, emptied, "replaced", deletedEntry, {
-      capacityAsserted: true,
-    });
+    return this.creation.replaceAssigned(context, assignment, device, inventoryComplete);
   }
 
-  private journalTarget(
-    context: ReconcileContext,
-    assignment: BindingAssignmentRecord,
-    newName: string | null,
-  ) {
-    return {
-      oldStableId: assignment.stableDeviceId,
-      oldName: assignment.deviceName,
-      // The old device lives on the binding's platform (the entry's); a cross-platform replacement
-      // records the platform it creates on (#11232).
-      ...(assignment.platform !== context.request.platform
-        ? { newPlatform: context.request.platform }
-        : {}),
-      newName,
-      newStableId: null,
-      requestedSpec: context.request.requestedSpec,
-      resolvedSpec: context.resolvedSpec,
-      specFingerprint: encodeManagedSpecFingerprint(context.fingerprint),
-    };
-  }
-
-  private noteJournal(context: ReconcileContext, entry: BindingJournalEntry): void {
-    context.evidence.journal = { entryId: entry.id, kind: entry.kind, phase: entry.phase };
-  }
-
-  /**
-   * Every precondition for destroying the binding's device: complete discovery, no live claim, boot
-   * capacity for the replacement, and the registry still naming this exact binding as its holder.
-   */
-  private async assertReplaceable(
-    request: BindingReconcileRequest,
-    assignment: BindingAssignmentRecord,
-    device: DeviceInfo,
-    inventoryComplete: boolean,
-  ): Promise<void> {
-    const oldId = assignment.stableDeviceId!;
-    if (!inventoryComplete) {
-      throw new ReconcileAbort(
-        failure("discovery_incomplete", "Replacement requires complete device discovery."),
-      );
-    }
-    const claim = await this.deps.claims.describe(device);
-    if (claim.kind !== "free") {
-      throw new ReconcileAbort(
-        failure(
-          claim.kind === "held" ? "device_busy" : "discovery_incomplete",
-          `Device '${oldId}' cannot be replaced: ${claim.reason}`,
-        ),
-      );
-    }
-    // Fail before deleting: only a device holding a boot binding of the platform being booted frees one.
-    const freedBootBindings =
-      assignment.platform === request.platform && holdsBootBinding(device) ? 1 : 0;
-    await this.assertBootCapacity(request, freedBootBindings);
-    this.checkBudget(request);
-    const holder = await this.deps.registry.findDeviceHolder(assignment.platform, oldId);
-    if (
-      holder?.kind !== "binding" ||
-      holder.assignment.scopeKey !== request.key.scopeKey ||
-      holder.assignment.bindingIndex !== request.key.bindingIndex ||
-      !bindingMatches(holder.assignment, expectationOf(assignment))
-    ) {
-      throw new ReconcileAbort(
-        failure("concurrent_modification", `Device '${oldId}' is no longer this binding's device.`),
-      );
-    }
-  }
-
-  // --- shared steps ----------------------------------------------------------------------------
-
-  /** Successful creation checks are shared by all steps of this reconcile only. */
   private async assertCreatable(context: ReconcileContext): Promise<void> {
-    if (context.creatabilityChecked) {
-      return;
-    }
-    const { request } = context;
-    const result = await this.deps.resolver.checkCreatable?.(
-      request.platform,
-      // Creation paths retain resolve()'s exact spec; only reuse/adopt can widen this type.
-      context.resolvedSpec as ResolvedExactDeviceSpecification,
-      { signal: request.signal },
-    );
-    // Cancellation or expiry while discovery was pending wins over its result.
-    this.checkBudget(request);
-    if (result?.kind === "unsupported") {
-      throw new ReconcileAbort(failure(result.code, result.message));
-    }
-    if (result?.kind === "unresolved") {
-      throw new ReconcileAbort(failure("discovery_incomplete", result.message));
-    }
-    context.creatabilityChecked = true;
+    return this.creation.assertCreatable(context);
   }
 
   /** Sessions this daemon holds on `device` (none when the claims port cannot tell). */
@@ -2459,19 +765,10 @@ export class BindingReconciler {
   private async releaseStaleSessions(
     context: ReconcileContext,
     device: DeviceInfo,
-    releaseStale: boolean,
   ): Promise<ReadonlySet<string>> {
     const stale = this.sessionsOn(device);
     if (stale.length === 0) {
       return new Set();
-    }
-    if (!releaseStale) {
-      throw new ReconcileAbort(
-        failure(
-          "device_busy",
-          `Device '${device.name}' is held by session(s) ${stale.join(", ")}.`,
-        ),
-      );
     }
     this.assertNoLiveExecutionOn(context, device, stale);
     try {
@@ -2517,10 +814,9 @@ export class BindingReconciler {
   private async provisionExisting(
     context: ReconcileContext,
     device: DeviceInfo,
-    options: { releaseStale: boolean },
   ): Promise<BindingProvisionedDevice> {
     const { request } = context;
-    const stale = await this.releaseStaleSessions(context, device, options.releaseStale);
+    const stale = await this.releaseStaleSessions(context, device);
     let provisioned: BindingProvisionedDevice;
     try {
       provisioned = await this.deps.provisioner.provision({
@@ -2563,41 +859,6 @@ export class BindingReconciler {
       provisioned.readiness.mode === "automation" &&
       provisioned.readiness.status === "automation_ready"
     );
-  }
-
-  /**
-   * Fail immediately at the boot limit before creating a device (and before deleting the one it
-   * replaces). `freedBootBindings` counts binding-holding devices the caller is about to delete; an
-   * unknown count is never free capacity. Booting a device that already exists is not checked
-   * here: the provision path owns that decision and its own-target exemption.
-   */
-  private async assertBootCapacity(
-    request: BindingReconcileRequest,
-    freedBootBindings = 0,
-  ): Promise<void> {
-    if (!this.deps.capacity) {
-      return;
-    }
-    const check = await this.deps.capacity.check(request.platform, { signal: request.signal });
-    if (check.kind === "unknown") {
-      throw new ReconcileAbort(failure("discovery_incomplete", check.message));
-    }
-    if (check.kind === "exhausted" && check.booted - freedBootBindings >= check.limit) {
-      throw new ReconcileAbort(
-        failure(
-          "capacity_exhausted",
-          `${check.booted} ${request.platform} device(s) booted; limit is ${check.limit}.`,
-          {
-            capacity: {
-              limit: check.limit,
-              booted: check.booted,
-              retryAfterMs: check.retryAfterMs,
-              ...externalDevicesField(check.externalDevices),
-            },
-          },
-        ),
-      );
-    }
   }
 
   private async releaseSession(sessionUuid: string): Promise<void> {
@@ -2691,3 +952,25 @@ export class BindingReconciler {
     };
   }
 }
+
+export { DefaultManagedSpecMatcher } from "./DefaultManagedSpecMatcher";
+
+export { DefaultManagedSpecResolver } from "./DefaultManagedSpecResolver";
+
+export { type ManagedSpecMatcher } from "./DefaultManagedSpecMatcher";
+
+export { type BindingRequestedSpec } from "./DefaultManagedSpecMatcher";
+
+export { type ManagedSpecMatch } from "./DefaultManagedSpecMatcher";
+
+export { type ManagedAndroidImageCatalog } from "./DefaultManagedSpecResolver";
+
+export { type ManagedAndroidProfileCatalog } from "./DefaultManagedSpecResolver";
+
+export { type DefaultManagedSpecResolverOptions } from "./DefaultManagedSpecResolver";
+
+export { computeManagedSpecFingerprint } from "./DefaultManagedSpecResolver";
+
+export { chooseIosDeviceType } from "./DefaultManagedSpecResolver";
+
+export { type BindingReconcileFailure } from "./ReconcileAbort";

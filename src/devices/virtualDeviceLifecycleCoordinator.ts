@@ -2,6 +2,8 @@ import { ActionableError, type Platform } from "../models";
 import { toActionableError } from "../models/ActionableError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { stableStringify } from "../utils/stableStringify";
+import { DeviceLifecyclePreemptedError } from "./DeviceLifecyclePreemptedError";
+export { DeviceLifecyclePreemptedError } from "./DeviceLifecyclePreemptedError";
 
 export type VirtualDeviceLifecycleOperation =
   | "start"
@@ -34,6 +36,12 @@ export interface VirtualDeviceLifecycleReservationOptions {
 export interface VirtualDeviceLifecycleLease {
   readonly signal: AbortSignal;
   readonly identity: VirtualDeviceLifecycleIdentity;
+  /**
+   * Operations of the owners that held this identity between this request queueing
+   * and acquiring it, in release order; empty when acquired without waiting;
+   * accumulates across bindCanonicalIdentity waits.
+   */
+  readonly precedingOperations?: readonly VirtualDeviceLifecycleOperation[];
   bindCanonicalIdentity(
     identity: StableVirtualDeviceIdentity,
     revalidate?: () => Promise<StableVirtualDeviceIdentity>,
@@ -58,18 +66,8 @@ export interface VirtualDeviceLifecycleCoordinator {
   ): Promise<VirtualDeviceLifecycleLease>;
 }
 
-export class DeviceLifecyclePreemptedError extends ActionableError {
-  constructor(identity: VirtualDeviceLifecycleIdentity) {
-    super(
-      `Device lifecycle work for ${identity.platform}:${
-        identity.kind === "stable" ? identity.stableId : identity.selector
-      } was preempted by teardown`,
-    );
-    this.name = "DeviceLifecyclePreemptedError";
-  }
-}
-
 interface LifecycleOwner {
+  precedingOperations: readonly VirtualDeviceLifecycleOperation[];
   operation: VirtualDeviceLifecycleOperation;
   controller: AbortController;
   /** Set once the owner's process survived SIGKILL; `pid` is undefined when unknown. */
@@ -78,6 +76,7 @@ interface LifecycleOwner {
 }
 
 interface LifecycleWaiter {
+  releasedFrom: number;
   operation: VirtualDeviceLifecycleOperation;
   controller: AbortController;
   resolve(owner: LifecycleOwner): void;
@@ -88,6 +87,7 @@ interface LifecycleState {
   identity: VirtualDeviceLifecycleIdentity;
   owner?: LifecycleOwner;
   waiters: LifecycleWaiter[];
+  released: VirtualDeviceLifecycleOperation[];
 }
 
 /** Operations that must not queue behind a device held by an unkillable process. */
@@ -170,12 +170,18 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
     let controller = new AbortController();
     const ownerByKey = new Map<string, LifecycleOwner>();
     await this.acquire(identity, options, controller, ownerByKey);
+    const precedingOperations = [...ownerByKey.values()].flatMap(
+      (owner) => owner.precedingOperations,
+    );
     let currentIdentity = identity;
     let currentOperation = options.operation;
     let reservationSignal = options.signal;
     let released = false;
 
     return {
+      get precedingOperations() {
+        return precedingOperations;
+      },
       get signal() {
         return controller.signal;
       },
@@ -209,6 +215,7 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
           owner.release();
           throw new ActionableError("Cannot bind a released device lifecycle reservation");
         }
+        precedingOperations.push(...owner.precedingOperations);
         ownerByKey.set(nextKey, owner);
         currentIdentity = nextIdentity;
         if (mustRevalidate && currentOperation !== "teardown") {
@@ -311,7 +318,7 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
     if (options.signal?.aborted) {
       throw reservationCancellationError(options.signal, options.operation);
     }
-    const state = this.states.get(key) ?? { identity, waiters: [] };
+    const state = this.states.get(key) ?? { identity, waiters: [], released: [] };
     this.states.set(key, state);
     if (!state.owner) {
       return this.assignOwner(key, state, options.operation, controller);
@@ -344,7 +351,13 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
     let waiter: LifecycleWaiter | undefined;
     try {
       return await new Promise<LifecycleOwner>((resolve, reject) => {
-        waiter = { operation: options.operation, controller, resolve, reject };
+        waiter = {
+          releasedFrom: state.released.length,
+          operation: options.operation,
+          controller,
+          resolve,
+          reject,
+        };
         if (options.operation === "teardown") {
           const firstNormal = state.waiters.findIndex(
             (candidate) => candidate.operation !== "teardown",
@@ -388,9 +401,11 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
     state: LifecycleState,
     operation: VirtualDeviceLifecycleOperation,
     controller: AbortController,
+    precedingOperations: readonly VirtualDeviceLifecycleOperation[] = [],
   ): LifecycleOwner {
     let released = false;
     const owner: LifecycleOwner = {
+      precedingOperations,
       operation,
       controller,
       release: () => {
@@ -398,9 +413,18 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
           return;
         }
         released = true;
+        state.released.push(owner.operation);
         const next = state.waiters.shift();
         if (next) {
-          next.resolve(this.assignOwner(key, state, next.operation, next.controller));
+          next.resolve(
+            this.assignOwner(
+              key,
+              state,
+              next.operation,
+              next.controller,
+              state.released.slice(next.releasedFrom),
+            ),
+          );
           return;
         }
         state.owner = undefined;

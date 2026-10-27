@@ -79,7 +79,7 @@ describe("formatSwipeOnMessage", () => {
 // already outcome-gated but the envelope never set `isError`, so a conforming
 // client still saw an ordinary result on a failed swipe.
 describe("swipeOnHandler (registered handler wiring)", () => {
-  const fakeDevice = { deviceId: "fake", platform: "android" } as unknown as BootedDevice;
+  const fakeDevice: BootedDevice = { deviceId: "fake", name: "fake", platform: "android" };
   const args: SwipeOnArgs = { direction: "up", platform: "android" };
 
   afterEach(() => {

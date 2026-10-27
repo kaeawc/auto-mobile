@@ -1,6 +1,5 @@
-import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
+import { ExitedChildProcess } from "../helpers/exitedChildProcess";
 import { expect, test } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -11,6 +10,7 @@ import {
   LaggingShutdownManager,
   KillTrackingShutdownManager,
   setup,
+  setupWith,
   setupPassiveRestart,
   setupAwaitingOwner,
   flush,
@@ -210,7 +210,7 @@ test("a resolved old-serial replacement keeps recovery pending despite another u
 });
 
 test("active emulator loss adopts a same-AVD replacement at a new serial", async () => {
-  const { sessions, manager, pool, captured } = await setup(new KillTrackingShutdownManager());
+  const { sessions, manager, pool, captured } = await setupWith(new KillTrackingShutdownManager());
   try {
     const returned = { ...original, deviceId: "emulator-5556" };
     manager.bootedDevices = [returned];
@@ -229,7 +229,7 @@ test("active emulator loss adopts a same-AVD replacement at a new serial", async
 });
 
 test("active emulator loss rebinds a pooled same-AVD replacement at a new serial", async () => {
-  const { sessions, manager, pool, captured } = await setup(new KillTrackingShutdownManager());
+  const { sessions, manager, pool, captured } = await setupWith(new KillTrackingShutdownManager());
   try {
     const returned = { ...original, deviceId: "emulator-5556" };
     manager.bootedDevices = [returned];
@@ -246,17 +246,10 @@ test("active emulator loss rebinds a pooled same-AVD replacement at a new serial
 });
 
 test("active emulator loss adopts a new serial after its tracked process exits", async () => {
-  const { sessions, manager, pool, captured } = await setup(new KillTrackingShutdownManager());
+  const { sessions, manager, pool, captured } = await setupWith(new KillTrackingShutdownManager());
   try {
-    const exitedProcess = {
-      pid: 42,
-      exitCode: 1,
-      signalCode: null,
-      kill: () => {
-        throw new Error("An exited process must not be killed");
-      },
-    } as unknown as ChildProcess;
-    poolInternals(pool).startedDeviceProcesses.set(original.deviceId, exitedProcess);
+    const exitedProcess = new ExitedChildProcess();
+    pool.testHooks.startedDeviceProcesses.set(original.deviceId, exitedProcess);
     const returned = { ...original, deviceId: "emulator-5556" };
     manager.bootedDevices = [returned];
     await expect(

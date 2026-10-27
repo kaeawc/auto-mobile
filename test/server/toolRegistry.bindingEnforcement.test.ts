@@ -1,6 +1,6 @@
-import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
@@ -29,7 +29,7 @@ import {
   type InputDeviceOwnedError,
 } from "../../src/daemon/inputDeviceOwnership";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -83,10 +83,10 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
         },
       },
     });
-    const devices = new FakeDeviceSessionManager();
+    const devices = new FakeDeviceReadiness();
     devices.setConnectedDevices([slotA, slotB, free]);
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: devices });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { async recordToolCall(): Promise<void> {} },
     });
@@ -474,7 +474,7 @@ describe("platform-only calls on a bound daemon connection", () => {
 
   function arrangedEach2<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each<T>([...table])(
         name,
         async (row: T) => {
           await arrangeHarness2();

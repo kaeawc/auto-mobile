@@ -103,8 +103,7 @@ run_git show "$HEAD_SHA:package.json" > "$work_dir/head-package.json"
 # these written keys; update both together. Canonical JSON ignores formatter changes.
 package_keys='["dependencies","devDependencies","bundledDependencies"]'
 # $keys is a jq variable, not a shell expansion.
-# shellcheck disable=SC2016
-package_filter='delpaths($keys | map([.]))'
+package_filter="delpaths(\$keys | map([.]))"
 if ! head_package="$(jq -S -c --argjson keys "$package_keys" "$package_filter" "$work_dir/head-package.json")" ||
    ! artifact_package="$(jq -S -c --argjson keys "$package_keys" "$package_filter" "$PINS_DIR/package.json")"; then
   echo '::error::Unable to compare artifact package.json with the PR head.'

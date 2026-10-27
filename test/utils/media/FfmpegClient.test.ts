@@ -53,7 +53,7 @@ describe("FfmpegClient", () => {
     const client = new DefaultFfmpegClient({
       binaryPath: "/tools/ffmpeg",
       spawn: (binary, args, options) => {
-        calls.push({ binary, args, stdio: options.stdio });
+        calls.push({ binary, args, stdio: options?.stdio });
         return process;
       },
     });

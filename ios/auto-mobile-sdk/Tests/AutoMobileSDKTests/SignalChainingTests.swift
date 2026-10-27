@@ -1,6 +1,3 @@
-// swiftlint:disable force_unwrapping
-// Force-unwrap is idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
-
 @testable import AutoMobileSDK
 import os
 import XCTest
@@ -225,7 +222,7 @@ final class SignalChainingTests: XCTestCase {
 
     // MARK: - Install / uninstall against a fake kernel
 
-    func testInstallSavesFullPreviousActionAndRegistersSigInfoHandler() {
+    func testInstallSavesFullPreviousActionAndRegistersSigInfoHandler() throws {
         let previous = sigInfoAction(recordingSigInfoHandler, flags: SA_ONSTACK | SA_NODEFER, mask: 0x42)
         kernel.actions[SIGUSR1] = previous
         let crashes = makeCrashes()
@@ -239,7 +236,7 @@ final class SignalChainingTests: XCTestCase {
         XCTAssertEqual(raw(saved.__sigaction_u.__sa_sigaction), raw(recordingSigInfoHandler))
         XCTAssertEqual(table.slotState[Int(SIGUSR1)], 1)
 
-        let installed = kernel.actions[SIGUSR1]!
+        let installed = try XCTUnwrap(kernel.actions[SIGUSR1])
         XCTAssertTrue(isOwnSignalAction(installed))
         XCTAssertEqual(installed.sa_flags, SA_SIGINFO | SA_ONSTACK | SA_NODEFER)
         XCTAssertEqual(installed.sa_mask, 0x42, "the previous action's blocked-signal mask is kept")
@@ -264,7 +261,7 @@ final class SignalChainingTests: XCTestCase {
         XCTAssertEqual(raw(saved.__sigaction_u.__sa_sigaction), raw(recordingSigInfoHandler))
     }
 
-    func testUninstallRestoresSavedActionsWhenOursIsStillCurrent() {
+    func testUninstallRestoresSavedActionsWhenOursIsStillCurrent() throws {
         let previous = sigInfoAction(recordingSigInfoHandler, flags: SA_ONSTACK, mask: 0x7)
         kernel.actions[SIGUSR1] = previous
         let crashes = makeCrashes()
@@ -272,7 +269,7 @@ final class SignalChainingTests: XCTestCase {
 
         crashes.uninstallSignalHandlers()
 
-        let restored = kernel.actions[SIGUSR1]!
+        let restored = try XCTUnwrap(kernel.actions[SIGUSR1])
         XCTAssertEqual(raw(restored.__sigaction_u.__sa_sigaction), raw(recordingSigInfoHandler))
         XCTAssertEqual(restored.sa_flags, previous.sa_flags)
         XCTAssertEqual(restored.sa_mask, 0x7)
@@ -281,7 +278,7 @@ final class SignalChainingTests: XCTestCase {
         XCTAssertEqual(autoMobileSignalTable.recording.pointee, 0)
     }
 
-    func testUninstallDoesNotClobberHandlerInstalledAfterOurs() {
+    func testUninstallDoesNotClobberHandlerInstalledAfterOurs() throws {
         kernel.actions[SIGUSR1] = sigInfoAction(recordingSigInfoHandler)
         let crashes = makeCrashes()
         crashes.installSignalHandlers()
@@ -290,7 +287,10 @@ final class SignalChainingTests: XCTestCase {
 
         crashes.uninstallSignalHandlers()
 
-        XCTAssertEqual(raw(kernel.actions[SIGUSR1]!.__sigaction_u.__sa_sigaction), raw(otherSigInfoHandler))
+        XCTAssertEqual(
+            try raw(XCTUnwrap(kernel.actions[SIGUSR1]).__sigaction_u.__sa_sigaction),
+            raw(otherSigInfoHandler)
+        )
         // Only the slot that is still ours (SIGUSR2) was written back.
         XCTAssertEqual(kernel.writes.count, writesBefore + 1)
         XCTAssertEqual(kernel.writes.last?.signal, SIGUSR2)
@@ -299,7 +299,7 @@ final class SignalChainingTests: XCTestCase {
         XCTAssertEqual(autoMobileSignalTable.recording.pointee, 0, "dormant forwarder must not record")
     }
 
-    func testReinstallAfterDormantUninstallReactivatesInPlaceWithoutCycle() {
+    func testReinstallAfterDormantUninstallReactivatesInPlaceWithoutCycle() throws {
         kernel.actions[SIGUSR1] = sigInfoAction(recordingSigInfoHandler)
         let crashes = makeCrashes()
         crashes.installSignalHandlers()
@@ -308,7 +308,10 @@ final class SignalChainingTests: XCTestCase {
 
         crashes.installSignalHandlers()
 
-        XCTAssertEqual(raw(kernel.actions[SIGUSR1]!.__sigaction_u.__sa_sigaction), raw(otherSigInfoHandler))
+        XCTAssertEqual(
+            try raw(XCTUnwrap(kernel.actions[SIGUSR1]).__sigaction_u.__sa_sigaction),
+            raw(otherSigInfoHandler)
+        )
         let saved = autoMobileSignalTable.previousActions[Int(SIGUSR1)]
         XCTAssertEqual(
             raw(saved.__sigaction_u.__sa_sigaction),
@@ -316,7 +319,7 @@ final class SignalChainingTests: XCTestCase {
             "the foreign reporter must not become our predecessor"
         )
         XCTAssertEqual(autoMobileSignalTable.recording.pointee, 1)
-        XCTAssertTrue(isOwnSignalAction(kernel.actions[SIGUSR2]!), "restored slot is reinstalled")
+        XCTAssertTrue(try isOwnSignalAction(XCTUnwrap(kernel.actions[SIGUSR2])), "restored slot is reinstalled")
     }
 
     func testUninstallWithoutInstallTouchesNothing() {
@@ -325,7 +328,7 @@ final class SignalChainingTests: XCTestCase {
         XCTAssertTrue(kernel.writes.isEmpty)
     }
 
-    func testResetUninstallsSignalHandlersEvenWhenNeverInitialized() {
+    func testResetUninstallsSignalHandlersEvenWhenNeverInitialized() throws {
         kernel.actions[SIGUSR1] = sigInfoAction(recordingSigInfoHandler)
         let crashes = makeCrashes()
         crashes.installSignalHandlers()
@@ -333,7 +336,10 @@ final class SignalChainingTests: XCTestCase {
 
         crashes.reset()
 
-        XCTAssertEqual(raw(kernel.actions[SIGUSR1]!.__sigaction_u.__sa_sigaction), raw(recordingSigInfoHandler))
+        XCTAssertEqual(
+            try raw(XCTUnwrap(kernel.actions[SIGUSR1]).__sigaction_u.__sa_sigaction),
+            raw(recordingSigInfoHandler)
+        )
     }
 
     func testFailedInstallLeavesNoSavedSlot() {
@@ -587,7 +593,7 @@ final class SignalChainingTests: XCTestCase {
 
     // MARK: - Re-install after a later handler vanished
 
-    func testReinstallsWhenALaterHandlerWasRemovedWithoutChaining() {
+    func testReinstallsWhenALaterHandlerWasRemovedWithoutChaining() throws {
         kernel.actions[SIGUSR1] = sigInfoAction(recordingSigInfoHandler)
         let crashes = makeCrashes()
         crashes.installSignalHandlers()
@@ -597,7 +603,10 @@ final class SignalChainingTests: XCTestCase {
 
         crashes.installSignalHandlers()
 
-        XCTAssertTrue(isOwnSignalAction(kernel.actions[SIGUSR1]!), "nothing points at us any more: install again")
+        XCTAssertTrue(
+            try isOwnSignalAction(XCTUnwrap(kernel.actions[SIGUSR1])),
+            "nothing points at us any more: install again"
+        )
         XCTAssertEqual(autoMobileSignalTable.slotState[Int(SIGUSR1)], 1)
         guard case .restoreDefaultAndReraise = chainAction(
             forPrevious: autoMobileSignalTable.previousActions[Int(SIGUSR1)]
@@ -606,7 +615,7 @@ final class SignalChainingTests: XCTestCase {
         }
     }
 
-    func testReinstallsWhenThePredecessorWasRestoredDirectly() {
+    func testReinstallsWhenThePredecessorWasRestoredDirectly() throws {
         kernel.actions[SIGUSR1] = sigInfoAction(recordingSigInfoHandler)
         let crashes = makeCrashes()
         crashes.installSignalHandlers()
@@ -616,7 +625,7 @@ final class SignalChainingTests: XCTestCase {
 
         crashes.installSignalHandlers()
 
-        XCTAssertTrue(isOwnSignalAction(kernel.actions[SIGUSR1]!))
+        XCTAssertTrue(try isOwnSignalAction(XCTUnwrap(kernel.actions[SIGUSR1])))
         let saved = autoMobileSignalTable.previousActions[Int(SIGUSR1)]
         XCTAssertEqual(raw(saved.__sigaction_u.__sa_sigaction), raw(recordingSigInfoHandler))
     }

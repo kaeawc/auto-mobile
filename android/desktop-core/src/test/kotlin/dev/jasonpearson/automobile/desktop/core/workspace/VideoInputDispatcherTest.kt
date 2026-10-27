@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import dev.jasonpearson.automobile.desktop.core.control.TestSnapshotSpec
 import dev.jasonpearson.automobile.desktop.core.control.testSnapshot
 import dev.jasonpearson.automobile.desktop.core.daemon.DEVICE_OWNED_BY_OTHER_SESSION_CODE
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
@@ -49,7 +50,10 @@ class VideoInputDispatcherTest {
       platform = { platform },
       deviceId = deviceId,
       tracer = InteractionLatencyTracer(),
-      ioDispatcher = UnconfinedTestDispatcher(scheduler),
+      options =
+        VideoInputOptions(
+          ioDispatcher = UnconfinedTestDispatcher(scheduler),
+        ),
     )
 
   @Test
@@ -93,8 +97,11 @@ class VideoInputDispatcherTest {
         platform = { "android" },
         deviceId = "emulator-5554",
         tracer = InteractionLatencyTracer(),
-        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-        onDeviceHeldElsewhere = { reports++ },
+        options =
+          VideoInputOptions(
+            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+            onDeviceHeldElsewhere = { reports++ },
+          ),
       )
 
     dispatcher.tap(inBounds)
@@ -119,8 +126,11 @@ class VideoInputDispatcherTest {
         platform = { "android" },
         deviceId = "emulator-5554",
         tracer = InteractionLatencyTracer(),
-        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-        onDeviceHeldElsewhere = { reports++ },
+        options =
+          VideoInputOptions(
+            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+            onDeviceHeldElsewhere = { reports++ },
+          ),
       )
 
     dispatcher.tap(inBounds)
@@ -144,7 +154,10 @@ class VideoInputDispatcherTest {
         platform = { "android" },
         deviceId = "emulator-5554",
         tracer = InteractionLatencyTracer(),
-        ioDispatcher = StandardTestDispatcher(testScheduler),
+        options =
+          VideoInputOptions(
+            ioDispatcher = StandardTestDispatcher(testScheduler),
+          ),
       )
     val results = (0 until 100).map { d.tap(DevicePoint(x = it, y = it, inBounds = true)) }
     advanceUntilIdle()
@@ -174,7 +187,10 @@ class VideoInputDispatcherTest {
           platform = { "android" },
           deviceId = "emulator-5554",
           tracer = InteractionLatencyTracer(),
-          ioDispatcher = StandardTestDispatcher(testScheduler),
+          options =
+            VideoInputOptions(
+              ioDispatcher = StandardTestDispatcher(testScheduler),
+            ),
         )
       d.tap(DevicePoint(x = 1, y = 1, inBounds = true))
       d.tap(DevicePoint(x = 2, y = 2, inBounds = true))
@@ -296,7 +312,7 @@ class VideoInputDispatcherTest {
     scope
       .dispatcher(client, testScheduler)
       .swipe(
-        testSnapshot(),
+        testSnapshot(TestSnapshotSpec()),
         DevicePoint(x = 100, y = 100, inBounds = true),
         DevicePoint(x = 102, y = 101, inBounds = true),
         gestureDurationMs = 120,
@@ -314,7 +330,7 @@ class VideoInputDispatcherTest {
     scope
       .dispatcher(client, testScheduler)
       .swipe(
-        testSnapshot(),
+        testSnapshot(TestSnapshotSpec()),
         DevicePoint(x = 100, y = 100, inBounds = true),
         DevicePoint(x = 700, y = 1500, inBounds = true),
         gestureDurationMs = 90,
@@ -351,8 +367,11 @@ class VideoInputDispatcherTest {
       platform = { "android" },
       deviceId = "emulator-5554",
       tracer = InteractionLatencyTracer(),
-      ioDispatcher = UnconfinedTestDispatcher(scheduler),
-      streamingEnabled = true,
+      options =
+        VideoInputOptions(
+          ioDispatcher = UnconfinedTestDispatcher(scheduler),
+          streamingEnabled = true,
+        ),
     )
 
   @Test
@@ -362,7 +381,7 @@ class VideoInputDispatcherTest {
     val handle =
       scope
         .dispatcher(FakeAutoMobileClient(), testScheduler)
-        .beginGestureStream(testSnapshot(), inBounds)
+        .beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds)
     assertNull(handle, "with the flag off the pane falls back to the atomic swipe")
     scope.cancel()
   }
@@ -375,7 +394,7 @@ class VideoInputDispatcherTest {
       assertNotNull(
         scope
           .streamingDispatcher(client, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds),
+          .beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds),
       )
     handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
     handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
@@ -412,7 +431,7 @@ class VideoInputDispatcherTest {
       assertNotNull(
         scope
           .streamingDispatcher(client, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds),
+          .beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds),
       )
     handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
     handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
@@ -455,11 +474,15 @@ class VideoInputDispatcherTest {
           platform = { "android" },
           deviceId = "emulator-5554",
           tracer = InteractionLatencyTracer(),
-          ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-          streamingEnabled = true,
-          onDeviceHeldElsewhere = { reports++ },
+          options =
+            VideoInputOptions(
+              ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+              streamingEnabled = true,
+              onDeviceHeldElsewhere = { reports++ },
+            ),
         )
-      val handle = assertNotNull(dispatcher.beginGestureStream(testSnapshot(), inBounds))
+      val handle =
+        assertNotNull(dispatcher.beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds))
       handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
       handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
       advanceUntilIdle()
@@ -479,13 +502,13 @@ class VideoInputDispatcherTest {
     assertNotNull(
         scope
           .streamingDispatcher(clientA, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds),
+          .beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds),
       )
       .end(DevicePoint(x = 360, y = 1400, inBounds = true))
     assertNotNull(
         scope
           .streamingDispatcher(clientB, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds),
+          .beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds),
       )
       .end(DevicePoint(x = 360, y = 1400, inBounds = true))
     advanceUntilIdle()
@@ -511,7 +534,7 @@ class VideoInputDispatcherTest {
       assertNotNull(
         scope
           .streamingDispatcher(client, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds),
+          .beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds),
       )
     handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
     handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))

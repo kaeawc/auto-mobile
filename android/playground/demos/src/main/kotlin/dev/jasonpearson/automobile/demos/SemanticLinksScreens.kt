@@ -123,38 +123,7 @@ fun ComposeSemanticLinksDemoScreen(onNavigateBack: () -> Unit) {
         )
       },
     ) { paddingValues ->
-      Column(
-        modifier =
-          Modifier.fillMaxSize()
-            .padding(paddingValues)
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState())
-            .semantics {
-              testTag = "semantic_links_compose_content"
-              testTagsAsResourceId = true
-            },
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-      ) {
-        Text(
-          text = "This screen uses AnnotatedString and LinkAnnotation links.",
-          style = MaterialTheme.typography.bodyLarge,
-        )
-        Text(
-          text = inlineLinks,
-          style = MaterialTheme.typography.bodyLarge,
-          modifier = Modifier.semantics { testTag = "semantic_links_compose_paragraph" },
-        )
-        Text(
-          text = standaloneLink,
-          style = MaterialTheme.typography.bodyLarge,
-          modifier = Modifier.semantics { testTag = "semantic_links_compose_standalone" },
-        )
-        Text(
-          text = "Last activated: $lastActivated",
-          style = MaterialTheme.typography.titleMedium,
-          modifier = Modifier.semantics { testTag = "semantic_links_result" },
-        )
-      }
+      ComposeLinksContent(paddingValues, inlineLinks, standaloneLink, lastActivated)
     }
   }
 }
@@ -176,13 +145,17 @@ private fun View.bindXmlSemanticLinks() {
   findViewById<TextView>(R.id.semantic_links_xml_paragraph).apply {
     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
     setTextColor(textColor)
-    text = createXmlInlineLinks { result.text = "Last activated: $it" }
+    text = createXmlInlineLinks {
+      result.text = resources.getString(R.string.semantic_links_last_activated, it)
+    }
     movementMethod = LinkMovementMethod.getInstance()
   }
   findViewById<TextView>(R.id.semantic_links_xml_standalone).apply {
     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
     setTextColor(textColor)
-    text = createXmlStandaloneLink { result.text = "Last activated: $it" }
+    text = createXmlStandaloneLink {
+      result.text = resources.getString(R.string.semantic_links_last_activated, it)
+    }
     movementMethod = LinkMovementMethod.getInstance()
   }
 }
@@ -257,4 +230,45 @@ private class ResultClickableSpan(
   private val onActivated: (String) -> Unit,
 ) : ClickableSpan() {
   override fun onClick(widget: View) = onActivated(result)
+}
+
+@Composable
+private fun ComposeLinksContent(
+  paddingValues: androidx.compose.foundation.layout.PaddingValues,
+  inlineLinks: AnnotatedString,
+  standaloneLink: AnnotatedString,
+  lastActivated: String,
+) {
+  Column(
+    modifier =
+      Modifier.fillMaxSize()
+        .padding(paddingValues)
+        .padding(16.dp)
+        .verticalScroll(rememberScrollState())
+        .semantics {
+          testTag = "semantic_links_compose_content"
+          testTagsAsResourceId = true
+        },
+    verticalArrangement = Arrangement.spacedBy(16.dp),
+  ) {
+    Text(
+      text = "This screen uses AnnotatedString and LinkAnnotation links.",
+      style = MaterialTheme.typography.bodyLarge,
+    )
+    Text(
+      text = inlineLinks,
+      style = MaterialTheme.typography.bodyLarge,
+      modifier = Modifier.semantics { testTag = "semantic_links_compose_paragraph" },
+    )
+    Text(
+      text = standaloneLink,
+      style = MaterialTheme.typography.bodyLarge,
+      modifier = Modifier.semantics { testTag = "semantic_links_compose_standalone" },
+    )
+    Text(
+      text = "Last activated: $lastActivated",
+      style = MaterialTheme.typography.titleMedium,
+      modifier = Modifier.semantics { testTag = "semantic_links_result" },
+    )
+  }
 }

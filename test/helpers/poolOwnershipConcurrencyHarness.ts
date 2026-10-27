@@ -1,5 +1,5 @@
 import { commitAcquisition, type AcquisitionReceipt } from "../../src/daemon/acquisitionReceipt";
-import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
+import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/wire/constants";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { holderOf } from "../../src/daemon/deviceBinding";
 import {
@@ -9,7 +9,7 @@ import {
 } from "../../src/daemon/inputDeviceOwnership";
 import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import type { BindingKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
-import { isReadOnlySqlQuery } from "../../src/server/databaseTools";
+import { isReadOnlySqlQuery } from "../../src/features/database/sqlQueryClassification";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -23,7 +23,7 @@ import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import {
   PLAN_AUTO_RELEASE_REASON,
   SessionManager,
@@ -314,17 +314,9 @@ export interface RunResult {
  * its acquired sets), read without side effects. Private state, read only here.
  */
 function autolockConnections(pool: DevicePool): Set<string> {
-  const manager: unknown = Reflect.get(pool, "autolockManager");
-  const routes: unknown = manager ? Reflect.get(manager, "mcpSessionAutolockMap") : undefined;
-  const acquired: unknown = manager
-    ? Reflect.get(manager, "mcpSessionAcquiredAutolocks")
-    : undefined;
-  if (!(routes instanceof Map) || !(acquired instanceof Map)) {
-    throw new Error("DeviceAutolockManager no longer keeps its MCP route maps; update the harness");
-  }
-  return new Set(
-    [...routes.keys(), ...acquired.keys()].filter((c): c is string => typeof c === "string"),
-  );
+  const { mcpSessionAutolockMap, mcpSessionAcquiredAutolocks } =
+    pool.testHooks.autolockManager.testHooks;
+  return new Set([...mcpSessionAutolockMap.keys(), ...mcpSessionAcquiredAutolocks.keys()]);
 }
 
 /**
@@ -346,7 +338,7 @@ export function isExpectedRefusal(error: unknown): boolean {
  * getSession() and so can start a lazy-expiry release mid-check. Private state, read only here.
  */
 function connectionOwnership(pool: DevicePool): ReadonlyMap<string, ReadonlySet<string>> {
-  const raw: unknown = Reflect.get(pool, "mcpSessionAcquiredDeviceSessions");
+  const raw: unknown = pool.testHooks.mcpSessionAcquiredDeviceSessions;
   if (!(raw instanceof Map)) {
     throw new Error(
       "DevicePool no longer keeps mcpSessionAcquiredDeviceSessions; update the harness",
@@ -1298,12 +1290,9 @@ class OwnershipWorld {
         this.discovery.setBootedDevices("android", this.onlineDevices());
         const session = reservation.session;
         if (session && session.assignedDevice === device.deviceId) {
-          await this.manager.releaseSessionIfOwned(
-            session.sessionId,
-            session,
-            device.deviceId,
-            "device-killed",
-          );
+          await this.manager.releaseSession(session.sessionId, "device-killed", {
+            expectedOwner: { session: session, deviceId: device.deviceId },
+          });
         }
         if (this.pool.getDevice(device.deviceId) === reservation.device) {
           await this.pool.retireDeviceForShutdown(reservation.device);

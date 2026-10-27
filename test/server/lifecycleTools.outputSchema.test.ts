@@ -23,6 +23,7 @@ import { registerDeviceTools } from "../../src/server/deviceTools";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
+import { buildObserveResult } from "../helpers/observeFixture";
 import { createAppToolsHarness } from "../helpers/appToolsHarness";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -30,12 +31,13 @@ isolateToolRegistry();
 
 const interactionDeps: InteractionToolDependencies = {};
 const appTools = createAppToolsHarness();
-const createObserveResult = (): ObserveResult => ({
-  updatedAt: 1,
-  screenSize: { width: 1080, height: 1920 },
-  systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-  viewHierarchy: { hierarchy: { node: {} } },
-});
+const createObserveResult = (): ObserveResult =>
+  buildObserveResult({
+    updatedAt: 1,
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy: { hierarchy: { node: {} } },
+  });
 
 const device: BootedDevice = { name: "fake", deviceId: "emulator-5554", platform: "android" };
 

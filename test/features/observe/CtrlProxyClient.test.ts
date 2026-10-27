@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import type { CtrlSocket } from "../../../src/features/observe/shared/types";
 import {
   afterAll,
@@ -148,31 +149,33 @@ describe("AndroidCtrlProxyClient", function () {
 
     // Create fake ADB instance
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     // Cached hierarchy liveness checks use process records; default cached test
     // fixtures represent a still-running app unless a test explicitly overrides it.
-    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
-      stdout: [
-        "1234:com.example.app/u0a123",
-        "1235:com.example/u0a123",
-        "1236:com.example.sdk/u0a123",
-        "1237:com.example.noneofthesdk/u0a123",
-        "1238:com.example.nosdk/u0a123",
-        "1239:com.example.new/u0a123",
-        "1240:com.example.remove/u0a123",
-        "1241:com.example.all/u0a123",
-        "1242:com.google.android.deskclock/u0a123",
-        "1243:com.test.app/u0a123",
-      ].join("\n"),
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "shell dumpsys activity processes",
+      createExecResult(
+        [
+          "1234:com.example.app/u0a123",
+          "1235:com.example/u0a123",
+          "1236:com.example.sdk/u0a123",
+          "1237:com.example.noneofthesdk/u0a123",
+          "1238:com.example.nosdk/u0a123",
+          "1239:com.example.new/u0a123",
+          "1240:com.example.remove/u0a123",
+          "1241:com.example.all/u0a123",
+          "1242:com.google.android.deskclock/u0a123",
+          "1243:com.test.app/u0a123",
+        ].join("\n"),
+        "",
+      ),
+    );
     fakeAdb.setScreenState(true);
 
     // Create test device
     testDevice = {
       deviceId: "test-device",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 
@@ -244,9 +247,16 @@ describe("AndroidCtrlProxyClient", function () {
     });
   };
 
-  const waitForSocket = async (
-    getSocket: () => FakeWebSocket | null,
-  ): Promise<FakeWebSocket | null> => {
+  const requireBinding = <T extends object>(binding: T | null): T => {
+    if (binding === null) {
+      throw new Error("expected the screen geometry to be bound");
+    }
+    return binding;
+  };
+
+  const waitForSocket = async <T extends FakeWebSocket>(
+    getSocket: () => T | null,
+  ): Promise<T | null> => {
     for (let attempt = 0; attempt < 5; attempt++) {
       const socket = getSocket();
       if (socket) {
@@ -361,6 +371,7 @@ describe("AndroidCtrlProxyClient", function () {
     isSystem: false,
     requestedPermissions: [],
     grantedPermissions: {},
+    totalTimeMs: 0,
     ...(versionCode === undefined ? {} : { versionCode }),
   });
 
@@ -425,7 +436,7 @@ describe("AndroidCtrlProxyClient", function () {
       }
     }
     const gatedAdb = new GatedForwardAdb();
-    gatedAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    gatedAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     gatedAdb.setScreenState(true);
     let socket: FakeWebSocket | null = null;
     const factory = (url: string): CtrlSocket => {
@@ -589,7 +600,7 @@ describe("AndroidCtrlProxyClient", function () {
   const hierarchyWithScreenSize = (width: number, height: number): any => ({
     packageName: "com.example.app",
     windows: [{ bounds: { left: 0, top: 0, right: width, bottom: height } }],
-    hierarchy: { node: { $: { class: "Root" } } },
+    hierarchy: { node: { className: "Root" } },
   });
 
   /**
@@ -608,10 +619,7 @@ describe("AndroidCtrlProxyClient", function () {
   };
 
   const setAdbPngScreenshotResponse = (screenshotBase64: string = pngFrame(1, 1)): void => {
-    fakeAdb.setCommandResponse("screencap -p", {
-      stdout: `${screenshotBase64}\n`,
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse("screencap -p", createExecResult(`${screenshotBase64}\n`, ""));
   };
 
   const forwardScreenshotBinding = (
@@ -668,7 +676,7 @@ describe("AndroidCtrlProxyClient", function () {
     const streamSocket = await startStreamServerWithScreenshotSubscriber();
 
     await accessibilityServiceClient.ensureConnected();
-    const ctrlProxySocket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+    const ctrlProxySocket = await waitForSocket(getSocket);
     await waitForSocketOpen(ctrlProxySocket);
     if (!ctrlProxySocket) {
       throw new Error("Expected capturing CtrlProxy socket");
@@ -678,10 +686,7 @@ describe("AndroidCtrlProxyClient", function () {
   };
 
   test("reports ADB screencap fallback screenshots as PNG fallback with reason", async () => {
-    fakeAdb.setCommandResponse("screencap -p", {
-      stdout: `${pngFrame(1, 1)}\n`,
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse("screencap -p", createExecResult(`${pngFrame(1, 1)}\n`, ""));
 
     const result = await accessibilityServiceClient.captureScreenshotForObservationStream();
 
@@ -918,7 +923,7 @@ describe("AndroidCtrlProxyClient", function () {
       setAdbPngScreenshotResponse();
 
       await accessibilityServiceClient.ensureConnected();
-      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+      const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       if (!socket) {
         throw new Error("Expected capturing CtrlProxy socket");
@@ -1050,7 +1055,7 @@ describe("AndroidCtrlProxyClient", function () {
       expect(client.a11yScreenshotSupported).toBe(false);
 
       // Exercise the same successful-connection hook used after a replacement/reconnect.
-      client["onConnectionEstablished"]();
+      client.testHooks.onConnectionEstablished();
       expect(client.a11yScreenshotSupported).toBe(null);
 
       const requestsBefore = countScreenshotRequests(socket);
@@ -2495,7 +2500,7 @@ describe("AndroidCtrlProxyClient", function () {
       testClient.handleHierarchyUpdate({
         updatedAt: 1,
         packageName: "com.example.app",
-        hierarchy: { node: { $: { class: "Root" } } },
+        hierarchy: { node: { className: "Root" } },
       });
       expect(testClient.hasCachedHierarchy()).toBe(true);
 
@@ -3452,7 +3457,7 @@ describe("AndroidCtrlProxyClient", function () {
           h.push("newer live", "foreign-request", 200);
           h.push("older explicit", h.requestIds()[0]!, 100);
           expect((await pending)?.hierarchy.hierarchy.text).toBe("older explicit");
-          expect(h.client.cachedHierarchy?.hierarchy.hierarchy.text).toBe("newer live");
+          expect(h.client.testHooks.cachedHierarchy()?.hierarchy.hierarchy.text).toBe("newer live");
           expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
           expect(h.timer.getPendingTimeouts()).not.toContain(1000);
           expect(h.pushes).toHaveBeenCalledTimes(1);
@@ -4126,8 +4131,8 @@ describe("AndroidCtrlProxyClient", function () {
         timer: testTimer,
       });
       const DIGEST = "a".repeat(64);
-      fakeAdb.setCommandResponse("pm path", { stdout: "package:/a/base.apk", stderr: "" });
-      fakeAdb.setCommandResponse("sha256sum", { stdout: `${DIGEST}  /a/base.apk`, stderr: "" });
+      fakeAdb.setCommandResponse("pm path", createExecResult("package:/a/base.apk", ""));
+      fakeAdb.setCommandResponse("sha256sum", createExecResult(`${DIGEST}  /a/base.apk`, ""));
       const pkgSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue(
         packageInfoResult(true, 5),
       );
@@ -4204,8 +4209,8 @@ describe("AndroidCtrlProxyClient", function () {
         timer: testTimer,
       });
       const DIGEST = "b".repeat(64);
-      fakeAdb.setCommandResponse("pm path", { stdout: "package:/a/base.apk", stderr: "" });
-      fakeAdb.setCommandResponse("sha256sum", { stdout: `${DIGEST}  /a/base.apk`, stderr: "" });
+      fakeAdb.setCommandResponse("pm path", createExecResult("package:/a/base.apk", ""));
+      fakeAdb.setCommandResponse("sha256sum", createExecResult(`${DIGEST}  /a/base.apk`, ""));
       let releasePackageInfo: () => void = () => {};
       const pkgSpy = spyOn(testClient, "requestPackageInfo").mockImplementation(
         () =>
@@ -4390,21 +4395,23 @@ describe("AndroidCtrlProxyClient", function () {
       const result =
         accessibilityServiceClient.convertToViewHierarchyResult(accessibilityHierarchy);
 
-      expect(result.hierarchy.text).toBe("6:43 AM");
-      expect(result.hierarchy["content-desc"]).toBe("6:43 AM");
-      expect(result.hierarchy.class).toBe("android.widget.TextClock");
-      expect(result.hierarchy.className).toBe("android.widget.TextClock");
+      expect(result.hierarchy).toHaveProperty("text", "6:43 AM");
+      expect(result.hierarchy).toHaveProperty("content-desc", "6:43 AM");
+      expect(result.hierarchy).toHaveProperty("class", "android.widget.TextClock");
+      expect(result.hierarchy).toHaveProperty("className", "android.widget.TextClock");
       expect(result.hierarchy.bounds).toEqual({
         left: 175,
         top: 687,
         right: 692,
         bottom: 973,
       });
-      expect(result.hierarchy.clickable).toBeUndefined();
-      expect(result.hierarchy.enabled).toBe("true");
-      expect(result.hierarchy.occlusionState).toBe("partial");
-      expect(result.hierarchy.occludedBy).toBe("Debug menu");
-      expect(result.hierarchy.occludedByViewId).toBe("stable-debug-menu");
+      expect(
+        "clickable" in result.hierarchy ? result.hierarchy.clickable : undefined,
+      ).toBeUndefined();
+      expect(result.hierarchy).toHaveProperty("enabled", "true");
+      expect(result.hierarchy).toHaveProperty("occlusionState", "partial");
+      expect(result.hierarchy).toHaveProperty("occludedBy", "Debug menu");
+      expect(result.hierarchy).toHaveProperty("occludedByViewId", "stable-debug-menu");
       expect(result.intentChooserDetected).toBe(true);
       expect(result.notificationPermissionDetected).toBe(true);
       expect(result.contentHiddenRegions).toEqual([
@@ -4416,10 +4423,13 @@ describe("AndroidCtrlProxyClient", function () {
       ]);
 
       // Check child node conversion
+      if (!result.hierarchy.node) {
+        throw new Error("Expected converted child");
+      }
       expect(typeof result.hierarchy.node).toBe("object");
       expect(result.hierarchy.node.text).toBe("Child Node");
       expect(result.hierarchy.node.class).toBe("android.widget.TextView");
-      expect(result.hierarchy.node.className).toBe("android.widget.TextView");
+      expect(result.hierarchy.node).toHaveProperty("className", "android.widget.TextView");
       expect(result.hierarchy.node.bounds).toEqual({
         left: 0,
         top: 0,
@@ -4447,6 +4457,9 @@ describe("AndroidCtrlProxyClient", function () {
       const result =
         accessibilityServiceClient.convertToViewHierarchyResult(accessibilityHierarchy);
 
+      if (!result.hierarchy.node) {
+        throw new Error("Expected converted child");
+      }
       expect(typeof result.hierarchy.node).toBe("object"); // Single child should not be in array
       expect(result.hierarchy.node.text).toBe("Single Child");
       expect(result.hierarchy.node.clickable).toBe("true");
@@ -4559,7 +4572,7 @@ describe("AndroidCtrlProxyClient", function () {
       expect(rootless.screenHeight).toBe(2340);
       expect(rootless.rotation).toBe(1);
       expect(rootless.systemInsets).toEqual({ top: 24, right: 0, bottom: 48, left: 0 });
-      expect(rootless.insets?.displayCutoutInfo).toEqual({
+      expect<unknown>(rootless.insets?.displayCutoutInfo).toEqual({
         classification: "hole_punch",
         bounds: [[480, 0, 600, 120]],
       });
@@ -4619,7 +4632,7 @@ describe("AndroidCtrlProxyClient", function () {
       expect(beforeId).toStartWith(STABLE_VIEW_ID_PREFIX);
       expect(afterId).toBe(beforeId);
       // Resource-id-backed view-ids pass through untouched.
-      expect(before.hierarchy["view-id"]).toBe("com.test.app:id/root");
+      expect(before.hierarchy).toHaveProperty("view-id", "com.test.app:id/root");
     });
 
     test("rewrites accessibility-focused mirror occlusion links against the emitted hierarchy ids", function () {
@@ -4748,7 +4761,7 @@ describe("AndroidCtrlProxyClient", function () {
     });
 
     test("fresh-hierarchy wait fails fast — well under the timeout budget — when the screen is off", async function () {
-      fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+      fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
 
       // Screen off: the connection succeeds (so the fresh-data wait is actually entered), but no
       // hierarchy is ever pushed, so waitForFreshData can only exit via the periodic screen check
@@ -6886,13 +6899,12 @@ describe("AndroidCtrlProxyClient", function () {
       const socket = await startStreamServerWithScreenshotSubscriber();
 
       accessibilityServiceClient.handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
-      const boundToScreenA = accessibilityServiceClient.screenGeometry.bind();
-      expect(boundToScreenA).not.toBeNull();
+      const boundToScreenA = requireBinding(accessibilityServiceClient.screenGeometry.bind());
 
       // Screen B arrives and is forwarded while the frame is still in flight. Same resolution, so
       // the geometry cache is unchanged and the provenance stays valid — only the capture moves.
       accessibilityServiceClient.handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
-      const currentAfterB = accessibilityServiceClient.screenGeometry.bind();
+      const currentAfterB = requireBinding(accessibilityServiceClient.screenGeometry.bind());
       expect(currentAfterB.captureSequence).toBeGreaterThan(boundToScreenA.captureSequence);
 
       socket.resetWrittenData();
@@ -7003,7 +7015,7 @@ describe("AndroidCtrlProxyClient", function () {
       });
       client.invalidateCache();
       await client.ensureConnected();
-      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+      const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       if (!socket) {
         throw new Error("Expected capturing CtrlProxy socket");
@@ -7070,7 +7082,7 @@ describe("AndroidCtrlProxyClient", function () {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe(OPERATION_CANCELLED_MESSAGE);
-      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+      const socket = await waitForSocket(getSocket);
       expect(socket === null ? [] : screenshotFrames(socket)).toHaveLength(0);
       expect(fakeScheduler.noteCaptureStartedCalls).toBe(0);
 
@@ -7246,7 +7258,7 @@ describe("AndroidCtrlProxyClient", function () {
       });
       client.invalidateCache();
       await client.ensureConnected();
-      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+      const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       if (!socket) {
         throw new Error("Expected capturing CtrlProxy socket");

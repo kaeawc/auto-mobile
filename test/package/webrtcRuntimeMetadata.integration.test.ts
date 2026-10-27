@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 describe("packaged WebRTC runtime metadata", () => {
-  test("a bundled WebRTC startup path reaches WHIP publish", { timeout: 15_000 }, async () => {
+  test("a bundled WebRTC startup path reaches WHIP publish", async () => {
     const workspaceScratch = join(import.meta.dir, "../../scratch");
     await mkdir(workspaceScratch, { recursive: true });
     const dir = await mkdtemp(join(workspaceScratch, "webrtc-bundle-"));
@@ -93,5 +93,5 @@ console.log("ok");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });

@@ -1,9 +1,12 @@
-import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
+import {
+  type DeviceHealthMarkers,
+  InMemoryDeviceHealthMarkers,
+} from "../../src/daemon/deviceHealthMarkers";
 import { FakeDeviceHealthMarkers } from "../fakes/FakeDeviceHealthMarkers";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { runDeviceHealthMarkersContract } from "./DeviceHealthMarkersContract";
 
-function harness(create: (timer: FakeTimer) => InMemoryDeviceHealthMarkers) {
+function harness(create: (timer: FakeTimer) => DeviceHealthMarkers) {
   return () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(1_000);

@@ -1,21 +1,22 @@
 import { defaultDaemonContext, type DaemonContext } from "../../../daemon/daemonContext";
 import type { SessionManager } from "../../../daemon/sessionManager";
 import { isDeviceInventoryTool } from "../../../daemon/daemonMcpProxy";
-import { SessionReleaseBroadcaster } from "../../sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../../daemon/sessionReleaseBroadcast";
 import {
   getActiveDeviceSelectionFromResult,
   isDeviceSessionAcquisitionTool,
-} from "../../deviceSessionResult";
-import { resolveDirectSessionDevice } from "../../directSessionDeviceRegistry";
-import { executionTracker, sessionExecutionMetadataOf } from "../../executionTracker";
+} from "../../../daemon/deviceSessionResult";
+import { resolveDirectSessionDevice } from "../../../utils/directSessionDeviceRegistry";
+import { executionTracker, sessionExecutionMetadataOf } from "../../../daemon/executionTracker";
 import {
   isSessionOwnedByAnotherConnection,
   namedSessionAccess,
 } from "../../foreignOwnedSessionRefusal";
+import { getAbortSignal } from "../../../utils/AbortContext";
 import { sessionForToolBinding } from "../../sessionForToolBinding";
 import { ToolRegistry } from "../../toolRegistry";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../../toolSelectionTools";
-import type { ToolSelectionProfileRegistry } from "../../toolSelectionProfileRegistry";
+import type { ToolSelectionProfileRegistry } from "../../../daemon/toolSelectionProfileRegistry";
 import type { InvocationPlan } from "./invoke";
 
 /**
@@ -69,11 +70,10 @@ export async function admitNamedSession(
   );
   await defaultDaemonContext
     .requireSessionManager()
-    .admitIssuedSessionForAutomation(
-      providedSessionUuid,
-      sessionExecutionMetadataOf(execution),
-      namedSessionAccess(input.plainReadCall, namesForeignOwnedSession),
-    );
+    .admitIssuedSessionForAutomation(providedSessionUuid, sessionExecutionMetadataOf(execution), {
+      ...namedSessionAccess(input.plainReadCall, namesForeignOwnedSession),
+      signal: getAbortSignal(),
+    });
   if (namesForeignOwnedSession) {
     executionTracker.markReadOnlySessionAccess(execution.id);
   } else {
@@ -125,7 +125,7 @@ export function bindActiveDeviceResult(
       getActiveDeviceSelectionFromResult(result)?.sessionUuid ?? plan.routingSessionUuid,
     )
   ) {
-    ToolRegistry.notifyToolListChanged();
+    ToolRegistry.notifyToolSelectionChanged();
   }
 }
 
@@ -190,7 +190,7 @@ export async function bindNamedSession(
     return;
   }
   if (sessionToolBinding.bind(sessionId, providedSessionUuid)) {
-    ToolRegistry.notifyToolListChanged();
+    ToolRegistry.notifyToolSelectionChanged();
   }
   if (tool.requiresDevice && !readOnlyCall && daemonSessionManager) {
     await attachToPool(providedSessionUuid, implicitAutolockMcpSessionId);

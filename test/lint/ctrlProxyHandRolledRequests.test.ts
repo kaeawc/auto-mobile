@@ -1,8 +1,15 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
-import { Visitor, type Expression } from "oxc-parser";
-import { parseGuardSource, relativePosix, typeScriptFiles, unwrapCallee } from "./astGuard";
+import { type Expression } from "oxc-parser";
+import {
+  parseGuardSource,
+  relativePosix,
+  typeScriptFiles,
+  unwrapCallee,
+  readGuardFile,
+  GuardVisitor as Visitor,
+} from "./astGuard";
 
 const EXEMPT = new Set([
   "src/features/observe/DeviceServiceUtils.ts",
@@ -16,11 +23,11 @@ const ALLOWANCES: Readonly<Record<string, number>> = {
   // Observation-stream screenshot: stream suppression, capture binding and rate-limit stamp.
   "src/features/observe/android/AndroidScreenshotCapture.ts": 2,
   // Hierarchy streaming path: subscription, cancellation and one-shot dispatch.
-  "src/features/observe/android/CtrlProxyHierarchy.ts": 3,
+  "src/features/observe/android/AndroidHierarchyRequestSender.ts": 3,
   // Hierarchy streaming path: deadline recompute, abort, preparation and cache shaping.
   "src/features/observe/ios/CtrlProxyHierarchy.ts": 2,
   // Mock-rules push uses sendMessage's disconnected warning and lastSendAt activity stamp.
-  "src/features/observe/ios/IOSCtrlProxyClient.ts": 1,
+  "src/features/observe/ios/CtrlProxyNetworkSync.ts": 1,
 };
 
 function memberName(expression: Expression): string | undefined {
@@ -89,7 +96,7 @@ describe("CtrlProxy hand-rolled requests can only shrink", () => {
     for (const file of typeScriptFiles(path.join(root, "src/features/observe"))) {
       const relative = relativePosix(root, file);
       if (!EXEMPT.has(relative)) {
-        facts.set(relative, scan(relative, readFileSync(file, "utf8")));
+        facts.set(relative, scan(relative, readGuardFile(file)));
       }
     }
   });

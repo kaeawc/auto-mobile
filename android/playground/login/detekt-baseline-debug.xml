@@ -2,12 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ComplexCondition:LoginForm.kt:(passwordHadContent &amp;&amp; password.length &lt; 5) || (passwordBlurred &amp;&amp; loginFormState.passwordError != null)</ID>
-    <ID>ComplexCondition:LoginForm.kt:(usernameHadContent &amp;&amp; username.length &lt; 5) || (usernameBlurred &amp;&amp; loginFormState.usernameError != null)</ID>
-    <ID>CyclomaticComplexMethod:LoginForm.kt:@Composable internal fun LoginForm</ID>
-    <ID>LongMethod:LoginScreen.kt:@Composable fun LoginScreenCore</ID>
-    <ID>LongParameterList:LoginForm.kt:@Composable internal fun LoginForm</ID>
-    <ID>TooGenericExceptionCaught:LoginDataSource.kt:LoginDataSource$e: Throwable</ID>
-    <ID>UnsafeCallOnNullableType:LoginScreen.kt:loginError!!</ID>
   </CurrentIssues>
 </SmellBaseline>

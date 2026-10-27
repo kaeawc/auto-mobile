@@ -10,11 +10,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${PROJECT_ROOT}/scripts/lib/spotlight-exclude.sh"
 
 cd "${PROJECT_ROOT}"
-mkdir -p scratch
+mkdir_spotlight_excluded scratch
+spotlight_exclude_dir "${PROJECT_ROOT}"
 
-# shellcheck source=scripts/lib/shell-core.sh disable=SC1091
+# shellcheck source=scripts/lib/shell-core.sh
 source "${PROJECT_ROOT}/scripts/lib/shell-core.sh"
 ensure_node_modules "${PROJECT_ROOT}"
 

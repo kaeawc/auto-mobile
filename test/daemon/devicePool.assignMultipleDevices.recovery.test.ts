@@ -148,7 +148,7 @@ describe("DevicePool", () => {
     const manager = new FakeDeviceManager([image]);
     devicePool = makePool({
       deviceManager: manager,
-      androidDeviceReboot: { run: async () => false },
+      androidDeviceReboot: { run: async () => false, clear: () => {} },
     });
     await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
     await devicePool.releaseDevice("emulator-5554", "session-1");

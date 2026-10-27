@@ -1,7 +1,7 @@
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import {
   createFakeDaemonState,
@@ -104,13 +104,13 @@ function transport(variant: Variant, first: ReturnType<typeof runner>, parked?: 
     return { success: true, totalTimeMs: 0, action: "runner" };
   };
   spyOn(android, "requestTapCoordinates").mockImplementation(
-    (_x, _y, _duration, _timeout, _perf, _context, dispatch, signal) => send(signal, dispatch),
+    ({ onDispatch: dispatch, signal: signal }) => send(signal, dispatch),
   );
   spyOn(android, "requestSwipe").mockImplementation(({ signal, onDispatch }) =>
     send(signal, onDispatch),
   );
   spyOn(ios, "requestTapCoordinates").mockImplementation(
-    (_x, _y, _duration, _timeout, _perf, _context, signal, dispatch) => send(signal, dispatch),
+    ({ signal: signal, onDispatch: dispatch }) => send(signal, dispatch),
   );
   spyOn(ios, "requestDrag").mockImplementation(({ signal, onDispatch }) =>
     send(signal, onDispatch),
@@ -230,27 +230,30 @@ test.each(
   expect(handler.forwardTails.size).toBe(0);
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
-test.each(variants)("%s cancels before dispatch without sending or stamping", async (variant) => {
-  const { handler, timer, stamps } = harness();
-  const first = runner();
-  const parked = Promise.withResolvers<void>();
-  const fake = transport(variant, first, parked.promise);
-  const owner = new AbortController();
-  const a = runInput(handler, inputFrame(variant), owner.signal);
-  void a.catch(() => {});
-  await drainUntil(() => fake.attempts === 1, { description: "parked before send" });
-  owner.abort(new Error("before dispatch cancelled"));
-  await expect(a).rejects.toThrow("before dispatch cancelled");
-  await runInput(handler, inputFrame(variant));
-  expect(stamps).toEqual(["A"]);
-  expect(fake.sends).toBe(1);
-  parked.resolve();
-  await drainMicrotasks(100);
-  expect(fake.sends).toBe(1);
-  expect(first.dispatched).toBe(false);
-  expect(handler.forwardTails.size).toBe(0);
-  expect(timer.getPendingTimeoutCount()).toBe(0);
-});
+test.each([...variants])(
+  "%s cancels before dispatch without sending or stamping",
+  async (variant) => {
+    const { handler, timer, stamps } = harness();
+    const first = runner();
+    const parked = Promise.withResolvers<void>();
+    const fake = transport(variant, first, parked.promise);
+    const owner = new AbortController();
+    const a = runInput(handler, inputFrame(variant), owner.signal);
+    void a.catch(() => {});
+    await drainUntil(() => fake.attempts === 1, { description: "parked before send" });
+    owner.abort(new Error("before dispatch cancelled"));
+    await expect(a).rejects.toThrow("before dispatch cancelled");
+    await runInput(handler, inputFrame(variant));
+    expect(stamps).toEqual(["A"]);
+    expect(fake.sends).toBe(1);
+    parked.resolve();
+    await drainMicrotasks(100);
+    expect(fake.sends).toBe(1);
+    expect(first.dispatched).toBe(false);
+    expect(handler.forwardTails.size).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  },
+);
 // daemon/cancelRequest is explicit cancellation; destroying a socket is the other owner abort.
 test.each(
   variants.flatMap((variant) =>
@@ -568,7 +571,7 @@ test("a global-action transport budget does not shorten the cancelled frame's re
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
-test.each(variants)(
+test.each([...variants])(
   "%s session release has a generic capitalized dispatched note and no append count",
   async (variant) => {
     const platform = variantPlatform(variant);

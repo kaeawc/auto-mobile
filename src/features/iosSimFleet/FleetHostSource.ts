@@ -1,11 +1,13 @@
-import { cpus, loadavg, totalmem } from "node:os";
+import { nodeHostLoadReader } from "../../utils/hostLoadBudget";
+import { totalmem } from "node:os";
 import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { PS_SNAPSHOT_ARGS, PS_SNAPSHOT_MAX_BUFFER_BYTES, parsePsSnapshot } from "./psSnapshot";
+import { readHostProcessTable } from "../../devices/bootAdmission/readHostProcessTable";
 import { SIMCTL_LIST_DEVICES_ARGS, parseSimctlInventory } from "./simctlInventory";
+import { CachedFootprintReader, withFootprints, type FootprintReader } from "./footprintSnapshot";
 import type {
   HostProcessRow,
   HostResources,
@@ -34,34 +36,9 @@ export interface HostOsInfo {
 
 export const nodeHostOsInfo: HostOsInfo = {
   totalMemoryBytes: () => totalmem(),
-  cpuCount: () => cpus().length,
-  loadAverage1m: () => {
-    const load = loadavg()[0];
-    // Windows reports 0 for every sample; treat that as "no data", not an idle host.
-    return process.platform === "win32" ? null : load;
-  },
+  cpuCount: () => nodeHostLoadReader.cpuCount(),
+  loadAverage1m: () => nodeHostLoadReader.loadAverage1m(),
 };
-
-/**
- * One read-only `ps` snapshot of the host process table. Shared by the iOS
- * fleet cost source and the Android boot admission source (#11181), so the
- * host's single `ps` call site stays here.
- */
-export async function readHostProcessTable(
-  executor: HostCommandExecutor,
-  options: FleetReadOptions = {},
-): Promise<HostProcessRow[]> {
-  const ps = await executor.executeCommand("ps", PS_SNAPSHOT_ARGS, {
-    signal: options.signal,
-    timeoutMs: options.timeoutMs,
-    maxBuffer: PS_SNAPSHOT_MAX_BUFFER_BYTES,
-  });
-  const { rows, skipped } = parsePsSnapshot(ps.stdout);
-  if (rows.length === 0) {
-    throw new Error(`ps returned no parseable processes (${skipped} unparseable rows)`);
-  }
-  return rows;
-}
 
 const MEMORY_PRESSURE_SYSCTL = ["-n", "kern.memorystatus_vm_pressure_level"];
 
@@ -87,6 +64,8 @@ export class CommandFleetHostSource implements FleetHostSource {
     private readonly os: HostOsInfo = nodeHostOsInfo,
     /** The canonical simctl reader; the inventory is read through it, not a second `xcrun` path. */
     private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(null),
+    /** Footprints come from one shared, cached `top` run, never one per snapshot (#15307). */
+    private readonly footprintReader: FootprintReader = new CachedFootprintReader(executor, timer),
   ) {}
 
   async readHostSnapshot(options: FleetReadOptions = {}): Promise<HostSnapshot> {
@@ -110,13 +89,24 @@ export class CommandFleetHostSource implements FleetHostSource {
 
   private async readProcesses(
     options: FleetReadOptions,
-  ): Promise<{ processes: HostProcessRow[]; processesError?: string }> {
-    try {
-      return { processes: await readHostProcessTable(this.executor, options) };
-    } catch (error) {
-      logger.warn(`host process table read failed: ${errorMessage(error)}`, error);
-      return { processes: [], processesError: errorMessage(error) };
+  ): Promise<{ processes: HostProcessRow[]; processesError?: string; footprintError?: string }> {
+    const [table, footprints] = await Promise.allSettled([
+      readHostProcessTable(this.executor, options),
+      this.footprintReader.read(options),
+    ]);
+    if (table.status === "rejected") {
+      logger.warn(`host process table read failed: ${errorMessage(table.reason)}`, table.reason);
+      return { processes: [], processesError: errorMessage(table.reason) };
     }
+    if (footprints.status === "rejected") {
+      // Without footprints memory cost stays unmeasured: summed RSS over-states it ~10x (#15288).
+      logger.warn(
+        `host footprint read failed: ${errorMessage(footprints.reason)}`,
+        footprints.reason,
+      );
+      return { processes: table.value, footprintError: errorMessage(footprints.reason) };
+    }
+    return { processes: withFootprints(table.value, footprints.value) };
   }
 
   private async readResources(options: FleetReadOptions): Promise<HostResources> {

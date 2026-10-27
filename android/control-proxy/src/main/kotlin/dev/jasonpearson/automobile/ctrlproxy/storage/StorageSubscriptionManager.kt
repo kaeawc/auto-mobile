@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.core.net.toUri
 import dev.jasonpearson.automobile.protocol.StorageChangeEvent
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
@@ -31,6 +32,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withTimeoutOrNull
 
+/** Cleanup bounds and the wait between the first and single retry of a DISABLED subscribe reply. */
+data class StorageSubscriptionConfig(
+  val cleanupTimeoutMs: Long = 1_000L,
+  val retryDelayMs: Long = 500L,
+  // The subscribe path already blocks a background worker; tests inject a wait without sleeping.
+  val pause: (Long) -> Unit = { Thread.sleep(it) },
+)
+
 /**
  * Manages subscriptions to SharedPreferences changes across multiple target apps.
  *
@@ -42,12 +51,11 @@ class StorageSubscriptionManager(
   private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
   scope: CoroutineScope = CoroutineScope(SupervisorJob() + ioDispatcher),
   private val backgroundCalls: BackgroundCalls = ContentResolverCalls(context, ioDispatcher),
-  private val cleanupTimeoutMs: Long = 1_000L,
-  // Waits between the first and the single retry of a DISABLED subscribe reply. Injected so tests
-  // run without a wall-clock sleep; the subscribe path already blocks a background worker.
-  private val retryDelayMs: Long = DISABLED_RETRY_DELAY_MS,
-  private val pause: (Long) -> Unit = { Thread.sleep(it) },
+  config: StorageSubscriptionConfig = StorageSubscriptionConfig(),
 ) {
+  private val cleanupTimeoutMs = config.cleanupTimeoutMs
+  private val retryDelayMs = config.retryDelayMs
+  private val pause = config.pause
 
   /**
    * Suspendable boundary for background provider calls, including deterministic cancellation tests.
@@ -79,7 +87,6 @@ class StorageSubscriptionManager(
     private const val AUTHORITY_SUFFIX = ".automobile.sharedprefs"
     private const val CHANGES_PATH = "changes"
     private const val STORAGE_EVENT_BUFFER_CAPACITY = 64
-    private const val DISABLED_RETRY_DELAY_MS = 500L
   }
 
   /** State for a single subscription. */
@@ -141,9 +148,26 @@ class StorageSubscriptionManager(
    * @return Result with availability info or error
    */
   fun checkSdkAvailability(packageName: String): Result<SdkAvailabilityInfo> {
-    return try {
+    return withProviderFailures(
+      onFailure = { e ->
+        when (e) {
+          is SecurityException -> {
+            Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
+            Result.failure(StorageError.SdkNotInstalled(packageName))
+          }
+          is IllegalArgumentException -> {
+            Log.e(TAG, "SDK provider unavailable for $packageName", e)
+            Result.failure(StorageError.SdkNotInstalled(packageName))
+          }
+          else -> {
+            Log.e(TAG, "Error checking SDK availability for $packageName", e)
+            Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
+          }
+        }
+      },
+    ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val result = context.contentResolver.call(uri, "checkAvailability", null, null)
 
       if (result == null) {
@@ -170,13 +194,6 @@ class StorageSubscriptionManager(
           else -> Result.failure(StorageError.SdkError("Unexpected response type"))
         }
       }
-    } catch (e: SecurityException) {
-      Result.failure(StorageError.SdkNotInstalled(packageName))
-    } catch (e: IllegalArgumentException) {
-      Result.failure(StorageError.SdkNotInstalled(packageName))
-    } catch (e: Exception) {
-      Log.e(TAG, "Error checking SDK availability for $packageName", e)
-      Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
     }
   }
 
@@ -188,9 +205,22 @@ class StorageSubscriptionManager(
    */
   fun listPreferenceFiles(packageName: String): Result<List<PreferenceFileInfo>> {
     Log.d(TAG, "listPreferenceFiles: packageName=$packageName")
-    return try {
+    return withProviderFailures(
+      onFailure = { e ->
+        when (e) {
+          is SecurityException -> {
+            Log.e(TAG, "listPreferenceFiles: SecurityException (SDK not installed)", e)
+            Result.failure(StorageError.SdkNotInstalled(packageName))
+          }
+          else -> {
+            Log.e(TAG, "Error listing preference files for $packageName", e)
+            Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
+          }
+        }
+      },
+    ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       Log.d(TAG, "listPreferenceFiles: calling contentResolver.call with authority=$authority")
       val result = context.contentResolver.call(uri, "listFiles", null, null)
       Log.d(TAG, "listPreferenceFiles: contentResolver.call returned, result=$result")
@@ -232,12 +262,6 @@ class StorageSubscriptionManager(
           }
         }
       }
-    } catch (e: SecurityException) {
-      Log.e(TAG, "listPreferenceFiles: SecurityException (SDK not installed)", e)
-      Result.failure(StorageError.SdkNotInstalled(packageName))
-    } catch (e: Exception) {
-      Log.e(TAG, "Error listing preference files for $packageName", e)
-      Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
     }
   }
 
@@ -249,9 +273,22 @@ class StorageSubscriptionManager(
    * @return Result with list of preference entries or error
    */
   fun getPreferences(packageName: String, fileName: String): Result<List<PreferenceEntry>> {
-    return try {
+    return withProviderFailures(
+      onFailure = { e ->
+        when (e) {
+          is SecurityException -> {
+            Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
+            Result.failure(StorageError.SdkNotInstalled(packageName))
+          }
+          else -> {
+            Log.e(TAG, "Error getting preferences for $packageName:$fileName", e)
+            Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
+          }
+        }
+      },
+    ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras = Bundle().apply { putString("fileName", fileName) }
       val result = context.contentResolver.call(uri, "getPreferences", null, extras)
 
@@ -283,11 +320,6 @@ class StorageSubscriptionManager(
           else -> Result.failure(StorageError.SdkError("Unexpected response type"))
         }
       }
-    } catch (e: SecurityException) {
-      Result.failure(StorageError.SdkNotInstalled(packageName))
-    } catch (e: Exception) {
-      Log.e(TAG, "Error getting preferences for $packageName:$fileName", e)
-      Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
     }
   }
 
@@ -304,9 +336,22 @@ class StorageSubscriptionManager(
    * @return Result with list of DataStore descriptors (as [PreferenceFileInfo]) or error
    */
   fun listDataStores(packageName: String, adapterName: String): Result<List<PreferenceFileInfo>> {
-    return try {
+    return withProviderFailures(
+      onFailure = { e ->
+        when (e) {
+          is SecurityException -> {
+            Log.e(TAG, "listDataStores: SecurityException (SDK not installed)", e)
+            Result.failure(StorageError.SdkNotInstalled(packageName))
+          }
+          else -> {
+            Log.e(TAG, "Error listing data stores for $packageName (adapter=$adapterName)", e)
+            Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
+          }
+        }
+      },
+    ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras = Bundle().apply { putString("adapterName", adapterName) }
       val result = context.contentResolver.call(uri, "listDataStores", null, extras)
 
@@ -329,12 +374,6 @@ class StorageSubscriptionManager(
           else -> Result.failure(StorageError.SdkError("Unexpected response type"))
         }
       }
-    } catch (e: SecurityException) {
-      Log.e(TAG, "listDataStores: SecurityException (SDK not installed)", e)
-      Result.failure(StorageError.SdkNotInstalled(packageName))
-    } catch (e: Exception) {
-      Log.e(TAG, "Error listing data stores for $packageName (adapter=$adapterName)", e)
-      Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
     }
   }
 
@@ -353,9 +392,26 @@ class StorageSubscriptionManager(
     adapterName: String,
     storeName: String,
   ): Result<List<PreferenceEntry>> {
-    return try {
+    return withProviderFailures(
+      onFailure = { e ->
+        when (e) {
+          is SecurityException -> {
+            Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
+            Result.failure(StorageError.SdkNotInstalled(packageName))
+          }
+          else -> {
+            Log.e(
+              TAG,
+              "Error getting data store for $packageName:$storeName (adapter=$adapterName)",
+              e,
+            )
+            Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
+          }
+        }
+      },
+    ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras =
         Bundle().apply {
           putString("adapterName", adapterName)
@@ -387,11 +443,6 @@ class StorageSubscriptionManager(
           else -> Result.failure(StorageError.SdkError("Unexpected response type"))
         }
       }
-    } catch (e: SecurityException) {
-      Result.failure(StorageError.SdkNotInstalled(packageName))
-    } catch (e: Exception) {
-      Log.e(TAG, "Error getting data store for $packageName:$storeName (adapter=$adapterName)", e)
-      Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
     }
   }
 
@@ -497,9 +548,22 @@ class StorageSubscriptionManager(
     }
 
   private fun callSubscribeToFile(packageName: String, fileName: String): SubscribeCall {
-    return try {
+    return withProviderFailures(
+      onFailure = { e ->
+        when (e) {
+          is SecurityException -> {
+            Log.e(TAG, "SDK subscription denied for $packageName (SDK not installed)", e)
+            SubscribeCall(Result.failure(StorageError.SdkNotInstalled(packageName)))
+          }
+          else -> {
+            Log.e(TAG, "Error subscribing to $packageName:$fileName", e)
+            SubscribeCall(Result.failure(StorageError.SdkError(e.message ?: "Unknown error")))
+          }
+        }
+      },
+    ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras = Bundle().apply { putString("fileName", fileName) }
       val result = context.contentResolver.call(uri, "subscribeToFile", null, extras)
 
@@ -517,11 +581,6 @@ class StorageSubscriptionManager(
           Result.success((response as? StorageResponse.SubscriptionResult)?.processToken),
         )
       }
-    } catch (e: SecurityException) {
-      SubscribeCall(Result.failure(StorageError.SdkNotInstalled(packageName)))
-    } catch (e: Exception) {
-      Log.e(TAG, "Error subscribing to $packageName:$fileName", e)
-      SubscribeCall(Result.failure(StorageError.SdkError(e.message ?: "Unknown error")))
     }
   }
 
@@ -531,6 +590,7 @@ class StorageSubscriptionManager(
    */
   private fun isPackageStopped(packageName: String): Boolean =
     try {
+      // API 24–32 require this overload; keep the same lookup and exceptions on every API level.
       @Suppress("DEPRECATION")
       val flags = context.packageManager.getApplicationInfo(packageName, 0).flags
       flags and ApplicationInfo.FLAG_STOPPED != 0
@@ -545,12 +605,14 @@ class StorageSubscriptionManager(
     fileName: String,
     subscriptionId: String,
   ) {
-    try {
-      val uri = Uri.parse("content://$packageName$AUTHORITY_SUFFIX")
+    withProviderFailures(
+      onFailure = { rollbackError ->
+        Log.w(TAG, "Failed to roll back SDK subscription for $subscriptionId", rollbackError)
+      },
+    ) {
+      val uri = "content://$packageName$AUTHORITY_SUFFIX".toUri()
       val extras = Bundle().apply { putString("fileName", fileName) }
       context.contentResolver.call(uri, "unsubscribeFromFile", null, extras)
-    } catch (rollbackError: Exception) {
-      Log.w(TAG, "Failed to roll back SDK subscription for $subscriptionId", rollbackError)
     }
   }
 
@@ -590,13 +652,15 @@ class StorageSubscriptionManager(
       unregisterPackageObserverIfUnused(packageName, fileName)
     }
 
-    try {
+    withProviderFailures(
+      onFailure = { e ->
+        Log.w(TAG, "Error unsubscribing from SDK (may be expected if app was uninstalled)", e)
+      },
+    ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras = Bundle().apply { putString("fileName", fileName) }
       context.contentResolver.call(uri, "unsubscribeFromFile", null, extras)
-    } catch (e: Exception) {
-      Log.w(TAG, "Error unsubscribing from SDK (may be expected if app was uninstalled)", e)
     }
 
     Log.d(TAG, "Unsubscribed from $subscriptionId")
@@ -617,9 +681,22 @@ class StorageSubscriptionManager(
    * @return Result with the preference entry (null if key not found) or error
    */
   fun getPreference(packageName: String, fileName: String, key: String): Result<PreferenceEntry?> {
-    return try {
+    return withProviderFailures(
+      onFailure = { e ->
+        when (e) {
+          is SecurityException -> {
+            Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
+            Result.failure(StorageError.SdkNotInstalled(packageName))
+          }
+          else -> {
+            Log.e(TAG, "Error getting preference for $packageName:$fileName:$key", e)
+            Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
+          }
+        }
+      },
+    ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras =
         Bundle().apply {
           putString("fileName", fileName)
@@ -655,11 +732,6 @@ class StorageSubscriptionManager(
           else -> Result.failure(StorageError.SdkError("Unexpected response type"))
         }
       }
-    } catch (e: SecurityException) {
-      Result.failure(StorageError.SdkNotInstalled(packageName))
-    } catch (e: Exception) {
-      Log.e(TAG, "Error getting preference for $packageName:$fileName:$key", e)
-      Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
     }
   }
 
@@ -680,9 +752,22 @@ class StorageSubscriptionManager(
     value: String?,
     type: String,
   ): Result<Unit> {
-    return try {
+    return withProviderFailures(
+      onFailure = { e ->
+        when (e) {
+          is SecurityException -> {
+            Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
+            Result.failure(StorageError.SdkNotInstalled(packageName))
+          }
+          else -> {
+            Log.e(TAG, "Error setting preference for $packageName:$fileName:$key", e)
+            Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
+          }
+        }
+      },
+    ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras =
         Bundle().apply {
           putString("fileName", fileName)
@@ -706,11 +791,6 @@ class StorageSubscriptionManager(
         Log.d(TAG, "Set preference $packageName:$fileName:$key")
         Result.success(Unit)
       }
-    } catch (e: SecurityException) {
-      Result.failure(StorageError.SdkNotInstalled(packageName))
-    } catch (e: Exception) {
-      Log.e(TAG, "Error setting preference for $packageName:$fileName:$key", e)
-      Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
     }
   }
 
@@ -723,9 +803,22 @@ class StorageSubscriptionManager(
    * @return Result with success or error
    */
   fun removePreference(packageName: String, fileName: String, key: String): Result<Unit> {
-    return try {
+    return withProviderFailures(
+      onFailure = { e ->
+        when (e) {
+          is SecurityException -> {
+            Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
+            Result.failure(StorageError.SdkNotInstalled(packageName))
+          }
+          else -> {
+            Log.e(TAG, "Error removing preference for $packageName:$fileName:$key", e)
+            Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
+          }
+        }
+      },
+    ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras =
         Bundle().apply {
           putString("fileName", fileName)
@@ -747,11 +840,6 @@ class StorageSubscriptionManager(
         Log.d(TAG, "Removed preference $packageName:$fileName:$key")
         Result.success(Unit)
       }
-    } catch (e: SecurityException) {
-      Result.failure(StorageError.SdkNotInstalled(packageName))
-    } catch (e: Exception) {
-      Log.e(TAG, "Error removing preference for $packageName:$fileName:$key", e)
-      Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
     }
   }
 
@@ -763,9 +851,22 @@ class StorageSubscriptionManager(
    * @return Result with success or error
    */
   fun clearPreferences(packageName: String, fileName: String): Result<Unit> {
-    return try {
+    return withProviderFailures(
+      onFailure = { e ->
+        when (e) {
+          is SecurityException -> {
+            Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
+            Result.failure(StorageError.SdkNotInstalled(packageName))
+          }
+          else -> {
+            Log.e(TAG, "Error clearing preferences for $packageName:$fileName", e)
+            Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
+          }
+        }
+      },
+    ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras =
         Bundle().apply {
           putString("fileName", fileName)
@@ -786,11 +887,6 @@ class StorageSubscriptionManager(
         Log.d(TAG, "Cleared preferences $packageName:$fileName")
         Result.success(Unit)
       }
-    } catch (e: SecurityException) {
-      Result.failure(StorageError.SdkNotInstalled(packageName))
-    } catch (e: Exception) {
-      Log.e(TAG, "Error clearing preferences for $packageName:$fileName", e)
-      Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
     }
   }
 
@@ -812,12 +908,18 @@ class StorageSubscriptionManager(
     fetchScope.cancel()
     for (state in observers) {
       state.signals.close()
-      try {
+      withProviderFailures(
+        onFailure = { e ->
+          Log.w(TAG, "Error unregistering ContentObserver during destroy", e)
+        },
+      ) {
         context.contentResolver.unregisterContentObserver(state.observer)
-      } catch (e: Exception) {
-        Log.w(TAG, "Error unregistering ContentObserver during destroy", e)
       }
     }
+    cleanupRemoteSubscriptions(remoteSubscriptions)
+  }
+
+  private fun cleanupRemoteSubscriptions(remoteSubscriptions: List<StorageSubscription>) {
     if (remoteSubscriptions.isEmpty()) return
 
     val cleanupScope = CoroutineScope(cleanupContext + SupervisorJob())
@@ -829,20 +931,22 @@ class StorageSubscriptionManager(
               // This sibling is deliberately outside withTimeout's child hierarchy: a Binder call
               // may ignore interruption. Bound the await, without joining a stuck provider thread.
               val call = cleanupScope.async {
-                val uri = Uri.parse("content://${subscription.packageName}$AUTHORITY_SUFFIX")
+                val uri = "content://${subscription.packageName}$AUTHORITY_SUFFIX".toUri()
                 val extras = Bundle().apply { putString("fileName", subscription.fileName) }
                 backgroundCalls.call(uri, "unsubscribeFromFile", extras)
               }
               try {
-                call.await()
-              } catch (e: CancellationException) {
-                throw e
-              } catch (e: Exception) {
-                Log.w(
-                  TAG,
-                  "Best-effort SDK unsubscribe failed for ${subscription.subscriptionId}",
-                  e,
-                )
+                withProviderFailures(
+                  onFailure = { e ->
+                    Log.w(
+                      TAG,
+                      "Best-effort SDK unsubscribe failed for ${subscription.subscriptionId}",
+                      e,
+                    )
+                  },
+                ) {
+                  call.await()
+                }
               } finally {
                 call.cancel()
               }
@@ -876,7 +980,7 @@ class StorageSubscriptionManager(
       }
 
       val authority = packageName + AUTHORITY_SUFFIX
-      val changesUri = Uri.parse("content://$authority/$CHANGES_PATH")
+      val changesUri = "content://$authority/$CHANGES_PATH".toUri()
 
       val signals = Channel<Unit>(Channel.CONFLATED)
       val observer =
@@ -888,7 +992,14 @@ class StorageSubscriptionManager(
           }
         }
 
-      try {
+      withProviderFailures(
+        onFailure = { e ->
+          Log.e(TAG, "Failed to register ContentObserver for $packageName", e)
+          registrationError = e
+          // Leave the package unmapped so a later subscribe can retry.
+          null
+        },
+      ) {
         context.contentResolver.registerContentObserver(changesUri, false, observer)
         Log.d(TAG, "Registered ContentObserver for $packageName")
         val worker = fetchScope.launch {
@@ -900,11 +1011,6 @@ class StorageSubscriptionManager(
           worker,
           ConcurrentHashMap.newKeySet<String>().apply { add(fileName) },
         )
-      } catch (e: Exception) {
-        Log.e(TAG, "Failed to register ContentObserver for $packageName", e)
-        registrationError = e
-        // Leave the package unmapped so a later subscribe can retry.
-        null
       }
     }
     return registrationError?.let {
@@ -920,11 +1026,13 @@ class StorageSubscriptionManager(
       if (state.subscriptions.isEmpty()) {
         state.signals.close()
         state.worker.cancel()
-        try {
+        withProviderFailures(
+          onFailure = { e ->
+            Log.w(TAG, "Error unregistering ContentObserver", e)
+          },
+        ) {
           context.contentResolver.unregisterContentObserver(state.observer)
           Log.d(TAG, "Unregistered ContentObserver for $packageName")
-        } catch (e: Exception) {
-          Log.w(TAG, "Error unregistering ContentObserver", e)
         }
         // Returning null removes the mapping.
         null
@@ -940,7 +1048,7 @@ class StorageSubscriptionManager(
     val state = synchronized(lifecycleLock) { packageObservers[packageName] } ?: return
     if (destroyed || state.signals !== signals) return
     val authority = packageName + AUTHORITY_SUFFIX
-    val uri = Uri.parse("content://$authority")
+    val uri = "content://$authority".toUri()
 
     for (fileName in state.subscriptions.toList()) {
       coroutineContext.ensureActive()
@@ -950,7 +1058,7 @@ class StorageSubscriptionManager(
 
       try {
         if (!fetchChangesForFile(packageName, fileName, uri, subState)) return
-      } catch (e: CancellationException) {
+      } catch (e: kotlinx.coroutines.CancellationException) {
         throw e
       } catch (e: Exception) {
         Log.e(TAG, "Error fetching changes for $packageName:$fileName", e)
@@ -1156,3 +1264,26 @@ sealed class StorageError(message: String) : Exception(message) {
 
   class SdkError(message: String) : StorageError(message)
 }
+
+/**
+ * Handles the platform failure set shared by these operations. Failure handlers run outside the
+ * try.
+ */
+private inline fun <T> withProviderFailures(onFailure: (Exception) -> T, block: () -> T): T =
+  try {
+    block()
+  } catch (e: kotlinx.coroutines.CancellationException) {
+    throw e
+  } catch (e: SecurityException) {
+    onFailure(e)
+  } catch (e: IllegalArgumentException) {
+    onFailure(e)
+  } catch (e: IllegalStateException) {
+    onFailure(e)
+  } catch (e: UnsupportedOperationException) {
+    onFailure(e)
+  } catch (e: android.os.BadParcelableException) {
+    onFailure(e)
+  } catch (e: NullPointerException) {
+    onFailure(e)
+  }

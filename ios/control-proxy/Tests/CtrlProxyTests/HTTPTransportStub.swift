@@ -1,10 +1,7 @@
 @testable import CtrlProxy
 import Foundation
 import os
-
-// Test fixtures fail-fast on malformed setup data, so force-unwrap is idiomatic here
-// (blanket-allowed for force_unwrapping in test targets — see .swiftlint.yml).
-// swiftlint:disable force_unwrapping
+import XCTest
 
 /// A scripted outcome for `StubHTTPTransport`. `Sendable` (no `any Error`) so the stub
 /// stays lock-confined-`Sendable` with no escape hatch.
@@ -43,11 +40,15 @@ final class StubHTTPTransport: HTTPRequesting {
             $0.recorded.append(request)
             return $0.outcomes.isEmpty ? .nonHTTPResponse : $0.outcomes.removeFirst()
         }
-        // Force-unwrap: every SDK-client request carries a localhost URL.
-        let url = request.url!
+        let url = try XCTUnwrap(request.url)
         switch outcome {
         case let .respond(status, body):
-            let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: url,
+                statusCode: status,
+                httpVersion: nil,
+                headerFields: nil
+            ))
             return (body, response)
         case .transportError:
             throw URLError(.cannotConnectToHost)

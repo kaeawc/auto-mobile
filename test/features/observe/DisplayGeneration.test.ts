@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -83,15 +84,18 @@ function harness(platform: "android" | "ios" = "android", singlePanel = false) {
   const panel = (key: "inner" | "cover", extra: Partial<ViewHierarchyResult> = {}) => {
     const width = key === "inner" ? 200 : 100;
     const height = key === "inner" ? 300 : 150;
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: `Display id 0: DisplayInfo{uniqueId "local:${key}" type INTERNAL, real ${width} x ${height}}`,
-      stderr: "",
-    });
-    adb.setCommandResponse("shell cmd device_state print-states", { stdout: states, stderr: "" });
-    adb.setCommandResponse("shell cmd device_state state", {
-      stdout: key === "inner" ? opened : closed,
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        `Display id 0: DisplayInfo{uniqueId "local:${key}" type INTERNAL, real ${width} x ${height}}`,
+        "",
+      ),
+    );
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(states, ""));
+    adb.setCommandResponse(
+      "shell cmd device_state state",
+      createExecResult(key === "inner" ? opened : closed, ""),
+    );
     ObservedAndroidDisplayCache.clear(device.deviceId);
     hierarchy.configureHierarchy({
       hierarchy: { node: {} },
@@ -115,7 +119,7 @@ function harness(platform: "android" | "ios" = "android", singlePanel = false) {
       hierarchyCapture: new FakeHierarchyCapture(() => hierarchy.getViewHierarchy(), platform),
       cacheStore: cache,
       // Explicit fake: no notifyutil/simulator operation, including the setPosture UDID test.
-      iosLockStateProbe: { read: async () => undefined },
+      iosLockStateProbe: { read: async () => ({ kind: "unknown", reason: "error" }) },
     },
     timer,
     ids,
@@ -451,6 +455,7 @@ test("action prepared at surfaced generation N is rejected after transition to N
     action.observedInteraction(
       async () => {
         dispatched = true;
+        return { success: true };
       },
       {
         changeExpected: false,
@@ -521,6 +526,7 @@ for (const platform of ["android", "ios"] as const) {
       action.observedInteraction(
         async () => {
           dispatched = true;
+          return { success: true };
         },
         { changeExpected: false, predictionContext: { toolName: "dragAndDrop", toolArgs: {} } },
       ),

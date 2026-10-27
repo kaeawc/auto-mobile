@@ -2,20 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:BroadcastGuardAdoptionTest.kt:BroadcastGuardScanner$fun scan: ScanResult</ID>
-    <ID>CyclomaticComplexMethod:CorrelatedErrorDriftGuardTest.kt:CorrelatedErrorDriftScanner$private fun stripComments: String</ID>
-    <ID>CyclomaticComplexMethod:FakeEditor.kt:FakeEditor$fun apply</ID>
-    <ID>CyclomaticComplexMethod:KotlinSourceScan.kt:KotlinSourceScan$fun maskLiteralsAndComments: String</ID>
-    <ID>CyclomaticComplexMethod:LaunchCancellationRethrowTest.kt:LaunchCancellationScanner$private fun blankNestedGroups: String</ID>
-    <ID>CyclomaticComplexMethod:LaunchCancellationRethrowTest.kt:LaunchCancellationScanner$private fun swallowingCatchOffsets: List&lt;Int&gt;</ID>
-    <ID>EmptyFunctionBlock:CtrlProxyActionsFakes.kt:NoOpCtrlProxyActions${}</ID>
-    <ID>EmptyFunctionBlock:SdkAnrBroadcastHandlerTest.kt:SdkAnrBroadcastHandlerTest.Fixture.&lt;no name provided&gt;${}</ID>
-    <ID>EmptyFunctionBlock:SdkEventBatchBroadcastHandlerTest.kt:CtrlProxyEventBatchReceiverTest.&lt;no name provided&gt;${}</ID>
-    <ID>EmptyFunctionBlock:SdkEventBatchBroadcastHandlerTest.kt:SdkEventBatchBroadcastHandlerExtraTest.&lt;no name provided&gt;${}</ID>
-    <ID>InjectDispatcher:CtrlProxyGestureServiceFixture.kt:CtrlProxyGestureServiceFixture$Unconfined</ID>
-    <ID>InjectDispatcher:CtrlProxyObserverGateTest.kt:CtrlProxyObserverGateTest$Unconfined</ID>
-    <ID>InjectDispatcher:GestureControllerTest.kt:GestureControllerTest$Unconfined</ID>
-    <ID>InjectDispatcher:HierarchyDebouncerErrorEmitTest.kt:HierarchyDebouncerErrorEmitTest$Unconfined</ID>
     <ID>InjectDispatcher:PrototypeAnchorWindowTest.kt:PrototypeAnchorWindowTest$Unconfined</ID>
     <ID>InjectDispatcher:PrototypeDetachedWindowTest.kt:PrototypeDetachedWindowTest$Unconfined</ID>
     <ID>InjectDispatcher:PrototypeHideForCaptureTest.kt:PrototypeHideForCaptureTest$Unconfined</ID>
@@ -23,76 +9,19 @@
     <ID>InjectDispatcher:PrototypeImeLiftTest.kt:PrototypeImeLiftTest$Unconfined</ID>
     <ID>InjectDispatcher:PrototypeRenderWorkTest.kt:PrototypeRenderWorkTest$Unconfined</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityTest.kt:SavedPrototypeActivityTest$Unconfined</ID>
-    <ID>InjectDispatcher:StorageSubscriptionManagerTest.kt:StorageSubscriptionManagerTest$IO</ID>
-    <ID>InjectDispatcher:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$Default</ID>
-    <ID>LargeClass:BroadcastGuardAdoptionTest.kt:BroadcastGuardAdoptionTest</ID>
-    <ID>LargeClass:CtrlProxyMessageHandlerTest.kt:CtrlProxyMessageHandlerTest</ID>
-    <ID>LargeClass:GestureStreamSessionTest.kt:GestureStreamSessionTest</ID>
-    <ID>LargeClass:ImeCommitDriverTest.kt:ImeCommitDriverTest</ID>
-    <ID>LargeClass:LaunchCancellationRethrowTest.kt:LaunchCancellationRethrowTest</ID>
     <ID>LargeClass:PrototypeControllerTest.kt:PrototypeControllerTest</ID>
     <ID>LargeClass:PrototypeHostTest.kt:PrototypeHostTest</ID>
     <ID>LargeClass:PrototypeMultiSurfaceTest.kt:PrototypeMultiSurfaceTest</ID>
     <ID>LargeClass:PrototypeRenderModelTest.kt:PrototypeRenderModelTest</ID>
     <ID>LargeClass:PrototypeRenderWorkTest.kt:PrototypeRenderWorkTest</ID>
-    <ID>LargeClass:PrototypeRuntimeTest.kt:PrototypeRuntimeTest</ID>
     <ID>LargeClass:SavedPrototypeStoreTest.kt:SavedPrototypeStoreTest</ID>
-    <ID>LargeClass:StorageSubscriptionManagerTest.kt:StorageSubscriptionManagerTest</ID>
-    <ID>LargeClass:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest</ID>
-    <ID>LargeClass:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest</ID>
-    <ID>LargeClass:WebSocketServerTest.kt:WebSocketServerTest</ID>
-    <ID>LongMethod:BroadcastGuardAdoptionTest.kt:BroadcastGuardScanner$fun scan: ScanResult</ID>
-    <ID>LongMethod:CommandAdvertisementTest.kt:CommandAdvertisementTest$@Test fun `complete advertisement contains every sealed request on each supported API`</ID>
-    <ID>LongMethod:ConfigurableTypingPolicyTest.kt:ConfigurableTypingPolicyTest$@Test fun `composing profile composes words and commits whole emoji graphemes`</ID>
-    <ID>LongMethod:CorrelatedErrorDriftGuardTest.kt:CorrelatedErrorDriftScanner$private fun stripComments: String</ID>
-    <ID>LongMethod:HierarchyDebouncerSuppressionTest.kt:HierarchyDebouncerSuppressionTest$private fun TestScope.verifyOverlappingCalls</ID>
-    <ID>LongMethod:KotlinSourceScan.kt:KotlinSourceScan$fun maskLiteralsAndComments: String</ID>
-    <ID>LongMethod:PinchGeometryTest.kt:PinchGeometryTest$@Test fun `golden vectors match iOS parity`</ID>
-    <ID>LongMethod:PinchGeometryTest.kt:PinchGeometryTest$@Test fun `path golden vectors match iOS parity`</ID>
-    <ID>LongMethod:PrototypeGestureTest.kt:PrototypeGestureTest$@Test fun `repeat binding carries all three lists through every gesture node variant`</ID>
-    <ID>LongMethod:PrototypeMaterialComponentsTest.kt:PrototypeMaterialComponentsTest$@Test fun `each new node maps its role label and bound state`</ID>
     <ID>LongMethod:PrototypeMultiSurfaceTest.kt:PrototypeMultiSurfaceTest$@Test fun `metadata attributes two then three surfaces and survives middle dismissal`</ID>
     <ID>LongMethod:PrototypePreviewRequestTest.kt:PrototypePreviewRequestTest$@Test fun `contact sheet lays images out in a near-square grid`</ID>
     <ID>LongMethod:PrototypeRenderModelTest.kt:PrototypeRenderModelTest$@Test fun `every style property and safe area selection survive pure mapping`</ID>
     <ID>LongMethod:PrototypeRenderWorkTest.kt:PrototypeRenderWorkTest$@Test fun `settled hidden retained children cannot receive taps and sibling content can`</ID>
-    <ID>LongMethod:PrototypeRepeatTest.kt:PrototypeRepeatTest$@Test fun `repeat binds every check message and preserves check operands`</ID>
     <ID>LongMethod:PrototypeScrollMeasurementTest.kt:PrototypeScrollMeasurementTest$private fun measure</ID>
     <ID>LongMethod:PrototypeSelectorCompatibilityTest.kt:PrototypeSelectorCompatibilityTest$@Test fun `acceptance selectors preserve tagged visuals text fields and button labels`</ID>
     <ID>LongMethod:PrototypeSemanticsNodeCountTest.kt:PrototypeSemanticsNodeCountTest$@Test fun `decorative visuals disappear and only safe single-text rows collapse`</ID>
-    <ID>LongMethod:QueuedWebSocketMessageHandlerIntegrationTest.kt:QueuedWebSocketMessageHandlerIntegrationTest$@Test fun `detached commit cancellation bypasses slow unrelated command and preserves its result`</ID>
-    <ID>LongMethod:QueuedWebSocketMessageHandlerIntegrationTest.kt:QueuedWebSocketMessageHandlerIntegrationTest$@Test fun `real read loops use stable distinct keys and preserve connection order`</ID>
-    <ID>LongMethod:SetTextAcknowledgementOrderTest.kt:SetTextAcknowledgementOrderTest$@Test fun `refresh replacements are validated before reading text and remembered state has hooks`</ID>
-    <ID>LongMethod:TapGestureCompletionWiringTest.kt:TapGestureCompletionWiringTest$@Test fun `tap settles off main and queues hierarchy before tap result`</ID>
-    <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `async action failure error response is sent only to originating connection`</ID>
-    <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `decode error response is sent only to originating connection`</ID>
-    <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `handler exception error response is sent only to originating connection`</ID>
-    <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `hierarchy reply clears owner before a duplicate error`</ID>
-    <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `observerSessionGeneration is stable within a session and advances after it empties`</ID>
-    <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `raw async response drops later orphaned correlated frames`</ID>
-    <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `typed async response drops later orphaned correlated frames`</ID>
     <ID>LongParameterList:PrototypeScreenshotComparator.kt:PrototypeScreenshotComparator$fun compare: Result</ID>
-    <ID>LongParameterList:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$private fun legacyGesture</ID>
-    <ID>LongParameterList:RetrofitPrototypeHttpClientTest.kt:RetrofitPrototypeHttpClientTest$private fun request</ID>
-    <ID>LongParameterList:TextInputControllerTest.kt:TextInputControllerTest.FakeField</ID>
-    <ID>LongParameterList:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest$private fun ViewHierarchyExtractor.createWindowEntry: Any</ID>
-    <ID>LongParameterList:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest$private fun elementWithBounds: UIElementInfo</ID>
-    <ID>LongParameterList:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest$private fun fakeNode: android.view.accessibility.AccessibilityNodeInfo</ID>
-    <ID>LongParameterList:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest$private fun fakeWindow: AccessibilityWindowInfo</ID>
-    <ID>NestedBlockDepth:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `insert text body matches the hand-built content in every optional combination`</ID>
-    <ID>NestedBlockDepth:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `swipe drag and pinch frames match the hand-built bytes`</ID>
-    <ID>SwallowedException:ResultBroadcasterTest.kt:ResultBroadcasterTest$e: CancellationException</ID>
-    <ID>TooGenericExceptionThrown:AsyncActionRunnerTest.kt:AsyncActionRunnerTest$throw RuntimeException("boom")</ID>
-    <ID>TooGenericExceptionThrown:AsyncActionRunnerTest.kt:AsyncActionRunnerTest$throw RuntimeException("original failure")</ID>
-    <ID>TooGenericExceptionThrown:AsyncActionRunnerTest.kt:AsyncActionRunnerTest$throw RuntimeException("socket closed")</ID>
-    <ID>TooGenericExceptionThrown:DeliverHierarchyFrameTest.kt:DeliverHierarchyFrameTest$throw RuntimeException("Infinity")</ID>
-    <ID>TooGenericExceptionThrown:GestureDispatchLifecycleTest.kt:GestureDispatchLifecycleTest$throw RuntimeException("result failed")</ID>
-    <ID>TooGenericExceptionThrown:ResultBroadcasterTest.kt:ResultBroadcasterTest$throw RuntimeException("original broadcast failure")</ID>
-    <ID>TooGenericExceptionThrown:ResultBroadcasterTest.kt:ResultBroadcasterTest$throw RuntimeException("socket closed")</ID>
-    <ID>TooGenericExceptionThrown:ResultBroadcasterTest.kt:ResultBroadcasterTest$throw RuntimeException("socket still closed")</ID>
-    <ID>TooGenericExceptionThrown:ServiceScopeGuardTest.kt:ServiceScopeGuardTest$throw RuntimeException("boom")</ID>
-    <ID>TooGenericExceptionThrown:ServiceScopeGuardTest.kt:ServiceScopeGuardTest$throw RuntimeException("original failure")</ID>
-    <ID>TooGenericExceptionThrown:ServiceScopeGuardTest.kt:ServiceScopeGuardTest$throw RuntimeException("socket closed")</ID>
-    <ID>TooGenericExceptionThrown:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest.&lt;no name provided&gt;$throw RuntimeException("async boom")</ID>
-    <ID>TooGenericExceptionThrown:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest.&lt;no name provided&gt;$throw RuntimeException("kaboom")</ID>
   </CurrentIssues>
 </SmellBaseline>

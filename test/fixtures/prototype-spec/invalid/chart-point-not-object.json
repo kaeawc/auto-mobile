@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "heart": [
+        {
+          "bpm": 1
+        },
+        5
+      ]
+    },
+    "root": {
+      "type": "chart",
+      "variant": "line",
+      "series": [
+        {
+          "path": "/heart",
+          "x": "t",
+          "y": "bpm",
+          "label": "Heart rate"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.series[0].path",
+  "expectedMessage": "Chart series point 1 is not an object"
+}

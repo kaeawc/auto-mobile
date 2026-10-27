@@ -1,3 +1,4 @@
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   PROTOTYPE_APPEARANCE_CAPABILITY,
@@ -120,7 +121,7 @@ describe("prototype appearance on the host (#11223)", () => {
   async function call(device: BootedDevice, input: Record<string, unknown>) {
     const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
     const response = await handler(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
   const show = (device: BootedDevice, extra: Record<string, unknown> = {}) =>
     call(device, { action: "show", spec, ...extra });

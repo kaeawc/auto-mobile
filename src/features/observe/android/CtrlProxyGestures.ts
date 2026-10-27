@@ -1,3 +1,4 @@
+import type { TwoFingerSwipeRequest } from "./types";
 /**
  * CtrlProxyGestures - Android gesture delegate.
  *
@@ -17,6 +18,16 @@ import {
   MULTI_FINGER_GESTURE_CAPABILITY,
   normalizeCtrlProxyMilliseconds,
 } from "./ctrlProxyProtocol";
+
+export interface GestureStartRequest {
+  gestureId: string;
+  x: number;
+  y: number;
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  displayId?: number;
+  beforeSend?: () => void;
+}
 
 export class CtrlProxyGestures extends SharedGestureDelegate {
   constructor(context: DelegateContext) {
@@ -89,18 +100,20 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
    * arrives, instead of the promise only ever settling via its timeout. The requestId keeps the
    * `two_finger_swipe_` prefix so callers/loggers that key on it are unaffected.
    */
-  async requestTwoFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration: number = 300,
-    offset: number = 100,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
+  async requestTwoFingerSwipe(request: TwoFingerSwipeRequest): Promise<A11ySwipeResult> {
+    const {
+      x1,
+      y1,
+      x2,
+      y2,
+      duration = 300,
+      offset = 100,
+      timeoutMs = 5000,
+      perf = new NoOpPerformanceTracker(),
+      displayId,
+      beforeSend,
+    } = request;
+
     // Coordinates go through the shared `coord()` policy (roundCoordinates: true for Android) so
     // TalkBack two-finger swipes land on whole pixels, exactly like the sibling swipe/tap/drag/
     // pinch gestures (#3049). Intentional and not to be regressed — the runner accepts fractional
@@ -188,16 +201,18 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
    * The display fence guards start only; a mid-stream transition does not cancel move/end.
    * The runner continues the accepted gesture on its original display.
    */
-  // oxlint-disable-next-line max-params -- Append the dispatch fence to the existing positional Android API.
-  async requestGestureStart(
-    gestureId: string,
-    x: number,
-    y: number,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
+
+  async requestGestureStart(request: GestureStartRequest): Promise<A11ySwipeResult> {
+    const {
+      gestureId,
+      x,
+      y,
+      timeoutMs = 5000,
+      perf = new NoOpPerformanceTracker(),
+      displayId,
+      beforeSend,
+    } = request;
+
     return sendCommand<A11ySwipeResult>(this.context, {
       idPrefix: "gesture_start",
       responseType: "swipe",

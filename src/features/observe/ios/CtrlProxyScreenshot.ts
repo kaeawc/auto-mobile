@@ -19,10 +19,8 @@ import {
 import { logger } from "../../../utils/logger";
 import type { DisplayPanel } from "../../../models/DisplayPanel";
 import { errorMessage } from "../../../utils/describeUnknownError";
-import {
-  createProductionDevicectlPanelScreenshotSource,
-  type SimulatorPanelScreenshotSource,
-} from "../../../utils/ios-cmdline-tools/DevicectlDisplayScreenshot";
+import type { SimulatorPanelScreenshotSource } from "../../../utils/ios-cmdline-tools/DevicectlDisplayScreenshot";
+import { createProductionDevicectlPanelScreenshotSource } from "../../../utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
 
 let defaultDevicectlPanelSource: SimulatorPanelScreenshotSource | undefined;
 

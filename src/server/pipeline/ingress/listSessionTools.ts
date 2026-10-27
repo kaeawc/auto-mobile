@@ -8,7 +8,7 @@ import {
 import type { McpServerOptions } from "../../index";
 import type { SessionToolBinding } from "../../SessionToolBinding";
 import { ToolRegistry } from "../../toolRegistry";
-import type { ToolSelectionProfileRegistry } from "../../toolSelectionProfileRegistry";
+import type { ToolSelectionProfileRegistry } from "../../../daemon/toolSelectionProfileRegistry";
 import { resolveToolResultsNoStructuredContent } from "./connectionPresentation";
 
 export interface ListSessionToolsDeps {

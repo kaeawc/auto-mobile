@@ -11,6 +11,8 @@ export class SharedBootAdmissionHostState {
   readonly records = new Map<string, HostBootAdmissionRecord>();
   locked = false;
   nextId = 0;
+  /** Pids the host no longer runs; every other pid counts as running. */
+  readonly exitedPids = new Set<number>();
   readonly waiters = new Set<() => void>();
 }
 
@@ -72,13 +74,34 @@ export class FakeHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
     if (this.failReads) {
       throw new HostBootAdmissionRegistryError("failed", "fake boot registry unreadable");
     }
+    for (const [id, record] of this.host.records) {
+      if (this.isStale(record)) {
+        this.host.records.delete(id);
+      }
+    }
     return [...this.host.records.values()]
       .filter((record) => record.ownerPid !== this.pid)
       .map((record) => ({ ...record }));
   }
 
+  /** Mirrors FileHostBootAdmissionRegistry: stale records are dropped on read. */
+  private isStale(record: HostBootAdmissionRecord): boolean {
+    const now = this.timer.now();
+    const exited = (pid: number): boolean => this.host.exitedPids.has(pid);
+    if (record.handedOffUntilMs !== undefined) {
+      return (
+        now >= record.handedOffUntilMs ||
+        (record.processId !== undefined && exited(record.ownerPid) && exited(record.processId))
+      );
+    }
+    return (
+      exited(record.ownerPid) ||
+      (record.admittedUntilMs !== undefined && now >= record.admittedUntilMs)
+    );
+  }
+
   publish(
-    fields: Pick<HostBootAdmissionRecord, "deviceId" | "admittedUntilMs"> = {},
+    fields: Pick<HostBootAdmissionRecord, "deviceId" | "admittedUntilMs" | "replacement"> = {},
   ): PublishedBootAdmission {
     if (this.failPublish) {
       throw new HostBootAdmissionRegistryError("failed", "fake boot registry unwritable");
@@ -87,6 +110,16 @@ export class FakeHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
     this.host.records.set(id, { id, ownerPid: this.pid, ...fields });
     let removed = false;
     return {
+      clearDeviceId: () => {
+        if (removed) {
+          return;
+        }
+        this.checkWrite();
+        const record = this.host.records.get(id);
+        if (record) {
+          delete record.deviceId;
+        }
+      },
       update: (update) => {
         if (removed) {
           return;

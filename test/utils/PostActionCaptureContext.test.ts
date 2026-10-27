@@ -12,6 +12,8 @@ import {
 const frame = (): ObserveResult => ({
   deviceId: "fake-device",
   observationId: "frame",
+  display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+  updatedAt: 0,
   screenSize: { width: 100, height: 100 },
   systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
   viewHierarchy: { hierarchy: {} },

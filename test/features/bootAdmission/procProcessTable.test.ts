@@ -1,7 +1,7 @@
 import { expect, test, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import { readProcProcessTable } from "../../../src/features/bootAdmission/procProcessTable";
-import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
+import { parsePsSnapshot } from "../../../src/devices/bootAdmission/psSnapshot";
 import { logger } from "../../../src/utils/logger";
 import { FakeProcFs } from "../../fakes/FakeProcFs";
 

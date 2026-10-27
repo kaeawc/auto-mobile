@@ -32,16 +32,13 @@ function makeMonitor() {
   };
   const frames = new SdkFrameMetricsStore();
   const buffer = new PerfWindowBuffer();
-  const monitor = new PerformanceMonitor(
-    new FakeTimer(),
-    new FakeAdbClientFactory(),
-    () => null,
-    undefined,
-    undefined,
-    () => emitter,
-    buffer,
-    frames,
-  );
+  const monitor = new PerformanceMonitor(new FakeTimer(), {
+    adbClientFactory: new FakeAdbClientFactory(),
+    serverGetter: () => null,
+    getTelemetryEmitter: () => emitter,
+    perfWindowBuffer: buffer,
+    frameMetricsStore: frames,
+  });
   monitor.startMonitoring("fake-device", "com.fake");
   const device = monitor.getMonitoredDevice("fake-device")!;
   return { monitor, device, events, order, frames, buffer };

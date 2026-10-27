@@ -15,7 +15,6 @@ const iosDevice: BootedDevice = {
   deviceId: "AAAA1111-BBBB-2222-CCCC-3333DDDD4444",
   name: "iPhone 15 Sim",
   platform: "ios",
-  status: "booted",
 };
 
 const baseRequest: PlanExecutionRequest = {

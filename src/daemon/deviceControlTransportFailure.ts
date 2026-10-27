@@ -1,4 +1,4 @@
-import { getToolTransportRecovery } from "../server/toolTransportRecovery";
+import { getToolTransportRecovery } from "./toolTransportRecovery";
 
 /**
  * The `device_control_transport_failure` wire type (#11820). The daemon stopped producing it when

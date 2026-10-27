@@ -112,51 +112,52 @@ test("garbage is unknown or unavailable without throwing", () => {
   expect(parsePmsetAssertions("garbage")).toHaveProperty("unavailable");
   expect(parseIoregClamshell("garbage")).toHaveProperty("unavailable");
 });
-test.each([
-  ["unknown", { power: { source: "unknown" } }, "could not be determined"],
-  ["battery", { power: { source: "battery", chargePercent: 12 } }, "12%"],
-  [
-    "idle",
-    { sleep: { preventUserIdleSystemSleep: false, preventSystemSleep: false } },
-    "caffeinate",
-  ],
-  ["lid", { lid: { closed: true } }, "open"],
-  [
-    "clamshell on battery",
-    {
-      power: { source: "battery", chargePercent: 50 },
-      lid: { closed: false, clamshellCausesSleep: true },
-    },
-    "cannot prevent",
-    2,
-  ],
-  [
-    "clamshell with unknown power",
-    { power: { source: "unknown" }, lid: { closed: false, clamshellCausesSleep: true } },
-    "cannot prevent",
-    2,
-  ],
-  [
-    "clamshell with unavailable power",
-    { power: { unavailable: "x" }, lid: { closed: false, clamshellCausesSleep: true } },
-    "cannot prevent",
-    2,
-  ],
-  [
-    "closed lid on AC",
-    { lid: { closed: true, clamshellCausesSleep: true } },
-    "The lid is closed",
-    1,
-  ],
-  ["unavailable", { power: { unavailable: "reader failed" } }, "reader failed"],
-] satisfies Array<[string, Partial<HostSections>, string, number?]>)(
-  "typed %s warning is actionable",
-  (_name, sections, message, count = 1) => {
-    const report = buildHostPreflightReport(options.batchDir, stats, { ...healthy, ...sections });
-    expect(report.warnings).toHaveLength(count);
-    expect(report.warnings.some((w) => w.includes(message))).toBe(true);
-  },
-);
+test.each(
+  (
+    [
+      ["unknown", { power: { source: "unknown" } }, "could not be determined"],
+      ["battery", { power: { source: "battery", chargePercent: 12 } }, "12%"],
+      [
+        "idle",
+        { sleep: { preventUserIdleSystemSleep: false, preventSystemSleep: false } },
+        "caffeinate",
+      ],
+      ["lid", { lid: { closed: true } }, "open"],
+      [
+        "clamshell on battery",
+        {
+          power: { source: "battery", chargePercent: 50 },
+          lid: { closed: false, clamshellCausesSleep: true },
+        },
+        "cannot prevent",
+        2,
+      ],
+      [
+        "clamshell with unknown power",
+        { power: { source: "unknown" }, lid: { closed: false, clamshellCausesSleep: true } },
+        "cannot prevent",
+        2,
+      ],
+      [
+        "clamshell with unavailable power",
+        { power: { unavailable: "x" }, lid: { closed: false, clamshellCausesSleep: true } },
+        "cannot prevent",
+        2,
+      ],
+      [
+        "closed lid on AC",
+        { lid: { closed: true, clamshellCausesSleep: true } },
+        "The lid is closed",
+        1,
+      ],
+      ["unavailable", { power: { unavailable: "reader failed" } }, "reader failed"],
+    ] satisfies Array<[string, Partial<HostSections>, string, number?]>
+  ).map(([name, sections, message, count = 1]) => ({ name, sections, message, count })),
+)("typed %s warning is actionable", ({ sections, message, count }) => {
+  const report = buildHostPreflightReport(options.batchDir, stats, { ...healthy, ...sections });
+  expect(report.warnings).toHaveLength(count);
+  expect(report.warnings.some((w) => w.includes(message))).toBe(true);
+});
 test("clamshell warning is suppressed on AC with the lid open", () => {
   const report = buildHostPreflightReport(options.batchDir, stats, {
     ...healthy,

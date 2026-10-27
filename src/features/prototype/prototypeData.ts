@@ -1,3 +1,4 @@
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeNodeChildren, prototypeSpecNodeRoots } from "./prototypeNodeChildren";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
@@ -13,7 +14,7 @@ export function isPrototypeDataPointer(value: unknown): value is string {
     typeof value === "string" &&
     value.length > 0 &&
     value.length <= contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH &&
-    /^(?:\/(?:[^~\/]|~[01])*)+$/.test(value)
+    prototypeContractPatterns.pointer.test(value)
   );
 }
 
@@ -61,23 +62,24 @@ export function resolvePrototypeDataPointer(data: unknown, pointer: string): unk
 /** Plain scan: malformed or unrelated braces stay literal and cannot invalidate text. */
 function* dataPlaceholderSpans(
   text: string,
+  prefix = "data:",
 ): Generator<{ pointer: string; start: number; end: number }> {
   let cursor = 0;
   while (cursor < text.length) {
-    if (text[cursor] !== "{" || !text.startsWith("data:", cursor + 1)) {
+    if (text[cursor] !== "{" || !text.startsWith(prefix, cursor + 1)) {
       cursor++;
       continue;
     }
     const end = Math.min(
       text.length,
-      cursor + 2 + 5 + contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH,
+      cursor + 2 + prefix.length + contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH,
     );
     let close = cursor + 1;
     while (close < end && text[close] !== "}") {
       close++;
     }
     const inner = close === end ? "" : text.slice(cursor + 1, close);
-    const pointer = inner.startsWith("data:") ? inner.slice(5) : "";
+    const pointer = inner.startsWith(prefix) ? inner.slice(prefix.length) : "";
     if (isPrototypeDataPointer(pointer)) {
       yield { pointer, start: cursor, end: close + 1 };
       cursor = close + 1;
@@ -90,6 +92,18 @@ function* dataPlaceholderSpans(
 /** Recognised pointers in authored order, using the same scan as text substitution. */
 export function prototypeDataPlaceholders(text: string): string[] {
   return Array.from(dataPlaceholderSpans(text), ({ pointer }) => pointer);
+}
+
+/** Spans of every `{data:/pointer}` and `{platform:/pointer}` placeholder, found by the same scan. */
+export function prototypeBindingSpans(text: string): { start: number; end: number }[] {
+  return [...dataPlaceholderSpans(text), ...dataPlaceholderSpans(text, "platform:")]
+    .map(({ start, end }) => ({ start, end }))
+    .sort((a, b) => a.start - b.start);
+}
+
+/** `{platform:/pointer}` placeholders (#14294), scanned exactly as `{data:/pointer}` ones. */
+export function prototypePlatformPlaceholders(text: string): string[] {
+  return Array.from(dataPlaceholderSpans(text, "platform:"), ({ pointer }) => pointer);
 }
 
 /** Replacements are inserted once and never scanned again for data placeholders. */

@@ -1,4 +1,4 @@
-import { anyDeviceReadOnlyArgShapeMatches } from "../../src/server/deviceReadOnlyArgShapes";
+import { anyDeviceReadOnlyArgShapeMatches } from "../../src/daemon/deviceReadOnlyArgShapes";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { registerPrototypeTools } from "../../src/server/prototypeTools";
@@ -10,6 +10,7 @@ import {
   getStaticToolDefinitions,
   getConnectedStaticToolDefinitions,
 } from "../../src/daemon/staticToolDefinitions";
+import type { ProxiedToolDefinition } from "../../src/daemon/daemonMcpProxy";
 import committedDefinitions from "../../schemas/tool-definitions.json";
 
 // Issue #5879 / review: the static cold-start surface mirrors the runtime
@@ -48,8 +49,8 @@ describe("getStaticToolDefinitions", () => {
 
   test("cold wire payload equals committed definitions with only the established omissions", () => {
     delete process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS;
-    const expected = committedDefinitions.map((tool) => {
-      const definition: Record<string, unknown> = { ...tool };
+    const expected = committedDefinitions.map((tool): ProxiedToolDefinition => {
+      const definition: ProxiedToolDefinition = { ...tool };
       delete definition.outputSchema;
       const meta: Record<string, unknown> = { ...tool._meta };
       delete meta["automobile/debugOnly"];
@@ -140,9 +141,30 @@ describe("getStaticToolDefinitions", () => {
     const shapes = {
       clipboard: [{ argument: "action", values: ["get"] }],
       keyboard: [{ argument: "action", values: ["detect", "listImes", "listProfiles"] }],
-      prototype: [{ argument: "action", values: ["status", "inspect", "listSaved"] }],
+      prototype: [{ argument: "action", values: ["status", "inspect", "listSaved", "screenMap"] }],
       accessibility: [{ absentArguments: ["talkback", "voiceover"] }],
-      displayConfig: [{ absentArguments: ["reset", "fontScale", "density", "theme"] }],
+      displayConfig: [
+        {
+          absentArguments: [
+            "reset",
+            "fontScale",
+            "contentSize",
+            "density",
+            "theme",
+            "size",
+            "navigationMode",
+            "displayCutout",
+            "increaseContrast",
+            "reduceMotion",
+            "boldText",
+            "colorInversion",
+            "colorCorrection",
+            "magnification",
+            "magnificationScale",
+            "extraDim",
+          ],
+        },
+      ],
     };
     for (const [name, expected] of Object.entries(shapes)) {
       const meta = getStaticToolDefinitions().find((tool) => tool.name === name)?._meta;

@@ -34,7 +34,10 @@ data class PickerDevice(
   val deviceSessionUuid: String? = null,
   /** Retained after an incomplete sweep; absence is not evidence of shutdown. */
   val inventoryUncertain: Boolean = false,
-  /** Device form factor ("phone"/"tablet"/"foldable"); unknown is absent. */
+  /**
+   * Device form factor ("phone"/"tablet"/"foldable"/"tv"/"watch"/"automotive"); unknown is absent.
+   * Free-form string: new values need no change here.
+   */
   val formFactor: String? = null,
 ) {
   /** UI identity is platform scoped; id remains the raw daemon command target. */
@@ -92,33 +95,7 @@ fun buildPickerDevices(
   val runtimeToSourceImage =
     sourceImageToRuntimeId.entries.associate { (source, rt) -> rt to source }
 
-  val bootedDevices = booted.map { device ->
-    val (osKey, osLabel) =
-      if (device.platform.equals("ios", ignoreCase = true)) {
-        val major = device.osVersion?.substringBefore(".")?.takeIf { it.isNotBlank() }
-        major to major?.let { "iOS $it" }
-      } else {
-        val api = device.apiLevel?.toString()
-        api to api?.let { "API $it" }
-      }
-    val deviceId = device.runtime.deviceId ?: device.identity.stableId
-    PickerDevice(
-      id = deviceId,
-      name = device.name,
-      platform = platformOf(device.platform),
-      state =
-        if (device.runtime.lifecycle.state == "booting") DeviceState.Booting
-        else DeviceState.Booted,
-      osKey = osKey,
-      osLabel = osLabel,
-      architecture = device.architecture,
-      formFactor = device.formFactor.takeUnless { it == "unknown" },
-      // Seed value only; an unknown (null) lock state seeds unlocked and the host poll refines it.
-      locked = device.runtime.locked == true,
-      isVirtual = device.isVirtual,
-      deviceSessionUuid = device.runtime.deviceSessionUuid,
-    )
-  }
+  val bootedDevices = booted.map { it.toPickerDevice() }
 
   // The daemon's stable identity wins over a previous boot attribution: a runtime serial may
   // have been reused by a different AVD. Older daemons fall back to in-session attribution.
@@ -138,19 +115,7 @@ fun buildPickerDevices(
 
   // An unresolved stable identity can only reconcile an unambiguous
   // same-platform image; never hide an arbitrary sibling with the same display name.
-  val imageNameCounts = images.groupingBy { platformOf(it.platform) to it.name }.eachCount()
-  val hideByName =
-    booted
-      .filter {
-        it.isVirtual &&
-          it.knownSourceImageId() == null &&
-          (platformOf(it.platform) to (it.runtime.deviceId ?: it.identity.stableId)) !in imageIds &&
-          (it.runtime.deviceId ?: it.identity.stableId) !in runtimeToSourceImage
-      }
-      .groupingBy { platformOf(it.platform) to it.name }
-      .eachCount()
-      .filter { (key, count) -> count == 1 && imageNameCounts[key] == 1 }
-      .keys
+  val hideByName = legacyNameMatches(booted, images, imageIds, runtimeToSourceImage)
 
   val shutdownDevices =
     images
@@ -172,4 +137,54 @@ fun buildPickerDevices(
       }
 
   return (bootedDevices + shutdownDevices).distinctBy { it.platform to it.id }
+}
+
+private fun BootedDeviceInfo.toPickerDevice(): PickerDevice {
+  val (osKey, osLabel) =
+    if (this.platform.equals("ios", ignoreCase = true)) {
+      val major = this.osVersion?.substringBefore(".")?.takeIf { it.isNotBlank() }
+      major to major?.let { "iOS $it" }
+    } else {
+      val api = this.apiLevel?.toString()
+      api to api?.let { "API $it" }
+    }
+  val deviceId = this.runtime.deviceId ?: this.identity.stableId
+  return PickerDevice(
+    id = deviceId,
+    name = this.name,
+    platform = platformOf(this.platform),
+    state =
+      if (this.runtime.lifecycle.state == "booting") DeviceState.Booting else DeviceState.Booted,
+    osKey = osKey,
+    osLabel = osLabel,
+    architecture = this.architecture,
+    formFactor = this.formFactor.takeUnless { it == "unknown" },
+    // Seed value only; an unknown (null) lock state seeds unlocked and the host poll refines it.
+    locked = this.runtime.locked == true,
+    isVirtual = this.isVirtual,
+    deviceSessionUuid = this.runtime.deviceSessionUuid,
+  )
+}
+
+private fun legacyNameMatches(
+  booted: List<BootedDeviceInfo>,
+  images: List<DeviceImageInfo>,
+  imageIds: Set<Pair<Platform, String>>,
+  runtimeToSourceImage: Map<String, String>,
+): Set<Pair<Platform, String>> {
+  val imageNameCounts = images.groupingBy { platformOf(it.platform) to it.name }.eachCount()
+  val hideByName =
+    booted
+      .filter {
+        it.isVirtual &&
+          it.knownSourceImageId() == null &&
+          (platformOf(it.platform) to (it.runtime.deviceId ?: it.identity.stableId)) !in imageIds &&
+          (it.runtime.deviceId ?: it.identity.stableId) !in runtimeToSourceImage
+      }
+      .groupingBy { platformOf(it.platform) to it.name }
+      .eachCount()
+      .filter { (key, count) -> count == 1 && imageNameCounts[key] == 1 }
+      .keys
+
+  return hideByName
 }

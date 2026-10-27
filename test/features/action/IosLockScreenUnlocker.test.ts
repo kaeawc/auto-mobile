@@ -1,3 +1,5 @@
+import type { SwipeGestureRequest } from "../../../src/features/action/swipeon/types";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   IosLockScreenUnlocker,
@@ -43,12 +45,14 @@ describe("IosLockScreenUnlocker", () => {
         : "caller screen swipe is fenced by a stale display revision",
       async () => {
         const observe = new FakeObserveScreen();
-        observe.setObserveResult({
-          timestamp: 0,
-          screenSize: { width: 1000, height: 2000 },
-          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-          viewHierarchy: { hierarchy: { node: { $: { _id: "lock" } } } },
-        });
+        observe.setObserveResult(
+          buildObserveResult({
+            updatedAt: 0,
+            screenSize: { width: 1000, height: 2000 },
+            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+            viewHierarchy: { hierarchy: { node: { $: { _id: "lock" } } } },
+          }),
+        );
         let gestures = 0;
         const swipe = new SwipeOn(device, null, {
           observeScreen: observe,
@@ -86,17 +90,21 @@ describe("IosLockScreenUnlocker", () => {
   for (const isFresh of [false, true, undefined]) {
     test(`unlock swipe refreshes geometry unless cache freshness is true (${isFresh})`, async () => {
       const observe = new FakeObserveScreen();
-      const cached = {
-        timestamp: 0,
+      const cached = buildObserveResult({
+        updatedAt: 0,
         screenSize: { width: 1000, height: 2000 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
         viewHierarchy: { hierarchy: { node: { $: { _id: "lock" } } } },
-        freshness: { isFresh },
-      };
+        ...(isFresh === undefined ? {} : { freshness: { isFresh } }),
+      });
       displayTransitions.notifyTransition(device.deviceId, "Home");
       observe.setObserveSequence([
         cached,
-        { ...cached, screenSize: { width: 600, height: 1200 }, freshness: { isFresh: true } },
+        buildObserveResult({
+          ...cached,
+          screenSize: { width: 600, height: 1200 },
+          freshness: { isFresh: true },
+        }),
       ]);
       const coordinates: number[][] = [];
       const swipe = new SwipeOn(device, null, {
@@ -104,7 +112,7 @@ describe("IosLockScreenUnlocker", () => {
         skipCallerDisplayFence: true,
         stopAfterIosGestureFailure: true,
         voiceOverExecutor: {
-          async executeSwipeGesture(x1, y1, x2, y2) {
+          async executeSwipeGesture({ x1, y1, x2, y2 }: SwipeGestureRequest) {
             coordinates.push([x1, y1, x2, y2]);
             return { success: false, x1, y1, x2, y2, duration: 300, error: "swipe failed" };
           },
@@ -125,11 +133,15 @@ describe("IosLockScreenUnlocker", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const observe = new FakeObserveScreen();
-    observe.setObserveResult({
-      timestamp: 0,
-      viewHierarchy: { hierarchy: { node: { $: { _id: "lock" } } } },
-      freshness: { isFresh: false },
-    });
+    observe.setObserveResult(
+      buildObserveResult({
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        updatedAt: 0,
+        viewHierarchy: { hierarchy: { node: { $: { _id: "lock" } } } },
+        freshness: { isFresh: false },
+      }),
+    );
     let observeSignal: AbortSignal | undefined;
     let freshness: string | undefined;
     observe.execute = async (options) => {
@@ -147,7 +159,7 @@ describe("IosLockScreenUnlocker", () => {
           ...dependencies,
           observeScreen: observe,
           voiceOverExecutor: {
-            async executeSwipeGesture(x1, y1, x2, y2) {
+            async executeSwipeGesture({ x1, y1, x2, y2 }: SwipeGestureRequest) {
               gestures++;
               return { success: false, x1, y1, x2, y2, duration: 300 };
             },
@@ -168,12 +180,14 @@ describe("IosLockScreenUnlocker", () => {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
       const observe = new FakeObserveScreen();
-      observe.setObserveResult({
-        timestamp: 0,
-        screenSize: { width: 1000, height: 2000 },
-        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-        viewHierarchy: { hierarchy: { node: { $: { _id: "lock" } } } },
-      });
+      observe.setObserveResult(
+        buildObserveResult({
+          updatedAt: 0,
+          screenSize: { width: 1000, height: 2000 },
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          viewHierarchy: { hierarchy: { node: { $: { _id: "lock" } } } },
+        }),
+      );
       let captured:
         | import("../../../src/features/action/ExecuteGesture").FencedGestureOptions
         | undefined;
@@ -183,7 +197,13 @@ describe("IosLockScreenUnlocker", () => {
         skipCallerDisplayFence: true,
         stopAfterIosGestureFailure: true,
         voiceOverExecutor: {
-          async executeSwipeGesture(x1, y1, x2, y2, _direction, _container, options) {
+          async executeSwipeGesture({
+            x1,
+            y1,
+            x2,
+            y2,
+            gestureOptions: options,
+          }: SwipeGestureRequest) {
             captured = options;
             return { success: false, x1, y1, x2, y2, duration: 300, error: "bounded" };
           },
@@ -226,7 +246,15 @@ describe("IosLockScreenUnlocker", () => {
         return {
           async execute(options) {
             calls.push(options);
-            return { success: true, duration: 300 };
+            return {
+              success: true,
+              targetType: "screen",
+              x1: 0,
+              y1: 100,
+              x2: 0,
+              y2: 0,
+              duration: 300,
+            };
           },
         };
       },
@@ -289,12 +317,14 @@ describe("IosLockScreenUnlocker", () => {
 
   test("wake swipe timeout skips post-action runner observation", async () => {
     const observe = new FakeObserveScreen();
-    observe.setObserveResult({
-      timestamp: 0,
-      screenSize: { width: 1000, height: 2000 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: { hierarchy: { node: { $: { _id: "lock" } } } },
-    });
+    observe.setObserveResult(
+      buildObserveResult({
+        updatedAt: 0,
+        screenSize: { width: 1000, height: 2000 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: { hierarchy: { node: { $: { _id: "lock" } } } },
+      }),
+    );
     let gestures = 0;
     const swipe = new SwipeOn(device, null, {
       observeScreen: observe,
@@ -342,7 +372,7 @@ describe("two-stage swipe budgets", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
-  for (const state of [false, undefined, new Error("probe failed"), "rejected"]) {
+  for (const state of [false, undefined, new Error("probe failed"), "rejected"] as const) {
     test(`post-wake probe ${String(state)} still tries the fast swipe without false success`, async () => {
       const timer = new FakeTimer();
       const actions = new FakeIosActions();
@@ -464,7 +494,15 @@ describe("two-stage swipe budgets", () => {
       flags.push(deps.iosLockScreenSwipe);
       return {
         async execute() {
-          return { success: true, duration: 300 };
+          return {
+            success: true,
+            targetType: "screen",
+            x1: 0,
+            y1: 100,
+            x2: 0,
+            y2: 0,
+            duration: 300,
+          };
         },
       };
     });

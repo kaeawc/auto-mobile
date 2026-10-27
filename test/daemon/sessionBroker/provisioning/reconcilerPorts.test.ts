@@ -1,10 +1,15 @@
+import { FakeDeviceUtils } from "../../../fakes/FakeDeviceUtils";
 import { AndroidEmulatorUnavailableError } from "../../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { SimctlUnavailableError } from "../../../../src/utils/ios-cmdline-tools/SimCtlClient";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { DeviceManagerBindingInventory } from "../../../../src/daemon/sessionBroker/provisioning/DeviceManagerBindingInventory";
 import {
-  DeviceManagerBindingInventory,
+  BOOT_CAPACITY_CHECK_TIMEOUT_MS,
   GateBindingBootCapacity,
-  PoolBindingDeviceClaims,
+} from "../../../../src/daemon/sessionBroker/provisioning/GateBindingBootCapacity";
+import { DEFAULT_SAMPLE_TIMEOUT_MS } from "../../../../src/devices/bootAdmission/BootAdmissionGate";
+import { PoolBindingDeviceClaims } from "../../../../src/daemon/sessionBroker/provisioning/PoolBindingDeviceClaims";
+import {
   ToolBindingProvisioner,
   type BindingToolInvoker,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconcilerPorts";
@@ -21,6 +26,9 @@ import { MultiPlatformDeviceManager } from "../../../../src/devices/deviceUtils"
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { createFakeAndroidEmulator } from "../../../fakes/FakeAndroidEmulator";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { drainUntil } from "../../../helpers/fakeTimerStepping";
+import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { logger } from "../../../../src/utils/logger";
 
 const IOS_18 = "com.apple.CoreSimulator.SimRuntime.iOS-18-0";
 const IPHONE_16 = "com.apple.CoreSimulator.SimDeviceType.iPhone-16";
@@ -84,6 +92,7 @@ describe("ToolBindingProvisioner", () => {
         },
         boot: true,
         readiness: "automation",
+        rollbackOnRetryableReadiness: false,
         timeoutMs: 60_000,
       },
     });
@@ -94,6 +103,72 @@ describe("ToolBindingProvisioner", () => {
       readiness: { mode: "automation", status: "automation_ready" },
     });
   });
+
+  test("passes the retained simulator identity from readiness failure evidence", async () => {
+    const { invoke } = recordingInvoker(
+      createToolErrorResponse("timeout", "readiness deadline", {
+        error: { code: "timeout", retryable: true },
+        lifecycle: {
+          state: "created_not_ready",
+          phase: "readiness",
+          device: {
+            platform: "ios",
+            stableId: "UDID-kept",
+            name: "kept",
+            runtimeDeviceId: "UDID-kept",
+          },
+        },
+      }),
+    );
+    await expect(
+      provisionerWith(invoke).provision({
+        platform: "ios",
+        name: "kept",
+        spec: { runtime: IOS_18, deviceType: IPHONE_16 },
+        mode: "create",
+        deadlineMs: 61_000,
+      }),
+    ).rejects.toMatchObject({
+      code: "timeout",
+      retryable: true,
+      diagnostics: { retainedDevice: { platform: "ios", stableId: "UDID-kept", name: "kept" } },
+    });
+  });
+
+  test.each([undefined, "kept", "UDID-kept"])(
+    "retained identity rejects a device name and falls back to runtime UDID %s",
+    async (runtimeDeviceId) => {
+      const { invoke } = recordingInvoker(
+        createToolErrorResponse("timeout", "readiness deadline", {
+          error: { code: "timeout", retryable: true },
+          lifecycle: {
+            state: "created_not_ready",
+            phase: "readiness",
+            device: { platform: "ios", stableId: "kept", name: "kept", runtimeDeviceId },
+          },
+        }),
+      );
+      const error = await provisionerWith(invoke)
+        .provision({
+          platform: "ios",
+          name: "kept",
+          spec: { runtime: IOS_18, deviceType: IPHONE_16 },
+          mode: "create",
+          deadlineMs: 61_000,
+        })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ProvisionDeviceError);
+      if (!(error instanceof ProvisionDeviceError)) {
+        throw new Error("Expected a typed provision failure");
+      }
+      expect(error.diagnostics.retainedDevice).toEqual(
+        runtimeDeviceId === "UDID-kept"
+          ? { platform: "ios", stableId: "UDID-kept", name: "kept" }
+          : undefined,
+      );
+    },
+  );
 
   test("an error response is rethrown as the typed provision failure", async () => {
     const { invoke } = recordingInvoker(
@@ -185,6 +260,79 @@ describe("DeviceManagerBindingInventory", () => {
     });
 
     expect(await inventory.list("ios", {})).toEqual({ complete: false, devices: [] });
+  });
+
+  describe("probeRunning (#15016)", () => {
+    const avd: DeviceInfo = {
+      name: "ambroker-verify-api30",
+      platform: "android",
+      isRunning: false,
+    };
+    const booted = (name: string, deviceId: string): BootedDevice => ({
+      name,
+      deviceId,
+      platform: "android",
+      source: "local",
+    });
+
+    function probing(
+      discover: NonNullable<
+        ConstructorParameters<typeof DeviceManagerBindingInventory>[0]["getBootedDevicesDetailed"]
+      >,
+    ) {
+      return new DeviceManagerBindingInventory({
+        listDeviceImages: async () => [],
+        getBootedDevicesDetailed: discover,
+      });
+    }
+
+    test("proves running only from a fresh, complete booted listing naming the AVD", async () => {
+      const calls: Array<{ bypass?: boolean }> = [];
+      const inventory = probing(async (_platform, options) => {
+        calls.push({ bypass: options?.bypassAndroidDeviceListCache });
+        return {
+          devices: [booted(avd.name, "emulator-5556")],
+          succeededPlatforms: new Set(["android"]),
+        };
+      });
+      expect(await inventory.probeRunning?.(avd, {})).toBe(true);
+      expect(calls).toEqual([{ bypass: true }]);
+    });
+
+    test("a complete listing without the AVD, or with only an unresolved emulator, is not proof", async () => {
+      const inventory = probing(async () => ({
+        devices: [
+          booted("other-avd", "emulator-5554"),
+          booted("Unknown (emulator-5610)", "emulator-5610"),
+          booted(avd.name, "R58M123ABC"),
+        ],
+        succeededPlatforms: new Set(["android"]),
+      }));
+      expect(await inventory.probeRunning?.(avd, {})).toBe(false);
+    });
+
+    test("an incomplete listing or a discovery failure is not proof", async () => {
+      expect(
+        await probing(async () => ({
+          devices: [booted(avd.name, "emulator-5556")],
+          succeededPlatforms: new Set(),
+        })).probeRunning?.(avd, {}),
+      ).toBe(false);
+      expect(
+        await probing(async () => {
+          throw new Error("adb offline");
+        }).probeRunning?.(avd, {}),
+      ).toBe(false);
+    });
+
+    test("an aborted probe rethrows the abort", async () => {
+      const controller = new AbortController();
+      const inventory = probing(async () => {
+        controller.abort();
+        throw new Error("aborted");
+      });
+      await expect(inventory.probeRunning?.(avd, { signal: controller.signal })).rejects.toThrow();
+    });
   });
 });
 
@@ -312,6 +460,36 @@ describe("PoolBindingDeviceClaims", () => {
 });
 
 describe("GateBindingBootCapacity", () => {
+  test.each(["check", "reserve"] as const)(
+    "%s maps an escaping ownership reader failure to typed unknown capacity",
+    async (route) => {
+      const error = new BindingDiscoveryIncompleteError("registry unreadable");
+      const reader = { refresh: () => Promise.reject(error) };
+      const capacity = new GateBindingBootCapacity(
+        new FakeTimer(),
+        () => reader.refresh(),
+        async () => {
+          await reader.refresh();
+          throw new Error("unreachable after failed ownership read");
+        },
+      );
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result =
+          route === "check"
+            ? await capacity.check("ios", {})
+            : await capacity.reserve("ios", { timeoutMs: 1000 });
+        expect(result).toMatchObject({
+          kind: "unknown",
+          message: expect.stringContaining("registry unreadable"),
+        });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("capacity is unknown"), error);
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
   test("a passing gate check is available capacity", async () => {
     const platforms: string[] = [];
     const capacity = new GateBindingBootCapacity(new FakeTimer(), async (platform) => {
@@ -322,10 +500,17 @@ describe("GateBindingBootCapacity", () => {
     expect(platforms).toEqual(["ios"]);
   });
 
-  test("the gate's refusal keeps its limit, count, wait hint and external devices", async () => {
+  test("the gate's refusal keeps its limit, count, wait hint and external and held devices", async () => {
     const capacity = new GateBindingBootCapacity(new FakeTimer(), async () => {
       throw new BootCapacityExhaustedError(
-        { platform: "ios", limit: 2, booted: 3, retryAfterMs: 5_000, externalDevices: ["UDID-1"] },
+        {
+          platform: "ios",
+          limit: 2,
+          booted: 3,
+          retryAfterMs: 5_000,
+          externalDevices: ["UDID-1"],
+          heldDevices: ["UDID-HELD"],
+        },
         "full",
       );
     });
@@ -336,6 +521,7 @@ describe("GateBindingBootCapacity", () => {
       booted: 3,
       retryAfterMs: 5_000,
       externalDevices: ["UDID-1"],
+      heldDevices: ["UDID-HELD"],
     });
   });
 
@@ -354,12 +540,25 @@ describe("GateBindingBootCapacity", () => {
     });
   });
 
-  test("a check that never answers is unknown after 5 s, with no real wait", async () => {
+  test("a sample as slow as the gate's own 15 s budget is still answered, not unknown (#13801)", async () => {
+    const timer = new FakeTimer();
+    const capacity = new GateBindingBootCapacity(
+      timer,
+      () => new Promise<void>((resolve) => timer.setTimeout(resolve, DEFAULT_SAMPLE_TIMEOUT_MS)),
+    );
+
+    const check = capacity.check("ios", {});
+    await timer.advanceTimersByTimeAsync(DEFAULT_SAMPLE_TIMEOUT_MS);
+
+    expect(await check).toEqual({ kind: "available" });
+  });
+
+  test("a check that never answers is unknown just after the gate's sample budget, with no real wait", async () => {
     const timer = new FakeTimer();
     const capacity = new GateBindingBootCapacity(timer, () => new Promise<void>(() => {}));
 
     const check = capacity.check("ios", {});
-    await timer.advanceTimersByTimeAsync(4_999);
+    await timer.advanceTimersByTimeAsync(BOOT_CAPACITY_CHECK_TIMEOUT_MS - 1);
     let settled = false;
     void check.then(() => {
       settled = true;
@@ -370,7 +569,101 @@ describe("GateBindingBootCapacity", () => {
 
     expect(await check).toEqual({
       kind: "unknown",
-      message: "Timed out after 5000ms checking ios boot capacity.",
+      message: `Timed out after ${BOOT_CAPACITY_CHECK_TIMEOUT_MS}ms checking ios boot capacity.`,
+    });
+  });
+
+  test.each([3_000, 60_000])(
+    "bounds and aborts the probe at min(%i, 17 s)",
+    async (remainingMs) => {
+      const timer = new FakeTimer();
+      let probeSignal: AbortSignal | undefined;
+      const capacity = new GateBindingBootCapacity(timer, async (_platform, signal) => {
+        probeSignal = signal;
+        await new Promise<void>(() => {});
+      });
+      const timeoutMs = Math.min(remainingMs, BOOT_CAPACITY_CHECK_TIMEOUT_MS);
+      const check = capacity.check("ios", {
+        timeoutMs: remainingMs,
+        signal: new AbortController().signal,
+      });
+      await timer.advanceTimersByTimeAsync(timeoutMs - 1);
+      expect(probeSignal?.aborted).toBe(false);
+      await timer.advanceTimersByTimeAsync(1);
+      expect(probeSignal?.aborted).toBe(true);
+      expect(await check).toEqual({
+        kind: "unknown",
+        message: `Timed out after ${timeoutMs}ms checking ios boot capacity.`,
+      });
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
+  test("a short-budget probe finishes at 3 s rather than the 17 s backstop", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const capacity = new GateBindingBootCapacity(timer, () => new Promise<void>(() => {}));
+    expect(await capacity.check("ios", { timeoutMs: 3_000 })).toMatchObject({ kind: "unknown" });
+    expect(timer.now()).toBe(3_000);
+  });
+
+  const slotReservation = () => ({
+    run: <T>(operation: () => Promise<T>) => operation(),
+    markReplacedDeviceGone: () => {},
+    release: () => {},
+  });
+
+  test("a slow replacement lookup leaves the reservation the gate's full sample budget (#14495)", async () => {
+    const timer = new FakeTimer();
+    const reserveTimeouts: number[] = [];
+    const capacity = new GateBindingBootCapacity(
+      timer,
+      async () => {},
+      (_platform, options) => {
+        reserveTimeouts.push(options.timeoutMs);
+        return new Promise((resolve) =>
+          timer.setTimeout(() => resolve(slotReservation()), DEFAULT_SAMPLE_TIMEOUT_MS),
+        );
+      },
+    );
+    const result = capacity.reserve("android", {
+      timeoutMs: 60_000,
+      resolveReplacingDeviceId: () =>
+        new Promise((resolve) => timer.setTimeout(() => resolve("emulator-5554"), 3_000)),
+    });
+    await timer.advanceTimersByTimeAsync(3_000);
+    await drainUntil(() => reserveTimeouts.length > 0, { description: "gate reservation" });
+    await timer.advanceTimersByTimeAsync(DEFAULT_SAMPLE_TIMEOUT_MS);
+    expect(await result).toMatchObject({ kind: "available" });
+    // The gate is handed what is left of the request, not its original budget.
+    expect(reserveTimeouts).toEqual([57_000]);
+  });
+
+  test("the request's timeoutMs still bounds the lookup and the sample together", async () => {
+    const timer = new FakeTimer();
+    let sampleSignal: AbortSignal | undefined;
+    const capacity = new GateBindingBootCapacity(
+      timer,
+      async () => {},
+      async (_platform, options) => {
+        sampleSignal = options.signal;
+        return await new Promise(() => {});
+      },
+    );
+    const result = capacity.reserve("android", {
+      timeoutMs: 10_000,
+      resolveReplacingDeviceId: () =>
+        new Promise((resolve) => timer.setTimeout(() => resolve("emulator-5554"), 3_000)),
+    });
+    await timer.advanceTimersByTimeAsync(3_000);
+    await drainUntil(() => sampleSignal !== undefined, { description: "gate reservation" });
+    await timer.advanceTimersByTimeAsync(7_000 - 1);
+    expect(sampleSignal?.aborted).toBe(false);
+    await timer.advanceTimersByTimeAsync(1);
+    expect(sampleSignal?.aborted).toBe(true);
+    expect(await result).toMatchObject({
+      kind: "unknown",
+      message: "Timed out reserving android boot capacity.",
     });
   });
 
@@ -393,4 +686,51 @@ describe("GateBindingBootCapacity", () => {
       "cancelled",
     );
   });
+});
+
+test("late reservation after adapter timeout is released", async () => {
+  const timer = new FakeTimer();
+  let complete:
+    | ((
+        reservation: import("../../../../src/devices/bootAdmission/BootSlotReservation").BootSlotReservation,
+      ) => void)
+    | undefined;
+  let released = 0;
+  const capacity = new GateBindingBootCapacity(
+    timer,
+    async () => {},
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  const result = capacity.reserve("ios", { timeoutMs: 60_000 });
+  timer.advanceTime(BOOT_CAPACITY_CHECK_TIMEOUT_MS);
+  expect(await result).toMatchObject({ kind: "unknown" });
+  complete?.({
+    run: (operation) => operation(),
+    markReplacedDeviceGone: () => {},
+    release: () => {
+      released += 1;
+    },
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(released).toBe(1);
+});
+
+test("replacement runtime lookup matches an AVD to its emulator serial, excluding physical devices", async () => {
+  const manager = new FakeDeviceUtils();
+  manager.setBootedDevices("android", [
+    { platform: "android", name: "binding-avd", deviceId: "physical-serial" },
+    { platform: "android", name: "other-avd", deviceId: "emulator-5554" },
+    { platform: "android", name: "binding-avd", deviceId: "emulator-5556" },
+  ]);
+  const inventory = new DeviceManagerBindingInventory(manager);
+  expect(
+    await inventory.runtimeDeviceId(
+      { platform: "android", name: "binding-avd", isRunning: true },
+      {},
+    ),
+  ).toBe("emulator-5556");
 });

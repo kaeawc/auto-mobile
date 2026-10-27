@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerHighlightTools } from "../../src/server/highlightTools";
-import { VisualHighlightClient } from "../../src/features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../../src/features/debug/VisualHighlightClient";
 import { SearchableHierarchy } from "../../src/features/utility/SearchableNode";
+import { SdkCapabilityQueryError } from "../../src/features/observe/ios/SdkCapabilityQueryError";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, HighlightShape, ViewHierarchyResult } from "../../src/models";
 import { innerBounds, nestedClickableHierarchy } from "../fixtures/nestedClickableHierarchy";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { toolIsError, toolJson } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -42,8 +44,8 @@ describe("Highlight Tools Registration", () => {
           shape: { type: "circle", bounds: { x: 0, y: 0, width: 10, height: 10 } },
         }),
       );
-      expect(response.isError).toBe(outcome === "success" ? undefined : true);
-      expect(JSON.parse(response.content[0].text)).toEqual(
+      expect(toolIsError(response)).toBe(outcome !== "success");
+      expect(toolJson(response)).toEqual(
         outcome === "success"
           ? { success: true }
           : {
@@ -53,6 +55,32 @@ describe("Highlight Tools Registration", () => {
       );
     },
   );
+
+  test("highlight keeps the typed SDK capability code and retryable flag", async () => {
+    registerHighlightTools({
+      generateHighlightId: () => "fake-highlight",
+      highlightClientFactory: () =>
+        Object.assign(new VisualHighlightClient(), {
+          addHighlight: async () => {
+            throw new SdkCapabilityQueryError("timeout", "SDK probe timed out");
+          },
+        }),
+    });
+    const tool = ToolRegistry.getTool("highlight")!;
+    const response = await tool.deviceAwareHandler!(
+      { deviceId: "fake", platform: "ios", name: "Fake" },
+      tool.schema.parse({
+        shape: { type: "circle", bounds: { x: 0, y: 0, width: 10, height: 10 } },
+      }),
+    );
+    expect(toolIsError(response)).toBe(true);
+    expect(toolJson(response)).toEqual({
+      success: false,
+      error: "SDK probe timed out",
+      code: "timeout",
+      retryable: true,
+    });
+  });
 
   test("registers highlight tool", () => {
     registerHighlightTools();
@@ -97,8 +125,8 @@ describe("Highlight Tools Registration", () => {
       { deviceId: "test", platform: "android", name: "Test" } as BootedDevice,
       tool.schema.parse({ platform: "android", text: "Target", containerOf }),
     );
-    expect(JSON.parse(response.content[0].text).success).toBe(true);
-    expect(response.isError).toBeUndefined();
+    expect(toolJson(response).success).toBe(true);
+    expect(toolIsError(response)).toBe(false);
     expect(shapes[0]).toEqual({ type: "circle", bounds });
   });
 
@@ -129,8 +157,8 @@ describe("Highlight Tools Registration", () => {
       { deviceId: "android-test", platform: "android", name: "test" },
       tool.schema.parse({ text: "Wi-Fi" }),
     );
-    expect(JSON.parse(response.content[0].text).success).toBe(true);
-    expect(response.isError).toBeUndefined();
+    expect(toolJson(response).success).toBe(true);
+    expect(toolIsError(response)).toBe(false);
     expect(shape).toEqual({
       type: "circle",
       bounds: {
@@ -180,8 +208,8 @@ describe("Highlight Tools Registration", () => {
       { deviceId: "android-test", platform: "android", name: "test" },
       tool.schema.parse({ elementId: "app:id/label" }),
     );
-    expect(JSON.parse(response.content[0].text).success).toBe(true);
-    expect(response.isError).toBeUndefined();
+    expect(toolJson(response).success).toBe(true);
+    expect(toolIsError(response)).toBe(false);
     expect(shape).toEqual({
       type: "circle",
       bounds: { x: 20, y: 30, width: 100, height: 30 },
@@ -194,7 +222,7 @@ describe("Highlight Tools Registration", () => {
     const tool = ToolRegistry.getTool("highlight");
     expect(tool).toBeDefined();
 
-    const validShape = {
+    const validShape: HighlightShape = {
       type: "circle",
       bounds: {
         x: 10,
@@ -265,7 +293,7 @@ describe("Highlight Tools Registration", () => {
     expect(tool).toBeDefined();
     expect(tool!.deviceAwareHandler).toBeDefined();
 
-    const validShape = {
+    const validShape: HighlightShape = {
       type: "circle",
       bounds: {
         x: 10,
@@ -288,7 +316,7 @@ describe("Highlight Tools Registration", () => {
       } as BootedDevice,
       parsed,
     );
-    const payload = JSON.parse(response.content[0].text);
+    const payload = toolJson(response);
 
     expect(payload.success).toBe(true);
     expect(addCalls).toEqual([{ id: "highlight-ios-shape", shape: validShape, platform: "ios" }]);
@@ -301,17 +329,19 @@ describe("Highlight Tools Registration", () => {
       screenWidth: 100,
       screenHeight: 100,
       hierarchy: {
-        bounds: [0, 0, 100, 100],
-        node: [
-          { text: "Visible", bounds: [0, 0, 20, 20] },
-          { text: "Offscreen", bounds: [0, 500, 20, 520] },
-        ],
+        node: {
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          node: [
+            { text: "Visible", bounds: { left: 0, top: 0, right: 20, bottom: 20 } },
+            { text: "Offscreen", bounds: { left: 0, top: 500, right: 20, bottom: 520 } },
+          ],
+        },
       },
-    };
+    } satisfies ViewHierarchyResult;
     registerHighlightTools({
       viewHierarchyClientFactory: () => ({
         requestHierarchySync: async () => ({ hierarchy }),
-        convertToViewHierarchyResult: () => hierarchy as ViewHierarchyResult,
+        convertToViewHierarchyResult: () => hierarchy,
       }),
       highlightClientFactory: () => ({
         addHighlight: async () => {
@@ -325,8 +355,8 @@ describe("Highlight Tools Registration", () => {
       { deviceId: "ios-test", platform: "ios", name: "test" },
       tool.schema.parse({ text: "Offscreen" }),
     );
-    expect(JSON.parse(response.content[0].text).success).toBe(false);
-    expect(response.isError).toBe(true);
+    expect(toolJson(response).success).toBe(false);
+    expect(toolIsError(response)).toBe(true);
     expect(highlighted).toBe(false);
   });
 
@@ -336,10 +366,12 @@ describe("Highlight Tools Registration", () => {
       screenWidth: 100,
       screenHeight: 100,
       hierarchy: {
-        node: [
-          { text: "X", bounds: [0, 200, 20, 220] },
-          { text: "X", bounds: [0, 10, 20, 30] },
-        ],
+        node: {
+          node: [
+            { text: "X", bounds: { left: 0, top: 200, right: 20, bottom: 220 } },
+            { text: "X", bounds: { left: 0, top: 10, right: 20, bottom: 30 } },
+          ],
+        },
       },
     };
     registerHighlightTools({
@@ -367,8 +399,8 @@ describe("Highlight Tools Registration", () => {
       { deviceId: "android-test", platform: "android", name: "test" },
       tool.schema.parse({ text: "X" }),
     );
-    expect(JSON.parse(response.content[0].text).success).toBe(true);
-    expect(response.isError).toBeUndefined();
+    expect(toolJson(response).success).toBe(true);
+    expect(toolIsError(response)).toBe(false);
     expect(shape?.bounds.y).toBe(10);
   });
 
@@ -420,7 +452,7 @@ describe("Highlight Tools Registration", () => {
       } as BootedDevice,
       parsed,
     );
-    const payload = JSON.parse(response.content[0].text);
+    const payload = toolJson(response);
 
     expect(payload.success).toBe(true);
     // iOS selector path must attach source dims so the in-app SDK can map

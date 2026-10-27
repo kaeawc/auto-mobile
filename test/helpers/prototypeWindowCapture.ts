@@ -2,17 +2,15 @@ import capture from "../fixtures/android-launcher/launcher-recents-emulator-5602
 import appLayerCapture from "../fixtures/android-overlay-window/app-layer-overlay-over-playground.raw.json";
 import floatingCoverCapture from "../fixtures/android-overlay-window/floating-overlay-over-button-elevated.raw.json";
 import { CTRL_PROXY_PACKAGE } from "../../src/ctrlProxy/constants";
-import { CtrlProxyHierarchy } from "../../src/features/observe/android/CtrlProxyHierarchy";
+import { createAndroidHierarchyConverter } from "./androidHierarchyConverter";
 import type {
   AccessibilityHierarchy,
   AccessibilityNode,
-  HierarchyDelegateContext,
 } from "../../src/features/observe/android/types";
 import { DefaultObserveElementCollector } from "../../src/features/observe/ObserveElementCollector";
 import type { ElementBounds } from "../../src/models/ElementBounds";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import type { PrototypePlacement, ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
-import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
  * A captured two-window screen standing in for the CtrlProxy prototype
@@ -47,9 +45,7 @@ const ACCESSIBILITY_WINDOW_TYPE_ACCESSIBILITY_OVERLAY = 4;
 
 /** The converted capture with no window relabelled (no prototype on screen). */
 export function capturedTwoWindowHierarchy(): ViewHierarchyResult {
-  return new CtrlProxyHierarchy({
-    timer: new FakeTimer(),
-  } as HierarchyDelegateContext).convertToViewHierarchyResult(
+  return createAndroidHierarchyConverter().convertToViewHierarchyResult(
     JSON.parse(capture.rawViewHierarchy.json) as AccessibilityHierarchy,
   );
 }
@@ -86,6 +82,7 @@ export function capturedPrototypeHierarchy(
 export function observationOf(viewHierarchy: ViewHierarchyResult): ObserveResult {
   return {
     updatedAt: 1,
+    observationId: "prototype-capture",
     display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: {
       width: RELABELLED_CAPTURE.screen.right,
@@ -98,9 +95,7 @@ export function observationOf(viewHierarchy: ViewHierarchyResult): ObserveResult
 }
 
 function convertCapture(json: string): ViewHierarchyResult {
-  return new CtrlProxyHierarchy({
-    timer: new FakeTimer(),
-  } as HierarchyDelegateContext).convertToViewHierarchyResult(
+  return createAndroidHierarchyConverter().convertToViewHierarchyResult(
     JSON.parse(json) as AccessibilityHierarchy,
   );
 }

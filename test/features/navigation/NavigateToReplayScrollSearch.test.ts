@@ -163,18 +163,14 @@ describe("navigateTo replay scroll search (#10154)", () => {
   };
 
   function navigate(signal?: AbortSignal) {
-    return new NavigateTo(
-      device,
-      new FakeAdbClientFactory(),
-      noSetup,
-      { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
-      manager,
+    return new NavigateTo(device, new FakeAdbClientFactory(), {
+      uiStateSetup: noSetup,
+      screenWaiter: { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
+      navigationManager: manager,
       timer,
-      undefined,
-      undefined,
-      () => observer,
-      searcher,
-    ).execute({ targetScreen: "Settings", platform: "android" }, undefined, signal);
+      foregroundObserverProvider: () => observer,
+      scrollSearcher: searcher,
+    }).execute({ targetScreen: "Settings", platform: "android" }, undefined, signal);
   }
 
   async function recordLinksEdge(

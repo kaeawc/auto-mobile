@@ -70,11 +70,13 @@ class AllocatingDeviceActionsTest {
   fun `a recording start allocates the device before the tool call`() {
     client.callToolResult = toolResponse("""{"action":"start","count":0,"recordings":[]}""")
 
-    McpVideoRecordingActions(provider).startRecording("emulator-5554")
+    val started = McpVideoRecordingActions(provider).startRecording("emulator-5554")
 
     assertEquals(listOf("setToolEnabled", "videoRecording"), client.toolCalls.map { it.name })
     assertEquals(listOf("emulator-5554@1"), allocations)
     assertEquals(DESKTOP_SESSION, sessionOf(client.toolCalls[1]))
+    // The owner a later stop names is the session this start named (#11366).
+    assertEquals(DESKTOP_SESSION, started.ownerSessionUuid)
   }
 
   @Test
@@ -167,7 +169,15 @@ class AllocatingDeviceActionsTest {
   fun `a control input allocates its device before it reaches the daemon`() {
     val control = inputAllocatingClient({ client }) { allocation }!!
 
-    control.inputTap(1.0, 2.0, "android", "emulator-5554")
+    control.inputTap(
+      input =
+        TapInput(
+          x = 1.0,
+          y = 2.0,
+          platform = "android",
+          deviceId = "emulator-5554",
+        ),
+    )
 
     assertEquals(listOf("emulator-5554@0"), allocations)
     assertEquals(1, client.inputTapCalls.size)
@@ -178,7 +188,16 @@ class AllocatingDeviceActionsTest {
     allowed = false
     val control = inputAllocatingClient({ client }) { allocation }!!
 
-    val result = control.inputTap(1.0, 2.0, "android", "emulator-5554")
+    val result =
+      control.inputTap(
+        input =
+          TapInput(
+            x = 1.0,
+            y = 2.0,
+            platform = "android",
+            deviceId = "emulator-5554",
+          ),
+      )
 
     assertEquals(listOf("emulator-5554@0"), allocations)
     assertTrue(client.inputTapCalls.isEmpty())
@@ -191,12 +210,32 @@ class AllocatingDeviceActionsTest {
     val refusing = DesktopInputAllocation { false }
 
     assertTrue(
-      inputAllocatingClient({ client }) { current }!!.inputTap(1.0, 2.0, "android", "e").success,
+      inputAllocatingClient({ client }) { current }!!
+        .inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+              platform = "android",
+              deviceId = "e",
+            ),
+        )
+        .success,
     )
     current = refusing
     assertEquals(
       false,
-      inputAllocatingClient({ client }) { current }!!.inputTap(1.0, 2.0, "android", "e").success,
+      inputAllocatingClient({ client }) { current }!!
+        .inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+              platform = "android",
+              deviceId = "e",
+            ),
+        )
+        .success,
     )
     assertEquals(1, client.inputTapCalls.size)
   }

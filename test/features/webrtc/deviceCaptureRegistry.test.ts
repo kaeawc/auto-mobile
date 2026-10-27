@@ -9,6 +9,8 @@ import {
 import type {
   H264CaptureSource,
   H264CaptureSourceOptions,
+  H264CaptureSourceMetrics,
+  H264CaptureSourceTelemetry,
 } from "../../../src/features/webrtc/H264CaptureSource";
 import type { BootedDevice } from "../../../src/models";
 import { H264AnnexBParser } from "../../../src/features/webrtc/h264";
@@ -16,6 +18,7 @@ import { logger } from "../../../src/utils/logger";
 
 const device = { deviceId: "a", platform: "android", name: "Pixel" } as BootedDevice;
 class FakeSource implements H264CaptureSource {
+  getTelemetry?: () => H264CaptureSourceTelemetry;
   starts = 0;
   stops = 0;
   staleStops: Array<boolean | undefined> = [];
@@ -932,7 +935,7 @@ describe("review regressions", () => {
     const seen: unknown[][] = [[], []];
     const a = h.acquire({ onFrameMetrics: (metrics) => seen[0].push(metrics) });
     await a.start();
-    const metrics = {
+    const metrics: H264CaptureSourceMetrics = {
       native: null,
       helper: null,
       encoder: {
@@ -1103,12 +1106,10 @@ test("optional capabilities forward resolved source identity and arguments", asy
     options: { device, onData: () => {} },
     create: (options) => {
       const source = h.create(options);
-      Object.assign(source, {
-        getTelemetry() {
-          expect(this).toBe(source);
-          return telemetry;
-        },
-      });
+      source.getTelemetry = function () {
+        expect(this).toBe(source);
+        return telemetry;
+      };
       return gate.promise;
     },
   });
@@ -1310,11 +1311,11 @@ describe("iOS shared capture frame-rate raise (#10711)", () => {
   test("a raise before the creator starts replaces the unstarted source once", async () => {
     const h = iosHarness();
     const gate = Promise.withResolvers<void>();
-    h.gateCreate(gate.promise);
+    void h.gateCreate(gate.promise);
     const relay = h.join(5, "relay");
     const webrtc = h.join(15, "webrtc");
     const starts = Promise.all([relay.handle.start(), webrtc.handle.start()]);
-    h.gateCreate(null);
+    void h.gateCreate(null);
     gate.resolve();
     await starts;
     expect(h.events).toEqual(["create1@5", "stop1", "create2@15", "start2"]);

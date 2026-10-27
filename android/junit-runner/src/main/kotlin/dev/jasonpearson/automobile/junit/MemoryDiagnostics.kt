@@ -38,9 +38,9 @@ internal object MemoryDiagnostics {
     )
   }
 
-  @Suppress("ExplicitGarbageCollectionCall")
   fun forceGc() {
-    System.gc()
+    // MemoryMXBean.gc has the same collection-request semantics as System.gc.
+    ManagementFactory.getMemoryMXBean().gc()
   }
 
   fun dumpHeap(label: String, reason: String? = null): File? {
@@ -57,8 +57,8 @@ internal object MemoryDiagnostics {
     val heapDumpFile = File(baseDir, "${timestamp}_${sanitizedLabel}.hprof")
 
     val pid = currentPid()
-    val jcmd = findTool("jcmd")
-    val jmap = findTool("jmap")
+    val jcmd = DiagnosticTools.findTool("jcmd")
+    val jmap = DiagnosticTools.findTool("jmap")
 
     val command =
       when {
@@ -73,8 +73,8 @@ internal object MemoryDiagnostics {
       return null
     }
 
-    val output = runTool(command, DEFAULT_TOOL_TIMEOUT_MS)
-    writeCommandOutput(
+    val output = DiagnosticTools.runTool(command, DEFAULT_TOOL_TIMEOUT_MS)
+    DiagnosticTools.writeCommandOutput(
       File(baseDir, "${timestamp}_${sanitizedLabel}_heap_dump.log"),
       command,
       output,
@@ -104,81 +104,33 @@ internal object MemoryDiagnostics {
     }
 
     val pid = currentPid()
-    val snapshot = captureSnapshot()
-    val summary = buildString {
-      appendLine("Timestamp: $timestamp")
-      appendLine("PID: $pid")
-      if (!reason.isNullOrBlank()) {
-        appendLine("Reason: $reason")
-      }
-      appendLine("Heap Used: ${formatBytes(snapshot.heapUsedBytes)}")
-      appendLine("Heap Committed: ${formatBytes(snapshot.heapCommittedBytes)}")
-      appendLine("Heap Max: ${formatBytes(snapshot.heapMaxBytes)}")
-      appendLine("Non-Heap Used: ${formatBytes(snapshot.nonHeapUsedBytes)}")
-      appendLine("Non-Heap Committed: ${formatBytes(snapshot.nonHeapCommittedBytes)}")
-      appendLine("Non-Heap Max: ${formatBytes(snapshot.nonHeapMaxBytes)}")
-    }
-    File(diagnosticsDir, "summary.txt").writeText(summary)
+    writeSummary(diagnosticsDir, timestamp, pid, reason)
 
     val errors = mutableListOf<String>()
 
-    runAndWriteTool(
-      diagnosticsDir,
-      "jstat-gc",
-      findTool("jstat"),
-      listOf("-gc", pid.toString(), "1", "1"),
-      errors,
-    )
-    runAndWriteTool(
-      diagnosticsDir,
-      "jstat-gccapacity",
-      findTool("jstat"),
-      listOf("-gccapacity", pid.toString(), "1", "1"),
-      errors,
-    )
-
-    runAndWriteTool(
-      diagnosticsDir,
-      "jcmd-heap-info",
-      findTool("jcmd"),
-      listOf(pid.toString(), "GC.heap_info"),
-      errors,
-    )
-    runAndWriteTool(
-      diagnosticsDir,
-      "jcmd-class-histogram",
-      findTool("jcmd"),
-      listOf(pid.toString(), "GC.class_histogram"),
-      errors,
-    )
-    runAndWriteTool(
-      diagnosticsDir,
-      "jcmd-vm-flags",
-      findTool("jcmd"),
-      listOf(pid.toString(), "VM.flags"),
-      errors,
-    )
-    runAndWriteTool(
-      diagnosticsDir,
-      "jcmd-vm-system-properties",
-      findTool("jcmd"),
-      listOf(pid.toString(), "VM.system_properties"),
-      errors,
-    )
-    runAndWriteTool(
-      diagnosticsDir,
-      "jcmd-gc-finalizer-info",
-      findTool("jcmd"),
-      listOf(pid.toString(), "GC.finalizer_info"),
-      errors,
-    )
-    runAndWriteTool(
-      diagnosticsDir,
-      "jcmd-thread-print",
-      findTool("jcmd"),
-      listOf(pid.toString(), "Thread.print"),
-      errors,
-    )
+    val commands =
+      listOf(
+        Triple("jstat-gc", "jstat", listOf("-gc", pid.toString(), "1", "1")),
+        Triple("jstat-gccapacity", "jstat", listOf("-gccapacity", pid.toString(), "1", "1")),
+      ) +
+        listOf(
+            "heap-info" to "GC.heap_info",
+            "class-histogram" to "GC.class_histogram",
+            "vm-flags" to "VM.flags",
+            "vm-system-properties" to "VM.system_properties",
+            "gc-finalizer-info" to "GC.finalizer_info",
+            "thread-print" to "Thread.print",
+          )
+          .map { (name, command) -> Triple("jcmd-$name", "jcmd", listOf(pid.toString(), command)) }
+    for ((prefix, tool, args) in commands) {
+      DiagnosticTools.runAndWriteTool(
+        diagnosticsDir,
+        prefix,
+        DiagnosticTools.findTool(tool),
+        args,
+        errors,
+      )
+    }
 
     if (errors.isNotEmpty()) {
       File(diagnosticsDir, "errors.txt").writeText(errors.joinToString("\n"))
@@ -202,91 +154,23 @@ internal object MemoryDiagnostics {
     return ProcessHandle.current().pid()
   }
 
-  private fun findTool(toolName: String): String? {
-    val javaHome = File(System.getProperty("java.home", ""))
-    val directCandidate = File(javaHome, "bin/$toolName")
-    val parentCandidate = javaHome.parentFile?.let { File(it, "bin/$toolName") }
-    val windowsCandidate = File(javaHome, "bin/$toolName.exe")
-    val parentWindowsCandidate = javaHome.parentFile?.let { File(it, "bin/$toolName.exe") }
+  private fun formatBytes(bytes: Long): String = formatMebibytes(bytes)
 
-    listOf(directCandidate, parentCandidate, windowsCandidate, parentWindowsCandidate)
-      .firstOrNull { it != null && it.exists() && it.canExecute() }
-      ?.let {
-        return it.absolutePath
-      }
-
-    val path = System.getenv("PATH") ?: return null
-    val segments = path.split(File.pathSeparator)
-    val candidates =
-      segments
-        .map { segment ->
-          listOf(
-            File(segment, toolName),
-            File(segment, "$toolName.exe"),
-          )
-        }
-        .flatten()
-    return candidates.firstOrNull { it.exists() && it.canExecute() }?.absolutePath
-  }
-
-  private fun runAndWriteTool(
-    diagnosticsDir: File,
-    filePrefix: String,
-    tool: String?,
-    args: List<String>,
-    errors: MutableList<String>,
-  ) {
-    if (tool == null) {
-      errors.add("$filePrefix: tool not found")
-      return
-    }
-
-    val command = listOf(tool) + args
-    val output = runTool(command, DEFAULT_TOOL_TIMEOUT_MS)
-    val outputFile = File(diagnosticsDir, "$filePrefix.txt")
-    writeCommandOutput(outputFile, command, output, null)
-
-    if (output.exitCode != 0) {
-      errors.add("$filePrefix: exitCode=${output.exitCode}")
-    }
-  }
-
-  private fun runTool(command: List<String>, timeoutMs: Long): ToolOutput {
-    return try {
-      val result = AutoMobileSharedUtils.executeCommand(command, timeoutMs)
-      ToolOutput(result.exitCode, result.output, result.errorOutput)
-    } catch (e: Exception) {
-      ToolOutput(-1, "", e.message ?: "Unknown error")
-    }
-  }
-
-  private fun writeCommandOutput(
-    file: File,
-    command: List<String>,
-    output: ToolOutput,
-    reason: String?,
-  ) {
-    val content = buildString {
-      appendLine("Command: ${command.joinToString(" ")}")
+  private fun writeSummary(diagnosticsDir: File, timestamp: String, pid: Long, reason: String?) {
+    val snapshot = captureSnapshot()
+    val summary = buildString {
+      appendLine("Timestamp: $timestamp")
+      appendLine("PID: $pid")
       if (!reason.isNullOrBlank()) {
         appendLine("Reason: $reason")
       }
-      appendLine("Exit Code: ${output.exitCode}")
-      if (output.stdout.isNotBlank()) {
-        appendLine()
-        appendLine("STDOUT:")
-        appendLine(output.stdout)
-      }
-      if (output.stderr.isNotBlank()) {
-        appendLine()
-        appendLine("STDERR:")
-        appendLine(output.stderr)
-      }
+      appendLine("Heap Used: ${formatBytes(snapshot.heapUsedBytes)}")
+      appendLine("Heap Committed: ${formatBytes(snapshot.heapCommittedBytes)}")
+      appendLine("Heap Max: ${formatBytes(snapshot.heapMaxBytes)}")
+      appendLine("Non-Heap Used: ${formatBytes(snapshot.nonHeapUsedBytes)}")
+      appendLine("Non-Heap Committed: ${formatBytes(snapshot.nonHeapCommittedBytes)}")
+      appendLine("Non-Heap Max: ${formatBytes(snapshot.nonHeapMaxBytes)}")
     }
-    file.writeText(content)
+    File(diagnosticsDir, "summary.txt").writeText(summary)
   }
-
-  private fun formatBytes(bytes: Long): String = formatMebibytes(bytes)
-
-  private data class ToolOutput(val exitCode: Int, val stdout: String, val stderr: String)
 }

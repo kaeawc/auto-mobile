@@ -616,6 +616,35 @@
       }
     },
     {
+      "name" : "accessibility_audit_result",
+      "wire" : {
+        "engine" : "xcuitest",
+        "issues" : [
+          {
+            "bounds" : {
+              "bottom" : 4,
+              "left" : 1,
+              "right" : 3,
+              "top" : 2
+            },
+            "check" : "contrast",
+            "detail" : "fixture detail",
+            "elementId" : "fixture-element",
+            "label" : "Fixture",
+            "summary" : "fixture issue"
+          }
+        ],
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "accessibility_audit_result",
+        "unsupportedChecks" : [
+          "fixture-check"
+        ]
+      }
+    },
+    {
       "name" : "magic_tap_result",
       "wire" : {
         "available" : true,
@@ -951,6 +980,47 @@
       }
     },
     {
+      "name" : "appearance_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "text" : "dark",
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "appearance_result"
+      }
+    },
+    {
+      "name" : "location_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "location_result"
+      }
+    },
+    {
       "name" : "error_deadline_completed_late",
       "wire" : {
         "error" : "Command request_swipe exceeded deadline at 5000ms (gesture completed after its deadline; outcome is indeterminate)",
@@ -1198,16 +1268,45 @@
         "totalTimeMs" : 17,
         "type" : "error"
       }
+    },
+    {
+      "name" : "delete_keychain_item_result",
+      "wire" : {
+        "deletedScope" : {
+          "accessGroup" : "TEAM.app",
+          "account" : "fixture",
+          "itemClass" : "genericPassword",
+          "service" : "test.service"
+        },
+        "outcome" : "deleted",
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "totalTimeMs" : 17,
+        "type" : "delete_keychain_item_result"
+      }
+    },
+    {
+      "name" : "delete_keychain_item_denied",
+      "wire" : {
+        "outcome" : "mutation_not_authorized",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "totalTimeMs" : 17,
+        "type" : "delete_keychain_item_result"
+      }
     }
   ],
   "responseTypes" : [
+    "accessibility_audit_result",
     "action_result",
+    "appearance_result",
     "append_text_result",
     "clear_preferences_result",
     "clear_text_result",
     "clipboard_result",
     "connected",
     "current_focus_result",
+    "delete_keychain_item_result",
     "drag_result",
     "execute_sql_result",
     "get_preference_result",
@@ -1219,6 +1318,7 @@
     "launch_app_result",
     "list_databases_result",
     "list_tables_result",
+    "location_result",
     "magic_tap_result",
     "multi_finger_swipe_result",
     "path_gesture_result",

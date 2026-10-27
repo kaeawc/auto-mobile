@@ -1,3 +1,4 @@
+import { toolPayload } from "./toolResponse";
 import { spyOn } from "bun:test";
 import { z } from "zod/v4";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -5,11 +6,11 @@ import { registerDerivedLabelSessionReleaseCascade } from "../../src/daemon/deri
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { registerPlanTools } from "../../src/server/planTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import * as videoRecordingManager from "../../src/server/videoRecordingManager";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -74,7 +75,11 @@ export interface PlanSessionHunt {
   acquire(sessionUuid?: string): Promise<string>;
   /** What each `huntProbe` plan step does; the default succeeds at once. */
   setProbeStep(step: ProbeStep): void;
-  runPlan(planContent: string, signal?: AbortSignal): Promise<PlanRunResult>;
+  runPlan(
+    planContent: string,
+    signal?: AbortSignal,
+    extraArgs?: Record<string, unknown>,
+  ): Promise<PlanRunResult>;
   poolHolder(deviceId: string): string | undefined;
   tearDown(): void;
 }
@@ -93,7 +98,7 @@ export async function createPlanSessionHunt(devices: BootedDevice[]): Promise<Pl
       recorder.stopVideoRecording,
     ),
     spyOn(videoRecordingManager, "rollbackVideoRecordingStart").mockResolvedValue(undefined),
-    spyOn(videoRecordingManager, "getVideoRecordingStatus").mockResolvedValue(null),
+    spyOn(videoRecordingManager, "getVideoRecordingStatus").mockResolvedValue(undefined),
     spyOn(videoRecordingManager, "getVideoRecordingMetadata").mockResolvedValue(null),
   ];
   restores.push(() => videoSpies.forEach((spy) => spy.mockRestore()));
@@ -113,12 +118,12 @@ export async function createPlanSessionHunt(devices: BootedDevice[]): Promise<Pl
       },
     }),
   );
-  const connected = new FakeDeviceSessionManager();
+  const connected = new FakeDeviceReadiness();
   connected.setConnectedDevices(devices);
   const originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
   restores.push(() => ToolRegistry.setCollaboratorsForTesting(originalCollaborators));
   ToolRegistry.setCollaboratorsForTesting({
-    deviceSessionManager: connected,
+    deviceReadiness: connected,
     toolCallRepository: { async recordToolCall(): Promise<void> {} },
     navigationToolCallRecorder: { record: () => undefined },
   });
@@ -196,11 +201,8 @@ export async function createPlanSessionHunt(devices: BootedDevice[]): Promise<Pl
     setProbeStep: (step) => {
       probeStep = step;
     },
-    runPlan: async (planContent, signal) => {
-      const response: {
-        structuredContent?: PlanRunResult;
-        content: Array<{ text: string }>;
-      } = await ToolRegistry.getTool("executePlan")!.handler(
+    runPlan: async (planContent, signal, extraArgs) => {
+      const response = await ToolRegistry.getTool("executePlan")!.handler(
         {
           planContent,
           startStep: 0,
@@ -208,11 +210,24 @@ export async function createPlanSessionHunt(devices: BootedDevice[]): Promise<Pl
           sessionUuid: BASE,
           deviceAllocationTimeoutMs: 1_000,
           abortStrategy: "immediate",
+          ...extraArgs,
         },
         undefined,
         signal,
       );
-      return response.structuredContent ?? JSON.parse(response.content[0].text);
+      const result = toolPayload(response);
+      if (!result) {
+        throw new Error("Missing plan result");
+      }
+      return z
+        .looseObject({
+          success: z.boolean().optional(),
+          error: z.string().optional(),
+          code: z.string().optional(),
+          retryable: z.boolean().optional(),
+          deviceMapping: z.record(z.string(), z.string()).optional(),
+        })
+        .parse(result);
     },
     poolHolder: (deviceId) => daemon().pool.getDevice(deviceId)?.sessionId ?? undefined,
     tearDown: () => {

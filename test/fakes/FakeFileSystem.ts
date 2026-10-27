@@ -2,6 +2,8 @@
  * Fake implementation of FileSystem for testing
  * Stores files in memory instead of interacting with the real file system
  */
+import { resolve } from "node:path";
+import type { GitMetadataReader } from "../../src/utils/GitMetadataClient";
 import { compareCodeUnits } from "../../src/utils/io";
 import { FileSystem } from "../../src/utils/filesystem/DefaultFileSystem";
 
@@ -284,5 +286,31 @@ export class FakeFileSystem implements FileSystem {
       return;
     }
     throw new Error(`Path not found: ${normalizedOld}`);
+  }
+}
+
+/** In-memory git metadata; null entries represent directories. */
+export class FakeGitMetadataReader implements GitMetadataReader {
+  readonly reads: string[] = [];
+  readonly inspections: string[] = [];
+
+  constructor(readonly entries: Record<string, string | null> = {}) {}
+
+  private lookup(path: string): [string, string | null] | undefined {
+    return Object.entries(this.entries).find(([key]) => resolve(key) === resolve(path));
+  }
+
+  kind(path: string): "file" | "directory" | null {
+    this.inspections.push(path);
+    const entry = this.lookup(path);
+    if (!entry) {
+      return null;
+    }
+    return entry[1] === null ? "directory" : "file";
+  }
+
+  readFile(path: string): string | null {
+    this.reads.push(path);
+    return this.lookup(path)?.[1] ?? null;
   }
 }

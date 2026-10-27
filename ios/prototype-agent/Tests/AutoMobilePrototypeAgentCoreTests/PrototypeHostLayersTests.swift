@@ -8,9 +8,19 @@ final class PrototypeHostLayersTests: XCTestCase {
         try JSONDecoder().decode(PrototypeSpec.self, from: Data(json.utf8))
     }
 
+    /// A contract-valid placement: a sheet needs its `edge` and `height`, a floating window its
+    /// `gravity` and `offset`.
+    private func placementJSON(_ type: String) -> String {
+        switch type {
+        case "sheet": #"{"type":"sheet","edge":"bottom","height":200}"#
+        case "floating": #"{"type":"floating","gravity":"center","offset":{"x":0,"y":0}}"#
+        default: #"{"type":"\#(type)"}"#
+        }
+    }
+
     private func dialogSpec(placement: String) throws -> PrototypeSpec {
         try spec("""
-        {"id":"d","window":{"placement":{"type":"\(placement)"}},"state":{"open":false},
+        {"id":"d","window":{"placement":\(placementJSON(placement))},"state":{"open":false},
          "root":{"type":"column","children":[
            {"type":"button","label":"Open","onTap":[{"type":"setState","key":"open","value":true}]},
            {"type":"dialog","testTag":"edit","title":"Edit","openWhen":{"key":"open","equals":true},
@@ -109,7 +119,7 @@ final class PrototypeHostLayersTests: XCTestCase {
         for placement in ["fullscreen", "sheet", "floating"] {
             for chrome in ["none", "bar", "none"] {
                 try session.show(spec("""
-                {"id":"marker","window":{"placement":{"type":"\(placement)"},"chrome":"\(chrome)"},
+                {"id":"marker","window":{"placement":\(placementJSON(placement)),"chrome":"\(chrome)"},
                  "root":{"type":"text","text":"Marker"}}
                 """))
                 XCTAssertEqual(

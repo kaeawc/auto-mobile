@@ -55,24 +55,44 @@ struct PrototypeTransportWriter: Sendable {
                             await sinks[id]?(data)
                         }
                     }
-                case let .toHost(requestId, json):
-                    // Exactly one connection: the most recently authenticated, remembered as owner.
-                    if let id = routing.route(requestId) {
-                        await Self.write(json, to: sinks[id])
-                    } else {
-                        onHostRequestsLost([requestId])
-                    }
-                case let .hostCancel(requestId, json):
-                    // Only to the connection that owns the request; nothing if it is gone.
-                    if let id = routing.owner(of: requestId) { await Self.write(json, to: sinks[id]) }
-                case let .hostFinished(requestId): routing.finish(requestId)
-                case let .removed(id):
-                    let lost = routing.disconnect(id)
-                    sinks[id] = nil
-                    if !lost.isEmpty { onHostRequestsLost(lost) }
-                case let .flush(done): done.resume()
+                default:
+                    await Self.route(
+                        operation,
+                        sinks: &sinks,
+                        routing: &routing,
+                        onHostRequestsLost: onHostRequestsLost
+                    )
                 }
             }
+        }
+    }
+
+    private static func route(
+        _ operation: Operation,
+        sinks: inout [Int: Sink],
+        routing: inout PrototypeHostRouting<Int>,
+        onHostRequestsLost: @Sendable ([String]) -> Void
+    )
+        async
+    {
+        switch operation {
+        case let .toHost(requestId, json):
+            // Exactly one connection: the most recently authenticated, remembered as owner.
+            if let id = routing.route(requestId) {
+                await write(json, to: sinks[id])
+            } else {
+                onHostRequestsLost([requestId])
+            }
+        case let .hostCancel(requestId, json):
+            // Only to the connection that owns the request; nothing if it is gone.
+            if let id = routing.owner(of: requestId) { await write(json, to: sinks[id]) }
+        case let .hostFinished(requestId): routing.finish(requestId)
+        case let .removed(id):
+            let lost = routing.disconnect(id)
+            sinks[id] = nil
+            if !lost.isEmpty { onHostRequestsLost(lost) }
+        case let .flush(done): done.resume()
+        default: break
         }
     }
 
@@ -159,7 +179,7 @@ actor PrototypeTransport {
 
     init(
         token: String,
-        capabilities: [String] = PrototypeAgentProtocol.capabilities,
+        capabilities: [String] = PrototypeAgentProtocol.advertisedCapabilities(),
         maxAuthenticatedClients: Int? = nil,
         sleep: @escaping Sleep = { seconds in try await Task.sleep(for: .seconds(seconds)) }
     ) {

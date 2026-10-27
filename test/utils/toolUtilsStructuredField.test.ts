@@ -4,6 +4,7 @@ import {
   createStructuredToolResponse,
   getStructuredField,
   getStructuredPayload,
+  readUnknownStructuredField,
   StructuredToolResponse,
 } from "../../src/utils/toolUtils";
 
@@ -39,9 +40,7 @@ interface SamplePayload {
   awaitTimeout?: boolean;
 }
 
-// A loose view of the accessor, used ONLY to exercise the runtime own-key guard
-// with keys the type system now (correctly) forbids passing directly.
-const looseField = getStructuredField as unknown as (response: unknown, key: string) => unknown;
+// Exercise the shared runtime guard through its unknown-envelope boundary.
 
 describe("getStructuredField (typed)", () => {
   test("returns a payload field that lives under structuredContent", () => {
@@ -67,11 +66,12 @@ describe("getStructuredField (typed)", () => {
   test("ignores a field that exists only at the envelope top level, not in structuredContent", () => {
     // Hand-built envelope where `found` sits at the top level but NOT in the
     // payload — the accessor must read only `structuredContent` and not leak it.
+    const topLevelOnly = { found: true };
     const envelope: StructuredToolResponse<SamplePayload> = {
       content: [],
       structuredContent: { success: true },
+      ...topLevelOnly,
     };
-    (envelope as Record<string, unknown>).found = true;
     expect(getStructuredField(envelope, "found")).toBeUndefined();
   });
 
@@ -81,17 +81,19 @@ describe("getStructuredField (typed)", () => {
   });
 
   test("returns undefined when structuredContent is missing or not an object", () => {
-    expect(looseField({ content: [] }, "found")).toBeUndefined();
-    expect(looseField({ structuredContent: "not-an-object" }, "found")).toBeUndefined();
-    expect(looseField({ structuredContent: null }, "found")).toBeUndefined();
+    expect(readUnknownStructuredField({ content: [] }, "found")).toBeUndefined();
+    expect(
+      readUnknownStructuredField({ structuredContent: "not-an-object" }, "found"),
+    ).toBeUndefined();
+    expect(readUnknownStructuredField({ structuredContent: null }, "found")).toBeUndefined();
   });
 
   test("reading the same field off the envelope top level is undefined (the foot-gun)", () => {
     const response = createStructuredToolResponse<SamplePayload>({ success: true, found: true });
     // Raw top-level read — the mistake this accessor exists to prevent. At the
-    // migrated src read sites this line is now a COMPILE error; here we cast to
-    // reproduce the historical runtime foot-gun.
-    expect((response as Record<string, unknown>).found).toBeUndefined();
+    // migrated src read sites this line is now a COMPILE error; here we probe the
+    // key to reproduce the historical runtime foot-gun.
+    expect("found" in response).toBe(false);
     // Accessor gets the real value.
     expect(getStructuredField(response, "found")).toBe(true);
   });
@@ -100,11 +102,11 @@ describe("getStructuredField (typed)", () => {
     const response = createStructuredToolResponse<SamplePayload>({ success: true });
     // `toString`/`constructor`/`__proto__` exist on Object.prototype but are not
     // payload fields. The keyof constraint now makes passing them a compile error,
-    // so the own-key runtime guard is defense-in-depth — exercised via the loose
-    // view to prove it still holds.
-    expect(looseField(response, "toString")).toBeUndefined();
-    expect(looseField(response, "constructor")).toBeUndefined();
-    expect(looseField(response, "__proto__")).toBeUndefined();
+    // so the own-key runtime guard is defense-in-depth — exercised via the unknown
+    // boundary to prove it still holds.
+    expect(readUnknownStructuredField(response, "toString")).toBeUndefined();
+    expect(readUnknownStructuredField(response, "constructor")).toBeUndefined();
+    expect(readUnknownStructuredField(response, "__proto__")).toBeUndefined();
   });
 
   test("resolves an own key whose value is falsy (found: false)", () => {
@@ -117,8 +119,8 @@ describe("getStructuredPayload", () => {
   test("returns the whole payload object under structuredContent", () => {
     const payload = { success: true, found: true, awaitTimeout: false };
     const response = createStructuredToolResponse(payload);
-    expect(getStructuredPayload(response)).toEqual(payload);
-    expect(getStructuredPayload(response)).toBe(response.structuredContent);
+    expect(getStructuredPayload<typeof payload>(response)).toEqual(payload);
+    expect(getStructuredPayload<typeof payload>(response)).toBe(response.structuredContent);
   });
 
   test("returns undefined for null / undefined responses", () => {
@@ -134,7 +136,7 @@ describe("getStructuredPayload", () => {
 
   test("falls back to parsing the serialized text part", () => {
     const textOnly = { content: [{ type: "text", text: JSON.stringify({ success: true }) }] };
-    expect(getStructuredPayload(textOnly)).toEqual({ success: true });
+    expect(getStructuredPayload<{ success: boolean }>(textOnly)).toEqual({ success: true });
   });
 });
 
@@ -150,7 +152,7 @@ describe("createStructuredToolResponse typed envelope", () => {
     expect(response.success).toBe(false);
     expect(response.error).toBe("nope");
     // `found` is NOT hoisted — it lives only under structuredContent.
-    expect((response as Record<string, unknown>).found).toBeUndefined();
+    expect("found" in response).toBe(false);
   });
 
   test("omits success/error when the payload lacks them", () => {
@@ -166,9 +168,7 @@ describe("createStructuredToolResponse typed envelope", () => {
   });
 
   test("tolerates non-object payloads without hoisting", () => {
-    const response = createStructuredToolResponse(
-      "plain-string" as unknown as { success?: boolean },
-    );
+    const response = createStructuredToolResponse("plain-string");
     expect(response.structuredContent).toBe("plain-string");
     expect("success" in response).toBe(false);
   });

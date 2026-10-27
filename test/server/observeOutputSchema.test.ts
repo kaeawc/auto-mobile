@@ -1,4 +1,9 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { jsonSchemaObjects } from "../helpers/advertisedOutputSchemas";
+import { resolveJsonSchemaReference } from "../../src/server/jsonSchemaReferences";
+import type { LayoutWarning } from "../../src/models/ObservationInsets";
+import { readToolResponse } from "../helpers/toolResponse";
+import { observeToolScreen } from "../helpers/observeToolScreen";
 import { describe, expect, spyOn, test } from "bun:test";
 import { toJSONSchema } from "zod/v4";
 import {
@@ -11,7 +16,7 @@ import {
   skeletonElementSchema,
   viewHierarchyNodeSchema,
 } from "../../src/server/toolOutputSchemas";
-import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
+import { applyJsonSchemaOverride } from "../../src/utils/schemaHelpers";
 import {
   advertiseBoundsForCompact,
   BOUNDS_UNION_DESCRIPTION_PREFIX,
@@ -38,6 +43,13 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
 
 isolateToolRegistry();
+
+/** A fresh module instance keyed by `key`, as the DB lifecycle suites import `database.ts`. */
+function importFreshServerConfig(
+  key: string,
+): Promise<typeof import("../../src/utils/ServerConfig")> {
+  return import(`../../src/utils/ServerConfig.ts?${key}`);
+}
 
 describe("observe setup timing composition", () => {
   const setup: TimingEntry = { name: "setup", durationMs: 5 };
@@ -97,16 +109,12 @@ describe("observe setup timing composition", () => {
       registerObserveTools({
         timer,
         pathProtection: new FakeScreenshotPathProtection(timer),
-        createScreen: () => ({
-          execute: screen.execute.bind(screen),
-          executeDeviceRead: screen.execute.bind(screen),
-          captureScreenshot: screen.captureScreenshot.bind(screen),
-          appendRawViewHierarchy: screen.appendRawViewHierarchy.bind(screen),
-          getMostRecentCachedObserveResult: screen.getMostRecentCachedObserveResult.bind(screen),
-        }),
+        createScreen: () => observeToolScreen(screen),
       });
       const tool = ToolRegistry.getTool("observe")!;
-      const response = await tool.deviceAwareHandler!(device, tool.schema.parse({}));
+      const response = readToolResponse(
+        await tool.deviceAwareHandler!(device, tool.schema.parse({})),
+      );
       if (expected) {
         expect(response.structuredContent).toHaveProperty("perfTiming", expected);
       } else {
@@ -297,7 +305,10 @@ describe("observe.outputSchema: requires usable screenshot-resource join keys on
     expect(
       (published.properties as Record<string, unknown>).observationScreenshotResourceUri,
     ).toBeDefined();
-    const display = (published.properties as Record<string, unknown>).display as {
+    const display = resolveJsonSchemaReference(
+      published,
+      (published.properties as Record<string, Record<string, unknown>>).display,
+    ) as {
       properties: Record<string, unknown>;
       required: string[];
     };
@@ -433,7 +444,7 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
         },
         ...(layoutWarnings === undefined ? {} : { layoutWarnings }),
       }) as ObserveResult;
-    const warning = {
+    const warning: LayoutWarning = {
       type: "important-content-under-inset",
       severity: "warning",
       element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
@@ -444,7 +455,7 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
       insetPx: { top: 59.5 },
       overlapPercent: 100,
       confidence: "high",
-    } as const;
+    };
     const perEntry = diffObserveResult(
       observation({ scope: "truncated", total: 100, warnings: [warning] }),
       observation({ scope: "truncated", total: 140, warnings: [warning] }),
@@ -626,7 +637,7 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
       } as never,
       { dropElements: false, compact: true },
     );
-    expect(sanitized.insets?.displayCutoutInfo?.bounds).toEqual([[480, 0, 600, 100]]);
+    expect<unknown>(sanitized.insets?.displayCutoutInfo?.bounds).toEqual([[480, 0, 600, 100]]);
     expect(() => observeResultSchema.parse(sanitized)).not.toThrow();
   });
 
@@ -692,7 +703,7 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
       compact: true,
     });
 
-    expect(compacted.layoutWarnings?.warnings[0]?.element.bounds).toEqual([0, 0, 100, 30]);
+    expect<unknown>(compacted.layoutWarnings?.warnings[0]?.element.bounds).toEqual([0, 0, 100, 30]);
     expect(() => observeResultSchema.parse(compacted)).not.toThrow();
   });
 
@@ -1031,19 +1042,16 @@ describe("observe tool registration advertises the schema (#3025)", () => {
   });
 
   test("advertises the bounds tuple through getToolDefinitions (compaction is a permanent default)", () => {
-    const observeSchemaJson = (): string => {
-      const observe = ToolRegistry.getToolDefinitions().find((t) => t.name === "observe");
-      return JSON.stringify((observe as Record<string, unknown>).outputSchema);
-    };
-    // Count JSON-Schema tuple sites (`prefixItems`). Bounds compaction is now
-    // unconditional, so the object|tuple union is advertised for every bounds
-    // field — plus the always-tuple `skeleton` bounds (#4388). A client can
-    // therefore always decode the emitted [l,t,r,b] tuple. There is no flag to
-    // flip: the advertised schema carries multiple tuple sites unconditionally.
-    const countTupleSites = (json: string): number => json.split("prefixItems").length - 1;
     withFreshRegistry(() => {
-      const sites = countTupleSites(observeSchemaJson());
-      expect(sites).toBeGreaterThan(1);
+      const observe = ToolRegistry.getToolDefinitions().find((t) => t.name === "observe");
+      const schema = observe!.outputSchema!;
+      const definitions = schema.$defs as Record<string, Record<string, unknown>>;
+      const tuple = Object.entries(definitions).find(([, node]) => Array.isArray(node.prefixItems));
+      expect(tuple).toBeDefined();
+      // Object|tuple bounds and always-tuple skeleton rows now share one
+      // definition rather than repeating prefixItems at each use site.
+      const uses = jsonSchemaObjects(schema).filter((node) => node.$ref === `#/$defs/${tuple![0]}`);
+      expect(uses.length).toBeGreaterThan(1);
     });
   });
 
@@ -1075,7 +1083,7 @@ describe("occlusionState/occludedBy/occludedByViewId: --no-occlusion (issue occl
     // Pollute the shared singleton to prove the fresh import is independent.
     serverConfig.setOcclusionEnabled(false);
     try {
-      const fresh = await import("../../src/utils/ServerConfig?occlusionDefault");
+      const fresh = await importFreshServerConfig("occlusionDefault");
       expect(fresh.serverConfig.getAccessibilityFlagsConfig().occlusionEnabled).toBe(true);
     } finally {
       serverConfig.setOcclusionEnabled(true);

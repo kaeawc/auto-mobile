@@ -73,8 +73,7 @@ than a CI round-trip.
 
 1. `turbo run lint build test` (or `bun test` for a fast full pass) — the **whole**
    suite, to catch regressions, not just the new tests.
-2. `bun run typecheck` — the new-error gate. If you fixed type errors, run
-   `bun run typecheck:update` and commit the smaller baseline.
+2. `bun run typecheck` and `bun run typecheck:test` — any type error fails (no baseline).
 3. `/validate` for any shell/Swift/Docker/schema surfaces you touched.
 4. Re-confirm each acceptance-criterion test is green.
 

@@ -299,6 +299,7 @@ MOCK
   # and pin both halves.
   script="$(pwd)/scripts/android/verify-emulator-sdk-resolution.sh"
   product="$(pwd)/src/devices/deviceBootService.ts"
+  selection="$(pwd)/src/devices/deviceBootSelection.ts"
 
   expected="$(grep -o 'expected_diagnostic="[^"]*"' "$script" \
     | head -n 1 | sed 's/^expected_diagnostic="//; s/"$//')"
@@ -324,7 +325,8 @@ MOCK
   probe_name="$(grep -o 'expected_probe_name="[^"]*"' "$script" \
     | head -n 1 | sed 's/^expected_probe_name="//; s/"$//')"
   [ "$probe_name" = 'name=${missing_avd}' ]
-  grep -qF 'name=${request.name}' "$product"
+  # The criteria detail is built by the shared boot-selection error helper.
+  grep -qF 'name=${request.name}' "$selection"
 }
 
 @test "the resolution tripwire rejects an iOS no-match diagnostic" {

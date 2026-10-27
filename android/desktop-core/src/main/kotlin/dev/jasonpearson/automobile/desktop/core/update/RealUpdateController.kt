@@ -69,7 +69,7 @@ class RealUpdateController(
       } catch (cancellation: CancellationException) {
         mutableStatus.value = previousStatus
         throw cancellation
-      } catch (error: Exception) {
+      } catch (error: ReleaseFetchException) {
         // Typed failure surfaced to the UI; the check is best-effort and must never crash the app.
         LOG.warn("Update check failed: ${error.message}", error)
         mutableStatus.value = UpdateStatus.Failed(error.message ?: "Update check failed")

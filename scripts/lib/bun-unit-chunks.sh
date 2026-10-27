@@ -20,9 +20,20 @@
 # manifest holds the chunk total so a consumer can tell a missing chunk from a
 # passing one. Must run from the repository root (bunfig.toml is read from it).
 set -euo pipefail
+# The direct parent is a watchdog/shard subshell which can survive test-ts.
+# Watch the exported lane owner instead; standalone callers watch their parent.
+original_parent_pid="${AUTOMOBILE_TEST_TS_PARENT_PID:-$PPID}"
+parent_is_alive() {
+  if ! kill -0 "$original_parent_pid" 2>/dev/null; then
+    echo 'test-ts: unit chunk caller is gone; stopping' >&2
+    exit 1
+  fi
+}
 root="$1" runner_os="$2" chunk_files="$3" report_dir="$4" shard="$5"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${root}/scripts/lib/spotlight-exclude.sh"
 shift 5
-# shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
+# shellcheck source=scripts/lib/bun-unit-test.sh
 source "$root/scripts/lib/bun-unit-test.sh"
 
 has_separator=0
@@ -69,13 +80,12 @@ add_group_chunks 0 "$shared_count" 1
 add_group_chunks "$shared_count" "${#files[@]}" 0
 total="${#chunk_offsets[@]}"
 if [[ -n "$coverage_root" ]]; then
-  mkdir -p "$coverage_root"
+  mkdir_spotlight_excluded_within "$root" "$coverage_root"
   printf '%s\n' "$total" > "$coverage_root/shard-${shard}.chunks"
 fi
 
 current_label=""
 current_log=""
-# shellcheck disable=SC2317,SC2329 # Invoked through the TERM trap below.
 interrupted() {
   # The shard watchdog sends TERM to this group: surface the chunk it cut short.
   printf 'INTERRUPTED: coverage shard %s chunk %s was running when the shard budget expired; log tail:\n' \
@@ -83,10 +93,13 @@ interrupted() {
   if [[ -n "$current_log" && -f "$current_log" ]]; then tail -n 60 "$current_log"; fi
   exit 143
 }
-if [[ -n "$coverage_root" ]]; then trap interrupted TERM; fi
+# Static reference for indirect callers; this branch never executes.
+if false; then interrupted "$@"; fi
+if [[ -n "$coverage_root" ]]; then trap 'interrupted' TERM; fi
 
 status=0
 for ((chunk = 0; chunk < total; chunk += 1)); do
+  parent_is_alive
   chunk_offset="${chunk_offsets[$chunk]}"
   chunk_size="${chunk_sizes[$chunk]}"
   chunk_slice=("${files[@]:chunk_offset:chunk_size}")

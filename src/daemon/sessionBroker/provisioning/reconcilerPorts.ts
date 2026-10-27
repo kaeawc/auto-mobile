@@ -1,19 +1,4 @@
-import { holderOf } from "../../deviceBinding";
-/**
- * Production ports for the binding reconciler (#11173 part b, #11175): the daemon's real
- * device inventory, the `provisionDevice` path (exact matching, creation, boot, automation
- * readiness, rollback) and the verified `deleteDevice` workflow, plus live-session and
- * foreign-daemon claims from the device pool.
- *
- * Provision and delete go through the registered tool handlers ({@link BindingToolInvoker}),
- * the same code an MCP caller runs, so the reconciler inherits their lifecycle leases, boot
- * capacity gate, rollback and evidence. Those handlers refuse every caller but a binding's own live
- * execution on a managed device; the reconciler holds no execution session yet, so it runs inside
- * {@link runAsBindingReconciler}, which the generic-exclusion guard accepts for this binding only.
- */
-
-import { AndroidEmulatorUnavailableError } from "../../../utils/android-cmdline-tools/AndroidEmulatorClient";
-import { SimctlUnavailableError } from "../../../utils/ios-cmdline-tools/SimCtlClient";
+import type { InternalProvisionDeviceArgs } from "../../../features/deviceLifecycle/core/contracts";
 import type { DeviceInfo } from "../../../models/index";
 import {
   ProvisionDeviceError,
@@ -21,31 +6,17 @@ import {
 } from "../../../devices/exactDeviceProvisioning";
 import { classifyDisplayCutout } from "../../../utils/displayCutout";
 import type { PlatformDeviceManager } from "../../../devices/deviceUtils";
-import { assertBootCapacityAvailable } from "../../../features/bootAdmission/sharedBootAdmissionGates";
-import { BootCapacityExhaustedError } from "../../../models/BootCapacityExhaustedError";
-import { BootedDeviceDiscoveryIncompleteError } from "../../../models/BootedDeviceDiscoveryIncompleteError";
-import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import type { AvdConfigReader } from "../../../utils/android-cmdline-tools/AvdConfigReader";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../../utils/deviceTimeouts";
 import type { Timer } from "../../../utils/SystemTimer";
-import type { PooledDevice } from "../../devicePool";
 import {
-  deviceStableId,
-  type BindingBootCapacity,
-  type BindingCapacityCheck,
-  type BindingDeviceClaim,
-  type BindingDeviceClaims,
   type BindingDeviceProvisioner,
-  type BindingInventory,
-  type BindingInventorySnapshot,
   type BindingProvisionRequest,
   type BindingProvisionedDevice,
   type BindingResolvedSpec,
 } from "./reconciler";
-import type { LiveExecutionSessions } from "../registry/ownerLiveness";
-import type { BindingPlatform } from "../registry/bindingRegistry";
 
 /** Invokes a registered tool handler in-process and returns its raw MCP tool response. */
 export type BindingToolInvoker = (
@@ -95,6 +66,37 @@ function numberField(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+/** Device IDs arriving over a tool response retain only string entries. */
+function deviceIdsField(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Read explicit retained-creation evidence rather than guessing from a timeout. */
+function retainedProvisionDeviceIdentity(payload: Record<string, unknown>) {
+  const lifecycle = payload.lifecycle;
+  if (!isRecord(lifecycle) || !isRecord(lifecycle.device)) {
+    return {};
+  }
+  const device = lifecycle.device;
+  const name = stringField(device.name);
+  const stableId = [stringField(device.stableId), stringField(device.runtimeDeviceId)].find(
+    (id) => id !== undefined && id !== name,
+  );
+  const retainedDevice =
+    lifecycle.state === "created_not_ready" &&
+    lifecycle.phase === "readiness" &&
+    device.platform === "ios" &&
+    stableId &&
+    name
+      ? { platform: "ios" as const, stableId, name }
+      : undefined;
+  return retainedDevice ? { retainedDevice } : {};
+}
+
 /** Rebuild the typed provision failure from a provisionDevice error response. */
 export function provisionErrorFromPayload(
   payload: Record<string, unknown>,
@@ -107,10 +109,10 @@ export function provisionErrorFromPayload(
   const limit = numberField(error.limit);
   const booted = numberField(error.booted);
   const retryAfterMs = numberField(error.retryAfterMs);
-  const externalDevices = Array.isArray(error.externalDevices)
-    ? error.externalDevices.filter((udid): udid is string => typeof udid === "string")
-    : [];
+  const externalDevices = deviceIdsField(error.externalDevices);
+  const heldDevices = deviceIdsField(error.heldDevices);
   return new ProvisionDeviceError(code, message, retryable, {
+    ...retainedProvisionDeviceIdentity(payload),
     ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
     ...(limit !== undefined && booted !== undefined
       ? {
@@ -118,6 +120,7 @@ export function provisionErrorFromPayload(
             limit,
             booted,
             ...(externalDevices.length > 0 ? { externalDevices } : {}),
+            ...(heldDevices.length > 0 ? { heldDevices } : {}),
           },
         }
       : {}),
@@ -180,6 +183,11 @@ export interface BindingProvisionPortDependencies {
   timer: Pick<Timer, "now">;
   /** Release a session the reconciler obtained but could not publish (device kept). */
   releaseSession: (sessionUuid: string) => Promise<void>;
+  /**
+   * Whether a newly booted Android emulator should skip the quick-boot snapshot save at exit:
+   * true when the host destroys released emulators instead of reusing them warm (#15477).
+   */
+  discardAndroidSnapshotOnExit?: () => boolean;
 }
 
 /** The `provisionDevice` path with `readiness: "automation"`. */
@@ -232,28 +240,31 @@ export class ToolBindingProvisioner implements BindingDeviceProvisioner {
   }
 
   async provision(request: BindingProvisionRequest): Promise<BindingProvisionedDevice> {
-    const spec =
-      request.spec.deviceType === undefined
-        ? { ...request.spec, deviceType: await this.existingModel(request) }
-        : request.spec;
-    const response = await this.deps.invokeTool(
-      "provisionDevice",
-      {
-        device: {
-          platform: request.platform,
-          name: request.name,
-          ...(request.platform === "ios" && request.deviceId ? { deviceId: request.deviceId } : {}),
-          spec,
-        },
-        boot: true,
-        readiness: "automation",
-        timeoutMs: clampTimeoutMs(
-          request.deadlineMs - this.deps.timer.now(),
-          MAX_PROVISION_DEVICE_TIMEOUT_MS,
-        ),
+    const spec = {
+      ...request.spec,
+      deviceType: request.spec.deviceType ?? (await this.existingModel(request)),
+    };
+    const args: InternalProvisionDeviceArgs = {
+      device: {
+        platform: request.platform,
+        name: request.name,
+        ...(request.platform === "ios" && request.deviceId ? { deviceId: request.deviceId } : {}),
+        spec,
       },
-      request.signal,
-    );
+      boot: true,
+      readiness: "automation",
+      ...(request.platform === "android" && this.deps.discardAndroidSnapshotOnExit?.() === true
+        ? { discardSnapshotOnExit: true }
+        : {}),
+      ...(request.platform === "ios" && request.mode === "create"
+        ? { rollbackOnRetryableReadiness: false }
+        : {}),
+      timeoutMs: clampTimeoutMs(
+        request.deadlineMs - this.deps.timer.now(),
+        MAX_PROVISION_DEVICE_TIMEOUT_MS,
+      ),
+    };
+    const response = await this.deps.invokeTool("provisionDevice", { ...args }, request.signal);
     const { isError, payload } = readToolPayload(response);
     if (isError) {
       throw provisionErrorFromPayload(payload, `provisionDevice '${request.name}' failed`);
@@ -290,178 +301,5 @@ export class ToolBindingProvisioner implements BindingDeviceProvisioner {
       "discovery_incomplete",
       `The model of ${request.platform} device '${request.name}' could not be read.`,
     );
-  }
-}
-
-/** Configured devices (AVDs, simulators) of one platform; a failed listing is incomplete. */
-export class DeviceManagerBindingInventory implements BindingInventory {
-  constructor(private readonly deviceManager: Pick<PlatformDeviceManager, "listDeviceImages">) {}
-
-  async list(
-    platform: BindingPlatform,
-    options: { signal?: AbortSignal },
-  ): Promise<BindingInventorySnapshot> {
-    try {
-      const devices = await this.deviceManager.listDeviceImages(platform, options.signal);
-      return { complete: true, devices };
-    } catch (error) {
-      options.signal?.throwIfAborted();
-      if (
-        (platform === "android" && error instanceof AndroidEmulatorUnavailableError) ||
-        (platform === "ios" && error instanceof SimctlUnavailableError)
-      ) {
-        // An optional platform's lister is expected to be absent on single-platform hosts.
-        logger.debug(`[Bindings] ${platform} toolchain not installed: ${errorMessage(error)}`);
-        return { complete: false, devices: [], toolchain: "not_installed" };
-      }
-      // Incomplete discovery is never authoritative absence; the reconciler refuses to act on it.
-      logger.warn(`[Bindings] ${platform} device inventory failed: ${errorMessage(error)}`, error);
-      return { complete: false, devices: [] };
-    }
-  }
-}
-
-/** Read-only "would one more cold boot of `platform` be refused now"; throws when it would. */
-export type BindingBootCapacityAssertion = (
-  platform: BindingPlatform,
-  signal: AbortSignal | undefined,
-) => Promise<void>;
-
-const BOOT_CAPACITY_CHECK_TIMEOUT_MS = 5_000;
-
-class BootCapacityCheckTimeoutError extends Error {}
-
-/**
- * The process-wide boot admission gates as the reconciler's capacity probe: the same read-only
- * check the provision path runs before creating a device, asked before a replacement deletes one.
- * Bounded, because the simulator fleet sample has no deadline of its own.
- */
-export class GateBindingBootCapacity implements BindingBootCapacity {
-  constructor(
-    private readonly timer: Timer,
-    private readonly assertAvailable: BindingBootCapacityAssertion = (platform, signal) =>
-      assertBootCapacityAvailable(platform, { signal }),
-  ) {}
-
-  async check(
-    platform: BindingPlatform,
-    options: { signal?: AbortSignal },
-  ): Promise<BindingCapacityCheck> {
-    try {
-      await raceWithDeadline(() => this.assertAvailable(platform, options.signal), {
-        timer: this.timer,
-        timeoutMs: BOOT_CAPACITY_CHECK_TIMEOUT_MS,
-        signal: options.signal,
-        label: `Checking ${platform} boot capacity`,
-        timeoutError: () =>
-          new BootCapacityCheckTimeoutError(
-            `Timed out after ${BOOT_CAPACITY_CHECK_TIMEOUT_MS}ms checking ${platform} boot capacity.`,
-          ),
-      });
-      return { kind: "available" };
-    } catch (error) {
-      if (error instanceof BootCapacityExhaustedError) {
-        const { externalDevices } = error.details;
-        return {
-          kind: "exhausted",
-          limit: error.limit,
-          booted: error.booted,
-          retryAfterMs: error.retryAfterMs,
-          ...(externalDevices && externalDevices.length > 0 ? { externalDevices } : {}),
-        };
-      }
-      if (
-        error instanceof BootedDeviceDiscoveryIncompleteError ||
-        error instanceof BootCapacityCheckTimeoutError
-      ) {
-        // A count that could not be read in time is unknown, never free capacity.
-        logger.warn(
-          `[Bindings] ${platform} boot capacity is unknown: ${errorMessage(error)}`,
-          error,
-        );
-        return { kind: "unknown", message: errorMessage(error) };
-      }
-      // Cancellation, or a defect: neither is a capacity answer, and a defect must not hide as a
-      // retryable refusal.
-      throw error;
-    }
-  }
-}
-
-export interface BindingClaimPool {
-  getAllDevices(): PooledDevice[];
-  /** Throws when another live daemon claims the device. */
-  assertNotClaimedByForeignDaemon(deviceId: string, platform: BindingPlatform): Promise<void>;
-}
-
-/**
- * A device is held while a pooled runtime of it has a session, or another daemon claims it. A
- * running device whose runtime identity the pool cannot resolve is unknown, never free.
- */
-export class PoolBindingDeviceClaims implements BindingDeviceClaims {
-  constructor(
-    private readonly pool: BindingClaimPool,
-    private readonly executions?: LiveExecutionSessions,
-  ) {}
-
-  isLiveExecution(sessionUuid: string): boolean {
-    return this.executions?.isLiveManagedExecutionSession(sessionUuid) ?? false;
-  }
-
-  async describe(device: DeviceInfo): Promise<BindingDeviceClaim> {
-    const runtimes = this.runtimesOf(device);
-    const held = runtimes.find((pooled) => holderOf(pooled) !== null);
-    if (held) {
-      return { kind: "held", reason: `session ${holderOf(held)} holds ${held.id}` };
-    }
-    // The listing reports an unknown running state as isRunning:false, so the flag alone is not
-    // evidence the device is stopped.
-    if (device.isRunningStateKnown === false && runtimes.length === 0) {
-      return { kind: "unknown", reason: "its running state could not be determined" };
-    }
-    if (device.platform === "android" && this.hasUnresolvedSessionRuntime()) {
-      return { kind: "unknown", reason: "a session holds an emulator whose AVD is unresolved" };
-    }
-    for (const runtime of runtimes) {
-      try {
-        await this.pool.assertNotClaimedByForeignDaemon(runtime.id, device.platform);
-      } catch (error) {
-        return { kind: "held", reason: errorMessage(error) };
-      }
-    }
-    return { kind: "free" };
-  }
-
-  sessionsOn(device: DeviceInfo): string[] {
-    return this.runtimesOf(device).flatMap((pooled) =>
-      holderOf(pooled) ? [holderOf(pooled)!] : [],
-    );
-  }
-
-  /** A session-held emulator whose AVD name has not resolved may be any configured AVD. */
-  private hasUnresolvedSessionRuntime(): boolean {
-    return this.pool
-      .getAllDevices()
-      .some(
-        (pooled) =>
-          pooled.platform === "android" &&
-          holderOf(pooled) !== null &&
-          !pooled.avdName &&
-          pooled.name.startsWith("Unknown ("),
-      );
-  }
-
-  /** The pooled runtimes of a configured device (AVD name or simulator UDID). */
-  private runtimesOf(device: DeviceInfo): PooledDevice[] {
-    const stableId = deviceStableId(device);
-    return this.pool
-      .getAllDevices()
-      .filter(
-        (pooled) =>
-          pooled.platform === device.platform &&
-          (device.platform === "android"
-            ? (pooled.avdName ?? pooled.name) === stableId
-            : pooled.id === stableId),
-      );
   }
 }

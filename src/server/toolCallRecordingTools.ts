@@ -3,14 +3,14 @@ import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { logger } from "../utils/logger";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
-import { addSessionUuidToSchema } from "./toolSchemaHelpers";
+import { addSessionUuidToSchema } from "../utils/schemaHelpers";
 import {
   startToolCallRecording,
   stopToolCallRecording,
   getToolCallRecordingStatus,
-} from "./toolCallRecordingManager";
+} from "../daemon/toolCallRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
-import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/wire/constants";
 
 // ============================================================================
 // Tool Call Recording — "recordToolCalls" tool

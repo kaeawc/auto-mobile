@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
+import java.net.MalformedURLException
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
@@ -231,14 +232,7 @@ object AutoMobileNetwork {
       val policy = capturePolicyProvider?.invoke()
       val headersEnabled = captureHeaders && (policy?.captureHeaders ?: true)
       val bodiesEnabled = captureBodies && (policy?.captureBodies ?: true)
-      val parsedUrl =
-        if (record.host == null || record.path == null) {
-          try {
-            java.net.URL(record.url)
-          } catch (_: Exception) {
-            null
-          }
-        } else null
+      val parsedUrl = parseRecordUrl(record)
       val host = record.host ?: parsedUrl?.host
       val path = record.path ?: parsedUrl?.path
       buf.add(
@@ -269,6 +263,15 @@ object AutoMobileNetwork {
       }
     }
   }
+
+  private fun parseRecordUrl(record: NetworkRequestRecord): java.net.URL? =
+    if (record.host == null || record.path == null) {
+      try {
+        java.net.URL(record.url)
+      } catch (_: MalformedURLException) {
+        null
+      }
+    } else null
 
   /**
    * Start a transport-neutral capture lifecycle. Use the returned handle from success, failure,

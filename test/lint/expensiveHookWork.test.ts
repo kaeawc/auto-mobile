@@ -1,19 +1,16 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+
 import path from "node:path";
 import { baselineEntries, scanExpensiveHookWork } from "./expensiveHookWork";
 
 const REPO_ROOT = path.join(import.meta.dir, "..", "..");
 const TEST_DIR = path.join(REPO_ROOT, "test");
-const BASELINE_FILE = path.join(import.meta.dir, "expensive-hook-work-baseline.txt");
-// Equals the baseline's line count; the UPDATE command below keeps it in sync.
-const BASELINE_CEILING = 33;
 // Parsing every test file can exceed Bun's default hook limit on loaded CI runners.
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 
 function unitTestFiles(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(dir).flatMap((entry) => {
     const file = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       return entry.name === "node_modules" || file === path.join(TEST_DIR, "integration")
@@ -45,6 +42,9 @@ describe("scanExpensiveHookWork", () => {
       afterEach(async () => { await fs.rm(dir, { recursive: true, force: true }); });
     `;
     expect(kindsIn(source)).toEqual(["beforeEach:temp-dir", "afterEach:recursive-rm"]);
+    expect(kindsIn(String.raw`beforeEach(() => { mkd\u0074emp("x"); });`)).toEqual([
+      "beforeEach:temp-dir",
+    ]);
   });
 
   test("follows a hook that names a local function and the helpers it calls", () => {
@@ -96,59 +96,24 @@ describe("scanExpensiveHookWork", () => {
   });
 });
 
-const UPDATE_COMMAND =
-  "UPDATE_EXPENSIVE_HOOK_BASELINE=1 bun test test/lint/expensiveHookWork.test.ts";
-
 describe("expensive per-test hook work stays out of unit tests", () => {
-  let baseline: string[] = [];
   let found: string[] = [];
 
   beforeAll(() => {
     found = unitTestFiles(TEST_DIR)
-      .map((file) => [relativePosix(file), readFileSync(file, "utf8")] as const)
+      .map((file) => [relativePosix(file), readGuardFile(file)] as const)
       .flatMap(([file, source]) => baselineEntries(file, scanExpensiveHookWork(file, source)))
       .sort();
-    if (process.env.UPDATE_EXPENSIVE_HOOK_BASELINE === "1") {
-      // Regenerate: lists exactly the files that still offend (drops stale lines) and syncs the ceiling.
-      writeFileSync(BASELINE_FILE, found.map((entry) => `${entry}\n`).join(""));
-      const self = fileURLToPath(import.meta.url);
-      writeFileSync(
-        self,
-        readFileSync(self, "utf8").replace(
-          /BASELINE_CEILING = \d+;/,
-          `BASELINE_CEILING = ${found.length};`,
-        ),
-      );
-    }
-    baseline = readFileSync(BASELINE_FILE, "utf8").split(/\r?\n/).filter(Boolean);
   }, TREE_SCAN_HOOK_TIMEOUT_MS);
 
   test("no new test does mkdtemp, rm, image/zip or DevicePool construction in beforeEach/afterEach", () => {
-    const added = found.filter((entry) => !baseline.includes(entry));
-    if (added.length > 0) {
+    if (found.length > 0) {
       throw new Error(
-        `New expensive beforeEach/afterEach work (CI per-test time includes these hooks, 5-15x on a ` +
-          `contended runner):\n  ${added.map((entry) => entry.replace("\t", "  [") + "]").join("\n  ")}\n` +
+        `Expensive beforeEach/afterEach work (CI per-test time includes these hooks, 5-15x on a ` +
+          `contended runner):\n  ${found.map((entry) => entry.replace("\t", "  [") + "]").join("\n  ")}\n` +
           `Fix it: use useScratchRoot (test/helpers/scratchRoot.ts) for temp directories and build ` +
-          `immutable fixtures/harnesses in beforeAll. If the per-test state is genuinely mutable ` +
-          `(e.g. a DevicePool), baseline it with: ${UPDATE_COMMAND}  (then commit ` +
-          `test/lint/expensive-hook-work-baseline.txt and this test file).`,
+          `immutable fixtures/harnesses in beforeAll.`,
       );
     }
-  });
-
-  test("the baseline lists only still-offending files, so it can only shrink", () => {
-    const stale = baseline.filter((entry) => !found.includes(entry));
-    if (stale.length > 0) {
-      throw new Error(
-        `Stale baseline lines (file fixed, renamed or deleted):\n  ${stale.join("\n  ").replaceAll("\t", "  ")}\n` +
-          `Run: ${UPDATE_COMMAND}  and commit the result.`,
-      );
-    }
-    expect(baseline.length).toBe(BASELINE_CEILING);
-  });
-
-  test("the baseline is sorted and free of duplicates", () => {
-    expect(baseline).toEqual([...new Set(baseline)].sort());
   });
 });

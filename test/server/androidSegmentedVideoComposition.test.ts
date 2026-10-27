@@ -28,7 +28,7 @@ import {
   setVideoRecordingManagerDependencies,
   startVideoRecording,
   stopVideoRecording,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
 import { logger } from "../../src/utils/logger";
 import { defaultTimer } from "../../src/utils/SystemTimer";

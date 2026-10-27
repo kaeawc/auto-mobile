@@ -5,7 +5,7 @@ import {
   type DeviceGestureRecordingDeviceResolution,
 } from "../../src/daemon/deviceGestureRecordingSocketServer";
 import type { DeviceGestureRecordingCommand } from "../../src/daemon/deviceGestureRecordingSocketTypes";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import {
   ActionableError,
   type AppearanceConfig,
@@ -28,7 +28,7 @@ import { FakeWindow } from "../fakes/FakeWindow";
  * syncWithHost false) keeps a light device when it starts a recording on a dark host. Without the
  * session, readiness read the global config, which follows the host.
  *
- * The production resolution runs here over a real DeviceSessionManager on fakes, so the assertion
+ * The production resolution runs here over a real DeviceReadiness on fakes, so the assertion
  * is the device write itself.
  */
 class TestableServer extends DeviceGestureRecordingSocketServer {
@@ -58,7 +58,8 @@ function harness() {
   const window = new FakeWindow();
   window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
   const configKeys: Array<string | undefined> = [];
-  const manager = DeviceSessionManager.createInstance(
+  const selectedSessions: Array<string | undefined> = [];
+  const manager = DeviceReadiness.createInstance(
     new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl(), {
       window,
       ctrlProxyManager: new FakeCtrlProxyManager(),
@@ -86,14 +87,16 @@ function harness() {
   );
   const production = createDeviceGestureRecordingDeviceResolution(() => ({
     getPlatformDeviceManager: () => manager.getPlatformDeviceManager(),
-    getCurrentDevice: () => manager.getCurrentDevice(),
     // Runner setup is not what this pins: readiness stops at "booted", then makes the same
     // selection and device writes.
     ensureDeviceReady: (platform, deviceId, options) =>
       manager.ensureDeviceReady(platform, deviceId, { ...options, readiness: "booted" }),
   }));
   const resolution: DeviceGestureRecordingDeviceResolution = {
-    selectDevice: async () => held,
+    selectDevice: async (_deviceId, _platform, sessionUuid) => {
+      selectedSessions.push(sessionUuid);
+      return held;
+    },
     readyDevice: async (device, sessionUuid) => {
       await production.readyDevice(device, sessionUuid);
       // Stops before a real recorder is built on the readied device.
@@ -110,12 +113,12 @@ function harness() {
   );
   const nightModeWrites = () =>
     adb.getExecutedCommands().filter((command) => command.includes("cmd uimode night"));
-  return { server, configKeys, nightModeWrites };
+  return { server, configKeys, nightModeWrites, selectedSessions };
 }
 
 describe("device-gesture-recording start readies the device for the session that asked", () => {
   test("a holder that chose light keeps a light device when it starts a recording on a dark host", async () => {
-    const { server, configKeys, nightModeWrites } = harness();
+    const { server, configKeys, nightModeWrites, selectedSessions } = harness();
 
     await expect(
       server.invoke({
@@ -127,7 +130,19 @@ describe("device-gesture-recording start readies the device for the session that
     ).rejects.toThrow("stop after readiness");
 
     expect(configKeys).toEqual([HOLDER]);
+    expect(selectedSessions).toEqual([HOLDER]);
     expect(nightModeWrites()).toEqual(["shell cmd uimode night no"]);
+  });
+
+  test("a padded session UUID selects and readies its device under the trimmed UUID (#14378)", async () => {
+    const { server, configKeys, selectedSessions } = harness();
+
+    await expect(
+      server.invoke({ command: "start", sessionUuid: ` ${HOLDER} `, platform: "android" }),
+    ).rejects.toThrow("stop after readiness");
+
+    expect(selectedSessions).toEqual([HOLDER]);
+    expect(configKeys).toEqual([HOLDER]);
   });
 
   test("a start without a session still uses the global config", async () => {

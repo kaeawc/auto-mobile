@@ -11,7 +11,7 @@ import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 function feed(client: DaemonClient, frames: unknown[]): void {
   const payload = frames.map((frame) => JSON.stringify(frame)).join("\n") + "\n";
-  (client as unknown as { handleData(data: Buffer): void }).handleData(Buffer.from(payload));
+  client.testHooks.simulateIncomingData(Buffer.from(payload));
 }
 
 describe("isDaemonNotification", () => {

@@ -116,6 +116,7 @@ describe("boundBackfillEventText", () => {
       category: "log",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { level: 4, tag: "t", message: "m".repeat(50_000) },
     };
     const bounded = boundBackfillEventText(event);
@@ -127,6 +128,7 @@ describe("boundBackfillEventText", () => {
       category: "storage",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: {
         key: "k",
         value: "v".repeat(30_000),
@@ -144,6 +146,7 @@ describe("boundBackfillEventText", () => {
       category: "log",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { level: 4, tag: "t", message: "small" },
     };
     const bounded = boundBackfillEventText(event);
@@ -153,6 +156,7 @@ describe("boundBackfillEventText", () => {
       category: "os",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { category: "lifecycle", kind: "foreground", details: null },
     };
     expect(boundBackfillEventText(os)).toEqual(os);
@@ -163,6 +167,7 @@ describe("boundBackfillEventText", () => {
       category: "log",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { level: 4, tag: "t", message: "m".repeat(10_239) + "😀" + "n".repeat(50) },
     };
     const bounded = boundBackfillEventText(event);
@@ -177,6 +182,7 @@ describe("boundBackfillEventText", () => {
       category: "os",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { category: "lifecycle", kind: "foreground", details: bigDetails },
     };
     const bounded = boundBackfillEventText(event);
@@ -194,6 +200,7 @@ describe("boundBackfillEventText", () => {
       category: "os",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { category: "lifecycle", kind: "foreground", details },
     };
     const bounded = boundBackfillEventText(event);
@@ -206,6 +213,7 @@ describe("boundBackfillEventText", () => {
       category: "layout",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { composableId: "c", detailsJson: raw },
     };
     const bounded = boundBackfillEventText(event);
@@ -221,6 +229,7 @@ describe("boundBackfillEventText", () => {
       category: "layout",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { composableId: "c", detailsJson: raw },
     };
     const bounded = boundBackfillEventText(event);
@@ -327,6 +336,7 @@ describe("TelemetryPushSocketServer", () => {
       category: "network",
       timestamp: 1000,
       deviceId: null,
+      sessionId: null,
       data: { method: "GET", url: "/users", statusCode: 200, durationMs: 42 },
     };
 
@@ -352,6 +362,7 @@ describe("TelemetryPushSocketServer", () => {
       category: "network",
       timestamp: 1000,
       deviceId: null,
+      sessionId: null,
       data: { method: "GET", url: "/users", statusCode: 200, durationMs: 42 },
     };
 
@@ -369,6 +380,7 @@ describe("TelemetryPushSocketServer", () => {
       category: "log",
       timestamp: 2000,
       deviceId: null,
+      sessionId: null,
       data: { level: 4, tag: "TestTag", message: "hello" },
     };
 
@@ -376,6 +388,7 @@ describe("TelemetryPushSocketServer", () => {
       category: "network",
       timestamp: 3000,
       deviceId: null,
+      sessionId: null,
       data: { method: "POST", url: "/submit", statusCode: 201, durationMs: 100 },
     };
 
@@ -387,21 +400,22 @@ describe("TelemetryPushSocketServer", () => {
     expect(msgs[0].data?.category).toBe("log");
   });
 
-  it("pushes custom events correctly", () => {
-    const { socket } = server.simulateSubscription({ category: "custom" });
+  it("pushes performance events correctly", () => {
+    const { socket } = server.simulateSubscription({ category: "performance" });
 
     const event: TelemetryEvent = {
-      category: "custom",
+      category: "performance",
       timestamp: 4000,
       deviceId: null,
-      data: { name: "purchase", properties: { item: "premium" } },
+      sessionId: null,
+      data: { metric: "frame_time", value: 16 },
     };
 
     server.pushTelemetryEvent(event);
 
     const msgs = socket.getWrittenMessages(telemetryPushFrameSchema);
     expect(msgs).toHaveLength(1);
-    expect(msgs[0].data?.category).toBe("custom");
+    expect(msgs[0].data?.category).toBe("performance");
   });
 
   it("pushes os events correctly", () => {
@@ -411,6 +425,7 @@ describe("TelemetryPushSocketServer", () => {
       category: "os",
       timestamp: 5000,
       deviceId: null,
+      sessionId: null,
       data: { category: "lifecycle", kind: "foreground", details: null },
     };
 
@@ -432,6 +447,7 @@ describe("TelemetryPushSocketServer", () => {
       category: "log",
       timestamp: 6000,
       deviceId: null,
+      sessionId: null,
       data: { level: 4, tag: "Test", message: "msg" },
     };
 
@@ -470,6 +486,7 @@ describe("TelemetryPushSocketServer", () => {
       category: "network",
       timestamp: 50000,
       deviceId: null,
+      sessionId: null,
       data: { method: "GET", url: "/test", statusCode: 200, durationMs: 10 },
     };
 
@@ -528,18 +545,21 @@ describe("TelemetryPushSocketServer", () => {
       category: "log",
       timestamp: 1000,
       deviceId: "device-1",
+      sessionId: null,
       data: { level: 4, tag: "t", message: "m" },
     };
     const wrongCategory: TelemetryEvent = {
       category: "network",
       timestamp: 2000,
       deviceId: "device-1",
+      sessionId: null,
       data: { method: "GET", url: "/x", statusCode: 200, durationMs: 0 },
     };
     const wrongDevice: TelemetryEvent = {
       category: "log",
       timestamp: 3000,
       deviceId: "device-2",
+      sessionId: null,
       data: { level: 4, tag: "t", message: "m" },
     };
 
@@ -561,6 +581,7 @@ describe("TelemetryPushSocketServer", () => {
       category: "log",
       timestamp: 1000,
       deviceId: null,
+      sessionId: null,
       data: { level: 4, tag: "Test", message: "during backfill" },
     };
 
@@ -661,7 +682,12 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         socket: socket,
         subscriptionId: "backfill-test",
         lastActivity: 0,
-        filter: { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
+        filter: {
+          category: "crash",
+          deviceSessionUuid: null,
+          deviceId: "emulator-5554",
+          sessionId: "session-abc",
+        },
         backfilling: true,
         drainPending: false,
       });
@@ -678,11 +704,17 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
       };
       const drainingBackfill = server.runBackfill(
         "backfill-test",
-        { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
+        {
+          category: "crash",
+          deviceSessionUuid: null,
+          deviceId: "emulator-5554",
+          sessionId: "session-abc",
+        },
         socket,
       );
       await wrote;
-      expect(socket.listenerCount("drain")).toBe(1);
+      // The connection outbox and the backfill waiter each own one drain listener.
+      expect(socket.listenerCount("drain")).toBe(2);
       socket.emit("drain");
       await drainingBackfill;
       expect(socket.listenerCount("drain")).toBe(0);
@@ -698,13 +730,23 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         socket: socket,
         subscriptionId: "backfill-test",
         lastActivity: 0,
-        filter: { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
+        filter: {
+          category: "crash",
+          deviceSessionUuid: null,
+          deviceId: "emulator-5554",
+          sessionId: "session-abc",
+        },
         backfilling: true,
         drainPending: false,
       });
       const backfill = server.runBackfill(
         "backfill-test",
-        { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
+        {
+          category: "crash",
+          deviceSessionUuid: null,
+          deviceId: "emulator-5554",
+          sessionId: "session-abc",
+        },
         socket,
       );
       server.removeSubscriber("backfill-test");

@@ -31,7 +31,7 @@ async function harness() {
   const timer = new FakeTimer();
   const socket = new RecordingSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "storage-send-command", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "storage-send-command", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
       webSocketFactory: () => socket,
@@ -43,12 +43,12 @@ async function harness() {
   await Promise.resolve();
   timer.advanceTime(123);
   client.connectionTestHooks.socket = socket;
-  client["supportedCommands"] = new Set([
+  client.connectionTestHooks.supportedCommands = new Set([
     "discover_keystore",
     "get_sdk_capabilities",
     SDK_CAPABILITIES_USER_ID_CAPABILITY,
   ]);
-  const manager = client["requestManager"];
+  const manager = client.connectionTestHooks.requestManager;
   const ids = new CountingIdGenerator("wire");
   manager.generateId = (prefix) => `${prefix}_${ids.next()}`;
   let connects = 0;
@@ -57,10 +57,10 @@ async function harness() {
     connects++;
     return true;
   };
-  client["cancelScreenshotBackoff"] = () => {
+  client.testHooks.overrideCancelScreenshotBackoff(() => {
     cancels++;
-  };
-  const storage = client["storage"];
+  });
+  const storage = client.testHooks.storage();
   return {
     client,
     storage,
@@ -78,7 +78,7 @@ async function flushDispatch() {
   }
 }
 
-const keystoreState = {
+const keystoreState: Awaited<ReturnType<CtrlProxyStorage["discoverKeystore"]>> = {
   schemaVersion: 1,
   capability: "storage.keystore",
   outcome: "disabled",
@@ -95,7 +95,33 @@ const snapshot = {
   policy: { captureHeaders: false, captureBodies: false, allowMutations: false },
 };
 const subscription = { packageName: "pkg", fileName: "prefs", subscriptionId: "pkg:prefs" };
-const methods = [
+type StorageResult = Awaited<
+  ReturnType<
+    CtrlProxyStorage[
+      | "getPreference"
+      | "listPreferenceFiles"
+      | "getPreferenceEntries"
+      | "discoverKeystore"
+      | "getSdkCapabilities"
+      | "subscribeStorage"
+      | "unsubscribeStorage"
+      | "setPreference"
+      | "removePreference"
+      | "clearPreferenceStore"]
+  >
+>;
+const methods: Array<{
+  operation: string;
+  label: string;
+  invoke: (storage: CtrlProxyStorage) => Promise<StorageResult>;
+  frame: (
+    requestId: string,
+  ) => ReturnType<(typeof ctrlProxyRequests)[keyof typeof ctrlProxyRequests]>;
+  literal: string;
+  response: object;
+  result: StorageResult;
+  write?: boolean;
+}> = [
   {
     operation: "list_preference_files",
     label: "List preference files",
@@ -261,13 +287,13 @@ for (const method of methods) {
     const isSdk = method.operation === "get_sdk_capabilities";
     const isKeystore = method.operation === "discover_keystore";
     const respond = (h: Awaited<ReturnType<typeof harness>>) =>
-      h.client["handleWebSocketMessage"](
+      h.client.testHooks.handleWebSocketMessage(
         JSON.stringify({ ...method.response, requestId: id, success: true, totalTimeMs: 7 }),
       );
 
     test("preserves the literal and builder frame, bypasses generic support, and correlates the reply", async () => {
       const h = await harness();
-      h.client["rejectedCommands"].add(method.operation);
+      h.client.testHooks.rejectedCommands.add(method.operation);
       const pending = method.invoke(h.storage);
       await flushDispatch();
       expect(h.socket.frames).toEqual([method.literal]);
@@ -415,7 +441,7 @@ for (const advertised of [false, true]) {
   test(`SDK userId is omitted when ${advertised ? "unspecified" : "not advertised"}`, async () => {
     const h = await harness();
     if (!advertised) {
-      h.client["supportedCommands"]!.delete(SDK_CAPABILITIES_USER_ID_CAPABILITY);
+      h.client.connectionTestHooks.supportedCommands!.delete(SDK_CAPABILITIES_USER_ID_CAPABILITY);
     }
     const pending = h.storage.getSdkCapabilities("pkg", advertised ? undefined : 10, 50);
     await flushDispatch();
@@ -436,7 +462,7 @@ for (const advertised of [false, true]) {
 for (const operation of ["discoverKeystore", "getSdkCapabilities"] as const) {
   test(`${operation} keeps the advertised capability precheck`, async () => {
     const h = await harness();
-    h.client["supportedCommands"] = new Set();
+    h.client.connectionTestHooks.supportedCommands = new Set();
     const result = await h.storage[operation]("pkg");
     expect(result).toMatchObject(
       operation === "discoverKeystore"

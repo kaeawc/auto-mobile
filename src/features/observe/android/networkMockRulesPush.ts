@@ -1,8 +1,8 @@
-import type { NetworkMockPushResult, NetworkMockRuleSync } from "../../../server/networkMockRules";
+import type { NetworkMockPushResult, NetworkMockRuleSync } from "../../../utils/networkMockRules";
 import {
   NETWORK_MOCK_REPORT_TIMEOUT_MS,
   parseMockRuleReport,
-} from "../../../server/networkMockRules";
+} from "../../../utils/networkMockRules";
 import { sendCommand } from "../DeviceServiceUtils";
 import type { BaseResult } from "../shared/types";
 import type { DelegateContext } from "./types";

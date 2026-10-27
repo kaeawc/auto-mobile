@@ -11,6 +11,23 @@ describe("pressButtonPolicy", () => {
     expect(isNavigationPressButton("volume_up")).toBe(false);
     expect(isInPlacePressButton("Menu")).toBe(true);
     expect(isInPlacePressButton("home")).toBe(false);
+    // The Action button runs a user-chosen shortcut and Camera Control opens the camera,
+    // so both may change the foreground UI (#14100).
+    expect(isNavigationPressButton("action")).toBe(true);
+    expect(isNavigationPressButton("Camera")).toBe(true);
+  });
+
+  test.each([
+    "lock",
+    "power_dialog",
+    "quick_settings",
+    "screenshot",
+    "split_screen",
+    "dismiss_notification_shade",
+  ])("%s is an Android system action with no keycode (#14095)", (button) => {
+    expect(isNavigationPressButton(button)).toBe(true);
+    expect(isNavigationPressButton(button.toUpperCase())).toBe(true);
+    expect(resolveAndroidKeyCode(button)).toBeUndefined();
   });
 
   test.each([

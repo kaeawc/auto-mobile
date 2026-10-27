@@ -2,12 +2,12 @@ import { describe, expect, test } from "bun:test";
 import type {
   AppleDeviceRuntime,
   AppleDeviceType,
-  SimCtl,
+  SimCtlClient,
 } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 
 /** The `simctl list runtimes|devicetypes` surface the contract exercises. */
 export type SimctlCatalog = Pick<
-  SimCtl,
+  SimCtlClient,
   "getRuntimes" | "getRuntimesChecked" | "getDeviceTypes" | "getDeviceTypesChecked"
 >;
 

@@ -15,7 +15,6 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -35,21 +34,9 @@ class FocusControllerTest {
     override fun currentTimeMillis() = 4_000L
   }
 
-  private class FakeSender : FocusController.ResponseSender {
-    var running = true
-    val messages = mutableListOf<String>()
-
-    override fun isRunning() = running
-
-    override suspend fun broadcast(message: String) {
-      messages += message
-    }
-
-    override suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String) {
-      messages += messageBuilder(null)
-    }
-
-    override fun connectionCount() = 1
+  private class FakeSender : FakeResultTransport() {
+    val messages
+      get() = sentFrames
   }
 
   private class FakeHost(private val scope: CoroutineScope) : FocusController.Host {
@@ -87,10 +74,12 @@ class FocusControllerTest {
         host = host,
         perfProvider = PerfProvider.createForTesting(timer),
         timeProvider = timer,
-        resultBroadcaster =
-          ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
         jsonCompact = json,
-        responseSender = sender,
+        resultSender =
+          guardedResultSender(
+            sender,
+            ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
+          ),
       )
     return controller to host
   }

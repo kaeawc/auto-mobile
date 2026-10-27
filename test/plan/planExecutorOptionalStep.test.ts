@@ -1,3 +1,4 @@
+import { DefaultPlanStepExecutor } from "../../src/utils/plan/PlanStepExecutor";
 import { describe, expect, test, mock, spyOn, beforeEach, afterEach } from "bun:test";
 import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { Plan } from "../../src/models/Plan";
@@ -188,14 +189,25 @@ describe("PlanExecutor — optional steps", () => {
         return createStructuredToolResponse({ success: false, error: "timed failure" });
       },
     );
-    const result = await createDefaultPlanExecutor(timer).executePlan({
-      name: "parallel-step-durations",
-      devices: ["device-a", "device-b"],
-      steps: [
-        { tool: "optionalStepTimed", params: { device: "device-a", elapsed: 250 }, optional: true },
-        { tool: "optionalStepTimed", params: { device: "device-b", elapsed: 400 }, optional: true },
-      ],
-    });
+    const result = await createDefaultPlanExecutor(timer).executePlan(
+      {
+        name: "parallel-step-durations",
+        devices: ["device-a", "device-b"],
+        steps: [
+          {
+            tool: "optionalStepTimed",
+            params: { device: "device-a", elapsed: 250 },
+            optional: true,
+          },
+          {
+            tool: "optionalStepTimed",
+            params: { device: "device-b", elapsed: 400 },
+            optional: true,
+          },
+        ],
+      },
+      0,
+    );
 
     expect(result.success).toBe(true);
     expect(result.perDeviceResults?.get("device-a")?.skippedSteps?.[0]?.durationMs).toBe(250);
@@ -481,7 +493,7 @@ describe("PlanExecutor — optional steps", () => {
   test.each([false, true])(
     "execution error preserves earlier skip (parallel=%s)",
     async (parallel) => {
-      const executeStep = spyOn(planExecutor, "executeStep")
+      const executeStep = spyOn(DefaultPlanStepExecutor.prototype, "executeStep")
         .mockResolvedValueOnce({ status: "skipped", error: "element not found", details: {} })
         .mockRejectedValueOnce(new Error("execution interrupted"));
       try {

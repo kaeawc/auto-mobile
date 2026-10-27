@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { Socket } from "node:net";
-import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../../src/models";
+import type {
+  AppearanceConfig,
+  AppearanceConfigInput,
+  AppearanceMode,
+  BootedDevice,
+} from "../../src/models";
+import { parseAppearanceConfig } from "../../src/features/appearance/AppearanceConfig";
 import {
   AppearanceSyncScheduler,
   type AppearanceSyncTarget,
@@ -16,7 +21,7 @@ import {
   type StreamAuthSessionManager,
 } from "../../src/daemon/streamSocketAuth";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
 
 /**
  * #10976: appearance and sync config is per session. A session's choice reaches only the devices
@@ -37,10 +42,10 @@ class FakeConfigStore {
     this.rows.get(sessionKey ?? "") ?? DEFAULTS;
 
   update = async (
-    update: Partial<AppearanceConfig> | null,
+    update: AppearanceConfigInput | null,
     sessionKey?: string,
   ): Promise<AppearanceConfig> => {
-    const next = { ...(await this.get(sessionKey)), ...update } as AppearanceConfig;
+    const next = parseAppearanceConfig({ ...(await this.get(sessionKey)), ...update });
     this.rows.set(sessionKey ?? "", next);
     return next;
   };
@@ -97,7 +102,7 @@ describe("AppearanceSyncScheduler with per-session config", () => {
 
   test("syncDevice reads the config of the session that acquired the device", async () => {
     const store = new FakeConfigStore();
-    await store.update({ syncWithHost: false }, "agent-a");
+    await store.update({ syncWithHost: false, applyOnConnect: false }, "agent-a");
     const { instance, applied } = scheduler(store, () => [
       target("emulator-5554", "agent-a"),
       target("emulator-5556", "agent-b"),
@@ -107,6 +112,33 @@ describe("AppearanceSyncScheduler with per-session config", () => {
     await instance.syncDevice(target("emulator-5556", "agent-b"));
 
     expect(applied).toEqual(["emulator-5556:dark"]);
+    await instance.stop();
+  });
+
+  test("a claim applies the holder's explicit mode although it does not follow the host (#11363)", async () => {
+    const store = new FakeConfigStore();
+    await store.update({ syncWithHost: false, defaultMode: "dark" }, "observer");
+    const { instance, applied } = scheduler(store, () => [target("emulator-5554", "observer")]);
+
+    await instance.syncDevice(target("emulator-5554", "observer"));
+    // The host-sync tick leaves an explicit choice alone.
+    await instance.trigger();
+
+    expect(applied).toEqual(["emulator-5554:dark"]);
+    await instance.stop();
+  });
+
+  test("a claim leaves the device alone when the holder neither follows the host nor applies on connect", async () => {
+    const store = new FakeConfigStore();
+    await store.update(
+      { syncWithHost: false, defaultMode: "dark", applyOnConnect: false },
+      "observer",
+    );
+    const { instance, applied } = scheduler(store, () => [target("emulator-5554", "observer")]);
+
+    await instance.syncDevice(target("emulator-5554", "observer"));
+
+    expect(applied).toEqual([]);
     await instance.stop();
   });
 });
@@ -126,14 +158,13 @@ describe("AppearanceSocketServer with per-session config", () => {
   );
 
   class Harness extends AppearanceSocketServer {
+    markListening(): void {
+      this.server = new FakeListeningNetServer();
+    }
+
     async send(socket: FakeSocket, request: Record<string, unknown>) {
-      await (this as unknown as { processLine(s: Socket, l: string): Promise<void> }).processLine(
-        socket as unknown as Socket,
-        JSON.stringify(request),
-      );
-      await (
-        this as unknown as { pendingBySocket: Map<unknown, Promise<void>> }
-      ).pendingBySocket.get(socket);
+      await this.processLine(socket, JSON.stringify(request));
+      await this.pendingBySocket.get(socket);
       return socket.getWrittenMessages(appearanceSocketResponseSchema).at(-1)!;
     }
   }
@@ -163,12 +194,12 @@ describe("AppearanceSocketServer with per-session config", () => {
       authenticator,
       {
         getPooledDevices: () => pooled,
-        getCurrentDevice: () => undefined,
+        getSessionDevice: () => undefined,
         getSessionForDevice: (deviceId) => owners.get(deviceId) ?? null,
       },
       dependencies,
     );
-    (server as unknown as { server: object }).server = { listening: true };
+    server.markListening();
     return { server, store, applied, keys };
   }
 
@@ -218,9 +249,12 @@ describe("AppearanceSocketServer with per-session config", () => {
   });
 
   test("the production server admits observer sessions on its authenticator", () => {
-    const authenticator = (
-      new AppearanceSocketServer("/fake/appearance.sock") as unknown as { authenticator: unknown }
-    ).authenticator;
+    class Probe extends AppearanceSocketServer {
+      get admittingAuthenticator(): unknown {
+        return this.authenticator;
+      }
+    }
+    const authenticator = new Probe("/fake/appearance.sock").admittingAuthenticator;
     expect(authenticator).toBeInstanceOf(ObserverAdmittingStreamAuthenticator);
   });
 });

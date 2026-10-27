@@ -200,19 +200,7 @@ class VideoStreamParser {
     var offset = 0
 
     if (!headerSeen) {
-      if (srcLen - offset < STREAM_HEADER_BYTES) {
-        buffer = src.copyOfRange(offset, srcLen)
-        return
-      }
-      val view = ByteBuffer.wrap(src, offset, STREAM_HEADER_BYTES).order(ByteOrder.BIG_ENDIAN)
-      val codecId = view.int
-      if (codecId != CODEC_ID_H264) {
-        throw VideoStreamFormatException(
-          "Unexpected codec id 0x${codecId.toUInt().toString(16)}; this client only decodes H.264",
-        )
-      }
-      onHeader(VideoStreamHeader(view.int, view.int))
-      headerSeen = true
+      if (!readStreamHeader(src, srcLen, onHeader)) return
       offset += STREAM_HEADER_BYTES
     }
 
@@ -229,49 +217,83 @@ class VideoStreamParser {
       }
 
       val start = offset + PACKET_HEADER_BYTES
-      val isConfig = (ptsAndFlags and FLAG_CONFIG) != 0L
-      val isDroppedFrames = !isConfig && size == 0 && (ptsAndFlags and FLAG_DROPPED_FRAMES) != 0L
-      val isHeartbeat = !isConfig && size == 0 && (ptsAndFlags and FLAG_HEARTBEAT) != 0L
-      val isKeyFrame = (ptsAndFlags and FLAG_KEY_FRAME) != 0L
-      if (
-        !isConfig &&
-          !isKeyFrame &&
-          size == 0 &&
-          !isHeartbeat &&
-          !isDroppedFrames &&
-          (ptsAndFlags and FLAG_SUBSCRIPTION_NOTICE) != 0L
-      ) {
-        val notice = subscriptionNotice(ptsAndFlags and PTS_MASK)
-        offset = start
-        if (notice is VideoStreamNotice.Ended) hasEnded = true
-        onNotice(notice)
-        if (hasEnded) break
-        continue
-      }
-      onPacket(
-        VideoPacket(
-          payload = src.copyOfRange(start, start + size),
-          // Bit 63 makes the int64 negative, so mask before reading the timestamp.
-          presentationTimeUs = ptsAndFlags and PTS_MASK,
-          isConfig = isConfig,
-          isKeyFrame = isKeyFrame,
-          // Rotation is attested only on a config packet carrying the presence bit (issue #4786).
-          rotation =
-            if (isConfig && (ptsAndFlags and FLAG_ROTATION_PRESENT) != 0L) {
-              ((ptsAndFlags and ROTATION_MASK) shr ROTATION_SHIFT).toInt()
-            } else {
-              null
-            },
-          droppedFrames = if (isDroppedFrames) ptsAndFlags and PTS_MASK else null,
-          heartbeat = isHeartbeat,
-        ),
-      )
+      dispatchPacket(src, start, PacketHeader(ptsAndFlags, size), onPacket, onNotice)
       offset = start + size
+      if (hasEnded) break
     }
 
     // Keep only the unconsumed tail. Empty in the common case, so nothing is retained from `src`.
     buffer = if (offset >= srcLen) EMPTY else src.copyOfRange(offset, srcLen)
   }
+
+  private fun readStreamHeader(
+    src: ByteArray,
+    srcLen: Int,
+    onHeader: (VideoStreamHeader) -> Unit,
+  ): Boolean {
+    if (srcLen < STREAM_HEADER_BYTES) {
+      buffer = src.copyOfRange(0, srcLen)
+      return false
+    }
+    val view = ByteBuffer.wrap(src, 0, STREAM_HEADER_BYTES).order(ByteOrder.BIG_ENDIAN)
+    val codecId = view.int
+    if (codecId != CODEC_ID_H264) {
+      throw VideoStreamFormatException(
+        "Unexpected codec id 0x${codecId.toUInt().toString(16)}; this client only decodes H.264",
+      )
+    }
+    onHeader(VideoStreamHeader(view.int, view.int))
+    headerSeen = true
+    return true
+  }
+
+  private fun dispatchPacket(
+    src: ByteArray,
+    start: Int,
+    header: PacketHeader,
+    onPacket: (VideoPacket) -> Unit,
+    onNotice: (VideoStreamNotice) -> Unit,
+  ) {
+    val isConfig = (header.ptsAndFlags and FLAG_CONFIG) != 0L
+    val isDroppedFrames =
+      !isConfig && header.size == 0 && (header.ptsAndFlags and FLAG_DROPPED_FRAMES) != 0L
+    val isHeartbeat = !isConfig && header.size == 0 && (header.ptsAndFlags and FLAG_HEARTBEAT) != 0L
+    val isKeyFrame = (header.ptsAndFlags and FLAG_KEY_FRAME) != 0L
+    val emptyData = !isConfig && !isKeyFrame && header.size == 0
+    val controlPacket = !isHeartbeat && !isDroppedFrames
+    val subscriptionNotice = (header.ptsAndFlags and FLAG_SUBSCRIPTION_NOTICE) != 0L
+    if (emptyData && controlPacket && subscriptionNotice) {
+      val notice = subscriptionNotice(header.ptsAndFlags and PTS_MASK)
+      if (notice is VideoStreamNotice.Ended) hasEnded = true
+      onNotice(notice)
+      return
+    }
+    onPacket(
+      VideoPacket(
+        payload = src.copyOfRange(start, start + header.size),
+        // Bit 63 makes the int64 negative, so mask before reading the timestamp.
+        presentationTimeUs = header.ptsAndFlags and PTS_MASK,
+        isConfig = isConfig,
+        isKeyFrame = isKeyFrame,
+        // Rotation is attested only on a config packet carrying the presence bit (issue #4786).
+        rotation = packetRotation(header),
+        droppedFrames = if (isDroppedFrames) header.ptsAndFlags and PTS_MASK else null,
+        heartbeat = isHeartbeat,
+      ),
+    )
+  }
+
+  private fun packetRotation(header: PacketHeader): Int? {
+    val isConfig = (header.ptsAndFlags and FLAG_CONFIG) != 0L
+    val ptsAndFlags = header.ptsAndFlags
+    return if (isConfig && (ptsAndFlags and FLAG_ROTATION_PRESENT) != 0L) {
+      ((ptsAndFlags and ROTATION_MASK) shr ROTATION_SHIFT).toInt()
+    } else {
+      null
+    }
+  }
+
+  private data class PacketHeader(val ptsAndFlags: Long, val size: Int)
 
   private companion object {
     val EMPTY = ByteArray(0)

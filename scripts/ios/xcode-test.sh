@@ -16,15 +16,18 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/ios/local-sim-build-args.sh disable=SC1091
+# shellcheck source=scripts/ios/local-sim-build-args.sh
 source "${SCRIPT_DIR}/local-sim-build-args.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${PROJECT_ROOT}/scripts/lib/spotlight-exclude.sh"
 # IOS_DIR is overridable (tests point it at a fixture dir); defaults to ios/.
 IOS_DIR="${IOS_DIR:-${PROJECT_ROOT}/ios}"
 # CI can pin this to a cacheable location. Leave it unset for local invocations
 # so Xcode retains its normal per-user DerivedData behavior.
 DERIVED_DATA_ARGS=()
 if [ -n "${AUTOMOBILE_XCODE_DERIVED_DATA:-}" ]; then
+    mkdir_spotlight_excluded_within "${PROJECT_ROOT}" "${AUTOMOBILE_XCODE_DERIVED_DATA}"
     DERIVED_DATA_ARGS=(-derivedDataPath "${AUTOMOBILE_XCODE_DERIVED_DATA}")
 fi
 

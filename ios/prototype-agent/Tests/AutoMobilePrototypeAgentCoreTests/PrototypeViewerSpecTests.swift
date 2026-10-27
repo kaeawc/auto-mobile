@@ -37,7 +37,7 @@ final class PrototypeViewerSpecTests: XCTestCase {
     }
 
     func testMissingIsNone() {
-        guard case .none = load() else { return XCTFail("Expected no saved prototype") }
+        guard case .absent = load() else { return XCTFail("Expected no saved prototype") }
     }
 
     func testBundledDemo() {

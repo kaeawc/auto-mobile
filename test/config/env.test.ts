@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AMBIENT_ENV_REGISTRY,
   ENV,
+  ENV_REGISTRY,
   readEnvBool,
   readEnvEnum,
   readEnvList,
@@ -40,6 +42,32 @@ describe("typed env readers", () => {
 
   test("bool falls back to the legacy name", () => {
     expect(readEnvBool(FLAG, { OLD_FLAG: "1" })).toBe(true);
+  });
+
+  // #11848: one truthiness rule, so `1`, `true` and `TRUE` mean the same thing for every flag.
+  test("every registered bool flag shares one truthiness table", () => {
+    const flags = [...ENV_REGISTRY, ...AMBIENT_ENV_REGISTRY].filter((spec) => spec.kind === "bool");
+    expect(flags.map((spec) => spec.name)).toContain(ENV.CTRLPROXY_VERBOSE.name);
+    const table: ReadonlyArray<readonly [string | undefined, boolean]> = [
+      ["1", true],
+      ["true", true],
+      ["TRUE", true],
+      ["on", true],
+      ["0", false],
+      ["false", false],
+      [undefined, false],
+    ];
+    for (const spec of flags) {
+      for (const name of [spec.name, spec.legacyName].filter((n) => n !== undefined)) {
+        for (const [value, expected] of table) {
+          expect([name, value, readEnvBool(spec, { [name]: value })]).toEqual([
+            name,
+            value,
+            expected,
+          ]);
+        }
+      }
+    }
   });
 
   test("number honours zero, exclusive minimums, fractions and reports invalid text", () => {

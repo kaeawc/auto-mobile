@@ -1,3 +1,6 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import {
@@ -86,6 +89,7 @@ function androidFrame(value: string, focused = true, secure = false, hint?: stri
   const frame = {
     ...observationOf(hierarchy),
     focusedElement: {
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       focused: true,
       text: "First name",
       "hint-text": "First name",
@@ -113,22 +117,24 @@ const iosField = (() => {
   }
   return field;
 })();
-function iosPrototypeObservation(value: string) {
+function iosPrototypeObservation(value: string): ObserveResult {
   const field = structuredClone(iosField);
   nodeAttributes(field).value = value;
   nodeAttributes(field)["resource-id"] = "ptf";
-  return {
-    timestamp: 1,
+  return buildObserveResult({
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    updatedAt: 1,
     viewHierarchy: {
       hierarchy: {
-        node: {
+        node: createFlatNodeForTest({
           className: "UIWindow",
           "resource-id": "automobile-prototype-window",
           node: [field],
-        },
+        }),
       },
     },
-  };
+  });
 }
 
 function harness(
@@ -247,6 +253,9 @@ for (const focused of [true, false]) {
     const observe = h.observer.execute;
     h.observer.execute = async (options) => {
       const observation = await observe(options);
+      if (!observation.focusedElement) {
+        throw new Error("Expected focused element");
+      }
       return { ...observation, focusedElement: { ...observation.focusedElement, password: true } };
     };
     const result = await h.run("prototype", [{ action: "type", text: "Rb one", mode: "auto" }]);
@@ -538,7 +547,12 @@ for (const platform of ["android", "ios"] as const) {
         platform === "android" ? android : ios,
         { selector: { elementId: "ptf" }, layer: "prototype", commands },
       );
-      expect(response.isError).toBe(platform === "ios" ? true : undefined);
+      if (typeof response !== "object" || response === null || !("structuredContent" in response)) {
+        throw new Error("Expected tool response");
+      }
+      expect("isError" in response ? response.isError : undefined).toBe(
+        platform === "ios" ? true : undefined,
+      );
       expect(response.structuredContent).toMatchObject({
         success: platform === "android",
         commands: [{ success: platform === "android" }],
@@ -713,7 +727,7 @@ for (const platform of ["android", "ios"] as const) {
     const h = harness(platform, { reader: platform === "ios" ? r.reader : undefined });
     const frame = platform === "android" ? androidFrame("Rb one") : iosPrototypeObservation("old");
     const interaction = spyOn(TapOnElement.prototype, "observedInteraction").mockImplementation(
-      async (block) => block(recordObservationRead(frame)),
+      runBlockWith(() => recordObservationRead(frame)),
     );
     const capability =
       platform === "android"
@@ -750,7 +764,7 @@ test("no-prototype focus reports no layer and implicit sendKeys makes no prototy
   };
   const read = spyOn(reader, "read");
   const interaction = spyOn(TapOnElement.prototype, "observedInteraction").mockImplementation(
-    async (block) => block(recordObservationRead(frame)),
+    runBlockWith(() => recordObservationRead(frame)),
   );
   const capability = spyOn(IOSCtrlProxyClient.prototype, "getSupportedCommands").mockResolvedValue(
     [],

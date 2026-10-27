@@ -33,7 +33,9 @@ describe("ClearText accessibility-service path", () => {
     const clearText = new ClearText(device, fakeFactory);
     capturedArgs.length = 0; // ignore construction-time calls; only assert about the a11y path
     const result = await clearText.testHooks.executeAndroidClearText({
-      timestamp: 0,
+      updatedAt: 0,
+      observationId: "test-observation",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     });

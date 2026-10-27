@@ -138,6 +138,7 @@ enum class PrototypeRequestErrorCode(val wireValue: String) {
   INVALID_URL("invalid_url"),
   INVALID_REQUEST("invalid_request"),
   NETWORK("network"),
+  BLOCKED_DESTINATION("blocked_destination"),
   TOO_MANY_IN_FLIGHT("too_many_in_flight"),
 
   /** A response with a non-2xx status. */
@@ -439,6 +440,8 @@ object PrototypeRequestOutcome {
     commit: (PrototypeDataWrite) -> PrototypeDataWriteError?,
   ): PrototypeRequestResult {
     var meta = metaOf(response)
+    // Prefer complete metadata, with a header-free fallback only when headers were supplied.
+    val metadataForms = listOfNotNull(true, false.takeIf { meta.headers != null })
     var wroteInto = false
     var form: Boolean? = null
     if (response is PrototypeRequestResponse.Received && response.body is JsonNull) {
@@ -468,7 +471,7 @@ object PrototypeRequestOutcome {
       } else {
         // The body and the first form of metadata that fits beside it are staged together; only
         // an accepted pair is applied (and reported), never a body whose metadata is refused.
-        val forms = if (meta.headers == null) listOf(true) else listOf(true, false)
+        val forms = metadataForms
         form = forms.firstOrNull {
           trial(listOf(body, PrototypeDataWrite.Set(metaPath, meta.toJson(it)))) == null
         }
@@ -489,8 +492,7 @@ object PrototypeRequestOutcome {
     }
     if (into != null) {
       val path = PrototypeRequests.metaPath(into)
-      val attempts =
-        form?.let { listOf(it) } ?: if (meta.headers == null) listOf(true) else listOf(true, false)
+      val attempts = listOfNotNull(form).ifEmpty { metadataForms }
       for (withHeaders in attempts) {
         if (commit(PrototypeDataWrite.Set(path, meta.toJson(withHeaders))) == null) break
       }
@@ -590,7 +592,8 @@ internal object PrototypeUrl {
     ) : Result
   }
 
-  fun parse(url: String): Result {
+  fun parse(input: String): Result {
+    val url = input.trim { it.code <= 32 }.filterNot { it in "\t\r\n" }.replace('\\', '/')
     val colon = schemeEnd(url)
     if (colon < 0) return notAbsolute(url)
     val scheme = url.substring(0, colon).lowercase()
@@ -606,6 +609,11 @@ internal object PrototypeUrl {
     val pathAt = beforeQuery.indexOf('/')
     val authority = if (pathAt < 0) beforeQuery else beforeQuery.substring(0, pathAt)
     if (authority.isEmpty()) return notAbsolute(url)
+    try {
+      if (java.net.URI("$scheme://$authority").rawAuthority == null) return notAbsolute(url)
+    } catch (_: java.net.URISyntaxException) {
+      return notAbsolute(url)
+    }
     return Result.Absolute(
       scheme = scheme,
       authority = authority,

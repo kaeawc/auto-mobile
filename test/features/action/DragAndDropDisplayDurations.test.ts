@@ -1,3 +1,5 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DragAndDrop, getIosDragTimeoutMs } from "../../../src/features/action/DragAndDrop";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -41,15 +43,21 @@ function fixture(options: { supportsDisplay: boolean; display?: string; autoAdva
     screenWidth: 200,
     screenHeight: 200,
     hierarchy: {
-      node: [
-        { $: { text: "Source", bounds: { left: 20, top: 30, right: 80, bottom: 50 } } },
-        { $: { text: "Target", bounds: { left: 120, top: 130, right: 180, bottom: 150 } } },
-      ],
+      node: createFlatNodeForTest({
+        node: [
+          createFlatNodeForTest({
+            $: { text: "Source", bounds: { left: 20, top: 30, right: 80, bottom: 50 } },
+          }),
+          createFlatNodeForTest({
+            $: { text: "Target", bounds: { left: 120, top: 130, right: 180, bottom: 150 } },
+          }),
+        ],
+      }),
     },
   };
-  const observation: ObserveResult = {
+  const observation: ObserveResult = buildObserveResult({
     observationId: "drag-display-observation",
-    timestamp: 1,
+    updatedAt: 1,
     displayRevision: 0,
     display: {
       key: options.display ?? "internal",
@@ -61,7 +69,7 @@ function fixture(options: { supportsDisplay: boolean; display?: string; autoAdva
     rotation: 0,
     systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
     viewHierarchy: hierarchy,
-  };
+  });
   const observe = new FakeObserveScreen();
   observe.setObserveResult(observation);
   const timer = new FakeTimer();
@@ -252,7 +260,10 @@ describe("dragAndDrop display durations", () => {
       const h = fixture({ supportsDisplay: true, display: "external" });
       const destination = {
         ...h.observation,
-        viewHierarchy: { hierarchy: { node: { text: "Destination" } }, displayId: 2 },
+        viewHierarchy: {
+          hierarchy: { node: createFlatNodeForTest({ text: "Destination" }) },
+          displayId: 2,
+        },
       };
       let postReads = 0;
       h.observe.setObserveResult(() => {

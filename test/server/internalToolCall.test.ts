@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { INTERNAL_NO_DIFF_PARAM, markInternalToolCall } from "../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM, markInternalToolCall } from "../../src/daemon/internalToolCall";
 
 /**
  * Unit guard for the shared internal-tool-call helper (#3087). Every internal

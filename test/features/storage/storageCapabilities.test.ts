@@ -1,4 +1,6 @@
-import { describe, it, expect } from "bun:test";
+import { beforeAll, describe, it, expect } from "bun:test";
+import { setDefaultAppFileProviderCoverageSource } from "../../../src/features/storage/defaultAppFileProviderCoverage";
+import { describeDefaultAppFileProviderCoverage } from "../../../src/server/appFileService";
 import {
   computeStorageCapabilities,
   findOperationCapability,
@@ -6,6 +8,11 @@ import {
   STORAGE_CAPABILITIES_SCHEMA_VERSION,
   type StorageCapabilityContext,
 } from "../../../src/features/storage/storageCapabilities";
+
+// Register the real coverage source explicitly so results never depend on import order.
+beforeAll(() => {
+  setDefaultAppFileProviderCoverageSource(describeDefaultAppFileProviderCoverage);
+});
 
 function ctx(overrides: Partial<StorageCapabilityContext> = {}): StorageCapabilityContext {
   return {
@@ -384,7 +391,7 @@ describe("Android app-owned Keystore capability", () => {
       ctx({ keystore: { ...keystore, scopes: [...keystore.scopes] } }),
     );
     const secure = report.domains.find((d) => d.domain === "secure_state")!;
-    expect(secure.capabilities).toEqual([keystore]);
+    expect<unknown>(secure.capabilities).toEqual([keystore]);
     expect(findOperationCapability(report, "secure_state", "read")?.state).toBe("unavailable");
     expect(findOperationCapability(report, "secure_state", "write")?.state).toBe("unsupported");
     expect(findOperationCapability(report, "secure_state", "namespace_reset")?.state).toBe(

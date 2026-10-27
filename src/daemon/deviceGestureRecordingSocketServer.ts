@@ -1,7 +1,7 @@
 import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
+import type { DeviceReadiness } from "./readiness/DeviceReadiness";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { ActionableError, type BootedDevice, type Platform } from "../models";
 import {
@@ -11,7 +11,7 @@ import {
   joinInFlightDeviceGestureRecordingStop,
   stopDeviceGestureRecording,
   NoUserInputCapturedError,
-} from "../server/deviceGestureRecordingManager";
+} from "./deviceGestureRecordingManager";
 import { logger } from "../utils/logger";
 import {
   DeviceGestureRecordingCommand,
@@ -27,6 +27,7 @@ import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/de
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 import { assertInputNotOnForeignBindingDevice } from "./inputDeviceOwnership";
 import { defaultDaemonContext } from "./daemonContext";
+import { resolveDirectSessionDevice } from "../utils/directSessionDeviceRegistry";
 import { deviceGestureRecordingStartOwnershipRefusal } from "./deviceGestureRecordingStartAdmission";
 
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
@@ -40,7 +41,7 @@ const DEVICE_GESTURE_RECORDING_PURPOSE = "to start a device gesture recording";
  * be tested without a device pool or a real runner (#6923).
  */
 export interface DeviceGestureRecordingDeviceResolution {
-  selectDevice(deviceId?: string, platform?: Platform): Promise<BootedDevice>;
+  selectDevice(deviceId?: string, platform?: Platform, sessionUuid?: string): Promise<BootedDevice>;
   /**
    * `sessionUuid` is the session that asked for the recording: readiness writes to the device
    * (appearance on connect), and those writes follow that session's own config, not the global
@@ -52,7 +53,7 @@ export interface DeviceGestureRecordingDeviceResolution {
 /** What device resolution needs of the device session manager; narrowed so a test can supply one. */
 export type DeviceGestureRecordingDeviceSessions = Pick<
   DeviceReadiness,
-  "ensureDeviceReady" | "getPlatformDeviceManager" | "getCurrentDevice"
+  "ensureDeviceReady" | "getPlatformDeviceManager"
 >;
 
 /**
@@ -71,15 +72,14 @@ export type DeviceGestureRecordingDeviceSessions = Pick<
  * some OTHER serial is still folded in even when this request goes on to fail.
  * Selection only: readiness is {@link DeviceGestureRecordingDeviceResolution.readyDevice}.
  *
- * With no serial named, several connected devices resolve to `currentDevice`
- * (the one `setActiveDevice` selected) when it is among them, preserving the
- * tie-break `ensureDeviceReady` applied before selection was split out.
+ * With no serial named, several connected devices resolve to the requester's
+ * session device when it is among them; otherwise the caller must name a device.
  */
 export async function resolveDeviceGestureRecordingDevice(
   deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
   deviceId?: string,
   platform?: Platform,
-  currentDevice: () => BootedDevice | undefined = () => undefined,
+  sessionDeviceId: () => string | undefined = () => undefined,
 ): Promise<BootedDevice> {
   const observed = await deviceManager.getBootedDevices(platform ?? "either");
   await reconcileDiscoveryObservation(observed, "device-gesture-recording-resolve");
@@ -102,12 +102,10 @@ export async function resolveDeviceGestureRecordingDevice(
   if (devices.length === 1) {
     return devices[0];
   }
-  const current = currentDevice();
-  const currentMatch = current
-    ? devices.find((device) => device.deviceId === current.deviceId)
-    : undefined;
-  if (currentMatch) {
-    return currentMatch;
+  const assignedDeviceId = sessionDeviceId();
+  const sessionMatch = devices.find((device) => device.deviceId === assignedDeviceId);
+  if (sessionMatch) {
+    return sessionMatch;
   }
   throw new ActionableError(
     `Multiple ${scope}; specify deviceId. Found: ${devices
@@ -145,19 +143,29 @@ const defaultBindingGate: DeviceGestureRecordingBindingGate = async (input) => {
 
 /**
  * The production device resolution over a device session manager, resolved at each use. Exported
- * with the manager injectable so a test can drive real readiness (and its device writes) on fakes.
+ * with readiness and the session-device ID lookup injectable so tests can use fakes.
  */
 export function createDeviceGestureRecordingDeviceResolution(
-  deviceSessions: () => DeviceGestureRecordingDeviceSessions = () => DeviceReadiness.getInstance(),
+  deviceSessions: () => DeviceGestureRecordingDeviceSessions,
+  sessionDeviceId: (sessionUuid: string | undefined) => string | undefined = (sessionUuid) => {
+    if (!sessionUuid) {
+      return undefined;
+    }
+    const manager = defaultDaemonContext.sessionManager();
+    return manager
+      ? (manager.getDeviceForSession(sessionUuid) ?? undefined)
+      : resolveDirectSessionDevice(sessionUuid)?.device.deviceId;
+  },
 ): DeviceGestureRecordingDeviceResolution {
   return {
-    selectDevice: (deviceId, platform) => {
-      const deviceSessionManager = deviceSessions();
+    selectDevice: (deviceId, platform, sessionUuid) => {
+      const deviceReadiness = deviceSessions();
+      const normalizedSessionUuid = sessionUuid?.trim() || undefined;
       return resolveDeviceGestureRecordingDevice(
-        deviceSessionManager.getPlatformDeviceManager(),
+        deviceReadiness.getPlatformDeviceManager(),
         deviceId,
         platform,
-        () => deviceSessionManager.getCurrentDevice(),
+        () => sessionDeviceId(normalizedSessionUuid),
       );
     },
     // Readiness for an already-selected, already-admitted device: the same
@@ -168,6 +176,18 @@ export function createDeviceGestureRecordingDeviceResolution(
         sessionId: sessionUuid,
       }),
   };
+}
+
+/**
+ * The stream authenticator trims the session UUID it authorizes, so every lookup uses the same
+ * trimmed UUID; a derived `base:label` suffix is kept (#14378).
+ */
+function withTrimmedSessionUuid(
+  request: DeviceGestureRecordingCommand,
+): DeviceGestureRecordingCommand {
+  return typeof request?.sessionUuid === "string"
+    ? { ...request, sessionUuid: request.sessionUuid.trim() || undefined }
+    : request;
 }
 
 const ensurePlatform = (value: unknown): Platform | undefined => {
@@ -202,7 +222,11 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
       "deviceGestureRecording",
     ),
     admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
-    deviceResolution: DeviceGestureRecordingDeviceResolution = createDeviceGestureRecordingDeviceResolution(),
+    deviceResolution: DeviceGestureRecordingDeviceResolution = createDeviceGestureRecordingDeviceResolution(
+      () => {
+        throw new ActionableError("Inject device readiness before recording gestures.");
+      },
+    ),
     bindingGate: DeviceGestureRecordingBindingGate = defaultBindingGate,
   ) {
     super(socketPath, timer, "DeviceGestureRecording");
@@ -213,8 +237,9 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
   }
 
   protected async handleRequest(
-    request: DeviceGestureRecordingCommand,
+    received: DeviceGestureRecordingCommand,
   ): Promise<DeviceGestureRecordingResponse> {
+    const request = withTrimmedSessionUuid(received);
     const command = request?.command;
     if (!command) {
       throw new Error("Request missing command field.");
@@ -282,7 +307,11 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
     daemonInitialized: boolean,
   ): Promise<DeviceGestureRecordingResponse> {
     const platform = ensurePlatform(request.platform);
-    const selected = await this.deviceResolution.selectDevice(request.deviceId, platform);
+    const selected = await this.deviceResolution.selectDevice(
+      request.deviceId,
+      platform,
+      request.sessionUuid,
+    );
     this.admissionGate.assertDeviceActionable(selected.deviceId, DEVICE_GESTURE_RECORDING_PURPOSE);
     const refusal = deviceGestureRecordingStartOwnershipRefusal(
       selected.deviceId,
@@ -429,8 +458,19 @@ export function getDeviceGestureRecordingSocketPath(): string {
   );
 }
 
-export async function startDeviceGestureRecordingSocketServer(): Promise<void> {
-  await socketServer.start(() => new DeviceGestureRecordingSocketServer());
+export async function startDeviceGestureRecordingSocketServer(
+  readiness: DeviceGestureRecordingDeviceSessions,
+): Promise<void> {
+  await socketServer.start(
+    () =>
+      new DeviceGestureRecordingSocketServer(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        createDeviceGestureRecordingDeviceResolution(() => readiness),
+      ),
+  );
 }
 
 export async function stopDeviceGestureRecordingSocketServer(): Promise<void> {

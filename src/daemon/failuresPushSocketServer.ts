@@ -6,13 +6,10 @@ import {
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { PushSubscriptionSocketServer, getSocketPath } from "./socketServer/index";
-import type { FailureType, FailureSeverity } from "../server/failuresResources";
+import type { FailureType, FailureSeverity } from "../models/failureAnalytics";
 import { FAILURES_PUSH_SOCKET_CONFIG } from "./daemonFiles";
-import {
-  type DeviceSessionResolver,
-  nullDeviceSessionResolver,
-  SuspendedDeviceRoutingLog,
-} from "./deviceSessionResolver";
+import { type DeviceSessionResolver, nullDeviceSessionResolver } from "./deviceSessionResolver";
+import { SuspendedDeviceRoutingLog } from "./SuspendedDeviceRoutingLog";
 
 /**
  * Failure notification data pushed to clients.

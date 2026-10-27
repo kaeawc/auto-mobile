@@ -6,14 +6,14 @@ import {
   type StreamSubscriptionIdentity,
   type StreamSubscriptionLifecycleEndReason,
   type StreamSubscriptionKind,
-} from "./streamSubscriptionPolicy";
+} from "./wire/streamSubscriptionPolicy";
 import {
   getDaemonStreamDeviceLifecycleEmitter,
   type StreamDeviceLifecycleEvents,
 } from "./streamDeviceLifecycleEvents";
-import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { ObserverReleaseBroadcaster, type ObserverReleaseSource } from "./observerReleaseBroadcast";
-import { WebRtcSubscriptionEndedError } from "../server/WebRtcSubscriptionEndedError";
+import { WebRtcSubscriptionEndedError } from "./WebRtcSubscriptionEndedError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
@@ -34,7 +34,7 @@ import type {
   reconcileWebRtcStreamsForDeviceOwnership,
   stopAllWebRtcStreams,
   waitForWebRtcStreamReadiness,
-} from "../server/webrtcStreamManager";
+} from "./webrtcStreamManager";
 import type {
   WebRtcStreamSocketRequest,
   WebRtcStreamSocketResponse,
@@ -110,7 +110,7 @@ const WEBRTC_STREAM_PURPOSE = "to start a WebRTC stream";
  * actually arrives, so the daemon does not load the heavy WebRTC stack at boot.
  */
 function loadManager() {
-  return import("../server/webrtcStreamManager");
+  return import("./webrtcStreamManager");
 }
 
 function defaultOwnershipChanges(): DeviceOwnershipChanges | null {

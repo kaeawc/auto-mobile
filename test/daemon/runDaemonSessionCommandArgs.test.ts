@@ -60,7 +60,7 @@ describe("a refused session command never reaches the daemon", () => {
     ["session-info", ["session-a", "--jsno"]],
   ])("%s %j: usage on stderr, exit 1, no daemon call", async (command, args) => {
     const client = new FakeDaemonClient({});
-    const output: unknown[] = [];
+    const output: Array<[string, unknown]> = [];
     const exited = new Error("fake exit");
     const log = spyOn(console, "log").mockImplementation((text) => output.push(["stdout", text]));
     const error = spyOn(console, "error").mockImplementation((text) =>

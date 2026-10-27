@@ -36,16 +36,20 @@ import dev.jasonpearson.automobile.storage.AnalyticsTracker
 
 data class BottomNavItem(val label: String, val icon: ImageVector, val route: String)
 
+data class HomeNavigation(
+  val onNavigateToVideoPlayer: (String) -> Unit = {},
+  val onNavigateToDemos: () -> Unit = {},
+  val onNavigateToSlides: (Int) -> Unit = {},
+  val onLogout: () -> Unit = {},
+  val onGuestModeNavigateToLogin: () -> Unit = {},
+)
+
 @Composable
 fun HomeScreen(
   modifier: Modifier = Modifier,
   initialSelectedTab: Int = 0,
   initialSelectedSubTab: Int? = null,
-  onNavigateToVideoPlayer: (String) -> Unit = {},
-  onNavigateToDemos: () -> Unit = {},
-  onNavigateToSlides: (Int) -> Unit = {},
-  onLogout: () -> Unit = {},
-  onGuestModeNavigateToLogin: () -> Unit = {},
+  navigation: HomeNavigation = HomeNavigation(),
 ) {
   TrackRecomposition(id = "screen.home", composableName = "HomeScreen") {
     var bottomNavSelection by remember { mutableIntStateOf(initialSelectedTab) }
@@ -54,11 +58,7 @@ fun HomeScreen(
       bottomNavSelected = bottomNavSelection,
       setBottomNavSelection = { bottomNavSelection = it },
       initialSelectedSubTab = initialSelectedSubTab,
-      onNavigateToVideoPlayer = onNavigateToVideoPlayer,
-      onNavigateToDemos = onNavigateToDemos,
-      onNavigateToSlides = onNavigateToSlides,
-      onLogout = onLogout,
-      onGuestModeNavigateToLogin = onGuestModeNavigateToLogin,
+      navigation = navigation,
     )
   }
 }
@@ -69,11 +69,7 @@ fun HomeScreenCore(
   modifier: Modifier = Modifier,
   setBottomNavSelection: (Int) -> Unit = {},
   initialSelectedSubTab: Int? = null,
-  onNavigateToVideoPlayer: (String) -> Unit = {},
-  onNavigateToDemos: () -> Unit = {},
-  onNavigateToSlides: (Int) -> Unit = {},
-  onLogout: () -> Unit = {},
-  onGuestModeNavigateToLogin: () -> Unit = {},
+  navigation: HomeNavigation = HomeNavigation(),
 ) {
   val context = LocalContext.current
   val analyticsTracker = remember { AnalyticsTracker.getInstance().apply { initialize(context) } }
@@ -103,8 +99,8 @@ fun HomeScreenCore(
             selected = bottomNavSelected == index,
             onClick = {
               when (item.route) {
-                "demos" -> onNavigateToDemos()
-                "slides" -> onNavigateToSlides(0) // Navigate to first slide
+                "demos" -> navigation.onNavigateToDemos()
+                "slides" -> navigation.onNavigateToSlides(0) // Navigate to first slide
                 else -> setBottomNavSelection(index)
               }
             },
@@ -120,7 +116,7 @@ fun HomeScreenCore(
       when (bottomNavSelected) {
         0 ->
           DiscoverVideoScreen(
-            onNavigateToVideoPlayer = onNavigateToVideoPlayer,
+            onNavigateToVideoPlayer = navigation.onNavigateToVideoPlayer,
             initialSelectedSubTab = initialSelectedSubTab,
           )
         1 -> {
@@ -132,8 +128,8 @@ fun HomeScreenCore(
         }
         3 ->
           SettingsScreen(
-            onLogout = onLogout,
-            onGuestModeNavigateToLogin = onGuestModeNavigateToLogin,
+            onLogout = navigation.onLogout,
+            onGuestModeNavigateToLogin = navigation.onGuestModeNavigateToLogin,
           )
       }
     }

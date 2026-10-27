@@ -1,3 +1,5 @@
+import { requirePrototypeTimersSupport } from "../../prototype/prototypeTimers";
+import { collectPrototypeStrings } from "../../prototype/prototypeAssetReferences";
 import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
 import {
   prototypePatchReplyFields,
@@ -34,6 +36,12 @@ import {
   isPrototypeRequestEventName,
   prototypeRequestEventOf,
 } from "../../prototype/prototypeRequestEvent";
+import {
+  isPrototypePlatformCallEventName,
+  isPrototypePlatformDeliveredEventName,
+  prototypePlatformCallEventOf,
+  prototypePlatformDeliveredEventOf,
+} from "../../prototype/prototypePlatformEvent";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 import type { DelegateContext } from "./types";
@@ -50,6 +58,7 @@ import {
   type PinSavedPrototypeMessage,
   type ListSavedPrototypesMessage,
   type ClearPrototypeStorageMessage,
+  type AdvancePrototypeClockMessage,
   type DeleteSavedPrototypeMessage,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
@@ -200,6 +209,22 @@ export function parsePrototypeStacks(value: unknown): PrototypeEvent["stacks"] {
 }
 export const prototypeStacksSchema = z.unknown().optional().transform(parsePrototypeStacks);
 
+type ReservedEmit = Pick<PrototypeEvent, "kind" | "name" | "payload">;
+
+/** Undefined for an unreserved event, null for a valid reserved payload, else the issue. */
+function reservedEmitPayloadIssue(event: ReservedEmit): string | null | undefined {
+  if (isPrototypeRequestEventName(event)) {
+    return prototypeRequestEventOf(event) === undefined ? "Invalid request event" : null;
+  }
+  if (isPrototypePlatformCallEventName(event)) {
+    return prototypePlatformCallEventOf(event) === undefined ? "Invalid platform event" : null;
+  }
+  if (isPrototypePlatformDeliveredEventName(event)) {
+    return prototypePlatformDeliveredEventOf(event) === undefined ? "Invalid platform event" : null;
+  }
+  return undefined;
+}
+
 /** One `prototype_event` push of a kind this host knows. */
 export const prototypeEventSchema = prototypeEventEnvelopeSchema
   .extend({
@@ -226,14 +251,12 @@ export const prototypeEventSchema = prototypeEventEnvelopeSchema
       }
       return;
     }
-    // A finished request (#12523) is an emit under a reserved name and must carry its payload.
-    if (isPrototypeRequestEventName(event)) {
-      if (prototypeRequestEventOf(event) === undefined) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["payload"],
-          message: "Invalid request event",
-        });
+    // A finished request (#12523) or platform call or event (#14294) is an emit under a reserved
+    // name and must carry its payload.
+    const reserved = reservedEmitPayloadIssue(event);
+    if (reserved !== undefined) {
+      if (reserved !== null) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["payload"], message: reserved });
       }
       return;
     }
@@ -291,33 +314,6 @@ export function decodePrototypeEvent(
 
 function isKnownPrototypeEventKind(kind: string): boolean {
   return (PROTOTYPE_EVENT_KINDS as readonly string[]).includes(kind);
-}
-
-/** Match cached IDs throughout JSON; asset and image values identify uncached references too. */
-function collectPrototypeStrings(
-  value: unknown,
-  strings: Set<string>,
-  references: Set<string>,
-  assetValue = false,
-  arbitraryJson = false,
-): void {
-  if (typeof value === "string") {
-    strings.add(value);
-    if (assetValue && !arbitraryJson) {
-      references.add(value);
-    }
-  } else if (typeof value === "object" && value !== null) {
-    // Object.entries also traverses array elements without changing subtree context.
-    for (const [key, child] of Object.entries(value)) {
-      collectPrototypeStrings(
-        child,
-        strings,
-        references,
-        assetValue || ["asset", "image"].includes(key),
-        arbitraryJson || ["state", "payload"].includes(key),
-      );
-    }
-  }
 }
 
 export class CtrlProxyPrototypes {
@@ -421,6 +417,22 @@ export class CtrlProxyPrototypes {
   ): Promise<PrototypeResult> {
     return this.request(ctrlProxyRequests.listSavedPrototypes({ requestId: "" }), timeoutMs, perf);
   }
+  async requestAdvancePrototypeClock(
+    id: string,
+    advanceTimeMs: number,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    if (!id || !Number.isInteger(advanceTimeMs) || advanceTimeMs < 1 || advanceTimeMs > 3600000) {
+      throw new ActionableError("simulate requires id and advanceTimeMs (integer 1..3600000)");
+    }
+    return this.request(
+      ctrlProxyRequests.advancePrototypeClock({ requestId: "", id, advanceTimeMs }),
+      timeoutMs,
+      perf,
+    );
+  }
+
   /**
    * Wipes the values the device stored for prototype `id` (#12522). Refused before anything is
    * sent when the device does not advertise `prototype_storage_v1`.
@@ -771,7 +783,8 @@ export class CtrlProxyPrototypes {
       | SavePrototypeMessage
       | ListSavedPrototypesMessage
       | DeleteSavedPrototypeMessage
-      | ClearPrototypeStorageMessage,
+      | ClearPrototypeStorageMessage
+      | AdvancePrototypeClockMessage,
     timeoutMs: number,
     perf?: PerformanceTracker,
     deliveryOptions: Pick<SendCommandOptions<PrototypeResult>, "onDispatch" | "timeoutError"> = {},
@@ -809,7 +822,8 @@ export class CtrlProxyPrototypes {
       | SavePrototypeMessage
       | ListSavedPrototypesMessage
       | DeleteSavedPrototypeMessage
-      | ClearPrototypeStorageMessage,
+      | ClearPrototypeStorageMessage
+      | AdvancePrototypeClockMessage,
   ): void {
     const supports = (command: string) => this.context.isCommandSupported?.(command);
     if (message.type === "patch_prototype" && supports(PROTOTYPE_PATCH_CAPABILITY) !== true) {
@@ -824,6 +838,7 @@ export class CtrlProxyPrototypes {
     }
     this.requireMultiSurfaceSupport(message, supports);
     requirePrototypeStorageSupport(message.type, supports);
+    requirePrototypeTimersSupport(message.type, supports);
     const type = message.type;
     if (
       [

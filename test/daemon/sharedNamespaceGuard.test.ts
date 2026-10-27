@@ -1,13 +1,26 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   ALLOW_SHARED_NAMESPACE_ENV,
   assertDaemonNamespaceMatchesState,
   SharedDaemonNamespaceError,
   SHARED_DAEMON_NAMESPACE_CODE,
 } from "../../src/daemon/sharedNamespaceGuard";
-import { resolveDaemonStatePath } from "../../src/daemon/constants";
+import type { DaemonClientLike } from "../../src/daemon/client";
+import { resolveDaemonStatePath } from "../../src/daemon/wire/constants";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
+
+let errorSpy: ReturnType<typeof spyOn<typeof console, "error">>;
+let logSpy: ReturnType<typeof spyOn<typeof console, "log">>;
+let exitSpy: ReturnType<typeof spyOn<typeof process, "exit">>;
+beforeEach(() => {
+  errorSpy = spyOn(console, "error");
+  logSpy = spyOn(console, "log");
+  exitSpy = spyOn(process, "exit");
+});
+afterEach(() => {
+  mock.restore();
+});
 
 const refusal = (env: NodeJS.ProcessEnv, allowShared = false): unknown => {
   try {
@@ -89,16 +102,16 @@ describe("daemon CLI lifecycle commands honor the namespace guard (#11252)", () 
         events.push("restart");
         return "restarted" as const;
       }
-      override createClient() {
+      override createClient(): DaemonClientLike {
         events.push("client");
         throw new Error("no daemon in this test");
       }
     }
-    const error = spyOn(console, "error").mockImplementation((text) => {
+    const error = errorSpy.mockImplementation((text) => {
       events.push(["stderr", text]);
     });
-    const log = spyOn(console, "log").mockImplementation(() => {});
-    const exit = spyOn(process, "exit").mockImplementation((code) => {
+    const log = logSpy.mockImplementation(() => {});
+    const exit = exitSpy.mockImplementation((code) => {
       events.push(["exit", code]);
       throw exited;
     });

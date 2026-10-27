@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { SlotTransitionGuard, SlotTransitionError } from "../../src/daemon/sessionSlots";
+import { SlotTransitionGuard } from "../../src/daemon/SlotTransitionGuard";
+import { SlotTransitionError } from "../../src/daemon/SlotTransitionError";
 import { FakeLogger } from "../fakes/FakeLogger";
 
 function fixture() {

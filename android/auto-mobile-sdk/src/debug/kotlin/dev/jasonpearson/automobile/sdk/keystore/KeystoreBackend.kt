@@ -2,7 +2,6 @@ package dev.jasonpearson.automobile.sdk.keystore
 
 import android.app.KeyguardManager
 import android.content.Context
-import android.os.Build
 import android.util.Log
 import java.security.KeyStore
 
@@ -57,8 +56,7 @@ internal class AndroidDeviceLockProbe(private val context: Context?) : DeviceLoc
       val manager = context?.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
       when {
         manager == null -> DeviceLockState.UNKNOWN
-        (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) manager.isDeviceLocked
-        else manager.isKeyguardLocked) -> DeviceLockState.LOCKED
+        manager.isDeviceLocked -> DeviceLockState.LOCKED
         else -> DeviceLockState.UNLOCKED
       }
     } catch (error: Exception) {

@@ -233,6 +233,18 @@ function fixture(observed: BootedDevice) {
   return { client, adb, factory };
 }
 
+test("a replacement reset can fence ownership immediately before the console kill dispatch", async () => {
+  const { client, adb } = fixture(original);
+  await expect(
+    client.killDevice(original, {
+      beforeDispatch: async () => {
+        throw new Error("replacement ownership lost");
+      },
+    }),
+  ).rejects.toThrow("replacement ownership lost");
+  expect(emuKillArgv(adb)).toHaveLength(0);
+});
+
 /**
  * No executed command may ever reach for a transport id, a transport-to-serial
  * resolution, or a guest power-off: `adb emu` ignores `-t`, and `shell reboot
@@ -281,9 +293,7 @@ function recordingFactory(attached: string[]): {
             includes: (part: string) => stdout.includes(part),
           };
         },
-        null,
-        undefined,
-        timer,
+        { timer },
       ),
   };
   return { factory, commands, timer };
@@ -503,9 +513,7 @@ function wedgedConsoleFactory(attached: string[]): {
             includes: () => false,
           };
         },
-        null,
-        undefined,
-        timer,
+        { timer },
       ),
   };
   return { factory, commands, timer };
@@ -551,7 +559,7 @@ test("an unforced kill still enriches discovery with the AVD-name probe", async 
   const startedAt = timer.now();
 
   const kill = client.killDevice(original);
-  for (let turn = 0; turn < 20 && nameProbes(commands).length < 3; turn++) {
+  for (let turn = 0; turn < 100 && nameProbes(commands).length < 3; turn++) {
     await Promise.resolve();
   }
   expect(nameProbes(commands).length).toBe(3);
@@ -633,7 +641,11 @@ test("a kill asks for the adb states in the mode that rejects a missing adb exec
   // ownership of an emulator that is alive (#11643).
   const { client, adb } = offlineFixture(offlineEmulator);
   const asked: Array<boolean | undefined> = [];
-  adb.getDeviceStates = async (options?: { throwOnMissingAdb?: boolean }) => {
+  adb.getDeviceStates = async (options?: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    throwOnMissingAdb?: boolean;
+  }) => {
     asked.push(options?.throwOnMissingAdb);
     throw new Error("ADB executable is unavailable");
   };

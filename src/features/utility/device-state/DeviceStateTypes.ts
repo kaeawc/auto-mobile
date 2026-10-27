@@ -1,4 +1,6 @@
+import type { IosRunnerLocationClient } from "./LocationOperations";
 import type { BootedDevice, ExecResult } from "../../../models";
+import type { DeviceTraits } from "../../../utils/android-cmdline-tools/deviceTraits";
 import { ActionableError } from "../../../models/ActionableError";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -15,6 +17,7 @@ import type {
   SetDeviceClockInput,
 } from "../DeviceClock";
 import type { DeviceCameraPosterState, SetDeviceCameraPosterInput } from "../DeviceCameraPoster";
+import type { DeviceSensorsState } from "../EmulatorSensors";
 import {
   locationInputError,
   type DeviceLocationState,
@@ -41,6 +44,10 @@ import {
   type BiometricEnrollment,
   type BiometricEnrollmentState,
 } from "./BiometricState";
+import type { ScreenLockState, SetScreenLockInput } from "../screenLock/ScreenLockTypes";
+import type { ScreenLockDeviceStateDependencies } from "../screenLock/ScreenLockOperations";
+import type { PowerState, SetPowerInput } from "../power/PowerTypes";
+import type { PowerDeviceStateDependencies } from "../power/PowerOperations";
 
 export interface DeviceStateResult {
   success: boolean;
@@ -54,6 +61,9 @@ export interface DeviceStateResult {
   location?: DeviceLocationState;
   clock?: DeviceClockState;
   cameraPoster?: DeviceCameraPosterState;
+  sensors?: DeviceSensorsState;
+  screenLock?: ScreenLockState;
+  power?: PowerState;
   /** Requested fields skipped because the current platform cannot support them. */
   unsupported?: DeviceStateField[];
   error?: string;
@@ -69,6 +79,8 @@ export interface SetDeviceStateInput {
   location?: SetDeviceLocationInput;
   clock?: SetDeviceClockInput;
   cameraPoster?: SetDeviceCameraPosterInput;
+  screenLock?: SetScreenLockInput;
+  power?: SetPowerInput;
 }
 
 /**
@@ -84,6 +96,9 @@ export const DEVICE_STATE_READABLE_FIELDS = [
   "biometrics",
   "networkCondition",
   "clock",
+  "sensors",
+  "screenLock",
+  "power",
 ] as const;
 
 export type DeviceStateField = (typeof DEVICE_STATE_READABLE_FIELDS)[number];
@@ -103,6 +118,8 @@ const DEVICE_STATE_WRITABLE_FIELD_PRESENCE: Record<keyof SetDeviceStateInput, tr
   location: true,
   clock: true,
   cameraPoster: true,
+  screenLock: true,
+  power: true,
 };
 
 /**
@@ -128,6 +145,9 @@ export interface SelectedDeviceStates {
   biometrics?: BiometricEnrollmentState;
   networkCondition?: NetworkConditionState;
   clock?: DeviceClockState;
+  sensors?: DeviceSensorsState;
+  screenLock?: ScreenLockState;
+  power?: PowerState;
 }
 
 /**
@@ -151,8 +171,12 @@ export interface DeviceStateDependencies {
   timer?: Timer;
   consoleFactory?: EmulatorConsoleClientFactory;
   routeRegistry?: LocationRouteRegistry;
+  /** Emulator detection for location writes; defaults to the shared cached reader. */
+  deviceTraits?: DeviceTraits;
   canWriteLocation?: () => boolean;
   /** Session attribution is supplied by the handler, never inferred from write admission. */
+  /** Physical iOS location seam (#14091); defaults to the device's CtrlProxy runner client. */
+  iosRunnerLocation?: IosRunnerLocationClient;
   onLocationApplied?: () => void;
   /** Renders `cameraPoster` QR payloads; defaults to the file-backed poster writer. */
   cameraPosterQrWriter?: QrPosterWriter;
@@ -171,6 +195,10 @@ export interface DeviceStateDependencies {
    * conditions are refused because nothing would renew or remove the rule.
    */
   iosAppNetworkRule?: () => IosAppNetworkRuleCommandContext | undefined;
+  /** Android lock-screen credential seams (#14107); a session supplies `mutation`. */
+  screenLock?: ScreenLockDeviceStateDependencies;
+  /** Android battery, Doze, standby, saver and thermal seams (#14084); a session supplies `mutation`. */
+  power?: PowerDeviceStateDependencies;
 }
 
 export type RequestedDeviceStates = Pick<
@@ -182,6 +210,8 @@ export type RequestedDeviceStates = Pick<
   | "location"
   | "clock"
   | "cameraPoster"
+  | "screenLock"
+  | "power"
 >;
 
 export const EMPTY_STATE_SELECTION_ERROR = "At least one device state field must be included";
@@ -195,7 +225,9 @@ export function setDeviceStateInputIsEmpty(input: SetDeviceStateInput): boolean 
     !input.networkCondition &&
     !input.location &&
     !input.clock &&
-    !input.cameraPoster
+    !input.cameraPoster &&
+    !input.screenLock &&
+    !input.power
   );
 }
 

@@ -70,18 +70,6 @@ internal class SdkEventBuffer(
     persistenceExecutor = null,
   )
 
-  private val fallbackPersistenceExecutor: Executor by lazy {
-    persistenceExecutor
-      ?: ThreadPoolExecutor(
-        0,
-        1,
-        2,
-        TimeUnit.SECONDS,
-        LinkedBlockingQueue<Runnable>(),
-      ) { runnable ->
-        Thread(runnable, "SdkEventPersistence").apply { isDaemon = true }
-      }
-  }
   private val logger = DefaultSdkLogger()
 
   private class DeliveryTask(val runnable: Runnable) {
@@ -89,20 +77,20 @@ internal class SdkEventBuffer(
   }
 
   private val deliveryTasks = mutableSetOf<DeliveryTask>()
-  // Only tasks already running on our executor may persist inline while shutdown drains.
-  private val deliveryWorker = ThreadLocal<Boolean>()
   private val lock = ReentrantLock()
   private val buffer = mutableListOf<SdkEvent>()
   private val pendingBatches = ArrayDeque<MutableList<SdkEvent>>()
   private var flushTask: ScheduledFuture<*>? = null
   private var isDeliveryScheduled = false
-  @Volatile private var isShutdown = false
+  private val state = EventBufferState(lock)
+  private val batchDelivery =
+    SdkEventDelivery(executor, persistence, dropCounter, onFlush, persistenceExecutor, state)
   @Volatile var isEnabled: Boolean = true
 
   /** Start the periodic flush timer. */
   fun start() {
     lock.withLock {
-      if (flushTask == null && !isShutdown) {
+      if (flushTask == null && !state.isShutdown) {
         flushTask =
           executor.scheduleAtFixedRate(
             // Backstop: any exception escaping the periodic task cancels all future
@@ -124,7 +112,7 @@ internal class SdkEventBuffer(
 
   /** Add an event to the buffer. Flushes immediately if buffer is full. */
   fun add(event: SdkEvent) {
-    if (isShutdown) {
+    if (state.isShutdown) {
       dropCounter?.increment(DropReason.SHUTDOWN)
       return
     }
@@ -133,46 +121,34 @@ internal class SdkEventBuffer(
       return
     }
 
-    var current: SdkEvent = event
-    for (processor in processors) {
-      try {
-        current =
-          processor.process(current)
-            ?: run {
-              dropCounter?.increment(DropReason.FILTERED)
-              return
+    batchDelivery.processEvent(event, processors) { current ->
+      lock.withLock {
+        if (state.isShutdown) {
+          dropCounter?.increment(DropReason.SHUTDOWN)
+          return@processEvent
+        }
+
+        while (
+          PendingEventBackpressure.pendingEventCount(buffer, pendingBatches) >= maxPendingEvents
+        ) {
+          when (backPressureStrategy) {
+            BackPressureStrategy.DROP_OLDEST -> {
+              PendingEventBackpressure.dropOldestPendingEvent(buffer, pendingBatches)
+              dropCounter?.increment(DropReason.BUFFER_OVERFLOW)
             }
-      } catch (error: Exception) {
-        logger.w("SdkEventBuffer", error) { "Event processor failed" }
-        dropCounter?.increment(DropReason.PROCESSOR_ERROR)
-        return
-      }
-    }
-
-    lock.withLock {
-      if (isShutdown) {
-        dropCounter?.increment(DropReason.SHUTDOWN)
-        return
-      }
-
-      while (pendingEventCount() >= maxPendingEvents) {
-        when (backPressureStrategy) {
-          BackPressureStrategy.DROP_OLDEST -> {
-            dropOldestPendingEvent()
-            dropCounter?.increment(DropReason.BUFFER_OVERFLOW)
-          }
-          BackPressureStrategy.IGNORE_NEWEST -> {
-            dropCounter?.increment(DropReason.BUFFER_OVERFLOW)
-            return
+            BackPressureStrategy.IGNORE_NEWEST -> {
+              dropCounter?.increment(DropReason.BUFFER_OVERFLOW)
+              return@processEvent
+            }
           }
         }
-      }
 
-      buffer.add(current)
-      if (buffer.size >= maxBufferSize) {
-        val snapshot = ArrayList(buffer)
-        buffer.clear()
-        enqueueDelivery(snapshot)
+        buffer.add(current)
+        if (buffer.size >= maxBufferSize) {
+          val snapshot = ArrayList(buffer)
+          buffer.clear()
+          enqueueDelivery(snapshot)
+        }
       }
     }
   }
@@ -187,13 +163,13 @@ internal class SdkEventBuffer(
       buffer.clear()
     }
 
-    deliverBatch(snapshot)
+    batchDelivery.deliverBatch(snapshot)
   }
 
   /** Submit a task to run on the buffer's background executor. */
   fun execute(task: Runnable) {
     lock.withLock {
-      if (isShutdown) return
+      if (state.isShutdown) return
       try {
         executor.execute(task)
       } catch (error: RejectedExecutionException) {
@@ -206,13 +182,13 @@ internal class SdkEventBuffer(
 
   /** Share the existing scheduler with delivery timeouts; no extra worker is created. */
   internal fun scheduleDelivery(task: Runnable, delayMs: Long): (() -> Unit)? = lock.withLock {
-    if (isShutdown || executor.isShutdown) return null
+    if (state.isShutdown || executor.isShutdown) return null
     val delivery = DeliveryTask(task)
     delivery.future =
       executor.schedule(
         {
           lock.withLock { deliveryTasks.remove(delivery) }
-          runOnDeliveryWorker(task)
+          batchDelivery.runOnDeliveryWorker(task)
         },
         delayMs,
         TimeUnit.MILLISECONDS,
@@ -228,14 +204,14 @@ internal class SdkEventBuffer(
 
   /** Dispatch result processing with the same late-completion fallback as persistence. */
   internal fun executeDelivery(task: Runnable) {
-    persistInBackground(Runnable { runOnDeliveryWorker(task) })
+    batchDelivery.persistInBackground(Runnable { batchDelivery.runOnDeliveryWorker(task) })
   }
 
   /** Shutdown the buffer, flushing remaining events. */
   fun shutdown() {
     lock.withLock {
-      if (isShutdown) return
-      isShutdown = true
+      if (state.isShutdown) return
+      state.isShutdown = true
       flushTask?.cancel(false)
       val deliveries = deliveryTasks.toList()
       deliveryTasks.clear()
@@ -243,15 +219,9 @@ internal class SdkEventBuffer(
       if (deliveries.isNotEmpty()) {
         // Resolve existing timeouts/retries on the same worker, before shutdown can terminate.
         executor.execute {
-          runOnDeliveryWorker(
+          batchDelivery.runOnDeliveryWorker(
             Runnable {
-              deliveries.forEach {
-                try {
-                  it.runnable.run()
-                } catch (error: Exception) {
-                  logger.w("SdkEventBuffer", error) { "Could not resolve shutdown delivery" }
-                }
-              }
+              batchDelivery.resolveShutdownDeliveries(deliveries.map { it.runnable })
             },
           )
         }
@@ -263,13 +233,13 @@ internal class SdkEventBuffer(
       }
     }
     executor.shutdown()
-    awaitExecutorTermination()
+    batchDelivery.awaitExecutorTermination()
   }
 
   /** Snapshot and queue pending events from the periodic executor. */
   private fun enqueueFlush() {
     lock.withLock {
-      if (isShutdown || buffer.isEmpty()) return
+      if (state.isShutdown || buffer.isEmpty()) return
       val snapshot = ArrayList(buffer)
       buffer.clear()
       enqueueDelivery(snapshot)
@@ -281,7 +251,7 @@ internal class SdkEventBuffer(
     pendingBatches.addLast(events)
     if (!isDeliveryScheduled) {
       isDeliveryScheduled = true
-      executor.execute { runOnDeliveryWorker(Runnable { drainDeliveries() }) }
+      executor.execute { batchDelivery.runOnDeliveryWorker(Runnable { drainDeliveries() }) }
     }
   }
 
@@ -294,29 +264,47 @@ internal class SdkEventBuffer(
         }
         pendingBatches.removeFirst()
       }
-      deliverBatch(events)
+      batchDelivery.deliverBatch(events)
     }
   }
 
-  /** Must be called while holding [lock]. Delivery in progress is no longer pending. */
-  private fun pendingEventCount(): Int = buffer.size + pendingBatches.sumOf { it.size }
+  /** Retry callbacks may arrive on the main looper; persist on our executor while active. */
+  internal fun persistUndelivered(events: List<SdkEvent>, deliveryId: String? = null) {
+    batchDelivery.persistUndelivered(events, deliveryId)
+  }
+}
 
-  /** Must be called while holding [lock]. */
-  private fun dropOldestPendingEvent() {
-    val oldestBatch = pendingBatches.firstOrNull()
-    if (oldestBatch == null) {
-      buffer.removeAt(0)
-      return
-    }
+private class EventBufferState(val lock: ReentrantLock) {
+  @Volatile var isShutdown = false
+}
 
-    oldestBatch.removeAt(0)
-    if (oldestBatch.isEmpty()) {
-      pendingBatches.removeFirst()
-    }
+/** Delivery and persistence share the original executor and shutdown worker marker. */
+private class SdkEventDelivery(
+  private val executor: ScheduledExecutorService,
+  private val persistence: EventPersistence?,
+  private val dropCounter: DropCounter?,
+  private val onFlush: (List<SdkEvent>) -> Unit,
+  persistenceExecutor: Executor?,
+  private val state: EventBufferState,
+) {
+  private val logger = DefaultSdkLogger()
+  // Only tasks already running on our executor may persist inline while shutdown drains.
+  private val deliveryWorker = ThreadLocal<Boolean>()
+  private val fallbackPersistenceExecutor: Executor by lazy {
+    persistenceExecutor
+      ?: ThreadPoolExecutor(
+        0,
+        1,
+        2,
+        TimeUnit.SECONDS,
+        LinkedBlockingQueue<Runnable>(),
+      ) { runnable ->
+        Thread(runnable, "SdkEventPersistence").apply { isDaemon = true }
+      }
   }
 
   /** Preserve shutdown delivery completion without running delivery on the caller thread. */
-  private fun awaitExecutorTermination() {
+  fun awaitExecutorTermination() {
     var wasInterrupted = false
     while (true) {
       try {
@@ -333,7 +321,7 @@ internal class SdkEventBuffer(
   }
 
   /** Retry callbacks may arrive on the main looper; persist on our executor while active. */
-  internal fun persistUndelivered(events: List<SdkEvent>, deliveryId: String? = null) {
+  fun persistUndelivered(events: List<SdkEvent>, deliveryId: String? = null) {
     val task = Runnable {
       val persisted =
         try {
@@ -349,7 +337,7 @@ internal class SdkEventBuffer(
     persistInBackground(task) { countDeliveryFailure(events.size) }
   }
 
-  private fun runOnDeliveryWorker(task: Runnable) {
+  fun runOnDeliveryWorker(task: Runnable) {
     val previous = deliveryWorker.get()
     deliveryWorker.set(true)
     try {
@@ -360,12 +348,12 @@ internal class SdkEventBuffer(
   }
 
   /** Shutdown may persist inline only on our existing worker, never the host caller. */
-  private fun persistInBackground(task: Runnable, onRejected: () -> Unit = {}) {
-    if (isShutdown && deliveryWorker.get() == true) {
+  fun persistInBackground(task: Runnable, onRejected: () -> Unit = {}) {
+    if (state.isShutdown && deliveryWorker.get() == true) {
       task.run()
       return
     }
-    val accepting = lock.withLock { !isShutdown && !executor.isShutdown }
+    val accepting = state.lock.withLock { !state.isShutdown && !executor.isShutdown }
     if (accepting) {
       try {
         executor.execute(task)
@@ -384,7 +372,7 @@ internal class SdkEventBuffer(
     }
   }
 
-  private fun countDeliveryFailure(count: Int) {
+  fun countDeliveryFailure(count: Int) {
     try {
       dropCounter?.increment(DropReason.DELIVERY_FAILED, count)
     } catch (error: Exception) {
@@ -393,30 +381,95 @@ internal class SdkEventBuffer(
     }
   }
 
-  private fun deliverBatch(events: List<SdkEvent>) {
+  fun deliverBatch(events: List<SdkEvent>) {
     if (events.isEmpty()) return
     try {
       onFlush(events)
+    } catch (error: UnsentEventBatchesException) {
+      logger.w("SdkEventBuffer", error) { "Could not flush event batch" }
+      persistFailedFlush(error.batches)
     } catch (error: Exception) {
       logger.w("SdkEventBuffer", error) { "Could not flush event batch" }
-      val unsent =
-        if (error is UnsentEventBatchesException) error.batches else listOf(events to null)
-      // A throwing custom EventPersistence.persist() must NOT escape this task: it
-      // runs inside scheduleAtFixedRate and an uncaught exception would silently
-      // cancel all future periodic flushes (#3605), so guard the persist too.
-      persistInBackground(
-        Runnable {
-          for ((chunk, id) in unsent) {
-            try {
-              persistence?.persist(chunk, id)
-            } catch (error: Exception) {
-              logger.w("SdkEventBuffer", error) { "Could not persist failed flush" }
-              // Best-effort retry; FLUSH_ERROR already accounts for this failed delivery.
-            }
+      persistFailedFlush(listOf(events to null))
+    }
+  }
+
+  fun persistFailedFlush(unsent: List<Pair<List<SdkEvent>, String?>>) {
+    // A throwing custom EventPersistence.persist() must NOT escape this task: it
+    // runs inside scheduleAtFixedRate and an uncaught exception would silently
+    // cancel all future periodic flushes (#3605), so guard the persist too.
+    persistInBackground(
+      Runnable {
+        for ((chunk, id) in unsent) {
+          try {
+            persistence?.persist(chunk, id)
+          } catch (error: Exception) {
+            logger.w("SdkEventBuffer", error) { "Could not persist failed flush" }
+            // Best-effort retry; FLUSH_ERROR already accounts for this failed delivery.
           }
-        },
-      )
-      repeat(unsent.sumOf { it.first.size }) { dropCounter?.increment(DropReason.FLUSH_ERROR) }
+        }
+      },
+    )
+    repeat(unsent.sumOf { it.first.size }) { dropCounter?.increment(DropReason.FLUSH_ERROR) }
+  }
+
+  fun processEvent(
+    event: SdkEvent,
+    processors: List<EventProcessor>,
+    onProcessed: (SdkEvent) -> Unit,
+  ) {
+    var current: SdkEvent = event
+    for (processor in processors) {
+      try {
+        current =
+          processor.process(current)
+            ?: run {
+              dropCounter?.increment(DropReason.FILTERED)
+              return
+            }
+      } catch (error: Exception) {
+        logger.w("SdkEventBuffer", error) { "Event processor failed" }
+        dropCounter?.increment(DropReason.PROCESSOR_ERROR)
+        return
+      }
+    }
+
+    onProcessed(current)
+  }
+
+  fun resolveShutdownDeliveries(tasks: List<Runnable>) {
+    tasks.forEach {
+      try {
+        it.run()
+      } catch (error: Exception) {
+        logger.w("SdkEventBuffer", error) { "Could not resolve shutdown delivery" }
+      }
+    }
+  }
+}
+
+/** These operations require the caller to hold the buffer lock. */
+private object PendingEventBackpressure {
+  /** Must be called while holding the buffer lock. Delivery in progress is no longer pending. */
+  fun pendingEventCount(
+    buffer: List<SdkEvent>,
+    pendingBatches: ArrayDeque<MutableList<SdkEvent>>,
+  ): Int = buffer.size + pendingBatches.sumOf { it.size }
+
+  /** Must be called while holding the buffer lock. */
+  fun dropOldestPendingEvent(
+    buffer: MutableList<SdkEvent>,
+    pendingBatches: ArrayDeque<MutableList<SdkEvent>>,
+  ) {
+    val oldestBatch = pendingBatches.firstOrNull()
+    if (oldestBatch == null) {
+      buffer.removeAt(0)
+      return
+    }
+
+    oldestBatch.removeAt(0)
+    if (oldestBatch.isEmpty()) {
+      pendingBatches.removeFirst()
     }
   }
 }

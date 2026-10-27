@@ -154,16 +154,20 @@ internal fun List<KeyValueFile>.applyKeyValueEdit(
  * the generation changed while the save was in flight, the older, just-submitted optimistic value
  * must not clobber the newer live state, so the receiver is returned unchanged.
  */
+internal data class KeyValueEdit(
+  val fileName: String,
+  val key: String,
+  val value: String?,
+  val type: KeyValueType,
+)
+
 internal fun List<KeyValueFile>.applyKeyValueEditIfGenerationUnchanged(
-  fileName: String,
-  key: String,
-  value: String?,
-  type: KeyValueType,
+  edit: KeyValueEdit,
   expectedGeneration: Long,
   currentGeneration: Long,
 ): List<KeyValueFile> =
   if (currentGeneration == expectedGeneration) {
-    applyKeyValueEdit(fileName, key, value, type)
+    applyKeyValueEdit(edit.fileName, edit.key, edit.value, edit.type)
   } else {
     this
   }

@@ -1,14 +1,11 @@
 # Agent-authored prototype specification
 
-This is the current, unversioned contract for #9296, child of #9295. Compose
-rendering on Android (#9299, #9300), asset transport (#9301), wire messages
-(#9298), the `prototype` MCP tool (#9302) and the
-[iOS simulator agent](../ios/prototype-agent.md) implement it; the iOS agent's
-[feature support table](../ios/prototype-agent.md#feature-support) lists what is Android only
-(`display`, `window.layer: "app"`, `window.persistence: "device"`, `inspect`, idle TTL).
-No code,
-expressions, URLs, image bytes, or migration instructions are accepted in a
-spec.
+Current, unversioned contract for the agent-authored prototype (#9296, child of #9295). Android Compose
+rendering, asset transport, the wire messages, the `prototype` MCP tool and the
+[iOS simulator agent](../ios/prototype-agent.md) implement it; the iOS
+[feature support table](../ios/prototype-agent.md#feature-support) lists what is Android only (`display`,
+`window.layer: "app"`, `window.persistence: "device"`, `inspect`, idle TTL). A spec accepts no code,
+expressions, URLs, image bytes or migration instructions.
 
 ## Owner decisions
 
@@ -26,6 +23,26 @@ The 2026-10-04 decisions supersede the issue's earlier proposals:
 - Windows are edge-to-edge. Safe-area padding is an explicit node opt-in.
 - A `sheet` window and a modal `bottomSheet` node are separate concepts.
 - Built-in icons come from a closed list (the bundled Material icon set); other artwork uses image assets.
+
+The 2026-10-26 decisions (#15244) fix the native-look and motion-profile work:
+
+1. **Default look.** `theme.design` defaults to `platform`. iOS prototypes look native by default
+   and the iOS screenshot baselines are re-recorded with it. On Android `platform` is still Material.
+   `material` stays available to force today's drawing on both platforms.
+2. **Other-platform namespaces.** A renderer ignores the other platform's namespace block (`ios: {...}`
+   on Android, `android: {...}` on iOS) and adds a `platformNotes` entry; it does not refuse the spec,
+   so one spec runs on both. This matches iOS ignoring `window.layer: "app"`.
+3. **iOS Reduce Motion** maps to the _reduced_ profile (crossfades), not to _off_. The system
+   setting `UIAccessibility.prefersCrossFadeTransitions` maps to _reduced_ as well.
+4. **Native controls without per-item identifiers** (segmented `Picker`, `TabView`, `Menu`) keep the
+   custom-drawn fallback. Each control is revisited after #15462.
+5. **`surface: "glass"` on Android** waits for real backdrop blur (API 31+ `RenderEffect`, after the
+   #15126 spike). Below API 31 it uses only a tonal fallback.
+6. **Width classes** are native per platform. Android reports the Material window size classes
+   (compact, medium, expanded); iOS reports only its horizontal size class (compact, regular). Specs
+   branch per platform.
+7. **Xcode 27.** An advisory (non-required) Xcode 27 iOS build runs on the self-hosted Macs now. The
+   required jobs switch after a green week. #15261 proceeds behind `#available`.
 
 Earlier decisions still apply: the renderer is Compose; sizes and positions use
 dp; prototype opacity is a percentage; app-element anchoring is supported; observe
@@ -61,54 +78,43 @@ strings; they do not share the state-key restriction.
 | `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` | 16              | Maximum named bindings per emit.context.                                                           |
 | `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`   | 4096 (4 KiB)    | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.             |
 
-Navigation item `image` uses also count toward `MAX_PROTOTYPE_IMAGES`. Assets have
-separate transport and decoded-memory limits in #9301. These spec limits keep
-parsing/layout work bounded without limiting image pixel data inside this file.
-Emit payload nesting has a separate `MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH` of 24
-(root payload depth 0). To avoid different number spellings in JVM/JS decoders,
-the byte budget counts each finite number as 32 bytes; strings, keys, booleans,
-null, punctuation, and separators use compact JSON UTF-8 bytes. This bounds
-actual compact serialized size and can conservatively reject numeric-heavy
-payloads. Raw number token length and whitespace are governed by the spec-byte
-limit. Nonfinite JSON numbers are rejected, including inside emit payloads.
+Navigation item `image` uses count toward `MAX_PROTOTYPE_IMAGES`. Assets have separate transport and
+decoded-memory limits (Asset transport). Emit payload nesting is bounded by
+`MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH` (24, root payload depth 0). The emit byte budget counts every finite
+number as 32 bytes, so JVM and JS number spellings cannot disagree, and everything else as compact JSON
+UTF-8; it can conservatively reject numeric-heavy payloads. Raw number token length and whitespace are
+governed by the spec-byte limit. Nonfinite numbers are rejected everywhere, including emit payloads.
 
-Every onTap list has 1–32 actions; tab bars have 1–32 items; bottom navigation has
-2–5 items; sheet detents have 1–8 entries.
+Every onTap list has 1-32 actions; tab bars have 1-32 items; bottom navigation has 2-5 items; sheet detents
+have 1-8 entries.
 
-The single structural rule source is `schemas/prototype-spec-contract.json`,
-imported by TypeScript and packaged as a JVM protocol resource. TypeScript's
-concrete Zod schema supplies inferred types and the final typed decode. Kotlin
-uses kotlinx.serialization models with sealed discriminated hierarchies. Use
-`validatePrototypeSpec` / `PrototypeSpecValidator.validate` as the complete entry
-points: structural validation, limits, and cross-references precede typed decode.
-Do not bypass them with a model decoder. Untagged dimension, detent, page-target,
-and scalar unions have explicit Kotlin serializers; only arbitrary emit payloads
-retain JsonElement. Validated integer model fields normalize decimal/exponent
-spellings before Kotlin decoding (e.g. `100.0` and `1e2` both mean 100). The protocol module has no API-dump
-plugin or API-check task; its published artifact includes the contract resource.
+The single structural rule source is `schemas/prototype-spec-contract.json`, imported by TypeScript and
+packaged as a JVM protocol resource. TypeScript's Zod schema supplies inferred types and the final typed
+decode; Kotlin uses kotlinx.serialization sealed hierarchies. `validatePrototypeSpec` /
+`PrototypeSpecValidator.validate` are the complete entry points (structure, limits and cross-references
+precede typed decode); never bypass them with a model decoder. Untagged dimension, detent, page-target and
+scalar unions have explicit Kotlin serializers; only arbitrary emit payloads keep `JsonElement`. Validated
+integer fields normalize decimal/exponent spellings before Kotlin decoding (`100.0` and `1e2` both mean
+100). The protocol module has no API-dump task; its artifact includes the contract resource.
 
 ## Data model (#11673)
 
-`data` is an optional top-level plain JSON object, owned by the agent and read-only on the device.
-Values may be objects, arrays, strings, finite numbers and booleans; null and non-JSON values are
-invalid. Object keys are arbitrary strings. `state` remains the user-owned scalar map: `setState`,
-`toggle`, `increment`, `decrement` only target declared state keys, including per-row keys. A key
-present only in data fails like any undeclared state key. A new full `show` replaces data.
+`data` is an optional top-level plain JSON object, agent-owned and read-only on the device (objects, arrays,
+strings, finite numbers, booleans; no null; arbitrary object keys). `state` stays the user-owned scalar map:
+`setState`, `toggle`, `increment`, `decrement` target only declared state keys, including per-row keys; a
+key present only in data fails like any undeclared key. A full `show` replaces data. CtrlProxy and the iOS
+agent advertise `prototype_data_model_v1`.
 
-Limits come from `schemas/prototype-spec-contract.json`: `MAX_PROTOTYPE_DATA_BYTES` (262144),
-`MAX_PROTOTYPE_DATA_DEPTH` (8), `MAX_PROTOTYPE_DATA_ARRAY_ITEMS` (500), and
-`MAX_PROTOTYPE_DATA_POINTER_LENGTH` (256 UTF-16 code units). Data is depth 1; only containers add
-depth. The byte cost reuses the emit payload cost: 32 bytes per number, compact JSON UTF-8 for
-strings/booleans/keys, punctuation and separators. Every number costs 32 bytes regardless of its
-digits, so numeric-heavy data reaches the byte limit before its serialized size does.
+Limits (`schemas/prototype-spec-contract.json`): `MAX_PROTOTYPE_DATA_BYTES` 262144,
+`MAX_PROTOTYPE_DATA_DEPTH` 8 (data is depth 1; only containers add depth), `MAX_PROTOTYPE_DATA_ARRAY_ITEMS`
+500, `MAX_PROTOTYPE_DATA_POINTER_LENGTH` 256 UTF-16 units. Byte cost reuses the emit payload cost (32 bytes
+per number regardless of digits), so numeric-heavy data reaches the limit early.
 
-CtrlProxy and the iOS prototype agent both advertise `prototype_data_model_v1`.
-
-Pointers are nonempty RFC 6901 paths relative to data, matching `^(?:/(?:[^~/]|~[01])*)+$`.
-Split after the leading slash; decode `~1` to `/`, then `~0` to `~`. Resolution follows exact own
-object members, including empty or numeric-looking keys. Array indices match `0|[1-9][0-9]*` and
-must be in bounds; `01`, `-`, `1.0`, negative indices and traversal through a scalar are missing.
-No data means every path is missing. `/a/` accesses the empty key inside `a`.
+Pointers are nonempty RFC 6901 paths relative to data, matching `^(?:/(?:[^~/]|~[01])*)+$`. Split after the
+leading slash; decode `~1` to `/`, then `~0` to `~`. Resolution follows exact own members, including empty
+or numeric-looking keys (`/a/` is the empty key inside `a`). Array indices match `0|[1-9][0-9]*` and must be
+in bounds; `01`, `-`, `1.0`, negatives and traversal through a scalar are missing. No data means every path
+is missing.
 
 ### Bindings and ordering
 
@@ -131,95 +137,61 @@ No data means every path is missing. `/a/` accesses the empty key inside `a`.
 }
 ```
 
-- `repeat.items: {path}` must resolve to an array of objects (empty is valid). Only scalar members
-  with field-shaped names are projected into items. `repeat.key` names a field every item has;
-  its rendered values must be unique, for literal lists too.
-- `MAX_PROTOTYPE_REPEAT_PATH_CELLS` bounds the sum across path-bound repeat containers in
-  pre-order after component expansion, including empty templates. Each instantiated object item
-  costs the number of projected scalar members, or one cell if it has none. Literal repeats do
-  not count. After the three path-source checks, exceeding this budget fails at
-  `<node>.repeat.items.path` with `Repeat path cell limit exceeded`, before template projection.
-  Cell counts and immutable projected lists are cached by pointer within each validation call.
-- `MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH` (16384 UTF-16 code units) bounds the sum of
-  replacement lengths per bindable field at each substitution stage: data in text-kind fields,
-  then repeat in every bindable field for each item, including repeat placeholders inserted by
-  data. Literal characters and unresolved repeat placeholders contribute zero; state placeholders
-  are not validated because state can change after show.
-  `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL` (4194304 UTF-16 code units) also bounds rebuilt text
-  per validation: each recognized data stage and each repeat item charges authored stage length
-  plus replacement length, including literal units and placeholder tokens. Inside a repeat, a
-  data-resolved field is also charged once per item, even without repeat placeholders. Purely
-  literal fields and state placeholders are not charged. Crossing the total fails at the field path
-  with `Substituted text total limit exceeded`.
-  During state interpolation, a replacement that would exceed the per-call substitution limit stays
-  as written, and later placeholders may still substitute.
-- `{data:/pointer}` binds only the text-kind fields repeat already binds: text, button/FAB labels,
-  segmented option labels, app bar title/navigation/action labels, dialog title/text/button labels,
-  and snackbar text/action label. Missing, object or array values become empty text. Other braces
-  stay literal. A data string is inserted as plain text before repeat and state binding, so
-  `{item.x}`, `{index}` or `{key}` inside it bind afterwards exactly like authored text.
-  Data values cannot be escaped; inserted strings are never scanned again for data placeholders.
-  Pointers are untouched by component props.
-- A condition uses exactly one of `key`, `data`, `all`, `any`, `not`. A data condition has exactly
-  one comparison: `equals` (same scalar type and value), `notEquals` (its inverse, including missing
-  or non-scalar), `gt` or `lt` (numbers only, otherwise false). `equals`/`notEquals` operands are
-  literals; repeat placeholders there are rejected. `bottomSheet.openWhen` remains boolean state.
+- `repeat.items` is the literal list or a strict `{path}` that statically resolves to an array of objects
+  within the 128-item maximum (empty is valid and gives zero instances). Each item is projected to scalar
+  members whose names match `^[A-Za-z_][A-Za-z0-9_]{0,63}$`; nested members stay in data and are invisible to
+  templates. Optional `repeat.key` names a projected field present in every item; rendered identities use
+  scalar text rendering and must be unique (7 and "7" collide), for literal lists too. Per-item field,
+  state-key, action and expanded node/image checks still run. Templates cannot nest repeats or pagers.
+- `MAX_PROTOTYPE_REPEAT_PATH_CELLS` bounds the sum across path-bound repeats in pre-order after component
+  expansion (empty templates included): each instantiated object item costs its projected scalar members, or
+  one if none; literal repeats are free. After the three path-source checks, exceeding it fails at
+  `<node>.repeat.items.path` with `Repeat path cell limit exceeded`, before projection. Cell counts and
+  projected lists are cached by pointer within a validation call.
+- `MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH` (16384 UTF-16 units) bounds the sum of replacement lengths per
+  bindable field at each substitution stage (data in text-kind fields, then repeat in every bindable field
+  per item, including repeat placeholders inserted by data). Literal characters, unresolved repeat
+  placeholders and state placeholders (state changes after show) are not counted.
+  `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL` (4194304 units) bounds rebuilt text per validation: each recognised
+  data stage and each repeat item charges authored stage length plus replacement length (a data-resolved
+  field inside a repeat is charged once per item). Purely literal fields and state placeholders are free.
+  Crossing it fails at the field with `Substituted text total limit exceeded`. During state interpolation a
+  replacement that would exceed the per-call limit stays as written and later placeholders may still
+  substitute.
+- `{data:<pointer>}` is recognised by a plain scan to the next closing brace; invalid placeholders stay
+  literal and never make text invalid. It binds only text-kind fields: `text.text`, `button.label`,
+  `fab.label`, `segmentedButton.options[].label`, `topAppBar.title`, `topAppBar.navigationIcon.label`,
+  `topAppBar.actions[].label`, `dialog.title`, `dialog.text`, `dialog.confirm.label`, `dialog.dismiss.label`,
+  `snackbar.text`, `snackbar.action.label`. It never binds state keys, operands, emit names/payloads or
+  content descriptions, and component props never reach it. Scalars render normally (integral numbers
+  without decimal point or exponent); missing/object/array values render empty. Binding order: data, then
+  repeat placeholders, then state interpolation. An inserted data string is plain text: `{item.x}`,
+  `{index}` and `{key}` inside it bind afterwards like authored text, it is never rescanned for data
+  placeholders, and data values cannot be escaped.
+- A condition uses exactly one of `key`, `data`, `all`, `any`, `not` (see Conditions). A `key` or `data` form
+  takes exactly one comparison: `equals` (same scalar type and value; numbers by value, -0 equals 0),
+  `notEquals` (its inverse, including missing or non-scalar), `gt` or `lt` (numbers only, otherwise false).
+  Data `equals`/`notEquals` operands are literals; a repeat placeholder there is rejected (state operands
+  still bind). `bottomSheet.openWhen` keeps its boolean `{key, equals}` form. Component props are never
+  bound in `repeat.items.path` or a condition's `data`; `repeat.key` passes through expansion unchanged.
 
-The host validates data and repeat paths; the device resolves authored bindings before repeat
-expansion. All data uses require `prototype_data_model_v1`; an older device is refused
-before uploads or show, with an update/relaunch hint. `status` reports the last successful show's
-data next to state; `inspect` reports and adopts device data. Absent data is omitted; dismiss
-clears it. Events never carry data.
+The host validates data and repeat paths and sends authored bindings unchanged. The device resolves them
+before repeat expansion: path items are projected, text is bound, conditions become in-memory constants. All
+data-model uses (top-level data, path items, `repeat.key`, data conditions, recognised text placeholders)
+require `prototype_data_model_v1`; the host refuses an older device before any upload or show, naming the
+first usage field (data first, then node fields in document order, depth-first), counting the others, with
+an update/relaunch hint and a literal-content fallback. `status` reports a deep copy of the last successful
+show's data next to state, `inspect` reports and adopts device data, dismiss clears it, absent data is
+omitted. Events never carry data.
 
-`repeat.items` accepts a strict `{ "path": pointer }` alongside the unchanged literal list.
-The path must statically resolve to an array of objects within the literal repeat's item maximum.
-Empty arrays produce zero instances. Each item is projected to scalar members whose names match
-`^[A-Za-z_][A-Za-z0-9_]{0,63}$`; nested members stay in data and are invisible to repeat templates.
-Optional `repeat.key` names a projected field present in every item; identities use scalar text
-rendering and must be unique (7 and "7" collide). It also works on literal lists. Existing
-per-item field, state-key, action and expanded node/image checks still run. Repeat templates
-cannot nest repeats or pagers.
-
-`{data:<pointer>}` is recognised by a plain scan to the next closing brace; invalid placeholders
-stay literal and never make text invalid. It binds only text-kind fields: `text.text`,
-`button.label`, `fab.label`, `segmentedButton.options[].label`, `topAppBar.title`,
-`topAppBar.navigationIcon.label`, `topAppBar.actions[].label`, `dialog.title`, `dialog.text`,
-`dialog.confirm.label`, `dialog.dismiss.label`, `snackbar.text`, `snackbar.action.label`.
-It never binds state keys, operands, emit names/payloads or content descriptions. Scalars render
-normally (integral numbers without a decimal point or exponent); missing/object/array values
-render empty. Bind authored data text first, repeat placeholders second, state interpolation
-last. Inserted data strings and repeat item values are never rescanned for data placeholders.
-A data string is inserted as plain text: repeat placeholders (`{item.x}`, `{index}`) and state
-placeholders (`{key}`) inside it bind afterwards exactly like authored text. Data values cannot
-be escaped.
-Component props are never bound in `repeat.items.path` or a condition's `data`; `repeat.key`
-passes through expansion unchanged.
-
-Conditions select exactly one of `key`, `data`, `all`, `any`, `not`. A `key` or `data` form requires
-exactly one of `equals`, `notEquals`, `gt`, `lt`. Data `equals` needs the same scalar type and value
-(numbers by value; -0 equals 0). `notEquals` is its inverse, including missing/non-scalar values.
-`gt`/`lt` compare numbers only, otherwise false. `equals`/`notEquals` are literals: a repeat
-placeholder in a data operand is rejected; state operands still bind. `bottomSheet.openWhen`
-keeps its boolean `{key, equals}` form. Devices resolve authored bindings before repeat
-expansion: path items are projected, text is bound, conditions become in-memory constants.
-The host performs validation only, preserving authored bindings on the wire.
-
-On Android, CtrlProxy keeps the original validated spec for state-write validation, persistence,
-replay and status. Each render mapping entry point (`mapPrototypeSpec`
-and the runtime's incremental mapper) resolves the authored spec. The runtime's mapper caches the
-resolved root per (root, data) identity pair and the resolved spec per authored spec instance, so
-state writes and repeated `renderModel()` calls do not re-resolve. State writes trigger one mapping
-pass; unchanged calls reuse the same model. The controller guards the authored tree, checks authored
-anchors before validation to preserve error precedence, validates the authored spec, then resolves
-it and guards the resolved tree, checking anchors again when resolution changes the root. A show
-therefore resolves during controller validation, its one-off `mapPrototypeSpec` render request and
-its runtime's incremental mapping. The validator's `MAX_PROTOTYPE_REPEAT_PATH_CELLS` limit bounds
-resolution work.
-Appearance and anchor layout consume the resulting render tree. `repeat.key` is validated and
-carried on the model; keyed Compose rows retain identity by `repeat.key` across patches and
-reordering, while unkeyed rows retain positional identity. CtrlProxy advertises
-`prototype_data_model_v1`, and its inspect entries report the shown spec's original `data` beside
-state, omitting it when absent.
+Android: CtrlProxy keeps the original validated spec for state-write validation, persistence, replay and
+status. Both render entry points (`mapPrototypeSpec` and the runtime's incremental mapper) resolve the
+authored spec; the runtime caches the resolved root per (root, data) identity pair and the resolved spec per
+authored spec instance, so state writes and repeated `renderModel()` calls do not re-resolve. The controller
+guards the authored tree, checks authored anchors before validation (to preserve error precedence),
+validates, resolves, guards the resolved tree, and re-checks anchors if resolution changed the root.
+Appearance and anchor layout consume the resolved render tree. `repeat.key` is carried on the model: keyed
+Compose rows retain identity across patches and reordering, unkeyed rows keep positional identity.
 
 ### Validation paths and reporting
 
@@ -241,19 +213,9 @@ depth precedes array length, then children; the byte check runs last.
 | `<node>.repeat.items.path`                                                                | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix                                                |
 | `<node>.repeat.key`                                                                       | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair                                                             |
 | Condition `.key`                                                                          | `Exactly one of key, data, all, any, not is required`                                                                                                                 |
-| Condition comparison field                                                                | `Requires key or data`; `Exactly one of equals, notEquals, gt, lt is required`                                                                                        |
+| Condition comparison field                                                                | `Requires key or data or platform`; `Exactly one of equals, notEquals, gt, lt, empty is required`                                                                     |
 | Condition `.equals` / `.notEquals` in bindable visiting order                             | `Repeat placeholder in a data condition operand is not supported`                                                                                                     |
 | `<node>.repeat`                                                                           | Existing expanded node/image limit errors                                                                                                                             |
-
-All data-model uses require `prototype_data_model_v1`: top-level data, path items, repeat.key,
-data conditions or recognised text placeholders. The host refuses before any asset upload or
-show when the device does not advertise it. The refusal identifies the first usage field (data
-first, then node fields in document order, depth-first), counts other fields and gives an update
-or iOS relaunch hint plus a literal-content fallback.
-
-`inspect` reports optional data beside state, absent for specs without data. Host-local `status`
-remembers a deep copy of the last successful show's data, replaces it on inspect adoption, and
-clears it with the prototype. Events never carry data.
 
 ## Theme
 
@@ -333,51 +295,16 @@ the system setting. Every per-mode form below reads that one resolved mode. A de
   `{light: assetId, dark: assetId}`. Only the asset for the resolved mode is decoded and drawn;
   both ids are checked at `show` and reported in `missingAssets`, and both stay retained with the
   prototype.
-- **Window metadata.** `prototypeOpaque` follows what is drawn. The root background and the window
-  scrim are resolved in the mode the show resolved to and count as solid only when the result is
-  fully opaque. An opaque role counts; the `scrim` role in a scrim slot never does. The root
-  counts only when it is drawn over the whole window (#11408): `width` and `height` both `fill`,
-  no `anchor` (an anchored root is laid out at its anchor's rectangle, in every placement),
-  no `maxWidth`/`maxHeight` cap and no `aspectRatio`, no non-zero `offset`, no rounded corner
-  (`cornerRadius` absent, `0`, `none` or all corners `0`) and no `pressScale` below one. A root
-  that fails any of these lets the app show at an edge or corner, so only an opaque fullscreen
-  scrim behind it can still make the window opaque. A chromeless fullscreen window can report
-  `prototypeOpaque: true` when opacity is 100 and its root or scrim is solid; a fullscreen window
-  with the translucent dismiss bar still reports false.
+- **Window metadata.** `prototypeOpaque` follows what is drawn. The root background and window scrim are resolved in the show's mode and count as solid only when fully opaque (an opaque role counts; the `scrim` role in a scrim slot never does). The root counts only when drawn over the whole window (#11408): `width` and `height` both `fill`, no `anchor`, no `maxWidth`/`maxHeight` cap, no `aspectRatio`, no non-zero `offset`, no rounded corner and no `pressScale` below one. A root failing any of these lets the app show at an edge or corner, so only an opaque fullscreen scrim behind it can still make the window opaque. A chromeless fullscreen window can report `true` when opacity is 100 and its root or scrim is solid; a fullscreen window with the translucent dismiss bar still reports false.
 
 ### Live appearance (#11221, `prototype_appearance_v1`)
 
-The controller resolves the mode once per show and keeps it current. That one value drives the
-host chrome (dismiss bar, Close control), the window scrim, every colour and image pair in the
-content and the window metadata, so they cannot draw in different modes. No window reads its own
-Compose configuration for it, which is why a window created from a display or app-layer window
-context follows the same value as one on the service context.
+The controller resolves the mode once per show and keeps it current. That one value drives the host chrome (dismiss bar, Close control), the window scrim, every colour and image pair and the window metadata, so they cannot draw in different modes. No window reads its own Compose configuration for it, so windows from a display or app-layer window context follow the same value.
 
-- **Override.** `show_prototype` takes a top-level `appearance`: `"device"` (the default when
-  absent), `"light"` or `"dark"`. It stands in for the system setting only: it decides a spec with
-  `theme.mode: "system"` and a spec whose mode would otherwise fall through to the device. It does
-  not beat an explicit `light`/`dark` mode, a flat `background`/`surface` override or an authored
-  opaque background. It belongs to the show: a later show of the same id without the field follows
-  the device again. An unknown value fails the request and leaves what is showing untouched.
-- **Re-theme.** The mode is resolved again after each interaction (a pager page or a `styleWhen`
-  state can change the background it is inferred from) and on every configuration change (the
-  device's night mode; on API 31+ the Material You palette, so a `colors.source: "device"` scheme
-  is read again after a wallpaper change). The window, the runtime, authored state, pager pages
-  and text-field contents are kept; only colours change. A prototype hidden by the lock screen or
-  because its app left the foreground is resolved too, and returns in the current mode.
-- **Event.** When the resolved mode changes, the device sends one `prototype_event` with
-  `kind: "appearance_changed"`, `name: null` and `payload: {mode, source}`, on the normal
-  sequence, buffering and replay path. Nothing is sent when the mode stays the same (a repeated
-  configuration change, a device flip under an explicit mode or an override, a palette change), nor
-  for the show itself, whose result carries the mode.
-- **Report.** A successful `show_prototype` result and each `inspect_prototypes` entry carry
-  `appearance: {mode, source, deviceDark}`. `mode` is `light` or `dark`. `source` names the step
-  that decided it: `explicit`, `override`, `roleLuminance`, `authoredBackground` or `system`
-  (`theme.mode: "system"` reports `system`, or `override` when the show pinned it). `deviceDark` is
-  the device's own setting whatever decided the mode. The host's `prototype` tool reports it only in
-  device answers (show, inspect); its host-local `status` omits it (#11416). The prototype's own window entry in a
-  hierarchy capture carries the same object as `prototypeAppearance`, next to `prototypePlacement`
-  and `prototypeOpaque`; an APK without `prototype_appearance_v1` omits it.
+- **Override.** `show_prototype` takes a top-level `appearance`: `"device"` (default), `"light"` or `"dark"`. It stands in for the system setting only: it decides a spec with `theme.mode: "system"` or one whose mode would otherwise fall through to the device, and does not beat an explicit `light`/`dark` mode, a flat `background`/`surface` override or an authored opaque background. It belongs to the show (a later show of the same id without it follows the device). An unknown value fails the request and leaves what is showing untouched.
+- **Re-theme.** The mode is resolved again after each interaction (a pager page or `styleWhen` state can change the background it is inferred from) and on every configuration change (night mode; on API 31+ the Material You palette, so `colors.source: "device"` re-reads after a wallpaper change). The window, runtime, state, pager pages and text-field contents are kept; only colours change. A prototype hidden by the lock screen or because its app left the foreground is resolved too and returns in the current mode.
+- **Event.** When the resolved mode changes the device sends one `prototype_event` with `kind: "appearance_changed"`, `name: null`, `payload: {mode, source}` on the normal sequence, buffering and replay path. Nothing is sent when the mode stays the same (repeated configuration change, device flip under an explicit mode or override, palette change), nor for the show itself.
+- **Report.** A successful `show_prototype` result and each `inspect_prototypes` entry carry `appearance: {mode, source, deviceDark}`. `source` names the deciding step: `explicit`, `override`, `roleLuminance`, `authoredBackground` or `system` (`theme.mode: "system"` reports `system`, or `override` when the show pinned it). `deviceDark` is the device's own setting. The host `prototype` tool reports it only in device answers (show, inspect), not host-local `status` (#11416). The prototype's window entry in a hierarchy capture carries it as `prototypeAppearance` next to `prototypePlacement` and `prototypeOpaque`; an APK without `prototype_appearance_v1` omits it.
 
 ## Windows
 
@@ -443,7 +370,7 @@ Every node has required `type`. All other common properties are optional:
 | `style`              | Strict style object below.                                                                                                                   |
 | `styleWhen`          | Conditional style overrides (see Conditional style below). One to 8 entries.                                                                 |
 | `visibleWhen`        | Condition (see Conditions below). A false condition, or a missing key, means hidden.                                                         |
-| `transition`         | Optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.                                                      |
+| `transition`         | Except on stacks (see Stack transitions), optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.            |
 | `anchor`             | Bounds or app-element anchor below.                                                                                                          |
 | `safeAreaPadding`    | Explicit inset selection below.                                                                                                              |
 
@@ -492,6 +419,7 @@ layout room.
 | `divider`         | Optional `orientation`: `horizontal` (default), `vertical`.                                                                                                                                                                                            |
 | `badge`           | Optional nonempty `text` (a count or short label); without it a small dot.                                                                                                                                                                             |
 | `progress`        | Optional `variant`: `linear` (default), `circular`; optional `stateKey` naming an initialized number within 0..`max` (determinate); optional `max` > 0, default 1, only with `stateKey`. Unbound is indeterminate.                                     |
+| `chart`           | Required `variant` (`line`, `area`, `bar`, `ring`) and 1 to 4 `series` `{path, x?, y, label, color?}` over a `/data` array; optional `yRange`, `xLabels`, `goal`. See Charts.                                                                          |
 | `dialog`          | Required `openWhen` and `confirm`; optional nonempty `title` and `text`, optional `icon`, optional `dismiss`, optional single `child`. Buttons are `{label, onTap?}`.                                                                                  |
 | `snackbar`        | Required `openWhen` and nonempty `text`; optional `action` button `{label, onTap?}` and `durationMs` (1 to 600000, self-closing).                                                                                                                      |
 | `timePicker`      | Required distinct `hourKey` and `minuteKey` naming initialized integers 0..23 and 0..59; optional `is24Hour` boolean, default the device setting.                                                                                                      |
@@ -530,94 +458,57 @@ window's height. Sheet node scrim applies inside that window, not beyond a
 floating or sheet window's bounds. A modal sheet intercepts touches inside the
 window while open; a sheet placement is only a window placement.
 
-`switch`, `checkbox` and `button` are Material 3 components (#10439, first
-slice). A switch or checkbox draws the bound boolean; a tap anywhere on the
-control, including its label, flips that state value, emits a `change` event
-(`{key, value}`) like a text field or `stateKey` selection, and then runs the
-node's own `onTap`, if any. A `setState` that would make the bound value
-non-boolean is rejected like any other binding type change. A button runs its
-`onTap`; without one it is drawn but inert. Each component is one accessibility
-node carrying its label as text, a native role (`Switch`, `Checkbox`,
-`Button`), and for switch and checkbox the checkable/checked state, so `observe`
-reports them as controls and `tapOn` by `testTag` or label toggles or presses
-them. Each reserves the Material 48 dp minimum touch target.
+Component behavior (Material 3). Each component is one accessibility node with a native role and its label
+as text, reserves a 48 dp minimum touch target, and is reached by `observe` / `tapOn` through `testTag` or
+label.
 
-`slider`, `chip` and `card` are the second slice. A slider is bound to a number
-state key that must already lie within `min`..`max`; `step`, when given, must
-be positive and divide `max - min` evenly (the thumb snaps to those positions,
-otherwise it is continuous). Dragging, or an accessibility set-progress action,
-stores the snapped number, emits `change` (`{key, value}`) only when the value
-moved, and then runs the node's `onTap`. It is one accessibility node carrying
-its label and a progress range (current, `min`..`max`, steps), so `observe`
-reports the value as range info. A chip with a `stateKey` is a filter chip: it
-toggles that boolean like a switch, emits `change`, then runs `onTap`, and
-reports the `Checkbox` role with its checked state. A chip without one is an
-assist chip: a `Button` that runs `onTap`. `variant: filter` requires a
-`stateKey` and `variant: assist` forbids one; `input` and `suggestion` chips are
-later slices. A card is a Material container whose `children` are laid out as a
-column; its `variant` selects filled, elevated or outlined, a `style.background`
-overrides the container colour, and an `onTap` makes the whole card clickable.
-A card has no accessibility label of its own.
-
-`radioGroup`, `listItem` and the button extras are the third slice of #10439. Button
-`tonal` and `elevated` are Material's filled-tonal and elevated buttons; an
-`icon` draws before the label. A radio group draws one Material radio row per
-option; a tap on a row (or its label) sets the bound string to that option's
-`value`, emits `change` (`{key, value}`) only if the value changed, and then runs
-the group's own `onTap`. A bound value matching no option leaves every option
-unselected. Each option row is its own accessibility node with the `RadioButton`
-role, its label as text and a selected state; when the group has a `testTag`, the
-option's tag is `<testTag>.<value>`. A list item is one accessibility node whose
-text is the headline (and supporting line). With a trailing switch or checkbox it
-is toggleable with the `Switch` or `Checkbox` role and checked state: a tap
-anywhere on the row flips the bound boolean, emits `change`, then runs `onTap`.
-Otherwise a row with `onTap` is a `Button` that runs it, and a row without is
-inert. A trailing `icon` is decorative.
-
-`iconButton`, `fab`, `segmentedButton`, `topAppBar`, `divider`, `badge`,
-`progress`, `dialog`, `snackbar`, `timePicker`, `datePicker` and the `input` and
-`suggestion` chips are the last slice of #10439. Icon buttons and FABs are
-`Button` nodes that run `onTap`, labelled by `contentDescription`, else an
-extended FAB's `label`, else their icon name. A segmented button behaves like a
-radio group: each segment is its own selectable node tagged `<testTag>.<value>`,
-and a tap binds the string key to its value, emits `change` if it moved, then
-runs `onTap`; multi-select segments are not offered (use filter chips). Input and
-suggestion chips, like assist chips, only run `onTap` and cannot bind a key.
-A top app bar's text is its title (state placeholders are resolved); its
-navigation icon and actions are icon `Button` nodes labelled by their `label` and
-tagged `<testTag>.navigation` and `<testTag>.actions.<index>`, each running its
-own `onTap`. It draws no system-bar inset of its own; add `safeAreaPadding`. A
-divider has no accessibility node unless tagged. A badge reads as its `text`. A
-bound progress indicator is determinate and reports `value / max` as progress
-range info over 0..1; an unbound one reports indeterminate progress.
-
-`dialog` and `snackbar` open while `openWhen` holds, like `bottomSheet` (an
-existing key must be boolean), and are drawn above the whole author tree inside
-the prototype window, never as a separate window. A dialog is modal: a scrim tap
-closes it, and so does either button. While it is open the page behind it is
-removed from the accessibility tree (`clearAndSetSemantics` on the page), so
-`observe` and screen readers see only the dialog, as on iOS and as touches
-already behave; a closed dialog leaves the page as it was. Closing writes `!equals` to the key and
-emits `change`; a button then runs its own `onTap`. Its title is its text, its
-`text` is a separate text node, `child` sits between the text and the buttons,
-and the buttons are tagged `<testTag>.confirm` and `<testTag>.dismiss`. A snackbar
-sits at the bottom of the window and is not modal: the page stays in the
-accessibility tree. It stays until closed unless it
-sets `durationMs` (an integer, 1 to 600000): it then closes itself that long after it
-opens, by writing `!equals` to its `openWhen` key like any other close. The timer is
-wall-clock time, not scaled by the animator duration. Its `action`
-(tagged `<testTag>.action`) closes it, then runs `onTap`. Title, text and
-snackbar text resolve state placeholders, so `Alarm set for {hour}:{minute}`
-reads the bound time.
-
-A time picker is Material's dial picker bound to two integer keys. A change
-stores both keys together and emits one `change` event (`{keys, values}`, or
-`{key, value}` when only one moved), then runs `onTap`. A date picker is
-Material's calendar bound to a `YYYY-MM-DD` string; picking a day binds the key,
-emits `change`, then runs `onTap`. Both report their value as the accessibility
-state (`07:30` in 24-hour form, `2026-10-08`), and a new bound value from a
-re-show or `setState` moves the picker. A `setState` that would put an out of
-range hour, minute or date into a bound key is rejected.
+- **Bound controls emit `change`.** `switch`, `checkbox`, `radioGroup`, `segmentedButton`, filter `chip`,
+  `slider`, `textField`, pickers and `stateKey` selection write the bound key, emit `change` (`{key, value}`;
+  `{keys, values}` for several; only when the value moved) and then run the node's own `onTap`. A `setState`
+  that would make a bound value the wrong type is rejected like any binding type change.
+- `button` runs `onTap`; without one it is drawn but inert. `tonal` and `elevated` are filled-tonal and
+  elevated; a leading `icon` draws before the label.
+- `switch` / `checkbox`: a tap anywhere, label included, flips the boolean; roles `Switch` / `Checkbox` with
+  checked state.
+- `slider`: the bound number must already lie within `min`..`max`; `step`, if given, must be positive and
+  divide `max - min` evenly (the thumb snaps, else continuous). Dragging or an accessibility set-progress
+  stores the snapped value. Reports a progress range (current, `min`..`max`, steps).
+- `chip`: with `stateKey` a filter chip (toggles the boolean, `Checkbox` role); without, an assist chip
+  (`Button`, runs `onTap`). `variant: filter` requires `stateKey`; `assist`, `input` and `suggestion`
+  forbid it (`input` / `suggestion` only run `onTap`).
+- `card`: Material container whose `children` lay out as a column; `variant` filled/elevated/outlined;
+  `style.background` overrides the colour; `onTap` makes the whole card clickable; no accessibility label
+  of its own.
+- `radioGroup`: one radio row per option; a tap sets the string to the option `value`. A value matching no
+  option leaves all unselected. Each row is a `RadioButton` node, tagged `<testTag>.<value>` when the group
+  has a `testTag`.
+- `segmentedButton`: like a radio group, each segment selectable and tagged `<testTag>.<value>`; single
+  select only (use filter chips for multi).
+- `listItem`: one node whose text is headline plus supporting line. A trailing switch/checkbox makes the row
+  toggleable (`Switch` / `Checkbox` role; a tap anywhere flips the boolean, emits `change`, then runs
+  `onTap`); otherwise a row with `onTap` is a `Button`, without is inert. A trailing `icon` is decorative.
+- `iconButton`, `fab`: `Button` nodes running `onTap`, labelled by `contentDescription`, else an extended
+  FAB's `label`, else the icon name.
+- `topAppBar`: title text resolves state placeholders; navigation icon and actions are icon `Button`s
+  labelled by `label`, tagged `<testTag>.navigation` and `<testTag>.actions.<index>`, each running its own
+  `onTap`. It draws no system-bar inset; add `safeAreaPadding`.
+- `divider` has no node unless tagged. `badge` reads as its `text`. `progress`: bound is determinate
+  (`value / max` as a range over 0..1), unbound is indeterminate.
+- `dialog` and `snackbar` open while `openWhen` holds (an existing key must be boolean) and draw above the
+  whole author tree inside the prototype window, never as a separate window. A dialog is modal: a scrim tap
+  or either button closes it; while open the page behind is removed from the accessibility tree
+  (`clearAndSetSemantics`), so `observe` sees only the dialog. Closing writes `!equals` to the key and emits
+  `change`, then a button runs its `onTap`. Title is its text, `text` a separate text node, `child` sits
+  between text and buttons; buttons are tagged `<testTag>.confirm` / `<testTag>.dismiss`. A snackbar sits at
+  the window bottom and is not modal (the page stays in the tree); it stays until closed unless
+  `durationMs` (1..600000, wall-clock, not scaled by the animator) closes it by writing `!equals`. Its
+  `action` (`<testTag>.action`) closes it, then runs `onTap`. Title, text and snackbar text resolve state
+  placeholders.
+- `timePicker`: Material dial bound to two integer keys; a change stores both and emits one `change`
+  (`{keys, values}`, or `{key, value}` if one moved). `datePicker`: Material calendar bound to a
+  `YYYY-MM-DD` string. Both report their value as accessibility state (`07:30` in 24-hour form,
+  `2026-10-08`), move when a re-show or `setState` rebinds, and reject a `setState` that would put an
+  out-of-range hour, minute or date in a bound key.
 
 Text interpolation is a renderer concern: `{page}`, `{pageCount}`, and state
 keys may appear in text. No expressions or interpolation parsing occurs during
@@ -677,6 +568,38 @@ this slice does not redact it.
 
 ## Style
 
+`prototype_style_polish_v2` gates layered `style.shadows`, `style.cornerStyle`,
+`style.border.gradient`, `scroll.fadeEdges` and `image.filter`. A renderer must advertise
+this capability before a host sends these fields.
+
+- `shadows` is 1–3 strict `{color, radius, spread?, offset?, inner?}` entries. Radius is
+  0–1000 dp, spread and each offset axis are -1000–1000 dp. Omitted spread is 0,
+  omitted offset is `{x:0,y:0}`, and omitted inner is false. Layers paint in array
+  order within the outer and inner groups: first is bottom-most, later layers sit on top.
+  Blur radius `b` uses Gaussian sigma `b/2` (CSS-like blur). Android adapts this to
+  the platform blur filter, whose minimum nonzero sigma is approximately 0.5 px.
+  `color` takes the same hex, role or `{light,dark}` forms as `shadowColor`. `shadows` excludes both
+  `elevation` and `shadowColor`, including explicit zero elevation.
+- `cornerStyle` is `circular` (default) or `continuous`, including with `cornerRadius: "full"`.
+  Continuous corners use dependency-free cubic smoothing (approximately 0.6), tapering
+  to circular at half the short side so full radii remain valid pills/circles.
+- A border is strict `{width, color?, gradient?}`, with exactly one of `color` or
+  `gradient`. Gradient reuses the linear/radial background-gradient contract.
+- A scroll node's `fadeEdges` is strict `{top?, bottom?, start?, end?}`, with at least
+  one edge, each 0–1000 dp. Fades draw only on edges that can still scroll; start/end
+  mirror in RTL. Top/bottom apply only to vertical scrolling, start/end only to horizontal
+  scrolling. Each fade is capped to its viewport dimension.
+- An image node's `filter` is strict `{saturation?, tint?}`, with at least one field.
+  Saturation is 0–2 and tint is a colour value. Saturation applies first, then tint
+  multiplies the image channels (including alpha). Other node types cannot set filter.
+
+Pairs in shadows and image tint, and pairs or role names in border gradient stops,
+also require `prototype_theme_modes_v1`.
+
+Rendering order: transform, press scale, size, alpha, drop shadows (`shadows`/`elevation`
+draw before the clip), clip (`cornerRadius` + `cornerStyle`), background, gradient,
+shimmer, border (color or gradient), inner shadows.
+
 All properties are optional. Sizes, padding, offsets, radii, and spacing use dp.
 Numeric lengths are capped at 10000, including fixed dimensions, bounds x/y/width/height,
 size constraints, padding, corner radii, border width, spacing, sheet height and fixed detents.
@@ -696,7 +619,7 @@ height which must be positive. Positive values use a minimum of 0.000001.
 | `padding`                                        | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `background`, `color`                            | Strict hex color, or a Material 3 color role name (see below).                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `cornerRadius`                                   | Nonnegative dp, a Shapes token (`none`, `extraSmall`, `small`, `medium`, `large`, `extraLarge`, `full`), or strict per-corner `{topStart?, topEnd?, bottomEnd?, bottomStart?}` of nonnegative dp where an omitted corner is square. Start and end follow the layout direction.                                                                                                                                                                                                                                     |
-| `border`                                         | `{width, color}`; nonnegative dp width; `color` takes hex or a color role name.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `border`                                         | `{width, color?, gradient?}`; nonnegative dp width; exactly one paint source, a colour value or a linear/radial gradient.                                                                                                                                                                                                                                                                                                                                                                                          |
 | `elevation`                                      | Nonnegative dp. Draws a shadow in the node's corner shape, behind its clip, background and border.                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `shadowColor`                                    | Hex color or color role name tinting the `elevation` shadow (ambient and spot). Without `elevation` it draws nothing; absent, the platform shadow color applies.                                                                                                                                                                                                                                                                                                                                                   |
 | `gradient`                                       | `{type: "linear", angle, stops}` or `{type: "radial", stops}`. `angle` is a finite number of degrees clockwise from left-to-right (0 = left to right, 90 = top to bottom). `stops` is 2–4 `{color, position?}` with a hex color and an optional 0–1 `position`; positions apply only when every stop has one (a position below the previous stop's is raised to it), otherwise stops are evenly spaced. Radial gradients are centered and reach the corners. Painted over `background` in the node's corner shape. |
@@ -755,6 +678,12 @@ vertical), even through intervening containers or horizontal scrolls. A vertical
 pager inside only a horizontal scroll is valid; horizontal pagers stay valid.
 The error is at the pager's `.axis`: "A vertical pager cannot appear inside a vertical scroll".
 
+The horizontal counterpart (#14165): a horizontal (or default-axis) pager or a carousel cannot have
+any horizontal scroll ancestor, because a horizontal scroll measures its child with an infinite
+width that their lazy layouts cannot take. The errors are at the pager or carousel itself: "A
+horizontal pager cannot appear inside a horizontal scroll" and "A carousel cannot appear inside a
+horizontal scroll".
+
 Current page means the first fully visible page: fixed sizes snap at Start; fill
 uses the usual settled page. `page_changed`, `{page}` / `{pageCount}`, `setPage` and
 navigation pager bindings keep their meaning. Stable keys and neighbour retention
@@ -762,22 +691,17 @@ stay unchanged. Every visible page (including partly visible peek and fixed-size
 
 ## Icons and images
 
-Built-in Material names are the 2,075 icons of `material-icons-extended`, written
-in snake_case (`home`, `timer`, `bedtime`, `alarm_add`, `add_a_photo`). The closed list is the
-`iconName` definition in `schemas/prototype-spec-contract.json`, shared by the TypeScript
-and JVM validators. The renderer already ships that library, so the full set adds no APK
-size beyond the list itself (about 10 KB measured). An icon node may set `variant`:
-`filled` (default), `outlined`, `rounded`, `sharp` or `twoTone`; nav items are always
-filled. Material Symbols names with no `material-icons-extended` counterpart are not
-available, and neither are symbol `weight` or `fill` axes, which would need a bundled
-variable font. Custom text fonts do ship, as host-uploaded assets (see "Custom fonts"
-below).
+Built-in names are the 2,075 icons of `material-icons-extended` in snake_case (`home`, `alarm_add`); the
+closed list is the `iconName` definition in `schemas/prototype-spec-contract.json`, shared by both
+validators. The renderer already ships that library, so the set adds only the list (about 10 KB). An icon
+node may set `variant` (`filled` default, `outlined`, `rounded`, `sharp`, `twoTone`); nav items are always
+filled. Material Symbols names without a counterpart and symbol `weight` / `fill` axes (which need a bundled
+variable font) are unavailable. Custom text fonts ship as host-uploaded assets (see "Custom fonts").
 
-Unknown names reject the spec. #9301 pins ID-based assets, but no nested reference
-shape, so image nodes use `{type: "image", asset: "opaque-id"}` and nav items
-use `image: "opaque-id"`. Asset existence is not validated here. A missing asset
-renders a visible placeholder and reports a result under #9301; image bytes,
-MIME types, URLs, cache paths, and screenshot handles are not spec properties.
+Unknown names reject the spec. Images are ID-based (#9301): `{type: "image", asset: "opaque-id"}` and nav
+`image: "opaque-id"`. Existence is not validated at spec level; a missing asset renders a placeholder and is
+reported in `missingAssets`. Bytes, MIME types, URLs, cache paths and screenshot handles are not spec
+properties.
 
 ### Asset transport (#9301, first slice)
 
@@ -797,28 +721,11 @@ replacement and a temporary lock-screen hide keep them.
 
 ### Rendering assets (#9301, second slice)
 
-An `image` node draws its asset with `contentScale`: `fit` letterboxes, `crop` fills the
-box and clips, `fill` stretches. Bytes are decoded off the main thread with
-`BitmapFactory` and `inSampleSize`, downsampled to the node's laid-out size (the screen
-size when an axis wraps content) and never above 4 Mi pixels (16 MiB as ARGB_8888). The
-decoded-bitmap cache keys on asset id and a power-of-two size bucket, evicts least
-recently used first, and holds at most 32 MiB of decoded pixels; a single bitmap larger
-than that is drawn but not retained. A replaced, removed or cleared asset drops its
-decoded copies immediately and the nodes showing it reload; uploading an id that was
-missing makes the placeholder load it.
+An `image` node draws its asset with `contentScale`: `fit` letterboxes, `crop` fills the box and clips, `fill` stretches. Bytes are decoded off the main thread with `BitmapFactory` and `inSampleSize`, downsampled to the node's laid-out size (screen size when an axis wraps) and never above 4 Mi pixels. The decoded-bitmap cache keys on asset id and a power-of-two size bucket, evicts least recently used first and holds at most 32 MiB of decoded pixels (a larger single bitmap is drawn but not retained). A replaced, removed or cleared asset drops its decoded copies immediately and showing nodes reload; uploading a previously missing id fills the placeholder.
 
-A nav item draws its `image` when it is ready, then its built-in `icon`, then a gray
-square. While an image decodes the node shows a plain gray box. An unknown asset id, a
-file the OS evicted from the cache directory (the store still lists it but `read`
-returns null) or undecodable bytes renders a gray box with a broken-image glyph.
+A nav item draws its `image` when ready, then its built-in `icon`, then a gray square. While an image decodes the node shows a plain gray box; an unknown id, a file the OS evicted from the cache directory (the store lists it but `read` returns null) or undecodable bytes renders a gray box with a broken-image glyph.
 
-`show_prototype` lists the referenced ids the device has no copy of in
-`prototype_result.missingAssets`, in first-use order. It is a warning: `success` stays true
-and the prototype is shown with placeholders, so the host can upload the assets and the
-nodes fill in without another `show`. The field is omitted when nothing is missing and
-from every other result, so older hosts see the frame they always did. An id the store
-lists but whose file was evicted is not reported at `show` time; it renders the
-placeholder. Dismissal clearing is unchanged.
+`show_prototype` lists referenced ids the device has no copy of in `prototype_result.missingAssets`, in first-use order. It is a warning: `success` stays true and placeholders show, so the host can upload and the nodes fill in without another `show`. The field is omitted when nothing is missing and from every other result. An id the store lists but whose file was evicted is not reported at `show`; it renders the placeholder.
 
 Host surface: the `prototype` tool's `show` takes
 `assets: [{id, path}]`, an absolute daemon-readable file path per asset. The host
@@ -881,14 +788,120 @@ appear, disappear or change (`animateContentSize`), gated by the same
 motion-enabled check, so a sibling slides into the freed space instead of
 jumping.
 
-A node's optional `transition` picks the `visibleWhen` enter/exit: `none`
+A non-stack node's optional `transition` picks the `visibleWhen` enter/exit: `none`
 (instant), `fade`, `expand` (grow/shrink) or `slide` (vertical slide with a
 fade). Absent keeps the default fade + expand. It has no effect on nodes
-without `visibleWhen`, or when motion is off.
+without `visibleWhen`, or when motion is off; a show reports the advisory
+`transition-without-visible-when` accessibility finding for that case.
 
 A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
 motion on it animates with a short spring; with `motion: "none"` or animator
 scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
+
+### Motion-active signal (#15114)
+
+Fades and scales change no node, so two identical hierarchy reads do not prove a
+prototype has stopped moving. The prototype window's entry in a hierarchy capture
+carries `prototypeMotion: {active, loops}` next to `prototypePlacement`
+(`prototype_window_metadata_v1`; older APKs omit it and hosts read absence as
+settled). `active` counts the animations that will finish: `visibleWhen` and
+retained-visibility transitions, `animate` style animations, `pressScale`,
+container size changes, swipe-row settles and pager scrolls. `loops` counts
+intentional infinite animations (today only the shimmer) and is ignored by hosts.
+`observe(waitFor: stable)` and the launcher/SystemUI quiet-tree wait do not settle
+while `active` is positive and stay bounded by their usual timeout. The count is
+zero after a single frame under `motion: "none"` or animator scale 0.
+
+### Screen map (#14125)
+
+`prototype {action:"screenMap", spec | specPath}` is host-only (no device request). It walks the
+spec, after component expansion, and returns `screenMap {nodes, edges}` plus a `mermaid` flowchart.
+Nodes are the root, each `stack` screen (`stack:<id>/<screen>`, `start` on the start screen), each
+`pager` page (`pager:<id>/<index>`, labelled from a `tabBar` or `bottomNav` that names the pager),
+`bottomSheet` and `dialog`. Edges are `push`, `replace`, `pop`, `popToRoot` and `setPage` actions, from
+the enclosing screen, each tagged with the `testTag`, `id` and text or label of the node that runs it
+and its spec path. A `pop` targets `back` (the previous screen is runtime state), and `setPage` with
+`next` or `prev` keeps the authored word. `visibleWhen` alternatives and sheet or dialog opening by
+state are not resolved. The dynamic cross-check and the diff against `getNavigationGraph` are not built.
+
+### Stack transitions
+
+`prototype_stack_transitions_v1` gates every explicit stack `transition` and push/replace
+`transition` override. Omission means `platform`; pop/popToRoot have no override. The contract
+is validated by both agents, and both advertise the capability.
+
+| Value      | Platform behaviour                         |
+| ---------- | ------------------------------------------ |
+| `platform` | Native navigation animation (default).     |
+| `slide`    | Directional screen slide, reversed on pop. |
+| `fade`     | Screen crossfade.                          |
+| `none`     | Instant screen change.                     |
+
+Android slides enter from the end edge with 30% outgoing parallax, mirrored in RTL; pop and
+popToRoot reverse that direction. Platform replace crossfades. Animations finish within 300 ms.
+`motion: "none"` and animator duration scale 0 snap immediately. The reduced-motion composition
+hook changes slides to crossfades; system preference wiring is deferred to #15115.
+
+Activity hosts scrub the pop with predictive back on API 34+, settle on commit, and restore the
+current screen on cancellation. Earlier APIs pop with the ordinary animation. Overlay windows
+and authored actions use ordinary transitions. Each path entry owns its scroll offsets, retained
+while covered and discarded on pop, replacement or removal. Settled screen containers expose
+`paneTitle`; outgoing content leaves composition and semantics after the animation.
+
+Stack transitions, including a predictive-back scrub, count in the motion-active window signal
+(#15114), so `observe(waitFor: stable)` waits them out.
+
+A stack's `transition` is the screen navigation animation only. The stack's own `visibleWhen`
+uses the default visibility animation; wrap the stack in a box to give that a custom transition.
+
+### Motion v2 (#14208, `prototype_motion_v2`, not device-verified)
+
+- **Animated style.** A node's `animate: {durationMs?, easing?}` (0–2000 ms, default 300;
+  `standard` (default), `emphasized`, `linear` or `spring`, which ignores the duration) makes
+  changes to its `alpha`, `offset`, `scale`, `rotation`, `background` and `color` animate, for
+  example a heart that grows and turns red when a `styleWhen` matches. Without `animate` those
+  changes stay instant.
+- **Scale and rotation.** Style `scale` (0–4) and `rotation` (-360..360 degrees) are drawn about
+  the node's centre without changing its layout slot, like `offset`; `styleWhen` can set them.
+- **Transitions.** `transition` also takes `slideStart` and `slideEnd`, which slide in from and out
+  to that edge (a drawer), and `scale`, which scales in with a fade. Start and end follow the layout
+  direction, so drawers mirror in right-to-left locales.
+- **Zoomable images.** An `image` with `zoomable: {maxScale}` (1–8) pinches between 1 and
+  `maxScale`, pans within its own bounds once zoomed, and toggles between 1x and 2x (or
+  `maxScale`) on a double tap; TalkBack gets "Zoom in" and "Zoom out" actions. The zoom is clipped
+  to the image's box and does not change its layout or reported bounds. `onTap` still runs; a
+  zoomable image cannot also have `onDoubleTap` (rejected at `<path>.zoomable`).
+- **Reduced motion.** Under `motion: "none"` or animator duration scale 0, style changes and
+  transitions snap, so `observe` and screenshots stay deterministic. Zoom changes are always applied
+  directly.
+
+Android draws scale and rotation with a `graphicsLayer`, animates with `animateFloatAsState` and
+`animateColorAsState`, and zooms with `transformable`. The iOS agent does not implement motion v2
+yet and does not advertise the capability (#14684), so the host refuses these fields there.
+
+### Transition choreography (#15247, `prototype_choreography_v1`, not device-verified)
+
+- **Delayed enters.** `transition` also takes `{type, delayMs?}` (`delayMs` 0-600 ms) in place of
+  the plain name; the enter starts after the delay and runs a 300 ms tween. A delay applies to
+  enters only, so a hidden node still leaves at once.
+- **`blurReplace`.** A blur and fade: the node enters from a 12 dp blur that clears as it fades in,
+  and leaves the other way. `Modifier.blur` does nothing below Android 12, which leaves the plain
+  fade there.
+- **Stagger.** A `box`, `row` or `column` takes `stagger: {ms, order?}` (`ms` 0-100; `order`
+  `forward` (default), `reverse` or `center`). Its direct children with `visibleWhen` enter one
+  after another in layout order, each `ms` apart, including the children a `repeat` makes. A child's
+  own `transition.delayMs` adds to its stagger wait.
+- **Limit.** No child waits more than 600 ms in all. The validator counts the children and a
+  literal `repeat` and rejects a longer wait at `<path>.stagger`; a data-bound `repeat` has no
+  static count, so the renderer clamps the wait to 600 ms instead.
+- **Reduced motion.** Under `motion: "none"` or animator duration scale 0 nothing animates, so no
+  delay applies and `observe` sees the settled tree.
+- **Retained subtrees.** A large `fade` or `none` subtree that the renderer keeps composed while
+  hidden (a scroll list) still fades without the delay.
+
+The render model carries each child's wait as `enterDelayMs` (stagger rank times `ms` plus its own
+delay, at most 600), so the stagger is decided with the tree and not while it draws. The iOS agent
+does not advertise the capability yet, so the host refuses these fields there.
 
 ## Actions and state
 
@@ -933,10 +946,8 @@ devices are refused before upload, display or patch dispatch. The `prototype_eve
 `contextTruncated: true` only when truncated; otherwise the field is omitted, never false.
 `awaitEvent` and host status preserve these fields.
 
-No scripts, callbacks, expressions, or implicit navigation. `setState` must
-preserve any text-field, selection, or sheet binding's scalar type at runtime;
-renderer enforcement is part of #9300. Event sequence and transmission are
-#9298/#9303. Dismissal does not remove the host's safety responsibilities.
+No scripts, callbacks, expressions or implicit navigation. `setState` must preserve a text-field, selection
+or sheet binding's scalar type at runtime (renderer-enforced, #9300).
 
 ### Data actions (#12519)
 
@@ -972,15 +983,13 @@ added: `name` is the written `/data/...` path (for an append, the array) and `pa
 is a data path must carry a valid payload or the host drops it. `awaitEvent` returns it like any
 other event.
 
-The Android runtime (`PrototypeRuntime.writeData`, over the shared `PrototypeDataWriter` that mirrors
-`applyPrototypeDataWrite`) applies a write to an immutable copy of `/data`, so Compose re-renders
-`repeat` and `{data: ...}` bindings from the new spec. A refused write (a typed error, an unresolvable
-value binding, or rows the renderer cannot take) changes and emits nothing, is logged, and the rest of
-the action list still runs. Each accepted write takes its own revision, so a state write later in the
-same list takes a later one. The event carries the value only while the payload fits
-`MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`; otherwise it is left out and the host stops tracking the spec. With
-no host connected, a device-persistent prototype's write events wait in `PrototypeOfflineEventBuffer`
-like every other event.
+Android: `PrototypeRuntime.writeData` (over the shared `PrototypeDataWriter`, a mirror of
+`applyPrototypeDataWrite`) applies a write to an immutable copy of `/data` and Compose re-renders `repeat`
+and `{data: ...}` bindings. A refused write (typed error, unresolvable value binding, rows the renderer
+cannot take) changes and emits nothing, is logged, and the rest of the list still runs. Each accepted write
+takes its own revision. The event carries the value only while the payload fits
+`MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`; otherwise it is left out and the host stops tracking the spec. With no
+host connected, a device-persistent prototype's write events wait in `PrototypeOfflineEventBuffer`.
 
 **Revisions and host patches.** The device has one revision counter per prototype, shared with iOS
 (#13040): every `show` takes the next revision (the first show of an id is revision 1, a re-show
@@ -1003,10 +1012,9 @@ The agent's `/data` patch and a device write must not silently lose each other, 
    `/data` patch applies the same rule against its own history. `replaceNode` and `/state` ops are
    unaffected.
 
-The smallest sound rule is therefore: a device write bumps the device revision and is reported in the
-change event; a stale `baseRevision` gets the existing conflict. Host-side bookkeeping lives in
-`PrototypeShownSpecs` (`recordDeviceDataWrite`, `dataPatchGuard`), called from
-`InMemoryPrototypeStatusStore.recordEvent` and `performPrototypePatch`.
+A device write bumps the device revision and is reported in the change event; a stale `baseRevision` gets
+the existing conflict. Host bookkeeping lives in `PrototypeShownSpecs` (`recordDeviceDataWrite`,
+`dataPatchGuard`), called from `InMemoryPrototypeStatusStore.recordEvent` and `performPrototypePatch`.
 
 ### Storage (#12522)
 
@@ -1049,10 +1057,9 @@ response (#12523) that writes state or data. A write that would take the stored 
 that key stays) and the key is listed in `skippedKeys` of the inspect report. Stored values are part
 of the device's per-id state: they survive a dismiss, a process restart and a saved prototype's relaunch.
 
-**Precedence (ADOPTED DECISION).** #12522 was labelled needs-decision; its proposal is adopted as
-the decision, and the rules below are the contract. They are implemented once as the pure function
-`restorePrototypeStorage` (`src/features/prototype/prototypeStorageRestore.ts`), the reference the
-device runtimes follow, as `applyPrototypeDataWrite` is for data actions.
+**Precedence (adopted decision, #12522).** The rules below are implemented once as the pure function
+`restorePrototypeStorage` (`src/features/prototype/prototypeStorageRestore.ts`), the reference the device
+runtimes follow, as `applyPrototypeDataWrite` is for data actions.
 
 1. On the next show of the same `id`, stored values replace the spec's values for the keys the spec
    lists. This applies to a same-id replacement, to a show after a dismiss and to a saved prototype's
@@ -1095,56 +1102,42 @@ device runtimes follow, as `applyPrototypeDataWrite` is for data actions.
   the same id starts clean. `delete_saved_prototype` needs no new flag. On iOS the saved prototype is
   its own app, so deleting the app removes its storage with it.
 
-**Native lanes need.** The Kotlin and Swift runtimes must: add `storage` to the spec model
-(the contract and its validator already accept it), the two limits to their constants (`MAX_PROTOTYPE_STORAGE_BYTES`,
-`MAX_PROTOTYPE_STORAGE_KEYS`), advertise `prototype_storage_v1`, persist and restore per the rules
-above, report `storage` in the inspect entry, handle `clear_prototype_storage` (a `ClearPrototypeStorage`
-serializer with `requestId` and `id`; replies carry `cleared`), and clear storage on `delete_saved_prototype`.
-
-**Android CtrlProxy (#12525).** CtrlProxy advertises `prototype_storage_v1` and implements the rules
-above in `PrototypeStorageRestorer` (`android/protocol`, the pure twin of `restorePrototypeStorage`),
-`PrototypeStoragePersistence` / `PrototypeStorageSession` and a `PrototypeStorageStore`
+**Android CtrlProxy (#12525).** Advertises `prototype_storage_v1`; the rules live in
+`PrototypeStorageRestorer` (`android/protocol`, the pure twin of `restorePrototypeStorage`),
+`PrototypeStoragePersistence` / `PrototypeStorageSession` and `PrototypeStorageStore`
 (`android/control-proxy/.../prototype`).
 
 - **Store.** `PrototypeStorageDirectoryStore` keeps one document per id at
-  `filesDir/prototype-storage/<slug>-<hash16>.json` (the slug prefix is the one saved prototypes use,
-  followed by 16 hex characters of the id's SHA-256): `{"id", "version", "values": {"state:dark": true,
-  "data:/cart": {...}}}`. A save writes `<name>.tmp`, syncs and renames it over the target, so a reader
-  sees the old or the new document. An unparsable document, a wrong shape or another id's document is
-  `Corrupt`: the show uses the spec's values, logs a warning and deletes it.
-- **Show.** The restore runs before the runtime is built, so the first draw already shows the stored
-  values; the runtime starts at the spec's revision and no `change` event is sent. Dropped entries
-  (version, unlisted, no longer fits) are deleted at once. The restored spec must still pass the same
-  validation as a shown one (a stored text that breaks a field's `maxLength` would not), otherwise
-  every stored value is dropped. A same-id show first flushes the shown prototype's pending write, so
-  it restores what the user last did.
-- **Write-back.** After each interaction and each patch, the session compares the listed keys with
-  what it last saw and stores those that changed: a state write, a device data action or a host
-  patch. Only changed keys are stored, so an untouched key keeps following the spec's value. The first
-  change of a burst arms one write `PROTOTYPE_STORAGE_DEBOUNCE_MILLIS` (500 ms) later and changes
-  inside the window ride along; dismissal (any reason, including teardown), replacement and the saved
-  activity's `onStop` flush at once. A write that fails is logged and retried at the next flush.
-  `request` responses (#12523) are covered when they land, because they write through the same state
-  and data paths.
-- **Limit.** Per id the stored entries (key bytes plus compact JSON) are summed against
-  `MAX_PROTOTYPE_STORAGE_BYTES`. A write that would pass it applies live, is not stored, keeps the
-  key's previous stored value and lists the key in `skippedKeys` until a later write fits.
-- **Removed pointers.** A listed `data:` pointer that a data action removes loses its stored value
-  (JSON `null` is not stored), so the spec's value returns on the next show.
-- **Surfaces.** The overlay (`PrototypeController`), `persistence: "device"` prototypes (same
-  controller) and `SavedPrototypeActivity` (its own persistence over the same store) all use it.
-  A service prototype and the saved activity of the same id share one file; the last write wins.
-- **Host actions.** `clear_prototype_storage` is answered by one `prototype_result` with `cleared`.
-  It clears the shown session (and its pending write) or, for an id nobody shows, the document. The
-  prototype on screen keeps its live values. `delete_saved_prototype` clears the id's storage after
-  deleting the saved copy. Each `inspect_prototypes` entry carries `storage` when its spec declares
-  `storage`: `keys` holds only the keys that currently hold a stored value.
-- **Reinstall (not done; follow-up).** Stored values live in `filesDir`, so they survive a dismiss,
-  a process restart and a saved prototype's launch but not an uninstall, a data clear or the
-  reinstall fallback. The #12268 host mirror (`savedPrototypeMirror.ts`) records a saved prototype
-  from what the host sent at `save`; the stored values exist only on the device, so mirroring them
-  needs a device-to-host export of a prototype's storage (a new wire message and a
-  `restoreSavedPrototypes` step that re-seeds it). That host work is not built here.
+  `filesDir/prototype-storage/<slug>-<hash16>.json` (slug as saved prototypes use, then 16 hex chars of the
+  id's SHA-256): `{"id", "version", "values": {"state:dark": true, "data:/cart": {...}}}`. A save writes
+  `<name>.tmp`, syncs and renames, so a reader sees the old or new document. An unparsable document, wrong
+  shape or another id's document is `Corrupt`: the show uses the spec's values, logs a warning and deletes
+  it.
+- **Show.** Restore runs before the runtime is built, so the first draw has the stored values; the runtime
+  starts at the spec's revision and sends no `change`. Dropped entries are deleted at once. The restored
+  spec must pass the same validation as a shown one (a stored text breaking `maxLength` would not),
+  otherwise every stored value is dropped. A same-id show first flushes the shown prototype's pending write.
+- **Write-back.** After each interaction and patch the session compares the listed keys with what it last
+  saw and stores only those that changed, so an untouched key keeps following the spec. The first change of
+  a burst arms one write `PROTOTYPE_STORAGE_DEBOUNCE_MILLIS` (500 ms) later; dismissal (any reason,
+  including teardown), replacement and the saved activity's `onStop` flush at once. A failed write is
+  logged and retried at the next flush. `request` responses are covered because they write through the same
+  paths.
+- **Limit.** Per id, entries are summed against `MAX_PROTOTYPE_STORAGE_BYTES`. A write that would pass it
+  applies live, is not stored, keeps the key's previous stored value and lists the key in `skippedKeys`
+  until a later write fits.
+- **Removed pointers.** A listed `data:` pointer removed by a data action loses its stored value (JSON
+  `null` is not stored), so the spec's value returns on the next show.
+- **Surfaces.** The overlay (`PrototypeController`), `persistence: "device"` prototypes and
+  `SavedPrototypeActivity` all use it; a service prototype and the saved activity of the same id share one
+  file (last write wins).
+- **Host actions.** `clear_prototype_storage` clears the shown session (and its pending write) or, for an id
+  nobody shows, the document; the prototype on screen keeps its live values. `delete_saved_prototype`
+  clears the id's storage after deleting the saved copy.
+- **Reinstall (not built).** Stored values live in `filesDir`: they survive dismiss, process restart and a
+  saved prototype's launch, not an uninstall, data clear or the reinstall fallback. The #12268 host mirror
+  records saved prototypes from what the host sent at `save`; mirroring stored values would need a
+  device-to-host export (a new wire message plus a `restoreSavedPrototypes` re-seed).
 
 ### Request action (#12523)
 
@@ -1173,7 +1166,7 @@ without them. A device advertising `prototype_network_v1` also writes `/data` fo
 
 | Field                  | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `url`                  | Required, at most 2048 characters. Any absolute `http` or `https` URL, with **no host allowlist** (localhost, loopback and private addresses included). Takes the text placeholders of any text field: `{key}` (state), `{data:/pointer}`, `{item.field}`, `{index}`. Without a placeholder it must parse as an http(s) URL; with one, only the literal `http://` or `https://` prefix is checked, because the rest is known when the request runs. The issue's `{state:key}` spelling does not exist in the placeholder grammar; use `{key}`.                                                                                                                                                                                                                                                                                                        |
+| `url`                  | Required, at most 2048 characters. Any absolute `http` or `https` URL. Host requests apply the egress policy described below. Takes the text placeholders of any text field: `{key}` (state), `{data:/pointer}`, `{item.field}`, `{index}`. Without a placeholder it must parse as an http(s) URL; with one, only the literal `http://` or `https://` prefix is checked, because the rest is known when the request runs. The issue's `{state:key}` spelling does not exist in the placeholder grammar; use `{key}`.                                                                                                                                                                                                                                                                                                                                  |
 | `method`               | `GET` (default), `POST`, `PUT`, `PATCH`, `DELETE` or `HEAD`, the same `PROTOTYPE_REQUEST_METHODS` the host executor accepts. `body` is refused with `GET` and `HEAD`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `headers`, `query`     | Up to 16 entries each: a literal string (text placeholders apply) or a value binding `{state}`, `{data}`, `{value}`, and `{item}` / `{index: true}` in a repeat. A bound value must be a string, number or boolean. Header names must be HTTP tokens. Query entries are set on the URL in sorted key order (UTF-16 code units, like JS `sort()`), on every runtime, so the resolved URL does not depend on authoring order. With no authored `query` the URL's raw query is kept verbatim. Each authored key replaces the value at its first existing piece in place and removes later duplicates; new keys are appended in sorted order. Only those pieces are re-encoded (form encoding: space is `+`, `~` is `%7E`); untouched pieces keep their exact spelling (`?flag`, `%20`). E.g. `?a=1&b=x%20y&a=3&c` with `{a:"2"}` gives `?a=2&b=x%20y&c`. |
 | `body`                 | A value binding, so a literal is `{value: json}`. Non-string values are sent as JSON with `Content-Type: application/json` unless a header sets one.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -1206,7 +1199,7 @@ the native runtimes):
    (`message` `HTTP <status>`). The status decides this before the body is consumed: a non-2xx body
    is never read or capped (it is reported as `null`), so an oversized error page is `http_error`,
    not `too_large`; the size cap applies to 2xx bodies only. A transport failure is an error with the executor's code (`timeout`,
-   `too_large`, `connection_refused`, `cancelled`, `invalid_url`, `invalid_request`, `network`,
+   `too_large`, `connection_refused`, `blocked_destination` (the destination is not permitted), `cancelled`, `invalid_url`, `invalid_request`, `network`,
    `too_many_in_flight`).
 3. With `into`, the metadata is then written to **`<into>__meta`**: the same pointer with `__meta`
    appended to its last segment (`/data/feed` reports at `/data/feed__meta`; `prototypeRequestMetaPath`).
@@ -1229,7 +1222,7 @@ authored `emit` with that name is a validation error) and a payload decoded by
 {
   "requestId": "r-1",
   "method": "GET",
-  "url": "http://localhost:8080/feed?q=cats",
+  "url": "https://api.example.com/feed?q=cats",
   "via": "host",
   "into": "/data/feed",
   "outcome": "success",
@@ -1255,67 +1248,142 @@ manifest, like `prototype_request`. Beyond `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT` a 
 are reversed as described in [Loopback requests from the device](#loopback-requests-from-the-device-12530).
 
 **Android runtime (#12528).** CtrlProxy advertises both capabilities and runs the action in
-`PrototypeRuntime`; the Kotlin twins of the TypeScript rules live in the `protocol` module
-(`PrototypeRequest.kt`: the resolver, `PrototypeRequestOutcome` and the event payload) and are
-tested against the same fixture, `request-actions.json`.
+`PrototypeRuntime`; the Kotlin twins of the TypeScript rules (`PrototypeRequest.kt`: resolver,
+`PrototypeRequestOutcome`, event payload) are tested against the same fixture, `request-actions.json`.
 
-- `statusKey` becomes `loading` in the tap's own interaction. The request then waits off the
-  interaction on the controller's scope, and its completion runs under the controller's lock, so a
-  response never lands in the middle of a tap. The completion order is the contract's: `into`,
-  `<into>__meta`, `statusKey`, the `prototype_request` event, then `onSuccess` / `onError`. A request
-  that cannot start (an unresolvable binding, or the in-flight cap) finishes at once as an error
-  without a `loading` step.
-- Both transports implement `PrototypeHttpClient`, so the runtime does not know which one ran.
-  `via: "host"` sends a `prototype_request` frame to the latest connected host over the CtrlProxy
-  socket and waits for the `prototype_response` with the same `requestId` (a host that never
-  answers times out five seconds after the request's own timeout; no host connected fails at once
-  with `network` and a message naming `via: "host"`). `via: "device"` is one Retrofit service
-  (`PrototypeHttpService`) over an injected `OkHttpClient` with raw `RequestBody` / `ResponseBody`
-  and no converter; the response is read with the `MAX_PROTOTYPE_RESPONSE_BYTES` cap, and the
-  contract timeout is the whole-call timeout. The two frames are plain serializable classes
-  (`PrototypeNetworkFrames.kt`), kept out of the `WebSocketRequest` / `WebSocketResponse` hierarchies
+- `statusKey` becomes `loading` in the tap's own interaction. The request then waits off the interaction on
+  the controller's scope and completes under the controller's lock, so a response never lands mid-tap.
+  Completion order is the contract's: `into`, `<into>__meta`, `statusKey`, the `prototype_request` event,
+  then `onSuccess` / `onError`. A request that cannot start (unresolvable binding, in-flight cap) finishes
+  at once as an error without a `loading` step.
+- Both transports implement `PrototypeHttpClient`. `via: "host"` sends a `prototype_request` frame to the
+  latest connected host over the CtrlProxy socket and waits for the `prototype_response` with the same
+  `requestId` (a silent host times out five seconds after the request's own timeout; no host fails at once
+  with `network` naming `via: "host"`). `via: "device"` is one Retrofit service (`PrototypeHttpService`)
+  over an injected `OkHttpClient` with raw bodies and no converter, read with the
+  `MAX_PROTOTYPE_RESPONSE_BYTES` cap; the contract timeout is the whole-call timeout. The two frames
+  (`PrototypeNetworkFrames.kt`) stay outside the `WebSocketRequest` / `WebSocketResponse` hierarchies
   because the host reads them outside its Kotlin-mirrored wire manifest.
-- A request to any absolute http or https URL is allowed: CtrlProxy declares
-  `android.permission.INTERNET` and a `network_security_config` with `cleartextTrafficPermitted="true"`
-  on the `base-config`. There is no host allowlist; CtrlProxy is sideloaded over adb and never
-  distributed.
-- Saved prototypes (`SavedPrototypeActivity`) run `via: "device"` requests on the same Retrofit
-  client; `via: "host"` finishes as an `invalid_request` error, since no host connection serves the
-  activity.
+- Any absolute http(s) URL is allowed: CtrlProxy declares `android.permission.INTERNET` and a
+  `network_security_config` with `cleartextTrafficPermitted="true"`. There is no host allowlist; CtrlProxy
+  is sideloaded over adb and never distributed.
+- Saved prototypes (`SavedPrototypeActivity`) run `via: "device"` on the same client; `via: "host"` finishes
+  as an `invalid_request` error because no host serves the activity.
 
-Worked example: a feed that shows a spinner, the result and an error (state
-`{"feedStatus": "idle", "search": "cats"}`, data `{"title": "Feed"}`):
+The shared fixture `test/fixtures/prototype-spec/valid/request-actions.json` covers both `via` values,
+`onSuccess` / `onError`, nesting, `statusKey` and `visibleWhen` on the status. A typical feed shows a
+spinner with `visibleWhen: {key: "feedStatus", equals: "loading"}` and the failure with
+`{data:/feed__meta/error/message}` under `equals: "error"`.
+
+### Platform actions and events (#14294)
+
+The platform vocabulary is the one shape every platform integration uses (notifications, media,
+location, share and so on): a `platform` action calls the platform from a tap, root `platform.on`
+handlers react to platform events, `{platform}` reads show live platform state, and a root
+`requires` block declares up front what the spec needs. It is modelled on the `request` action.
+This section is the contract and the host validation; running the calls is the device module
+registries' job (#14295 on Android, #14296 on iOS), and no production runtime advertises it yet.
 
 ```json
-[
-  {
-    "type": "text",
-    "text": "Loading",
-    "visibleWhen": { "key": "feedStatus", "equals": "loading" }
+{
+  "requires": {
+    "platform": ["notifications", "media"],
+    "permissions": [{ "name": "notifications", "purpose": "Alerts when a new episode is out" }],
+    "background": ["audio"]
   },
-  {
-    "type": "text",
-    "text": "{data:/feed__meta/error/message}",
-    "visibleWhen": { "key": "feedStatus", "equals": "error" }
-  },
-  {
-    "type": "button",
-    "label": "Load",
-    "onTap": [
-      {
-        "type": "request",
-        "url": "http://localhost:8080/feed",
-        "query": { "q": { "state": "search" } },
-        "into": "/data/feed",
-        "statusKey": "feedStatus"
-      }
-    ]
+  "platform": {
+    "on": {
+      "media.ended": [{ "type": "setState", "key": "playing", "value": false }]
+    }
   }
-]
+}
 ```
 
-The shared native-parity fixture `test/fixtures/prototype-spec/valid/request-actions.json` covers
-both `via` values, `onSuccess` / `onError`, nesting, `statusKey` and `visibleWhen` on the status.
+```json
+{
+  "type": "platform",
+  "call": "notifications.post",
+  "args": { "title": { "value": "New episode" }, "body": { "data": "/episodes/0/title" } },
+  "into": "/data/lastPost",
+  "statusKey": "postStatus",
+  "timeoutMs": 5000,
+  "onSuccess": [],
+  "onError": []
+}
+```
+
+**Modules.** The contract's top-level `platformModules` table is the single source for every call
+and event: each module names its capability, and each call its arguments (with the contract rule
+a literal `{value}` argument must satisfy), the permissions and background names it needs, and a
+`sensitive` flag for the threat model (#14293). The validators and the capability gates read the
+table, so a module is added by adding its entry. The placeholder module `test` (`test.echo`,
+`test.protected`, the `test.tick` event, capability `prototype_platform_test_v1`) makes the
+vocabulary testable before any real module exists; no production runtime advertises it.
+
+| Field                  | Rule                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `call`                 | Required: `"<module>.<op>"` naming a call in `platformModules`, else `Unknown platform call` at `.call`. Its module must be listed in `requires.platform`, its permissions in `requires.permissions` and its background names in `requires.background`; each error is at `.call`.                                                                                                         |
+| `args`                 | Up to `MAX_PROTOTYPE_PLATFORM_ARGS` (16) entries, exactly the call's declared arguments (`Unknown argument`, `Required argument` at `.args.<name>`). Each is a value binding: `{value}`, `{state}`, `{data}`, `{platform}`, `{item}` / `{index: true}` in a repeat, and `{event}` inside a handler. A literal `{value}` must satisfy the argument's rule (error at `.args.<name>.value`). |
+| `into`                 | Optional `/data/<pointer>`, the `request` rule: an object member, not an array element, so `<into>__meta` can be written beside it. `/platform` is read-only, so an `into` under it is refused. Written with `applyPrototypeDataWrite` and reported as a `change` event.                                                                                                                  |
+| `statusKey`            | A declared **string** state key, moved `loading` → `success` or `error`, as for `request`.                                                                                                                                                                                                                                                                                                |
+| `timeoutMs`            | Optional integer, 1 to `MAX_PROTOTYPE_PLATFORM_TIMEOUT_MS` (300000, long enough for a system picker); the default is `DEFAULT_PROTOTYPE_PLATFORM_TIMEOUT_MS` (10000).                                                                                                                                                                                                                     |
+| `onSuccess`, `onError` | Optional action lists (1 to 32). They count toward `MAX_PROTOTYPE_ACTION_DEPTH`.                                                                                                                                                                                                                                                                                                          |
+
+A failed call writes `{code, message}` to `<into>__meta.error`, with `code` one of `unsupported`,
+`unavailable`, `permission_denied`, `invalid_args`, `cancelled`, `timeout`, `too_many_in_flight`
+(more than `MAX_PROTOTYPE_PLATFORM_CALLS_IN_FLIGHT`, 4) or `platform_error`.
+
+**`requires`** is optional and strict. `platform` lists module names (1 to 32, unique, each in
+`platformModules`, else `Unknown platform module`). `permissions` lists `{name, purpose}` entries
+(1 to 16, names unique): `name` is one of the canonical permissions of #14297 (`camera`,
+`microphone`, `location`, `locationBackground`, `notifications`, `photos`, `photosAdd`, `contacts`,
+`calendar`, `bluetooth`, `nearbyWifi`, `motion`, `speech`) and `purpose`, a nonblank string of at
+most 512 characters, becomes the iOS usage string and the Android rationale. `background` lists
+the canonical background names of #14301 (`audio`, `location`, `call`, `connectedDevice`,
+`transfer`, `camera`, `microphone`, `remoteNotification`). The host reads `requires` before show
+for the gates below, and the disposable-app shell (#14184) derives its manifest and Info.plist from
+it.
+
+**Events.** `platform.on` maps `"<module>.<event>"` names (up to `MAX_PROTOTYPE_PLATFORM_HANDLERS`, 32) to action lists. An unknown event is refused at `platform.on["<name>"]`, and its module must be
+declared. A handler runs atomically under the interaction lock, like a tap, and may use `push` /
+`pop`, data and state actions and `platform` calls. Only inside a handler, `{event: "/pointer"}`
+reads the delivered event's data, scoped the way `{item}` is scoped to a repeat; anywhere else it
+is refused with `{event} is only available inside a platform.on handler`.
+
+**Platform state** is device-owned JSON under `/platform/<module>/...` (for example
+`/platform/permissions/camera`), at most `MAX_PROTOTYPE_PLATFORM_STATE_BYTES` (65536). It is read
+with a `{platform:/pointer}` text placeholder, a `{platform: pointer}` value binding and a
+`{platform: pointer, equals | notEquals | gt | lt}` condition, parallel to the `{data}` forms; the
+pointer's first segment names the module, which must be declared. It is not patchable, not
+storable and not part of the `/data` revision log.
+
+**Reported events.** No wire field is added. A finished call is an `emit` named
+`prototype_platform` with payload `{callId, call, outcome, error?, durationMs, simulated?}`, sent
+after the `into`, `__meta` and `statusKey` writes and before `onSuccess` / `onError`. A delivered
+event is an `emit` named `prototype_platform_event` with payload `{event, data, truncated?,
+simulated?}`, `data` cut to the 4 KiB emit budget with `truncated: true`. Await them with
+`awaitEvent {kind: "emit", eventName: "prototype_platform"}`; a malformed payload is dropped, as for
+requests (`prototypePlatformEvent.ts`). Authored emit names cannot start with `prototype_`, which
+generalizes the single reserved `prototype_request` name.
+
+**Capabilities.** `prototype_platform_v1` gates `requires`, `platform.on`, the `platform` action and
+`{platform}` reads; each module adds `prototype_platform_<module>_v1`, and a later op or event gets
+a `_v2` gate that checks the fields that version introduced. The gates are generated from
+`platformModules` and join `PROTOTYPE_SPEC_CAPABILITY_GATES`, so show, patch and `replaceNode`
+refuse uniformly. Because every module use must be declared in the root `requires`, which a patch
+cannot add, a patch never introduces a module the shown spec did not already require.
+
+Android's renderer accepts an identity-stable `PrototypePlatform` containing an immutable module
+registry. The host supplies modules; it retains ownership and closes them after all surfaces detach.
+The built-in device module projects the host's measured window state. Each surface subscribes to
+module state and events, and the controller shares a four-call limiter across its surfaces. Calls
+resolve arguments at invocation, wait outside the interaction lock, and commit result, metadata,
+status, outcome event and follow-ups under that lock. Replacement, reset and dismissal cancel calls;
+cancellation reports an outcome without running follow-ups. CtrlProxy registers only the device
+module in release; debug additionally registers the permission-free test module.
+
+The shared fixtures `test/fixtures/prototype-spec/valid/platform-*.json` and
+`invalid/platform-*.json` are replayed by the TypeScript, Kotlin and Swift validators.
 
 ### Conditions
 
@@ -1328,6 +1396,7 @@ A condition is exactly one of these forms. `visibleWhen` takes any of them;
 | `{key, notEquals: scalar}` | The state value differs, including when the key is missing.              |
 | `{key, gt: number}`        | The state value is a number greater than `gt`. Any other type is false.  |
 | `{key, lt: number}`        | The state value is a number less than `lt`. Any other type is false.     |
+| `{data \| platform, ...}`  | The same comparisons on a `/data` or `/platform` value (see above).      |
 | `{all: [condition, ...]}`  | Every member holds. One to 16 members.                                   |
 | `{any: [condition, ...]}`  | At least one member holds. One to 16 members.                            |
 | `{not: condition}`         | The member does not hold.                                                |
@@ -1566,18 +1635,7 @@ runs the full validator before sending. Errors preserve deterministic paths.
 The host validates state ops against the agent-declared state and leaves value
 comparison for `/state` `test` to the device; its copy cannot know user edits.
 
-Patches are FIFO per device, with one in flight at a time. A pending show makes
-patch refuse as busy. Shows are not delayed by patches. If a dispatched show
-and an acknowledged patch overlap, their device-side order is unknown: the host
-forgets its spec, warns, and requires a further successful show before patching.
-A failed dispatched show, dismissed event, successful dismiss, session release,
-device removal or unbinding also ends tracking. Inspect retains each reported tracked id
-and drops missing ids; adopted siblings do not end its tracking. A fifth-surface refusal
-with `replaceOthers: false` also retains the acknowledged specs. A timeout or connection loss after
-patch dispatch is indeterminate and requires a new show. A failure before dispatch
-keeps the tracked copy. An atomic device
-refusal leaves the tracked copy unchanged. A successful patch refreshes shown
-status data without changing `lastResult`, timestamps or event snapshots.
+Patches are FIFO per device, one in flight at a time; a pending show makes patch refuse as busy, and shows are not delayed by patches. If a dispatched show and an acknowledged patch overlap, their device-side order is unknown: the host forgets its spec, warns, and requires a further successful show before patching. A failed dispatched show, dismissed event, successful dismiss, session release, device removal or unbinding also ends tracking. Inspect retains each reported tracked id and drops missing ids (adopted siblings do not end tracking); a fifth-surface refusal with `replaceOthers: false` retains the acknowledged specs. A timeout or connection loss after dispatch is indeterminate and requires a new show; a failure before dispatch keeps the tracked copy; an atomic device refusal leaves it unchanged. A successful patch refreshes shown status data without changing `lastResult`, timestamps or event snapshots.
 
 ### Re-showing a prototype
 
@@ -1599,13 +1657,10 @@ on the tool result.
 
 ### Presenting alternatives
 
-The host has no carousel helper; `showVariants` and its on-device pick were
-removed (#10489, #10488). An agent shows one design with `show`, explains it and
-the others in the conversation, and shows the next on request, or shows one spec
-whose `pager` holds every design with a visible label per page (see the
-full-screen pager example below). The user chooses in chat; nothing waits on the
-device for a choice. `pager`, `setPage` and `{page}`/`{pageCount}` interpolation
-remain spec primitives for that.
+The host has no carousel helper (`showVariants` and its on-device pick were removed, #10489, #10488). Show
+one design with `show` and discuss the others in chat, or show one spec whose `pager` holds every design
+with a visible label per page (see the full-screen pager example). Nothing waits on the device for a
+choice.
 
 ### Loopback requests from the device (#12530)
 
@@ -1628,7 +1683,9 @@ ignored.
 - A saved prototype launched with no host connected has no host to run `adb reverse`, so its
   `via: "device"` requests to localhost fail until a host shows or re-shows it. Use a reachable
   address (or `via: "host"` while a host is attached) for prototypes meant to run unattended.
-- iOS simulators share the Mac's network, so nothing is reversed there.
+- iOS simulators share the Mac's network, so nothing is reversed there. The iOS agent refuses
+  loopback destinations for `via: "device"`; see the iOS
+  [destination policy](../ios/prototype-agent.md#destination-policy-13815).
 
 ## Data, storage and network (#12531)
 
@@ -1649,44 +1706,49 @@ A device without a capability is refused before uploads or show, with a message 
 capability. Device-side verification is the manual run in `skills/manual-test/prototype-acceptance.md`
 ("Data, storage and network").
 
-**Data actions.** Each write is applied to the shown spec's `/data` with the host's own function,
-bumps the data revision, rebuilds the drawn tree (repeat rows included) and sends one `change` event
-named for the path. A refused write changes nothing and the rest of the action list still runs. Once
-the device has written a prototype's data, a host patch to `/data` needs `baseRevision`.
-
-**Storage precedence.** On a show of an id with a `storage` block: a changed `version` discards all
-stored values; otherwise a stored value replaces the spec's for each listed key, a stored key no longer
-listed is dropped, and a stored value that no longer fits (state type changed, data of another JSON
-kind, unwritable pointer) is dropped and the spec's value stands. Writes are debounced after every
-change (user edit, data action, request response) and flushed on dismiss. `clearStorage {id}` and
-`deleteSaved` wipe an id's values.
-
-**Request lifecycle.** `statusKey` moves `loading` then `success` or `error`; a 2xx body is written to
-`into` and `{status, headers, durationMs, error?}` to `<into>__meta`; a non-2xx status, transport
-failure or a body `/data` cannot hold leaves `into` alone and sets `meta.error`. The completion is
-atomic: if the body fits but no form of `__meta` fits beside it, nothing is written but the error
-metadata. A newer request to the same `into` cancels the older (latest wins), and dismissing the
-prototype cancels its requests. Each finished request is a `prototype_request` emit event.
+Behaviour per feature lives in the sections above: a data write bumps the data revision and emits one
+`change` named for the path; storage precedence is the six rules under Storage; the request lifecycle
+(`statusKey`, `<into>__meta`, atomic completion, latest-wins cancellation, `prototype_request` event) is
+under Request action.
 
 **The two transports.**
 
 - `via: "host"` (the default): the device sends a `prototype_request` frame and the host runs the
-  fetch, so `localhost` is the host machine and any URL the host can reach works. The host needs a
+  HTTP transport, with an egress policy checked before every connection and redirect. The host needs a
   connection; with none the request fails with `network`. Closing the owning connection fails its
   calls at once, and a cancelled call sends `prototype_request_cancel` so the host frees the slot.
 - `via: "device"`: the device runs the request itself. On Android `localhost` is the device, so the
   host runs `adb reverse` for each loopback port it finds in the shown spec (see
   [Loopback requests from the device](#loopback-requests-from-the-device-12530)); on an iOS
-  simulator `localhost` is the Mac, which shares its loopback, and nothing is reversed.
+  simulator nothing is reversed and the agent refuses loopback destinations (see the iOS
+  [destination policy](../ios/prototype-agent.md#destination-policy-13815)).
 
-**No allowlist.** A request may target any absolute `http` or `https` URL. There is deliberately no host
-allowlist: the prototype tool is an authoring aid the agent already drives with full device control, and
-a spec that can reach only some hosts would break prototypes of real API integrations.
+**Host egress policy.** Host requests refuse localhost names, loopback, unspecified and link-local
+addresses, emulator host aliases, and IPv6 forms embedding those IPv4 destinations.
+SIIT and both NAT64 prefixes use the embedded IPv4 classification;
+Teredo and site-local IPv6 addresses are refused. Every DNS
+answer must be permitted; the connection is pinned to a validated IP while retaining the original
+HTTP authority and TLS hostname. Daemon HTTP ports (including the configured port and fallback
+range) and CtrlProxy's port are refused on private addresses; public addresses remain permitted on
+those ports. Redirects are checked at each hop (at most five); HTTPS-to-HTTP redirects are refused.
+An origin change removes all authored headers. Host, connection/framing, Cookie, Origin and Proxy-
+headers and Expect are not accepted from requests. Other RFC1918 destinations remain permitted
+on ordinary ports, including `10.1.2.3` and `192.168.1.10`.
+A policy refusal is `blocked_destination`: the destination
+is not permitted. Device requests retain their platform transport behavior.
+
+The host transport makes a direct connection. Node uses a fresh agent with an empty `proxyEnv`,
+ignoring HTTP(S)_PROXY, ALL_PROXY and NO_PROXY routing configuration. Bun refuses the request
+before connecting if any nonempty HTTP_PROXY, HTTPS_PROXY or ALL_PROXY variable is present
+(case-insensitive), even with NO_PROXY set; NO_PROXY alone is permitted. That refusal is a
+`network` outcome. Environment variables are never changed during a request.
+For gzip, deflate and Brotli responses, the size cap applies to decoded bytes; the returned
+headers omit content-encoding and content-length because they describe the encoded body.
 
 **Cleartext and transport security.** CtrlProxy declares `INTERNET` and a `network_security_config`
 with cleartext permitted, so `http://` works for `via: "device"` on Android. On iOS, `via: "device"`
-runs inside the target app and obeys its App Transport Security: `localhost` and IP addresses are
-exempt, other cleartext hosts fail with `network` and a message pointing to `via: "host"` or `https://`.
+runs inside the target app and obeys its App Transport Security: IP addresses are exempt (`localhost`
+is too, but the agent's destination policy refuses it), other cleartext hosts fail with `network` and a message pointing to `via: "host"` or `https://`.
 `via: "host"` is not subject to ATS.
 
 **Saved prototypes.** A saved Android prototype (see
@@ -1804,44 +1866,42 @@ inset padding does not reinterpret their coordinate origin.
 
 ## Lifecycle and safety
 
-#12064 reverses the #9307 "non-removable dismiss control" default: chromeless
-fullscreen is the default on a device advertising `prototype_window_chrome_v1`,
-the bar is opt-in, and CtrlProxy's host escape is a stationary two-finger long
-press for 1 s anywhere on the window that reveals a small dismiss pill for 5 s.
-Recognition cancels authored touch handling and swallows the rest of that gesture.
-A second hold restarts the pill's timeout; a replacing show hides it. A
-host-owned wrapper exposes the `Dismiss AutoMobile prototype` accessibility
-dismiss action without touch, and touch exploration (TalkBack) keeps the pill
-permanently visible. Both the pill and the accessibility action dismiss with
-reason `user` and remain usable at spec opacity 0. Back is not the exit: its
-existing behavior is unchanged, dismissing only while a text field makes the
-window focusable. Agent dismiss, a replacing show, authored dismiss, the
-five-minute session idle TTL, last-client disconnect and service teardown keep
-working. Home hides a session prototype when its app leaves the foreground.
-A CtrlProxy that does not advertise `prototype_window_chrome_v1` keeps the bar,
-and explicit `none` is refused by the host.
+#12064 reverses the #9307 "non-removable dismiss control" default: chromeless fullscreen is the default on
+a device advertising `prototype_window_chrome_v1`, and the bar is opt-in. The host escape is a stationary
+two-finger long press (1 s) anywhere on the window that cancels authored touch handling for that gesture and
+reveals a small dismiss pill for 5 s (a second hold restarts the timeout; a replacing show hides it). A
+host-owned wrapper exposes the `Dismiss AutoMobile prototype` accessibility dismiss action without touch,
+and touch exploration (TalkBack) keeps the pill permanently visible. Both dismiss with reason `user` and
+stay usable at spec opacity 0. Back is not the exit: it only dismisses while a text field makes the window
+focusable. Agent dismiss, a replacing show, authored dismiss, the five-minute idle TTL, last-client
+disconnect and service teardown keep working. Home hides a session prototype when its app leaves the
+foreground. A CtrlProxy without the capability keeps the bar and the host refuses explicit `none`.
 
 Two safety cases still need device verification: 3-button navigation with
 `layer: "system"`, and a prototype shown with no application window in front
 (which Home does not hide).
 
-With `none`, authored content fills the full window including under the status
-bar; top content needs top-edge `safeAreaPadding`, and relative sheet detents use
-the full window height. With `bar` (including the older-device fallback), the
-translucent host row remains above clipped authored content, independent of spec
-style and opacity; its height is excluded from the authored viewport.
-Both fullscreen modes keep the window alpha at 1 and fade only authored content
-and its scrim, so the host dismiss control never inherits spec opacity.
-A `persistence: "device"` prototype outlives its host session: it is not dismissed
-when the last client disconnects (including a show queued after that edge), it
-has no idle TTL, and its uploaded assets are kept until it is dismissed. Because
-nobody may be connected to remove it, sheet and floating windows also carry an
-opaque “Close” control drawn above the authored content, and spec opacity fades
-only the content. Fullscreen defaults to `bar`; a device advertising
-`prototype_window_chrome_v1` also honours explicit `none` with the hidden escape.
-It ends through that control, the fullscreen dismiss row or revealed pill
-(`user`), `dismiss_prototype` (`agent`), a replacing show, or service
-unbind/destroy (`teardown`). Keyguard hiding is unchanged.
+With `none`, authored content fills the window including under the status bar (top content needs top-edge
+`safeAreaPadding`; relative sheet detents use the full window height). With `bar` (also the older-device
+fallback) a translucent host row stays above clipped authored content, independent of spec style and
+opacity, and its height is excluded from the authored viewport. Both fullscreen modes keep window alpha at 1
+and fade only authored content and its scrim.
+
+The dismiss bar's button and the persistent (`persistence: "device"`) sheet and floating Close control are one
+circular close chip (#15119), the twin of the iOS chip: a 32 dp opaque `prototypeCloseColors` fill with a
+Close glyph, no text label, a 48 dp hit target, and the shared host id `automobile-prototype-dismiss`
+(`testTag`, exposed as the resource id) with content description `Dismiss AutoMobile prototype`. The persistent
+chip sits top-end inside the system-bar and cutout insets; the bar keeps its inset-aware row. The brief
+chromeless escape pill keeps its text. Session-scoped sheets and floating windows still draw no host control
+(they end through the agent's `dismiss`, a replacing show, the TTL or a disconnect).
+
+A `persistence: "device"` prototype outlives its host session: it is not dismissed when the last client
+disconnects (including a show queued after that edge), has no idle TTL, and keeps its assets until
+dismissal. Because nobody may be connected to remove it, sheet and floating windows carry an opaque "Close"
+control above the authored content, and opacity fades only the content. Fullscreen defaults to `bar`; a
+device with `prototype_window_chrome_v1` also honours explicit `none` with the hidden escape. It ends
+through that control, the dismiss row or pill (`user`), `dismiss_prototype` (`agent`), a replacing show, or
+service unbind/destroy (`teardown`). Keyguard hiding is unchanged.
 
 Events a persisted prototype emits while no client is connected (checked per event
 against the live client count) go to a bounded ring in `PrototypeController`
@@ -1855,25 +1915,19 @@ the ring. The host adopts the report into its status store and event buffers,
 because the host clears both on session release. Both behaviours are advertised
 as `prototype_persistence_replay_v1`; a host refuses `inspect` without it.
 
-Every dismissal emits one `prototype_event` with `kind: "dismissed"`, null `name`,
-and `payload: {"reason": "user|agent|disconnect|ttl|teardown"}` (one reason string).
-Host and authored dismiss controls use `user`; `dismiss_prototype` uses `agent`;
-last-client disconnect uses `disconnect`; idle expiry uses `ttl`; service teardown,
-unbind/restart and owning-display removal use `teardown`. Sequence allocation
-precedes delivery even if no socket remains. A show replacement closes the old
-runtime silently and cancels its timer. Disconnect counts are captured at removal
-with the existing observer-session generation so rapid reconnects cannot erase the
-zero edge or dismiss a replacement from a new observer session. No state is
-persisted across process restart.
+Every dismissal emits one `prototype_event` with `kind: "dismissed"`, null `name` and
+`payload: {"reason": "user|agent|disconnect|ttl|teardown"}`. Host and authored dismiss controls use `user`;
+`dismiss_prototype` `agent`; last-client disconnect `disconnect`; idle expiry `ttl`; service teardown,
+unbind/restart and owning-display removal `teardown`. Sequence allocation precedes delivery even with no
+socket. A show replacement closes the old runtime silently and cancels its timer. Disconnect counts are
+captured at removal with the existing observer-session generation so rapid reconnects cannot erase the zero
+edge or dismiss a replacement. No state persists across process restart.
 
-Idle means no interaction or accepted show. The device fallback TTL is five
-minutes (300,000 ms), positive and settable locally on the controller. Shows
-(including a same-id show) and user interactions restart it (initial/restored
-unchanged pager reports are rendering and do not count); configuration
-changes and safety hide/restore do not. Hidden prototypes still expire. The current
-strict protocol has no TTL or device-session-release message: no wire field is
-added here. Session release is covered only when it closes the last WebSocket;
-a release that retains sockets requires a future daemon/device contract.
+Idle means no interaction or accepted show. The device fallback TTL is five minutes (300,000 ms), settable
+locally on the controller. Shows (including same-id) and user interactions restart it (initial or restored
+unchanged pager reports do not); configuration changes and safety hide/restore do not, and hidden
+prototypes still expire. The strict protocol has no TTL or session-release message, so session release is
+covered only when it closes the last WebSocket.
 
 Rotation, density/size changes and fold posture callbacks refresh layout params
 without recreating runtime or composition: authored state and settled pager pages
@@ -1888,85 +1942,92 @@ events are dropped before hierarchy debouncing and navigation tracking.
 
 ### Foreground scoping (#10261, owner decision 2026-10-09)
 
-A session prototype is tied to the app (package) it was shown over, matching the iOS
-agent, which lives inside the app. When that app leaves the foreground the window is
-hidden (state, pages and the idle TTL are kept; no `dismissed` event, no sequence
-allocation) and when the app returns the same runtime is shown again. A
-`window.persistence: "device"` prototype is a standalone mock and is not tied to an app.
+A session prototype is tied to the app (package) it was shown over, matching the iOS agent, which lives inside the app. When that app leaves the foreground the window is hidden (state, pages and the idle TTL are kept; no `dismissed` event, no sequence allocation) and when the app returns the same runtime is shown again. A `window.persistence: "device"` prototype is a standalone mock and is not tied to an app.
 
-- **Anchor.** Each `show` (including an in-place replace) reads the application
-  window in front (the active application-type accessibility window, else the topmost)
-  and clears any suspension. If no application window qualifies, the prototype is
-  unscoped and stays up everywhere.
-- **Signal.** `TYPE_WINDOW_STATE_CHANGED` events already delivered to CtrlProxy; no new
-  poller. An event moves the foreground only when its window is `TYPE_APPLICATION`
-  and its package is not CtrlProxy's own and not in the ignore set. IME, dialogs of
-  type system, accessibility overlays (this prototype's own windows) and the shade
-  are therefore never candidates. Ignore set: `com.android.systemui`,
-  `com.google.android.permissioncontroller`, `com.android.permissioncontroller`,
-  `com.google.android.packageinstaller`, `com.android.packageinstaller`, `android`
-  (resolver, ANR and crash dialogs). A dialog of the same app is the same package.
-  An event whose window type cannot be read is ignored (fails open: nothing hides).
-- **Debounce.** A flip, either way, applies only after the new state holds for 400 ms
-  (`PROTOTYPE_FOREGROUND_DEBOUNCE_MILLIS`), so a transient window does not flicker it.
-- **Hidden means gone.** The window is removed, so it takes no touches and is absent
-  from `observe`. `inspect` reports `suspended: true` on the prototype entry, and the
-  hierarchy capture carries top-level `prototypeSuspended: true`, so `layer: "prototype"`
-  calls fail with "hidden because the app it was shown over is not in front" instead
-  of "no prototype is showing".
-  `inspect` also reports optional `hiddenReason`: `app_layer_window_hidden` when the app in front hides an app-layer window, or `device_blocked` when locked or the screen is off. The host carries it into status and uses it for `prototype_hidden` layer refusals. A show reports `visible: false` with the same `notVisibleReason`; older devices retain `no_prototype_window_on_screen` for app-layer confirmation. Hidden reasons are absent when visible or suspended.
-
-  The host stores `suspended` from `inspect` and surfaces it on `prototype` status
-  entries (host-local, so it is as fresh as the last `inspect`; a new `show` or an
-  `inspect` after the app returns clears it), and an `awaitEvent` that times out on
-  a suspended prototype carries the same explanation as a `warning`. Absent on iOS.
-
-- **Separate from other hides.** Suspension is its own state
-  (`PrototypeForegroundTracker.suspended`). The host's `isBlocked` is the lock-screen
-  check OR suspension, so any restore path (unlock, relayout, or a future capture-time
-  hide from #9305) that calls `show` while suspended is refused; a capture restore
-  can never re-show a suspended prototype, and ending suspension does not undo a
-  capture hide held by another component.
-- Dismissal, TTL expiry and teardown release the anchor. A hidden prototype still
-  expires on its idle TTL.
+- **Anchor.** Each `show` (including an in-place replace) reads the application window in front (the active application-type accessibility window, else the topmost) and clears any suspension. If none qualifies the prototype is unscoped and stays up everywhere.
+- **Signal.** `TYPE_WINDOW_STATE_CHANGED` events already delivered to CtrlProxy; no new poller. An event moves the foreground only when its window is `TYPE_APPLICATION` and its package is not CtrlProxy's own and not in the ignore set, so IME, system dialogs, this prototype's own overlays and the shade are never candidates. Ignore set: `com.android.systemui`, `com.google.android.permissioncontroller`, `com.android.permissioncontroller`, `com.google.android.packageinstaller`, `com.android.packageinstaller`, `android` (resolver, ANR and crash dialogs). A dialog of the same app is the same package. An event whose window type cannot be read is ignored (fails open: nothing hides).
+- **Debounce.** A flip either way applies only after the new state holds 400 ms (`PROTOTYPE_FOREGROUND_DEBOUNCE_MILLIS`).
+- **Hidden means gone.** The window is removed: no touches, absent from `observe`. `inspect` reports `suspended: true` on the entry and the hierarchy capture carries top-level `prototypeSuspended: true`, so `layer: "prototype"` calls fail with "hidden because the app it was shown over is not in front" rather than "no prototype is showing". `inspect` also reports optional `hiddenReason`: `app_layer_window_hidden` when the app in front hides an app-layer window, or `device_blocked` when locked or screen off; the host carries it into status and `prototype_hidden` layer refusals. A show reports `visible: false` with the same `notVisibleReason`; older devices retain `no_prototype_window_on_screen`. Hidden reasons are absent when visible or suspended.
+- **Host side.** The host stores `suspended` from `inspect` and surfaces it on `prototype` status entries (as fresh as the last `inspect`; a new `show` or an `inspect` after the app returns clears it); an `awaitEvent` that times out on a suspended prototype carries the same explanation as a `warning`. Absent on iOS.
+- **Separate from other hides.** Suspension is its own state (`PrototypeForegroundTracker.suspended`). The host's `isBlocked` is the lock-screen check OR suspension, so any restore path that calls `show` while suspended is refused, and ending suspension does not undo a capture hide held by another component.
+- Dismissal, TTL expiry and teardown release the anchor; a hidden prototype still expires on its idle TTL.
 
 Deferred: secure-window detection has no trusted existing signal.
 
 ### Bottom sheet and the keyboard (#10262)
 
-Owner decision 2026-10-09: a bottom sheet moves above the keyboard whenever the keyboard
-is shown and returns to the screen edge when it hides.
+Owner decision 2026-10-09: a bottom sheet moves above the keyboard whenever it is shown and returns to the screen edge when it hides.
 
-- **Scope.** Only a `sheet` window with `edge: "bottom"`. Fullscreen, floating, dialog,
-  top and side sheet windows never move. A `bottomSheet` node lives inside its window
-  and rides with it; it needs no separate handling.
-- **Source.** The input-method window's bounds from the accessibility window list
-  (`TYPE_INPUT_METHOD`), not the prototype window's `WindowInsets.Type.ime()`. Prototype
-  windows are `TYPE_ACCESSIBILITY_OVERLAY` windows that are not the IME target, and the
-  platform dispatches the IME inset only to the IME target, so a sheet over another app's
-  field would read 0. The service sees the keyboard window whichever app owns the field.
-  The lift is `screenBottom - ime.top` (0 when no input-method window has bounds).
-  This follows from platform behaviour and is unit-tested with fake bounds; the API
-  30/34/36 device check in the issue is still open.
-- **Mechanism.** The host relayouts on the window events it already receives
-  (`TYPE_WINDOWS_CHANGED`), setting the bottom-gravity window's `y` to the lift (a positive
-  `y` raises a bottom-gravity window). Moving the window moves its touch region with it;
-  touch-through and the foreground-suspension and capture hides are unchanged because
-  they act on the same params and `isBlocked`.
-- **No system panning.** A bottom sheet sets `SOFT_INPUT_ADJUST_NOTHING`, so a sheet that
-  owns the focused text field is not also resized or panned by the platform.
-- **Motion.** The position jumps. The accessibility source reports no per-frame values,
-  so it cannot follow the keyboard's slide (`WindowInsetsAnimation` only reaches the IME
-  target). `motion: "none"` therefore has nothing to disable here.
-- **Explicit padding.** `safeAreaPadding` with `ime` still applies inside the window;
-  on a lifted sheet it reads 0 for a non-IME-target window, so it does not double-count.
+- **Scope.** Only a `sheet` window with `edge: "bottom"`; fullscreen, floating, dialog, top and side sheets never move. A `bottomSheet` node rides with its window and needs no handling.
+- **Source.** The input-method window's bounds from the accessibility window list (`TYPE_INPUT_METHOD`), not the prototype window's `WindowInsets.Type.ime()`: prototype windows are `TYPE_ACCESSIBILITY_OVERLAY` and not the IME target, and the platform dispatches the IME inset only to the target, so a sheet over another app's field would read 0. Lift is `screenBottom - ime.top` (0 when no input-method window has bounds). Unit-tested with fake bounds; the API 30/34/36 device check is still open.
+- **Mechanism.** The host relayouts on the `TYPE_WINDOWS_CHANGED` events it already receives, setting the bottom-gravity window's `y` to the lift. Moving the window moves its touch region; touch-through and the foreground-suspension and capture hides act on the same params and `isBlocked`.
+- **No system panning.** A bottom sheet sets `SOFT_INPUT_ADJUST_NOTHING`, so the platform does not also resize or pan it.
+- **Motion.** The position jumps: the accessibility source reports no per-frame values (`WindowInsetsAnimation` only reaches the IME target), so `motion: "none"` has nothing to disable.
+- **Explicit padding.** `safeAreaPadding` with `ime` still applies inside the window; on a lifted sheet it reads 0 for a non-IME-target window, so it does not double-count.
 
-Device checks must cover keyguard timing, daemon death, pager page 3
-across rotation, fold/display removal, and API 30/34/36 keyboard/cutout geometry.
+Device checks must cover keyguard timing, daemon death, pager page 3 across rotation, fold/display removal, and API 30/34/36 keyboard/cutout geometry.
 
-This is Android only. The iOS agent does not lift a sheet above the keyboard, and whether to
-rely on UIKit keyboard avoidance or match this behaviour is an open decision (see
-[iOS prototype agent](../ios/prototype-agent.md#open-decisions)).
+Android only. The iOS agent does not lift a sheet above the keyboard; whether to rely on UIKit keyboard avoidance or match this is an open decision (see [iOS prototype agent](../ios/prototype-agent.md#open-decisions)).
+
+## Placeholder lint (#15444)
+
+A successful `show` or `patch` returns `placeholderFindings` when a repeat or state placeholder sits
+in a field that does not bind it, so it would be drawn literally. It is advisory, host-only and
+never refuses a show. Each finding names the field `path` (for example `root.children[0].label`),
+the `placeholder` as authored and a `detail`. The output keeps 50 findings, and
+`placeholderFindingsTotal` reports the full count when it is capped.
+
+- A repeat placeholder (`{index}`, or `{alias.field}` for an enclosing `repeat.as`) in a text field
+  that is not in the bindable set, such as `chip.label` or `badge.text`. Fields that bind
+  (`button.label`, `topAppBar.title`, `searchBar.placeholder`, and `text` nodes) are not reported.
+- A `{key}` state placeholder naming a declared `state` key in `chip.label`, `badge.text`,
+  `textField.placeholder` or `searchBar.placeholder`. Only a `text` node reads `{key}` from state.
+  Other fields are left alone because a renderer may bind them beyond the contract.
+
+Whether to widen binding to these fields is a separate contract decision (#15444); until then use a
+`text` node next to the field.
+
+## Accessibility lint (#14126)
+
+A successful `show` or `patch` returns `accessibilityFindings`: an advisory, host-only lint of the
+component-expanded spec sent to the device. It never refuses a show and needs no device capability.
+Each finding names a `rule`, the node `path` and a `detail`. The output keeps 50 findings, and
+`accessibilityFindingsTotal` reports the full count when it is capped.
+
+| Rule                              | Finds                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unlabeled-control`               | A node with `onTap`, `onLongPress` or `onDoubleTap`, or an `iconButton`, `fab`, `switch`, `checkbox`, `slider` or `select`, with no `contentDescription`, `label`, `text`, `spans`, `headline` or `title` on itself or a descendant.                                                                                                                                  |
+| `unlabeled-image`                 | An `image` or `icon` with a `testTag` but no `contentDescription`. An untagged, non-tappable one without a description is decorative: the renderers hide it from accessibility, so it is not reported.                                                                                                                                                                |
+| `unlabeled-text-field`            | A `textField` or `searchBar` with no `label`, `placeholder` or `contentDescription`.                                                                                                                                                                                                                                                                                  |
+| `low-contrast`                    | A `text` node with an authored `style.color` below WCAG AA against the nearest background the host can resolve: 4.5:1, or 3:1 for large text (`textSize` 24 or more, 18.66 or more at `fontWeight` 700, or a `display`/`headline` `textStyle`). It is checked in light and dark, or only the mode `theme.mode` pins; `mode` names the failing one, `value` the ratio. |
+| `small-touch-target`              | A tappable node or control whose authored `width`, `height`, `maxWidth` or `maxHeight` is under 48dp (44pt on iOS); `value` is the smallest side. Sizes left to layout are not checked.                                                                                                                                                                               |
+| `transition-without-visible-when` | A non-stack node with a `transition` but no `visibleWhen`: nothing ever enters or exits, so the transition never runs.                                                                                                                                                                                                                                                |
+
+Colours resolve on the host as the renderers do: a hex value, a `{light, dark}` pair, or a role
+from the Material 3 baseline scheme with `theme.colors` overrides (flat, then per mode). A
+`theme.colors.seed` or `source: device` makes the device derive its own scheme, so only the roles
+the spec overrides are known then, and text using any other role is not checked. The background
+starts at the `surface` role and follows authored `style.background` values, compositing
+translucent ones. Under a `gradient`, a `style.alpha`, or a component that paints its own surface
+(`card`, `dialog`, `bottomSheet`, `snackbar`, `topAppBar`, `bottomNav`, `tabBar`, `button`, `fab`,
+`chip`) the background is unknown and contrast is not checked. `styleWhen` overrides are not
+evaluated.
+
+### Pseudo-locale (#14126)
+
+`show` takes `pseudoLocale: true`. The device receives a copy of the spec in which every `text`,
+`label`, `placeholder`, `headline`, `title`, `supporting`, `supportingText`, `trailingText`, check `message` and span `text` is
+accented, padded by about 40% and wrapped in `[ ]`, so truncation and clipping are visible without a
+translation. `{key}`, `{data:/pointer}` and `{item.field}` bindings are left intact, as are
+`contentDescription`, state, data, request bodies, `emit` context and payload, `repeat` and option `value`s. The authored
+spec is what status, `patch` and the accessibility lint see, so `patch` ops (other than a
+`replaceNode`) edit the device copy and a `replaceNode` sends authored text. A `linkify` text keeps its mention, hashtag and URL tokens as written and takes no `[ ]`
+wrapper, so links stay detectable. Stack screen and component names are never treated as spec
+fields. Each show states the
+option afresh.
+
+The on-device audit of a shown prototype and the RTL check that #14126 also proposes are not
+implemented yet.
 
 ## Rejection paths and deterministic first error
 
@@ -2127,25 +2188,13 @@ alignment) before rendering; only the host resolves selectors.
 
 ## Shared verification and sibling updates
 
-Both test suites enumerate the same `test/fixtures/prototype-spec/valid` and
-`invalid` JSON files, assert nonempty directories, and require coverage of every
-node/action/placement. Invalid files wrap `{spec, expectedPath}`. The byte limit
-has no fixture file: each suite generates its own input and checks the exact
-boundary in bytes, including whitespace, as well as the emit payload boundary.
-Fixture and contract files are pinned to LF for Windows. No binary assets are
-included. Worked examples above are also committed as valid fixtures and decode in both
-suites. The page is registered under How it Works in `mkdocs.yml` and linked from the
-design index. The existing system-tray page remains in its internal `not_in_nav`
-registration; this public contract has an explicit navigation entry.
-
-Sibling follow-ups: #9300 must include horizontal scroll, tabs/navigation, and
-modal sheet state; #9298 must use the envelope's `id` and `window` rather than
-introducing conflicting separate placement/spec identity; #9316 must adopt the
-anchor field names and selected placement/origin rules; #9301 must use opaque
-asset strings and count nav images as spec image uses; #9296 must remove its
-`specVersion` proposal. #9295's root-level opacity wording maps to
-`window.opacity`, and its focusability wording follows the later device findings.
-No sibling issues are edited as part of this implementation.
+The TypeScript and Kotlin suites enumerate the same `test/fixtures/prototype-spec/valid` and `invalid`
+files, assert nonempty directories and require coverage of every node, action and placement. Invalid files
+wrap `{spec, expectedPath}`. The byte limit has no fixture: each suite generates its own input and checks
+the exact byte boundary (whitespace included) and the emit payload boundary. Fixture and contract files are
+pinned to LF for Windows; no binary assets are included. The worked examples above are committed as
+`doc-example-N.json` fixtures and `test/parity/prototypeSpec.test.ts` asserts they match this page. The page
+is registered under How it Works in `mkdocs.yml` and linked from the design index.
 
 ## Flow and grid contract (not device-verified)
 
@@ -2197,6 +2246,29 @@ Android draws it with Material `PullToRefreshBox` around the scroll; the authore
 size modifiers sit on the box. iOS uses `refreshable`, whose async closure stays open until the key
 is false again; a key set true without a pull (an agent patch) shows a plain `ProgressView` at the
 top because SwiftUI cannot start `refreshable` programmatically.
+
+## Chat lists (`prototype_chat_scroll_v1`, #14232, not device-verified)
+
+A vertical `scroll` can be a conversation view:
+
+| Field            | Rule                                                                                                                                                                   |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reverse`        | Anchors the scroll at the end of its content (Android `verticalScroll(reverseScrolling = true)`), so the newest row is at the bottom and growth keeps the end in view. |
+| `stickToEnd`     | A forward scroll at its end follows rows appended to it. A reverse scroll is anchored at its end already.                                                              |
+| `atEndKey`       | A declared boolean state key the runtime writes when the end position changes, as a `change` event, for a "new messages" pill.                                         |
+| `onStartReached` | 1 to 32 actions run once each time the scroll reaches its start (edge-triggered; a list that fits never fires), for loading older history.                             |
+
+The options need a vertical scroll (`Chat scroll options need a vertical scroll` at the option's
+path), and `atEndKey` a declared boolean state key. `scrollTo {scroll, to, animated?}` moves the
+scroll whose `id` is `scroll`; exactly one scroll may carry that id (`Unknown scroll id`,
+`Duplicate scroll id` at `.scroll`). `to` is `"start"`, `"end"` or `{key: value}`, a `repeat.key`
+value of a row inside the scroll; a key that is not laid out drops the request. `animated` defaults
+to true. Scrolling is not a state change and emits nothing. A composer is a row with a `textField`
+(`imeAction: "send"`, `onSubmit`) and a send `iconButton`, padded with
+`safeAreaPadding {edges: ["bottom"], types: ["ime", "systemBars"]}`; whether a fullscreen overlay
+receives IME insets is owed device verification, like the bottom-sheet lift (#10262). Rows off
+screen are absent from `observe`; `swipeOn lookFor` still finds them. The iOS agent does not
+advertise the capability yet (#14671), so the host refuses these specs there.
 
 ## Swipe actions (not device-verified)
 
@@ -2263,6 +2335,92 @@ pinned to the material3 supplied by `androidx-compose-bom` in
 window, not a SearchBar popup/dialog or lazy list that drops rows, so `observe`
 sees every result row.
 
+## Loading and empty states (#14207, `prototype_loading_states_v1`, not device-verified)
+
+A data condition may test emptiness instead of comparing: `{data: "/feed", empty: true}` holds
+when the value is missing, `[]`, `{}` or `""` (`null` cannot be stored in `/data`), and
+`empty: false` holds otherwise. `empty` takes the place of `equals`, `notEquals`, `gt` and `lt`
+(exactly one is required), and `{key, empty}` is rejected at `<path>.empty` with
+`empty applies only to data conditions`. Like other data conditions it is resolved on the device
+against the current `/data`, so a request response or data action flips it.
+
+Style `shimmer: true` draws a highlight band sweeping across a `box`, `row`, `column` or `card`
+over its background and inside its clip; any other node type is rejected at
+`<path>.style.shimmer`. The node reports state description "Loading". With `motion: "none"` or
+animator scale 0 no band is drawn, so screenshots see the plain placeholder. A `repeat` of literal
+placeholder rows makes a skeleton list. The iOS agent advertises the capability too (#14689): it
+sweeps the same band (1.2 s, 35% white, clipped to the node's corner shape) over the node, reads
+"Loading" to VoiceOver with the updates-frequently trait, draws no band under `motion: "none"` or
+Reduce Motion, and rejects shimmer on other node types at the same path.
+
+## Effects (#15128, `prototype_effects_v1`, contract only)
+
+`style.effects` is an array of 1-4 effects drawn in order. The list is closed and data-only: a
+`source` key, `type: "shader"`, a fifth effect, an unknown type and an out-of-range param are each
+rejected at the offending path, identically in the TS, Kotlin and Swift validators (so the spec's
+opening rule, no code, holds). `schemas/prototype-spec-contract.json` (`definitions.effect`) is the
+source of truth; the shared corpus pins it.
+
+| `type`                | Params (all optional unless marked)                                                | Android floor |
+| --------------------- | ---------------------------------------------------------------------------------- | ------------- |
+| `noise`               | `amount` 0-1, `grain` 0.5-8 dp, `seed` int 0-65535, `monochrome`                   | 33            |
+| `gradientMesh`        | `colors` exactly 4 (required; hex, role or `{light, dark}`), `softness` 0-1        | 33            |
+| `shimmer`             | `color`, `angle` -360..360 degrees, `width` 0.05-1 of the node                     | any           |
+| `glow`                | `color` (required), `radius` 0-48 dp, `intensity` 0-1                              | any           |
+| `vignette`            | `color`, `intensity` 0-1, `radius` 0-1                                             | any           |
+| `blur`                | `radius` 0-25 dp (required); blurs the node's own content                          | 31            |
+| `pixelate`            | `cell` 1-64 dp (required)                                                          | 33            |
+| `chromaticAberration` | `offset` 0-8 dp, `angle` -360..360 degrees                                         | 33            |
+| `wave`                | `amplitude` 0-16 dp, `wavelength` 8-400 dp, `angle` -360..360 degrees              | 33            |
+| `ripple`              | `amplitude` 0-16 dp, `wavelength` 8-400 dp, `center` `{x, y}` each 0-1 of the node | 33            |
+
+Every effect also takes `animate: {periodMs}` (integer 400-20000; a loop, separate from the
+node-level motion-v2 `animate`) and `phase` 0-1.
+
+- **Paint only.** Effects never change layout, hit testing, observe bounds, accessibility
+  semantics, the host dismiss controls or the host accessibility dismiss action, and never draw
+  outside the node's bounds (the authored viewport for the root).
+- **Frozen phase.** Under `motion: "none"`, animator scale 0, Reduce Motion (iOS) and while the
+  prototype is hidden, an animated effect stays at its `phase` so screenshots are deterministic.
+  `noise` is seeded and never uses device randomness.
+- **`styleWhen`** replaces `effects` as a whole when it matches.
+- **Limits.** `MAX_PROTOTYPE_EFFECTS` (64) and `MAX_PROTOTYPE_ANIMATED_EFFECTS` (8) count over the
+  expanded `repeat` tree. Counting is conservative: every declared list counts, `styleWhen` styles
+  included, although only one list applies at a time. A list longer than 4 is reported at
+  `<path>.style.effects` before the count is applied. The node that crosses a limit is reported
+  (`Effect limit exceeded`, `Animated effect limit exceeded`); a template inside a `repeat` is
+  reported at the `repeat` with the `Expanded` forms of those two messages.
+- **Capability.** Any `effects` list needs `prototype_effects_v1`, checked on `show` and on the full
+  patch result. No CtrlProxy or iOS agent advertises it yet: rendering is tracked by the Android
+  (#15129) and iOS (#15130) render issues, so the host refuses these specs today.
+
+Decisions left to the renderers, to settle in those issues: what `phase` means for an effect
+without a natural cycle (`noise`, `blur`, `pixelate`, `vignette`, `glow`, `gradientMesh`; the
+contract accepts it everywhere), and the colour-role and `{light, dark}` resolution inside effects
+(they use the same resolver as `style.color`; advertising the capability implies supporting it).
+
+## Charts (#14209, not device-verified)
+
+A `chart` node draws a `line`, `area`, `bar` or `ring` chart from 1 to 4 `series`. Each series
+reads the `/data` array at `path` (objects only, at most 500 like any data array), taking each
+point's numeric `y` member and optional `x` label member. A literal `path` must resolve to an array
+when the spec is shown, and every point must be an object with a numeric `y`. A repeat-bound path is
+bound per row. `yRange {min, max}` fixes the axis (max above min); otherwise it spans the values
+and the goal, and bars rise from zero. `xLabels` (`none`, `ends`, `all`) draws the first series'
+x labels below the plot. `goal` is a dashed reference line; a `ring` takes exactly one series and a
+positive goal and draws that series' latest value against it. The capability is
+`prototype_chart_v1`.
+
+Android draws it with Compose `Canvas` and no new dependency. The render mapper reads the points
+from the current `/data` on every mapping pass, so a data action, request or patch redraws it. Points
+a later write broke (a non-object, a non-numeric `y`) are skipped rather than failing the frame. The
+chart is one accessibility node labelled with its summary ("Line chart, Heart rate, 24 points, min
+58, max 141, latest 72"; "Ring chart, Steps today, 6500 of 10000"); an authored
+`contentDescription` replaces it, and `observe` reports it. The x labels are visual only. The iOS
+agent advertises the capability too (#14679): it draws the same four variants with Swift Charts and
+describes line, area and bar charts to VoiceOver with an `AXChartDescriptor`; its summary text is
+checked against the shared `chart-variants.json` fixture.
+
 ## Rich text
 
 A text node has exactly one of `text` or `spans`; plain `text: ""` remains valid.
@@ -2283,6 +2441,25 @@ Use `tapAt` on the span bounds as the fallback.
 On iOS, links are drawn as links and tap-through is by `tapAt` only; show reports the
 `rich-text-links` platform note for tappable spans because there are no separate accessibility elements or semantic links.
 
+### Linkify (#14233)
+
+`linkify: {kinds, style?, onTap}` on a text node with `text` (not `spans`) turns @mentions,
+#hashtags and URLs in the resolved text into links, for content from data such as `{item.body}`.
+`kinds` lists 1 to 3 of `mention`, `hashtag` and `url`; `style` takes the span style fields; a tap on
+a match runs `onTap` (1 to 32 actions). The grammar is fixed and shared by every runtime
+(`test/fixtures/prototype-spec/linkify/cases.json`): a match starts at the start of the text or
+after whitespace; a mention is `@` and 1 to 30 of `[A-Za-z0-9_]` (so `ana@example.com` is not one);
+a hashtag is `#` and up to 100 letters, marks, digits or `_`, not all digits; a URL is `http://` or
+`https://` up to the next whitespace with trailing `.,;:!?'")]}` removed. Inside `onTap` only,
+`{match: "text"}` reads the tapped match (`@ana`) and `{match: "kind"}` its kind: as a `setState`
+value, a `setData` / `appendData` value or an emit context entry, for example
+`setState profileHandle {match: "text"}` then `push profile`. `{match}` anywhere else is refused.
+Inside a repeat, `onTap` also binds `{item: "field"}`, `{index: true}`, `{alias.field}` and `{index}`
+per row, including state keys such as `liked_{item.id}`. Repeat binding preserves `{match}` for
+tap-time resolution; emit payloads and `{value: ...}` literals remain opaque. A URL tap never opens a browser; that is the `links.open`
+platform call. Matches are links like tappable spans (Android `tapOn {accessibilityLink}`, iOS
+`tapAt`) and require `prototype_linkify_v1`.
+
 Owed device checks (later platform passes): advertise the capability only after renderer support;
 verify mixed span styles, resolved concatenated observe text, per-span actions without URL navigation,
 Android semanticLinks and both selectors across windows, and iOS tapAt-only links plus platformNotes.
@@ -2292,7 +2469,7 @@ The shared contract caps spans at 64 per text node. Host tests do not verify dev
 
 `menu` and `select` require `prototype_menus_v1`; the host refuses them before showing or uploading assets when the connected renderer lacks it.
 
-A `menu` requires `openWhen: {key, equals}` with a boolean equality and 1–16 strict `items`. Each item is `{label, icon?, trailingText?, enabled?, onTap?}` or exactly `{type:"divider"}`. Labels and trailing text are nonempty, icons use the existing icon names, and `onTap` has 1–32 existing actions. A disabled item is dimmed, cannot be tapped and does not close the menu. Dividers are neither focusable nor tappable. The elevated surface is anchored to its parent’s bottom end and clamped inside the window. An enabled item or outside tap writes `!equals` to the open key; item actions run after closing.
+A `menu` requires `openWhen: {key, equals}` with a boolean equality and 1–16 strict `items`. Each item is `{label, icon?, trailingText?, enabled?, onTap?}` or exactly `{type:"divider"}`. Labels and trailing text are nonempty, icons use the existing icon names, and `onTap` has 1–32 existing actions. A disabled item is dimmed, cannot be tapped and does not close the menu. Dividers are neither focusable nor tappable. The elevated surface aligns to its parent’s bottom end. When it cannot fit below and fits above, it opens above the parent; otherwise it keeps its below placement clamped inside the window. Horizontal alignment is unchanged. An enabled item or outside tap writes `!equals` to the open key; item actions run after closing.
 
 While a menu is open, the page behind it is removed from the accessibility tree, like a dialog; the menu items and outside-dismiss layer remain exposed. Closing restores the page. An expanded select leaves the page in the accessibility tree.
 
@@ -2301,6 +2478,45 @@ A `select` requires a string `stateKey` and 2–32 `{value,label}` options with 
 Rendering stays inside the prototype window on both platforms so `observe` and `tapOn` reach the normal hierarchy. Android uses an in-window surface rather than a separate DropdownMenu/Popup window. iOS uses an in-window list rather than system SwiftUI Menu/Picker popups; successful iOS shows report this substitution in `platformNotes`. Menu icons use the existing SF Symbols mapping on iOS.
 
 The select field and menu surface carry the node `testTag`. Select option rows use `<testTag>.<value>`; menu item rows use `<testTag>.<index>`, with zero-based positions including dividers. Android adds row tags only when `testTag` is set; iOS falls back to `(testTag ?? id).<value>` or `(testTag ?? id).<index>`.
+
+## Tooltip and drawer
+
+`tooltip` requires `prototype_tooltip_v1`, nonblank `text`, boolean `openWhen: {key, equals}`,
+and exactly one of `anchorTo` or `anchor`. `anchorTo` names exactly one node id after component
+and repeat expansion; self references and absent targets report `Unknown anchorTo id`, and
+multiple instances report `Duplicate anchorTo id`, at the tooltip's `.anchorTo` path. Bounds
+anchors use the host-resolved screen rectangle plus offset. Tooltips are hoisted overlays, not
+ordinary anchored layout children. An unlaid-out target draws no bubble or scrim and keeps state.
+
+The pure `placePrototypeBubble` function places tooltips inside the window with an 8 dp gap and
+margin. `caret` names the bubble edge pointing at the target: `top` places it below, `bottom`
+above, and `start`/`end` mirror with layout direction. `auto` prefers below. An unavailable side
+flips to its opposite; auto can use horizontal space when neither vertical side fits. If neither
+side fits, the larger available side wins and the origin is clamped. The caret tracks the target
+center, clamped away from the bubble corners. Menu placement shares this calculation.
+
+Optional `spotlight` draws the themed scrim at 40% with an even-odd rounded cutout around the
+target: `padding` defaults to 8 dp and `cornerRadius` to 12 dp, both integers from 0 through 64.
+The bubble exposes text and the node test tag to accessibility; the scrim uses `<testTag>.close`.
+With a spotlight the page semantics are cleared, focus moves to the bubble and returns to the
+`anchorTo` target on dismissal. Without a spotlight the page stays interactive and exposed.
+Scrim taps and bubble taps without `onTap` write `!equals`, then run optional `onDismiss` actions.
+A bubble with `onTap` runs only those actions, allowing state-driven tours.
+
+`drawer` requires `prototype_drawer_v1`, `edge: start|end`, boolean `openWhen`, and one `child`.
+The logical edge mirrors in RTL. Its surface fills the safe-area height and is
+`min(320dp, window width - 56dp)` wide. Optional `scrim` uses the themed color-value rules;
+omission uses the scrim role at 40%. The scrim's `<testTag>.close` tap writes `!equals`.
+`dismissOnSwipe` defaults to true: dragging toward the panel's edge beyond half its width
+uses the bottom-sheet settle rule to dismiss. Opening is state-driven only.
+
+Drawers clear the page's accessibility semantics, move focus into the panel, restore the page's
+previous focus on close, and take Back/Escape before stack navigation or window dismissal.
+The last open panel remains composed through exit, including removal from the author tree.
+Panel motion is a 300 ms edge slide with a fading scrim; `motion: none` or animator scale zero
+settles instantly. `LocalPrototypeReducedMotion` replaces the slide with a cross-fade. Drawer
+transitions report through `ReportPrototypeMotion` until settled; the renderer does not supply
+the reduced-motion preference itself.
 
 ## Checks
 
@@ -2376,13 +2592,7 @@ then renders the latest snapshot or the corresponding typed error screen if the
 entry was deleted or cannot be opened. A different id delivered to the activity
 also reloads. Handled configuration changes preserve the live runtime state.
 
-The activity is `exported=false` with no intent filter. App-owned launches,
-including our pinned shortcut intents launched with the app's identity, can
-open it; other apps cannot render saved content or probe ids. An exported
-activity plus a signature permission would introduce an unnecessary external
-entry point, and exporting with an intent filter alone would let any app
-enumerate/launch saved entries. We rejected those alternatives; explicit,
-app-owned intents also avoid Android 15's stricter intent matching requirements.
+The activity is `exported=false` with no intent filter: app-owned launches (including our pinned shortcut intents) can open it, other apps cannot render saved content or probe ids. Rejected: exporting with a signature permission (an unnecessary external entry point) and exporting with an intent filter alone (any app could enumerate and launch saved entries). Explicit app-owned intents also avoid Android 15's stricter intent matching.
 
 Saved entries live under `savedPrototypeRoot(context)`, the credential-encrypted
 app-private `filesDir/saved-prototypes` directory. Locked storage is checked
@@ -2426,8 +2636,17 @@ CtrlProxy calls `ShortcutManager.requestPinShortcut` with the stored label and a
 prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
 
 - Android never pins silently: the default launcher always shows its confirmation dialog, so a
-  fresh pin is reported `pending`. Declining delivers no callback. Automatic acceptance is #12266
-  and is device-verification work (launcher dialogs differ).
+  fresh pin is reported `pending`. Declining delivers no callback. `autoConfirm` taps the dialog's accept
+  button by label and reports `pinned` only after `listSaved` confirms (#12266, device-verification
+  work: launcher dialogs differ).
+- A launcher caches its workspace, so a new or updated shortcut can stay invisible (#14887). After a
+  `pinned` result, or a save whose shortcut was `updated`, the host looks for the label on the home
+  screen. If it is missing, it resolves the default launcher (`cmd package resolve-activity`), and
+  when that package is a known launcher runs `am force-stop` plus a HOME intent once, waits for the
+  launcher's tree to go quiet, and looks again. The result reports `launcherRestarted` and
+  `shortcutVisible`; an unknown launcher is left alone with a warning. It is on by default on
+  emulators and physical devices; `restartLauncher:false` opts out. It never runs on a pending pin
+  (no shortcut exists yet) and runs at most once per call.
 - An unsupported launcher keeps the save and reports `pinned:"unsupported"`. A locked or
   screen-off device reports `device_locked`; the save remains and a retry is safe.
 - The app cannot remove a pinned icon: `deleteSaved` disables the shortcut. `removeIcon:true`
@@ -2438,3 +2657,37 @@ prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
 - Pinning from the accessibility service while no CtrlProxy activity is visible, launcher dialog
   shapes, badges and `clear-shortcuts` behaviour on the workspace are unverified on a device
   (#12261).
+
+### Timers
+
+`startTimer {id, afterMs, everyMs?, maxRuns?, actions}` and `cancelTimer {id}` require
+`prototype_timers_v1`. IDs are literal strings of 1..64 characters and never repeat-bound.
+Delays are integers 100..3600000 ms; maxRuns is 1..10000 total fires including the first and
+requires everyMs. A list contains 1..32 actions and shares the request follow-up depth limit.
+The whole spec, including components and platform handlers, may declare eight distinct timer ids.
+
+Each prototype has a ledger of at most eight live timers. Starting a live id replaces it and resets
+runs. Cancelling an unknown id is a no-op. Each fire uses the same atomic interaction as a tap:
+requireValid and all planned writes are validated together; rejection drops state changes and events
+but counts the run. One change event follows a net state change. Dismiss cancels every timer.
+A timer may cancel itself; replacing its own id during a fire wins over the old timer's reschedule.
+Repeats advance from the planned fire time, without drift, until maxRuns or cancellation.
+Fires never restart idle TTL. Hidden/inactive prototypes freeze remaining time and restore it on
+resume; transient screenshot hides do not pause. Dismiss (including TTL, disconnect or teardown)
+and replacing show cancel timers; patch preserves them.
+
+The injected clock/scheduler drives real scheduling. `prototype {action:"simulate",id,advanceTimeMs}`
+advances 1..3600000 ms without waiting and returns optional `fired`, refusing before sending unless
+the capability is advertised. `advance_prototype_clock {id,advanceTimeMs}` fires due timers in
+chronological order, ties by start order, including newly started timers due in the window.
+Paused advancement fires zero times. Exactly 10000 due fires succeed; if an additional fire is
+still due, advancement stops at the last fire with an error and fired=10000, retaining pending timers
+for the next call. Real scheduling continues from shifted time. Inspect reports `timers:[{id,nextFireInMs,runs}]` sorted by remaining
+time then start order, with nonnegative remaining time frozen while paused. Devices omit the field
+when empty; the host returns an array for capable devices, including an empty array when absent,
+and omits malformed timer reports.
+
+Cross-field errors point to `.maxRuns` when everyMs is absent and to `.id` on the ninth distinct
+startTimer in contract document order. A cancelTimer id with no declaration produces a host-only
+show/patch warning. This asymmetry is deliberate: Kotlin and Swift accept it without a diagnostic
+and cancellation remains a runtime no-op.

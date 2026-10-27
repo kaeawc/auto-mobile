@@ -1,7 +1,7 @@
 import { describe, test } from "bun:test";
 import fc from "fast-check";
+import { isTruthyEnvText } from "../../src/config/env";
 import {
-  isTruthyEnvValue,
   LEGACY_SKIP_ACCESSIBILITY_DOWNLOAD_FLAG,
   shouldSkipCtrlProxyDownload,
   SKIP_CTRL_PROXY_DOWNLOAD_ENV,
@@ -11,43 +11,56 @@ import {
 // Property-based tests. See Backoff.property.test.ts for the pinned-seed rationale.
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 
-// "true" in an arbitrary mix of upper/lower case — exercises the case-insensitive branch.
-const mixedCaseTrue = fc.array(fc.boolean(), { minLength: 4, maxLength: 4 }).map((bits) =>
-  "true"
-    .split("")
-    .map((ch, i) => (bits[i] ? ch.toUpperCase() : ch))
-    .join(""),
-);
+const TRUTHY_TOKENS = ["1", "true", "yes", "on"] as const;
 
-describe("isTruthyEnvValue (property-based)", () => {
+// A truthy token in an arbitrary mix of upper/lower case, padded with whitespace — exercises the
+// case-insensitive and trimming branches.
+const paddedMixedCaseTruthy = fc
+  .tuple(
+    fc.constantFrom(...TRUTHY_TOKENS),
+    fc.array(fc.boolean(), { minLength: 4, maxLength: 4 }),
+    fc.constantFrom("", " ", "\t"),
+    fc.constantFrom("", " ", "\n"),
+  )
+  .map(
+    ([token, bits, before, after]) =>
+      before +
+      token
+        .split("")
+        .map((ch, i) => (bits[i] ? ch.toUpperCase() : ch))
+        .join("") +
+      after,
+  );
+
+describe("isTruthyEnvText (property-based)", () => {
   test("is total and matches its exact definition for arbitrary strings", () => {
     fc.assert(
       fc.property(fc.option(fc.string({ maxLength: 8 }), { nil: undefined }), (value) => {
-        const result = isTruthyEnvValue(value);
+        const result = isTruthyEnvText(value);
         return (
           typeof result === "boolean" &&
-          result === (value === "1" || value?.toLowerCase() === "true")
+          result ===
+            (value !== undefined &&
+              (TRUTHY_TOKENS as readonly string[]).includes(value.trim().toLowerCase()))
         );
       }),
       RUN_OPTIONS,
     );
   });
 
-  test('accepts "1" and any casing of "true"', () => {
+  test("accepts 1, true, yes and on in any casing, with surrounding whitespace", () => {
     fc.assert(
-      fc.property(mixedCaseTrue, (variant) => isTruthyEnvValue("1") && isTruthyEnvValue(variant)),
+      fc.property(paddedMixedCaseTruthy, (variant) => isTruthyEnvText(variant)),
       RUN_OPTIONS,
     );
   });
 
   test("rejects undefined and unrelated tokens", () => {
-    const notTruthy = fc
-      .constantFrom("", "0", "false", "yes", "2", "on", "enabled", " true", "true ")
-      .filter((v) => v !== "1" && v.toLowerCase() !== "true");
+    const notTruthy = fc.constantFrom("", "0", "false", "no", "off", "2", "enabled", "t rue");
     fc.assert(
       fc.property(
         notTruthy,
-        (value) => isTruthyEnvValue(value) === false && isTruthyEnvValue(undefined) === false,
+        (value) => isTruthyEnvText(value) === false && isTruthyEnvText(undefined) === false,
       ),
       RUN_OPTIONS,
     );
@@ -90,7 +103,7 @@ describe("shouldSkipCtrlProxyDownload (property-based)", () => {
         fc.option(fc.string({ maxLength: 8 }), { nil: undefined }),
         (args, envValue) => {
           const env = { [SKIP_CTRL_PROXY_DOWNLOAD_ENV]: envValue };
-          return shouldSkipCtrlProxyDownload(args, env) === isTruthyEnvValue(envValue);
+          return shouldSkipCtrlProxyDownload(args, env) === isTruthyEnvText(envValue);
         },
       ),
       RUN_OPTIONS,

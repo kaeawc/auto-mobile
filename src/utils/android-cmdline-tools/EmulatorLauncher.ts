@@ -26,6 +26,8 @@ import type {
   EmulatorProcessLaunch,
   EmulatorLauncherHost,
 } from "./EmulatorLaunchSupport";
+import { EmulatorStartupValidation } from "./EmulatorStartupValidation";
+import { ENV, readEnvRaw } from "../../config/env";
 
 export * from "./EmulatorLaunchSupport";
 
@@ -42,6 +44,26 @@ export interface EmulatorLauncher {
 
 export class DefaultEmulatorLauncher implements EmulatorLauncher {
   constructor(private readonly host: EmulatorLauncherHost) {}
+
+  private createLaunchState(): EmulatorLaunchState {
+    return {
+      launchOutput: "",
+      duplicateAvdDetected: false,
+      startupValidationComplete: false,
+      stdoutGraceTimeout: undefined,
+      serialPollInterval: undefined,
+      serialProbeInFlight: false,
+      startupAccelerationFailureDetected: false,
+      childTerminationObserved: false,
+      earlyExitCategory: undefined,
+      exitCode: undefined,
+      exitSignal: undefined,
+      provisionalPostValidationExitError: undefined,
+      resolvePostValidationExit: undefined,
+      exitDrainTimeout: undefined,
+      earlyExitFinalization: undefined,
+    };
+  }
 
   async startEmulatorProcess(
     avdName: string,
@@ -119,11 +141,12 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       args.push("-no-window");
     }
     args.push(...this.host.emulatorAudioArguments());
-    const extraArgsRaw = process.env.AUTOMOBILE_EMULATOR_ARGS;
+    const extraArgsRaw = readEnvRaw(ENV.EMULATOR_ARGS);
+    if (extraArgsRaw) {
+      args.push(...parseExtraEmulatorArguments(extraArgsRaw));
+    }
     if (requestedExtraArgs) {
       args.push(...requestedExtraArgs);
-    } else if (extraArgsRaw) {
-      args.push(...parseExtraEmulatorArguments(extraArgsRaw));
     }
     this.appendCameraPosterArguments(args, options.cameraPosterPath);
     this.host.throwIfLaunchCancelled(avdName, isCancelled);
@@ -190,6 +213,8 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       perf,
       args,
       reservedEmulator,
+      expectedDeviceId,
+      signal,
       // The capacity slot is handed off before the launch owner can act on the child.
       onSpawn: (spawned) => {
         onAdmittedSpawn?.(spawned, reservedEmulator?.deviceId);
@@ -261,6 +286,8 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     args: string[];
     reservedEmulator: EmulatorDeviceIdReservation | undefined;
     onSpawn: EmulatorProcessOptions["onSpawn"];
+    expectedDeviceId?: string;
+    signal?: AbortSignal;
   }): Promise<ChildProcess | null> {
     const { avdName, perf } = context;
     return new Promise((resolve, reject) => {
@@ -270,19 +297,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       const stdoutRedactor = new AndroidCommandOutputStreamRedactor();
       const stderrRedactor = new AndroidCommandOutputStreamRedactor();
 
-      const state: EmulatorLaunchState = {
-        launchOutput: "",
-        duplicateAvdDetected: false,
-        startupValidationComplete: false,
-        childTerminationObserved: false,
-        earlyExitCategory: undefined,
-        exitCode: undefined,
-        exitSignal: undefined,
-        provisionalPostValidationExitError: undefined,
-        resolvePostValidationExit: undefined,
-        exitDrainTimeout: undefined,
-        earlyExitFinalization: undefined,
-      };
+      const state = this.createLaunchState();
       perf.startOperation("panicDetection");
 
       const {
@@ -311,7 +326,11 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
         appendRedactedLaunchOutput,
       );
       // Monitor emulator output for PANIC errors during startup validation.
-      const monitorOutput = (data: Buffer, outputRedactor: AndroidCommandOutputStreamRedactor) =>
+      const monitorOutput = (
+        data: Buffer,
+        outputRedactor: AndroidCommandOutputStreamRedactor,
+        isStdout: boolean,
+      ) => {
         this.monitorLaunchOutput(
           {
             state,
@@ -327,9 +346,11 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
           data,
           outputRedactor,
         );
+        startupValidation.observeOutput(data.toString(), isStdout, currentLaunchOutput());
+      };
 
-      const monitorStdoutHandler = (data: Buffer) => monitorOutput(data, stdoutRedactor);
-      const monitorStderrHandler = (data: Buffer) => monitorOutput(data, stderrRedactor);
+      const monitorStdoutHandler = (data: Buffer) => monitorOutput(data, stdoutRedactor, true);
+      const monitorStderrHandler = (data: Buffer) => monitorOutput(data, stderrRedactor, false);
 
       // Set a timeout for startup validation (5 seconds should be enough to detect PANIC)
       const startupTimeout = this.host.timer().setTimeout(() => {
@@ -346,12 +367,18 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
           return;
         }
         state.startupValidationComplete = true;
+        startupValidation.cancelEarlySignals();
         this.host.timer().clearTimeout(startupTimeout);
         child.stdout?.off("data", monitorStdoutHandler);
         child.stderr?.off("data", monitorStderrHandler);
         child.stdout?.on("data", stdoutCaptureHandler);
         child.stderr?.on("data", stderrCaptureHandler);
       };
+
+      const startupValidation = this.createStartupValidation(
+        { state, child, perf, completeStartupValidation, resolve },
+        context,
+      );
 
       const clearExitDrainTimeout = () => {
         if (state.exitDrainTimeout) {
@@ -397,6 +424,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
         state,
         perf,
         startupTimeout,
+        startupValidation,
         monitorStdoutHandler,
         monitorStderrHandler,
         beginPostValidationExit,
@@ -408,7 +436,29 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
         finalizeEarlyExit,
         reject,
       });
+      startupValidation.startSerialPolling();
     });
+  }
+
+  private createStartupValidation(
+    context: Pick<
+      EmulatorLaunchMonitorContext,
+      "state" | "child" | "perf" | "completeStartupValidation" | "resolve"
+    >,
+    options: Pick<EmulatorProcessOptions, "expectedDeviceId" | "signal">,
+  ): EmulatorStartupValidation {
+    return new EmulatorStartupValidation(
+      this.host,
+      context.state,
+      context.child,
+      () => {
+        context.completeStartupValidation();
+        context.perf.endOperation("panicDetection");
+        context.resolve(context.child);
+      },
+      options.expectedDeviceId,
+      options.signal,
+    );
   }
 
   private createLaunchCaptureHandlers(
@@ -474,6 +524,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     state: EmulatorLaunchState;
     perf: ReturnType<typeof createGlobalPerformanceTracker>;
     startupTimeout: NodeJS.Timeout;
+    startupValidation: EmulatorStartupValidation;
     monitorStdoutHandler: (data: Buffer) => void;
     monitorStderrHandler: (data: Buffer) => void;
     beginPostValidationExit: (output: string) => void;
@@ -490,6 +541,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       state,
       perf,
       startupTimeout,
+      startupValidation,
       monitorStdoutHandler,
       monitorStderrHandler,
       beginPostValidationExit,
@@ -507,6 +559,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
 
     child.on("exit", (code, signal) => {
       this.host.timer().clearTimeout(startupTimeout);
+      startupValidation.cancelEarlySignals();
       this.host.reservations().releaseLaunchChild(child);
       state.childTerminationObserved = true;
       state.exitCode = code;
@@ -530,6 +583,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
 
     child.on("close", (code, signal) => {
       this.host.timer().clearTimeout(startupTimeout);
+      startupValidation.cancelEarlySignals();
       this.host.reservations().releaseLaunchChild(child);
       clearExitDrainTimeout();
       state.childTerminationObserved = true;

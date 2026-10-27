@@ -1,4 +1,4 @@
-import path, { type PlatformPath } from "node:path";
+import path from "node:path";
 import ts from "typescript";
 
 type ImportedBinding = { module: string; name: string };
@@ -11,7 +11,7 @@ export function resolveModule(
   from: string,
   specifier: string,
   known: Set<string>,
-  pathApi: Pick<PlatformPath, "dirname" | "resolve"> = path,
+  pathApi: Pick<typeof path, "dirname" | "resolve"> = path,
 ): string | undefined {
   if (!specifier.startsWith("./") && !specifier.startsWith("../")) {
     return undefined;

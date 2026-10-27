@@ -33,13 +33,13 @@ struct PrototypeOfflineEventBuffer<Element> {
         elements = Array(repeating: nil, count: capacity)
     }
 
-    mutating func add(_ e: Element) {
+    mutating func add(_ entry: Element) {
         if count == elements.count {
-            elements[head] = e
+            elements[head] = entry
             head = (head + 1) % elements.count
             dropped += 1
         } else {
-            elements[(head + count) % elements.count] = e
+            elements[(head + count) % elements.count] = entry
             count += 1
         }
     }
@@ -71,13 +71,13 @@ struct PrototypeEventOutbox<Element> {
         buffer = PrototypeOfflineEventBuffer(capacity: capacity)
     }
 
-    mutating func publish(_ e: Element) -> [Element] {
-        guard mode.buffersOffline else { return [e] }
+    mutating func publish(_ entry: Element) -> [Element] {
+        guard mode.buffersOffline else { return [entry] }
         guard clients > 0 else {
-            buffer.add(e)
+            buffer.add(entry)
             return []
         }
-        return buffer.drain() + [e]
+        return buffer.drain() + [entry]
     }
 
     mutating func clientCountChanged(_ n: Int) -> [Element] {

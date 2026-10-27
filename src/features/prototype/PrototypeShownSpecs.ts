@@ -43,6 +43,8 @@ function pathsOverlap(a: string, b: string): boolean {
 }
 
 interface DeviceSpecs {
+  /** The device's platform, as the show that created this state reported it. */
+  platform?: "android" | "ios";
   entries: Map<string, ShownSpecJson>;
   dataWrites: Map<string, DataWriteLog>;
   epoch: number;
@@ -55,7 +57,12 @@ export class PrototypeShownSpecs {
   private sequence = 0;
   private readonly devices = new Map<string, DeviceSpecs>();
 
-  beginShow(deviceId: string, id?: string, replaceOthers = true): number {
+  beginShow(
+    deviceId: string,
+    id?: string,
+    replaceOthers = true,
+    platform?: "android" | "ios",
+  ): number {
     const state = this.devices.get(deviceId) ?? {
       entries: new Map<string, ShownSpecJson>(),
       dataWrites: new Map<string, DataWriteLog>(),
@@ -64,6 +71,7 @@ export class PrototypeShownSpecs {
       open: new Map<number, PendingShow>(),
       poisonedThrough: 0,
     };
+    state.platform = platform ?? state.platform;
     const ticket = ++this.sequence;
     state.issued = ticket;
     for (const pending of state.open.values()) {
@@ -130,6 +138,19 @@ export class PrototypeShownSpecs {
     }
     const spec = state?.entries.get(id);
     return spec && state ? { kind: "known", spec, version: state.epoch } : { kind: "unknown" };
+  }
+
+  /** The platform of a device a show was sent to, while its state is kept. */
+  platformOf(deviceId: string): "android" | "ios" | undefined {
+    return this.devices.get(deviceId)?.platform;
+  }
+
+  /** Devices with an acknowledged spec for this id, sorted. */
+  devicesShowing(id: string): string[] {
+    return [...this.devices.entries()]
+      .filter(([, state]) => state.entries.has(id))
+      .map(([deviceId]) => deviceId)
+      .sort();
   }
 
   commitPatch(deviceId: string, id: string, version: number, spec: ShownSpecJson): boolean {

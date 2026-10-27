@@ -28,7 +28,10 @@ class HierarchyDebouncerSuspendTest {
           object : TimeProvider {
             override fun currentTimeMillis() = testScheduler.currentTime
           },
-        extractHierarchy = { _, _ -> expected },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ -> expected },
+          ),
       )
     val suspending =
       debouncer.extractAfterQuiescenceSuspending(
@@ -49,7 +52,10 @@ class HierarchyDebouncerSuspendTest {
           object : TimeProvider {
             override fun currentTimeMillis() = testScheduler.currentTime
           },
-        extractHierarchy = { _, _ -> expected },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ -> expected },
+          ),
       )
     val first = launch { debouncer.extractAfterQuiescenceSuspending() }
     val second = launch { debouncer.extractAfterQuiescenceSuspending() }
@@ -81,11 +87,14 @@ class HierarchyDebouncerSuspendTest {
           object : TimeProvider {
             override fun currentTimeMillis() = testScheduler.currentTime
           },
-        onDiscardedHierarchy = { discarded += it },
-        extractHierarchy = { _, _ ->
-          if (cancelDuringWalk) cancelled = true
-          next
-        },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            onDiscardedHierarchy = { discarded += it },
+            extractHierarchy = { _, _ ->
+              if (cancelDuringWalk) cancelled = true
+              next
+            },
+          ),
       )
     debouncer.extractImmediately()
     val firstResult = debouncer.hierarchyFlow.replayCache.single()

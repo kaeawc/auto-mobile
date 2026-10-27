@@ -26,15 +26,16 @@ internal fun multiFingerCountError(fingerCount: Int): String? =
  * `ObjCExceptionCatcher_synthesizeMultiFingerSwipe`), so both platforms agree. Identical start and
  * end points make a tap or, with a long duration, a long press.
  */
-internal fun computeMultiFingerStrokes(
-  x1: Double,
-  y1: Double,
-  x2: Double,
-  y2: Double,
-  offset: Int,
-  fingerCount: Int,
-): List<FingerStroke> =
-  (0 until fingerCount).map { index ->
+internal fun computeMultiFingerStrokes(geometry: MultiFingerStrokeGeometry): List<FingerStroke> {
+  val x1 = geometry.x1
+  val y1 = geometry.y1
+  val x2 = geometry.x2
+  val y2 = geometry.y2
+  val offset = geometry.offset
+  val fingerCount = geometry.fingerCount
+
+  return (0 until fingerCount).map { index ->
     val dx = (index * offset).toFloat()
     FingerStroke(x1.toFloat() + dx, y1.toFloat(), x2.toFloat() + dx, y2.toFloat())
   }
+}

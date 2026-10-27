@@ -404,7 +404,7 @@ final class XCTestRunnerTests: XCTestCase {
             success: false,
             executedSteps: 3,
             totalSteps: 10,
-            failedStep: (
+            failedStep: .init(
                 stepIndex: 3,
                 tool: "tapOn",
                 error: "Element \"Submit Button\" not found on screen",
@@ -663,6 +663,13 @@ private struct FakePlanLoader: AutoMobilePlanLoading {
 
 /// Sequential fake: setup precedes execution; captured calls are inspected only after awaiting it.
 private final class FakeMCPClient: AutoMobileMCPClient, @unchecked Sendable {
+    struct FailedStep {
+        let stepIndex: Int
+        let tool: String
+        let error: String
+        let device: String?
+    }
+
     struct Call {
         let name: String
         let arguments: [String: Any]
@@ -690,8 +697,7 @@ private final class FakeMCPClient: AutoMobileMCPClient, @unchecked Sendable {
         success: Bool,
         executedSteps: Int,
         totalSteps: Int,
-        // swiftlint:disable:next large_tuple
-        failedStep: (stepIndex: Int, tool: String, error: String, device: String?)?,
+        failedStep: FailedStep?,
         error: String?
     ) {
         var payload: [String: Any] = [

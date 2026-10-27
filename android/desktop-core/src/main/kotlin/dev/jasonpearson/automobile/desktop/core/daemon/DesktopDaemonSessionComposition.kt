@@ -8,13 +8,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -23,16 +21,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-private val LOG = LoggerFactory.getLogger("DesktopDaemonSessionComposition")
-private const val HEARTBEAT_INTERVAL_MS = 2_000L
+internal val DESKTOP_DAEMON_COMPOSITION_LOG =
+  LoggerFactory.getLogger("DesktopDaemonSessionComposition")
+internal const val HEARTBEAT_INTERVAL_MS = 2_000L
 
 /**
  * Bind attempts per binding before a non-ownership failure is surfaced instead of retried (#10682).
@@ -126,7 +122,12 @@ enum class SessionReleaseReason {
   /** The daemon restarted (or the device restarted) and did not restore the session. */
   DAEMON_RESTARTED,
   /** The daemon no longer had the session's hold, for a reason it did not say. */
-  DAEMON_RELEASED;
+  DAEMON_RELEASED,
+  /**
+   * The user selected another device while recording this one (owner decision 2026-10-10, #11366):
+   * its pane closed, which releases it and finalizes the recording.
+   */
+  DEVICE_SWITCH;
 
   companion object {
     /** Maps the daemon's `releaseReason` string (`src/daemon/sessionManager.ts`) to a notice. */
@@ -192,6 +193,11 @@ data class DesktopDaemonSessionState(
    * shows. Safe from any thread.
    */
   val reportHeldElsewhere: (String) -> Unit = {},
+  /**
+   * Counts the times the user's remembered appearance choice was re-sent under a session (#11363),
+   * so a view of the session's appearance config re-reads it after the restore.
+   */
+  val appearanceRestores: Int = 0,
 ) {
   val sessionUuidProvider: () -> String?
     get() = session?.sessionUuidProvider ?: { null }
@@ -254,105 +260,172 @@ fun rememberPaneSessionUuidProvider(state: DesktopDaemonSessionState): () -> Str
  * is not. When the daemon drops the hold (idle release, restart, expiry) the session drops back to
  * watching under a fresh UUID and never re-acquires the device on its own.
  */
-@Composable
-fun rememberDesktopDaemonSession(
-  socketPath: String?,
+data class DesktopDaemonSessionOptions(
+  val socketPath: String?,
   /** The devices visible panes show. Only one of these can be allocated. */
-  panes: State<List<DesktopDaemonSessionBinding>>,
-  sessionFactory: (String) -> DesktopDaemonSession = { DesktopDaemonSession.create(it) },
-  ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-  cleanupDispatcher: CoroutineDispatcher = Dispatchers.IO,
+  val panes: State<List<DesktopDaemonSessionBinding>>,
+  val sessionFactory: (String) -> DesktopDaemonSession = { DesktopDaemonSession.create(it) },
+  val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+  val cleanupDispatcher: CoroutineDispatcher = Dispatchers.IO,
   /**
    * Whether the user can see the host (#10695). After [hiddenReleaseGraceMs] hidden, the session
    * releases any device it holds and drops back to watching; showing the host again allocates
    * nothing until the user's next input.
    */
-  hostVisible: Boolean = true,
-  hiddenReleaseGraceMs: Long = HIDDEN_RELEASE_GRACE_MS,
-  inputAllocationTimeoutMs: Long = INPUT_ALLOCATION_TIMEOUT_MS,
+  val hostVisible: Boolean = true,
+  val hiddenReleaseGraceMs: Long = HIDDEN_RELEASE_GRACE_MS,
+  val inputAllocationTimeoutMs: Long = INPUT_ALLOCATION_TIMEOUT_MS,
   /**
    * The recording the desktop started. A hidden host does not release the device it is recording
    * (#10978): the hidden release is skipped, and the daemon's idle window frees the device later.
    */
-  activeRecordings: ActiveRecordingTracker = remember { ActiveRecordingTracker() },
-  onDaemonRecovered: suspend () -> Boolean = { true },
-  bindRetryBackoff: BindRetryBackoff = BindRetryBackoff.Default,
+  val activeRecordings: ActiveRecordingTracker? = null,
+  val onDaemonRecovered: suspend () -> Boolean = { true },
+  val bindRetryBackoff: BindRetryBackoff = BindRetryBackoff.Default,
   /** Monotonic milliseconds, for [HEARTBEAT_LAPSE_MS]; tests pass their virtual clock. */
-  monotonicClockMs: () -> Long = { System.nanoTime() / 1_000_000 },
-): DesktopDaemonSessionState {
-  // Bumped to replace the session with a fresh one (#10659). Releasing a session is how a hold is
-  // dropped, and a released UUID is terminal on the daemon, so the fresh one registers as an
-  // observer and allocates only on the next input.
-  var sessionEpoch by remember(socketPath) { mutableStateOf(0) }
+  val monotonicClockMs: () -> Long = { System.nanoTime() / 1_000_000 },
+  /**
+   * The user's last appearance choice, re-sent under each session that registers (#11363). Null
+   * re-sends nothing.
+   */
+  val appearanceChoices: AppearanceChoiceMemory? = null,
+  /** The plain (non-allocating) appearance client a re-sent choice goes through. */
+  val appearanceClientFactory: (sessionUuidProvider: () -> String?) -> AppearanceClient = {
+    AppearanceSocketClient(sessionUuidProvider = it)
+  },
+)
+
+@Composable
+fun rememberDesktopDaemonSession(options: DesktopDaemonSessionOptions): DesktopDaemonSessionState {
+  val state = remember(options.socketPath) { DesktopDaemonCompositionState() }
+  val activeRecordings = options.activeRecordings ?: remember { ActiveRecordingTracker() }
   val session =
-    remember(socketPath, sessionEpoch) {
-      socketPath?.let {
-        runCatching { sessionFactory(it) }
+    remember(options.socketPath, state.sessionEpoch) {
+      options.socketPath?.let {
+        runCatching { options.sessionFactory(it) }
           .onFailure { error ->
-            LOG.warn("Could not create desktop daemon session: ${error.message}")
+            DESKTOP_DAEMON_COMPOSITION_LOG.warn(
+              "Could not create desktop daemon session: ${error.message}",
+            )
           }
           .getOrNull()
       }
     }
-  // Everything below survives a session rotation (keyed on the socket); the binding effect resets
-  // the per-session parts when it restarts.
-  var boundDeviceId by remember(socketPath) { mutableStateOf<String?>(null) }
-  var bindErrorMessage by remember(socketPath) { mutableStateOf<String?>(null) }
-  var bindErrorDeviceId by remember(socketPath) { mutableStateOf<String?>(null) }
-  // The device the user last sent input to (or asked to control): the only device ever allocated.
-  var inputDeviceId by remember(socketPath) { mutableStateOf<String?>(null) }
-  var heldElsewhereDeviceId by remember(socketPath) { mutableStateOf<String?>(null) }
-  var idleReleasedDeviceId by remember(socketPath) { mutableStateOf<String?>(null) }
-  var releaseReason by remember(socketPath) { mutableStateOf<SessionReleaseReason?>(null) }
-  // A bind error that forced a rotation (to drop a hold on another device) is carried so the fresh
-  // session shows it instead of re-running the bounded retries.
-  var carriedBindError by remember(socketPath) { mutableStateOf<Pair<String, String>?>(null) }
-  // Bumped only by an explicit Take control / Retry (#10660). It keys the binding effect, so each
-  // click restarts it and makes exactly one fresh bind attempt.
-  var controlRequests by remember(socketPath) { mutableStateOf(0) }
-  var hiddenPastGrace by remember(socketPath) { mutableStateOf(false) }
-  // A lapse rotated the session: the fresh session runs the daemon-recovery refresh once.
-  val pendingRecoveryRefresh = remember(socketPath) { AtomicBoolean(false) }
-  // The device the current session holds, read on input threads for the no-wait fast path.
-  val heldDevice = remember(socketPath) { AtomicReference<String?>(null) }
-  val gates = remember(socketPath) { InputAllocationGates() }
-  val currentSession by rememberUpdatedState(session)
-  val visiblePanes = panes.value
-  val currentPanes by rememberUpdatedState(visiblePanes)
+  state.currentSession = session
+  val visiblePanes = options.panes.value
+  state.currentPanes = visiblePanes
+  state.HostVisibilityEffect(options, activeRecordings)
+  state.VisiblePanesEffect(options, visiblePanes, activeRecordings)
+  val requestInput = state.rememberRequestInput(options)
+  val inputAllocation = state.rememberInputAllocation(options, requestInput)
+  val requestControl = state.rememberRequestControl(options)
+  val reportHeldElsewhere = state.rememberReportHeldElsewhere(options)
+  val actions =
+    DesktopSessionActions(requestInput, inputAllocation, requestControl, reportHeldElsewhere)
+  val target =
+    if (state.hiddenPastGrace) null
+    else visiblePanes.firstOrNull { it.deviceId == state.inputDeviceId }
+  state.CleanupEffect(options, session)
+  state.BindingEffect(options, session, target)
+  val registered = session?.isRegistered?.collectAsState()?.value ?: false
+  state.AppearanceRestoreEffect(options, session, registered)
+  return state.renderState(session, registered, actions)
+}
 
-  LaunchedEffect(hostVisible, hiddenReleaseGraceMs) {
-    if (hostVisible) {
-      hiddenPastGrace = false
-    } else {
-      delay(hiddenReleaseGraceMs)
-      if (inputDeviceId?.let(activeRecordings::isRecordingOn) == true) {
-        // Releasing would stop the recording the user started; recording is not use, so the
-        // daemon's idle window still frees the device eventually (#10978).
-        LOG.info("Desktop host hidden while recording $inputDeviceId; keeping the device held")
-        return@LaunchedEffect
-      }
-      hiddenPastGrace = true
-      // Nobody can see the device (#10695): stop holding it, as after an idle release. Showing the
-      // host again allocates nothing until the user's next input.
-      inputDeviceId?.let { device ->
-        LOG.info("Desktop host hidden; releasing $device until it is used again")
-        idleReleasedDeviceId = device
-        releaseReason = SessionReleaseReason.HIDDEN_WINDOW
-        inputDeviceId = null
+internal class DesktopDaemonCompositionState {
+  var sessionEpoch by mutableStateOf(0)
+  var boundDeviceId by mutableStateOf<String?>(null)
+  var bindErrorMessage by mutableStateOf<String?>(null)
+  var bindErrorDeviceId by mutableStateOf<String?>(null)
+  var inputDeviceId by mutableStateOf<String?>(null)
+  var heldElsewhereDeviceId by mutableStateOf<String?>(null)
+  var idleReleasedDeviceId by mutableStateOf<String?>(null)
+  var releaseReason by mutableStateOf<SessionReleaseReason?>(null)
+  var carriedBindError by mutableStateOf<Pair<String, String>?>(null)
+  var controlRequests by mutableStateOf(0)
+  var hiddenPastGrace by mutableStateOf(false)
+  var appearanceRestores by mutableStateOf(0)
+  val pendingRecoveryRefresh = AtomicBoolean(false)
+  val heldDevice = AtomicReference<String?>(null)
+  val gates = InputAllocationGates()
+  var currentSession by mutableStateOf<DesktopDaemonSession?>(null)
+  var currentPanes by mutableStateOf<List<DesktopDaemonSessionBinding>>(emptyList())
+}
+
+private data class DesktopSessionActions(
+  val requestInput: (String) -> Deferred<Boolean>,
+  val inputAllocation: DesktopInputAllocation,
+  val requestControl: (String) -> Unit,
+  val reportHeldElsewhere: (String) -> Unit,
+)
+
+@Composable
+private fun DesktopDaemonCompositionState.HostVisibilityEffect(
+  options: DesktopDaemonSessionOptions,
+  activeRecordings: ActiveRecordingTracker,
+) {
+  with(options) {
+    LaunchedEffect(hostVisible, hiddenReleaseGraceMs) {
+      if (hostVisible) {
+        hiddenPastGrace = false
+      } else {
+        delay(hiddenReleaseGraceMs)
+        if (inputDeviceId?.let(activeRecordings::isRecordingOn) == true) {
+          // Releasing would stop the recording the user started; recording is not use, so the
+          // daemon's idle window still frees the device eventually (#10978).
+          DESKTOP_DAEMON_COMPOSITION_LOG.info(
+            "Desktop host hidden while recording $inputDeviceId; keeping the device held",
+          )
+          return@LaunchedEffect
+        }
+        hiddenPastGrace = true
+        // Nobody can see the device (#10695): stop holding it, as after an idle release. Showing
+        // the
+        // host again allocates nothing until the user's next input.
+        inputDeviceId?.let { device ->
+          DESKTOP_DAEMON_COMPOSITION_LOG.info(
+            "Desktop host hidden; releasing $device until it is used again",
+          )
+          idleReleasedDeviceId = device
+          releaseReason = SessionReleaseReason.HIDDEN_WINDOW
+          inputDeviceId = null
+        }
       }
     }
   }
-  // A closed pane stops holding its device (#10659), and its refusal notice goes with it.
-  LaunchedEffect(visiblePanes) {
-    val visible = visiblePanes.map { it.deviceId }.toSet()
-    if (inputDeviceId != null && inputDeviceId !in visible) inputDeviceId = null
-    if (heldElsewhereDeviceId != null && heldElsewhereDeviceId !in visible) {
-      heldElsewhereDeviceId = null
+}
+
+@Composable
+private fun DesktopDaemonCompositionState.VisiblePanesEffect(
+  options: DesktopDaemonSessionOptions,
+  visiblePanes: List<DesktopDaemonSessionBinding>,
+  activeRecordings: ActiveRecordingTracker,
+) {
+  with(options) {
+    LaunchedEffect(visiblePanes) {
+      val visible = visiblePanes.map { it.deviceId }.toSet()
+      inputDeviceId
+        ?.takeIf { it !in visible && activeRecordings.isRecordingOn(it) }
+        ?.let { recorded ->
+          // Leaving a recorded device releases it and finalizes the recording (#11366): mark it
+          // released, as an idle release does, so the dashboard fetches the artifact, drops Stop.
+          idleReleasedDeviceId = recorded
+          releaseReason = SessionReleaseReason.DEVICE_SWITCH
+        }
+      if (inputDeviceId != null && inputDeviceId !in visible) inputDeviceId = null
+      if (heldElsewhereDeviceId != null && heldElsewhereDeviceId !in visible) {
+        heldElsewhereDeviceId = null
+      }
     }
   }
+}
 
-  val requestInput: (String) -> Deferred<Boolean> =
-    remember(socketPath) {
+@Composable
+private fun DesktopDaemonCompositionState.rememberRequestInput(
+  options: DesktopDaemonSessionOptions,
+): (String) -> Deferred<Boolean> {
+  with(options) {
+    return remember(socketPath) {
       { deviceId ->
         when {
           currentSession == null -> CompletableDeferred(true)
@@ -374,19 +447,36 @@ fun rememberDesktopDaemonSession(
         }
       }
     }
-  val inputAllocation =
-    remember(socketPath, inputAllocationTimeoutMs) {
+  }
+}
+
+@Composable
+private fun DesktopDaemonCompositionState.rememberInputAllocation(
+  options: DesktopDaemonSessionOptions,
+  requestInput: (String) -> Deferred<Boolean>,
+): DesktopInputAllocation {
+  with(options) {
+    return remember(socketPath, inputAllocationTimeoutMs) {
       DesktopInputAllocation { deviceId ->
         val gate = requestInput(deviceId)
         val allowed = runBlocking { withTimeoutOrNull(inputAllocationTimeoutMs) { gate.await() } }
         if (allowed == null) {
-          LOG.warn("Allocating $deviceId for input timed out; dropping the input")
+          DESKTOP_DAEMON_COMPOSITION_LOG.warn(
+            "Allocating $deviceId for input timed out; dropping the input",
+          )
         }
         allowed == true
       }
     }
-  val requestControl: (String) -> Unit =
-    remember(socketPath) {
+  }
+}
+
+@Composable
+private fun DesktopDaemonCompositionState.rememberRequestControl(
+  options: DesktopDaemonSessionOptions,
+): (String) -> Unit {
+  with(options) {
+    return remember(socketPath) {
       { deviceId ->
         if (currentPanes.any { it.deviceId == deviceId }) {
           if (heldElsewhereDeviceId == deviceId) heldElsewhereDeviceId = null
@@ -398,11 +488,20 @@ fun rememberDesktopDaemonSession(
         }
       }
     }
-  val reportHeldElsewhere: (String) -> Unit =
-    remember(socketPath) {
+  }
+}
+
+@Composable
+private fun DesktopDaemonCompositionState.rememberReportHeldElsewhere(
+  options: DesktopDaemonSessionOptions,
+): (String) -> Unit {
+  with(options) {
+    return remember(socketPath) {
       { deviceId ->
         if (currentPanes.any { it.deviceId == deviceId }) {
-          LOG.info("Device $deviceId is held by another session; watching only")
+          DESKTOP_DAEMON_COMPOSITION_LOG.info(
+            "Device $deviceId is held by another session; watching only",
+          )
           heldElsewhereDeviceId = deviceId
           // The daemon says this session does not hold it, whatever the last bind said: input stops
           // taking the no-wait path, and leaving the device lets the binding loop drop any hold.
@@ -411,295 +510,102 @@ fun rememberDesktopDaemonSession(
         }
       }
     }
-  val target =
-    if (hiddenPastGrace) null else visiblePanes.firstOrNull { it.deviceId == inputDeviceId }
+  }
+}
 
-  val bindingMutex = remember(session) { Mutex() }
-  val bindingGeneration = remember(session) { AtomicLong(0L) }
-
-  DisposableEffect(socketPath) { onDispose { gates.dropAllExcept(null) } }
-  DisposableEffect(session) {
-    val cleanupScope = CoroutineScope(SupervisorJob() + cleanupDispatcher)
-    onDispose {
-      if (session != null) {
-        cleanupScope.launch {
-          runCatching { session.release() }
-            .onFailure { error ->
-              LOG.warn("Failed to release desktop daemon session: ${error.message}")
-            }
+@Composable
+private fun DesktopDaemonCompositionState.CleanupEffect(
+  options: DesktopDaemonSessionOptions,
+  session: DesktopDaemonSession?,
+) {
+  with(options) {
+    DisposableEffect(socketPath) { onDispose { gates.dropAllExcept(null) } }
+    DisposableEffect(session) {
+      val cleanupScope = CoroutineScope(SupervisorJob() + cleanupDispatcher)
+      onDispose {
+        if (session != null) {
+          cleanupScope.launch {
+            runCatching { session.release() }
+              .onFailure { error ->
+                DESKTOP_DAEMON_COMPOSITION_LOG.warn(
+                  "Failed to release desktop daemon session: ${error.message}",
+                )
+              }
+            cleanupScope.cancel()
+          }
+        } else {
           cleanupScope.cancel()
         }
-      } else {
-        cleanupScope.cancel()
       }
     }
   }
+}
 
-  LaunchedEffect(session, target, controlRequests) {
-    val generation = bindingGeneration.incrementAndGet()
-    boundDeviceId = null
-    bindErrorMessage = null
-    bindErrorDeviceId = null
-    heldDevice.set(null)
-    // Input waiting on a device that is no longer the one to allocate is dropped.
-    gates.dropAllExcept(target?.deviceId)
-    if (session == null) {
-      boundDeviceId = target?.deviceId
-      target?.let { gates.complete(it.deviceId, allowed = true) }
-      return@LaunchedEffect
-    }
-
-    if (target == null && session.holdsDevice) {
-      // The user left the device (its pane closed, the host hid, the hold lapsed): release it by
-      // rotating the session (the old one is released by the DisposableEffect above).
-      sessionEpoch++
-      return@LaunchedEffect
-    }
-
-    val carried = carriedBindError?.takeIf { it.first == target?.deviceId }
-    carriedBindError = null
-
-    var refreshAfterRecovery = pendingRecoveryRefresh.getAndSet(false)
-    var failureLogged = false
-    // The daemon acknowledged this effect's bind (#10237). A healthy heartbeat cycle sends only
-    // `daemon/heartbeat`; a changed target restarts this effect, so it starts unbound.
-    var bindingAcknowledged = false
-    // Only the daemon's ownership refusal counts as held elsewhere (#10682); any other failed bind
-    // is retried up to [MAX_BIND_ATTEMPTS] times and then surfaced as [bindErrorMessage].
-    var failedBinds = if (carried != null) MAX_BIND_ATTEMPTS else 0
-    // Heartbeat ticks spent with a bind error surfaced; every [BIND_ERROR_RETRY_TICKS] allows one
-    // more bind attempt (#10716). Counted in ticks, not wall time, so tests drive it with the
-    // virtual clock.
-    var ticksWithBindError = 0
-    // Automatic re-attempts spent on this error (the backoff index), and the tick count the current
-    // wait needs (-1 until chosen). Both reset once a bind succeeds.
-    var bindErrorRetries = 0
-    var bindErrorWaitTicks = -1
-    if (carried != null) {
-      bindErrorMessage = carried.second
-      bindErrorDeviceId = carried.first
-    }
-    // Set when this session must be replaced by a fresh one before anything else happens: it still
-    // holds a device the user no longer drives (#10682 C3), or the daemon released its UUID
-    // terminally so it can never bind again (C4).
-    var rotateSession = false
-    // When a heartbeat last reached the daemon. Transient failures keep a held device until this is
-    // more than [HEARTBEAT_LAPSE_MS] old (#11072).
-    var lastHeartbeatOkAtMs = monotonicClockMs()
-    while (isActive && bindingGeneration.get() == generation) {
-      val registered = runCatching {
-        bindingMutex.withLock {
-          if (bindingGeneration.get() != generation) return@LaunchedEffect
-          withContext(ioDispatcher) {
-            when {
-              target == null -> session.ensureRegistered()
-              heldElsewhereDeviceId == target.deviceId || failedBinds >= MAX_BIND_ATTEMPTS -> {
-                session.ensureRegistered()
-                gates.complete(target.deviceId, allowed = false)
-              }
-              bindingAcknowledged -> gates.complete(target.deviceId, allowed = true)
-              else -> {
-                val result = session.client.setActiveDevice(target.deviceId, target.platform)
-                when {
-                  result.success -> {
-                    bindingAcknowledged = true
-                    // The daemon was just reached: the lapse window starts here, not at effect
-                    // start. A bind slower than [HEARTBEAT_LAPSE_MS] (allocation timeout 10 s)
-                    // must not let one transient first-heartbeat miss drop the device (#11102).
-                    lastHeartbeatOkAtMs = monotonicClockMs()
-                    failedBinds = 0
-                    bindErrorRetries = 0
-                    // A later bind succeeding (the device came back) clears a surfaced bind error
-                    // without a Retry click.
-                    bindErrorMessage = null
-                    bindErrorDeviceId = null
-                    session.deviceBound(held = true)
-                    heldDevice.set(target.deviceId)
-                    gates.complete(target.deviceId, allowed = true)
-                  }
-                  result.refusal == SetActiveDeviceRefusal.SESSION_RELEASED -> {
-                    // A released UUID is terminal on the daemon; re-sending it would fail
-                    // forever. The input is the user's, so the fresh session allocates the
-                    // device, and the waiting input goes through once it does.
-                    LOG.info(
-                      "Desktop session ${session.sessionUuid} was released by the daemon; " +
-                        "allocating ${target.deviceId} under a fresh session: ${result.message}",
-                    )
-                    rotateSession = true
-                  }
-                  result.refusal == SetActiveDeviceRefusal.HELD_BY_ANOTHER_SESSION -> {
-                    heldElsewhereDeviceId = target.deviceId
-                    gates.complete(target.deviceId, allowed = false)
-                    LOG.info(
-                      "Device ${target.deviceId} is held by another session; watching only: " +
-                        "${result.message}",
-                    )
-                    if (session.holdsDevice) {
-                      // The daemon refused before rebinding, so this session still holds the
-                      // device the user drove before. Release that hold by rotating the session.
-                      rotateSession = true
-                    } else {
-                      session.ensureRegistered()
-                    }
-                  }
-                  else -> {
-                    failedBinds++
-                    // The input is dropped; the bounded retries below run without it.
-                    gates.complete(target.deviceId, allowed = false)
-                    val message = result.message ?: "Failed to set active device"
-                    when {
-                      failedBinds < MAX_BIND_ATTEMPTS -> {
-                        // A bounded transient retry: stay registered (streams keep authenticating
-                        // with this UUID) and re-send the bind on the next heartbeat tick.
-                        LOG.info(
-                          "Binding ${target.deviceId} failed (attempt $failedBinds of " +
-                            "$MAX_BIND_ATTEMPTS), retrying: $message",
-                        )
-                        session.ensureRegistered()
-                      }
-                      session.holdsDevice -> {
-                        // The daemon refused before rebinding, so this session still holds the
-                        // device it bound earlier, which an unusable pane would keep from everyone
-                        // else until the idle window. Drop that hold by rotating the session; the
-                        // fresh session shows this error without holding anything.
-                        LOG.warn(
-                          "Could not bind ${target.deviceId}: $message; releasing the " +
-                            "previously bound device",
-                        )
-                        carriedBindError = target.deviceId to message
-                        rotateSession = true
-                      }
-                      else -> {
-                        LOG.warn("Could not bind ${target.deviceId}: $message")
-                        bindErrorMessage = message
-                        bindErrorDeviceId = target.deviceId
-                        session.ensureRegistered()
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+@Composable
+private fun DesktopDaemonCompositionState.BindingEffect(
+  options: DesktopDaemonSessionOptions,
+  session: DesktopDaemonSession?,
+  target: DesktopDaemonSessionBinding?,
+) {
+  with(options) {
+    val bindingMutex = remember(session) { Mutex() }
+    val bindingGeneration = remember(session) { AtomicLong(0L) }
+    LaunchedEffect(session, target, controlRequests) {
+      val generation = bindingGeneration.incrementAndGet()
+      boundDeviceId = null
+      bindErrorMessage = null
+      bindErrorDeviceId = null
+      heldDevice.set(null)
+      // Input waiting on a device that is no longer the one to allocate is dropped.
+      gates.dropAllExcept(target?.deviceId)
+      if (session == null) {
+        boundDeviceId = target?.deviceId
+        target?.let { gates.complete(it.deviceId, allowed = true) }
+        return@LaunchedEffect
       }
-        .onFailure { error ->
-          if (error is CancellationException) throw error
-          // A transport failure is not a refusal: drop the input, and retry on the next tick.
-          if (!bindingAcknowledged) target?.let { gates.complete(it.deviceId, allowed = false) }
-          if (!failureLogged) {
-            LOG.warn("Failed to register desktop session: ${error.message}")
-            failureLogged = true
-          }
-        }
-        .isSuccess
-      if (bindingGeneration.get() != generation) return@LaunchedEffect
-      if (rotateSession) {
+
+      if (target == null && session.holdsDevice) {
+        // The user left the device (its pane closed, the host hid, the hold lapsed): release it by
+        // rotating the session (the old one is released by the DisposableEffect above).
         sessionEpoch++
         return@LaunchedEffect
       }
-      if (!registered) {
-        delay(HEARTBEAT_INTERVAL_MS)
-        continue
-      }
 
-      failureLogged = false
-      boundDeviceId = target?.deviceId?.takeIf { bindingAcknowledged }
-      if (refreshAfterRecovery) {
-        refreshAfterRecovery =
-          !runCatching { onDaemonRecovered() }
-            .onFailure { error ->
-              LOG.warn("Failed to refresh state after daemon recovery: ${error.message}")
-            }
-            .getOrDefault(false)
-      }
-      var lapse: Throwable? = null
-      val alive = runCatching {
-        delay(HEARTBEAT_INTERVAL_MS)
-        withContext(ioDispatcher) { session.heartbeat() }
-      }
-        .onFailure { error ->
-          if (error is CancellationException) throw error
-          lapse = error
-          LOG.warn("Desktop daemon session heartbeat failed: ${error.message}")
-        }
-        .isSuccess
-      if (alive) lastHeartbeatOkAtMs = monotonicClockMs()
-      // Only the daemon's "session not found" means the session is gone. Any other failure (a
-      // connect error, a missing socket, a daemon still initializing) is retried on the next tick,
-      // and only a streak longer than the lease plus grace counts as a lapse (#11072).
-      val sessionGone = lapse is DaemonSessionNotFoundException
-      val lapsedPastLease = !alive && monotonicClockMs() - lastHeartbeatOkAtMs > HEARTBEAT_LAPSE_MS
-      if (alive && failedBinds >= MAX_BIND_ATTEMPTS && bindErrorMessage != null) {
-        if (bindErrorWaitTicks < 0) {
-          val delayMs = bindRetryBackoff.delayMs(bindErrorRetries)
-          bindErrorWaitTicks =
-            ((delayMs + HEARTBEAT_INTERVAL_MS - 1) / HEARTBEAT_INTERVAL_MS).toInt()
-        }
-        ticksWithBindError++
-        if (ticksWithBindError >= bindErrorWaitTicks) {
-          // One attempt: a failure puts the count straight back to the cap and keeps the message.
-          ticksWithBindError = 0
-          bindErrorWaitTicks = -1
-          bindErrorRetries++
-          failedBinds = MAX_BIND_ATTEMPTS - 1
-        }
-      } else {
-        ticksWithBindError = 0
-        bindErrorWaitTicks = -1
-      }
-      if (!alive && bindingAcknowledged && target != null && !sessionGone && !lapsedPastLease) {
-        // A transient miss: the daemon still holds the session, so keep the device and retry.
-        continue
-      }
-      if (!alive && bindingAcknowledged && target != null) {
-        // The daemon no longer has this session's hold: it idle-released it after the idle window
-        // (owner decision 2026-10-08), restarted, or expired the session. Drop back to watching
-        // under a fresh session and never re-acquire the device on our own (#10730): only the
-        // user's next input allocates it again.
-        LOG.info(
-          "Desktop session ${session.sessionUuid} lost ${target.deviceId}; watching it under a " +
-            "fresh session until it is used again",
+      DesktopDaemonBinding(
+          DesktopBindingContext(
+            options,
+            this@BindingEffect,
+            session,
+            target,
+            bindingMutex,
+            bindingGeneration,
+            generation,
+          ),
         )
-        heldDevice.set(null)
-        idleReleasedDeviceId = target.deviceId
-        releaseReason =
-          if (sessionGone) {
-            SessionReleaseReason.fromDaemon(
-              (lapse as? DaemonSessionNotFoundException)?.releaseReason,
-            )
-          } else {
-            SessionReleaseReason.HEARTBEAT_LAPSED
-          }
-        inputDeviceId = null
-        pendingRecoveryRefresh.set(true)
-        sessionEpoch++
-        return@LaunchedEffect
-      }
-      if (!alive) {
-        refreshAfterRecovery = true
-        boundDeviceId = null
-        // A surfaced bind error is retried once the session re-registers after a lapse (a daemon
-        // restart may have brought the device back); a success clears it.
-        if (failedBinds >= MAX_BIND_ATTEMPTS) failedBinds = 0
-        bindErrorRetries = 0
-      }
+        .run()
     }
   }
+}
 
-  val registered = session?.isRegistered?.collectAsState()?.value ?: false
+@Composable
+private fun DesktopDaemonCompositionState.renderState(
+  session: DesktopDaemonSession?,
+  registered: Boolean,
+  actions: DesktopSessionActions,
+): DesktopDaemonSessionState {
   return DesktopDaemonSessionState(
     session = session,
     boundDeviceId = boundDeviceId,
     isRegistered = registered,
     heldElsewhereDeviceId = heldElsewhereDeviceId,
-    requestControl = requestControl,
+    requestControl = actions.requestControl,
     bindErrorMessage = bindErrorMessage,
     bindErrorDeviceId = bindErrorDeviceId,
     idleReleasedDeviceId = idleReleasedDeviceId,
     releaseReason = releaseReason,
-    requestInput = requestInput,
-    inputAllocation = inputAllocation,
-    reportHeldElsewhere = reportHeldElsewhere,
+    requestInput = actions.requestInput,
+    inputAllocation = actions.inputAllocation,
+    reportHeldElsewhere = actions.reportHeldElsewhere,
+    appearanceRestores = appearanceRestores,
   )
 }

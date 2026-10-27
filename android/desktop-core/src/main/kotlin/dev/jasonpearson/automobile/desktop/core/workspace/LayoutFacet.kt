@@ -5,22 +5,21 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import dev.jasonpearson.automobile.desktop.core.LIVE_STALL_RECONNECT_MS
+import dev.jasonpearson.automobile.desktop.core.LiveVideoFrameOptions
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorDashboard
+import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorOptions
 import dev.jasonpearson.automobile.desktop.core.rememberLiveVideoFrame
-import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
-import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
-import kotlinx.coroutines.delay
 
 // Stream hints for the inspector's live mirror. Inspection wants CRISP pixels (element bounds are
 // read against them) but is mostly static, so High quality at a low rate is the right trade. When
 // this facet is the device's only subscriber (Inspect mode replaces the pane's stream area) its
 // hints fix the shared encode; when a pane already streams the device, the daemon keeps the first
 // subscriber's encode and these hints are ignored.
-private const val INSPECTOR_PANE_FPS = 10
+internal const val INSPECTOR_PANE_FPS = 10
 
 /**
  * Docked-facet body for the Layout Inspector, scoped to a single pane's device. An
@@ -44,61 +43,52 @@ private const val INSPECTOR_PANE_FPS = 10
  * — the host supplies it from its `DesktopDaemonSession`.
  */
 @Composable
-fun LayoutFacet(
-  column: DeviceColumn,
-  sessionUuidProvider: () -> String? = { null },
-  observationStreamFactory: () -> ObservationStream = {
-    ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
-  },
-  backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
-  socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
-  // Window-focus gate (#5219): the desktop host passes `false` when its window is unfocused or
-  // minimized, pausing the inspector's live mirror the same way the stream pane pauses. Default
-  // `true` keeps other embeddings always-streaming.
-  streamingEnabled: Boolean = true,
-  videoSourceFactory: (deviceId: String) -> VideoStreamSource = {
-    VideoStreamClient(
-      quality = VideoStreamQuality.High,
-      fps = INSPECTOR_PANE_FPS,
-      sessionUuidProvider = sessionUuidProvider,
-    )
-  },
-) {
-  val observation =
-    rememberReconnectingObservationState(
-      deviceId = column.deviceId,
-      streamFactory = observationStreamFactory,
-      backoffDelay = backoffDelay,
-      socketAvailable = socketAvailable,
-    )
-  val videoSource = remember(column.deviceId) { videoSourceFactory(column.deviceId) }
-  // The relay's own heartbeat (issue #7549) makes the Streaming-stall watchdog safe on any backend,
-  // including iOS's idle-buffer-dropping capture — a static inspected screen still advances
-  // lastActivityMs every heartbeat. Only a daemon too old to advertise heartbeatMs falls back to
-  // the
-  // pre-#7549 per-platform heuristic (Android had its own idle-frame heartbeat; iOS did not).
-  val heartbeatMs by videoSource.heartbeatMs.collectAsState()
-  val liveFrame =
-    rememberLiveVideoFrame(
-      videoSource,
-      column.deviceId,
-      autoReconnect = true,
-      streamingEnabled = streamingEnabled,
-      stallReconnectMs =
-        if (heartbeatMs != null || column.platform == Platform.Android) {
-          LIVE_STALL_RECONNECT_MS
-        } else {
-          null
-        },
-    )
-  observation.stream?.let { activeStream ->
-    LayoutInspectorDashboard(
-      dataSourceMode = DataSourceMode.Real,
-      observationStream = activeStream,
-      deviceId = column.deviceId,
-      platform = if (column.platform == Platform.Ios) "ios" else "android",
-      liveFrame = liveFrame?.bitmap,
-      connectionGeneration = observation.connectionGeneration,
-    )
+fun LayoutFacet(options: LayoutFacetOptions) {
+  with(options) {
+    val observation =
+      rememberReconnectingObservationState(
+        dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+          deviceId = column.deviceId,
+          streamFactory = observationStreamFactory,
+          backoffDelay = backoffDelay,
+          socketAvailable = socketAvailable,
+        ),
+      )
+    val videoSource = remember(column.deviceId) { videoSourceFactory(column.deviceId) }
+    // The relay's own heartbeat (issue #7549) makes the Streaming-stall watchdog safe on any
+    // backend,
+    // including iOS's idle-buffer-dropping capture — a static inspected screen still advances
+    // lastActivityMs every heartbeat. Only a daemon too old to advertise heartbeatMs falls back to
+    // the
+    // pre-#7549 per-platform heuristic (Android had its own idle-frame heartbeat; iOS did not).
+    val heartbeatMs by videoSource.heartbeatMs.collectAsState()
+    val liveFrame =
+      rememberLiveVideoFrame(
+        LiveVideoFrameOptions(
+          videoSource,
+          column.deviceId,
+          autoReconnect = true,
+          streamingEnabled = streamingEnabled,
+          stallReconnectMs =
+            if (heartbeatMs != null || column.platform == Platform.Android) {
+              LIVE_STALL_RECONNECT_MS
+            } else {
+              null
+            },
+        ),
+      )
+    observation.stream?.let { activeStream ->
+      LayoutInspectorDashboard(
+        options =
+          LayoutInspectorOptions(
+            dataSourceMode = DataSourceMode.Real,
+            deviceId = column.deviceId,
+            platform = if (column.platform == Platform.Ios) "ios" else "android",
+            liveFrame = liveFrame?.bitmap,
+            connectionGeneration = observation.connectionGeneration,
+          ),
+        observationStream = activeStream,
+      )
+    }
   }
 }

@@ -532,7 +532,10 @@ function runnerIntervals(bundle: Bundle) {
   return rows.filter((row) => row.interval.end > row.interval.start);
 }
 
-function namespaceConcurrency(rows: ReturnType<typeof runnerIntervals>, options: ReportOptions) {
+function namespaceConcurrency(
+  rows: ReturnType<typeof runnerIntervals>,
+  options: ReportOptions,
+): Pick<Report["concurrency"], "namespaceVcpu" | "namespaceProfiles"> {
   const vcpus = { ...DEFAULT_NAMESPACE_VCPUS, ...options.namespaceVcpus };
   const namespace = rows.filter((row) => row.pool === "namespace");
   const profiles = [

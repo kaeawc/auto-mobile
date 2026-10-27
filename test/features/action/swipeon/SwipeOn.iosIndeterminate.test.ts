@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../../helpers/observedInteractionStub";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { loadIosRemindersNoiseObservePair } from "../../../fixtures/observe/observeFixture";
@@ -33,7 +34,7 @@ function harness() {
     voiceOverExecutor,
     accessibilityDetector: new FakeAccessibilityDetector(),
   });
-  action.observedInteraction = async (run) => ({ ...(await run(observation)), observation });
+  action.observedInteraction = runBlockWithEnvelope(observation, { observation });
   const invalidations: string[] = [];
   existingSpy = spyOnIosExistingInstance({
     invalidateCache: () => invalidations.push("ios"),

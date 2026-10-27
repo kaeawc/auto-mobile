@@ -5,7 +5,7 @@ import { idleReleaseAt } from "../../src/daemon/sessionHoldDiagnostics";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -121,6 +121,9 @@ describe("a rehydrated cli-idle session across a daemon stall", () => {
     const session = manager.getSession("rehydrated-cli")!;
     const windowStart = session.awaitingOwnerSince ?? Number.NaN;
     const idleDue = idleReleaseAt(session);
+    if (idleDue === null) {
+      throw new Error("Expected the rehydrated session to report an idle release");
+    }
 
     timer.setCurrentTime(STALL_MS);
     manager.forgiveDaemonStall(STALL_MS, 0, STALL_MS, 0);

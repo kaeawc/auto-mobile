@@ -1,53 +1,59 @@
-import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../daemon/deviceAcquisitionRefusals";
-import { TransitionalWaitBudget } from "../utils/TransitionalWaitBudget";
-import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
-import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
-import {
-  awaitTerminationWithinRequest,
-  terminateColdBootProcess,
-  terminateOwnedEmulatorProcess,
-  type OwnedTermination,
-  type OwnedTerminationWait,
-} from "./coldBootProcessTermination";
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import { ActionableError } from "../models";
 import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
-import { isEmulatorLaunchCancelledError } from "../utils/android-cmdline-tools/EmulatorLaunchCancelledError";
-import type {
-  DeviceMatchCriteria,
-  FormFactor,
-  MatchingStrategy,
-} from "../models/DeviceMatchCriteria";
-import type { DeviceCreationGate } from "./deviceCreationGate";
+import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
+import { errorMessage } from "../utils/describeUnknownError";
+import { describeDisplayRequirements, matchesDeviceCriteria } from "../utils/deviceMatcher";
+import { logger } from "../utils/logger";
+import { DeviceBootExecution } from "./DeviceBootExecution";
 import {
-  assertAndroidImageRunningStateKnown,
-  DEFAULT_DEVICE_READY_TIMEOUT_MS,
-  type BootedDeviceDiscoveryOptions,
-  type PlatformDeviceManager,
-  waitForDeviceReadyOrCancel,
-} from "./deviceUtils";
+  defaultDisplayInventoryProvider,
+  hydrateRequiredDisplayInventories,
+} from "./DisplayInventoryProvider";
+import { assertExactAndroidImageDiscovery } from "./androidBootIdentity";
+import { bootAdmissionServices } from "./bootAdmissionServices";
+import { enrichBootedDevice, findImageForBootedDevice } from "./bootedDeviceEnrichment";
+import type { BootDeadlineContext } from "./deviceBootContext";
+import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
 import {
-  describeDisplayRequirements,
-  matchesDeviceCriteria,
-  type DeviceMatcher,
-} from "../utils/deviceMatcher";
+  boundedIosRecheck,
+  findRunningImageAfterLease,
+  revalidateImageIdentity,
+  revalidateRunningIdentity,
+} from "./deviceBootRevalidation";
+import {
+  type AdoptAfterLease,
+  assertBootedMatchesImage,
+  assertExactRunningDiscovery,
+  assertExactRunningName,
+  assertRequestedNameVerifiable,
+  createdImageFor,
+  type DeviceBootProgress,
+  type DeviceBootRequest,
+  type DeviceBootResult,
+  type DeviceBootServiceDependencies,
+  enrichBootedDevicesFromImages,
+  findBootedDeviceMatchingImage,
+  findEligibleExactBootedDevice,
+  hasExplicitSpecConstraints,
+  hasInFlightAndroidColdBoot,
+  isExcludedImage,
+  noMatchingDeviceError,
+  trackInFlightAndroidColdBootIfNeeded,
+} from "./deviceBootSelection";
 import type {
-  DeviceProvisioner,
   DeviceProvisioningIdentityHooks,
   ProvisionedDevice,
   ProvisioningCreateIdentity,
 } from "./deviceProvisioning";
+import {
+  assertAndroidImageRunningStateKnown,
+  DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  type BootedDeviceDiscoveryOptions,
+} from "./deviceUtils";
 import { ProvisionDeviceCreateRejectedError } from "./exactDeviceProvisioning";
-import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { errorMessage } from "../utils/describeUnknownError";
-import { logger } from "../utils/logger";
-import { runWithAbortSignal } from "../utils/AbortContext";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { runPhaseWithSettlement } from "../utils/runPhaseWithSettlement";
-import { assertBootCapacityAvailable } from "../features/bootAdmission/sharedBootAdmissionGates";
-import { AndroidBootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import type { StableVirtualDeviceIdentity } from "./virtualDeviceLifecycleCoordinator";
 import {
   getVirtualDeviceLifecycleCoordinator,
@@ -56,524 +62,27 @@ import {
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleLease,
 } from "./virtualDeviceLifecycleCoordinator";
-import {
-  defaultDisplayInventoryProvider,
-  hydrateRequiredDisplayInventories,
-  type DisplayInventoryProvider,
-} from "./DisplayInventoryProvider";
-
-const ABORT_SETTLEMENT_GRACE_MS = 1_000;
-/** Bound on the iOS post-lease "did a sibling already boot this simulator" re-check (#9920). */
-const IOS_POST_LEASE_RECHECK_TIMEOUT_MS = 5_000;
-
-/** A boot deadline failure, kept distinct from platform command failures. */
-export class DeviceBootTimeoutError extends ActionableError {
-  readonly code = "timeout";
-  /** A purely time-based failure, retryable like provisionDevice's `timeout` (#11548). */
-  readonly retryable = true;
-
-  constructor(
-    readonly operation: string,
-    readonly phase: string,
-    readonly elapsedMs: number,
-    readonly budgetMs: number,
-    /** The device being booted, when it was known at the time of the timeout. */
-    readonly device?: string,
-  ) {
-    super(
-      `${operation} timeout exhausted while ${phase}; ` +
-        (device ? `device=${device}; ` : "") +
-        `remainingBudgetMs=0; elapsedMs=${elapsedMs}; budgetMs=${budgetMs}; origin=DeviceBootService`,
-    );
-  }
-}
+export { AndroidAvdIdentityConflictError } from "./AndroidAvdIdentityConflictError";
+export { AndroidAvdIdentityUnresolvedError } from "./AndroidAvdIdentityUnresolvedError";
+export { AndroidDeviceIdentityUnresolvedError } from "./AndroidDeviceIdentityUnresolvedError";
+export { DeviceBootTimeoutError } from "./DeviceBootTimeoutError";
+export { enrichBootedDevice } from "./bootedDeviceEnrichment";
+export {
+  type DeviceBootProgress,
+  type DeviceBootRequest,
+  type DeviceBootResult,
+  type DeviceBootServiceDependencies,
+  enrichBootedDevicesFromImages,
+  findUniqueBootedAndroidDeviceByName,
+  getInFlightAndroidColdBootReader,
+  type InFlightAndroidColdBootReader,
+} from "./deviceBootSelection";
 
 // Defined beside the other typed models so the boot admission gates can throw it too (#11236).
 export {
   AndroidBootedDeviceDiscoveryIncompleteError,
   BootedDeviceDiscoveryIncompleteError,
 } from "../models/BootedDeviceDiscoveryIncompleteError";
-/** More than one live emulator claims the requested stable AVD identity. */
-export class AndroidAvdIdentityConflictError extends ActionableError {
-  readonly code = "identity_conflict";
-
-  constructor(
-    readonly avdName: string,
-    readonly candidateSerials: readonly string[],
-  ) {
-    super(
-      `identity_conflict: Android AVD '${avdName}' is claimed by multiple running ` +
-        `emulators: ${candidateSerials.join(", ")}. Pass an explicit deviceId (ADB serial) to select one.`,
-    );
-  }
-}
-
-/** Shared retry evidence for an emulator whose AVD identity cannot be proved. */
-class AndroidIdentityUnresolvedError extends ActionableError {
-  readonly code = "target_identity_unresolved";
-  readonly retryable = true;
-  readonly retryAfterMs = DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
-  readonly deviceId?: string;
-
-  constructor(
-    message: string,
-    readonly candidateSerials: readonly string[],
-  ) {
-    super(message);
-    if (candidateSerials.length === 1) {
-      this.deviceId = candidateSerials[0];
-    }
-  }
-
-  toPayload(): Record<string, unknown> {
-    return {
-      code: this.code,
-      retryable: this.retryable,
-      retryAfterMs: this.retryAfterMs,
-      candidateSerials: this.candidateSerials,
-      ...(this.deviceId !== undefined ? { deviceId: this.deviceId } : {}),
-    };
-  }
-}
-
-/** A live emulator with an unanswered AVD-name probe may be the requested image. */
-export class AndroidAvdIdentityUnresolvedError extends AndroidIdentityUnresolvedError {
-  constructor(
-    readonly avdName: string,
-    candidateSerials: readonly string[],
-  ) {
-    super(
-      `target_identity_unresolved: Cannot prove whether Android AVD '${avdName}' is already running; ` +
-        `AVD name is unavailable for ${candidateSerials.join(", ")}. Retry after identity discovery recovers.`,
-      candidateSerials,
-    );
-  }
-
-  override toPayload(): Record<string, unknown> {
-    return { ...super.toPayload(), avdName: this.avdName };
-  }
-}
-
-/** adb lists the serial, but its unanswered probe prevents lifecycle identity resolution. */
-export class AndroidDeviceIdentityUnresolvedError extends AndroidIdentityUnresolvedError {
-  constructor(deviceId: string) {
-    super(
-      `target_identity_unresolved: Android emulator '${deviceId}' is listed by adb but did not answer its AVD-name probe, ` +
-        "so it cannot be resolved for lifecycle coordination. Retry once it responds; " +
-        "if it stays unresponsive, call killDevice for it and then startDevice.",
-      [deviceId],
-    );
-  }
-}
-
-/**
- * Whether a request that names its device by `deviceId` also carries spec fields that device must
- * satisfy. `name` is a spec field like any other (#11648); an exact name (`matchExactName`) paired
- * with a deviceId is an identity pair with its own typed mismatch checks, so it stays out.
- */
-function hasExplicitSpecConstraints(request: DeviceBootRequest): boolean {
-  return (
-    (request.name !== undefined && request.matchExactName !== true) ||
-    request.minOsVersion !== undefined ||
-    request.maxOsVersion !== undefined ||
-    request.formFactor !== undefined ||
-    request.requires !== undefined ||
-    request.screenSize !== undefined
-  );
-}
-
-function assertAndroidAvdIdentityResolved(devices: readonly BootedDevice[], avdName: string): void {
-  const unresolved = devices
-    .filter(
-      (device) =>
-        device.platform === "android" &&
-        isAndroidEmulatorSerial(device.deviceId) &&
-        device.name === `Unknown (${device.deviceId})`,
-    )
-    .map((device) => device.deviceId);
-  if (unresolved.length > 0) {
-    throw new AndroidAvdIdentityUnresolvedError(avdName, [...new Set(unresolved)].toSorted());
-  }
-}
-
-function assertBootedMatchesImage(device: BootedDevice, image: DeviceInfo): void {
-  if (image.platform !== "android") {
-    return;
-  }
-  if (device.platform !== image.platform || device.name !== image.name) {
-    throw new ActionableError(
-      `target_identity_mismatch: Configured ${image.platform} image '${image.name}' ` +
-        `(${image.deviceId ?? "no runtime ID"}) resolved to '${device.name}' (${device.deviceId}). ` +
-        "Retry after device discovery refreshes.",
-    );
-  }
-}
-
-/**
- * A `name` constraint on an emulator whose AVD-name probe went unanswered cannot be judged: the
- * placeholder name proves neither a match nor a mismatch, so the request is retryable rather than
- * refused as unsatisfied (#11648).
- */
-function assertRequestedNameVerifiable(request: DeviceBootRequest, running: BootedDevice): void {
-  if (request.name !== undefined && request.matchExactName !== true) {
-    assertAndroidAvdIdentityResolved([running], request.name);
-  }
-}
-
-function assertExactRunningDiscovery(
-  request: DeviceBootRequest,
-  devices: readonly BootedDevice[],
-): void {
-  if (request.matchExactName && request.name && request.platform === "android") {
-    assertAndroidAvdIdentityResolved(devices, request.name);
-  }
-}
-
-function assertExactRunningName(request: DeviceBootRequest, device: BootedDevice): void {
-  if (request.matchExactName && request.name && device.name !== request.name) {
-    throw new ActionableError(
-      `target_identity_mismatch: Requested ${request.platform} device '${request.name}' ` +
-        `resolved to '${device.name}' (${device.deviceId}).`,
-    );
-  }
-}
-
-function assertExactAndroidImageDiscovery(
-  image: DeviceInfo,
-  booted: readonly BootedDevice[],
-  exactTarget: boolean,
-): void {
-  if (!exactTarget || image.platform !== "android") {
-    return;
-  }
-  assertAndroidAvdIdentityResolved(booted, image.name);
-  const occupiedSerial =
-    image.deviceId && isAndroidEmulatorSerial(image.deviceId)
-      ? booted.find((device) => device.deviceId === image.deviceId && device.name !== image.name)
-      : undefined;
-  if (occupiedSerial) {
-    throw new ActionableError(
-      `target_identity_mismatch: Configured Android AVD '${image.name}' lists serial ` +
-        `'${image.deviceId}', but that serial is running '${occupiedSerial.name}'. ` +
-        "Refresh device inventory and retry.",
-    );
-  }
-}
-
-/**
- * Resolves an exact Android AVD name only when it maps to one live ADB serial.
- * Repeated discovery rows for the same serial do not make the identity ambiguous.
- */
-export function findUniqueBootedAndroidDeviceByName(
-  devices: readonly BootedDevice[],
-  avdName: string,
-): BootedDevice | undefined {
-  const matchesBySerial = new Map(
-    devices
-      .filter(
-        (device) =>
-          device.platform === "android" &&
-          device.name === avdName &&
-          isAndroidEmulatorSerial(device.deviceId),
-      )
-      .map((device): [string, BootedDevice] => [device.deviceId, device]),
-  );
-  const matches = [...matchesBySerial.values()];
-  if (matches.length > 1) {
-    throw new AndroidAvdIdentityConflictError(avdName, [...matchesBySerial.keys()].toSorted());
-  }
-  return matches[0];
-}
-
-// DeviceBootService instances are per request, while a duplicate Android
-// start is coordinated through the shared lifecycle coordinator. Keep the
-// ownership marker at that process-local boundary until readiness settles.
-const inFlightAndroidColdBoots = new WeakMap<
-  VirtualDeviceLifecycleCoordinator,
-  Map<string, number>
->();
-
-export interface InFlightAndroidColdBootReader {
-  /** AVD names with at least one in-flight (claimed, not yet released) Android cold boot. */
-  listInFlightAndroidColdBootAvdNames(): readonly string[];
-}
-
-export function getInFlightAndroidColdBootReader(
-  lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = getVirtualDeviceLifecycleCoordinator(),
-): InFlightAndroidColdBootReader {
-  return {
-    listInFlightAndroidColdBootAvdNames: () => [
-      ...(inFlightAndroidColdBoots.get(lifecycleCoordinator)?.keys() ?? []),
-    ],
-  };
-}
-
-function notifyAndroidColdBootTrackingChanged(
-  listener: DeviceBootServiceDependencies["onAndroidColdBootTrackingChanged"],
-  avdName: string,
-  phase: "claimed" | "released",
-): void {
-  try {
-    listener?.(avdName, phase);
-  } catch (error) {
-    // Resource notification is advisory; listener failure must not fail the boot.
-    logger.warn(
-      `[DeviceBootService] Android cold-boot tracking listener failed: ${errorMessage(error)}`,
-      error,
-    );
-  }
-}
-
-function trackInFlightAndroidColdBoot(
-  lifecycleCoordinator: VirtualDeviceLifecycleCoordinator,
-  avdName: string,
-  listener?: DeviceBootServiceDependencies["onAndroidColdBootTrackingChanged"],
-): () => void {
-  const boots = inFlightAndroidColdBoots.get(lifecycleCoordinator) ?? new Map<string, number>();
-  inFlightAndroidColdBoots.set(lifecycleCoordinator, boots);
-  const priorCount = boots.get(avdName) ?? 0;
-  boots.set(avdName, priorCount + 1);
-  if (priorCount === 0) {
-    notifyAndroidColdBootTrackingChanged(listener, avdName, "claimed");
-  }
-  return () => {
-    const remaining = (boots.get(avdName) ?? 1) - 1;
-    if (remaining > 0) {
-      boots.set(avdName, remaining);
-      return;
-    }
-    boots.delete(avdName);
-    if (boots.size === 0) {
-      inFlightAndroidColdBoots.delete(lifecycleCoordinator);
-    }
-    notifyAndroidColdBootTrackingChanged(listener, avdName, "released");
-  };
-}
-
-function hasInFlightAndroidColdBoot(
-  lifecycleCoordinator: VirtualDeviceLifecycleCoordinator,
-  avdName: string,
-): boolean {
-  return (inFlightAndroidColdBoots.get(lifecycleCoordinator)?.get(avdName) ?? 0) > 0;
-}
-
-function trackInFlightAndroidColdBootIfNeeded(
-  lifecycleCoordinator: VirtualDeviceLifecycleCoordinator,
-  image: DeviceInfo,
-  listener?: DeviceBootServiceDependencies["onAndroidColdBootTrackingChanged"],
-): (() => void) | undefined {
-  return image.platform === "android"
-    ? trackInFlightAndroidColdBoot(lifecycleCoordinator, image.name, listener)
-    : undefined;
-}
-
-/** Whether a boot re-checks for an already-running device after its lifecycle lease settles. */
-type AdoptAfterLease = "always" | "if-queued" | "never";
-
-function findBootedDeviceMatchingImage(
-  image: DeviceInfo,
-  booted: readonly BootedDevice[],
-): BootedDevice | undefined {
-  if (image.platform === "android") {
-    const sameName = findUniqueBootedAndroidDeviceByName(booted, image.name);
-    return sameName;
-  }
-  return image.deviceId ? booted.find((device) => device.deviceId === image.deviceId) : undefined;
-}
-
-function findEligibleExactBootedDevice(
-  platform: Platform,
-  devices: BootedDevice[],
-  name: string,
-  criteria: DeviceMatchCriteria,
-): BootedDevice | null {
-  const exact =
-    platform === "android"
-      ? findUniqueBootedAndroidDeviceByName(devices, name)
-      : devices.find((candidate) => candidate.name === name);
-  return exact && matchesDeviceCriteria(exact, criteria) ? exact : null;
-}
-
-/** Inputs which affect device discovery, creation, and readiness, but not MCP sessions or automation setup. */
-export interface DeviceBootRequest {
-  cameraPosterPath?: string;
-  operationName?: string;
-  platform: "android" | "ios";
-  minOsVersion?: string;
-  maxOsVersion?: string;
-  name?: string;
-  formFactor?: FormFactor;
-  requires?: DeviceMatchCriteria["requires"];
-  screenSize?: { width: number; height: number };
-  deviceId?: string;
-  preferRunning?: boolean;
-  timeoutMs?: number;
-  /** Absolute deadline shared with higher-level automation readiness. */
-  totalDeadlineMs?: number;
-  signal?: AbortSignal;
-  createIfMissing?: boolean;
-  /**
-   * The caller just created this device (a fresh provision), so its first boot
-   * is a genuine cold boot. Opts the Android readiness wait into bounded
-   * ADB-offline recovery instead of silently waiting out the whole budget
-   * (issue #7054).
-   */
-  freshProvision?: boolean;
-  /** Internal CI policy: preserve OS bounds for provisioning while matching its exact owned name across runtime fallback. */
-  matchNamedDeviceIgnoringOsVersion?: boolean;
-  /** Internal identity policy: select a named runtime only when its name is an exact match. */
-  matchExactName?: boolean;
-  /**
-   * Recovery snapshots keep preserved Android AVDs out of a concurrent startup match; managed
-   * bindings keep their AVDs out of generic starts (#11174).
-   */
-  excludeDeviceNames?: ReadonlySet<string>;
-  /**
-   * Recovery snapshots keep preserved Android serials out of a concurrent startup match; managed
-   * bindings keep their simulator UDIDs out of generic starts (#11174). Matched against both booted
-   * devices and images.
-   */
-  excludeDeviceIds?: ReadonlySet<string>;
-  /**
-   * Booted devices a selector match takes only when no other booted device satisfies the spec:
-   * the ones another session holds (#11648). They stay candidates, so a spec only held devices
-   * satisfy keeps its typed ownership refusal instead of booting around the holder. An exact
-   * target (`deviceId`, `matchExactName`) is an identity, not a choice, and ignores this.
-   */
-  deferDeviceIds?: ReadonlySet<string>;
-  /** Non-mutating acceptance control for deterministic discovery-order coverage. */
-  presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"];
-}
-
-export interface DeviceBootProgress {
-  report(current: number, total: number, message: string): Promise<void>;
-}
-
-export interface DeviceBootResult {
-  device: BootedDevice;
-  source: "booted" | "cold-boot";
-  runningBeforeCall?: true;
-  sourceImage?: DeviceInfo;
-  processHandle?: ChildProcess | null;
-  processId?: number;
-  provisioned: boolean;
-}
-
-export interface DeviceBootServiceDependencies {
-  invalidateAndroidDeviceList?: () => void;
-  deviceManager: PlatformDeviceManager;
-  deviceMatcher: DeviceMatcher;
-  displayInventory?: DisplayInventoryProvider;
-  deviceCreationGate: DeviceCreationGate;
-  deviceProvisioner: DeviceProvisioner;
-  matchingStrategy: MatchingStrategy;
-  /** Defaults to no recovery so normal product and MCP boot never erases devices. */
-  bootRecovery?: DeviceBootRecovery;
-  timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
-  /** Bind a selector reservation to canonical identity before mutating the device. */
-  onIdentityResolved?: (identity: StableVirtualDeviceIdentity) => Promise<void>;
-  lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
-  /** Fired synchronously, fire-and-forget on the 0->1 claim and 1->0 release transitions. */
-  onAndroidColdBootTrackingChanged?: (avdName: string, phase: "claimed" | "released") => void;
-  /** Existing lease held by a caller through later session/readiness work. */
-  lifecycleLease?: VirtualDeviceLifecycleLease;
-  /**
-   * Called with the exit promise of an owned emulator that survived SIGTERM and
-   * SIGKILL, so an injected lease's owner can hold it until the process is gone
-   * (#9901). A lease this service reserves itself is held automatically.
-   */
-  retainLeaseUntil?: (settlement: Promise<void>) => void;
-  /**
-   * Set by a long-lived owner (the daemon): once the request is cancelled or out of budget, the
-   * emulator's termination may carry on in the background while the lease stays held (#9920).
-   * Left unset by a one-shot process (`--boot-device`) that exits as soon as `boot` returns,
-   * which would take the SIGKILL escalation's timer down with it: there `boot` waits in full.
-   */
-  cleanupMayOutliveRequest?: boolean;
-  /** Liveness probe for an emulator that survived SIGKILL; injected so tests never signal a real pid. */
-  isProcessRunning?: (pid: number) => boolean;
-  /** Opts an injected daemon lease into post-bind re-checks; deviceTools' reservation races tolerate shared cold boots. */
-  allowExternalLeaseAdoptionRecheck?: boolean;
-  /**
-   * Removes a device this boot created (createIfMissing) when binding or booting
-   * it then fails, so it is not orphaned (#11100). The original failure is still
-   * thrown; a rollback failure is the callee's to report.
-   *
-   * When the create itself was cancelled or timed out, `device` carries only the
-   * identity the create claimed (no iOS UDID) and `pendingCreation` settles once
-   * the platform create has; the callee resolves the exact device after it
-   * (#11155).
-   */
-  rollbackCreatedDevice?: (
-    device: DeviceInfo,
-    failure: unknown,
-    options?: { pendingCreation?: Promise<unknown> },
-  ) => Promise<void>;
-  /**
-   * Read-only boot capacity check run before creating a device (createIfMissing), so at the
-   * limit the request is refused with `capacity_exhausted` instead of creating, being refused
-   * at boot and deleting (#11236). Defaults to the process-wide admission gates.
-   */
-  checkBootCapacity?: (platform: Platform, signal?: AbortSignal) => Promise<void>;
-}
-
-interface BootDeadlineContext {
-  request: DeviceBootRequest;
-  operationName: string;
-  startedAtMs: number;
-  deadlineMs: number;
-  /** Name of the device being booted, once resolved; named by a timeout error (#11548). */
-  deviceLabel?: string;
-  signal?: AbortSignal;
-  lifecycleLease?: VirtualDeviceLifecycleLease;
-  ownsLifecycleLease: boolean;
-  /** Exit promises of owned emulators that could not be confirmed dead; the lease outlives them. */
-  unconfirmedProcessExits: Promise<void>[];
-  /**
-   * Terminations the request stopped waiting for (it was cancelled or out of budget). Each
-   * settles only once its AVD is free, so the lease outlives them (#9920).
-   */
-  pendingTerminations: Promise<void>[];
-  /**
-   * The termination of a cancelled launch's child when this service cannot hold the lease for it.
-   * The start phase rejects on the abort regardless, so the boot awaits this before it rejects.
-   */
-  unheldLaunchTermination?: Promise<OwnedTermination>;
-  /** A fresh provision's cold boot opts Android readiness into offline recovery (#7054). */
-  freshProvision?: boolean;
-}
-
-function noMatchingDeviceError(
-  request: DeviceBootRequest,
-  criteria: DeviceMatchCriteria,
-  images: DeviceInfo[],
-  describedCandidates: Parameters<typeof describeDisplayRequirements>[1],
-): ActionableError {
-  return new ActionableError(
-    `No ${request.platform} device matching criteria found. ` +
-      `${request.minOsVersion ? `minOsVersion>=${request.minOsVersion} ` : ""}` +
-      `${request.maxOsVersion ? `maxOsVersion<=${request.maxOsVersion} ` : ""}` +
-      `${request.name ? `name=${request.name} ` : ""}` +
-      `${describeDisplayRequirements(criteria, describedCandidates)} ` +
-      `Available images: ${images.map((device) => `${device.name}${device.osVersion ? ` (v${device.osVersion})` : ""}`).join(", ") || "none"}.`,
-  );
-}
-
-function createdImageFor(
-  provisioned: ProvisionedDevice | ProvisioningCreateIdentity,
-  request: DeviceBootRequest,
-): DeviceInfo {
-  return {
-    name: provisioned.name,
-    platform: provisioned.platform,
-    deviceId: "deviceId" in provisioned ? provisioned.deviceId : undefined,
-    isRunning: false,
-    formFactor: request.formFactor,
-    runtimeId: provisioned.runtimeId,
-    runtime: provisioned.runtime,
-    deviceType: provisioned.deviceType,
-  } as DeviceInfo;
-}
 
 /**
  * Product boot boundary shared by MCP and daemon-free callers.
@@ -582,6 +91,7 @@ function createdImageFor(
  * CtrlProxy. Those are application concerns layered on by `startDevice`.
  */
 export class DeviceBootService {
+  private readonly execution: DeviceBootExecution;
   private readonly bootRecovery: DeviceBootRecovery;
   private readonly timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
@@ -589,6 +99,7 @@ export class DeviceBootService {
   constructor(private readonly dependencies: DeviceBootServiceDependencies) {
     this.bootRecovery = dependencies.bootRecovery ?? new NoopDeviceBootRecovery();
     this.timer = dependencies.timer ?? defaultTimer;
+    this.execution = new DeviceBootExecution(dependencies, this.timer);
     this.lifecycleCoordinator =
       dependencies.lifecycleCoordinator ??
       (dependencies.timer
@@ -680,44 +191,6 @@ export class DeviceBootService {
     await this.dependencies.onIdentityResolved?.(identity);
   }
 
-  private async discoverBootedDevices(
-    platform: DeviceBootRequest["platform"],
-    context: BootDeadlineContext,
-    phase: string,
-    bypassAndroidCache = false,
-    awaitAbortSettlement = true,
-    presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"],
-  ): Promise<BootedDevice[]> {
-    // Android completeness can only be judged from the detailed discovery
-    // result (`succeededPlatforms`), so android always takes this path — a
-    // plain `getBootedDevices` call cannot distinguish a transient ADB
-    // failure from a genuinely empty result (#7179).
-    const useDetailed = platform === "android" || presentationOrder !== undefined;
-    const options: BootedDeviceDiscoveryOptions = {
-      ...(bypassAndroidCache ? { bypassAndroidDeviceListCache: true } : {}),
-      ...(presentationOrder !== undefined ? { presentationOrder } : {}),
-    };
-    if (useDetailed) {
-      const discovery = await this.runPhase(
-        context,
-        phase,
-        async () =>
-          await this.dependencies.deviceManager.getBootedDevicesDetailed(platform, options),
-        awaitAbortSettlement,
-      );
-      if (platform === "android" && !discovery.succeededPlatforms.has("android")) {
-        throw new AndroidBootedDeviceDiscoveryIncompleteError(discovery.discoveryErrors?.android);
-      }
-      return discovery.devices;
-    }
-    return await this.runPhase(
-      context,
-      phase,
-      () => this.dependencies.deviceManager.getBootedDevices(platform),
-      awaitAbortSettlement,
-    );
-  }
-
   private async bootKnownDevice(
     request: DeviceBootRequest & { deviceId: string },
     context: BootDeadlineContext,
@@ -733,7 +206,7 @@ export class DeviceBootService {
       requires: request.requires,
       screenSize: request.screenSize,
     };
-    const booted = await this.discoverBootedDevices(
+    const booted = await this.execution.discoverBootedDevices(
       request.platform,
       context,
       "discovering running devices",
@@ -753,7 +226,7 @@ export class DeviceBootService {
         progress,
       );
     }
-    const images = await this.runPhase(context, "listing device images", () =>
+    const images = await this.execution.runPhase(context, "listing device images", () =>
       deviceManager.listDeviceImages(request.platform),
     );
     const image = images.find(
@@ -847,7 +320,7 @@ export class DeviceBootService {
         : running.deviceId.includes("-") && running.deviceId.length > 30;
     if (hasExplicitConstraints || needsIosRuntimeMetadata || needsConfiguredImage) {
       try {
-        return await this.enrichBootedDeviceFromImage(running, context);
+        return await this.execution.enrichBootedDeviceFromImage(running, context);
       } catch (error) {
         if (hasExplicitConstraints) {
           throw error;
@@ -859,22 +332,6 @@ export class DeviceBootService {
       }
     }
     return { device: running, image: undefined };
-  }
-
-  private async enrichBootedDeviceFromImage(
-    device: BootedDevice,
-    context: BootDeadlineContext,
-  ): Promise<{ device: BootedDevice; image: DeviceInfo | undefined }> {
-    const images = await this.runPhase(
-      context,
-      `resolving ${device.platform} device metadata`,
-      (signal) => this.dependencies.deviceManager.listDeviceImages(device.platform, signal),
-    );
-    const image = findImageForBootedDevice(device, images);
-    return {
-      device: image ? enrichBootedDevice(device, image) : device,
-      image,
-    };
   }
 
   private async bootMatchingDevice(
@@ -895,7 +352,7 @@ export class DeviceBootService {
     const criteria = request.matchNamedDeviceIgnoringOsVersion
       ? { ...provisionCriteria, minOsVersion: undefined, maxOsVersion: undefined }
       : provisionCriteria;
-    const images = await this.runPhase(context, "listing device images", () =>
+    const images = await this.execution.runPhase(context, "listing device images", () =>
       deviceManager.listDeviceImages(request.platform),
     );
     const matchingImages = images.filter(
@@ -978,7 +435,7 @@ export class DeviceBootService {
     if (request.preferRunning === false) {
       return undefined;
     }
-    const booted = await this.discoverBootedDevices(
+    const booted = await this.execution.discoverBootedDevices(
       request.platform,
       context,
       "discovering running devices",
@@ -1010,7 +467,7 @@ export class DeviceBootService {
     if (!match) {
       return undefined;
     }
-    await this.reportProgress(context, progress, 100, "Found matching running device");
+    await this.execution.reportProgress(context, progress, 100, "Found matching running device");
     const image = findImageForBootedDevice(match, images);
     const result = await this.waitForRunningDevice(match, context, progress);
     assertExactRunningName(request, result.device);
@@ -1089,7 +546,7 @@ export class DeviceBootService {
         this.adoptAfterLeasePolicy(context, image, preferRunning, false),
       );
     }
-    const booted = await this.discoverBootedDevices(
+    const booted = await this.execution.discoverBootedDevices(
       image.platform,
       context,
       "resolving the running device image",
@@ -1097,7 +554,12 @@ export class DeviceBootService {
       true,
       presentationOrder,
     );
-    assertExactAndroidImageDiscovery(image, booted, exactTarget === true);
+    assertExactAndroidImageDiscovery(
+      image,
+      booted,
+      exactTarget === true,
+      context.freshProvision === true,
+    );
     // iOS simulators can share a display name, so only their UDID is lifecycle
     // identity. Android `deviceId` may instead name an AVD image, where name
     // fallback is required because the booted device carries an ADB serial.
@@ -1156,8 +618,8 @@ export class DeviceBootService {
     const checkBootCapacity =
       this.dependencies.checkBootCapacity ??
       ((platform: Platform, signal?: AbortSignal) =>
-        assertBootCapacityAvailable(platform, { signal }));
-    await this.runPhase(context, "checking boot capacity", (signal) =>
+        bootAdmissionServices.assertBootCapacityAvailable(platform, { signal }));
+    await this.execution.runPhase(context, "checking boot capacity", (signal) =>
       checkBootCapacity(criteria.platform, signal),
     );
     let created: ProvisionedDevice | undefined;
@@ -1175,16 +637,31 @@ export class DeviceBootService {
       },
     );
     try {
-      const provisioned = await this.runPhase(context, "provisioning a device", (signal) => {
-        provisioning = this.dependencies.deviceProvisioner.provision(
-          criteria,
-          signal,
-          identityHooks,
-        );
-        return provisioning;
-      });
+      const provisioned = await this.execution.runPhase(
+        context,
+        "provisioning a device",
+        (signal) => {
+          provisioning = this.dependencies.deviceProvisioner.provision(
+            criteria,
+            signal,
+            identityHooks,
+          );
+          return provisioning;
+        },
+      );
       created = provisioned;
-      return await this.bootImage(createdImageFor(provisioned, request), context, progress, true);
+      const boot = await this.bootImage(
+        createdImageFor(provisioned, request),
+        context,
+        progress,
+        true,
+      );
+      return {
+        ...boot,
+        ...(provisioned.prebootDisabledResources
+          ? { prebootDisabledResources: provisioned.prebootDisabledResources }
+          : {}),
+      };
     } catch (error) {
       await this.rollbackFailedProvisioning(request, error, {
         created,
@@ -1298,13 +775,16 @@ export class DeviceBootService {
         if (attempts > 1) {
           return this.bootImageOnce(recoveryTarget, context, progress, false);
         }
-        const ready = await this.runPhase(context, "waiting for a running device", (signal) =>
-          this.dependencies.deviceManager.waitForDeviceReady(
-            { ...device, isRunning: true },
-            this.remaining(context, "waiting for a running device"),
-            undefined,
-            signal,
-          ),
+        const ready = await this.execution.runPhase(
+          context,
+          "waiting for a running device",
+          (signal) =>
+            this.dependencies.deviceManager.waitForDeviceReady(
+              { ...device, isRunning: true },
+              this.execution.remaining(context, "waiting for a running device"),
+              undefined,
+              signal,
+            ),
         );
         return { device: { ...device, ...ready }, source: "booted", provisioned: false };
       },
@@ -1316,69 +796,18 @@ export class DeviceBootService {
     device: BootedDevice,
     context: BootDeadlineContext,
   ): Promise<StableVirtualDeviceIdentity> {
-    const devices = await this.discoverBootedDevices(
-      device.platform,
-      context,
-      "revalidating the running device after lifecycle wait",
-      device.platform === "android",
-    );
-    const current = devices.find((candidate) => candidate.deviceId === device.deviceId);
-    if (!current) {
-      throw new ActionableError(
-        "Selected running device disappeared during lifecycle wait; retry device selection",
-      );
-    }
-    return {
-      platform: current.platform,
-      stableId: current.platform === "android" ? current.name : current.deviceId,
-    };
+    return revalidateRunningIdentity({ execution: this.execution }, device, context);
   }
 
   private async revalidateImageIdentity(
     image: DeviceInfo,
     context: BootDeadlineContext,
   ): Promise<StableVirtualDeviceIdentity> {
-    const images = await this.runPhase(
+    return revalidateImageIdentity(
+      { execution: this.execution, dependencies: this.dependencies },
+      image,
       context,
-      "revalidating the device image after lifecycle wait",
-      (signal) => this.dependencies.deviceManager.listDeviceImages(image.platform, signal),
     );
-    const request = context.request;
-    const criteria: DeviceMatchCriteria = {
-      platform: request.platform,
-      name: request.name,
-      minOsVersion: request.matchNamedDeviceIgnoringOsVersion ? undefined : request.minOsVersion,
-      maxOsVersion: request.matchNamedDeviceIgnoringOsVersion ? undefined : request.maxOsVersion,
-      formFactor: request.formFactor,
-      requires: request.requires,
-      screenSize: request.screenSize,
-    };
-    const eligible = images.filter(
-      (candidate) =>
-        !isExcludedImage(candidate, request.excludeDeviceNames, request.excludeDeviceIds) &&
-        matchesDeviceCriteria(candidate, criteria),
-    );
-    const current = request.deviceId
-      ? eligible.find(
-          (candidate) =>
-            candidate.deviceId === request.deviceId || candidate.name === request.deviceId,
-        )
-      : request.matchExactName && request.name
-        ? eligible.find((candidate) => candidate.name === request.name)
-        : this.dependencies.deviceMatcher.matchDeviceImage(
-            criteria,
-            eligible,
-            this.dependencies.matchingStrategy,
-          );
-    if (!current) {
-      throw new ActionableError(
-        "Selected device image disappeared during lifecycle wait; retry device selection",
-      );
-    }
-    return {
-      platform: current.platform,
-      stableId: current.platform === "android" ? current.name : current.deviceId!,
-    };
   }
 
   /**
@@ -1392,35 +821,17 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     boundedIosRecheck = true,
   ): Promise<BootedDevice | undefined> {
-    const phase = "re-checking the running device after the shared lifecycle lease settled";
-    if (image.platform === "android") {
-      const booted = await this.discoverBootedDevices(image.platform, context, phase, true, true);
-      const running = findUniqueBootedAndroidDeviceByName(booted, image.name);
-      return running && !hasInFlightAndroidColdBoot(this.lifecycleCoordinator, image.name)
-        ? running
-        : undefined;
-    }
-    // Bypass the simulator-list cache: the cached list is what made this image
-    // look stopped, and `startDevice` itself bypasses it before refusing a boot.
-    // The image is a simctl simulator, so devicectl discovery cannot answer for its UDID.
-    const discoverSimulators = (signal: AbortSignal) =>
-      this.dependencies.deviceManager.getBootedDevicesDetailed(image.platform, {
-        bypassIosDeviceListCache: true,
-        skipPhysicalIosDiscovery: true,
-        signal,
-      });
-    // The boot path's own "already running" refusal means the list already
-    // answered within the boot budget, so that follow-up read is not bounded.
-    const discovery = await this.runPhase(context, phase, (signal) =>
-      boundedIosRecheck
-        ? this.boundedIosRecheck(phase, signal, discoverSimulators)
-        : discoverSimulators(signal),
+    return findRunningImageAfterLease(
+      {
+        execution: this.execution,
+        dependencies: this.dependencies,
+        lifecycleCoordinator: this.lifecycleCoordinator,
+        timer: this.timer,
+      },
+      image,
+      context,
+      boundedIosRecheck,
     );
-    // An unanswered inventory proves nothing; fall through to the boot path,
-    // whose own running-state check reports an unreadable simulator list.
-    return discovery?.succeededPlatforms.has("ios")
-      ? findBootedDeviceMatchingImage(image, discovery.devices)
-      : undefined;
   }
 
   /**
@@ -1434,70 +845,7 @@ export class DeviceBootService {
     signal: AbortSignal,
     operation: (signal: AbortSignal) => Promise<T>,
   ): Promise<T | undefined> {
-    const recheck = new AbortController();
-    const timedOut = new Error(`${phase} timed out`);
-    try {
-      return await raceWithDeadline(operation(AbortSignal.any([signal, recheck.signal])), {
-        timer: this.timer,
-        timeoutMs: IOS_POST_LEASE_RECHECK_TIMEOUT_MS,
-        signal,
-        label: phase,
-        timeoutError: () => timedOut,
-        onTimeout: () => recheck.abort(timedOut),
-      });
-    } catch (error) {
-      if (error !== timedOut) {
-        throw error;
-      }
-      logger.warn(
-        `[startDevice] Simulator re-check did not answer within ${IOS_POST_LEASE_RECHECK_TIMEOUT_MS}ms; ` +
-          "continuing to the boot path",
-      );
-      return undefined;
-    }
-  }
-
-  // An unrelated emulator's shutdown can briefly hide whether this AVD is already running.
-  private async recheckRunningState(
-    image: DeviceInfo,
-    context: BootDeadlineContext,
-  ): Promise<DeviceInfo> {
-    if (image.platform !== "android") {
-      return image;
-    }
-    const wait = new TransitionalWaitBudget({
-      timer: this.timer,
-      getSignal: () => context.signal,
-      budgetMs: Math.min(5_000, Math.max(0, context.deadlineMs - this.timer.now())),
-    });
-    while (await wait.waitForNextAttempt()) {
-      if (context.deadlineMs <= this.timer.now()) {
-        break;
-      }
-      const images = await this.runPhase(
-        context,
-        "rechecking Android image running state",
-        (signal) => {
-          (this.dependencies.invalidateAndroidDeviceList ?? resetAdbDeviceListCache)();
-          return this.dependencies.deviceManager.listDeviceImages("android", signal);
-        },
-      );
-      const refreshed = images.find((candidate) => candidate.name === image.name);
-      if (!refreshed) {
-        break;
-      }
-      if (refreshed.isRunningStateKnown === false) {
-        continue;
-      }
-      if (refreshed.isRunning) {
-        throw new AndroidBootedDeviceDiscoveryIncompleteError(
-          undefined,
-          `Cannot safely cold-boot Android AVD '${image.name}': it turned out to be running. Retry the request.`,
-        );
-      }
-      return refreshed;
-    }
-    return image;
+    return boundedIosRecheck({ timer: this.timer }, phase, signal, operation);
   }
 
   private async bootImage(
@@ -1509,7 +857,7 @@ export class DeviceBootService {
   ): Promise<DeviceBootResult> {
     context.deviceLabel = image.deviceId ? `${image.name} (${image.deviceId})` : image.name;
     if (image.isRunningStateKnown === false) {
-      image = await this.recheckRunningState(image, context);
+      image = await this.execution.recheckRunningState(image, context);
     }
     assertAndroidImageRunningStateKnown(image);
     if (image.platform === "ios" && !image.deviceId) {
@@ -1629,7 +977,12 @@ export class DeviceBootService {
       this.dependencies.onAndroidColdBootTrackingChanged,
     );
     try {
-      return await this.bootImageOnceWithOwnedLaunchTracking(image, context, progress, provisioned);
+      return await this.execution.bootImageOnceWithOwnedLaunchTracking(
+        image,
+        context,
+        progress,
+        provisioned,
+      );
     } catch (error) {
       // The start phase rejects on an abort without waiting for a cancelled launch's child, so a
       // service that cannot hold the lease confirms that child's exit before its caller sees the
@@ -1640,396 +993,4 @@ export class DeviceBootService {
       releaseInFlightAndroidColdBoot?.();
     }
   }
-
-  private async bootImageOnceWithOwnedLaunchTracking(
-    image: DeviceInfo,
-    context: BootDeadlineContext,
-    progress: DeviceBootProgress | undefined,
-    provisioned: boolean,
-  ): Promise<DeviceBootResult> {
-    let disposeStartHandleCancellation = () => {};
-    const handle = await this.runPhase(context, "starting the device", async (signal) => {
-      const started = await this.startDeviceOwningCancelledLaunch(image, context);
-      const cancelStarted = () => {
-        if (started) {
-          // No lease ordering is possible here: the phase already rejected. Still escalate so
-          // a late handle that ignores SIGTERM is not left running with nothing tracking it.
-          void terminateColdBootProcess(started, image.name, this.timer).confirmed.catch(
-            (error: unknown) => {
-              logger.warn(
-                `[startDevice] Late start handle cleanup failed for ${image.name}: ${errorMessage(error)}`,
-                error,
-              );
-            },
-          );
-        }
-      };
-      if (signal.aborted) {
-        cancelStarted();
-      } else {
-        signal.addEventListener("abort", cancelStarted, { once: true });
-        disposeStartHandleCancellation = () => signal.removeEventListener("abort", cancelStarted);
-      }
-      return started;
-    });
-    disposeStartHandleCancellation();
-    let termination: Promise<OwnedTermination> | undefined;
-    let cleanupWait: Promise<OwnedTerminationWait> | undefined;
-    // Idempotent: the abort listener, the readiness failure path and the catch
-    // block share one termination, and the two that wait share one bounded wait.
-    const cancelHandle = (): Promise<OwnedTermination> => {
-      if (!handle) {
-        return Promise.resolve({ state: "confirmed" });
-      }
-      termination ??= this.terminateOwnedHandle(handle, image, context);
-      return termination;
-    };
-    const awaitCleanup = (): Promise<OwnedTerminationWait> => {
-      cleanupWait ??= this.awaitOwnedCleanup(cancelHandle(), context);
-      return cleanupWait;
-    };
-    const cancelOnAbort = () => {
-      void cancelHandle();
-    };
-    context.signal?.addEventListener("abort", cancelOnAbort, { once: true });
-    try {
-      await this.reportProgress(context, progress, 60, "Device started, waiting for readiness...");
-      const ready = await this.runPhase(context, "waiting for device boot readiness", () =>
-        waitForDeviceReadyOrCancel(
-          this.dependencies.deviceManager,
-          image,
-          handle,
-          this.remaining(context, "waiting for device boot readiness"),
-          context.signal,
-          this.timer,
-          async () => {
-            await awaitCleanup();
-          },
-          () => this.timeoutError(context, "waiting for device boot readiness"),
-          // A freshly-provisioned Android AVD's first boot is a genuine cold
-          // boot; opt it into bounded ADB-offline recovery (#7054). Fresh state
-          // arrives either from this call site (`provisioned`) or from the
-          // request when a just-created device is booted by serial through
-          // `bootKnownDevice` (`context.freshProvision`). A cold boot of a
-          // pre-existing AVD keeps the wait-out behavior, as does any iOS boot.
-          image.platform === "android" && (provisioned || context.freshProvision === true)
-            ? { freshProvision: true }
-            : undefined,
-        ),
-      );
-      await this.reportProgress(context, progress, 100, "Device is ready for use");
-      return {
-        device: enrichBootedDevice(ready, image),
-        source: "cold-boot",
-        sourceImage: image,
-        processHandle: handle,
-        processId: handle?.pid,
-        provisioned,
-      };
-    } catch (error) {
-      const wait = await awaitCleanup();
-      throw annotateTerminationOutcome(error, wait, handle);
-    } finally {
-      context.signal?.removeEventListener("abort", cancelOnAbort);
-    }
-  }
-
-  /**
-   * Terminates the emulator this boot started (never an adopted one). A survivor
-   * is marked on the lease and watched until its pid is gone, and that watch is
-   * retained so the AVD's lifecycle lease is not handed out while it still holds
-   * the AVD (#9901); the watch's liveness re-check bounds how long (#9920).
-   */
-  private async terminateOwnedHandle(
-    handle: ChildProcess,
-    image: DeviceInfo,
-    context: BootDeadlineContext,
-  ): Promise<OwnedTermination> {
-    const outcome = await terminateOwnedEmulatorProcess(handle, image.name, this.timer, {
-      markHeldByUnkillableProcess: (pid) =>
-        context.lifecycleLease?.markHeldByUnkillableProcess?.(pid),
-      isProcessRunning: this.dependencies.isProcessRunning,
-    });
-    if (outcome.state === "survived") {
-      context.unconfirmedProcessExits.push(outcome.gone);
-      this.dependencies.retainLeaseUntil?.(outcome.gone);
-    }
-    return outcome;
-  }
-
-  /**
-   * Waits for the owned emulator's termination, but only while the request is
-   * live. When the request is cancelled or out of budget the cleanup carries on
-   * in the background and keeps the lease held (#9920), but only for a long-lived
-   * owner (`cleanupMayOutliveRequest`) with a lease it can hold. A one-shot CLI
-   * process, or a lease this service does not own and cannot hand the survivor
-   * to, is still waited on in full.
-   */
-  private async awaitOwnedCleanup(
-    termination: Promise<OwnedTermination>,
-    context: BootDeadlineContext,
-  ): Promise<OwnedTerminationWait> {
-    if (!this.canHoldCleanup(context)) {
-      return (await termination).state;
-    }
-    const wait = await awaitTerminationWithinRequest(termination, {
-      timer: this.timer,
-      deadlineMs: context.deadlineMs,
-      signal: context.signal,
-    });
-    if (wait === "pending") {
-      this.holdLeaseUntilSettled(termination, context);
-    }
-    return wait;
-  }
-
-  /**
-   * Whether the cleanup of an emulator this boot started may outlive the request:
-   * a long-lived owner (`cleanupMayOutliveRequest`) with a lease it can hold.
-   */
-  private canHoldCleanup(context: BootDeadlineContext): boolean {
-    return (
-      this.dependencies.cleanupMayOutliveRequest === true &&
-      (context.ownsLifecycleLease || this.dependencies.retainLeaseUntil !== undefined)
-    );
-  }
-
-  /**
-   * Keeps the AVD's lifecycle lease held until `termination` has settled (and, for a
-   * survivor, until it is finally gone): the request stopped waiting for it.
-   */
-  private holdLeaseUntilSettled(
-    termination: Promise<OwnedTermination>,
-    context: BootDeadlineContext,
-  ): void {
-    const settled = termination.then(
-      (outcome) => (outcome.state === "survived" ? outcome.gone : undefined),
-      () => undefined,
-    );
-    context.pendingTerminations.push(settled);
-    this.dependencies.retainLeaseUntil?.(settled);
-  }
-
-  /**
-   * Starts the device, and when the launch is cancelled after the emulator was
-   * spawned (a cancel during its startup validation), takes the child from the
-   * cancellation error: it terminates it with the same SIGTERM -> bounded wait ->
-   * SIGKILL escalation as any other owned handle and holds the lease until the exit
-   * is confirmed. The phase rejects on the abort regardless, so this must register
-   * its hold before returning (#10075).
-   */
-  private async startDeviceOwningCancelledLaunch(
-    image: DeviceInfo,
-    context: BootDeadlineContext,
-  ): Promise<ChildProcess | null> {
-    try {
-      return await this.dependencies.deviceManager.startDevice(
-        image,
-        this.remaining(context, "starting the device"),
-        context.request.cameraPosterPath === undefined
-          ? undefined
-          : { cameraPosterPath: context.request.cameraPosterPath },
-      );
-    } catch (error) {
-      if (isEmulatorLaunchCancelledError(error) && error.process) {
-        this.ownCancelledLaunchTermination(
-          this.terminateOwnedHandle(error.process, image, context),
-          context,
-        );
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * A service that can hold the lease keeps it until the termination settles and
-   * lets the phase reject at once. One that cannot (a lease it neither owns nor can
-   * retain, or a one-shot owner) records the termination on the context and `boot`
-   * awaits it before the failure reaches the caller, so the caller never releases its
-   * lease while the child is still shutting down. A child that survives SIGKILL is the
-   * one case left uncovered there, as in `awaitOwnedCleanup`: it is logged and the
-   * caller's lease is released.
-   */
-  private ownCancelledLaunchTermination(
-    termination: Promise<OwnedTermination>,
-    context: BootDeadlineContext,
-  ): void {
-    if (this.canHoldCleanup(context)) {
-      this.holdLeaseUntilSettled(termination, context);
-      return;
-    }
-    context.unheldLaunchTermination = termination;
-  }
-
-  private async reportProgress(
-    context: BootDeadlineContext,
-    progress: DeviceBootProgress | undefined,
-    current: number,
-    message: string,
-  ): Promise<void> {
-    if (!progress) {
-      return;
-    }
-    await this.runPhase(
-      context,
-      `reporting ${current}% device boot progress`,
-      () => progress.report(current, 100, message),
-      false,
-    );
-  }
-
-  private remaining(context: BootDeadlineContext, phase: string): number {
-    const remainingMs = Math.floor(context.deadlineMs - this.timer.now());
-    if (remainingMs <= 0) {
-      throw this.timeoutError(context, phase);
-    }
-    return remainingMs;
-  }
-
-  private async runPhase<T>(
-    context: BootDeadlineContext,
-    phase: string,
-    operation: (signal: AbortSignal) => Promise<T>,
-    awaitAbortSettlement = true,
-  ): Promise<T> {
-    const remainingMs = this.remaining(context, phase);
-    if (context.signal?.aborted) {
-      throw new ActionableError(`startDevice cancelled while ${phase}`);
-    }
-    return await runPhaseWithSettlement(
-      {
-        timer: this.timer,
-        timeoutMs: remainingMs,
-        signal: context.signal,
-        graceMs: ABORT_SETTLEMENT_GRACE_MS,
-        label: phase,
-        timeoutError: () => this.timeoutError(context, phase),
-        defaultAbortError: () => new ActionableError(`startDevice cancelled while ${phase}`),
-        awaitAbortSettlement,
-        preferOperationFailureOnTimeout: true,
-      },
-      (signal) => runWithAbortSignal(signal, () => operation(signal)),
-    );
-  }
-
-  private timeoutError(context: BootDeadlineContext, phase: string): DeviceBootTimeoutError {
-    return new DeviceBootTimeoutError(
-      context.operationName,
-      phase,
-      this.timer.now() - context.startedAtMs,
-      Math.max(0, context.deadlineMs - context.startedAtMs),
-      context.deviceLabel ?? context.request.name ?? context.request.deviceId,
-    );
-  }
-}
-
-// oxlint-disable-next-line complexity -- explicit per-field fallback keeps configured-image precedence auditable.
-export function enrichBootedDevice(device: BootedDevice, image: DeviceInfo): BootedDevice {
-  return {
-    ...device,
-    iosVersion: device.iosVersion ?? image.iosVersion,
-    apiLevel: device.apiLevel ?? image.apiLevel,
-    osVersion: device.osVersion ?? image.osVersion,
-    runtimeId: device.runtimeId ?? image.runtimeId,
-    runtime: device.runtime ?? image.runtime,
-    deviceType: device.deviceType ?? image.deviceType,
-    formFactor: device.formFactor ?? image.formFactor,
-    screenWidth: device.screenWidth ?? image.screenWidth,
-    screenHeight: device.screenHeight ?? image.screenHeight,
-    screenDensity: device.screenDensity ?? image.screenDensity,
-    model: device.model ?? image.model,
-    architecture: device.architecture ?? image.architecture,
-    capabilityInventory: device.capabilityInventory ?? image.capabilityInventory,
-  };
-}
-
-function findImageForBootedDevice(
-  device: BootedDevice,
-  images: readonly DeviceInfo[],
-): DeviceInfo | undefined {
-  return images.find(
-    (image) =>
-      image.platform === device.platform &&
-      (image.deviceId === device.deviceId ||
-        (device.platform === "android" &&
-          isAndroidEmulatorSerial(device.deviceId) &&
-          image.name === device.name)),
-  );
-}
-
-export function enrichBootedDevicesFromImages(
-  booted: BootedDevice[],
-  images: DeviceInfo[],
-): BootedDevice[] {
-  const imagesById = new Map(
-    images.filter((image) => image.deviceId).map((image) => [image.deviceId!, image]),
-  );
-  const imagesByName = new Map(images.map((image) => [image.name, image]));
-  return booted.map((device) => {
-    const canMatchAndroidByName =
-      device.platform === "android" && isAndroidEmulatorSerial(device.deviceId);
-    const image =
-      (device.deviceId ? imagesById.get(device.deviceId) : undefined) ??
-      (canMatchAndroidByName ? imagesByName.get(device.name) : undefined);
-    return image?.platform === device.platform ? enrichBootedDevice(device, image) : device;
-  });
-}
-
-/**
- * Reports the original boot failure with the cleanup outcome added as context.
- * The error is never mutated (it may be the caller's own abort reason, and a
- * DOMException's message is read-only): an annotated copy keeps the class so
- * callers' type checks still classify it, and anything that cannot be copied
- * is wrapped with the original as `cause`.
- */
-function annotateTerminationOutcome(
-  error: unknown,
-  wait: OwnedTerminationWait,
-  handle: ChildProcess | null,
-): unknown {
-  const pid = handle?.pid ?? "unknown";
-  if (wait === "survived") {
-    return withCleanupNote(
-      error,
-      `Cleanup also failed: emulator process ${pid} did not exit after SIGTERM and SIGKILL, ` +
-        "so its AVD stays reserved until the process is gone (its liveness is re-checked " +
-        "periodically); terminate that process manually if it does not.",
-    );
-  }
-  if (wait === "unobservable") {
-    return withCleanupNote(
-      error,
-      `Cleanup also failed: the exit of emulator process ${pid} could not be observed, so its ` +
-        "AVD was released; terminate that process manually if it is still running.",
-    );
-  }
-  return error;
-}
-
-function withCleanupNote(error: unknown, note: string): unknown {
-  if (error instanceof Error && !(error instanceof DOMException)) {
-    const copy: Error = Object.create(
-      Object.getPrototypeOf(error),
-      Object.getOwnPropertyDescriptors(error),
-    );
-    Object.defineProperty(copy, "message", {
-      value: `${error.message} ${note}`,
-      writable: true,
-      configurable: true,
-    });
-    return copy;
-  }
-  return new ActionableError(`${errorMessage(error)} ${note}`, { cause: error });
-}
-
-/** Whether a startup match must skip this image: its name or its device id is excluded. */
-function isExcludedImage(
-  image: DeviceInfo,
-  excludedNames: ReadonlySet<string> | undefined,
-  excludedIds: ReadonlySet<string> | undefined,
-): boolean {
-  return (
-    excludedNames?.has(image.name) === true ||
-    (image.deviceId !== undefined && excludedIds?.has(image.deviceId) === true)
-  );
 }

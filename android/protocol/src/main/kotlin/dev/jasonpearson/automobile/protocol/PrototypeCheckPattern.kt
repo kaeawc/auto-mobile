@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.protocol
 
 import java.util.regex.Pattern
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Portable regex grammar: a group repeated more than once must not transitively contain alternation
@@ -11,6 +13,15 @@ import java.util.regex.Pattern
 data class PrototypeCheckPatternResult(val ok: Boolean, val message: String? = null)
 
 object PrototypeCheckPattern {
+  private val maxLength = PrototypeSpecContract.checkPatternMaxLength
+  private val maxBound =
+    PrototypeSpecContract.limits.getValue("MAX_PROTOTYPE_CHECK_QUANTIFIER_BOUND").jsonPrimitive.int
+  private val maxVariable =
+    PrototypeSpecContract.limits
+      .getValue("MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS")
+      .jsonPrimitive
+      .int
+
   fun parse(pattern: String): PrototypeCheckPatternResult = Parser(pattern).parse()
 
   fun matches(pattern: String, value: String): Boolean {
@@ -29,15 +40,7 @@ object PrototypeCheckPattern {
       if (char == '\\') {
         val next = pattern[cursor++]
         append(
-          when (next) {
-            'd' -> "[0-9]"
-            'D' -> "[^0-9]"
-            'w' -> "[A-Za-z0-9_]"
-            'W' -> "[^A-Za-z0-9_]"
-            's' -> "[ \\t\\r\\n\\f\\x0B]"
-            'S' -> "[^ \\t\\r\\n\\f\\x0B]"
-            else -> "\\$next"
-          },
+          escapedSource(next),
         )
       } else {
         when (char) {
@@ -56,15 +59,40 @@ object PrototypeCheckPattern {
           '.' -> if (inClass) append(char) else append("[^\\r\\n\\u2028\\u2029]")
           // Java's $ accepts a final line terminator even before another authored atom.
           // JS without multiline treats authored anchors as absolute boundaries.
-          '$' -> if (inClass) append(char) else append("\\z")
-          '^' -> if (inClass) append(char) else append("\\A")
+          '$',
+          '^' -> append(anchorSource(char, inClass))
           else -> append(char)
         }
       }
     }
   }
 
-  private data class Body(var variable: Boolean = false, var alternation: Boolean = false)
+  private fun anchorSource(char: Char, inClass: Boolean): String =
+    if (inClass) char.toString() else if (char == '$') "\\z" else "\\A"
+
+  private fun escapedSource(next: Char): String =
+    when (next) {
+      'd' -> "[0-9]"
+      'D' -> "[^0-9]"
+      'w' -> "[A-Za-z0-9_]"
+      'W' -> "[^A-Za-z0-9_]"
+      's' -> "[ \\t\\r\\n\\f\\x0B]"
+      'S' -> "[^ \\t\\r\\n\\f\\x0B]"
+      else -> "\\$next"
+    }
+
+  private fun groupError(rest: String): String {
+    return when {
+      rest.startsWith("?=") || rest.startsWith("?!") -> "Lookahead is not supported"
+      rest.startsWith("?<=") || rest.startsWith("?<!") -> "Lookbehind is not supported"
+      rest.startsWith("?<") -> "Named groups are not supported"
+      else -> "Inline flags or unsupported group syntax"
+    }
+  }
+
+  private data class Body(var variable: Boolean = false, var alternation: Boolean = false) {
+    fun hasVariableOrAlternation(): Boolean = variable || alternation
+  }
 
   private class Parser(val source: String) {
     var cursor = 0
@@ -73,8 +101,8 @@ object PrototypeCheckPattern {
     var variable = false
 
     fun parse(): PrototypeCheckPatternResult {
-      if (source.length > 128)
-        return PrototypeCheckPatternResult(false, "Pattern exceeds 128 characters")
+      if (source.length > maxLength)
+        return PrototypeCheckPatternResult(false, "Pattern exceeds $maxLength characters")
       body(false)
       return PrototypeCheckPatternResult(error == null, error)
     }
@@ -98,18 +126,22 @@ object PrototypeCheckPattern {
           cursor++
           continue
         }
-        val atom = atom()
-        val maximum = quantifier()
-        val repeated = maximum != null && maximum > 1
-        if (maximum != null && (char == '^' || char == '$')) fail("Anchor cannot be quantified")
-        if (repeated && atom != null && (atom.variable || atom.alternation)) {
-          fail("Repeated group contains repetition or alternation")
-        }
-        body.variable = body.variable || variable || atom?.variable == true
-        body.alternation = body.alternation || atom?.alternation == true
+        readAtom(body, char)
       }
       if (group && error == null) fail("Unclosed group")
       return body
+    }
+
+    private fun readAtom(body: Body, char: Char) {
+      val atom = atom()
+      val maximum = quantifier()
+      val repeated = maximum != null && maximum > 1
+      if (maximum != null && (char == '^' || char == '$')) fail("Anchor cannot be quantified")
+      if (repeated && atom?.hasVariableOrAlternation() == true) {
+        fail("Repeated group contains repetition or alternation")
+      }
+      body.variable = body.variable || variable || atom?.variable == true
+      body.alternation = body.alternation || atom?.alternation == true
     }
 
     fun atom(): Body? {
@@ -120,7 +152,7 @@ object PrototypeCheckPattern {
           if (peek() == '?') {
             if (source.startsWith("?:", cursor)) cursor += 2
             else {
-              fail(groupError())
+              fail(groupError(source.substring(cursor)))
               return null
             }
           }
@@ -134,16 +166,6 @@ object PrototypeCheckPattern {
         ']' -> fail("Unexpected metacharacter or quantifier")
       }
       return null
-    }
-
-    fun groupError(): String {
-      val rest = source.substring(cursor)
-      return when {
-        rest.startsWith("?=") || rest.startsWith("?!") -> "Lookahead is not supported"
-        rest.startsWith("?<=") || rest.startsWith("?<!") -> "Lookbehind is not supported"
-        rest.startsWith("?<") -> "Named groups are not supported"
-        else -> "Inline flags or unsupported group syntax"
-      }
     }
 
     fun escape(): Int? {
@@ -211,8 +233,8 @@ object PrototypeCheckPattern {
           '{' -> boundedQuantifier()
           else -> null
         }
-      if (variable && ++variableQuantifiers > 2)
-        fail("pattern has too many variable quantifiers (max 2)")
+      if (variable && ++variableQuantifiers > maxVariable)
+        fail("pattern has too many variable quantifiers (max $maxVariable)")
       if (maximum != null)
         when (peek()) {
           '?' -> fail("Lazy quantifiers are not supported")
@@ -234,8 +256,8 @@ object PrototypeCheckPattern {
       val maximum =
         if (upper == null) minimum
         else if (upper.isEmpty()) Double.POSITIVE_INFINITY else upper.toDouble()
-      if (minimum > 100 || (maximum.isFinite() && maximum > 100))
-        fail("Quantifier bounds must be <=100")
+      if (minimum > maxBound || (maximum.isFinite() && maximum > maxBound))
+        fail("Quantifier bounds must be <=$maxBound")
       else if (minimum > maximum) fail("Quantifier minimum exceeds maximum")
       variable = maximum > minimum
       cursor += match.value.length

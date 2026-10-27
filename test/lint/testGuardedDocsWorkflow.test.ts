@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
 import { load } from "js-yaml";
 
@@ -8,13 +9,14 @@ interface Workflow {
     string,
     {
       if?: string;
+      env: Record<string, string>;
       steps: { id?: string; with?: { script?: string } }[];
     }
   >;
 }
 
 const workflow = load(
-  readFileSync(join(import.meta.dir, "../../.github/workflows/pull_request.yml"), "utf8"),
+  readGuardFile(join(import.meta.dir, "../../.github/workflows/pull_request.yml")),
 ) as Workflow;
 const guardedDoc = "docs/using/screen-control.md";
 

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { once } from "node:events";
 import { createConnection, createServer, type Server as NetServer, type Socket } from "node:net";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -22,7 +22,13 @@ const isWindows = platform() === "win32";
 function createFakeDaemonState() {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      hasSession: () => false,
+      getSession: () => null,
+      getDeviceLabels: () => undefined,
+      releaseSession: async () => null,
+    }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -32,7 +38,7 @@ function createFakeDaemonState() {
 }
 
 function reachability(result: boolean): DaemonSocketReachabilityLike {
-  return { isReachable: async () => result };
+  return { probe: async () => (result ? "answered" : "absent") };
 }
 
 function ownerLiveness(status: SocketOwnerStatus): SocketOwnerLiveness {
@@ -87,6 +93,18 @@ describe("UnixSocketServer bind guard (issue #6232)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
     tempDirs.length = 0;
+  });
+
+  (isWindows ? test.skip : test)("unknown probe refuses even with a dead owner", async () => {
+    const socketPath = tempSocketPath();
+    writeFileSync(socketPath, "preserve");
+    const server = makeServer(socketPath, {
+      reachability: { probe: async () => "unknown" },
+      ownerLiveness: ownerLiveness("dead"),
+    });
+    await expect(server.start()).rejects.toThrow(/probe is inconclusive/);
+    expect(readFileSync(socketPath, "utf8")).toBe("preserve");
+    expect(server.isListening()).toBe(false);
   });
 
   (isWindows ? test.skip : test)(
@@ -206,7 +224,7 @@ describe("UnixSocketServer bind guard (issue #6232)", () => {
       let released = false;
       const server = makeServer(socketPath, {
         reachability: {
-          isReachable: async () => {
+          probe: async () => {
             throw new Error("probe must not run while the reclaim lock is unavailable");
           },
         },

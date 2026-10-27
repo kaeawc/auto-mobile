@@ -1,6 +1,8 @@
-import { expect, describe, test, beforeEach, spyOn } from "bun:test";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { expect, describe, test, beforeEach, spyOn, afterEach, mock } from "bun:test";
 import { HandleIntentChooser } from "../../../src/features/action/HandleIntentChooser";
-import { selectAndroidOpenLinkChooser } from "../../../src/server/interactionTools";
+import { selectAndroidOpenLinkChooser } from "../../../src/server/interactionToolHandlers";
 import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 
 const testDevice: BootedDevice = {
@@ -13,6 +15,10 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 
+afterEach(() => {
+  mock.restore();
+});
+
 describe("HandleIntentChooser", () => {
   let handleIntentChooser: HandleIntentChooser;
   let fakeDeepLinkManager: FakeDeepLinkManager;
@@ -20,8 +26,8 @@ describe("HandleIntentChooser", () => {
   let fakeWindow: FakeWindow;
   let fakeAwaitIdle: FakeAwaitIdle;
 
-  const mockObserveResult: ObserveResult = {
-    timestamp: "2025-01-01T00:00:00.000Z",
+  const mockObserveResult: ObserveResult = buildObserveResult({
+    updatedAt: Date.parse("2025-01-01T00:00:00.000Z"),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     viewHierarchy: {
@@ -51,8 +57,8 @@ describe("HandleIntentChooser", () => {
           ],
         },
       },
-    } as ViewHierarchyResult,
-  };
+    } satisfies ViewHierarchyResult,
+  });
 
   beforeEach(() => {
     // Create fakes for dependencies
@@ -84,8 +90,9 @@ describe("HandleIntentChooser", () => {
     // These cases exercise chooser routing. BaseVisualChange's observation and
     // settle contract is covered independently, so invoke the feature block
     // directly with the configured fake observation.
-    handleIntentChooser.observedInteraction = async (block) =>
-      block(await fakeObserveScreen.getMostRecentCachedObserveResult());
+    handleIntentChooser.observedInteraction = runBlockWith(() =>
+      fakeObserveScreen.getMostRecentCachedObserveResult(),
+    );
   });
 
   describe("constructor", () => {
@@ -266,7 +273,7 @@ describe("HandleIntentChooser", () => {
 
       try {
         await handleIntentChooser.execute("always");
-        expect.fail("Expected an error to be thrown");
+        throw new Error("Expected an error to be thrown");
       } catch (error) {
         expect((error as Error).message).toContain("Cannot perform action without view hierarchy");
       }

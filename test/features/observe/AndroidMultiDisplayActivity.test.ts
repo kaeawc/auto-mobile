@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -42,7 +43,7 @@ describe("display-scoped resumed activity", () => {
     );
 
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("dumpsys activity activities", { stdout: output, stderr: "" });
+    adb.setCommandResponse("dumpsys activity activities", createExecResult(output, ""));
     const backStack = await new GetBackStack(device, new FakeAdbClientFactory(adb)).execute();
     expect(backStack.displayCount).toBe(2);
     expect(backStack.currentActivity).toEqual({
@@ -64,7 +65,7 @@ describe("display-scoped resumed activity", () => {
     expect(parseResumedActivityForDisplay(filteredForegroundOutput(output))).toEqual(selected);
 
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("dumpsys activity activities", { stdout: output, stderr: "" });
+    adb.setCommandResponse("dumpsys activity activities", createExecResult(output, ""));
     const backStack = await new GetBackStack(device, new FakeAdbClientFactory(adb)).execute();
     expect(backStack.currentActivity?.name).toBe("com.android.contacts.activities.PeopleActivity");
   });
@@ -127,7 +128,7 @@ describe("display-scoped resumed activity", () => {
   test("observe pairs the default-display hierarchy with its resumed activity", async () => {
     const output = fixture("multi-display-foldable.log");
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("dumpsys activity activities", { stdout: output, stderr: "" });
+    adb.setCommandResponse("dumpsys activity activities", createExecResult(output, ""));
     adb.setForegroundApp({ packageName: "com.google.android.gms", userId: 0 });
     const factory = new FakeAdbClientFactory(adb);
     const timer = new FakeTimer();

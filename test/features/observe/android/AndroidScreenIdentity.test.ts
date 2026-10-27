@@ -30,7 +30,9 @@ function windowRoot(
   windowId: number,
 ): ViewHierarchyNode {
   const roots = observation.viewHierarchy!.hierarchy.node as ViewHierarchyNode[];
-  return roots.find((root) => root.windowId === windowId)!;
+  return roots.find(
+    (root) => Object.getOwnPropertyDescriptor(root, "windowId")?.value === windowId,
+  )!;
 }
 
 /** The first child of the captured window root: where Compose would attach `paneTitle` semantics. */

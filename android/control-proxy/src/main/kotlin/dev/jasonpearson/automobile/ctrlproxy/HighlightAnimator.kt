@@ -7,16 +7,26 @@ import android.animation.ValueAnimator
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.annotation.VisibleForTesting
 
+/** Render and lifecycle callbacks for an animated highlight. */
+internal data class HighlightAnimatorDependencies(
+  val onAlphaUpdate: (String, Float) -> Unit,
+  val onDrawProgressUpdate: (String, Float) -> Unit,
+  val onAnimationComplete: (String) -> Unit,
+  val onAnimationActiveChanged: (Boolean) -> Unit,
+)
+
 internal class HighlightAnimator(
-  private val onAlphaUpdate: (String, Float) -> Unit,
-  private val onDrawProgressUpdate: (String, Float) -> Unit,
-  private val onAnimationComplete: (String) -> Unit,
-  private val onAnimationActiveChanged: (Boolean) -> Unit,
+  dependencies: HighlightAnimatorDependencies,
   private val fadeInDurationMs: Long = DEFAULT_FADE_IN_DURATION_MS,
   private val fadeOutDurationMs: Long = DEFAULT_FADE_OUT_DURATION_MS,
   private val displayDurationMs: Long = DEFAULT_DISPLAY_DURATION_MS,
   private val interpolator: TimeInterpolator = DEFAULT_INTERPOLATOR,
 ) {
+  private val onAlphaUpdate = dependencies.onAlphaUpdate
+  private val onDrawProgressUpdate = dependencies.onDrawProgressUpdate
+  private val onAnimationComplete = dependencies.onAnimationComplete
+  private val onAnimationActiveChanged = dependencies.onAnimationActiveChanged
+
   companion object {
     const val DEFAULT_FADE_IN_DURATION_MS = 500L
     const val DEFAULT_DISPLAY_DURATION_MS = 500L

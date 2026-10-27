@@ -51,8 +51,7 @@ describe("AndroidEmulatorClient wakeAndUnlock", () => {
   };
 
   function runWakeAndUnlock(signal?: AbortSignal): Promise<void> {
-    const wakeAndUnlock = (emulatorClient as any).wakeAndUnlock.bind(emulatorClient);
-    return wakeAndUnlock(DEVICE, signal);
+    return emulatorClient.wakeAndUnlock(DEVICE, signal);
   }
 
   beforeEach(() => {
@@ -261,7 +260,7 @@ describe("AndroidEmulatorClient wakeAndUnlock", () => {
   });
 
   test("treats unknown wakefulness as not-awake and still wakes the device", async () => {
-    (fakeAdb as any).wakefulness = null;
+    fakeAdb.setWakefulnessUnknown();
     fakeAdb.setDeviceLockSequence([LOCKED_SWIPE, UNLOCKED]);
 
     await runWakeAndUnlock();

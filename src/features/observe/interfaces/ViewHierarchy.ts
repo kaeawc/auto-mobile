@@ -28,6 +28,7 @@ export interface ViewHierarchy {
    */
   getScreenIdentity?(
     applicationId?: string,
+    capturedAt?: number,
   ): ScreenIdentity | undefined | Promise<ScreenIdentity | undefined>;
 
   /**

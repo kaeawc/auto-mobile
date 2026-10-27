@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonClient } from "../../src/daemon/client";
 import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_VERSION,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import {
   handleDaemonRequest,
@@ -17,7 +17,7 @@ import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
@@ -26,7 +26,7 @@ import {
 } from "../../src/daemon/sessionManager";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
+import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -35,6 +35,20 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+
+let available: ReturnType<typeof spyOn<typeof DaemonClient, "isAvailable">>;
+let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+let info: ReturnType<typeof spyOn<typeof logger, "info">>;
+beforeEach(() => {
+  available = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+  warn = spyOn(logger, "warn").mockImplementation(() => {});
+  info = spyOn(logger, "info").mockImplementation(() => {});
+});
+afterEach(() => {
+  available.mockRestore();
+  warn.mockRestore();
+  info.mockRestore();
+});
 
 // #10656 (H1 of #10655): a liveness heartbeat must not count as device use.
 //
@@ -123,7 +137,6 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
   let heartbeats: HeartbeatReply[];
   let forwarded: ForwardedCall[];
   let reaped: Array<{ sessionId: string; reason: string }>;
-  const spies: Array<ReturnType<typeof spyOn>> = [];
 
   /** Advance fake time, letting each due event's async work (a keeper round trip) settle. */
   async function idleFor(ms: number): Promise<void> {
@@ -135,11 +148,6 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
   }
 
   async function arrangeHarness(): Promise<void> {
-    spies.push(
-      spyOn(DaemonClient, "isAvailable").mockResolvedValue(true),
-      spyOn(logger, "warn").mockImplementation(() => {}),
-      spyOn(logger, "info").mockImplementation(() => {}),
-    );
     timer = new FakeTimer();
     heartbeats = [];
     forwarded = [];
@@ -266,9 +274,6 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
     await proxy.close();
     await monitor.stop();
     manager.stopCleanupTimer();
-    for (const spy of spies.splice(0)) {
-      spy.mockRestore();
-    }
   });
 
   /** The monotonic release point for SESSION, or undefined while it is still held. */

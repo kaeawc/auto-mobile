@@ -1,3 +1,4 @@
+import { useFakeCtrlProxyManagerHost } from "../helpers/ctrlProxyManagerHost";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "fs";
 import * as path from "path";
@@ -10,6 +11,9 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice, ExecResult } from "../../src/models";
+import { AndroidCtrlProxyRebind } from "../../src/ctrlProxy/AndroidCtrlProxyRebind";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // Issue #10199. These tests run the manager on a REAL AdbClient so the ambient
@@ -40,7 +44,6 @@ const FORCE_STOP = `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`;
 const testDevice: BootedDevice = {
   deviceId: "test-device",
   platform: "android",
-  isEmulator: true,
   name: "Test Device",
 };
 
@@ -76,7 +79,10 @@ function createHarness(handler: Handler = () => undefined) {
     }
     return execResult("");
   };
-  const adb = new AdbClient(testDevice, exec, null, new DefaultRetryExecutor(timer), timer);
+  const adb = new AdbClient(testDevice, exec, {
+    retryExecutor: new DefaultRetryExecutor(timer),
+    timer,
+  });
   const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, adb, timer);
   return { manager, executed, timer };
 }
@@ -86,6 +92,7 @@ const readdWrites = (executed: string[]) =>
   puts(executed).filter((command) => command.includes(component));
 
 describe("AndroidCtrlProxyManager rebind cancellation (#10199)", () => {
+  useFakeCtrlProxyManagerHost();
   beforeEach(() => {
     AndroidCtrlProxyManager.resetInstances();
   });
@@ -320,3 +327,55 @@ describe("AndroidCtrlProxyManager rebind cancellation (#10199)", () => {
     });
   });
 });
+
+test.each(["retry", "load", "exhausted", "stuck"] as const)(
+  "shielded rebind budget: %s",
+  async (mode) => {
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    let writes = 0;
+    adb.executeCommand = async (command, options) => {
+      if (command.startsWith(SETTINGS_PUT) && !command.includes(component)) {
+        writes++;
+        if (mode === "load") {
+          await timer.sleep(12000);
+        } else if (mode === "stuck") {
+          await new Promise<void>(() => {});
+        } else if (mode === "exhausted" || writes === 1) {
+          await new Promise<void>((resolve) =>
+            options?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+          );
+          options?.signal?.throwIfAborted();
+        }
+      }
+      return execResult(command === SETTINGS_GET ? component : boundCapture);
+    };
+    const rebind = new AndroidCtrlProxyRebind({
+      adb,
+      timer,
+      device: testDevice,
+      env: {},
+      hostLoad: { loadAverage1m: () => (mode === "load" ? 3 : 0), cpuCount: () => 1 },
+      assertNotDrivenByOtherDaemon: async () => {},
+      isAccessibilityServiceHealthy: async () => false,
+      clearAvailabilityCache: () => {},
+    });
+    const result = rebind.rebindIfUnhealthy().then(
+      (value) => value,
+      (error: unknown) => error,
+    );
+    await drainUntilQuiescent(timer);
+    timer.advanceTime(mode === "load" ? 12000 : 5000);
+    await drainUntilQuiescent(timer);
+    timer.advanceTime(mode === "exhausted" || mode === "stuck" ? 10000 : 100);
+    await drainUntilQuiescent(timer);
+    timer.advanceTime(100);
+    if (mode === "exhausted" || mode === "stuck") {
+      expect(String(await result)).toContain("budget-driven");
+    } else {
+      expect(await result).toBe(true);
+    }
+    // A write that never settles is not retried: it could still land after its successors.
+    expect(writes).toBe(mode === "load" || mode === "stuck" ? 1 : 2);
+  },
+);

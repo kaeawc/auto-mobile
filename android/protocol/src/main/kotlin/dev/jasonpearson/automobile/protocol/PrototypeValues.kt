@@ -82,6 +82,13 @@ sealed class PrototypeCornerRadius {
   }
 }
 
+/**
+ * A node's `transition` (#15247): its [type] alone, or `{type, delayMs?}` where [delayMs] (0..600)
+ * is the wait before the enter starts.
+ */
+@Serializable(with = PrototypeTransitionSerializer::class)
+data class PrototypeTransition(val type: String, val delayMs: Int? = null)
+
 @Serializable(with = PrototypeDetentSerializer::class)
 sealed class PrototypeDetent {
   data object Half : PrototypeDetent()
@@ -202,6 +209,29 @@ object PrototypeModeValueSerializer :
     }
 }
 
+object PrototypeTransitionSerializer :
+  PrototypeJsonValueSerializer<PrototypeTransition>("PrototypeTransition") {
+  override fun fromJson(value: JsonElement): PrototypeTransition {
+    if (value is JsonPrimitive && value.isString) return PrototypeTransition(value.content)
+    val data = value as? JsonObject ?: throw SerializationException("Expected transition")
+    val type =
+      (data["type"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        ?: throw SerializationException("Expected transition type")
+    // The contract accepts integral tokens such as 100.0 and 1e2, which `intOrNull` would drop.
+    val delay =
+      (data["delayMs"] as? JsonPrimitive)?.doubleOrNull?.takeIf { it % 1.0 == 0.0 }?.toInt()
+    return PrototypeTransition(type, delay)
+  }
+
+  override fun toJson(value: PrototypeTransition): JsonElement =
+    if (value.delayMs == null) JsonPrimitive(value.type)
+    else
+      buildJsonObject {
+        put("type", value.type)
+        put("delayMs", value.delayMs)
+      }
+}
+
 /**
  * What one image slot costs against `MAX_PROTOTYPE_IMAGES`: an asset id costs 1, and a `{light,
  * dark}` pair costs 2 when the two modes name different assets (#11218). Absent is 0.
@@ -301,20 +331,17 @@ object PrototypeDetentSerializer :
 
 object PrototypePageTargetSerializer :
   PrototypeJsonValueSerializer<PrototypePageTarget>("PrototypePageTarget") {
+  private fun isPageIndex(number: Double): Boolean =
+    number.isFinite() && number in 0.0..Int.MAX_VALUE.toDouble() && number % 1.0 == 0.0
+
   override fun fromJson(value: JsonElement): PrototypePageTarget {
     if (value == JsonPrimitive("next")) return PrototypePageTarget.Next
     if (value == JsonPrimitive("prev")) return PrototypePageTarget.Prev
     val primitive = value as? JsonPrimitive ?: throw SerializationException("Expected page index")
-    val number = primitive.takeIf { !it.isString }?.doubleOrNull
-    if (
-      number == null ||
-        !number.isFinite() ||
-        number < 0 ||
-        number > Int.MAX_VALUE ||
-        number % 1.0 != 0.0
-    ) {
-      throw SerializationException("Invalid page index")
-    }
+    val number =
+      primitive.takeIf { !it.isString }?.doubleOrNull
+        ?: throw SerializationException("Invalid page index")
+    if (!isPageIndex(number)) throw SerializationException("Invalid page index")
     return PrototypePageTarget.Index(number.toInt())
   }
 

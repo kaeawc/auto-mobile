@@ -135,7 +135,7 @@ describe("criteria allocation rollback on thrown errors", () => {
       if (record.sessionUuid === "plan:c") {
         throw originalError;
       }
-      await upsert(record);
+      return await upsert(record);
     });
     try {
       await expect(pool.assignMultipleDevicesByCriteria(requests, 10_000)).rejects.toBe(
@@ -176,7 +176,7 @@ describe("criteria allocation rollback on thrown errors", () => {
         if (record.sessionUuid === "plan:c") {
           throw new Error("third session persistence rejected");
         }
-        await upsert(record);
+        return await upsert(record);
       });
     };
 

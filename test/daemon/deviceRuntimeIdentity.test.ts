@@ -9,6 +9,7 @@ import {
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 
 const id = "emulator-5554";
 const observed = (name: string, observedAt: number): BootedDevice => ({
@@ -82,6 +83,50 @@ function harness() {
 }
 
 describe("DeviceRuntimeIdentity", () => {
+  test("twenty foreign placeholders never change quarantine or identity evidence", async () => {
+    const h = harness();
+    const device = { ...pooled(), id: "emulator-5610" };
+    h.devices.set(device.id, device);
+    let flips = 0;
+    Object.defineProperty(device, "identityUnresolved", {
+      get: () => undefined,
+      set: () => {
+        flips++;
+      },
+    });
+    for (let n = 0; n < 20; n++) {
+      await h.identity.reconcileDiscoveryObservation(
+        [
+          {
+            deviceId: device.id,
+            platform: "android",
+            name: `Unknown (${device.id})`,
+            foreignOwned: true,
+            observedAt: n + 1,
+          },
+        ],
+        "foreign listing",
+      );
+    }
+    expect(flips).toBe(0);
+    expect(device.identityObservedAt).toBeUndefined();
+    expect(device.avdName).toBe("Pixel");
+    expect(h.calls).toEqual([]);
+    expect(h.deviceCalls).toEqual([]);
+  });
+
+  test("foreign resolved observations cannot lift quarantine", async () => {
+    const h = harness();
+    const device = pooled();
+    device.identityUnresolved = true;
+    device.identityObservedAt = 1;
+    h.devices.set(id, device);
+    const foreign: BootedDevice = { ...observed("Pixel", 20), foreignOwned: true };
+    await h.identity.reconcileDiscoveryObservation([foreign], "foreign listing");
+    expect(device.identityUnresolved).toBe(true);
+    expect(device.identityObservedAt).toBe(1);
+  });
+
   test("admission refusal has a quarantine type and preserves the existing message", () => {
     const h = harness();
     const device = pooled();
@@ -103,7 +148,7 @@ describe("DeviceRuntimeIdentity", () => {
   test("quarantine cancels by device even when the pool has no session", async () => {
     const h = harness();
     const device = pooled();
-    device.sessionId = undefined;
+    patchDeviceBinding(device, { sessionId: null });
     h.devices.set(id, device);
     await h.identity.reconcileDiscoveryObservation([observed("Other", 20)], "test", {
       excludeExecutionId: "own-execution",
@@ -165,6 +210,21 @@ describe("DeviceRuntimeIdentity", () => {
     expect(h.identity.getPendingUnresolvedEvidence(id)?.observedAt).toBe(13);
     h.identity.clearPendingReplacement(id);
     expect(h.identity.getPendingReplacement(id)).toBeUndefined();
+    expect(h.identity.getPendingUnresolvedEvidence(id)).toBeUndefined();
+  });
+
+  test("a timed-out name probe does not replace pending identity evidence", async () => {
+    const h = harness();
+    h.identity.beginPendingReplacement(observed("Other", 10));
+    await h.identity.reconcileDiscoveryObservation(
+      [{ ...observed(`Unknown (${id})`, 20), nameProbeTimedOut: true }],
+      "test",
+    );
+    await h.identity.reconcileDiscoveryObservation(
+      [{ ...observed(`Unknown (${id})`, 21), consoleBusyDuringProbe: true }],
+      "test",
+    );
+    expect(h.identity.getPendingReplacement(id)?.name).toBe("Other");
     expect(h.identity.getPendingUnresolvedEvidence(id)).toBeUndefined();
   });
 });

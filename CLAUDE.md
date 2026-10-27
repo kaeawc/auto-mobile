@@ -8,6 +8,7 @@ Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities thr
   lint tooling: `oxlint-plugins/auto-mobile.mjs` (oxlint's plugin API is
   JS-first), as `eslint.config.mjs` was before it. Every rule in it is covered by
   the fast unit tests under `test/lint/`.
+- Docs have two audiences, and neither is a changelog. `docs/using/` is for end users only: what to call, parameters, results, errors and what to do — no source paths, class names, issue-number rationale, or AutoMobile's own CI/test harness. `docs/design-docs/` holds technical internals: architecture, contracts, invariants, failure modes and why a choice was made. Keep both concise and current-state: do not add progress logs, status checklists, dated history, per-PR/issue narration, or pasted run output to either; that belongs in the PR description, commit message, or issue. Update a doc only when the behavior it describes changes, by editing the existing statement in place.
 - Write GitHub issue and pull request references as clickable Markdown links only
   in AI-authored prose a human reads directly — issue and PR bodies, review
   comments, commit messages, and assistant chat responses — where a clickable
@@ -31,6 +32,7 @@ Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities thr
 - Ktfmt normalizes `runCatching{}.getOrNull()` to `runCatching {}.getOrNull()` once; write the spaced form and do not mistake that first rewrite for a non-idempotent formatter.
 - Before adding a helper, parser, or dependency, search `src/`, `scripts/lib/`, `package.json`, and the runtime standard library. Prefer the standard library, then an existing direct dependency, then an existing repository helper, then a small tested helper. Do not parse JSON, YAML, XML, or TypeScript with line regexes when a structured parser or typed module contract exists. For new packages, state which built-in and installed alternatives were checked. Preserve injected interfaces/FakeTimer seams where tests need deterministic control.
 - Always use interfaces & fakes & FakeTimer to decouple implementations and keep tests extremely fast and non-flaky
+- iOS tests never run on Linux or Windows. Do not hand-guard iOS test files: `test/macos-only-tests.txt` classifies them (an iOS path token such as `ios`, `simctl`, `devicectl` or `simulator` makes a test macOS-only; `portable` rules keep cross-platform logic running everywhere) and `scripts/test-ts.sh` skips them off macOS. A new test that imports only iOS source needs a rule there; `test/lint/macOsOnlyTestClassification.integration.test.ts` enforces it. See `docs/design-docs/ci/macos-only-tests.md`.
 - Unit tests should pass in 100ms or less. Do not assume that a failing test can be allowed to fail. CI enforces this per test from the JUnit reporter's time (which excludes `beforeAll`); a test over budget is re-run in isolation and only its MEDIAN is failed, so a genuine breach must be fixed in the test, never by raising `BUN_TEST_MAX_MS`. The isolated re-runs run serially after all shards, each bracketed by a calibration probe (`runner-calibration.ts measure`); a run whose probe reads above `BUN_TEST_TIMING_CONTENTION_SLOWDOWN` (1.5x) AND whose sample is over budget is retried up to `BUN_TEST_TIMING_CONTENTION_RETRIES` (2) times, only while the remaining recheck budget still covers one attempt for every run left to verify, and the least-contended attempt is kept (an under-budget sample is conclusive and never retried). Samples are never scaled, so a slow test still fails on a contended runner; the summary reports the probe slowdown beside each verdict and flags any shard with `BUN_TEST_TIMING_CONTENDED_SHARD_MIN` (10) over-budget first samples as "Runner contended".
 - One canonical primitive per concern: UUIDs come from `IdGenerator`, randomness from `Random` (`pick`/`next`), backoff from `Backoff`. Inject these (interface + fake) rather than spawning a new `randomUUID()`/`Math.random()` path.
 - Prefer narrow interfaces that expose exactly what consumers need (YAGNI); grow the interface when the second consumer arrives, not ahead of need.
@@ -121,12 +123,22 @@ bun test <file>        # Run specific test file (no cache)
 Before pushing Node/TypeScript changes, run `bash scripts/prepush-node.sh`.
 Use `scripts/prepush.sh` (`--list` to preview, `--all`, `--changed`, or `--base`) to select per-lane gates from changed paths; per-lane scripts remain usable standalone and each records its own attestation, while the dispatcher does not.
 Use `bash scripts/prepush-node.sh --changed` for the faster affected-unit-test
-loop; `bun scripts/lib/affectedTests.ts` adds reference-only unit extras beyond Bun's import closure, affected safe integration coverage, explicit cap fallbacks, and the cross-cutting source-scan tests in `test/always-run-tests.txt` (which always run, since moving code breaks them untouched); formatting, typecheck, and lint intentionally remain full repository
-gates. It also runs the tool-free TypeScript subset of CI Fast Validation
+loop; early selection via `bun scripts/lib/affectedTests.ts` adds reference-only unit extras beyond Bun's import closure, affected safe integration coverage, and the cross-cutting source-scan tests in `test/always-run-tests.txt` (which always run, since moving code breaks them untouched); a unit cap fallback replaces the changed lane with the full unit lane and skips unit extras, while integration caps use the full safe lane. Formatting, typecheck, and lint intentionally remain full repository
+gates. Typecheck and lint stay strictly serial and separate because oxlint 1.88's experimental `--type-check` and tsgolint diagnostics do not replace the fail-closed typecheck parser, TS2688/`@types/bun` guard, or separate src/test tsconfig projects. It also runs the tool-free TypeScript subset of CI Fast Validation
 (`scripts/all_fast_validate_checks.sh --only ...`, ~10 s, including the offline
-lychee pass when `lychee` is installed), the `test/lint/` suites (including the
-Windows path-separator assertion guard), and, on Linux or with `--timing`, the
-100 ms unit budget. Shell, Kotlin, Swift, docs-syntax, bats and Windows/macOS
+lychee pass when `lychee` is installed), repository lint tests, and, on Linux or with `--timing`, the
+100 ms unit budget. The timing gate measures the unit lane's JUnit reports when
+source or runtime inputs changed; changed test files alone are still re-run
+individually. Changed mode without reports uses the timing validator's own
+affected-test selection. The separate repository lint gate runs only
+`test/lint/*.integration.test.ts` in full mode (unit files already run in the unit
+lane); `--changed` runs the whole `test/lint/` directory only when branch,
+worktree, or untracked paths touch `src/`, `test/`, `scripts/`, `oxlint-plugins/`,
+`android/`, `ios/`, `docs/`, `skills/`, `schemas/`, `.claude/`, `.github/`, or root
+`.oxlintrc.json`, `package.json`, `bun.lock`, `bunfig.toml`, `turbo.json`, or
+`tsconfig*.json`. After that directory runs, affected unit and integration extras
+omit `test/lint/` files already covered. Always-run unit extras still run when
+that gate skips. Shell, Kotlin, Swift, docs-syntax, bats and Windows/macOS
 matrix lanes are not covered: use `scripts/prepush-shell.sh` and the platform
 gates, and expect CI to be the only Windows run. `oxlint`'s actual exit code is authoritative: Error-level rules such as
 `eqeqeq` are enforced directly by oxlint, not its warning-only ratchet, and
@@ -161,25 +173,24 @@ the legacy `node10` that `"node"` aliased to; bundler also matches how bun
 resolves this repo's extensionless imports and is the config `tsgolint` reads for
 oxlint's `--type-aware` rules).
 
-## Typecheck baseline gate
+## Typecheck gates
 
 Bun's bundler skips type-checking, so `build`/`test` do NOT catch type errors.
-A scoped gate (issue #3001) runs `tsgo --noEmit` and fails CI only on errors NOT
-already in the committed baseline (`scripts/typecheck-baseline.txt`, the
-tolerated errors; count them with `grep -vc '^#' scripts/typecheck-baseline.txt`):
+Two `tsgo --noEmit` passes run in CI (`scripts/typecheck-baseline.sh`):
 
 ```bash
-bun run typecheck             # gate: fail on NEW type errors (CI runs this)
-bun run typecheck:update      # regenerate the baseline after fixing errors
+bun run typecheck             # src (tsconfig.json): NO baseline, any error fails
+bun run typecheck:test        # every test/**/*.ts (tsconfig.test.json): NO baseline, any error fails
 ```
 
-When you FIX type errors, run `bun run typecheck:update` and commit the smaller
-baseline — it is a one-way ratchet (`--update` refuses to grow it without
-`-- --allow-grow`). When you INTRODUCE a new error the gate prints it; fix it, or
-(rarely) record it with `typecheck:update`. The baseline is version-sensitive:
-`@typescript/native-preview` is a dated preview build, so regenerate the baseline
-in the same PR that bumps it (the `# generated-with:` header records the version
-and the gate warns on drift).
+Both baselines reached zero and were deleted (issues #3001, #11787): there is no
+type-error baseline and no `--update` path, so any type error in `src/` or `test/` fails.
+Both projects resolve `bun:*` modules and the `Bun` global from `@types/bun` via the
+`types` list in their tsconfig; if it is missing the gate exits 4 on TS2688 / unresolved
+`bun:` modules, so a broken install cannot pass silently. Run time is about 2 s (src) and
+6 s (test). `as any` and `as unknown as` in `test/` are hard `oxlint` errors
+(`auto-mobile/no-as-any`, `auto-mobile/no-unknown-cast`); the former test cast baselines
+are deleted too. Fix the code (typed fakes, `Pick<>` views, `satisfies`, type guards).
 
 ## oxlint ratchet baseline
 
@@ -197,12 +208,13 @@ bun run lint:baseline   # alias of lint:prune (regenerate the baseline)
 
 Everything in `.oxlintrc.json` set to `error` is gated directly by `oxlint` (its
 exit code is authoritative; CI disables fixes so even auto-fixable violations
-exit non-zero). The ratchet's violation counts cover only the rules set to `warn`
-because they carry pre-existing violations: `complexity`, `max-depth`, `max-params`,
-`max-lines-per-function`, `max-classes-per-file`, `auto-mobile/max-class-lines`
-(1000 non-blank lines), and `auto-mobile/catch-convention`.
+exit non-zero). `complexity`, `max-depth`, `max-params`, `max-lines-per-function`,
+`max-classes-per-file`, `auto-mobile/max-class-lines` (1000 non-blank lines), and
+`auto-mobile/catch-convention` are fully burned down and are `error` too, so the ratchet's
+violation counts no longer cover them.
 `typescript/no-floating-promises` and `typescript/no-misused-promises` are fully
-burned down and are `error` in `.oxlintrc.json`, but they need type information and
+burned down and are `error` in `.oxlintrc.json` (`no-floating-promises` covers `test/` too,
+where a deliberately unawaited call is written `void`), but they need type information and
 the fast stage is not type-aware, so they are enforced by the ratchet stage
 (`oxlint --type-aware`), which keeps them in its gated codes at a zero baseline: any
 diagnostic is a new violation and fails the gate (`--update` refuses to record one
@@ -251,13 +263,23 @@ Explicit loops (`for`, `for-of`, `for-in`, `while`) are deliberately NOT linted.
 The ratchet nudges toward declarative style where a clean declarative form
 exists; it does not outlaw iteration.
 
-## DaemonState.getInstance() ratchet
+## Zero baselines are deleted, not kept
 
-`test/lint/daemonStateGetInstanceRatchet.test.ts` parses `src/` and compares per-file
-`DaemonState.getInstance(` call counts to `test/lint/daemon-state-get-instance-baseline.txt`
-(#11806). A file may never exceed its baseline count; after removing calls, run
-`UPDATE_DAEMON_STATE_BASELINE=1 bun test test/lint/daemonStateGetInstanceRatchet.test.ts`
-and commit the smaller baseline (it refuses to grow without `=grow`).
+When a ratchet baseline reaches zero, delete its baseline file, its regeneration
+path (`UPDATE_*` env var, `--update`) and any allow-list plumbing, and make the guard
+assert "no violations" outright (a warn-level oxlint rule becomes `error` and leaves
+the ratchet's rule list in `scripts/oxlint-baseline.sh`). Named `EXEMPT_*` lists that
+encode deliberate, reasoned exceptions are not baselines and stay. Import-direction
+tiers follow the same rule: only tiers marked `baselined: true` in
+`scripts/check-tier-import-direction.ts` keep a file under
+`scripts/import-direction-baselines/`; `scripts/check-utils-import-direction.ts` has
+no baseline at all.
+
+## DaemonState.getInstance() guard
+
+`test/lint/daemonStateGetInstanceRatchet.test.ts` parses `src/` and fails on any
+`DaemonState.getInstance(` call outside its named `EXEMPT_FILES` (#11806). The
+baseline reached zero and was deleted; pass the daemon state in as a dependency.
 
 ## File-backed DB lifecycle tests
 
@@ -290,6 +312,25 @@ authoritative set of MCP tool names and schemas (regenerate it with
 interaction (tap/swipe/drag/pinch, key and text input, clipboard), app management
 (launch/terminate/install/uninstall), and device management (list/provision/kill
 devices, set the active device).
+
+## Android Lint
+
+Run `cd android && ./gradlew lintDebug --continue`. The Android pre-push gate
+runs lint for affected modules (all modules for Gradle/build-logic changes);
+the CI Detekt job runs it for every Android module. New warnings fail the build.
+Remaining findings live in each module's `lint-baseline.xml`; clean modules have
+no baseline. Baselines may only shrink, both in total and for each issue id per
+module. After fixing a module, remove its baseline and regenerate with
+`./gradlew :<module>:lintDebug -Dlint.baselines.continue=true`. Keep the generated
+file only if nonempty, then run `./gradlew :<module>:lintDebug --rerun-tasks` once
+to refresh AGP's cached baseline creation result. Never use `--allow-grow` when
+updating baselines. `scripts/android/check-lint-baseline-shrink.sh` checks
+HEAD against the merge-base with origin/main; pre-push includes local edits too.
+Checks that compare against what is published upstream (AndroidGradlePluginVersion,
+GradleDependency, NewerVersionAvailable, OldTargetApi) are disabled in the
+convention plugins: their findings change over time and cannot be baselined.
+Lint must never rewrite files (no autofix); a clean `git status` after a lint run
+is the check.
 
 # Android Notification Group Handling (Hard-Won Knowledge)
 

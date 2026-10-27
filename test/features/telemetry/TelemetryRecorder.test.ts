@@ -1,13 +1,14 @@
 import { event as prototypeEvent } from "../../helpers/prototypeTestEvent";
 import { FakeTelemetryRepository as FakeRepository } from "../../fakes/FakeTelemetryRepository";
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import {
   TelemetryRecorder,
   type TelemetryRepository,
   type TelemetryPushTarget,
   type TelemetryEvent,
 } from "../../../src/features/telemetry/TelemetryRecorder";
-import { NetworkState } from "../../../src/server/NetworkState";
+import { NetworkState } from "../../../src/utils/NetworkState";
 import type { RecordLogEventInput } from "../../../src/db/logEventRepository";
 import type { RecordOsEventInput } from "../../../src/db/osEventRepository";
 import type { RecordNavigationEventInput } from "../../../src/db/navigationEventRepository";
@@ -25,6 +26,18 @@ class FakePushTarget implements TelemetryPushTarget {
     this.pushedEvents.push(event);
   }
 }
+
+const layoutEvent: Parameters<TelemetryRecorder["recordLayoutEvent"]>[0] = {
+  timestamp: 7000,
+  applicationId: "com.example",
+  subType: "hierarchy_change",
+  composableName: null,
+  composableId: null,
+  recompositionCount: 1,
+  durationMs: null,
+  likelyCause: null,
+  detailsJson: null,
+};
 
 describe("TelemetryRecorder", () => {
   let repo: FakeRepository;
@@ -333,13 +346,18 @@ describe("TelemetryRecorder", () => {
     // before the repo write completes. Both DB write and push should use device-A.
     let resolveWrite: (() => void) | null = null;
     const slowRepo: TelemetryRepository = {
-      ...repo,
+      recordLogEvent: repo.recordLogEvent.bind(repo),
+      recordOsEvent: repo.recordOsEvent.bind(repo),
+      recordNavigationEvent: repo.recordNavigationEvent.bind(repo),
+      recordStorageEvent: repo.recordStorageEvent.bind(repo),
+      recordLayoutEvent: repo.recordLayoutEvent.bind(repo),
       recordNetworkEvent: async (input) => {
         repo.networkEvents.push(input);
         // Block until test resolves
         await new Promise<void>((r) => {
           resolveWrite = r;
         });
+        return 1;
       },
     };
     const slowRecorder = new TelemetryRecorder(slowRepo, () => pushTarget);
@@ -487,7 +505,7 @@ describe("TelemetryRecorder", () => {
   it("recordLayoutEvent stores to repository with context and screenName", async () => {
     recorder.setContext("d3", "s3");
 
-    await recorder.recordLayoutEvent({
+    const persisted = await recorder.recordLayoutEvent({
       timestamp: 7000,
       applicationId: "com.example",
       subType: "recomposition",
@@ -500,11 +518,60 @@ describe("TelemetryRecorder", () => {
       screenName: "HomeScreen",
     });
 
+    expect(persisted).toBe(true);
     expect(repo.layoutEvents).toHaveLength(1);
     expect(repo.layoutEvents[0].deviceId).toBe("d3");
     expect(repo.layoutEvents[0].sessionId).toBe("s3");
     expect(repo.layoutEvents[0].composableName).toBe("UserList");
     expect(repo.layoutEvents[0].screenName).toBe("HomeScreen");
+  });
+
+  it("reports failed layout persistence without losing the live socket event", async () => {
+    repo.shouldThrow = true;
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await recorder.recordLayoutEvent(layoutEvent)).toBe(false);
+      expect(repo.layoutEvents).toHaveLength(0);
+      expect(pushTarget.pushedEvents.map((event) => event.category)).toEqual(["layout"]);
+      expect(warning).toHaveBeenCalled();
+      repo.shouldThrow = false;
+      expect(await recorder.recordLayoutEvent(layoutEvent)).toBe(true);
+      expect(repo.layoutEvents).toHaveLength(1);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it("does not confirm a layout write skipped by shutdown draining", async () => {
+    const barrier = new InMemoryDbWriteBarrier(new FakeTimer());
+    const drainingRecorder = new TelemetryRecorder(
+      repo,
+      () => pushTarget,
+      () => barrier,
+    );
+    barrier.beginDrain();
+    expect(await drainingRecorder.recordLayoutEvent(layoutEvent)).toBe(false);
+    expect(repo.layoutEvents).toHaveLength(0);
+    expect(pushTarget.pushedEvents.map((event) => event.category)).toEqual(["layout"]);
+  });
+
+  it("waits for repository completion before confirming a layout write", async () => {
+    const pending = Promise.withResolvers<void>();
+    const write = spyOn(repo, "recordLayoutEvent").mockImplementationOnce(() => pending.promise);
+    let settled = false;
+    const recording = recorder.recordLayoutEvent(layoutEvent).then((persisted) => {
+      settled = true;
+      return persisted;
+    });
+    try {
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      pending.resolve();
+      expect(await recording).toBe(true);
+    } finally {
+      pending.resolve();
+      write.mockRestore();
+    }
   });
 
   it("recordLayoutEvent pushes category layout to socket", async () => {
@@ -633,6 +700,7 @@ describe("TelemetryRecorder", () => {
 
   describe("batched ingestion (issue #3138)", () => {
     class FakeBatchRepo implements BatchTelemetryRepository {
+      failLayout = false;
       logBatches: RecordLogEventInput[][] = [];
       osBatches: RecordOsEventInput[][] = [];
       navBatches: RecordNavigationEventInput[][] = [];
@@ -647,9 +715,55 @@ describe("TelemetryRecorder", () => {
         this.navBatches.push(i);
       }
       async recordLayoutEvents(i: RecordLayoutEventInput[]): Promise<void> {
+        if (this.failLayout) {
+          throw new Error("layout batch lost");
+        }
         this.layoutBatches.push(i);
       }
     }
+
+    it("confirms a buffered layout add only once its batch commits (#14625)", async () => {
+      const batchRepo = new FakeBatchRepo();
+      const buffer = new TelemetryEventBuffer(batchRepo, new FakeTimer());
+      const bufferedRecorder = new TelemetryRecorder(repo, () => pushTarget, undefined, buffer);
+      let settled: boolean | undefined;
+      const receipt = bufferedRecorder.recordLayoutEvent(layoutEvent).then((persisted) => {
+        settled = persisted;
+        return persisted;
+      });
+      await Promise.resolve();
+      // Pushed live immediately, but unconfirmed until the batch is flushed.
+      expect(pushTarget.pushedEvents.map((event) => event.category)).toEqual(["layout"]);
+      expect(settled).toBeUndefined();
+      expect(repo.layoutEvents).toHaveLength(0);
+
+      await bufferedRecorder.flushBuffer();
+
+      expect(await receipt).toBe(true);
+      expect(batchRepo.layoutBatches).toEqual([[expect.objectContaining({ timestamp: 7000 })]]);
+    });
+
+    it("resolves a buffered layout add false when its batch is lost, then true on a later success", async () => {
+      const batchRepo = new FakeBatchRepo();
+      const buffer = new TelemetryEventBuffer(batchRepo, new FakeTimer());
+      const bufferedRecorder = new TelemetryRecorder(repo, () => pushTarget, undefined, buffer);
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        batchRepo.failLayout = true;
+        const lost = bufferedRecorder.recordLayoutEvent(layoutEvent);
+        await bufferedRecorder.flushBuffer();
+        expect(await lost).toBe(false);
+        expect(warning).toHaveBeenCalled();
+
+        batchRepo.failLayout = false;
+        const kept = bufferedRecorder.recordLayoutEvent(layoutEvent);
+        await bufferedRecorder.flushBuffer();
+        expect(await kept).toBe(true);
+        expect(batchRepo.layoutBatches).toHaveLength(1);
+      } finally {
+        warning.mockRestore();
+      }
+    });
 
     it("routes log/os/nav/layout through the buffer and coalesces into one batch per kind", async () => {
       const batchRepo = new FakeBatchRepo();
@@ -804,7 +918,11 @@ describe("TelemetryRecorder", () => {
       const barrier = new InMemoryDbWriteBarrier(new FakeTimer());
       let resolveWrite: (() => void) | null = null;
       const slowRepo: TelemetryRepository = {
-        ...repo,
+        recordNetworkEvent: repo.recordNetworkEvent.bind(repo),
+        recordOsEvent: repo.recordOsEvent.bind(repo),
+        recordNavigationEvent: repo.recordNavigationEvent.bind(repo),
+        recordStorageEvent: repo.recordStorageEvent.bind(repo),
+        recordLayoutEvent: repo.recordLayoutEvent.bind(repo),
         recordLogEvent: async (input) => {
           repo.logEvents.push(input);
           await new Promise<void>((r) => {

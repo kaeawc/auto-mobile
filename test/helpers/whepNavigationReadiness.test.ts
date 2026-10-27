@@ -1,13 +1,4 @@
-import {
-  afterAll,
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  spyOn,
-  test,
-  type Mock,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from "bun:test";
 import {
   formatNavigationTimeoutError,
   probePageStateAfterNavigateTimeout,
@@ -21,22 +12,16 @@ const url = "http://127.0.0.1:8889/device-capture-ios";
 
 describe("probeWhepPageReachable", () => {
   const signal = new AbortController().signal;
-  const timeout = spyOn(AbortSignal, "timeout");
-  const warn = spyOn(console, "warn");
+  let timeout: Mock<typeof AbortSignal.timeout>;
+  let warn: Mock<typeof console.warn>;
 
   beforeEach(() => {
     // Fake the timeout factory so these fetch-only tests never schedule timers.
-    timeout.mockReturnValue(signal);
-    warn.mockImplementation(() => {});
+    timeout = spyOn(AbortSignal, "timeout").mockReturnValue(signal);
+    warn = spyOn(console, "warn").mockImplementation(() => {});
   });
 
   afterEach(() => {
-    timeout.mockClear();
-    warn.mockClear();
-  });
-
-  // Restore global seams before any other test file uses them.
-  afterAll(() => {
     timeout.mockRestore();
     warn.mockRestore();
   });

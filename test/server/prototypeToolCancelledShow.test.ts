@@ -1,3 +1,5 @@
+import { toolStructured } from "../helpers/toolResponse";
+import { createExecResult } from "../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PROTOTYPE_SHOW_IN_PLACE_CAPABILITY } from "../../src/features/observe/android/ctrlProxyProtocol";
 import { registerPrototypeTools } from "../../src/server/prototypeTools";
@@ -42,7 +44,7 @@ describe("a show cancelled while a capability lookup waits must never reach the 
     client = new FakeCtrlProxy(timer);
     client.setSupportedCommands(["prototype_display_id_v2", PROTOTYPE_SHOW_IN_PLACE_CAPABILITY]);
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", { stdout: BOTH_PANELS, stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(BOTH_PANELS, ""));
     unsubscribe = registerPrototypeTools({
       clientFactory: () => client,
       adbFactory: new FakeAdbClientFactory(adb),
@@ -112,7 +114,7 @@ describe("a show cancelled while a capability lookup waits must never reach the 
     ).catch(() => undefined);
     client.supportsCommand = supports;
     const shown = await run({ action: "show", spec });
-    expect(JSON.stringify(shown.structuredContent)).not.toContain("newer show");
+    expect(JSON.stringify(toolStructured(shown))).not.toContain("newer show");
     expect(client.getPrototypeHistory()).toHaveLength(1);
   });
 });

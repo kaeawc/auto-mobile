@@ -1,3 +1,4 @@
+import { applyIosLockStateReading } from "./ios/IosLockStateProbe";
 import type { ObservationCollectionRequest } from "./collectors/ObservationCollectionRequest";
 import { displayPinFailure } from "./SessionDisplayContext";
 import { SelectedDisplayReadPolicy } from "./SelectedDisplayRead";
@@ -202,7 +203,7 @@ export class SingleDisplayCaptureStage {
     );
     const fallback = this.d.createBaseResult();
     if (iosLockState) {
-      fallback.deviceLock = await iosLockState;
+      applyIosLockStateReading(fallback, await iosLockState);
     }
     return this.d.createCriticalFallback(err, { fallback });
   }
@@ -219,19 +220,16 @@ export class SingleDisplayCaptureStage {
     if (options?.hierarchyOnly) {
       // Commit verification reuses the same hierarchy/focus extraction, then
       // returns before device-state reads, cache writes, predictions or audits.
-      await this.d
-        .hierarchyCollector()
-        .collect(
-          result,
-          queryOptions,
-          perf,
-          skipWaitForFresh,
-          minTimestamp,
-          signal,
-          true,
-          capturedHierarchy,
-          options.timeoutMs,
-        );
+      await this.d.hierarchyCollector().collect(result, {
+        queryOptions,
+        perf,
+        skipWaitForFresh,
+        minTimestamp,
+        signal,
+        readOnly: true,
+        capturedHierarchy,
+        readOptions: options.timeoutMs,
+      });
       throwIfAborted(signal);
       perf.end();
       return { earlyResult: result, foregroundSnapshot, foregroundIdentity };

@@ -1,0 +1,202 @@
+{
+  "offset": {
+    "x": -12.5,
+    "y": 24.25
+  },
+  "padding": {
+    "top": 1.5,
+    "bottom": 2.5,
+    "start": 3.5,
+    "end": 4.5
+  },
+  "bounds": {
+    "x": -1.5,
+    "y": 2.5,
+    "width": 300.25,
+    "height": 400.5
+  },
+  "sheetCondition": {
+    "key": "sheetOpen",
+    "equals": true
+  },
+  "safeAreaPadding": {
+    "edges": ["top", "start"],
+    "types": ["systemBars", "ime"]
+  },
+  "animate": {
+    "durationMs": 450,
+    "easing": "spring"
+  },
+  "stagger": {
+    "ms": 40,
+    "order": "center"
+  },
+  "zoomable": {
+    "maxScale": 4.5
+  },
+  "radioOption": {
+    "value": "small",
+    "label": "Small"
+  },
+  "chartRange": {
+    "min": -2.5,
+    "max": 10.5
+  },
+  "container": {
+    "text": "Panel",
+    "index": 0,
+    "selectionStrategy": "unique",
+    "container": {
+      "elementId": "outer"
+    }
+  },
+  "selector": {
+    "testTag": "target",
+    "container": {
+      "text": "Panel",
+      "index": 0,
+      "selectionStrategy": "unique",
+      "container": {
+        "elementId": "outer"
+      }
+    }
+  },
+  "styleWhenEntry": {
+    "when": {
+      "key": "enabled",
+      "equals": true
+    },
+    "style": {
+      "color": "#112233"
+    }
+  },
+  "anchorBounds": {
+    "type": "bounds",
+    "bounds": {
+      "x": -1.5,
+      "y": 2.5,
+      "width": 300.25,
+      "height": 400.5
+    },
+    "alignment": "top",
+    "offset": {
+      "x": -12.5,
+      "y": 24.25
+    }
+  },
+  "anchorElement": {
+    "type": "element",
+    "selector": {
+      "elementId": "target"
+    },
+    "alignment": "cover",
+    "offset": {
+      "x": -12.5,
+      "y": 24.25
+    }
+  },
+  "placementFullscreen": {
+    "type": "fullscreen",
+    "scrim": {
+      "light": "#112233",
+      "dark": "#445566"
+    }
+  },
+  "placementSheet": {
+    "type": "sheet",
+    "edge": "bottom",
+    "height": 320.0
+  },
+  "placementFloating": {
+    "type": "floating",
+    "gravity": "center",
+    "offset": {
+      "x": -12.5,
+      "y": 24.25
+    }
+  },
+  "gradientLinear": {
+    "type": "linear",
+    "angle": 45.0,
+    "stops": [
+      {
+        "color": "#112233",
+        "position": 0.0
+      },
+      {
+        "color": {
+          "light": "#112233",
+          "dark": "#445566"
+        },
+        "position": 1.0
+      }
+    ]
+  },
+  "gradientRadial": {
+    "type": "radial",
+    "stops": [
+      {
+        "color": "#112233",
+        "position": 0.0
+      },
+      {
+        "color": {
+          "light": "#112233",
+          "dark": "#445566"
+        },
+        "position": 1.0
+      }
+    ]
+  },
+  "listItemTrailingSwitch": {
+    "type": "switch",
+    "stateKey": "enabled"
+  },
+  "listItemTrailingCheckbox": {
+    "type": "checkbox",
+    "stateKey": "enabled"
+  },
+  "listItemTrailingIcon": {
+    "type": "icon",
+    "name": "check"
+  },
+  "appBarAction": {
+    "icon": "check",
+    "label": "Go",
+    "onTap": [
+      {
+        "type": "emit",
+        "name": "go"
+      }
+    ]
+  },
+  "dialogButton": {
+    "label": "Go",
+    "onTap": [
+      {
+        "type": "emit",
+        "name": "go"
+      }
+    ]
+  },
+  "scrollRefresh": {
+    "stateKey": "enabled",
+    "onRefresh": [
+      {
+        "type": "emit",
+        "name": "go"
+      }
+    ]
+  },
+  "border": {
+    "width": 2.5,
+    "color": "#112233"
+  },
+  "gradientStop": {
+    "color": {
+      "light": "#112233",
+      "dark": "#445566"
+    },
+    "position": 0.5
+  }
+}

@@ -2,11 +2,11 @@ import {
   decideLifecycleEvent,
   type StreamSubscriptionEndReason,
   type StreamSubscriptionDecision,
-} from "../../src/daemon/streamSubscriptionPolicy";
+} from "../../src/daemon/wire/streamSubscriptionPolicy";
 import type {
   endWebRtcStreamsForDevice,
   stopAllWebRtcStreams,
-} from "../../src/server/webrtcStreamManager";
+} from "../../src/daemon/webrtcStreamManager";
 
 const reason: StreamSubscriptionEndReason = "stopped_by_owner";
 // @ts-expect-error Owner stop is not a device lifecycle event.

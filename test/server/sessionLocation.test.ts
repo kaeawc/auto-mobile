@@ -1,4 +1,5 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { z } from "zod/v4";
+import { afterEach, mock, describe, expect, spyOn, test } from "bun:test";
 import { SessionManager, PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -13,6 +14,8 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { DeviceState } from "../../src/features/utility/DeviceState";
+import type { DeviceTraits } from "../../src/utils/android-cmdline-tools/deviceTraits";
+import { FakeDeviceTraits, androidDeviceTraits } from "../fakes/FakeDeviceTraits";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeEmulatorConsoleClient } from "../fakes/FakeEmulatorConsoleClient";
@@ -22,6 +25,10 @@ import {
   createSessionLocationWriteAdmission,
 } from "../../src/server/sessionLocation";
 import { MockLocationClearRegistry } from "../../src/features/utility/MockLocationClear";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const deviceId = "emulator-5554";
 const points = [
@@ -233,7 +240,9 @@ describe("session location admission", () => {
       await manager.releaseSession("session");
       expect(manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
       expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
-      expect(simctl.getMethodCalls("executeCommandArgs")[0].args[2]).toBe("set");
+      expect(
+        z.array(z.string()).parse(simctl.getMethodCalls("executeCommandArgs")[0].args)[2],
+      ).toBe("set");
     } finally {
       markSet.mockRestore();
       manager.stopCleanupTimer();
@@ -387,19 +396,20 @@ describe("session route cleanup", () => {
       await mutation;
       await flush();
       expect(markSet).not.toHaveBeenCalled();
-      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
-        "set",
-        "clear",
-      ]);
+      expect(
+        simctl
+          .getMethodCalls("executeCommandArgs")
+          .map((call) => z.array(z.string()).parse(call.args)[2]),
+      ).toEqual(["set", "clear"]);
       const pending = manager.getPendingDeviceCleanup(device.deviceId);
       expect(pending).not.toBeNull();
       timer.advanceTime(250);
       await pending;
-      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
-        "set",
-        "clear",
-        "clear",
-      ]);
+      expect(
+        simctl
+          .getMethodCalls("executeCommandArgs")
+          .map((call) => z.array(z.string()).parse(call.args)[2]),
+      ).toEqual(["set", "clear", "clear"]);
     } finally {
       markSet.mockRestore();
       finished.resolve();
@@ -468,11 +478,11 @@ describe("session route cleanup", () => {
       await flush();
       expect(manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
       expect(pool.getDevice(device.deviceId)?.status).toBe("idle");
-      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
-        "set",
-        "clear",
-        "clear",
-      ]);
+      expect(
+        simctl
+          .getMethodCalls("executeCommandArgs")
+          .map((call) => z.array(z.string()).parse(call.args)[2]),
+      ).toEqual(["set", "clear", "clear"]);
     } finally {
       clears.retireDevice(device.deviceId);
       await manager.getPendingDeviceCleanup(device.deviceId);
@@ -486,7 +496,6 @@ describe("session route cleanup", () => {
       const targetId = platform === "android" ? deviceId : "12345678-1234-1234-1234-123456789ABC";
       const finished = Promise.withResolvers<void>();
       const adb = new FakeAdbClient();
-      adb.setCommandResult("shell getprop ro.kernel.qemu", "1\n");
       const consoleClient = new FakeEmulatorConsoleClient();
       const simctl = new FakeSimctl();
       let outcome: Promise<unknown> | undefined;
@@ -503,6 +512,7 @@ describe("session route cleanup", () => {
             timer,
             routeRegistry: registry,
             adbFactory: new FakeAdbClientFactory(adb),
+            deviceTraits: new FakeDeviceTraits(androidDeviceTraits()),
             consoleFactory: () => consoleClient,
             simctl,
             canWriteLocation: createSessionLocationWriteAdmission({
@@ -550,15 +560,15 @@ describe("session route cleanup", () => {
     const { timer, manager, registry } = harness();
     const probeFinished = Promise.withResolvers<void>();
     const probeStarted = Promise.withResolvers<void>();
-    class DelayedAdb extends FakeAdbClient {
-      override async executeCommand(command: string) {
+    // The emulator probe stays in flight until the test releases it.
+    const deviceTraits: DeviceTraits = {
+      async read() {
         probeStarted.resolve();
         await probeFinished.promise;
-        return super.executeCommand(command);
-      }
-    }
-    const adb = new DelayedAdb();
-    adb.setCommandResult("shell getprop ro.kernel.qemu", "1\n");
+        return androidDeviceTraits();
+      },
+    };
+    const adb = new FakeAdbClient();
     const consoleClient = new FakeEmulatorConsoleClient();
     let mutation: Promise<unknown> | undefined;
     try {
@@ -571,6 +581,7 @@ describe("session route cleanup", () => {
           timer,
           routeRegistry: registry,
           adbFactory: new FakeAdbClientFactory(adb),
+          deviceTraits,
           consoleFactory: () => consoleClient,
           canWriteLocation: createSessionLocationWriteAdmission({
             sessionManager: manager,

@@ -5,12 +5,12 @@ import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
+import { ListChangedBroadcaster } from "../../src/daemon/listChangedBroadcast";
 import {
   SessionReleaseBroadcaster,
   SESSION_RELEASED_NOTIFICATION_METHOD,
-} from "../../src/server/sessionReleaseBroadcast";
-import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
+} from "../../src/daemon/sessionReleaseBroadcast";
+import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/wire/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import {
@@ -26,7 +26,12 @@ import { isDaemonResponse, parseWireFrameLine } from "./helpers/parseDaemonRespo
 function createFakeDaemonState() {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      hasSession: () => false,
+      getSession: () => null,
+      getDeviceLabels: () => undefined,
+      releaseSession: async () => null,
+    }),
     getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
@@ -174,7 +179,7 @@ describe("UnixSocketServer notification broadcast", () => {
     });
     // A short settle window: any stray frame for the bystander would have been
     // written in the same synchronous broadcast as the subscriber's frame.
-    await new Promise((resolve) => defaultTimer.setTimeout(resolve, 25));
+    await new Promise<void>((resolve) => defaultTimer.setTimeout(() => resolve(), 25));
     expect(bystander.frames).toEqual([]);
   });
 

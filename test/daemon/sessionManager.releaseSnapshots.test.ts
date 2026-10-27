@@ -149,12 +149,9 @@ test("a same-UUID resume discards a failed non-terminal release snapshot", async
   expect(await retryWrite.call(manager, staleSnapshot, true)).toBe(false);
   // The public ownership fence also declines a late retry from the old incarnation.
   await expect(
-    manager.releaseSessionIfOwned(
-      "reused-session",
-      original,
-      "emulator-old",
-      "allocation-rollback",
-    ),
+    manager.releaseSession("reused-session", "allocation-rollback", {
+      expectedOwner: { session: original, deviceId: "emulator-old" },
+    }),
   ).resolves.toBeNull();
   expect(await persistence.getSession("reused-session")).toMatchObject({
     device_id: "emulator-new",
@@ -182,10 +179,11 @@ test("a retry during an unpublished same-UUID resume leaves the new row active",
     expect(pending.has("racing-session")).toBe(true);
 
     persistence.failure = null;
-    persistence.upsertActiveSession = async (record) => {
-      await upsert(record);
+    persistence.upsertActiveSession = async (record, nowMs, options) => {
+      const version = await upsert(record, nowMs, options);
       upsertStarted.resolve();
       await finishUpsert.promise;
+      return version;
     };
     const resume = manager.createSession("racing-session", "emulator-new", "android");
     await upsertStarted.promise;

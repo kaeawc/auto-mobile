@@ -7,9 +7,9 @@ import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -76,7 +76,7 @@ describe("SessionHeartbeatMonitor", () => {
       monitor.start();
       expect(timer.getPendingIntervalCount()).toBe(before + 1);
 
-      monitor.stop();
+      void monitor.stop();
       expect(timer.getPendingIntervalCount()).toBe(before);
     });
 
@@ -100,7 +100,7 @@ describe("SessionHeartbeatMonitor", () => {
       }
       expect(reaped).toEqual(["s1"]);
 
-      monitor.stop();
+      void monitor.stop();
     });
 
     it("a release still tearing down does not hold up other sessions' scans", async () => {
@@ -532,7 +532,7 @@ describe("SessionHeartbeatMonitor", () => {
       timer.advanceTime(1);
       await Promise.resolve();
       expect(reaped).toEqual(["s1"]);
-      monitor.stop();
+      void monitor.stop();
     });
 
     it("does not overlap a heartbeat reap with the next interval tick", async () => {

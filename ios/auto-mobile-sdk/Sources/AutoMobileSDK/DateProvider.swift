@@ -8,6 +8,5 @@ protocol DateProvider: Sendable {
 
 /// Default DateProvider that returns the real system time.
 struct SystemDateProvider: DateProvider, Sendable {
-    init() {}
     func now() -> Date { Date() }
 }

@@ -7,9 +7,8 @@ import { join } from "path";
 import type { ExecResult } from "../../models";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { hashAppBundle } from "./AppBundleHasher";
-import { isProcessAlreadyGoneError } from "./iosProcessErrors";
+import { getExecErrorText, isDevicectlProcessGoneError } from "./devicectlProcessErrors";
 import { iosMajorVersionFromDevicectlDetails } from "./iosVersion";
-import { normalizeIosDevicePath as normalizeDevicePath } from "./iosInstalledApp";
 import { logger } from "../logger";
 import { DefaultHostCommandExecutor, type HostCommandOptions } from "../HostCommandExecutor";
 import { throwIfAborted } from "../toolUtils";
@@ -24,6 +23,20 @@ import {
   SIMULATOR_UNINSTALL_TIMEOUT_MS,
 } from "./simulatorUninstallBound";
 import { sortedReaddir } from "../io";
+import {
+  findBundleEntry,
+  extractInstalledAppEntries,
+  extractBundlePath,
+  findProcessIdentifier,
+  findRunningProcessPid,
+} from "./devicectlAppQueries";
+export { isDevicectlProcessGoneError } from "./devicectlProcessErrors";
+export {
+  findBundleEntry,
+  extractInstalledAppEntries,
+  findProcessIdentifier,
+  findRunningProcessPid,
+} from "./devicectlAppQueries";
 
 /** Short reads share the 15-second device-list budget used by the lister and SimCtlClient. */
 const DEVICECTL_INFO_TIMEOUT_MS = 15_000;
@@ -105,117 +118,6 @@ const parseJsonOutputPath = (command: string): string | null => {
   return null;
 };
 
-const bundleIdentifier = (record: Record<string, unknown>): unknown => {
-  return (
-    record.bundleIdentifier ??
-    record.bundleID ??
-    record.bundleId ??
-    record.CFBundleIdentifier ??
-    record.BUNDLE_IDENTIFIER
-  );
-};
-
-export const findBundleEntry = (
-  data: unknown,
-  bundleId: string,
-): Record<string, unknown> | null => {
-  if (!data || typeof data !== "object") {
-    return null;
-  }
-  if (Array.isArray(data)) {
-    for (const item of data) {
-      const found = findBundleEntry(item, bundleId);
-      if (found) {
-        return found;
-      }
-    }
-    return null;
-  }
-
-  const record = data as Record<string, unknown>;
-  const idValue = bundleIdentifier(record);
-  if (typeof idValue === "string" && idValue === bundleId) {
-    return record;
-  }
-
-  for (const value of Object.values(record)) {
-    const found = findBundleEntry(value, bundleId);
-    if (found) {
-      return found;
-    }
-  }
-  return null;
-};
-
-/**
- * Pull the installed-app records out of a `devicectl device info apps`
- * payload. devicectl nests the listing under `result.apps`, while the
- * `--bundle-id` shape used elsewhere in this module (and the fixtures that
- * pin it) writes a bare `{ apps: [...] }`. Search for the first `apps` array
- * either way rather than hardcoding one envelope, and drop non-object
- * members so callers can treat every entry as a record.
- *
- * Returns null when the payload carries no `apps` array at all, or carries one
- * whose members are all unreadable — those are payloads this code does not
- * understand, which must not be reported as the device having no apps
- * installed. An `apps` array that is present but empty returns `[]`, because
- * that genuinely means "nothing installed".
- */
-export const extractInstalledAppEntries = (data: unknown): Record<string, unknown>[] | null => {
-  if (!data || typeof data !== "object") {
-    return null;
-  }
-  if (Array.isArray(data)) {
-    for (const item of data) {
-      const found = extractInstalledAppEntries(item);
-      if (found) {
-        return found;
-      }
-    }
-    return null;
-  }
-
-  const record = data as Record<string, unknown>;
-  if (Array.isArray(record.apps)) {
-    const entries = record.apps.filter(
-      (entry): entry is Record<string, unknown> =>
-        Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
-    );
-    // An array that carried members but none we can read is a payload shape we
-    // do not understand; only an originally empty array means "nothing installed".
-    if (entries.length === 0 && record.apps.length > 0) {
-      return null;
-    }
-    return entries;
-  }
-
-  for (const value of Object.values(record)) {
-    const found = extractInstalledAppEntries(value);
-    if (found) {
-      return found;
-    }
-  }
-  return null;
-};
-
-const extractBundlePath = (entry: Record<string, unknown>): string | null => {
-  const candidates = [
-    entry.bundleURL,
-    entry.bundlePath,
-    entry.bundleURLString,
-    entry.bundle_url,
-    entry.bundle_path,
-    entry.url,
-    entry.path,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === "string") {
-      return normalizeDevicePath(candidate);
-    }
-  }
-  return null;
-};
-
 const findAppBundleInDir = async (
   root: string,
   deps: DeviceAppManagerDependencies,
@@ -238,211 +140,6 @@ const findAppBundleInDir = async (
 };
 
 const getErrorMessage = (error: unknown): string => errorMessage(error);
-
-/**
- * Full text of a failed `exec` rejection. Promisified `child_process.exec`
- * rejects with an Error whose `message` is "Command failed: <cmd>" and whose
- * `stdout`/`stderr` carry the tool's actual diagnostic — devicectl writes its
- * ESRCH "No such process" text to stderr, so we must inspect the captured
- * streams, not just message. stdout is included as a cheap belt-and-suspenders:
- * with `--quiet` devicectl uses stderr, but its error framing is undocumented.
- */
-const getExecErrorText = (error: unknown): string => {
-  const parts = [getErrorMessage(error)];
-  if (error && typeof error === "object") {
-    for (const field of ["stderr", "stdout"] as const) {
-      const value = (error as Record<string, unknown>)[field];
-      if (typeof value === "string" && value.length > 0) {
-        parts.push(value);
-      }
-    }
-  }
-  return parts.join("\n");
-};
-
-/**
- * True when a devicectl `process terminate` failure means the target PID was
- * already gone — it exited between our `info processes` resolution and the kill
- * (a real on-device race, issue #3054). devicectl surfaces ESRCH either as the
- * localized "No such process" strerror text or, on some builds, the bare
- * `NSPOSIXErrorDomain error 3` code without the strerror gloss.
- *
- * The shared already-gone phrasings live in {@link isProcessAlreadyGoneError}
- * (used by the simulator path too, issue #3076); here we OR-in the two
- * devicectl-specific extras so a raced exit reports an effectively-terminated
- * app instead of a false `success:false`. Together these preserve the exact
- * prior devicectl behavior: shared `not running` ∪ extra `no longer running`.
- *
- * Deliberately narrow: unrelated failures (device locked, not connected,
- * permission denied) must still propagate as hard errors. The "not running"
- * family is scoped to the *process* so a device/CoreDevice-level "not running"
- * message can never be mistaken for an already-exited PID.
- */
-export const isDevicectlProcessGoneError = (message: string): boolean => {
-  const normalized = message.toLowerCase();
-  return (
-    isProcessAlreadyGoneError(message) ||
-    normalized.includes("nsposixerrordomain error 3") || // bare ESRCH code
-    /process (?:is )?no longer running/.test(normalized)
-  ); // devicectl-only phrasing
-};
-
-/**
- * Recursively find the launched process's `processIdentifier` in a devicectl
- * `process launch --json-output` payload. The stable location is
- * `result.process.processIdentifier`; we prefer it and fall back to a deep
- * search so a devicectl-version reshuffle of the envelope still yields the PID.
- */
-export const findProcessIdentifier = (data: unknown): number | undefined => {
-  const direct = (data as { result?: { process?: { processIdentifier?: unknown } } })?.result
-    ?.process?.processIdentifier;
-  if (typeof direct === "number") {
-    return direct;
-  }
-
-  const walk = (node: unknown): number | undefined => {
-    if (!node || typeof node !== "object") {
-      return undefined;
-    }
-    if (Array.isArray(node)) {
-      for (const item of node) {
-        const found = walk(item);
-        if (found !== undefined) {
-          return found;
-        }
-      }
-      return undefined;
-    }
-    const record = node as Record<string, unknown>;
-    if (typeof record.processIdentifier === "number") {
-      return record.processIdentifier;
-    }
-    for (const value of Object.values(record)) {
-      const found = walk(value);
-      if (found !== undefined) {
-        return found;
-      }
-    }
-    return undefined;
-  };
-  return walk(data);
-};
-
-const extractExecutablePath = (record: Record<string, unknown>): string | null => {
-  const raw = record.executable ?? record.executablePath ?? record.executableURL ?? record.path;
-  if (typeof raw === "string") {
-    return normalizeDevicePath(raw);
-  }
-  if (raw && typeof raw === "object") {
-    const inner = (raw as Record<string, unknown>).url ?? (raw as Record<string, unknown>).path;
-    if (typeof inner === "string") {
-      return normalizeDevicePath(inner);
-    }
-  }
-  return null;
-};
-
-const extractProcessPid = (record: Record<string, unknown>): number | undefined => {
-  const raw = record.processIdentifier ?? record.pid ?? record.processID;
-  if (typeof raw === "number" && Number.isInteger(raw)) {
-    return raw;
-  }
-  // devicectl JSON is unverified; tolerate a stringified integer PID too.
-  if (typeof raw === "string" && /^\d+$/.test(raw.trim())) {
-    return Number(raw.trim());
-  }
-  return undefined;
-};
-
-/** Basename of a path (last `/`-separated segment), ignoring any trailing slash. */
-const pathBasename = (path: string): string => {
-  const trimmed = path.replace(/\/+$/, "");
-  const idx = trimmed.lastIndexOf("/");
-  return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
-};
-
-/**
- * Find the PID of the app's **own** main process from a devicectl
- * `device info processes --json-output` payload, given its installed
- * `bundlePath`.
- *
- * The exact envelope is not formally documented by Apple (see simctl.md caveat),
- * so we deep-walk and accept several field-name spellings: the executable may be
- * a string or an object carrying `url`/`path`, and the PID may be spelled
- * `processIdentifier`, `pid`, or `processID`.
- *
- * Matching is deliberately scoped to the **main app binary**, which is a *direct
- * child* of the `.app` directory (`MyApp.app/MyApp` — CFBundleExecutable, whose
- * name may differ from the bundle name, but always one level down). App
- * extensions live *inside* the same bundle at `MyApp.app/PlugIns/Foo.appex/Foo`
- * and their executables also start with `"<bundle>/"`, so a naive prefix match
- * would SIGKILL an extension and falsely report the app terminated. We therefore
- * require the path segment after `"<bundle>/"` to contain no further `/`. This
- * also excludes a sibling like `MyApp.app.extension/...` (different prefix).
- *
- * Two-pass, per issue #2882: the strict inside-bundle match is preferred, but if
- * it finds nothing we fall back to matching a process whose executable
- * **basename** equals the bundle name (minus `.app`). The fallback guards the
- * real-device risk that `info processes` executable paths don't nest under the
- * `info apps` bundle URL (e.g. `/private` vs `/var` symlink, differing container
- * roots) — without it a mismatch would silently report the app as not running.
- * The basename fallback naturally still excludes extensions (a `Foo.appex`
- * binary's basename won't equal the app name).
- */
-export const findRunningProcessPid = (data: unknown, bundlePath: string): number | null => {
-  const normalizedBundle = normalizeDevicePath(bundlePath).replace(/\/+$/, "");
-  if (!normalizedBundle) {
-    return null;
-  }
-  const insidePrefix = `${normalizedBundle}/`;
-  const appName = pathBasename(normalizedBundle).replace(/\.app$/i, "");
-
-  const isMainBinaryOfBundle = (exe: string): boolean => {
-    if (!exe.startsWith(insidePrefix)) {
-      return false;
-    }
-    // Direct child only: no further path separator → the app's own binary,
-    // not a nested PlugIns/*.appex/* extension executable.
-    return !exe.slice(insidePrefix.length).includes("/");
-  };
-
-  const walk = (node: unknown, matches: (exe: string) => boolean): number | null => {
-    if (!node || typeof node !== "object") {
-      return null;
-    }
-    if (Array.isArray(node)) {
-      for (const item of node) {
-        const found = walk(item, matches);
-        if (found !== null) {
-          return found;
-        }
-      }
-      return null;
-    }
-    const record = node as Record<string, unknown>;
-    const exe = extractExecutablePath(record);
-    const pid = extractProcessPid(record);
-    if (exe !== null && pid !== undefined && matches(exe)) {
-      return pid;
-    }
-    for (const value of Object.values(record)) {
-      const found = walk(value, matches);
-      if (found !== null) {
-        return found;
-      }
-    }
-    return null;
-  };
-
-  const primary = walk(data, isMainBinaryOfBundle);
-  if (primary !== null) {
-    return primary;
-  }
-  if (!appName) {
-    return null;
-  }
-  return walk(data, (exe) => pathBasename(exe) === appName);
-};
 
 const isExpectedMissingLegacySimulatorApp = (bundleId: string, errorMessage: string): boolean =>
   bundleId.endsWith(".XCTestServiceApp") &&
@@ -676,16 +373,21 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
    * its on-disk path, cleaning up temp dirs afterward. Returns null if the bundle
    * can't be located (or not on macOS).
    *
-   * Lookup failures (info/copy) are swallowed → null. The callback's own errors
-   * PROPAGATE: clearAppDataViaReinstall must surface an install failure that
+   * Lookup failures (info/copy) are swallowed → null unless `surfaceLookupErrors` is set, which
+   * throws them with devicectl's stderr instead (#14094); null then means not installed. The
+   * callback's own errors PROPAGATE: clearAppDataViaReinstall must surface an install failure that
    * happens after the uninstall, not mask it as "could not resolve bundle".
    */
-  private async withInstalledAppBundle<T>(
+  public async withInstalledAppBundle<T>(
     deviceUdid: string,
     bundleId: string,
     fn: (bundlePath: string) => Promise<T>,
+    options: { surfaceLookupErrors?: boolean } = {},
   ): Promise<T | null> {
     if (this.deps.platform() !== "darwin") {
+      if (options.surfaceLookupErrors) {
+        throw new ActionableError("Reading a physical iOS app bundle requires macOS");
+      }
       return null;
     }
 
@@ -742,6 +444,11 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
         this.deps.logger.warn(
           `[DeviceAppManager] Failed to read installed app bundle for ${bundleId}: ${errorMessage(error)}`,
         );
+        if (options.surfaceLookupErrors) {
+          throw new ActionableError(
+            `Failed to copy the installed ${bundleId} bundle from device ${deviceUdid}: ${getExecErrorText(error)}`,
+          );
+        }
         return null;
       }
 
@@ -1097,6 +804,43 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
   }
 
   /**
+   * PID of `bundleId`'s main process on a physical device (#14096): `null` when installed but not
+   * running, `undefined` when not installed. Matching is by the exact bundle id's installed path,
+   * so a bundle id that is a prefix of another never resolves the other app. macOS-only.
+   */
+  public async findRunningAppPid(
+    deviceUdid: string,
+    bundleId: string,
+  ): Promise<number | null | undefined> {
+    if (this.deps.platform() !== "darwin") {
+      throw new ActionableError("Physical iOS process lookup requires macOS");
+    }
+    const bundlePath = await this.resolveInstalledBundlePathOnDevice(deviceUdid, bundleId);
+    return bundlePath ? this.resolveRunningPid(deviceUdid, bundlePath) : undefined;
+  }
+
+  /** `devicectl device process signal` (#14096, #14098); "already_exited" on ESRCH, else throws with stderr. */
+  public async signalProcess(
+    deviceUdid: string,
+    pid: number,
+    signal: "SIGABRT" | "SIGKILL",
+  ): Promise<"signalled" | "already_exited"> {
+    const args = ["devicectl", "device", "process", "signal", "--device", deviceUdid];
+    try {
+      await this.execute("xcrun", [...args, "--pid", String(pid), "--signal", signal, "--quiet"]);
+      return "signalled";
+    } catch (error) {
+      const message = getExecErrorText(error);
+      if (!isDevicectlProcessGoneError(message)) {
+        throw new ActionableError(`Failed to send ${signal} to PID ${pid}: ${message}`);
+      }
+      // ESRCH: the process exited between PID lookup and the signal, so nothing was delivered.
+      this.deps.logger.debug(`[DeviceAppManager] PID ${pid} exited before signal: ${message}`);
+      return "already_exited";
+    }
+  }
+
+  /**
    * Resolve the on-device installed bundle path for `bundleId` via
    * `devicectl device info apps --bundle-id`. Returns null when the app isn't
    * installed (no matching bundle entry / no resolvable path); devicectl exec or
@@ -1215,7 +959,7 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
         // A killed lookup says nothing about whether the app exists; a caller that must not read
         // "unknown" as "absent" opts in to the typed timeout instead of the null.
         throw new SimctlCommandTimeoutError(
-          `simctl get_app_container for ${bundleId} timed out after ${SIMULATOR_APP_CONTAINER_TIMEOUT_MS}ms`,
+          `simctl app container lookup for ${bundleId} timed out after ${SIMULATOR_APP_CONTAINER_TIMEOUT_MS}ms`,
           { cause: error },
         );
       }

@@ -11,7 +11,7 @@ import type {
   FailuresStreamSocketResponse,
 } from "./failuresStreamSocketTypes";
 import { FAILURES_STREAM_SOCKET_CONFIG } from "./daemonFiles";
-import { FAILURES_STREAM_MAX_FRAME_BYTES } from "./socketServer/LineFramer";
+import { FAILURES_STREAM_MAX_FRAME_BYTES } from "./wire/LineFramer";
 import {
   getDateRangeDurationMs as getDateRangeDuration,
   normalizeAggregation,
@@ -39,6 +39,10 @@ export type FailuresStreamRepository = Pick<
  * Socket server for failures stream.
  * Handles poll_notifications, poll_groups, poll_timeline, and acknowledge commands.
  */
+function isCommandFrame(value: unknown): value is FailuresStreamSocketRequest {
+  return typeof value === "object" && value !== null && "command" in value;
+}
+
 export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   FailuresStreamSocketRequest,
   FailuresStreamSocketResponse
@@ -60,6 +64,18 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
     this.authenticator =
       options.authenticator ??
       createDefaultStreamSocketAuthenticator("failuresStream", { allowObserverSessions: true });
+  }
+
+  /**
+   * Entry for a frame whose shape is not yet validated (parsed JSON, fuzzed input). Only the
+   * command discriminator is checked here; each handler validates its own fields and rejects
+   * malformed values before touching the repository.
+   */
+  protected handleUntypedRequest(raw: unknown): Promise<FailuresStreamSocketResponse> {
+    if (!isCommandFrame(raw)) {
+      return Promise.reject(new Error("Invalid request: expected an object with a command"));
+    }
+    return this.handleRequest(raw);
   }
 
   protected async handleRequest(

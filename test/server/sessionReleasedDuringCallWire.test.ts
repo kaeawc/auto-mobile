@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:te
 import { z } from "zod/v4";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 

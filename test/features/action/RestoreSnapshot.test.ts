@@ -1,3 +1,10 @@
+import { resolveOwnAppDataContainer } from "../../../src/utils/ios-cmdline-tools/simulatorOwnContainer";
+import {
+  simulatorOwnership,
+  simulatorDataContainer,
+  cloneContainerFixture,
+} from "../../helpers/simulatorContainerFixture";
+import { FakeDeviceSnapshotStore } from "../../fakes/FakeDeviceSnapshotStore";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { useScratchRoot } from "../../helpers/scratchRoot";
 import { RestoreSnapshot } from "../../../src/features/action/RestoreSnapshot";
@@ -40,7 +47,6 @@ describe("RestoreSnapshot", () => {
       deviceId: "emulator-5554",
       name: "Pixel_5",
       platform: "android",
-      isEmulator: true,
     };
 
     // Create fakes
@@ -68,7 +74,12 @@ describe("RestoreSnapshot", () => {
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
 
     // Create RestoreSnapshot instance with fakes
-    restoreSnapshot = new RestoreSnapshot(device, fakeAdbFactory, fakeEmulator, fakeTimer, store);
+    restoreSnapshot = new RestoreSnapshot(device, {
+      adbFactory: fakeAdbFactory,
+      emulator: fakeEmulator,
+      timer: fakeTimer,
+      store,
+    });
 
     // Setup default command results
     fakeAdb.setCommandResult("shell pm clear com.example.app", "Success");
@@ -193,18 +204,16 @@ describe("RestoreSnapshot", () => {
         includeSettings: false,
       };
       fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "OK");
-      const notReadyEmulator = {
-        waitForEmulatorReady: async () => {
-          throw new ActionableError("timed out waiting for boot completion");
-        },
-      } as AndroidEmulatorClient;
-      const restoring = new RestoreSnapshot(
-        device,
-        fakeAdbFactory,
-        notReadyEmulator,
-        fakeTimer,
+      const notReadyEmulator = new AndroidEmulatorClient();
+      notReadyEmulator.waitForEmulatorReady = async () => {
+        throw new ActionableError("timed out waiting for boot completion");
+      };
+      const restoring = new RestoreSnapshot(device, {
+        adbFactory: fakeAdbFactory,
+        emulator: notReadyEmulator,
+        timer: fakeTimer,
         store,
-      );
+      });
 
       const restoringPromise = restoring.execute({ snapshotName, manifest, useVmSnapshot: true });
       await expect(restoringPromise).rejects.toThrow(
@@ -227,19 +236,17 @@ describe("RestoreSnapshot", () => {
       };
       const calls: string[] = [];
       fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "OK");
-      const notReadyEmulator = {
-        waitForEmulatorReady: async () => {
-          calls.push("ready");
-          throw new Error("timed out waiting for boot completion");
-        },
-      } as AndroidEmulatorClient;
-      const restoring = new RestoreSnapshot(
-        device,
-        fakeAdbFactory,
-        notReadyEmulator,
-        fakeTimer,
+      const notReadyEmulator = new AndroidEmulatorClient();
+      notReadyEmulator.waitForEmulatorReady = async () => {
+        calls.push("ready");
+        throw new Error("timed out waiting for boot completion");
+      };
+      const restoring = new RestoreSnapshot(device, {
+        adbFactory: fakeAdbFactory,
+        emulator: notReadyEmulator,
+        timer: fakeTimer,
         store,
-      );
+      });
 
       await expect(
         restoring.execute({
@@ -406,16 +413,13 @@ describe("RestoreSnapshot", () => {
         deviceId: "ABC123DEF",
         name: "Pixel_5_Physical",
         platform: "android",
-        isEmulator: false,
       };
 
-      const restorePhysical = new RestoreSnapshot(
-        physicalDevice,
-        fakeAdbFactory,
-        undefined,
-        fakeTimer,
+      const restorePhysical = new RestoreSnapshot(physicalDevice, {
+        adbFactory: fakeAdbFactory,
+        timer: fakeTimer,
         store,
-      );
+      });
 
       // Create VM snapshot manifest (but can't restore on physical device)
       const manifest: DeviceSnapshotManifest = {
@@ -812,18 +816,11 @@ describe("RestoreSnapshot (iOS failure reporting)", () => {
   );
 
   function makeRestoreWithFileOperations(
-    operations: NonNullable<ConstructorParameters<typeof RestoreSnapshot>[7]>,
+    operations: NonNullable<
+      NonNullable<ConstructorParameters<typeof RestoreSnapshot>[1]>["iosRestoreOperations"]
+    >,
   ): RestoreSnapshot {
-    return new RestoreSnapshot(
-      device,
-      undefined,
-      undefined,
-      undefined,
-      store,
-      simctl,
-      undefined,
-      operations,
-    );
+    return new RestoreSnapshot(device, { store, simctl, iosRestoreOperations: operations });
   }
 
   it("returns the failed bundle while another iOS bundle restores", async () => {
@@ -930,7 +927,7 @@ describe("RestoreSnapshot (iOS)", () => {
 
   beforeEach(async () => {
     device = {
-      deviceId: "ios-device-1",
+      deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
       name: "iPhone 15",
       platform: "ios",
     };
@@ -941,18 +938,17 @@ describe("RestoreSnapshot (iOS)", () => {
   });
 
   function makeRestore(
-    operations?: ConstructorParameters<typeof RestoreSnapshot>[7],
+    operations?: NonNullable<
+      ConstructorParameters<typeof RestoreSnapshot>[1]
+    >["iosRestoreOperations"],
   ): RestoreSnapshot {
-    return new RestoreSnapshot(
-      device,
-      undefined,
-      undefined,
-      new FakeTimer(),
+    return new RestoreSnapshot(device, {
+      timer: new FakeTimer(),
       store,
       simctl,
-      undefined,
-      operations,
-    );
+      iosRestoreOperations: operations,
+      containerOwnership: simulatorOwnership,
+    });
   }
 
   // All gate version values below are synthetic.
@@ -1125,9 +1121,9 @@ describe("RestoreSnapshot (iOS)", () => {
     // restore over a failing simctl transport (#5620).
     device = { deviceId: "00008030-001C2D3E1234567A", name: "iPhone 15 Pro", platform: "ios" };
 
-    await expect(makeRestore().execute({ snapshotName: "physical" })).rejects.toThrow(
-      /physical iOS device/i,
-    );
+    await expect(
+      makeRestore().execute({ snapshotName: "physical", manifest: compatibilityManifest("17.0") }),
+    ).rejects.toThrow(/physical iOS device/i);
     expect(simctl.getMethodCalls("launchApp").length).toBe(0);
   });
 
@@ -1141,9 +1137,11 @@ describe("RestoreSnapshot (iOS)", () => {
     await fs.mkdir(path.join(appDataPath, bundleId, "Documents"), { recursive: true });
     await fs.writeFile(path.join(appDataPath, bundleId, "Documents", "data.txt"), "new-data");
 
-    const containerRoot = path.join(testBasePath, "containers", bundleId);
-    await fs.mkdir(path.join(containerRoot, "Documents"), { recursive: true });
-    await fs.writeFile(path.join(containerRoot, "Documents", "data.txt"), "old-data");
+    const containerRoot = simulatorDataContainer(device.deviceId);
+    const containerFiles = new Map([
+      [path.join(containerRoot, "Documents", "data.txt"), "old-data"],
+    ]);
+    const removed: string[] = [];
 
     simctl.setContainerPath(bundleId, containerRoot);
     simctl.setInstalledApps([{ bundleId }]);
@@ -1163,7 +1161,35 @@ describe("RestoreSnapshot (iOS)", () => {
       },
     };
 
-    const result = await makeRestore().execute({
+    const result = await makeRestore({
+      pathExists: async (target) =>
+        fs.access(target).then(
+          () => true,
+          () => false,
+        ),
+      terminateAppIfRunning: (deviceId, appId) => simctl.terminateApp(appId, deviceId),
+      getAppDataContainerPath: (deviceId, appId) =>
+        resolveOwnAppDataContainer({
+          ...simulatorOwnership,
+          deviceId,
+          bundleId: appId,
+          run: (args) => simctl.executeCommandArgs(args),
+        }),
+      rm: async (target) => {
+        removed.push(target);
+        for (const file of containerFiles.keys()) {
+          if (file.startsWith(`${target}${path.sep}`)) {
+            containerFiles.delete(file);
+          }
+        }
+      },
+      cp: async (source, destination) => {
+        containerFiles.set(
+          path.join(destination, "data.txt"),
+          await fs.readFile(path.join(source, "data.txt"), "utf8"),
+        );
+      },
+    }).execute({
       snapshotName,
       manifest,
       useVmSnapshot: false,
@@ -1171,7 +1197,8 @@ describe("RestoreSnapshot (iOS)", () => {
 
     expect(result.success).toBe(true);
     expect(result.failures).toEqual([]);
-    const restored = await fs.readFile(path.join(containerRoot, "Documents", "data.txt"), "utf-8");
+    expect(removed).toEqual([path.join(containerRoot, "Documents")]);
+    const restored = containerFiles.get(path.join(containerRoot, "Documents", "data.txt"));
     expect(restored).toBe("new-data");
     expect(simctl.getMethodCalls("terminateApp")).toHaveLength(1);
   });
@@ -1373,5 +1400,68 @@ describe("RestoreSnapshot (iOS)", () => {
     const argvCommands = simctl.getMethodCalls("executeCommandArgs").map((c) => c.args);
     // UI restore still runs after the failed defaults write.
     expect(argvCommands).toContainEqual(["ui", device.deviceId, "appearance", "light"]);
+  });
+});
+
+describe("RestoreSnapshot default iOS ownership wiring", () => {
+  const snapshotScratch = useScratchRoot("restore-clone-ownership-");
+  const UDID = "7B3A3792-DB53-4654-BA94-27A1D305C3B7";
+  const manifest: DeviceSnapshotManifest = {
+    snapshotName: "clone",
+    timestamp: "2026-10-03T00:00:00Z",
+    platform: "ios",
+    deviceId: UDID,
+    deviceName: "clone",
+    includeAppData: true,
+    includeSettings: false,
+    snapshotType: "app_data",
+  };
+  it("default restore operations pass ownership through and record refusal before rm/cp", async () => {
+    const bundleId = "com.apple.mobilesafari";
+    const clone = cloneContainerFixture(UDID, null);
+    const simctl = new FakeSimctl();
+    simctl.setContainerPath(bundleId, clone.reported);
+    simctl.setInstalledApps([{ bundleId }]);
+    const store = new FakeDeviceSnapshotStore(snapshotScratch.next());
+    await fs.mkdir(store.getAppDataPath("clone", { platform: "ios", deviceId: UDID }), {
+      recursive: true,
+    });
+    const rm = spyOn(fs, "rm").mockResolvedValue();
+    const cp = spyOn(fs, "cp").mockResolvedValue();
+    try {
+      const restore = new RestoreSnapshot(
+        { platform: "ios", deviceId: UDID, name: "clone" },
+        {
+          store,
+          simctl,
+          containerOwnership: clone.ownership,
+        },
+      );
+      expect(
+        await restore.execute({
+          snapshotName: "clone",
+          manifest: {
+            ...manifest,
+            includeSettings: false,
+            appDataBackup: { backupMethod: "simctl_copy", backedUpPackages: [bundleId] },
+          },
+        }),
+      ).toMatchObject({
+        success: false,
+        failures: [
+          {
+            kind: "ios_bundle",
+            bundleId,
+            reason: expect.stringContaining("foreign-device-unproven"),
+          },
+        ],
+      });
+      expect(clone.inspected).toEqual([clone.own]);
+      expect(rm).not.toHaveBeenCalled();
+      expect(cp).not.toHaveBeenCalled();
+    } finally {
+      rm.mockRestore();
+      cp.mockRestore();
+    }
   });
 });

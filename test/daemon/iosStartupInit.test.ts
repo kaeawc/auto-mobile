@@ -2,8 +2,9 @@ import { describe, expect, spyOn, test } from "bun:test";
 import {
   initializeIosCtrlProxyAtStartup,
   selectIosStartupWarmupDevices,
+  type IosStartupWarmupDevice,
 } from "../../src/daemon/iosStartupInit";
-import { CtrlProxyStaleRunnerCacheError } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import { CtrlProxyStaleRunnerCacheError } from "../../src/ctrlProxy/CtrlProxyStaleRunnerCacheError";
 import { ActionableError } from "../../src/models/ActionableError";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -19,7 +20,7 @@ describe("initializeIosCtrlProxyAtStartup (#7032)", () => {
   const BUDGET_MS = 5_000;
 
   test("startup warm-up selects only enabled owned or allowlisted iOS simulators", () => {
-    const booted = [
+    const booted: IosStartupWarmupDevice[] = [
       { id: "sim-owned", platform: "ios" },
       { id: "sim-allowlisted", platform: "ios" },
       { id: "sim-unowned", platform: "ios" },
@@ -49,7 +50,7 @@ describe("initializeIosCtrlProxyAtStartup (#7032)", () => {
   test("startup warm-up skips gated iOS holders and names them in one info", () => {
     const info = spyOn(logger, "info").mockImplementation(() => {});
     try {
-      const devices = [
+      const devices: IosStartupWarmupDevice[] = [
         { id: "unconfirmed", platform: "ios" },
         { id: "lost", platform: "ios" },
         { id: "confirmed", platform: "ios" },

@@ -1,0 +1,41 @@
+{
+  "id": "platform-handler",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "ticks": 0
+  },
+  "data": {
+    "lastTick": {}
+  },
+  "requires": {
+    "platform": ["test"]
+  },
+  "platform": {
+    "on": {
+      "test.tick": [
+        {
+          "type": "increment",
+          "key": "ticks"
+        },
+        {
+          "type": "platform",
+          "call": "test.echo",
+          "args": {
+            "message": {
+              "event": "/count"
+            }
+          },
+          "into": "/data/lastTick"
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "Ticks {ticks}"
+  }
+}

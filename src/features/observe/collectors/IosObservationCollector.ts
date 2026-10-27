@@ -34,19 +34,16 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
     readOptions,
   }: PlatformCollectionContext): Promise<void> {
     perf.serial("ios_collect");
-    await this.deps
-      .hierarchyCollector()
-      .collect(
-        result,
-        queryOptions,
-        perf,
-        skipWaitForFresh,
-        minTimestamp,
-        signal,
-        readOnly,
-        capturedHierarchy,
-        readOptions,
-      );
+    await this.deps.hierarchyCollector().collect(result, {
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+      readOnly,
+      capturedHierarchy,
+      readOptions,
+    });
 
     this.applyIosScreenMetadata(result);
     this.applyIosInsetsAndRotation(result);
@@ -56,7 +53,7 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
     try {
       sdkScreenIdentity = await this.deps
         .viewHierarchy()
-        .getScreenIdentity?.(result.viewHierarchy?.packageName);
+        .getScreenIdentity?.(result.viewHierarchy?.packageName, result.viewHierarchy?.updatedAt);
     } catch (error) {
       // The hierarchy remains valid when the optional SDK refresh fails.
       logger.debug(`[iOS] SDK screen identity refresh failed; using hierarchy identity: ${error}`);

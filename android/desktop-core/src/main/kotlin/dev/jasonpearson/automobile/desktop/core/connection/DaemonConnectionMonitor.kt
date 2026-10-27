@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.connection
 
+import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
+import java.io.IOException
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CancellationException
@@ -81,7 +83,13 @@ class DaemonConnectionMonitor(
       // Genuine disposal (collector cancelled). Propagate so teardown does not log a false daemon
       // failure and flip the dot to disconnected while the app is closing.
       throw cancellation
-    } catch (error: Exception) {
+    } catch (error: IOException) {
+      onProbeFailure(error)
+      ConnectionState.Disconnected(error.message)
+    } catch (error: IllegalStateException) {
+      onProbeFailure(error)
+      ConnectionState.Disconnected(error.message)
+    } catch (error: McpConnectionException) {
       // A failed status call means the daemon socket is unreachable; surface it as Disconnected.
       onProbeFailure(error)
       ConnectionState.Disconnected(error.message)

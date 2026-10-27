@@ -52,6 +52,13 @@ export const MCP_ARGUMENT_BUDGET_CASES: readonly ArgumentBudgetCase[] = [
     defaultFloor: DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
     argumentsFor: (value) => ({ waitFor: { elementId: "missing", timeout: value } }),
   },
+  {
+    ...waitCase("mediaSession", "timeoutMs", 5000),
+    argumentsFor: (value) => ({
+      action: "get",
+      waitFor: { mediaState: "playing", timeoutMs: value },
+    }),
+  },
   waitCase("barrier", "timeout", BARRIER_TIMEOUT_MS),
   waitCase("criticalSection", "timeout", BARRIER_TIMEOUT_MS),
   waitCase("explore", "timeoutMs", DEFAULT_EXPLORE_TIMEOUT_MS),

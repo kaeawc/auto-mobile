@@ -17,7 +17,7 @@ import {
 import {
   DeviceOwnedByOtherDaemonError,
   freshStartAlreadyBoundError,
-} from "./deviceAcquisitionRefusals";
+} from "../models/deviceAcquisitionRefusals";
 import type { AutolockClient, DeviceAutolockManager } from "./deviceAutolockManager";
 import {
   CREATE_SESSION_RELEASE_WAIT_MS,
@@ -147,6 +147,8 @@ export interface ExplicitBindOptions {
   refusePreparedForOtherRequest: boolean;
   deferRebindCleanup: boolean;
   recoveryTarget?: SessionRecoveryTarget;
+  /** The caller's cancel signal, read once by the pool entry point (#11817). */
+  signal?: AbortSignal;
 }
 
 /**
@@ -170,6 +172,8 @@ export interface BindDeviceRequest {
   receipt?: AcquisitionReceipt;
   refusePreparedForOtherRequest?: boolean;
   recoveryTarget?: SessionRecoveryTarget;
+  /** The caller's cancel signal, read once by the pool entry point (#11817). */
+  signal?: AbortSignal;
 }
 
 /**
@@ -205,6 +209,11 @@ function creatorPersistenceSource(
     : undefined;
 }
 
+/** Only an Android loss recovery names the serial it expects to replace (#15456). */
+function recoveryRebindFlag(expectedExistingSessionDeviceId: string | undefined): true | undefined {
+  return expectedExistingSessionDeviceId === undefined ? undefined : true;
+}
+
 function isAnonymousCaller(caller: AutolockClient | undefined): boolean {
   return caller?.oneShotCli === true || caller?.mcpSessionId === undefined;
 }
@@ -236,6 +245,7 @@ export class ExplicitDeviceBind {
         receipt: receipt ?? {},
         deferRebindCleanup: receipt !== undefined,
         refusePreparedForOtherRequest: request.refusePreparedForOtherRequest ?? false,
+        signal: request.signal,
       });
     } finally {
       endBind();
@@ -357,6 +367,7 @@ export class ExplicitDeviceBind {
               sessionId,
               sourceImage,
               confirmedSameOwner,
+              options.signal,
             );
           }
 
@@ -535,6 +546,8 @@ export class ExplicitDeviceBind {
             expectedExistingSessionDeviceId,
           ),
           recoveryTarget: options.recoveryTarget,
+          recovery: recoveryRebindFlag(expectedExistingSessionDeviceId),
+          signal: options.signal,
         },
       ),
     );
@@ -788,9 +801,12 @@ export class ExplicitDeviceBind {
       persistenceSource: string | undefined;
       deferCleanup?: (cleanup: DeferredRebindCleanup) => void;
       recoveryTarget?: SessionRecoveryTarget;
+      /** An Android loss recovery moving its own session, not a client-chosen device. */
+      recovery?: boolean;
+      signal?: AbortSignal;
     },
   ): () => Promise<Session> {
-    const { stableDeviceId, persistenceSource } = creation;
+    const { stableDeviceId, persistenceSource, signal } = creation;
     const previousDeviceId = previousSession?.assignedDevice;
     if (!previousDeviceId || previousDeviceId === deviceId) {
       return async () => {
@@ -805,6 +821,7 @@ export class ExplicitDeviceBind {
             recoveredLiveness: creation.recoveryTarget?.liveness,
             initialOwnership: creation.recoveryTarget?.initialOwnership,
             persistenceSource,
+            signal,
           },
         );
         if (previousSession && platform === "android") {
@@ -835,6 +852,8 @@ export class ExplicitDeviceBind {
       const session = await this.port.sessionManager.rebindSession(sessionId, deviceId, platform, {
         stableDeviceId,
         deferCleanup: creation.deferCleanup,
+        recovery: creation.recovery,
+        signal,
       });
       if (previousDevice) {
         this.port.autolockManager.clearRebindAutolockLock(
@@ -895,6 +914,7 @@ export class ExplicitDeviceBind {
     requestedSessionId: string,
     sourceImage?: DeviceInfo,
     confirmedSameOwner = false,
+    signal?: AbortSignal,
   ): Promise<string> {
     const existingSessionId = existingSession.sessionId;
     if (sourceImage && !confirmedSameOwner) {
@@ -924,7 +944,10 @@ export class ExplicitDeviceBind {
       undefined,
       undefined,
       false,
-      { callerExecutionId: this.port.ambientExecutionIdReader?.getExecutionId() },
+      {
+        callerExecutionId: this.port.ambientExecutionIdReader?.getExecutionId(),
+        signal,
+      },
     );
     logger.info(`Reusing existing session ${refreshedSession.sessionId} for device ${deviceId}`);
     return refreshedSession.sessionId;

@@ -397,10 +397,12 @@ describe("SwipeOn container overlays", () => {
   let fakeWindow: FakeWindow;
   let fakeTimer: FakeTimer;
   let fakeAccessibilityDetector: FakeAccessibilityDetector;
-  let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
+  let getInstanceSpy: ReturnType<typeof spyOn>;
 
   const createObserveResult = (viewHierarchy: any): ObserveResult => ({
-    timestamp: Date.now(),
+    updatedAt: Date.now(),
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 1000, height: 2000 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     viewHierarchy,
@@ -467,7 +469,7 @@ describe("SwipeOn container overlays", () => {
   });
 
   afterEach(() => {
-    getInstanceSpy?.mockRestore();
+    getInstanceSpy.mockRestore();
   });
 
   test("avoids clickable overlays outside the container subtree", async () => {

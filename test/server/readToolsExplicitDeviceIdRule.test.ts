@@ -1,9 +1,11 @@
+import type { ResolvedDeviceIdentity } from "../../src/daemon/readiness/DeviceReadiness";
+import { z } from "zod/v4";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { matchRunningReadTarget } from "../../src/devices/runningReadTarget";
 import { afterAll, afterEach, beforeAll, expect, mock, spyOn, test } from "bun:test";
@@ -11,7 +13,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import type { IosBootInstrumentation } from "../../src/features/iosSimFleet/IosBootInstrumentation";
 import {
   isSessionlessDeviceRead,
@@ -45,7 +47,7 @@ import {
 } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { createExecResult } from "../../src/utils/execResult";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -73,18 +75,22 @@ isolateToolRegistry();
 const readArgs: Record<string, Record<string, unknown>> = {
   keyboard: { action: "detect" },
   clipboard: { action: "get" },
+  mediaSession: { action: "get" },
   sqlQuery: { query: "SELECT 1" },
   prototype: { action: "inspect" },
+  statusBar: { action: "get" },
 };
 // All handler bodies are stubbed, so even platform-specific reads can exercise resolution.
 const EXPECTED = [
   "accessibility",
   "clipboard",
+  "compareScreenshot",
   "displayConfig",
   "getAppPermissions",
   "getDataStore",
   "getDeepLinks",
   "getDeviceState",
+  "getLogs",
   "getNavigationGraph",
   "getNetworkGraph",
   "getNotificationPolicy",
@@ -95,10 +101,12 @@ const EXPECTED = [
   "keyboard",
   "listApps",
   "listDataStores",
+  "mediaSession",
   "observe",
   "prototype",
   "snapshotOf",
   "sqlQuery",
+  "statusBar",
 ];
 const deviceFor = (platform: Platform): BootedDevice => ({
   platform,
@@ -107,7 +115,10 @@ const deviceFor = (platform: Platform): BootedDevice => ({
 });
 
 class ReadSimctl extends FakeSimctl {
-  async presentSimulatorAfterStart(): Promise<void> {}
+  readonly presentations: string[] = [];
+  async presentSimulatorAfterStart(udid: string): Promise<void> {
+    this.presentations.push(udid);
+  }
 }
 
 function harness(
@@ -142,8 +153,10 @@ function harness(
     { platform, limit: 1, booted: 1, retryAfterMs: 100 },
     "capacity refused",
   );
+  let instrumentationRequests = 0;
   const instrumentation: IosBootInstrumentation = {
     async run(request, boot) {
+      instrumentationRequests++;
       if (capacity) {
         throw capacityError;
       }
@@ -164,7 +177,7 @@ function harness(
     iosClient.setConnectWithoutSetupResult(true);
   }
   const lifecycle = new FakeVirtualDeviceLifecycleCoordinator();
-  const manager = DeviceSessionManager.createInstance(
+  const manager = DeviceReadiness.createInstance(
     new FakeDeviceClientProvider(adb, discovery, simctl, {
       window,
       iosCtrlProxyManager: iosManager,
@@ -257,12 +270,27 @@ function harness(
     verify,
     detect,
     capacityError,
+    get instrumentationRequests() {
+      return instrumentationRequests;
+    },
     iosManager,
     androidManager,
     handledDevices: [] as BootedDevice[],
     handlerSignals: [] as Array<AbortSignal | undefined>,
     runs: [] as Array<{ deviceId: string; sessionUuid: unknown; readPath: boolean }>,
   };
+}
+
+function stoppedIosMessage(device: BootedDevice): string {
+  return `iOS simulator '${device.name}' (${device.deviceId}) is not booted; a read never boots a simulator. Call startDevice (or acquire a session) to boot it.`;
+}
+
+function assertNoIosReadBoot(current: ReturnType<typeof harness>): void {
+  expect(current.boots).toEqual([]);
+  expect(current.simctl.getMethodCalls("bootSimulator")).toEqual([]);
+  expect(current.instrumentationRequests).toBe(0);
+  expect(current.simctl.presentations).toEqual([]);
+  expect(current.runs).toEqual([]);
 }
 
 type Harness = ReturnType<typeof harness>;
@@ -326,7 +354,7 @@ beforeAll(async () => {
           h!.handlerSignals.push(getAbortSignal());
           h!.runs.push({
             deviceId: device.deviceId,
-            sessionUuid: args.sessionUuid,
+            sessionUuid: z.object({ sessionUuid: z.string().optional() }).parse(args).sessionUuid,
             readPath: isSessionlessDeviceRead(),
           });
           return { success: true };
@@ -399,10 +427,8 @@ afterEach(async () => {
   restoreReadTimer = undefined;
   h?.restoreSpies();
   h = undefined;
-  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originals.deviceSessionManager });
-  expect(ToolRegistry.getCollaboratorsForTesting().deviceSessionManager).toBe(
-    originals.deviceSessionManager,
-  );
+  ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: originals.deviceReadiness });
+  expect(ToolRegistry.getCollaboratorsForTesting().deviceReadiness).toBe(originals.deviceReadiness);
   DaemonState.getInstance().reset();
   expect(DaemonState.getInstance().isInitialized()).toBe(false);
   expect(executionTracker.getActiveExecutionCount()).toBe(0);
@@ -436,11 +462,13 @@ const READS_THAT_READY_UNHELD = {
   android: [
     "accessibility",
     "clipboard",
+    "compareScreenshot",
     "displayConfig",
     "getAppPermissions",
     "getDataStore",
     "getDeepLinks",
     "getDeviceState",
+    "getLogs",
     "getNavigationGraph",
     "getNetworkGraph",
     "getNotificationPolicy",
@@ -452,15 +480,18 @@ const READS_THAT_READY_UNHELD = {
     "prototype",
     "snapshotOf",
     "sqlQuery",
+    "statusBar",
   ],
   ios: [
     "accessibility",
     "clipboard",
+    "compareScreenshot",
     "displayConfig",
     "getAppPermissions",
     "getDataStore",
     "getDeepLinks",
     "getDeviceState",
+    "getLogs",
     "getNavigationGraph",
     "getNetworkGraph",
     "getNotificationPolicy",
@@ -472,17 +503,20 @@ const READS_THAT_READY_UNHELD = {
     "prototype",
     "snapshotOf",
     "sqlQuery",
+    "statusBar",
   ],
 };
 const READS_WITHOUT_UNHELD_READINESS = {
   android: [
     "inspectPackageSigning", // Declares booted readiness; no CtrlProxy setup.
     "listApps", // Declares booted readiness; no CtrlProxy setup.
+    "mediaSession", // Declares booted readiness; plain adb only.
     "observe", // Explicit deviceId uses the observer path; no ensureDeviceReady.
   ],
   ios: [
     "inspectPackageSigning", // Declares booted readiness; no runner setup.
     "listApps", // Declares booted readiness; no runner setup.
+    "mediaSession", // Declares booted readiness; no runner setup.
     "observe", // Explicit deviceId uses the observer path; no ensureDeviceReady.
   ],
 };
@@ -511,7 +545,7 @@ test("documented unheld registry readiness matches literal classifications", () 
   }
 });
 
-test("unheld readiness literal lists partition all 21 production reads", () => {
+test("unheld readiness literal lists partition all 22 production reads", () => {
   for (const platform of ["android", "ios"] as const) {
     const classified = [
       ...READS_THAT_READY_UNHELD[platform],
@@ -527,7 +561,7 @@ for (const platform of ["android", "ios"] as const) {
   for (const name of EXPECTED) {
     test(`${platform} unheld running not ready: ${name}`, async () => {
       h = harness(platform, true, false, false, false, true);
-      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
+      ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: h.manager });
       const daemon = unheld.get(platform)!;
       DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
       const execution = executionTracker.startExecution(name);
@@ -575,8 +609,8 @@ for (const platform of ["android", "ios"] as const) {
       observed.set(name, ran);
       observedReadiness.set(platform, observed);
       expect(daemon.sessions.getAllSessions()).toEqual([]);
-      expect(h.manager.getCurrentDevice()).toBeUndefined();
-      expect(h.manager.getCurrentPlatform()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
       expect(h.manager.getExplicitDevicePin()).toBeUndefined();
       expect(h.apply).not.toHaveBeenCalled();
       expect(h.getConfig).not.toHaveBeenCalled();
@@ -735,7 +769,7 @@ for (const platform of ["android", "ios"] as const) {
               };
             };
           }
-          ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
+          ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: h.manager });
           const held = column.startsWith("held");
           const owner = owners.get(platform)!;
           const holderBefore = structuredClone(owner.sessions.getSession(`holder-${platform}`));
@@ -754,6 +788,11 @@ for (const platform of ["android", "ios"] as const) {
                       sessionUuid: "restart-owner",
                       owned: true,
                       restartHandoff: true,
+                      target: {
+                        platform,
+                        stableDeviceId: h!.device.deviceId,
+                        deviceId: h!.device.deviceId,
+                      },
                       retryAfterMs: 500,
                     }
                   : undefined;
@@ -776,8 +815,6 @@ for (const platform of ["android", "ios"] as const) {
                     holder: "session_broker",
                     scopeKey: "scope",
                     bindingIndex: 0,
-                    scopeState: null,
-                    execSessionUuid: "slot-exec",
                   });
                 }
               },
@@ -847,7 +884,7 @@ for (const platform of ["android", "ios"] as const) {
                 retryable: true,
               });
             }
-            if (column === "capacity") {
+            if (column === "capacity" && platform === "android") {
               expect(error).toBe(h.capacityError);
             }
           } finally {
@@ -858,8 +895,11 @@ for (const platform of ["android", "ios"] as const) {
           row.set(name, decision);
           decisions.set(key, row);
           const label = platform === "android" ? "Android" : "iOS";
-          const expected =
-            column === "reserved-stopped" || column === "failed-other-reserved"
+          const iosStopped =
+            platform === "ios" && ["stopped", "failed-other-stopped", "capacity"].includes(column);
+          const expected = iosStopped
+            ? stoppedIosMessage(h.device)
+            : column === "reserved-stopped" || column === "failed-other-reserved"
               ? "device_owned_by_other_session"
               : column === "unnamed"
                 ? `No ${label} device is running, so there is nothing to read. Start one with startDevice or provisionDevice, or pass a deviceId.`
@@ -878,6 +918,9 @@ for (const platform of ["android", "ios"] as const) {
                         ? `Device ${id} not found on ${requested ?? "either"} platform. Available ${requested ?? "either"} devices: none`
                         : `device:${h.device.deviceId};boots:${column === "stopped" || column === "failed-other-stopped" ? 1 : 0}`;
           expect(decision).toBe(expected);
+          if (iosStopped) {
+            assertNoIosReadBoot(h);
+          }
           if (failedOther) {
             const retried = column === "failed-other-unknown" || column === "failed-other-reserved";
             expect(retryTimer.now()).toBe(retried ? 1000 : 0);
@@ -900,8 +943,8 @@ for (const platform of ["android", "ios"] as const) {
             expect(h.detect).toHaveBeenCalledTimes(1);
             expect(h.handledDevices.map(withoutInventoryOutcome)).toEqual([h.device]);
           }
-          expect(h.manager.getCurrentDevice()).toBeUndefined();
-          expect(h.manager.getCurrentPlatform()).toBeUndefined();
+          expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+          expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
           expect(h.manager.getExplicitDevicePin()).toBeUndefined();
           expect(h.apply).not.toHaveBeenCalled();
           expect(h.getConfig).not.toHaveBeenCalled();
@@ -1061,7 +1104,7 @@ for (const column of probeColumns) {
       const held = column === "probe-held-name";
       h = harness("android", !stopped);
       installProbeInventory(column);
-      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
+      ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: h.manager });
       const daemon = (held ? owners : unheld).get("android")!;
       DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
       const before = structuredClone(daemon.sessions.getAllSessions());
@@ -1100,8 +1143,8 @@ for (const column of probeColumns) {
       const probes = h.adb.getExecutedCommands().filter((c) => c === "emu avd name");
       expect(probes).toHaveLength(column === "probe-running-id" ? 0 : 1);
       expect(h.boots).toHaveLength(stopped ? 1 : 0);
-      expect(h.manager.getCurrentDevice()).toBeUndefined();
-      expect(h.manager.getCurrentPlatform()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
       expect(h.manager.getExplicitDevicePin()).toBeUndefined();
       expect(h.apply).not.toHaveBeenCalled();
       expect(h.getConfig).not.toHaveBeenCalled();
@@ -1134,7 +1177,7 @@ for (const column of probeColumns) {
 test("a probed serial missing from the memoized raw scan is refreshed before readiness", async () => {
   h = harness("android", true);
   installProbeInventory("probe-running-name");
-  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
+  ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: h.manager });
   const daemon = unheld.get("android")!;
   DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
   let scans = 0;
@@ -1151,15 +1194,15 @@ test("a probed serial missing from the memoized raw scan is refreshed before rea
   expect(h.adb.getExecutedCommands().filter((c) => c === "emu avd name")).toHaveLength(1);
   expect(h.boots).toEqual([]);
   expect(daemon.sessions.getAllSessions()).toEqual([]);
-  expect(h.manager.getCurrentDevice()).toBeUndefined();
-  expect(h.manager.getCurrentPlatform()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
   expect(h.manager.getExplicitDevicePin()).toBeUndefined();
   expect(h.apply).not.toHaveBeenCalled();
 });
 
 test("a serial acquired during discovery is rechecked before readiness", async () => {
   h = harness("android", true);
-  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
+  ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: h.manager });
   DaemonState.getInstance().initialize(slotOwner.sessions, slotOwner.pool);
   let acquired = false;
   let listings = 0;
@@ -1198,7 +1241,7 @@ test("a serial acquired during discovery is rechecked before readiness", async (
 
 test("control naming a stopped AVD keeps the provided-device not-found outcome", async () => {
   h = harness("android", false);
-  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
+  ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: h.manager });
   const daemon = unheld.get("android")!;
   DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
   // Control bypasses resolveReadinessReadTarget's read boot; requireProvidedReadinessDevice rejects.
@@ -1221,7 +1264,7 @@ for (const name of ["observe", "listApps", "getDeviceState"]) {
     h = harness("android", true);
     const foreign = { ...h.device, deviceId: "emulator-5590", name: "Foreign" };
     h.devices.splice(0, h.devices.length, foreign);
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: h.manager });
     const owner = owners.get("android")!;
     DaemonState.getInstance().initialize(owner.sessions, owner.pool);
     const before = structuredClone(owner.sessions.getSession("holder-android"));
@@ -1262,7 +1305,7 @@ for (const platform of ["android", "ios"] as const) {
     for (const kind of ["holder", "reservation"] as const) {
       test(`${platform}: ${kind} appears during ${phase}, no read boot`, async () => {
         h = harness(platform, false);
-        ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
+        ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: h.manager });
         DaemonState.getInstance().initialize(slotOwner.sessions, slotOwner.pool);
         const id = platform === "android" ? h.device.name : h.device.deviceId;
         let claimed = false;
@@ -1311,6 +1354,11 @@ for (const platform of ["android", "ios"] as const) {
                   sessionUuid: "late-owner",
                   owned: false,
                   restartHandoff: true,
+                  target: {
+                    platform,
+                    stableDeviceId: h!.device.deviceId,
+                    deviceId: h!.device.deviceId,
+                  },
                   retryAfterMs: 500,
                 }
               : undefined;
@@ -1326,7 +1374,11 @@ for (const platform of ["android", "ios"] as const) {
               [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
             })
             .catch((error: unknown) => error);
-          if (kind === "reservation") {
+          if (platform === "ios" && phase === "images") {
+            expect(result).toBeInstanceOf(ActionableError);
+            expect(result).toHaveProperty("message", stoppedIosMessage(h.device));
+            assertNoIosReadBoot(h);
+          } else if (kind === "reservation") {
             expect(result).toMatchObject({ code: "device_owned_by_other_session" });
           } else if (platform === "android") {
             expect(h.runs).toEqual([
@@ -1360,7 +1412,7 @@ for (const platform of ["android", "ios"] as const) {
   for (const scenario of ["recovers", "fails", "aborts", "healthy-other", "held-fails"] as const) {
     test(`${platform} explicit observe discovery: ${scenario}`, async () => {
       h = harness(platform, true);
-      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
+      ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: h.manager });
       const daemon = (scenario === "held-fails" ? owners : unheld).get(platform)!;
       DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
       let listings = 0;
@@ -1426,7 +1478,7 @@ for (const platform of ["android", "ios"] as const) {
     for (const identity of ["name", "deviceId"] as const) {
       test(`${platform} stopped reserved ${identity}, platform=${requested ?? "absent"}`, async () => {
         h = harness(platform, false);
-        ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
+        ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: h.manager });
         const daemon = unheld.get(platform)!;
         DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
         const id = h.device[identity];
@@ -1442,6 +1494,11 @@ for (const platform of ["android", "ios"] as const) {
                   sessionUuid: "restart-owner",
                   owned: true,
                   restartHandoff: true,
+                  target: {
+                    platform,
+                    stableDeviceId: h!.device.deviceId,
+                    deviceId: h!.device.deviceId,
+                  },
                   retryAfterMs: 500,
                 }
               : undefined;
@@ -1517,6 +1574,7 @@ function reserveReadTarget(platform: Platform, id: string): void {
             sessionUuid: "restart-owner",
             owned: true,
             restartHandoff: true,
+            target: { platform, stableDeviceId: h!.device.deviceId, deviceId: h!.device.deviceId },
             retryAfterMs: 500,
           }
         : undefined;
@@ -1537,7 +1595,7 @@ async function onePlatformDecision(
 ): Promise<{ decision: string; listings: number }> {
   useFakeReadRetryTimer();
   h = harness(platform, scenario === "running");
-  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
+  ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: h.manager });
   const daemon = unheld.get(platform)!;
   DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
   const other = platform === "android" ? "ios" : "android";
@@ -1597,6 +1655,11 @@ async function onePlatformDecision(
       expect(h.ensure).not.toHaveBeenCalled();
     }
     decision = "discovery_incomplete";
+  } else if (platform === "ios" && scenario === "stopped") {
+    expect(result).toBeInstanceOf(ActionableError);
+    expect(result).toHaveProperty("message", stoppedIosMessage(h.device));
+    assertNoIosReadBoot(h);
+    decision = stoppedIosMessage(h.device);
   } else {
     expect(result).not.toBeInstanceOf(Error);
     expect(h.runs).toHaveLength(1);
@@ -1606,8 +1669,8 @@ async function onePlatformDecision(
     expect(h.ensure).toHaveBeenCalledTimes(name === "observe" && scenario === "running" ? 0 : 1);
   }
   expect(daemon.sessions.getAllSessions()).toEqual([]);
-  expect(h.manager.getCurrentDevice()).toBeUndefined();
-  expect(h.manager.getCurrentPlatform()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
   expect(h.manager.getExplicitDevicePin()).toBeUndefined();
   expect(h.apply).not.toHaveBeenCalled();
   expect(h.getConfig).not.toHaveBeenCalled();
@@ -1661,7 +1724,7 @@ for (const platform of ["android", "ios"] as const) {
     test(`${platform} reserved ${name} overrides failed discovery`, async () => {
       useFakeReadRetryTimer();
       h = harness(platform, false);
-      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
+      ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: h.manager });
       const daemon = unheld.get(platform)!;
       DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
       const id = h.device.deviceId;
@@ -1693,7 +1756,7 @@ for (const platform of ["android", "ios"] as const) {
   }
   test(`${platform} explicitly unavailable platform does not retry`, async () => {
     h = harness(platform, false);
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: h.manager });
     let listings = 0;
     statusListing = async () => {
       listings++;
@@ -1718,7 +1781,7 @@ for (const platform of ["android", "ios"] as const) {
   });
   test(`${platform} abort without reason during read backoff preserves signal reason`, async () => {
     h = harness(platform, false);
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: h.manager });
     let listings = 0;
     statusListing = async () => {
       listings++;
@@ -1804,7 +1867,7 @@ for (const platform of ["android", "ios"] as const) {
   });
 }
 
-for (const platform of ["android", "ios"] as const) {
+for (const platform of ["android"] as const) {
   for (const phase of platform === "android" ? ["lease wait", "cold boot"] : ["lease wait"]) {
     for (const acquisition of [
       "held",
@@ -1816,7 +1879,7 @@ for (const platform of ["android", "ios"] as const) {
       test(`${platform}: read by stopped image ${platform === "android" ? "name" : "UDID"} ${phase}, ${acquisition} watches or cancels`, async () => {
         h = harness(platform, false);
         const current = h;
-        ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: current.manager });
+        ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: current.manager });
         DaemonState.getInstance().initialize(slotOwner.sessions, slotOwner.pool);
         const { device, lifecycle } = current;
         const identity = {
@@ -1877,7 +1940,7 @@ for (const platform of ["android", "ios"] as const) {
         }
         const execution = executionTracker.startExecution("listApps");
         const callerFailure = new ActionableError("caller cancelled readiness");
-        const realVerify = DeviceSessionManager.prototype.verifyDevice.bind(current.manager);
+        const realVerify = DeviceReadiness.prototype.verifyDevice.bind(current.manager);
         const seen: Array<{ marks: string[]; cancelled: number; aborted: boolean }> = [];
         const readinessAmbientAborted: Array<boolean | undefined> = [];
         const verify = async (...args: Parameters<typeof realVerify>) => {
@@ -1898,7 +1961,7 @@ for (const platform of ["android", "ios"] as const) {
             return;
           }
           if (phase === "cold boot") {
-            await DeviceSessionManager.prototype.verifyAndroidDevice.call(
+            await DeviceReadiness.prototype.verifyAndroidDevice.call(
               current.manager,
               args[0],
               args[2],
@@ -1911,7 +1974,8 @@ for (const platform of ["android", "ios"] as const) {
         const coldVerify =
           phase === "cold boot"
             ? spyOn(current.manager, "verifyAndroidDevice").mockImplementation(
-                (id, options, resolved) => verify(id, "android", options, resolved),
+                (id, options, resolved?: ResolvedDeviceIdentity) =>
+                  verify(id, "android", options, resolved),
               )
             : undefined;
         if (!coldVerify) {
@@ -1974,7 +2038,7 @@ for (const platform of ["android", "ios"] as const) {
               .getExecutedCommands()
               .filter((c) => /settings (put|delete)|cmd uimode/.test(c)),
           ).toEqual([]);
-          expect(current.manager.getCurrentDevice()).toBeUndefined();
+          expect(current.manager.getExplicitDevicePin()).toBeUndefined();
         } finally {
           blocker?.release();
           executionTracker.endExecution(execution.id);
@@ -1992,4 +2056,36 @@ function withoutInventoryOutcome(device: BootedDevice): BootedDevice {
   const stripped = { ...device };
   delete stripped[displayInventoryOutcome];
   return stripped;
+}
+
+for (const operation of ["start", "shutdown"] as const) {
+  test(`ios: stopped image read refuses before ${operation} lease wait`, async () => {
+    h = harness("ios", false);
+    const current = h;
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: current.manager });
+    DaemonState.getInstance().initialize(slotOwner.sessions, slotOwner.pool);
+    const blocker = await current.lifecycle.reserve(
+      { kind: "stable", platform: "ios", stableId: current.device.deviceId },
+      { operation, deadlineMs: 300_000 },
+    );
+    const execution = executionTracker.startExecution("listApps");
+    try {
+      const result = await ToolRegistry.getTool("listApps")!
+        .handler({
+          platform: "ios",
+          deviceId: current.device.deviceId,
+          [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
+          [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
+        })
+        .catch((error: unknown) => error);
+      expect(result).toBeInstanceOf(ActionableError);
+      expect(result).toHaveProperty("message", stoppedIosMessage(current.device));
+      assertNoIosReadBoot(current);
+      expect(current.lifecycle.reservations).toHaveLength(1);
+      expect(execution.sessionlessDeviceUse?.size ?? 0).toBe(0);
+    } finally {
+      blocker.release();
+      executionTracker.endExecution(execution.id);
+    }
+  });
 }

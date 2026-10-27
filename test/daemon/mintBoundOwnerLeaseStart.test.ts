@@ -5,7 +5,11 @@ import {
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { ownerLeaseHeartbeat, SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
+import {
+  ownerLeaseHeartbeat,
+  SUSPECT_GRACE_MS,
+  type LivenessOwnerHold,
+} from "../../src/daemon/livenessOwnerLease";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -286,7 +290,7 @@ test("late stall cannot re-arm a silent minter claim hold through tool activity"
     manager.recordToolCallEnded("S");
   }
   timer.setCurrentTime(20_000);
-  const lapsed = { state: "lapsed", remainingMs: 0, holdRemainingMs: 0 };
+  const lapsed: LivenessOwnerHold = { state: "lapsed", remainingMs: 0, holdRemainingMs: 0 };
   expect(manager.getOwnerLeaseHold("S")).toEqual(lapsed);
   expect(manager.forgiveDaemonStall(20_000, 1_000, 0, 19_000)).toBe(1);
   expect(session.stallForgivenAt).toBe(19_000);

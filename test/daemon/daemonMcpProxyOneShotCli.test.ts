@@ -1,7 +1,7 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock, beforeEach } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_ONE_SHOT_CLI_PARAM, DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_ONE_SHOT_CLI_PARAM, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -14,7 +14,6 @@ async function forwardedParams(
   const client = new FakeDaemonClient({ toolResult: { content: [] } });
   const manager = new FakeDaemonManager();
   manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
-  const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
   const proxy = new DaemonMcpProxy({
     clientFactory: () => client,
     daemonManager: manager,
@@ -26,7 +25,6 @@ async function forwardedParams(
     await proxy.callTool("getAndroid", args);
     return client.callToolCalls.at(-1)?.params as Record<string, unknown> | undefined;
   } finally {
-    isAvailableSpy.mockRestore();
     await proxy.close();
   }
 }
@@ -50,4 +48,12 @@ describe("DaemonMcpProxy one-shot CLI marker (#11096)", () => {
       ).toEqual(withProxyOwnerToken({ deviceId: "emulator-5554" }));
     },
   );
+});
+
+afterEach(() => {
+  mock.restore();
+});
+
+beforeEach(() => {
+  spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
 });

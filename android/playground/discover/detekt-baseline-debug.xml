@@ -2,24 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ComplexCondition:DragReorderState.kt:(newIndex == 0 &amp;&amp; remainingOffset &lt; 0f) || (newIndex == lastIndex &amp;&amp; remainingOffset &gt; 0f)</ID>
-    <ID>CyclomaticComplexMethod:IcTraceRecorder.kt:IcTraceRecorder$fun textArg: String</ID>
-    <ID>CyclomaticComplexMethod:InputTextScreen.kt:@Composable fun InputTextScreen</ID>
-    <ID>EmptyKotlinFile:ReorderableGrid.kt:.ReorderableGrid.kt</ID>
-    <ID>LongMethod:ChatScreen.kt:@Composable fun MessageBubble</ID>
-    <ID>LongMethod:ChatScreen.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun ChatScreen</ID>
-    <ID>LongMethod:IcTraceScreen.kt:@Composable fun IcTraceScreen</ID>
-    <ID>LongMethod:InputTextScreen.kt:@Composable fun InputTextScreen</ID>
-    <ID>LongMethod:LongPressContent.kt:@OptIn(ExperimentalFoundationApi::class) @Composable fun LongPressContent</ID>
-    <ID>LongMethod:LongPressContent.kt:@OptIn(ExperimentalFoundationApi::class) @Composable private fun LongPressDragList</ID>
-    <ID>LongMethod:ReorderableGrid.kt:@Composable fun GridImageItem</ID>
-    <ID>LongMethod:ReorderableGrid.kt:@Composable fun ReorderableGrid</ID>
-    <ID>LongMethod:SwipeableCard.kt:@Composable fun SwipeableCard</ID>
-    <ID>LongMethod:TapScreen.kt:@Composable private fun PressDurationTracker</ID>
-    <ID>LongMethod:TapScreen.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun TapScreen</ID>
-    <ID>LongMethod:VideoListScreen.kt:@Composable fun VideoCard</ID>
-    <ID>LongParameterList:IcTraceRecorder.kt:IcTraceRecorder$@Synchronized fun record</ID>
-    <ID>LongParameterList:ReorderableGrid.kt:@Composable fun GridImageItem</ID>
-    <ID>TooManyFunctions:LoggingInputConnection.kt:LoggingInputConnection : InputConnectionWrapper</ID>
   </CurrentIssues>
 </SmellBaseline>

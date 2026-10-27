@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "image",
+      "asset": "photo",
+      "zoomable": {
+        "maxScale": 2
+      },
+      "onDoubleTap": [
+        {
+          "type": "emit",
+          "name": "like"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.zoomable",
+  "expectedMessage": "A zoomable image cannot also have onDoubleTap"
+}

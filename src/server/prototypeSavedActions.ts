@@ -38,6 +38,22 @@ import { ActionableError, toActionableError } from "../models/ActionableError";
 import { outputLooksLikeShellFailure } from "../utils/android-cmdline-tools/shellOutputHeuristics";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
+import type { ProtoViewerDevice } from "../features/prototype/protoViewer/protoViewerDevice";
+import {
+  protoViewerHandles,
+  routeToProtoViewer,
+  type ProtoViewerEntry,
+} from "../features/prototype/protoViewer/protoViewerSaved";
+import {
+  confirmPinDialog,
+  type PinConfirmationDriver,
+  type PinConfirmationOutcome,
+} from "../features/prototype/pinConfirmation";
+
+import {
+  refreshLauncherForShortcut,
+  type LauncherRefreshDriver,
+} from "../features/prototype/launcherRefresh";
 
 export type PrototypeSavedAction = "save" | "listSaved" | "deleteSaved";
 export type PrototypeSavedErrorCode =
@@ -51,8 +67,13 @@ export interface PrototypeSavedOutput {
   saved?: SavedPrototypeInfo;
   savedPrototypes?: (Omit<SavedPrototypeEntry, "savedAt"> & { savedAt?: number })[];
   pinned?: "pinned" | "pending" | "unsupported";
+  /** Whether the default launcher was restarted so a new or updated shortcut shows (#14887). */
+  launcherRestarted?: boolean;
+  /** Whether the shortcut was seen on the home screen after pin/update; absent when not checked. */
+  shortcutVisible?: boolean;
   warning?: string;
   uploadedAssets?: UploadedPrototypeAsset[];
+  viewer?: ProtoViewerEntry;
 }
 export interface PrototypeSavedInput {
   action: PrototypeSavedAction;
@@ -61,6 +82,8 @@ export interface PrototypeSavedInput {
   icon?: string;
   pin?: true;
   autoConfirm?: true;
+  /** false opts out of the automatic launcher restart after a pin or shortcut update. */
+  restartLauncher?: false;
   id?: string;
   removeIcon?: true;
   timeoutMs?: number;
@@ -73,6 +96,10 @@ export interface PrototypeSavedDependencies {
   >;
   /** Host-side adb for `removeIcon`; absent means the icon cannot be cleared from the host. */
   adb?: AdbExecutor;
+  /** Accepts the launcher's pin dialog for `autoConfirm`; absent means it cannot be driven. */
+  pinConfirmation?: PinConfirmationDriver;
+  /** Looks for the shortcut and restarts the launcher when it is missing; absent skips it. */
+  launcherRefresh?: LauncherRefreshDriver;
   stageAssets: () => Promise<{ uploaded: UploadedPrototypeAsset[]; failure?: PrototypeResult }>;
   signal?: AbortSignal;
 }
@@ -222,23 +249,129 @@ async function saveAndroidPrototype(
     args.timeoutMs,
   );
   const output = savedPrototypeResult(args, result);
-  if (!args.pin || !output.success) {
+  if (!output.success) {
     return { ...output, ...uploaded };
+  }
+  return { ...output, ...(await pinAndRefresh(deps, args, result)), ...uploaded };
+}
+
+/** The pin step (when asked for) and the launcher refresh that follows a shortcut change. */
+async function pinAndRefresh(
+  deps: PrototypeSavedDependencies,
+  args: PrototypeSavedInput,
+  result: PrototypeResult,
+): Promise<Partial<PrototypeSavedOutput>> {
+  if (!args.pin) {
+    // An updated shortcut (new label or icon) can show stale in the launcher without a pin call.
+    return await refreshLauncher(deps, args, result.saved?.shortcut === "updated");
   }
   // The pin transport takes no signal, so a cancellation that landed during the save must stop
   // the second mutation here; the completed save is still reported.
   if (deps.signal?.aborted) {
     return {
-      ...output,
       warning: "The request was cancelled after the save, so the prototype was not pinned.",
-      ...uploaded,
     };
   }
-  return {
-    ...output,
-    ...(await pinSavedPrototype(deps, args, result.saved?.id ?? args.spec!.id)),
-    ...uploaded,
-  };
+  const pinned = await pinSavedPrototype(deps, args, result.saved?.id ?? args.spec!.id);
+  return { ...pinned, ...(await refreshLauncher(deps, args, pinned.pinned === "pinned")) };
+}
+
+/**
+ * Restarts the default launcher when a pinned or updated shortcut is not showing (#14887). Runs
+ * once per call, only when the shortcut exists, and never fails the save.
+ */
+async function refreshLauncher(
+  deps: PrototypeSavedDependencies,
+  args: PrototypeSavedInput,
+  shortcutExists: boolean,
+): Promise<Partial<PrototypeSavedOutput>> {
+  if (!deps.launcherRefresh || args.restartLauncher === false || !shortcutExists) {
+    return {};
+  }
+  try {
+    const outcome = await refreshLauncherForShortcut(deps.launcherRefresh, {
+      label: args.label ?? args.spec!.id,
+      signal: deps.signal,
+    });
+    return {
+      launcherRestarted: outcome.launcherRestarted,
+      shortcutVisible: outcome.shortcutVisible,
+      ...(outcome.message ? { warning: outcome.message } : {}),
+    };
+  } catch (error) {
+    if (deps.signal?.aborted) {
+      throw error;
+    }
+    // The pin already succeeded; a failed launcher check only leaves visibility unreported.
+    logger.warn(`[prototype] launcher refresh failed: ${errorMessage(error)}`, error);
+    return {};
+  }
+}
+
+const PIN_PENDING_WARNING =
+  "The launcher's confirmation dialog is open and the icon is pinned only once it is accepted; declining sends no signal.";
+const PIN_VERIFY_ATTEMPTS = 5;
+const PIN_VERIFY_POLL_MS = 400;
+
+function autoConfirmReason(outcome: PinConfirmationOutcome | undefined): string {
+  switch (outcome?.status) {
+    case "unrecognized":
+      return `confirmation_unrecognized: no known accept button in the launcher dialog (buttons seen: ${outcome.visibleButtons.join(", ") || "none"}); accept it on the device.`;
+    case "timeout":
+      return "The launcher's confirmation dialog did not appear in time; accept it on the device if it is open.";
+    case "tap_failed":
+      return `Tapping the accept button failed (${outcome.error}); accept it on the device.`;
+    case "tapped":
+      return `Tapped "${outcome.label}" but the shortcut was not reported pinned yet.`;
+    default:
+      return "autoConfirm needs a driveable device; accept the launcher dialog on the device.";
+  }
+}
+
+/** Taps the launcher's accept button, then reports pinned only once listSaved says so. */
+async function autoConfirmPin(
+  deps: PrototypeSavedDependencies,
+  args: PrototypeSavedInput,
+  id: string,
+): Promise<Partial<PrototypeSavedOutput>> {
+  const driver = deps.pinConfirmation;
+  const pending = (outcome?: PinConfirmationOutcome) => ({
+    pinned: "pending" as const,
+    warning: `${PIN_PENDING_WARNING} autoConfirm: ${autoConfirmReason(outcome)}`,
+  });
+  if (!driver) {
+    return pending();
+  }
+  const outcome = await confirmPinDialog(driver, { signal: deps.signal });
+  if (outcome.status !== "tapped") {
+    return pending(outcome);
+  }
+  for (let attempt = 0; attempt < PIN_VERIFY_ATTEMPTS; attempt++) {
+    deps.signal?.throwIfAborted();
+    if (await isPinnedOnDevice(deps, id, args.timeoutMs)) {
+      return { pinned: "pinned" };
+    }
+    await driver.timer.sleep(PIN_VERIFY_POLL_MS);
+  }
+  return pending(outcome);
+}
+
+async function isPinnedOnDevice(
+  deps: PrototypeSavedDependencies,
+  id: string,
+  timeoutMs: number | undefined,
+): Promise<boolean> {
+  try {
+    const listed = await deps.client.listSaved(timeoutMs);
+    return listed.savedPrototypes?.some((entry) => entry.id === id && entry.pinned) === true;
+  } catch (error) {
+    if (deps.signal?.aborted) {
+      throw error;
+    }
+    // A failed verification read only leaves the pin pending, which is reported to the caller.
+    logger.warn(`[prototype] pin verification failed: ${errorMessage(error)}`, error);
+    return false;
+  }
 }
 
 /**
@@ -261,17 +394,14 @@ async function pinSavedPrototype(
     logger.warn(`[prototype] pin request failed: ${errorMessage(error)}`, error);
     return { success: false, error: `Saved, but pinning failed. ${errorMessage(error)}` };
   }
-  const autoConfirm = args.autoConfirm
-    ? " autoConfirm is not implemented yet (#12266): accept the launcher's Add to home screen dialog on the device."
-    : "";
   if (reply.success && reply.pin?.status === "already_pinned") {
     return { pinned: "pinned" };
   }
+  if (reply.success && args.autoConfirm) {
+    return await autoConfirmPin(deps, args, id);
+  }
   if (reply.success) {
-    return {
-      pinned: "pending",
-      warning: `The launcher's confirmation dialog is open and the icon is pinned only once it is accepted; declining sends no signal.${autoConfirm}`,
-    };
+    return { pinned: "pending", warning: PIN_PENDING_WARNING };
   }
   const failure = savedPrototypeFailure(reply);
   if (reply.errorCode === "pin_unsupported") {
@@ -345,6 +475,12 @@ async function removeIconWarning(
   }
 }
 
+function requireSavedId(value: { action: string; id?: string }, ctx: z.RefinementCtx): void {
+  if ((value.action === "deleteSaved" || value.action === "open") && value.id === undefined) {
+    ctx.addIssue({ code: "custom", path: ["id"], message: `${value.action} requires id` });
+  }
+}
+
 /** Action-specific refinements keep the existing actions' validation unchanged. */
 export function validatePrototypeSavedInput(
   value: {
@@ -361,9 +497,7 @@ export function validatePrototypeSavedInput(
   if (value.action === "save" && value.spec === undefined) {
     ctx.addIssue({ code: "custom", path: ["spec"], message: "save requires spec" });
   }
-  if (value.action === "deleteSaved" && value.id === undefined) {
-    ctx.addIssue({ code: "custom", path: ["id"], message: "deleteSaved requires id" });
-  }
+  requireSavedId(value, ctx);
   if (value.autoConfirm && !value.pin) {
     ctx.addIssue({ code: "custom", path: ["autoConfirm"], message: "autoConfirm requires pin" });
   }
@@ -385,9 +519,17 @@ interface IosSavedDependencies {
   installer?: IosSavedPrototypeInstaller;
   assetFileReader: PrototypeAssetFileReader;
   observationScreenshotReader: PrototypeObservationScreenshotReader;
+  /** ProtoViewer on Android or an iOS simulator; absent means saves keep the platform path. */
+  protoViewer?: (device: BootedDevice) => ProtoViewerDevice;
 }
 
-/** Intercept saved iOS actions, otherwise retain the existing platform validation. */
+const OPEN_NEEDS_PROTOVIEWER =
+  "open needs ProtoViewer installed on an Android device or iOS simulator.";
+
+/**
+ * Intercept saved iOS actions and ProtoViewer-routed Android ones, otherwise retain the existing
+ * platform validation. A promise that settles undefined means "not routed": continue as before.
+ */
 export function createPrototypeSavedPlatformDispatch(dependencies: IosSavedDependencies) {
   let installer = dependencies.installer;
   const backend = () => (installer ??= createDefaultIosPrototypeInstaller());
@@ -398,10 +540,50 @@ export function createPrototypeSavedPlatformDispatch(dependencies: IosSavedDepen
     platformError: () =>
       | (Pick<ActionableError, "message"> & { errorCode?: PrototypeSavedErrorCode })
       | undefined,
-  ): Promise<PrototypeSavedOutput> | PrototypeSavedOutput | undefined => {
+  ): Promise<PrototypeSavedOutput | undefined> | PrototypeSavedOutput | undefined => {
     const error = platformError();
     if (error) {
       return prototypePlatformFailure(error);
+    }
+    if (
+      device.platform === "ios" &&
+      args.action === "open" &&
+      resolveIosDeviceKind(device) !== "simulator"
+    ) {
+      return {
+        success: false,
+        errorCode: "unsupported_platform",
+        error: "open needs an iOS simulator. Target one with deviceId or sessionUuid.",
+      };
+    }
+    if (
+      (device.platform === "android" || device.platform === "ios") &&
+      dependencies.protoViewer &&
+      protoViewerHandles(args)
+    ) {
+      return routeToProtoViewer(
+        args,
+        { ...dependencies, device: dependencies.protoViewer(device) },
+        signal,
+      ).then((output) => {
+        if (output || device.platform !== "ios" || !isPrototypeSavedAction(args.action)) {
+          return output;
+        }
+        return performIosSavedAction(
+          backend,
+          device,
+          { ...args, action: args.action },
+          dependencies,
+          signal,
+        );
+      });
+    }
+    if (args.action === "open") {
+      return {
+        success: false,
+        errorCode: "unsupported_capability",
+        error: OPEN_NEEDS_PROTOVIEWER,
+      };
     }
     if (device.platform !== "ios" || !isPrototypeSavedAction(args.action)) {
       return undefined;
@@ -552,11 +734,19 @@ async function performIosSavedAction(
 /** Dispatches saved actions without adding decisions to the shared tool handler. */
 export function dispatchPrototypeSavedAction<T>(
   args: Omit<PrototypeSavedInput, "action"> & {
-    action: PrototypeSavedAction | "show" | "patch" | "dismiss";
+    action: PrototypeSavedAction | "open" | "show" | "patch" | "dismiss";
   },
   dependencies: () => PrototypeSavedDependencies,
   fallback: (action: "show" | "patch" | "dismiss") => Promise<T>,
 ): Promise<PrototypeSavedOutput | T> {
+  if (args.action === "open") {
+    // The platform dispatch answers every open it can route; nothing reaches CtrlProxy.
+    return Promise.resolve({
+      success: false,
+      errorCode: "unsupported_capability",
+      error: OPEN_NEEDS_PROTOVIEWER,
+    });
+  }
   if (isPrototypeSavedAction(args.action)) {
     return performPrototypeSavedAction(dependencies(), { ...args, action: args.action });
   }

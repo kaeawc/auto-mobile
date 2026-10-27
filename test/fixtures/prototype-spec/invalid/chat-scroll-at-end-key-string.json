@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "atEnd": "yes"
+    },
+    "root": {
+      "type": "scroll",
+      "child": {
+        "type": "spacer"
+      },
+      "atEndKey": "atEnd"
+    }
+  },
+  "expectedPath": "root.atEndKey",
+  "expectedMessage": "atEndKey must name a declared boolean state key"
+}

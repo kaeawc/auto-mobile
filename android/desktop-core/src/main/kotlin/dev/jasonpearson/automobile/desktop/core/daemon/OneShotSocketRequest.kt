@@ -70,14 +70,23 @@ internal fun oneShotSocketRequest(
         expired.set(true)
         try {
           channel.close()
-        } catch (_: IOException) {
+        } catch (error: IOException) {
+          dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory.getLogger(
+              "SocketRequestWatchdog",
+            )
+            .debug("Timed-out socket close failed: ${error.message}")
           // Best-effort watchdog close; use owns the definitive close on the request thread.
         }
       }
     try {
       channel.connect(UnixDomainSocketAddress.of(socketPath))
       return exchangeLine(channel, requestLine, label)
-    } catch (error: Exception) {
+    } catch (error: IOException) {
+      if (expired.get()) {
+        throw McpConnectionException("$label request timed out after ${timeoutMs}ms", error)
+      }
+      throw error
+    } catch (error: McpConnectionException) {
       if (expired.get()) {
         throw McpConnectionException("$label request timed out after ${timeoutMs}ms", error)
       }

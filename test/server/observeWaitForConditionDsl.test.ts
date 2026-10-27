@@ -183,9 +183,7 @@ describe("waitForObservation DSL branch", () => {
     const outcome = await waitForObservation(
       observeScreen,
       { for: "appear", text: "Account" } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.matched).toBe(true);
@@ -209,9 +207,7 @@ describe("waitForObservation DSL branch", () => {
         timeout: 500,
         settled: { quietPeriodMs: 100 },
       } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.matched).toBe(false);
     expect(outcome.timedOut).toBe(true);
@@ -239,9 +235,7 @@ describe("waitForObservation DSL branch", () => {
         timeout: 500,
         settled: { quietPeriodMs: 100 },
       } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.matched).toBe(false);
     expect(outcome.timedOut).toBe(true);
@@ -268,9 +262,7 @@ describe("waitForObservation DSL branch", () => {
         elementId: "submit",
         settled: { quietPeriodMs: 250 },
       } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.settled).toBe(true);
     expect(outcome.timedOut).toBe(false);
@@ -297,9 +289,7 @@ describe("waitForObservation DSL branch", () => {
         settled: { quietPeriodMs: 200 },
         timeoutMs: 500,
       } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.matched).toBe(false);
@@ -326,9 +316,7 @@ describe("waitForObservation DSL branch", () => {
         settled: { quietPeriodMs: 200 },
         timeoutMs: 500,
       } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.matched).toBe(true);
@@ -357,9 +345,7 @@ describe("waitForObservation DSL branch", () => {
         settled: { quietPeriodMs: 200 },
         timeoutMs: 700,
       } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.matched).toBe(true);
@@ -377,9 +363,7 @@ describe("waitForObservation DSL branch", () => {
     await waitForObservation(
       observeScreen,
       { for: "appear", elementId: "submit" } satisfies WaitForWithSettled,
-      undefined,
-      true,
-      timer,
+      { skipBackStack: true, timer },
     );
     expect(observeScreen.getCollectDeferredBackStackCallCount()).toBe(0);
     expect(observeScreen.getExecuteOptions().length).toBeGreaterThan(0);
@@ -400,9 +384,7 @@ describe("waitForObservation DSL branch", () => {
     const outcome = await waitForObservation(
       observeScreen,
       { for: "appear", elementId: "submit" } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -428,9 +410,7 @@ describe("waitForObservation DSL branch", () => {
     const outcome = await waitForObservation(
       observeScreen,
       { for: "stable" } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -453,9 +433,7 @@ describe("waitForObservation DSL branch", () => {
     const outcome = await waitForObservation(
       observeScreen,
       { for: "textEquals", elementId: "counter", text: "5" } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -476,9 +454,7 @@ describe("waitForObservation DSL branch", () => {
     const outcome = await waitForObservation(
       observeScreen,
       { for: "clickable", elementId: "submit", timeout: 300 } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(true);
@@ -500,9 +476,7 @@ describe("waitForObservation DSL branch", () => {
     const outcome = await waitForObservation(
       observeScreen,
       { for: "stable" } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.settled).toBe(false);
@@ -524,9 +498,7 @@ describe("waitForObservation DSL branch", () => {
     const outcome = await waitForObservation(
       observeScreen,
       { for: "stable", timeout: 300 } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.awaitTimeout).toBe(true);
@@ -557,9 +529,7 @@ describe("display stamp waitFor conditions", () => {
       const outcome = await waitForObservation(
         screen,
         { posture },
-        undefined,
-        false,
-        new FakeTimer(),
+        { skipBackStack: false, timer: new FakeTimer() },
       );
       expect(outcome.matched).toBe(true);
       expect(outcome.observation.display.posture).toBe(posture);
@@ -598,7 +568,7 @@ describe("display stamp waitFor conditions", () => {
         displayObservation("inner", "inner", "opened"),
         displayObservation("cover", "cover", "closed", 20),
       ]);
-      const matched = await waitForObservation(screen, condition, undefined, false, timer);
+      const matched = await waitForObservation(screen, condition, { skipBackStack: false, timer });
       expect(matched.matched).toBe(true);
       expect(matched.observation.display.key).toBe("cover");
 
@@ -607,9 +577,7 @@ describe("display stamp waitFor conditions", () => {
       const timedOut = await waitForObservation(
         timeoutScreen,
         { ...condition, timeout: 300, pollMs: 100 },
-        undefined,
-        false,
-        timer,
+        { skipBackStack: false, timer },
       );
       expect(timedOut.timedOut).toBe(true);
       expect(timedOut.matched).toBe(false);
@@ -634,9 +602,7 @@ describe("display stamp waitFor conditions", () => {
     const outcome = await waitForObservation(
       screen,
       { activeDisplay: "cover", timeout: 200 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome).toMatchObject({
       timedOut: true,
@@ -661,9 +627,7 @@ describe("waitFor back-compat", () => {
     const wait = waitForObservation(
       screen,
       { text: "Ready", timeout: 40_000, settled: { quietPeriodMs: 200 } },
-      caller.signal,
-      false,
-      timer,
+      { signal: caller.signal, skipBackStack: false, timer },
     );
     await drainUntil(() => timer.getPendingSleepCount() === 1, {
       description: "settle poll sleep",
@@ -691,9 +655,7 @@ describe("waitFor back-compat", () => {
       waitForObservation(
         screen,
         { text: "NeverAppears", timeout: 40_000 },
-        caller.signal,
-        false,
-        timer,
+        { signal: caller.signal, skipBackStack: false, timer },
       ),
     ).rejects.toBe(loss);
     expect(screen.getExecuteCallCount()).toBe(2);
@@ -713,7 +675,11 @@ describe("waitFor back-compat", () => {
     });
 
     await expect(
-      waitForObservation(screen, { posture: "closed", timeout: 40_000 }, undefined, false, timer),
+      waitForObservation(
+        screen,
+        { posture: "closed", timeout: 40_000 },
+        { skipBackStack: false, timer },
+      ),
     ).rejects.toBe(loss);
     expect(screen.getExecuteCallCount()).toBe(2);
     expect(timer.now()).toBe(100);
@@ -740,9 +706,7 @@ describe("waitFor back-compat", () => {
     const result = await waitForObservation(
       screen,
       { posture: "closed", timeout: 40_000 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(result.matched).toBe(true);
     expect(result.timedOut).toBe(false);
@@ -758,9 +722,7 @@ describe("waitFor back-compat", () => {
     const result = await waitForObservation(
       screen,
       { text: "NeverAppears", timeout: 300 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(result).toMatchObject({
       matched: false,
@@ -783,9 +745,7 @@ describe("waitFor back-compat", () => {
     const outcome = await waitForObservation(
       observeScreen,
       { text: "Sign in or register", settled: { quietPeriodMs: 200 }, timeoutMs: 300 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.polls).toBe(1);
@@ -810,9 +770,7 @@ describe("waitFor back-compat", () => {
     const outcome = await waitForObservation(
       observeScreen,
       { text: "Sign in or register", settled: { quietPeriodMs: 200 }, timeoutMs: 300 },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.polls).toBe(4);
@@ -844,9 +802,7 @@ describe("waitFor back-compat", () => {
         settled: { quietPeriodMs: 200 },
         timeoutMs: 300,
       },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.polls).toBe(4);
@@ -868,9 +824,7 @@ describe("waitFor back-compat", () => {
     const outcome = await waitForObservation(
       observeScreen,
       { elementId: "submit", settled: { quietPeriodMs: 100 } },
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
 
     expect(outcome.matched).toBe(true);
@@ -1028,7 +982,7 @@ describe("scoped waits through the poll loop", () => {
         updatedAt: 10 + index * 10,
       },
     }));
-    return waitForObservation(screen, { timeoutMs: 450, ...wait }, undefined, false, timer);
+    return waitForObservation(screen, { timeoutMs: 450, ...wait }, { skipBackStack: false, timer });
   };
 
   test("DSL timeout reports unique target ambiguity and candidates", async () => {

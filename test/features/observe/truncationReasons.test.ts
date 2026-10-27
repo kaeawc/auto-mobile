@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "./flatHierarchyBuilders";
 import { describe, expect, test } from "bun:test";
 import {
   WINDOW_TRUNCATION_REASON_MEANINGS,
@@ -55,7 +56,11 @@ describe("window truncation vocabulary", () => {
     // Metadata fakes exercise package lookup, not hierarchy parsing or root linking.
     expect(
       collectWindowTruncations([
-        { id: 1, hierarchy: { packageName: "com.example.root" }, truncationReasons: ["max_nodes"] },
+        {
+          id: 1,
+          hierarchy: createFlatNodeForTest({ packageName: "com.example.root" }),
+          truncationReasons: ["max_nodes"],
+        },
         {
           id: 2,
           hierarchy: { $: { package: "com.example.wrapped" } },
@@ -64,7 +69,7 @@ describe("window truncation vocabulary", () => {
         {
           id: 3,
           packageName: "com.example.window",
-          hierarchy: { packageName: "other" },
+          hierarchy: createFlatNodeForTest({ packageName: "other" }),
           truncationReasons: ["max_depth"],
         },
         { id: 4, truncationReasons: ["future_code"] },

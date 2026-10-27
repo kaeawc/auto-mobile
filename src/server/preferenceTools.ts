@@ -1,6 +1,7 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
-import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withAppIdAliases } from "../utils/schemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import {
   getPreferenceResultSchema,
@@ -98,7 +99,7 @@ export function registerPreferenceTools(deps: Partial<PreferenceToolsDependencie
       const result = await appPreferencesFactory(device).setPreference(args);
       return createStructuredToolResponse(result);
     },
-    { defaultEnabled: false, outputSchema: setPreferenceResultSchema },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setPreferenceResultSchema },
   );
 }
 

@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../../observe/flatHierarchyBuilders";
 import { expect, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
@@ -31,28 +32,33 @@ function listHarness({
   let offset = 0;
   const steps: Step[] = [];
   const observe = (): ObserveResult => ({
-    timestamp: timer.now(),
+    updatedAt: timer.now(),
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     screenSize: { width: 1080, height: 2400 },
     viewHierarchy: {
       hierarchy: {
-        node: {
+        node: createFlatNodeForTest({
           bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
-          node: {
-            "resource-id": "list",
-            scrollable: true,
-            bounds: { left: 0, top: 300, right: 1080, bottom: 2100 },
-            node: Array.from({ length: 6 }, (_, index) => ({
-              text: `row ${offset + index + 1}`,
-              "resource-id": "row",
-              bounds: {
-                left: 0,
-                top: 300 + index * PITCH,
-                right: 1080,
-                bottom: 300 + (index + 1) * PITCH,
-              },
-            })),
-          },
-        },
+          node: [
+            createFlatNodeForTest({
+              "resource-id": "list",
+              scrollable: true,
+              bounds: { left: 0, top: 300, right: 1080, bottom: 2100 },
+              node: Array.from({ length: 6 }, (_, index) => ({
+                text: `row ${offset + index + 1}`,
+                "resource-id": "row",
+                bounds: {
+                  left: 0,
+                  top: 300 + index * PITCH,
+                  right: 1080,
+                  bottom: 300 + (index + 1) * PITCH,
+                },
+              })),
+            }),
+          ],
+        }),
       },
     },
   });
@@ -179,11 +185,14 @@ function scriptedPages(pages: string[][], stuckBack = false) {
   let page = 0;
   const backwards: boolean[] = [];
   const observe = (): ObserveResult => ({
-    timestamp: timer.now(),
+    updatedAt: timer.now(),
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     screenSize: { width: 1080, height: 2400 },
     viewHierarchy: {
       hierarchy: {
-        node: {
+        node: createFlatNodeForTest({
           "resource-id": "list",
           scrollable: true,
           bounds: { left: 0, top: 300, right: 1080, bottom: 2100 },
@@ -197,7 +206,7 @@ function scriptedPages(pages: string[][], stuckBack = false) {
               bottom: 300 + (index + 1) * (VIEWPORT / pages[page].length),
             },
           })),
-        },
+        }),
       },
     },
   });

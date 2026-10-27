@@ -114,8 +114,7 @@ class SdkTelemetryReceiversTest {
   @Test
   fun `a legacy navigation broadcast is queued with prefixed arguments and the injected clock`() {
     val processor = mockk<SdkEventBatchProcessor>()
-    every { processor.enqueueNavigationEvent(any(), any(), any(), any(), any(), any()) } returns
-      true
+    every { processor.enqueueNavigationEvent(any()) } returns true
     val receiver = NavigationEventReceiver({ processor }, FakeTimer())
 
     receiver.onReceive(
@@ -130,12 +129,14 @@ class SdkTelemetryReceiversTest {
 
     verify(exactly = 1) {
       processor.enqueueNavigationEvent(
-        destination = "Home",
-        source = "COMPOSE",
-        arguments = mapOf("id" to "7"),
-        metadata = mapOf("tag" to "x"),
-        applicationId = "com.app",
-        timestamp = 11_000L,
+        NavigationEventInput(
+          destination = "Home",
+          source = "COMPOSE",
+          arguments = mapOf("id" to "7"),
+          metadata = mapOf("tag" to "x"),
+          applicationId = "com.app",
+          timestamp = 11_000L,
+        ),
       )
     }
   }
@@ -154,7 +155,21 @@ class SdkTelemetryReceiversTest {
     receiver.onReceive(context, null)
 
     verify(exactly = 0) {
-      processor.enqueueNavigationEvent(any(), any(), any(), any(), any(), any())
+      processor.enqueueNavigationEvent(any())
+    }
+  }
+
+  @Test
+  fun `plain runtime navigation extras failures are contained`() {
+    val intent = mockk<Intent>()
+    every { intent.action } returns AutoMobileSDK.ACTION_NAVIGATION_EVENT
+    every { intent.getStringExtra(any()) } throws RuntimeException("Parcel.readValue failed")
+    val processor = mockk<SdkEventBatchProcessor>()
+
+    NavigationEventReceiver({ processor }, FakeTimer()).onReceive(context, intent)
+
+    verify(exactly = 0) {
+      processor.enqueueNavigationEvent(any())
     }
   }
 }

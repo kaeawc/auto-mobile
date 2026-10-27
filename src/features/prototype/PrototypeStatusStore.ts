@@ -1,3 +1,4 @@
+import type { PrototypeTimerReport } from "./prototypeTimerSchema";
 import type { PrototypeHiddenReason } from "./prototypeHidden";
 import { PrototypeShownSpecs } from "./PrototypeShownSpecs";
 import type { PrototypeData } from "./prototypeSpec";
@@ -55,6 +56,7 @@ export interface PrototypeLastResult {
    * after a show or a clearStorage, which leave the stored values for the next inspect to report.
    */
   storage?: PrototypeStorageReport;
+  timers?: PrototypeTimerReport[];
   success: boolean;
   error?: string;
   totalTimeMs?: number;
@@ -76,6 +78,7 @@ export interface AdoptedPrototype {
   hiddenReason?: PrototypeHiddenReason;
   appearance?: ShownPrototypeAppearance;
   storage?: PrototypeStorageReport;
+  timers?: PrototypeTimerReport[];
   pages: PrototypeEvent["pages"];
   stacks?: PrototypeEvent["stacks"];
   state: PrototypeEvent["state"];
@@ -265,6 +268,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...(prototype.hiddenReason ? { hiddenReason: prototype.hiddenReason } : {}),
       ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
       ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
+      ...(prototype.timers ? { timers: structuredClone(prototype.timers) } : {}),
       success: true,
       timestamp: this.clock.now(),
     };

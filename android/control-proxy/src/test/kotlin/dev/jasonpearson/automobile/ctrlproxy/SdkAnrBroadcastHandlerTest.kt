@@ -137,7 +137,9 @@ class SdkAnrBroadcastHandlerTest {
         },
         log =
           object : SdkEventBatchBroadcastHandler.LogSink {
-            override fun debug(message: String) {}
+            override fun debug(message: String) {
+              // Intentionally no-op: debug logging is irrelevant to receiver behavior.
+            }
 
             override fun warn(message: String) {
               error(message)

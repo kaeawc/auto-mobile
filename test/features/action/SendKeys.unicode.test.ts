@@ -181,7 +181,7 @@ describe("sendKeys Unicode delivery", () => {
       expect(await h.executor.type({ action: "type", text, mode: "eventAll" })).toMatchObject({
         success: true,
       });
-      expect(h.inserted).toEqual(inserts);
+      expect(h.inserted).toEqual([...inserts]);
       expectWellFormedInserts(h.inserted);
       expect(h.adb.getExecutedCommands()).toEqual([]);
     }

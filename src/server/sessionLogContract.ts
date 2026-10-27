@@ -4,10 +4,10 @@ import {
   normalizeAppFileRelativePath,
   type AppFileContainer,
 } from "./appFileContract";
-import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withAppIdAliases } from "../utils/schemaHelpers";
 import { optionalEnum, optionalInteger, optionalString } from "./queryParamValidation";
 import type { Platform } from "../models";
-import type { LocalFileListEntry } from "./appFileService";
+import type { LocalFileListEntry } from "./appFileSupport";
 import { decodeSegmentOrThrow } from "./resourceUriSegments";
 import { encodeUriSegment } from "../utils/encodeUriSegment";
 
@@ -65,6 +65,8 @@ export interface SessionLogAppGroupRequest {
 export interface UnifiedLogWindowRequest {
   lastSeconds: number;
   level: UnifiedLogLevel;
+  /** Executable name also matched, for apps that log under a subsystem other than their bundle id (#14739). */
+  processName?: string;
 }
 
 export interface SessionLogCollectionRequest {
@@ -87,9 +89,23 @@ export interface SessionLogFileOutcome {
   reason?: string;
 }
 
+/**
+ * Machine-readable causes a source can report beside its `reason`, so clients
+ * can branch on a locked or unpaired device without parsing prose.
+ */
+export const SESSION_LOG_FAILURE_CODES = [
+  "HOST_UNSUPPORTED",
+  "HOST_NOT_ADMIN",
+  "DEVICE_NOT_CONNECTED",
+  "DEVICE_NOT_PAIRED",
+  "DEVICE_LOCKED",
+] as const;
+export type SessionLogFailureCode = (typeof SESSION_LOG_FAILURE_CODES)[number];
+
 export type SessionLogSourceFailure = {
   status: "unavailable" | "failed" | "timedOut";
   reason: string;
+  code?: SessionLogFailureCode;
 };
 
 export type SessionLogSourceOutcome<T> = ({ status: "ok" } & T) | SessionLogSourceFailure;
@@ -105,10 +121,19 @@ export interface SessionLogAppGroupResult {
   entries: SessionLogFileOutcome[];
 }
 
+/**
+ * How a unified-log window was read: `simctl spawn … log show` on a Simulator, or
+ * a host `log collect --device-udid` archive then `log show` on a physical device.
+ */
+export type UnifiedLogMechanism = "simctl-log-show" | "log-collect";
+
 export interface UnifiedLogWindowResult {
   lastSeconds: number;
   level: UnifiedLogLevel;
   predicate: string;
+  mechanism: UnifiedLogMechanism;
+  /** Wall-clock time the collection took, in milliseconds. */
+  collectionMs: number;
   timeoutMs: number;
   byteCount: number;
   truncated: boolean;

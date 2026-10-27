@@ -5,7 +5,7 @@ LYCHEE_VERSION="0.22.0" # Change this to the desired version
 # Shared colors + command_exists + detect_os/detect_arch (issue #2822).
 # detect_arch echoes the canonical "arm64" token for aarch64/arm64 hosts (the
 # old local copy echoed "aarch64"); the asset-name cases below key off "arm64".
-# shellcheck source=scripts/lib/tool-install.sh disable=SC1091
+# shellcheck source=scripts/lib/tool-install.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
 
 # Install lychee on macOS

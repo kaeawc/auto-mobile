@@ -1,10 +1,49 @@
 import { describe, expect, test } from "bun:test";
-import { parseGuardSource } from "./astGuard";
+import { mkdirSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import {
+  createGuardSourceReader,
+  guardDirectoryEntries,
+  parseGuardSource,
+  readGuardFile,
+  typeScriptFiles,
+  guardTextMayMatch,
+  GuardVisitor,
+} from "./astGuard";
+import type { VisitorObject } from "oxc-parser";
 import { collectSourceFacts } from "./sourceFacts";
 
 const facts = (source: string) => collectSourceFacts(parseGuardSource("fixture.ts", source));
 
 describe("collectSourceFacts (mutations the guards rely on)", () => {
+  const scratch = useScratchRoot("ast-guard-cache-");
+  test.each(["win32", "darwin"] as const)(
+    "guard source reader handles unchanged stat identity on %s",
+    (platform) => {
+      let source = 'import "s1";';
+      let reads = 0;
+      const stat = { dev: 1n, ino: 2n, mtimeNs: 3n, ctimeNs: 4n, size: 12n };
+      const read = createGuardSourceReader({
+        platform,
+        stat: () => stat,
+        readFile: () => {
+          reads++;
+          return source;
+        },
+      });
+      expect(read("fixture.ts")).toBe(source);
+      expect(read("fixture.ts")).toBe(source);
+      source = 'import "s2";';
+      expect(read("fixture.ts")).toBe(platform === "win32" ? source : 'import "s1";');
+      expect(reads).toBe(platform === "win32" ? 3 : 1);
+      stat.ctimeNs++;
+      expect(read("fixture.ts")).toBe(source);
+      expect(reads).toBe(platform === "win32" ? 4 : 2);
+    },
+  );
+
   test("module specifiers cover static, dynamic, re-export and require forms", () => {
     expect(
       facts(
@@ -12,6 +51,39 @@ describe("collectSourceFacts (mutations the guards rely on)", () => {
          export { x } from "s4"; const m = await import("s5"); const r = require("s6");`,
       ).moduleSpecifiers.sort(),
     ).toEqual(["s1", "s2", "s3", "s4", "s5", "s6"]);
+
+    // Exercise the inventory -> source -> facts pipeline against mutable scanner fixtures.
+    const root = scratch.next();
+    const nested = path.join(root, "nested");
+    mkdirSync(nested);
+    expect(typeScriptFiles(root)).toEqual([]);
+    const file = path.join(nested, "source.ts");
+    writeFileSync(file, 'import "s1";');
+    utimesSync(file, 0, 0);
+    expect(typeScriptFiles(root)).toEqual([file]);
+    expect(facts(readGuardFile(file)).moduleSpecifiers).toEqual(["s1"]);
+    expect(readGuardFile(pathToFileURL(file))).toBe(readGuardFile(file));
+    // Same size and restored mtime: re-read on Windows, use ctime elsewhere.
+    writeFileSync(file, 'import "s2";');
+    utimesSync(file, 0, 0);
+    expect(facts(readGuardFile(file)).moduleSpecifiers).toEqual(["s2"]);
+    const replacement = path.join(nested, "replacement.ts");
+    writeFileSync(replacement, 'import "s3";');
+    utimesSync(replacement, 0, 0);
+    renameSync(replacement, file);
+    expect(facts(readGuardFile(file)).moduleSpecifiers).toEqual(["s3"]);
+    const files = typeScriptFiles(root);
+    files.pop();
+    expect(typeScriptFiles(root)).toEqual([file]);
+    const entries = guardDirectoryEntries(root);
+    entries.pop();
+    expect(guardDirectoryEntries(root).map((entry) => entry.name)).toEqual(["nested"]);
+    const renamed = path.join(nested, "renamed.ts");
+    renameSync(file, renamed);
+    expect(typeScriptFiles(root)).toEqual([renamed]);
+    rmSync(renamed);
+    expect(typeScriptFiles(root)).toEqual([]);
+    expect(() => readGuardFile(renamed)).toThrow();
   });
 
   test("template-literal and import-equals specifiers are recorded", () => {
@@ -96,10 +168,104 @@ describe("collectSourceFacts scoping and call facts", () => {
     const all = scoped(undefined);
     expect(all.identifierNames).toContain("daemonManager");
     expect(all.calledMethodNames).toContain("kill");
+
+    const program = parseGuardSource("visitor.ts", "const x = 1;");
+    const calls: string[] = [];
+    let retained: VisitorObject = {};
+    const visitor = new GuardVisitor(
+      {
+        Program() {
+          calls.push("enter");
+        },
+        "Program:exit"() {
+          calls.push("exit");
+        },
+      },
+      (handlers) => {
+        retained = handlers;
+        return {
+          visit(value) {
+            handlers.Program?.(value);
+            handlers["Program:exit"]?.(value);
+          },
+        };
+      },
+    );
+    visitor.visit(program);
+    expect(calls).toEqual(["enter", "exit"]);
+    // Model Oxc's process-level cache keeping these forwarders after traversal.
+    retained.Program?.(program);
+    retained["Program:exit"]?.(program);
+    expect(calls).toEqual(["enter", "exit"]);
+    visitor.visit(program);
+    expect(calls).toEqual(["enter", "exit", "enter", "exit"]);
+
+    let retainedThrow: VisitorObject = {};
+    const failing = new GuardVisitor(
+      {
+        Program() {
+          throw new Error("scanner failure");
+        },
+      },
+      (handlers) => {
+        retainedThrow = handlers;
+        return {
+          visit(value) {
+            handlers.Program?.(value);
+          },
+        };
+      },
+    );
+    expect(() => failing.visit(program)).toThrow("scanner failure");
+    expect(() => retainedThrow.Program?.(program)).not.toThrow();
+
+    const nested: string[] = [];
+    const inner = new GuardVisitor({
+      Program() {
+        nested.push("inner");
+      },
+    });
+    const outer = new GuardVisitor({
+      Program() {
+        nested.push("outer");
+        inner.visit(program);
+        nested.push("outer exit");
+      },
+    });
+    outer.visit(program);
+    expect(nested).toEqual(["outer", "inner", "outer exit"]);
   });
 
   test("an unknown method fails loudly", () => {
     expect(() => scoped({ method: "missing" })).toThrow("method missing not found");
+    expect(parseGuardSource("a.ts", "const unrelated = 1;", false)).toBeUndefined();
+    expect(() => parseGuardSource("a.ts", "const =", false)).toThrow("a.ts:");
+    for (const source of [
+      String.raw`\u0061`,
+      String.raw`\x61`,
+      String.raw`\060`,
+      String.raw`\a`,
+      "\\\n",
+    ]) {
+      expect(guardTextMayMatch(source, /a/)).toBe(true);
+    }
+    for (const source of [
+      String.raw`\n`,
+      String.raw`\t`,
+      String.raw`\r`,
+      String.raw`\0`,
+      String.raw`\\`,
+      String.raw`\"`,
+      String.raw`\/`,
+    ]) {
+      expect(guardTextMayMatch(source, /a/)).toBe(false);
+    }
+    expect(guardTextMayMatch(String.raw`device["statu\s"]`, /status/)).toBe(true);
+    expect(guardTextMayMatch(String.raw`/\s+\d+/`, /sessionId|status/)).toBe(false);
+    const stateful = /status/g;
+    stateful.lastIndex = 42;
+    expect(guardTextMayMatch("device.status", stateful)).toBe(true);
+    expect(stateful.lastIndex).toBe(42);
   });
 });
 

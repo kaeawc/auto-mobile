@@ -281,6 +281,14 @@ describe("assertHttpsAssetUrl (#4761 https enforcement)", function () {
     ).not.toThrow();
   });
 
+  test("the opt-out still rejects schemes other than http://", function () {
+    for (const url of ["file:///tmp/control-proxy.ipa", "ftp://mirror.test/control-proxy.ipa"]) {
+      expect(() =>
+        assertHttpsAssetUrl(url, "LABEL", { [AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV]: "1" }),
+      ).toThrow("LABEL must use https://");
+    }
+  });
+
   test("rejects a non-absolute URL", function () {
     expect(() => assertHttpsAssetUrl("/relative/path", "LABEL", {})).toThrow(
       "LABEL must be an absolute URL",

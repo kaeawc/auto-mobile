@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "q": ""
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "visibleWhen": {
+        "key": "q",
+        "empty": true
+      }
+    }
+  },
+  "expectedPath": "root.visibleWhen.empty",
+  "expectedMessage": "empty applies only to data conditions"
+}

@@ -58,15 +58,9 @@ import os
             let valueBeforeKeyPress = try focusedElement.map { element in
                 try catchingObjCException { fieldText(element) }
             }
-            let caretBefore: Int?
-            if normalizedKey == "delete", let focusedElement {
-                GesturePhaseDiagnostics.current?.begin("caretProbe")
-                caretBefore = try probeCaretIndex(
-                    app: app, focusedElement: focusedElement, original: valueBeforeKeyPress
-                )
-            } else {
-                caretBefore = nil
-            }
+            let caretBefore = try forwardDeleteCaret(
+                normalizedKey: normalizedKey, app: app, focusedElement: focusedElement, original: valueBeforeKeyPress
+            )
 
             if isDestructiveKey, !GesturePerformer.canVerifyDestructiveKey(focusedValue: valueBeforeKeyPress) {
                 throw GestureError.gestureFailed(
@@ -74,23 +68,9 @@ import os
                 )
             }
 
-            let expectedForwardDelete: String?
-            if normalizedKey == "delete", let original = valueBeforeKeyPress, !original.isEmpty {
-                guard let caretBefore else {
-                    throw GestureError.gestureFailed(
-                        "Forward delete unavailable: could not verify the caret position; use text replacement instead"
-                    )
-                }
-                guard let expected = GesturePerformer.forwardDeleteResult(original: original, caretIndex: caretBefore)
-                else {
-                    throw GestureError.gestureFailed(
-                        "Forward delete has no following character at the caret; move the caret left first"
-                    )
-                }
-                expectedForwardDelete = expected
-            } else {
-                expectedForwardDelete = nil
-            }
+            let expectedForwardDelete = try Self.expectedForwardDeleteValue(
+                normalizedKey: normalizedKey, original: valueBeforeKeyPress, caretBefore: caretBefore
+            )
 
             GesturePhaseDiagnostics.current?.begin("keyDelivery")
             try catchingObjCException {
@@ -135,6 +115,35 @@ import os
                 valueBeforeKeyPress: valueBeforeKeyPress, caretBefore: caretBefore,
                 expectedForwardDelete: expectedForwardDelete, focusedKind: focusedKind, warning: &warning
             )
+        }
+
+        private func forwardDeleteCaret(
+            normalizedKey: String, app: XCUIApplication, focusedElement: XCUIElement?, original: String?
+        )
+            throws -> Int?
+        {
+            guard normalizedKey == "delete", let focusedElement else { return nil }
+            GesturePhaseDiagnostics.current?.begin("caretProbe")
+            return try probeCaretIndex(app: app, focusedElement: focusedElement, original: original)
+        }
+
+        private static func expectedForwardDeleteValue(
+            normalizedKey: String, original: String?, caretBefore: Int?
+        )
+            throws -> String?
+        {
+            guard normalizedKey == "delete", let original, !original.isEmpty else { return nil }
+            guard let caretBefore else {
+                throw GestureError.gestureFailed(
+                    "Forward delete unavailable: could not verify the caret position; use text replacement instead"
+                )
+            }
+            guard let expected = forwardDeleteResult(original: original, caretIndex: caretBefore) else {
+                throw GestureError.gestureFailed(
+                    "Forward delete has no following character at the caret; move the caret left first"
+                )
+            }
+            return expected
         }
 
         private static func xcuiKeyboardKey(normalizedKey: String, key: String) throws -> XCUIKeyboardKey {
@@ -236,6 +245,29 @@ import os
             )
         }
 
+        /// Returns true when native delivery already produced the expected value.
+        private func confirmForwardDeleteDelivery(
+            app: XCUIApplication, focusedElement: XCUIElement, valueBeforeKeyPress: String,
+            caretBefore: Int?, expectedForwardDelete: String?
+        )
+            throws -> Bool
+        {
+            GesturePhaseDiagnostics.current?.begin("outcomeConfirmation")
+            let valueBeforeFallback = try catchingObjCException { fieldText(focusedElement) }
+            if valueBeforeFallback == expectedForwardDelete { return true }
+            if valueBeforeFallback == valueBeforeKeyPress, let caretBefore {
+                try emulateForwardDelete(
+                    app: app, focusedElement: focusedElement, original: valueBeforeKeyPress,
+                    caretBefore: caretBefore
+                )
+            } else {
+                throw GestureError.gestureFailed(
+                    "Forward delete changed a different character; use text replacement instead"
+                )
+            }
+            return false
+        }
+
         private func confirmDestructiveKeyOutcome(
             app: XCUIApplication, key: String, normalizedKey: String, focusedElement: XCUIElement,
             valueBeforeKeyPress: String, caretBefore: Int?, expectedForwardDelete: String?,
@@ -243,21 +275,10 @@ import os
         )
             async throws -> Bool?
         {
-            if normalizedKey == "delete" {
-                GesturePhaseDiagnostics.current?.begin("outcomeConfirmation")
-                let valueBeforeFallback = try catchingObjCException { fieldText(focusedElement) }
-                if valueBeforeFallback == expectedForwardDelete { return nil }
-                if valueBeforeFallback == valueBeforeKeyPress, let caretBefore {
-                    try emulateForwardDelete(
-                        app: app, focusedElement: focusedElement, original: valueBeforeKeyPress,
-                        caretBefore: caretBefore
-                    )
-                } else {
-                    throw GestureError.gestureFailed(
-                        "Forward delete changed a different character; use text replacement instead"
-                    )
-                }
-            }
+            if normalizedKey == "delete", try confirmForwardDeleteDelivery(
+                app: app, focusedElement: focusedElement, valueBeforeKeyPress: valueBeforeKeyPress,
+                caretBefore: caretBefore, expectedForwardDelete: expectedForwardDelete
+            ) { return nil }
 
             var valueAfterKeyPress = valueBeforeKeyPress
             GesturePhaseDiagnostics.current?.begin("postCondition")

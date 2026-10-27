@@ -157,7 +157,7 @@ describe("DevicePool", () => {
   describe("statistics", () => {
     test("should return correct pool statistics", async () => {
       const deviceIds = ["emulator-5554", "emulator-5556", "emulator-5558"];
-      await devicePool.initializeWithDevices(deviceIds.map(createBootedDevice));
+      await initializeLiveDevices(deviceIds.map((deviceId) => createBootedDevice(deviceId)));
 
       // Assign all 3 devices
       await devicePool.assignDeviceToSession("session-1");

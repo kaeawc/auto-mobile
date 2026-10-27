@@ -164,7 +164,9 @@ class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
 
   convertToViewHierarchyResult(hierarchy: AccessibilityHierarchy): ViewHierarchyResult {
     return {
-      hierarchy: { node: hierarchy.hierarchy },
+      hierarchy: {
+        node: { text: hierarchy.hierarchy.text, bounds: hierarchy.hierarchy.bounds },
+      },
       packageName: hierarchy.packageName,
       updatedAt: hierarchy.updatedAt,
       screenWidth: hierarchy.screenWidth,

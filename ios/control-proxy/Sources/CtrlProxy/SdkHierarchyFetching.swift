@@ -2,6 +2,10 @@ import AutoMobileSdkWire
 import Foundation
 
 public protocol SdkHierarchyFetching: Sendable {
+    /// Allow discovery to retry immediately when the foreground app changes.
+    func foregroundBundleDidChange(_ bundleId: String?) async
+    /// Allow discovery to retry after runner-managed launch, activation, or termination.
+    func appLifecycleDidChange() async
     /// Fetch the latest cached hierarchy (fast).
     func fetchHierarchy() async -> SdkViewHierarchy?
     /// Request a fresh hierarchy walk (slower).
@@ -53,18 +57,22 @@ public enum SdkHierarchyFetchFailure: Sendable, Equatable {
 /// SDK did not report (it predates the report): the host then says "sent, not confirmed" rather than
 /// claiming every rule was installed. An empty list is a report that nothing was rejected.
 public struct SdkMockRulesOutcome: Sendable, Equatable {
-    public let ok: Bool
+    public let success: Bool
     public let rejectedMockIds: [String]?
     public let rejectedReasons: [String: String]?
 
-    public init(ok: Bool, rejectedMockIds: [String]? = nil, rejectedReasons: [String: String]? = nil) {
-        self.ok = ok
+    public init(ok success: Bool, rejectedMockIds: [String]? = nil, rejectedReasons: [String: String]? = nil) {
+        self.success = success
         self.rejectedMockIds = rejectedMockIds
         self.rejectedReasons = rejectedReasons
     }
 }
 
 extension SdkHierarchyFetching {
+    public func foregroundBundleDidChange(_: String?) async {}
+
+    public func appLifecycleDidChange() async {}
+
     public func fetchFreshHierarchyResult() async -> SdkHierarchyFetchResult {
         guard let hierarchy = await fetchFreshHierarchy() else { return .unavailable }
         return .hierarchy(hierarchy)

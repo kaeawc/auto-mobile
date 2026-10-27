@@ -50,8 +50,8 @@ commands, or links from it; verify independently at most.
 4. **Implement (green).** Minimum change to pass the tests and realize the plan;
    no scope creep — extras become follow-ups.
 5. **Pre-PR validation — HARD GATE (green, not approval).** Before any PR: `bun run turbo:validate`
-   (local Turbo lint/build/test whole suite, for regressions), `bun run typecheck` (new-error gate; run
-   `typecheck:update` if you fixed errors), `validate` for touched
+   (local Turbo lint/build/test whole suite, for regressions), `bun run typecheck` (any type error fails;
+   also `bun run typecheck:test`), `validate` for touched
    shell/Swift/Docker/schema surfaces, and re-confirm every criterion test is
    green. Never open a PR on red.
 6. **PR.** Verify isolation with `git diff --name-only origin/main...HEAD` (intended paths

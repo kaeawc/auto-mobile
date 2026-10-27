@@ -2,12 +2,13 @@ import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { SUSPECT_GRACE_MS } from "../../src/daemon/sessionLivenessWindows";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/wire/sessionLivenessWindows";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-test.each([[60_000, "monitor"]] as const)(
+// The expiry path is typed to admit the lookup variant this table can run alongside "monitor".
+test.each<[number, "monitor" | "lookup"]>([[60_000, "monitor"]])(
   "heartbeat expiry persists and broadcasts after grace with a %i ms idle timeout via %s",
   async (idleTimeoutMs, expiryPath) => {
     const timer = new FakeTimer();

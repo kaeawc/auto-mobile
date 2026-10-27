@@ -2,24 +2,33 @@ import Foundation
 
 /// Runs the requests a `PrototypeSession` starts (#12529) and reports each answer back to it.
 ///
-/// A `via: "host"` request is sent to the connected AutoMobile host as a `prototype_request` frame
-/// and ends with the host's `prototype_response`; the host has no cancel frame, so a cancelled call
-/// is forgotten here and its late response ignored. A `via: "device"` request runs on the injected
-/// `PrototypeHttpClient`, and cancelling it cancels the task. Every completion, including the ones
-/// decided here (no host, no client, a silent host), is delivered asynchronously, never from
+/// Inside AutoMobile, a `via: "host"` request is sent as a `prototype_request` frame and ends with
+/// the daemon's `prototype_response`. Embedded apps route it to their handler or device client.
+/// Client requests run in cancellable tasks; late responses for cancelled calls are ignored.
+/// Imported-prototype denial callbacks are bound to their request's consent epoch. Consent is
+/// checked again at main-actor delivery so obsolete successes and failures cannot update state.
+/// Every completion, including those decided here (no host, no client, a silent host), is
+/// delivered asynchronously, never from
 /// inside the transition that started the request.
 @MainActor
 final class PrototypeRequestDriver {
     typealias SendToHost = @MainActor ([String: Any]) -> Bool
     typealias Complete = @MainActor (String, PrototypeRequestResponse) -> Void
 
+    enum HostRoute {
+        case daemon(SendToHost)
+        case handler(any PrototypeHttpClient)
+        /// Reuses the injected device client, including its egress policy.
+        case deviceClient
+    }
+
     /// The host enforces `timeoutMs` itself; this is the slack before the device gives up on a
     /// host that never answers.
     static let hostGraceMs = 2000
 
     private let clock: PrototypeClock
-    private let device: (any PrototypeHttpClient)?
-    private let sendToHost: SendToHost
+    private var device: (any PrototypeHttpClient)?
+    private var hostRoute: HostRoute
     private var hostWatchdogs: [String: PrototypeTimerHandle] = [:]
     private var deviceTasks: [String: Task<Void, Never>] = [:]
     private var notices: [Task<Void, Never>] = []
@@ -33,10 +42,20 @@ final class PrototypeRequestDriver {
     /// the host aborts the call and sends no reply.
     var onHostCancel: (([String: Any]) -> Void)?
 
-    init(clock: PrototypeClock, device: (any PrototypeHttpClient)?, sendToHost: @escaping SendToHost) {
+    init(clock: PrototypeClock, device: (any PrototypeHttpClient)?, hostRoute: HostRoute) {
         self.clock = clock
         self.device = device
-        self.sendToHost = sendToHost
+        self.hostRoute = hostRoute
+    }
+
+    convenience init(clock: PrototypeClock, device: (any PrototypeHttpClient)?, sendToHost: @escaping SendToHost) {
+        self.init(clock: clock, device: device, hostRoute: .daemon(sendToHost))
+    }
+
+    /// Updates embedded routing without resetting the session or cancelling calls already started.
+    func updateClients(device: any PrototypeHttpClient, hostRoute: HostRoute) {
+        self.device = device
+        self.hostRoute = hostRoute
     }
 
     /// Requests running now (host calls awaiting a response and device tasks).
@@ -114,6 +133,14 @@ final class PrototypeRequestDriver {
     // MARK: Host
 
     private func startHost(_ job: PrototypeRequestJob) {
+        switch hostRoute {
+        case let .daemon(sendToHost): startDaemon(job, sendToHost: sendToHost)
+        case let .handler(client): startClient(job, client: client)
+        case .deviceClient: startDevice(job)
+        }
+    }
+
+    private func startDaemon(_ job: PrototypeRequestJob, sendToHost: SendToHost) {
         guard sendToHost(job.hostFrame) else {
             announce(job.requestId, .failed(
                 PrototypeRequestError(
@@ -146,25 +173,36 @@ final class PrototypeRequestDriver {
             ))
             return
         }
+        startClient(job, client: device)
+    }
+
+    private func startClient(_ job: PrototypeRequestJob, client: any PrototypeHttpClient) {
         let request = PrototypeHttpRequest(job: job)
+        let check = PrototypeDeliveryCheck()
         deviceTasks[job.requestId] = Task { [weak self] in
             let response: PrototypeRequestResponse
             do {
-                response = try await device.perform(request).requestResponse(for: job.method)
+                response = try await client.perform(request, delivery: check).requestResponse(for: job.method)
             } catch let failure as PrototypeHttpFailure {
                 response = .failed(failure.error, durationMs: failure.durationMs)
             } catch {
                 // The protocol promises PrototypeHttpFailure only; anything else is a client bug.
                 response = .failed(PrototypeRequestError(.network, "The on-device HTTP client failed."), durationMs: 0)
             }
-            self?.finishDevice(job.requestId, response)
+            self?.finishDevice(job.requestId, response, check: check)
         }
     }
 
-    private func finishDevice(_ requestId: String, _ response: PrototypeRequestResponse) {
+    private func finishDevice(
+        _ requestId: String, _ response: PrototypeRequestResponse, check: PrototypeDeliveryCheck
+    ) {
         // A cancelled call was removed before its task ended: its answer is not wanted.
         guard deviceTasks.removeValue(forKey: requestId) != nil else { return }
-        deliver(requestId, response)
+        if let failure = check.obsoleteFailure() {
+            deliver(requestId, .failed(failure.error, durationMs: failure.durationMs))
+        } else {
+            deliver(requestId, response)
+        }
     }
 
     // MARK: Delivery

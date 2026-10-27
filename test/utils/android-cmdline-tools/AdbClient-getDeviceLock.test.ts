@@ -17,7 +17,7 @@ function execResult(stdout: string): ExecResult {
     toString: () => stdout,
     trim: () => stdout.trim(),
     includes: (s: string) => stdout.includes(s),
-  } as unknown as ExecResult;
+  };
 }
 
 /** Real KeyguardServiceDelegate block with the three parsed booleans templated. */
@@ -48,7 +48,7 @@ function makeClient(policyStdout: string | { throws: true }): AdbClient {
     }
     return Promise.resolve(execResult(""));
   };
-  return new AdbClient(null, mockExec, null);
+  return new AdbClient(null, mockExec);
 }
 
 describe("AdbClient.getDeviceLock", () => {

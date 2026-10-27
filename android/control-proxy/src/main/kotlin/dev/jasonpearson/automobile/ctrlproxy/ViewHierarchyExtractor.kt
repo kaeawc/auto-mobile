@@ -10,8 +10,10 @@ import android.util.SparseArray
 import android.view.Display
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import androidx.core.util.size
 import dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
+import dev.jasonpearson.automobile.ctrlproxy.models.PrototypeWindowMotion
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SemanticLink
 import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
@@ -31,6 +33,8 @@ import kotlin.math.min
  * UIElementInfo objects for automated testing.
  */
 class ViewHierarchyExtractor
+// Keep the independent, default-off debug flag injectable without regrouping existing callbacks.
+@Suppress("LongParameterList")
 internal constructor(
   private val recompositionStore: RecompositionStore? = null,
   internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
@@ -52,6 +56,7 @@ internal constructor(
     { _, _ ->
       null
     },
+  private val pruneBaselineWrappers: Boolean = false,
 ) {
 
   internal data class DisplayWindows(val displayId: Int, val windows: List<AccessibilityWindowInfo>)
@@ -89,7 +94,7 @@ internal constructor(
       return selected
     }
     val overlays =
-      (0 until windowsByDisplay.size()).flatMap { index ->
+      (0 until windowsByDisplay.size).flatMap { index ->
         windowsByDisplay.valueAt(index).filter { window ->
           window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD ||
             window.root?.let { root ->
@@ -114,10 +119,10 @@ internal constructor(
     if (windowsByDisplay[Display.DEFAULT_DISPLAY].orEmpty().any { it.isFocused || it.isActive }) {
       return Display.DEFAULT_DISPLAY
     }
-    for (index in 0 until windowsByDisplay.size()) {
+    for (index in 0 until windowsByDisplay.size) {
       if (windowsByDisplay.valueAt(index).any { it.isFocused }) return windowsByDisplay.keyAt(index)
     }
-    for (index in 0 until windowsByDisplay.size()) {
+    for (index in 0 until windowsByDisplay.size) {
       if (windowsByDisplay.valueAt(index).any { it.isActive }) return windowsByDisplay.keyAt(index)
     }
     return Display.DEFAULT_DISPLAY
@@ -149,9 +154,6 @@ internal constructor(
     private const val TAG = "ViewHierarchyExtractor"
     private const val MAX_DEPTH = 100 // Prevent infinite traversal in focus-order extraction
     private const val MAX_CHILDREN = 256 // Limit children to prevent memory issues
-    private const val OCCLUSION_THRESHOLD = 0.95
-    private const val OCCLUSION_BUCKET_WIDTH = 128
-    private const val MAX_OCCLUSION_BUCKET_SPAN = 64
     private const val DEFAULT_WINDOW_KEY = -1
     private const val INCOMPLETE_ACTIVE_WINDOW_NULL_ROOT = "active_window_null_root"
     private const val INCOMPLETE_APP_WINDOW_NULL_ROOT = "app_window_null_root"
@@ -182,101 +184,121 @@ internal constructor(
    * Extracts view hierarchy from the active window.
    *
    * @param rootNode Root accessibility node
-   * @param textFilter Optional text filter
-   * @param screenDimensions Optional screen dimensions for offscreen filtering
-   * @param dedupeTextContentDesc When true, omit content-desc when it equals text (default: true)
-   * @param disableAllFiltering When true, disable all optimizations and filtering (for observe with
-   *   raw:true)
+   * @param options Filtering, snapshot budget, and display attribution for this capture
    */
   @JvmOverloads
   fun extractFromActiveWindow(
     rootNode: AccessibilityNodeInfo?,
-    textFilter: String? = null,
-    screenDimensions: ScreenDimensions? = null,
-    dedupeTextContentDesc: Boolean = true,
-    disableAllFiltering: Boolean = false,
-    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
-    displayId: Int? = null,
-    panelUniqueId: String? = null,
-  ): ViewHierarchy? {
-    if (rootNode == null) {
-      Log.w(TAG, "Root node is null")
-      return ViewHierarchy(error = "Root node is null")
-    }
-
-    var accessibilityFocusedNode: AccessibilityNodeInfo? = null
-    return try {
-      // Find accessibility-focused node before extracting hierarchy
-      accessibilityFocusedNode = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-      val budget = HierarchySnapshotBudget(snapshotOptions)
-      val rootElement =
-        extractNodeInfo(
-          rootNode,
-          0,
-          textFilter,
-          screenDimensions,
-          dedupeTextContentDesc,
-          accessibilityFocusedNode,
-          budget = budget,
-        )
-      val contentHiddenRegions = rootElement?.let {
-        detectContentHiddenRegions(listOf(it), screenDimensions)
+    options: HierarchyExtractionOptions = HierarchyExtractionOptions(),
+  ): ViewHierarchy? =
+    with(options) {
+      if (rootNode == null) {
+        Log.w(TAG, "Root node is null")
+        return@with ViewHierarchy(error = "Root node is null")
       }
 
-      // Skip optimization and filtering if disableAllFiltering is true
-      val processedElement =
-        if (disableAllFiltering) {
-          rootElement
-        } else {
-          val optimizedList = rootElement?.let { optimizeHierarchy(it) }
-          Log.d(TAG, "[PROCESS] After optimizeHierarchy: ${optimizedList?.size} elements")
+      var accessibilityFocusedNode: AccessibilityNodeInfo? = null
+      return@with try {
+        // Find accessibility-focused node before extracting hierarchy
+        accessibilityFocusedNode = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        ActiveWindowCapture(rootNode, accessibilityFocusedNode, options).capture()
+      } catch (e: IllegalArgumentException) {
+        Log.e(TAG, "Error extracting view hierarchy", e)
+        ViewHierarchy(error = "Failed to extract view hierarchy: ${e.message}")
+      } catch (e: IllegalStateException) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        Log.e(TAG, "Error extracting view hierarchy", e)
+        ViewHierarchy(error = "Failed to extract view hierarchy: ${e.message}")
+      } catch (e: SecurityException) {
+        Log.e(TAG, "Error extracting view hierarchy", e)
+        ViewHierarchy(error = "Failed to extract view hierarchy: ${e.message}")
+      } finally {
+        accessibilityFocusedNode?.recycle()
+      }
+    }
 
-          val wrappedElement = optimizedList?.let { wrapOptimizedElements(it) }
+  private inner class ActiveWindowCapture(
+    val rootNode: AccessibilityNodeInfo,
+    val accessibilityFocusedNode: AccessibilityNodeInfo?,
+    val options: HierarchyExtractionOptions,
+  ) {
+    private val budget = HierarchySnapshotBudget(options.snapshotOptions)
 
-          // Single-window occlusion filtering is intentionally skipped.
-          // After optimizeHierarchy promotes children from bounds-only wrappers, the tree
-          // structure no longer matches visual relationships, causing false occlusion between
-          // visual siblings that end up at different tree depths (e.g., Compose overlapping
-          // layouts).
-          wrappedElement
+    fun capture(): ViewHierarchy? =
+      with(options) {
+        val rootElement =
+          extractNodeInfo(
+            rootNode,
+            0,
+            NodeExtraction(
+              textFilter,
+              screenDimensions,
+              dedupeTextContentDesc,
+              accessibilityFocusedNode,
+              budget,
+            ),
+          )
+        val contentHiddenRegions = rootElement?.let {
+          detectContentHiddenRegions(listOf(it), screenDimensions)
         }
 
-      val intentChooserDetected =
-        processedElement?.let { detectIntentChooserIndicators(it) } ?: false
-      val notificationPermissionDetected = processedElement?.let {
-        detectNotificationPermissionDialog(it, rootNode.packageName?.toString())
+        // Skip optimization and filtering if disableAllFiltering is true
+        val processedElement =
+          if (disableAllFiltering) {
+            rootElement
+          } else {
+            val optimizedList = rootElement?.let { optimizeWindowRoot(it) }
+            Log.d(TAG, "[PROCESS] After optimizeHierarchy: ${optimizedList?.size} elements")
+
+            val wrappedElement = optimizedList?.let { wrapOptimizedElements(it) }
+
+            // Single-window occlusion filtering is intentionally skipped.
+            // After optimizeHierarchy promotes children from bounds-only wrappers, the tree
+            // structure no longer matches visual relationships, causing false occlusion between
+            // visual siblings that end up at different tree depths (e.g., Compose overlapping
+            // layouts).
+            wrappedElement
+          }
+
+        result(processedElement, contentHiddenRegions)
       }
 
-      val unifiedHierarchy = processedElement?.let {
-        UIElementInfo(
-          children = listOf(it.copy(displayId = displayId, panelUniqueId = panelUniqueId)),
+    private fun result(
+      processedElement: UIElementInfo?,
+      contentHiddenRegions: List<ContentHiddenRegion>?,
+    ): ViewHierarchy =
+      with(options) {
+        val intentChooserDetected =
+          processedElement?.let { detectIntentChooserIndicators(it) } ?: false
+        val notificationPermissionDetected = processedElement?.let {
+          detectNotificationPermissionDialog(it, rootNode.packageName?.toString())
+        }
+
+        val unifiedHierarchy = processedElement?.let {
+          UIElementInfo(
+            children = listOf(it.copy(displayId = displayId, panelUniqueId = panelUniqueId)),
+          )
+        }
+
+        // Find the accessibility-focused element in the unified hierarchy
+        val accessibilityFocusedElement = unifiedHierarchy?.let {
+          findAccessibilityFocusedElement(it)
+        }
+
+        return@with ViewHierarchy(
+          packageName = rootNode.packageName?.toString(),
+          userId = android.os.Process.myUid() / ANDROID_USER_ID_RANGE,
+          hierarchy = unifiedHierarchy?.let { WireNodeCodec.materialize(it) },
+          intentChooserDetected = intentChooserDetected,
+          notificationPermissionDetected = notificationPermissionDetected,
+          accessibilityFocusedElement =
+            accessibilityFocusedElement?.let { WireNodeCodec.materialize(it) },
+          contentHiddenRegions = contentHiddenRegions?.takeIf { it.isNotEmpty() },
+          truncationReasons = budget.truncationReasons().ifEmpty { null },
+          prototypeSuspended = prototypeSuspended().takeIf { it },
+          prototypeHiddenReason = prototypeHiddenReason(displayId ?: Display.DEFAULT_DISPLAY, null),
         )
       }
-
-      // Find the accessibility-focused element in the unified hierarchy
-      val accessibilityFocusedElement = unifiedHierarchy?.let {
-        findAccessibilityFocusedElement(it)
-      }
-
-      ViewHierarchy(
-        packageName = rootNode.packageName?.toString(),
-        userId = android.os.Process.myUid() / ANDROID_USER_ID_RANGE,
-        hierarchy = unifiedHierarchy?.let { WireNodeCodec.materialize(it) },
-        intentChooserDetected = intentChooserDetected,
-        notificationPermissionDetected = notificationPermissionDetected,
-        accessibilityFocusedElement =
-          accessibilityFocusedElement?.let { WireNodeCodec.materialize(it) },
-        contentHiddenRegions = contentHiddenRegions?.takeIf { it.isNotEmpty() },
-        truncationReasons = budget.truncationReasons().ifEmpty { null },
-        prototypeSuspended = prototypeSuspended().takeIf { it },
-        prototypeHiddenReason = prototypeHiddenReason(displayId ?: Display.DEFAULT_DISPLAY, null),
-      )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error extracting view hierarchy", e)
-      ViewHierarchy(error = "Failed to extract view hierarchy: ${e.message}")
-    } finally {
-      accessibilityFocusedNode?.recycle()
-    }
   }
 
   /**
@@ -285,324 +307,374 @@ internal constructor(
    *
    * @param windows List of all accessibility windows (from AccessibilityService.windows)
    * @param activeWindowRoot Root node of the active window (for backward compatibility)
-   * @param textFilter Optional text filter
-   * @param screenDimensions Optional screen dimensions for offscreen filtering
-   * @param dedupeTextContentDesc When true, omit content-desc when it equals text (default: true)
-   * @param disableAllFiltering When true, disable all optimizations and filtering (for observe with
-   *   raw:true)
-   * @param occlusionEnabled When false, skip the cross-window occlusion pass entirely — no occluder
-   *   loop, no occlusionState/occludedBy/occludedByViewId fields (daemon's --no-occlusion flag,
-   *   default true)
+   * @param options Filtering, cross-window occlusion, snapshot budget, and display attribution
    */
   @JvmOverloads
   fun extractFromAllWindows(
     windows: List<AccessibilityWindowInfo>,
     activeWindowRoot: AccessibilityNodeInfo?,
-    textFilter: String? = null,
-    screenDimensions: ScreenDimensions? = null,
-    dedupeTextContentDesc: Boolean = true,
-    disableAllFiltering: Boolean = false,
-    occlusionEnabled: Boolean = true,
-    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
-    displayId: Int? = null,
-    panelUniqueId: String? = null,
-  ): ViewHierarchy {
-    if (windows.isEmpty() && activeWindowRoot == null) {
-      Log.w(TAG, "No windows available for extraction")
-      return ViewHierarchy(error = "No windows available")
-    }
+    options: HierarchyExtractionOptions = HierarchyExtractionOptions(),
+  ): ViewHierarchy =
+    with(options) {
+      if (windows.isEmpty() && activeWindowRoot == null) {
+        Log.w(TAG, "No windows available for extraction")
+        return@with ViewHierarchy(error = "No windows available")
+      }
 
-    // Find accessibility-focused node across all windows
-    var accessibilityFocusedNode: AccessibilityNodeInfo? = null
-    for (window in windows) {
-      val rootNode =
-        try {
-          window.root
-        } catch (error: Exception) {
-          Log.d(TAG, "Could not read window root for accessibility focus", error)
-          null
-        } ?: continue
+      val accessibilityFocusedNode = findAccessibilityFocus(windows, activeWindowRoot)
+
       try {
-        val focusedInWindow = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        if (focusedInWindow != null) {
-          accessibilityFocusedNode = focusedInWindow
-          break
-        }
+        return@with WindowCapture(windows, activeWindowRoot, accessibilityFocusedNode, options)
+          .capture()
       } finally {
-        rootNode.recycle()
+        accessibilityFocusedNode?.recycle()
       }
     }
-    // Fallback to activeWindowRoot if not found in windows list
-    if (accessibilityFocusedNode == null && activeWindowRoot != null) {
-      accessibilityFocusedNode =
-        activeWindowRoot.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+
+  private data class CapturedWindow(
+    val root: AccessibilityNodeInfo,
+    val bounds: Rect,
+    val type: String,
+    val layer: Int,
+  )
+
+  private inner class WindowCapture(
+    val windows: List<AccessibilityWindowInfo>,
+    val activeWindowRoot: AccessibilityNodeInfo?,
+    val accessibilityFocusedNode: AccessibilityNodeInfo?,
+    val options: HierarchyExtractionOptions,
+  ) {
+    private val textFilter
+      get() = options.textFilter
+
+    private val screenDimensions
+      get() = options.screenDimensions
+
+    private val dedupeTextContentDesc
+      get() = options.dedupeTextContentDesc
+
+    private val disableAllFiltering
+      get() = options.disableAllFiltering
+
+    private val occlusionEnabled
+      get() = options.occlusionEnabled
+
+    private val snapshotOptions
+      get() = options.snapshotOptions
+
+    private val displayId
+      get() = options.displayId
+
+    private val panelUniqueId
+      get() = options.panelUniqueId
+
+    val windowEntries = mutableListOf<WindowEntry>()
+    var ownPrototypeWindowCaptured = false
+    var prototypeRootUnreadable = false
+    val primaryAppWindowId: Int? = pickPrimaryAppWindowId(windows)
+    // Preserve the full legacy allowance for a lone primary window. Reserving a second slot
+    // would truncate it sooner even when fallback is never needed.
+    val reserveFallback =
+      activeWindowRoot != null && (windows.size != 1 || windows.single().id != primaryAppWindowId)
+    val budget =
+      HierarchySnapshotBudget(
+        snapshotOptions,
+        slotCount = maxOf(1, windows.size + if (reserveFallback) 1 else 0),
+      )
+    var mainHierarchy: UIElementInfo? = null
+    var mainPackageName: String? = null
+    var intentChooserDetected = false
+    var notificationPermissionDetected: Boolean? = null
+    var activeWindowLayer = 0
+    var activeWindowKey: Int? = null
+    val windowInfos = mutableListOf<WindowInfo>()
+    val contentHiddenRegionRoots = mutableListOf<UIElementInfo>()
+
+    // Track whether the accessibility service hierarchy is incomplete
+    // This happens when active windows have null roots or only system UI is accessible
+    var activeWindowHasNullRoot = false
+    var primaryAppWindowHasNullRoot = false
+    var hasApplicationWindow = false
+
+    // The primary app window's own bounds, used below to correlate a permission-controller
+    // dialog window with the app it belongs to (issue #6151 follow-up). `null` when no distinct
+    // primary window was picked, in which case `isPrimaryWindow` already covers the active
+    // window directly and correlation is moot.
+    val primaryAppWindowBounds: Rect? = primaryAppWindowId?.let { id ->
+      windows.firstOrNull { it.id == id }?.let { w -> Rect().also(w::getBoundsInScreen) }
     }
 
-    try {
-      val windowEntries = mutableListOf<WindowEntry>()
-      var ownPrototypeWindowCaptured = false
-      var prototypeRootUnreadable = false
-      val primaryAppWindowId: Int? = pickPrimaryAppWindowId(windows)
-      // Preserve the full legacy allowance for a lone primary window. Reserving a second slot
-      // would truncate it sooner even when fallback is never needed.
-      val reserveFallback =
-        activeWindowRoot != null && (windows.size != 1 || windows.single().id != primaryAppWindowId)
-      val budget =
-        HierarchySnapshotBudget(
-          snapshotOptions,
-          slotCount = maxOf(1, windows.size + if (reserveFallback) 1 else 0),
+    fun capture(): ViewHierarchy {
+      for (window in windows) captureWindow(window)
+      recoverActiveWindow()
+      applyOcclusion()
+      return result()
+    }
+
+    private fun captureWindow(window: AccessibilityWindowInfo) {
+      val windowBudget = budget.openScope()
+      var rootNode: AccessibilityNodeInfo? = null
+      val prototypeTitle = hasPrototypeTitle(window.type, window.title)
+      var prototypeRootRead = false
+      try {
+        rootNode = window.root
+        prototypeRootRead = recordWindowRoot(window, rootNode, prototypeTitle)
+        if (rootNode == null) return
+        captureWindowRoot(window, rootNode, windowBudget)
+      } catch (e: IllegalArgumentException) {
+        if (prototypeTitle && !prototypeRootRead) prototypeRootUnreadable = true
+        Log.e(TAG, "Error extracting hierarchy from window ${window.id}", e)
+      } catch (e: IllegalStateException) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        if (prototypeTitle && !prototypeRootRead) prototypeRootUnreadable = true
+        Log.e(TAG, "Error extracting hierarchy from window ${window.id}", e)
+      } catch (e: SecurityException) {
+        if (prototypeTitle && !prototypeRootRead) prototypeRootUnreadable = true
+        Log.e(TAG, "Error extracting hierarchy from window ${window.id}", e)
+      } finally {
+        finishWindowScope(windowInfos, window.id, windowBudget)
+        rootNode?.recycle()
+      }
+    }
+
+    private fun recordWindowRoot(
+      window: AccessibilityWindowInfo,
+      rootNode: AccessibilityNodeInfo?,
+      prototypeTitle: Boolean,
+    ): Boolean {
+      if (rootNode == null) {
+        prototypeRootUnreadable = prototypeRootUnreadable || prototypeTitle
+        primaryAppWindowHasNullRoot = primaryAppWindowHasNullRoot || window.id == primaryAppWindowId
+        activeWindowHasNullRoot = activeWindowHasNullRoot || window.isActive
+        logNullWindowRoot(window, primaryAppWindowId)
+        return false
+      }
+      if (!prototypeTitle) return false
+      val packageName = rootNode.packageName?.toString()
+      val prototypeRootRead = packageName != null
+      ownPrototypeWindowCaptured =
+        ownPrototypeWindowCaptured || packageName == DEFAULT_CTRL_PROXY_PACKAGE
+      prototypeRootUnreadable = prototypeRootUnreadable || !prototypeRootRead
+      return prototypeRootRead
+    }
+
+    private fun captureWindowRoot(
+      window: AccessibilityWindowInfo,
+      rootNode: AccessibilityNodeInfo,
+      windowBudget: HierarchySnapshotBudget,
+    ) {
+      val windowLayer = window.layer
+      if (window.isActive) {
+        activeWindowLayer = windowLayer
+        activeWindowKey = window.id
+      }
+
+      val windowType = windowTypeName(window)
+
+      // Track if we successfully extract from any application window
+      // Only TYPE_APPLICATION counts - IME, overlays, and system windows don't represent app
+      // content
+      if (window.type == AccessibilityWindowInfo.TYPE_APPLICATION) {
+        hasApplicationWindow = true
+      }
+
+      val windowBounds = Rect()
+      window.getBoundsInScreen(windowBounds)
+      windowInfos.add(
+        windowInfo(
+          window,
+          windowBounds,
+          displayId,
+          panelUniqueId,
+          rootNode.packageName?.toString(),
+        ),
+      )
+      val element =
+        extractNodeInfo(
+          rootNode,
+          0,
+          NodeExtraction(
+            textFilter,
+            screenDimensions,
+            dedupeTextContentDesc,
+            accessibilityFocusedNode,
+            windowBudget,
+          ),
+          parentPath = "w${window.id}",
         )
-      var mainHierarchy: UIElementInfo? = null
-      var mainPackageName: String? = null
-      var intentChooserDetected = false
-      var notificationPermissionDetected: Boolean? = null
-      var activeWindowLayer = 0
-      var activeWindowKey: Int? = null
-      val windowInfos = mutableListOf<WindowInfo>()
-      val contentHiddenRegionRoots = mutableListOf<UIElementInfo>()
+      if (element != null) {
+        contentHiddenRegionRoots.add(element)
+      }
+      recordWindowElement(
+        window,
+        element,
+        CapturedWindow(rootNode, windowBounds, windowType, windowLayer),
+      )
+    }
 
-      // Track whether the accessibility service hierarchy is incomplete
-      // This happens when active windows have null roots or only system UI is accessible
-      var activeWindowHasNullRoot = false
-      var primaryAppWindowHasNullRoot = false
-      var hasApplicationWindow = false
-
-      // The primary app window's own bounds, used below to correlate a permission-controller
-      // dialog window with the app it belongs to (issue #6151 follow-up). `null` when no distinct
-      // primary window was picked, in which case `isPrimaryWindow` already covers the active
-      // window directly and correlation is moot.
-      val primaryAppWindowBounds: Rect? = primaryAppWindowId?.let { id ->
-        windows.firstOrNull { it.id == id }?.let { w -> Rect().also(w::getBoundsInScreen) }
+    private fun recordWindowElement(
+      window: AccessibilityWindowInfo,
+      element: UIElementInfo?,
+      captured: CapturedWindow,
+    ) {
+      val processedElement = processWindowElement(element, disableAllFiltering)
+      val packageName = captured.root.packageName?.toString()
+      if (!intentChooserDetected && processedElement != null) {
+        intentChooserDetected = detectIntentChooserIndicators(processedElement)
       }
 
-      // Extract from each window
-      for (window in windows) {
-        val windowBudget = budget.openScope()
-        var rootNode: AccessibilityNodeInfo? = null
-        val prototypeTitle = hasPrototypeTitle(window.type, window.title)
-        var prototypeRootRead = false
-        try {
-          rootNode = window.root
-          if (rootNode == null) {
-            if (prototypeTitle) prototypeRootUnreadable = true
-            if (window.id == primaryAppWindowId) {
-              Log.w(
-                TAG,
-                "[HIERARCHY-DEBUG] Primary application window ${window.id} has null root node - accessibility service incomplete",
-              )
-              primaryAppWindowHasNullRoot = true
-            }
-            if (window.isActive) {
-              Log.w(
-                TAG,
-                "[HIERARCHY-DEBUG] Active window ${window.id} has null root node - accessibility service incomplete",
-              )
-              activeWindowHasNullRoot = true
-            } else {
-              Log.d(TAG, "[HIERARCHY-DEBUG] Window ${window.id} has null root node, skipping")
-            }
-            continue
-          }
-          if (prototypeTitle) {
-            val packageName = rootNode.packageName?.toString()
-            prototypeRootRead = packageName != null
-            if (packageName == DEFAULT_CTRL_PROXY_PACKAGE) ownPrototypeWindowCaptured = true
-            if (!prototypeRootRead) prototypeRootUnreadable = true
-          }
-          val windowLayer = window.layer
-          if (window.isActive) {
-            activeWindowLayer = windowLayer
-            activeWindowKey = window.id
-          }
-
-          val windowType =
-            when (window.type) {
-              AccessibilityWindowInfo.TYPE_APPLICATION -> "application"
-              AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "input_method"
-              AccessibilityWindowInfo.TYPE_SYSTEM -> "system"
-              AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "accessibility_overlay"
-              AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "split_screen_divider"
-              AccessibilityWindowInfo.TYPE_MAGNIFICATION_OVERLAY -> "magnification_overlay"
-              else -> "unknown_${window.type}"
-            }
-
-          // Track if we successfully extract from any application window
-          // Only TYPE_APPLICATION counts - IME, overlays, and system windows don't represent app
-          // content
-          if (window.type == AccessibilityWindowInfo.TYPE_APPLICATION) {
-            hasApplicationWindow = true
-          }
-
-          val windowBounds = Rect()
-          window.getBoundsInScreen(windowBounds)
-          windowInfos.add(
-            windowInfo(
-              window,
-              windowBounds,
-              displayId,
-              panelUniqueId,
-              rootNode.packageName?.toString(),
-            ),
-          )
-          val element =
-            extractNodeInfo(
-              rootNode,
-              0,
-              textFilter,
-              screenDimensions,
-              dedupeTextContentDesc,
-              accessibilityFocusedNode,
-              parentPath = "w${window.id}",
-              budget = windowBudget,
-            )
-          if (element != null) {
-            contentHiddenRegionRoots.add(element)
-          }
-          // Skip optimization if disableAllFiltering is true
-          val processedElement =
-            if (disableAllFiltering) {
-              element
-            } else {
-              element?.let {
-                val optimizedList = optimizeHierarchy(it)
-                wrapOptimizedElements(optimizedList)
-              }
-            }
-          val packageName = rootNode.packageName?.toString()
-          if (!intentChooserDetected && processedElement != null) {
-            intentChooserDetected = detectIntentChooserIndicators(processedElement)
-          }
-
-          // Prefer a focused application window, or the app below an IME that owns focus.
-          val isPrimaryWindow =
-            if (primaryAppWindowId != null) window.id == primaryAppWindowId else window.isActive
-          if (isPrimaryWindow) {
-            mainHierarchy = processedElement
-            mainPackageName = packageName
-          }
-          // A runtime permission dialog is its own permissioncontroller window. Detect it in the
-          // primary window or in a focused/active one that also overlaps the primary app window's
-          // bounds (a dialog owns focus while it is on screen, even mid-transition when selection
-          // still lands on the app beneath it), so the flag cannot read false while the dialog is
-          // up (#6151). A focused/active window that does NOT overlap the primary app — e.g.
-          // another app's own dialog in an unrelated split-screen pane — does not flag the primary
-          // app's observation (#6151 follow-up: cross-app false-positive correlation).
-          val canCarryDialog =
-            isPrimaryWindow ||
-              ((window.isFocused || window.isActive) &&
-                (primaryAppWindowBounds == null ||
-                  Rect.intersects(primaryAppWindowBounds, windowBounds)))
-          if (
-            notificationPermissionDetected != true && processedElement != null && canCarryDialog
-          ) {
-            notificationPermissionDetected =
-              detectNotificationPermissionDialog(processedElement, packageName)
-          }
-
-          if (processedElement != null) {
-            windowEntries.add(
-              WindowEntry(
-                windowId = window.id,
-                windowType = windowType,
-                windowLayer = windowLayer,
-                packageName = packageName,
-                isActive = window.isActive,
-                isFocused = window.isFocused,
-                hierarchy = processedElement,
-                windowBounds = ElementBounds(windowBounds),
-                isOwnPrototype = hasPrototypeTitle(window.type, window.title),
-              ),
-            )
-          }
-        } catch (e: Exception) {
-          if (prototypeTitle && !prototypeRootRead) prototypeRootUnreadable = true
-          Log.e(TAG, "Error extracting hierarchy from window ${window.id}", e)
-        } finally {
-          finishWindowScope(windowInfos, window.id, windowBudget)
-          rootNode?.recycle()
-        }
+      // Prefer a focused application window, or the app below an IME that owns focus.
+      val isPrimaryWindow =
+        if (primaryAppWindowId != null) window.id == primaryAppWindowId else window.isActive
+      if (isPrimaryWindow) {
+        mainHierarchy = processedElement
+        mainPackageName = packageName
       }
+      // A runtime permission dialog is its own permissioncontroller window. Detect it in the
+      // primary window or in a focused/active one that also overlaps the primary app window's
+      // bounds (a dialog owns focus while it is on screen, even mid-transition when selection
+      // still lands on the app beneath it), so the flag cannot read false while the dialog is
+      // up (#6151). A focused/active window that does NOT overlap the primary app — e.g.
+      // another app's own dialog in an unrelated split-screen pane — does not flag the
+      // primary
+      // app's observation (#6151 follow-up: cross-app false-positive correlation).
+      updatePermissionDialog(
+        window,
+        processedElement,
+        packageName,
+        isPrimaryWindow,
+        captured.bounds,
+      )
 
+      if (processedElement != null) {
+        windowEntries.add(
+          WindowEntry(
+            windowId = window.id,
+            windowType = captured.type,
+            windowLayer = captured.layer,
+            packageName = packageName,
+            isActive = window.isActive,
+            isFocused = window.isFocused,
+            hierarchy = processedElement,
+            windowBounds = ElementBounds(captured.bounds),
+            isOwnPrototype = hasPrototypeTitle(window.type, window.title),
+          ),
+        )
+      }
+    }
+
+    private fun updatePermissionDialog(
+      window: AccessibilityWindowInfo,
+      processedElement: UIElementInfo?,
+      packageName: String?,
+      isPrimaryWindow: Boolean,
+      windowBounds: Rect,
+    ) {
+      val canCarryDialog =
+        isPrimaryWindow ||
+          ((window.isFocused || window.isActive) &&
+            (primaryAppWindowBounds == null ||
+              Rect.intersects(primaryAppWindowBounds, windowBounds)))
+      if (notificationPermissionDetected != true && processedElement != null && canCarryDialog) {
+        notificationPermissionDetected =
+          detectNotificationPermissionDialog(processedElement, packageName)
+      }
+    }
+
+    private fun recoverActiveWindow() {
       // Fallback to activeWindowRoot when it can still recover application content. When the
-      // selected app has no root, rootInActiveWindow can be the active system status bar, which is
+      // selected app has no root, rootInActiveWindow can be the active system status bar, which
+      // is
       // not a substitute for application content.
-      if (
+      val canRecoverActiveWindow =
         mainHierarchy == null &&
           activeWindowRoot != null &&
           (!primaryAppWindowHasNullRoot ||
             activeWindowRoot.packageName?.toString()?.let { it != "com.android.systemui" } == true)
-      ) {
-        val (element, fallbackReasons) =
-          budget.inScope(reserved = reserveFallback) { fallbackBudget ->
-            val extracted =
-              extractNodeInfo(
-                activeWindowRoot,
-                0,
+      if (canRecoverActiveWindow) {
+        captureRecoveredWindow()
+      } else if (reserveFallback) {
+        budget.inScope { /* Release the unused fallback reservation. */ }
+      }
+    }
+
+    private fun captureRecoveredWindow() {
+      val (element, fallbackReasons) =
+        budget.inScope(reserved = reserveFallback) { fallbackBudget ->
+          val extracted =
+            extractNodeInfo(
+              checkNotNull(activeWindowRoot),
+              0,
+              NodeExtraction(
                 textFilter,
                 screenDimensions,
                 dedupeTextContentDesc,
                 accessibilityFocusedNode,
-                budget = fallbackBudget,
-              )
-            extracted to fallbackBudget.truncationReasons().ifEmpty { null }
-          }
-        if (element != null) {
-          contentHiddenRegionRoots.add(element)
-        }
-        // Skip optimization if disableAllFiltering is true
-        mainHierarchy =
-          if (disableAllFiltering) {
-            element
-          } else {
-            element?.let { wrapOptimizedElements(optimizeHierarchy(it)) }
-          }
-        mainPackageName = activeWindowRoot.packageName?.toString()
-        if (!intentChooserDetected && mainHierarchy != null) {
-          intentChooserDetected = detectIntentChooserIndicators(mainHierarchy!!)
-        }
-        if (notificationPermissionDetected != true && mainHierarchy != null) {
-          notificationPermissionDetected =
-            detectNotificationPermissionDialog(mainHierarchy!!, mainPackageName)
-        }
-        val fallbackWindowId = activeWindowKey ?: DEFAULT_WINDOW_KEY
-        if (mainHierarchy != null || fallbackReasons != null) {
-          recordFallbackWindow(
-            windowInfos,
-            WindowInfo(
-              id = fallbackWindowId,
-              displayId = displayId,
-              panelUniqueId = panelUniqueId,
-              type = AccessibilityWindowInfo.TYPE_APPLICATION,
-              windowLayer = activeWindowLayer,
-              isActive = true,
-              isFocused = true,
-              truncationReasons = fallbackReasons,
-            ),
-          )
-        }
-        if (mainHierarchy != null) {
-          val fallbackEntry =
-            WindowEntry(
-              windowId = fallbackWindowId,
-              windowType = "application",
-              windowLayer = activeWindowLayer,
-              packageName = mainPackageName,
-              isActive = true,
-              isFocused = true,
-              hierarchy = mainHierarchy!!,
-              windowBounds = windowInfos.firstOrNull { it.id == fallbackWindowId }?.bounds,
+                fallbackBudget,
+              ),
             )
-          val existingIndex = windowEntries.indexOfFirst { it.windowId == fallbackWindowId }
-          if (existingIndex >= 0) {
-            windowEntries[existingIndex] = fallbackEntry
-          } else {
-            windowEntries.add(fallbackEntry)
-          }
+          extracted to fallbackBudget.truncationReasons().ifEmpty { null }
         }
-      } else if (reserveFallback) {
-        budget.inScope { /* Release the unused fallback reservation. */ }
+      if (element != null) {
+        contentHiddenRegionRoots.add(element)
       }
+      // Skip optimization if disableAllFiltering is true
+      mainHierarchy =
+        if (disableAllFiltering) {
+          element
+        } else {
+          element?.let { wrapOptimizedElements(optimizeWindowRoot(it)) }
+        }
+      mainPackageName = checkNotNull(activeWindowRoot).packageName?.toString()
+      if (!intentChooserDetected && mainHierarchy != null) {
+        intentChooserDetected = detectIntentChooserIndicators(checkNotNull(mainHierarchy))
+      }
+      if (notificationPermissionDetected != true && mainHierarchy != null) {
+        notificationPermissionDetected =
+          detectNotificationPermissionDialog(checkNotNull(mainHierarchy), mainPackageName)
+      }
+      recordRecoveredWindow(fallbackReasons)
+    }
 
+    private fun recordRecoveredWindow(fallbackReasons: List<String>?) {
+      val fallbackWindowId = activeWindowKey ?: DEFAULT_WINDOW_KEY
+      if (mainHierarchy != null || fallbackReasons != null) {
+        recordFallbackWindow(
+          windowInfos,
+          WindowInfo(
+            id = fallbackWindowId,
+            displayId = displayId,
+            panelUniqueId = panelUniqueId,
+            type = AccessibilityWindowInfo.TYPE_APPLICATION,
+            windowLayer = activeWindowLayer,
+            isActive = true,
+            isFocused = true,
+            truncationReasons = fallbackReasons,
+          ),
+        )
+      }
+      if (mainHierarchy != null) {
+        val fallbackEntry =
+          WindowEntry(
+            windowId = fallbackWindowId,
+            windowType = "application",
+            windowLayer = activeWindowLayer,
+            packageName = mainPackageName,
+            isActive = true,
+            isFocused = true,
+            hierarchy = checkNotNull(mainHierarchy),
+            windowBounds = windowInfos.firstOrNull { it.id == fallbackWindowId }?.bounds,
+          )
+        val existingIndex = windowEntries.indexOfFirst { it.windowId == fallbackWindowId }
+        if (existingIndex >= 0) {
+          windowEntries[existingIndex] = fallbackEntry
+        } else {
+          windowEntries.add(fallbackEntry)
+        }
+      }
+    }
+
+    private fun applyOcclusion() {
       // Skip occlusion filtering when disabled (disableAllFiltering or the --no-occlusion
       // daemon flag), or when there's only one window (within-window "occlusion" between peer
       // subtrees like notification_panel and keyguard_message_area_container incorrectly strips
@@ -638,7 +710,9 @@ internal constructor(
             }
             ?.hierarchy ?: mainHierarchy
       }
+    }
 
+    private fun result(): ViewHierarchy {
       val capturedPrototype: Boolean? =
         when {
           ownPrototypeWindowCaptured -> true
@@ -661,28 +735,7 @@ internal constructor(
         )
       }
 
-      val sortedWindowRoots =
-        windowEntries
-          .sortedWith(compareBy<WindowEntry> { it.windowLayer }.thenBy { it.windowId })
-          .map {
-            // Preserve IME ownership after window roots are combined (issue #6795).
-            // The desktop projection folds this subtree; raw captures retain every key.
-            if (it.windowType == "input_method" && !it.packageName.isNullOrBlank()) {
-              it.hierarchy.copy(
-                windowId = it.windowId,
-                displayId = windowInfos.firstOrNull { info -> info.id == it.windowId }?.displayId,
-                panelUniqueId = panelUniqueId,
-                extras =
-                  it.hierarchy.extras.orEmpty() + ("automobile:imePackage" to it.packageName),
-              )
-            } else {
-              it.hierarchy.copy(
-                windowId = it.windowId,
-                displayId = windowInfos.firstOrNull { info -> info.id == it.windowId }?.displayId,
-                panelUniqueId = panelUniqueId,
-              )
-            }
-          }
+      val sortedWindowRoots = sortedWindowRoots(windowEntries, windowInfos, panelUniqueId)
       val unifiedHierarchy =
         if (sortedWindowRoots.isEmpty()) null else UIElementInfo(children = sortedWindowRoots)
 
@@ -690,21 +743,13 @@ internal constructor(
         findAccessibilityFocusedElement(it)
       }
 
-      // Determine if the accessibility service hierarchy is incomplete
-      // This happens when:
-      // 1. An active window has a null root (app restricts accessibility access)
-      // 2. The selected application window has a null root
-      // 3. Only system UI windows were successfully extracted (no app windows accessible)
-      val isSystemUiForeground = mainPackageName == "com.android.systemui"
-      // When causes overlap, prefer the active null root, then the selected app null root,
-      // then the absence of any accessible app window. Keep the flag and reason in sync.
       val ctrlProxyIncompleteReason =
-        when {
-          activeWindowHasNullRoot -> INCOMPLETE_ACTIVE_WINDOW_NULL_ROOT
-          primaryAppWindowHasNullRoot -> INCOMPLETE_APP_WINDOW_NULL_ROOT
-          !hasApplicationWindow && !isSystemUiForeground -> INCOMPLETE_NO_APP_WINDOW_ROOT
-          else -> null
-        }
+        incompleteReason(
+          activeWindowHasNullRoot,
+          primaryAppWindowHasNullRoot,
+          hasApplicationWindow,
+          mainPackageName,
+        )
       val ctrlProxyIncomplete = ctrlProxyIncompleteReason != null
       if (ctrlProxyIncomplete) {
         Log.w(
@@ -730,10 +775,132 @@ internal constructor(
         prototypeSuspended = prototypeSuspended().takeIf { it },
         prototypeHiddenReason = prototypeHiddenReason(captureDisplayId, capturedPrototype),
       )
-    } finally {
-      accessibilityFocusedNode?.recycle()
     }
   }
+
+  private fun sortedWindowRoots(
+    windowEntries: List<WindowEntry>,
+    windowInfos: List<WindowInfo>,
+    panelUniqueId: String?,
+  ): List<UIElementInfo> {
+    return windowEntries
+      .sortedWith(compareBy<WindowEntry> { it.windowLayer }.thenBy { it.windowId })
+      .map {
+        // Preserve IME ownership after window roots are combined (issue #6795).
+        // The desktop projection folds this subtree; raw captures retain every key.
+        if (it.windowType == "input_method" && !it.packageName.isNullOrBlank()) {
+          it.hierarchy.copy(
+            windowId = it.windowId,
+            displayId = windowInfos.firstOrNull { info -> info.id == it.windowId }?.displayId,
+            panelUniqueId = panelUniqueId,
+            extras = it.hierarchy.extras.orEmpty() + ("automobile:imePackage" to it.packageName),
+          )
+        } else {
+          it.hierarchy.copy(
+            windowId = it.windowId,
+            displayId = windowInfos.firstOrNull { info -> info.id == it.windowId }?.displayId,
+            panelUniqueId = panelUniqueId,
+          )
+        }
+      }
+  }
+
+  private fun incompleteReason(
+    activeWindowHasNullRoot: Boolean,
+    primaryAppWindowHasNullRoot: Boolean,
+    hasApplicationWindow: Boolean,
+    mainPackageName: String?,
+  ): String? {
+    // Determine if the accessibility service hierarchy is incomplete
+    // This happens when:
+    // 1. An active window has a null root (app restricts accessibility access)
+    // 2. The selected application window has a null root
+    // 3. Only system UI windows were successfully extracted (no app windows accessible)
+    val isSystemUiForeground = mainPackageName == "com.android.systemui"
+    // When causes overlap, prefer the active null root, then the selected app null root,
+    // then the absence of any accessible app window. Keep the flag and reason in sync.
+    return when {
+      activeWindowHasNullRoot -> INCOMPLETE_ACTIVE_WINDOW_NULL_ROOT
+      primaryAppWindowHasNullRoot -> INCOMPLETE_APP_WINDOW_NULL_ROOT
+      !hasApplicationWindow && !isSystemUiForeground -> INCOMPLETE_NO_APP_WINDOW_ROOT
+      else -> null
+    }
+  }
+
+  private fun windowTypeName(window: AccessibilityWindowInfo): String {
+    return when (window.type) {
+      AccessibilityWindowInfo.TYPE_APPLICATION -> "application"
+      AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "input_method"
+      AccessibilityWindowInfo.TYPE_SYSTEM -> "system"
+      AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "accessibility_overlay"
+      AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "split_screen_divider"
+      AccessibilityWindowInfo.TYPE_MAGNIFICATION_OVERLAY -> "magnification_overlay"
+      else -> "unknown_${window.type}"
+    }
+  }
+
+  private fun findAccessibilityFocus(
+    windows: List<AccessibilityWindowInfo>,
+    activeWindowRoot: AccessibilityNodeInfo?,
+  ): AccessibilityNodeInfo? {
+    val search = accessibilityFocusSearch(windows)
+    var accessibilityFocusedNode: AccessibilityNodeInfo? = null
+    for (window in search.windows) {
+      val rootNode =
+        try {
+          window.root
+        } catch (error: IllegalArgumentException) {
+          Log.d(TAG, "Could not read window root for accessibility focus", error)
+          null
+        } catch (error: IllegalStateException) {
+          if (error is kotlinx.coroutines.CancellationException) throw error
+          Log.d(TAG, "Could not read window root for accessibility focus", error)
+          null
+        } catch (error: SecurityException) {
+          Log.d(TAG, "Could not read window root for accessibility focus", error)
+          null
+        } ?: continue
+      try {
+        val focusedInWindow = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        if (focusedInWindow != null) {
+          accessibilityFocusedNode = focusedInWindow
+          break
+        }
+      } finally {
+        rootNode.recycle()
+      }
+    }
+    // Fallback to activeWindowRoot if not found in windows list
+    if (accessibilityFocusedNode == null && search.activeRootFallback && activeWindowRoot != null) {
+      accessibilityFocusedNode =
+        activeWindowRoot.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+    }
+    return accessibilityFocusedNode
+  }
+
+  private fun logNullWindowRoot(window: AccessibilityWindowInfo, primaryAppWindowId: Int?) {
+    if (window.id == primaryAppWindowId) {
+      Log.w(
+        TAG,
+        "[HIERARCHY-DEBUG] Primary application window ${window.id} has null root node - accessibility service incomplete",
+      )
+    }
+    if (window.isActive) {
+      Log.w(
+        TAG,
+        "[HIERARCHY-DEBUG] Active window ${window.id} has null root node - accessibility service incomplete",
+      )
+    } else {
+      Log.d(TAG, "[HIERARCHY-DEBUG] Window ${window.id} has null root node, skipping")
+    }
+  }
+
+  private fun processWindowElement(
+    element: UIElementInfo?,
+    disableAllFiltering: Boolean,
+  ): UIElementInfo? =
+    if (disableAllFiltering) element
+    else element?.let { wrapOptimizedElements(optimizeWindowRoot(it)) }
 
   private fun finishWindowScope(
     windowInfos: MutableList<WindowInfo>,
@@ -789,6 +956,8 @@ internal constructor(
       prototypePlacement = prototypeMetadata?.placement,
       prototypeOpaque = prototypeMetadata?.opaque,
       prototypeAppearance = prototypeMetadata?.appearance,
+      prototypeMotion =
+        prototypeMetadata?.motion?.let { PrototypeWindowMotion(it.active, it.loops) },
     )
   }
 
@@ -975,6 +1144,12 @@ internal constructor(
       return false
     }
 
+    val scan = PermissionScan()
+    scan.visit(element)
+    return scan.hasNotificationText && scan.hasPermissionButtons
+  }
+
+  private inner class PermissionScan {
     var hasNotificationText = false
     var hasPermissionButtons = false
 
@@ -996,6 +1171,10 @@ internal constructor(
         return
       }
 
+      visitChildren(node)
+    }
+
+    fun visitChildren(node: UIElementInfo) {
       for (child in visibleChildren(node)) {
         visit(child)
         if (hasNotificationText && hasPermissionButtons) {
@@ -1003,9 +1182,6 @@ internal constructor(
         }
       }
     }
-
-    visit(element)
-    return hasNotificationText && hasPermissionButtons
   }
 
   internal fun detectNotificationPermissionDialogForTest(
@@ -1063,6 +1239,12 @@ internal constructor(
 
   /** Single-pass variant used by tests and by the production overload. */
   internal fun pickPrimaryAppWindowId(windows: List<WindowMeta>): Int? {
+    val selection = PrimaryWindowSelection()
+    for (window in windows) selection.consider(window)
+    return selection.result()
+  }
+
+  private class PrimaryWindowSelection {
     var hasIme = false
     var anyWindowFocused = false
     var focusedAppId: Int? = null
@@ -1070,7 +1252,8 @@ internal constructor(
     var activeAppId: Int? = null
     var topAppId: Int? = null
     var topAppLayer = Int.MIN_VALUE
-    for (w in windows) {
+
+    fun consider(w: WindowMeta) {
       if (w.isFocused) anyWindowFocused = true
       when (w.type) {
         AccessibilityWindowInfo.TYPE_INPUT_METHOD -> if (w.hasRoot) hasIme = true
@@ -1089,14 +1272,35 @@ internal constructor(
         }
       }
     }
-    if (focusedAppId != null) {
-      return focusedAppId
+
+    fun result(): Int? {
+      if (focusedAppId != null) {
+        return focusedAppId
+      }
+      // The IME owns focus, or the focus flag is populated nowhere: the application window with
+      // readable content is the user-facing window — the active one when several coexist
+      // (split-screen, picture-in-picture), else the topmost. A focused non-app window (shade,
+      // quick settings, keyguard) keeps the active-window fallback.
+      return if (hasIme || !anyWindowFocused) activeAppId ?: topAppId else null
     }
-    // The IME owns focus, or the focus flag is populated nowhere: the application window with
-    // readable content is the user-facing window — the active one when several coexist
-    // (split-screen, picture-in-picture), else the topmost. A focused non-app window (shade,
-    // quick settings, keyguard) keeps the active-window fallback.
-    return if (hasIme || !anyWindowFocused) activeAppId ?: topAppId else null
+  }
+
+  private fun extractChildNodes(
+    node: AccessibilityNodeInfo,
+    childCount: Int,
+    extract: (AccessibilityNodeInfo, Int) -> UIElementInfo?,
+  ): List<UIElementInfo> {
+    val children = mutableListOf<UIElementInfo>()
+    for (index in 0 until childCount) {
+      val child = node.getChild(index) ?: continue
+      try {
+        val childInfo = extract(child, index)
+        if (childInfo != null) children.add(childInfo)
+      } finally {
+        child.recycle()
+      }
+    }
+    return children
   }
 
   /**
@@ -1110,19 +1314,23 @@ internal constructor(
    * @param dedupeTextContentDesc When true, omit content-desc when it equals text
    * @param accessibilityFocusedNode The node that has accessibility focus (TalkBack cursor)
    */
+  private data class NodeExtraction(
+    val textFilter: String?,
+    val screenDimensions: ScreenDimensions?,
+    val dedupeTextContentDesc: Boolean,
+    val accessibilityFocusedNode: AccessibilityNodeInfo?,
+    val budget: HierarchySnapshotBudget,
+  )
+
   private fun extractNodeInfo(
     node: AccessibilityNodeInfo,
     depth: Int,
-    textFilter: String? = null,
-    screenDimensions: ScreenDimensions? = null,
-    dedupeTextContentDesc: Boolean = true,
-    accessibilityFocusedNode: AccessibilityNodeInfo? = null,
+    context: NodeExtraction,
     parentPath: String = "",
     childIndex: Int = 0,
-    budget: HierarchySnapshotBudget,
   ): UIElementInfo? {
     stats.nodesVisited.incrementAndGet()
-    if (!budget.enter(depth)) {
+    if (!context.budget.enter(depth)) {
       return null
     }
 
@@ -1132,7 +1340,7 @@ internal constructor(
       val elementBounds = ElementBounds(bounds)
 
       // Filter completely offscreen nodes early to avoid processing subtrees
-      if (elementBounds.isCompletelyOffscreen(screenDimensions)) {
+      if (elementBounds.isCompletelyOffscreen(context.screenDimensions)) {
         return null
       }
 
@@ -1154,112 +1362,142 @@ internal constructor(
       val totalChildCount = node.childCount
       val childCount = min(totalChildCount, MAX_CHILDREN)
       if (totalChildCount > MAX_CHILDREN) {
-        budget.recordChildCapTruncation()
+        context.budget.recordChildCapTruncation()
       }
 
-      for (i in 0 until childCount) {
-        val child = node.getChild(i)
-        if (child != null) {
-          try {
-            val childInfo =
-              extractNodeInfo(
-                child,
-                depth + 1,
-                textFilter,
-                screenDimensions,
-                dedupeTextContentDesc,
-                accessibilityFocusedNode,
-                parentPath = currentPath,
-                childIndex = i,
-                budget = budget,
-              )
-            if (childInfo != null) {
-              children.add(childInfo)
-            }
-          } finally {
-            child.recycle()
-          }
-        }
-      }
+      children.addAll(
+        extractChildNodes(node, childCount) { child, index ->
+          extractNodeInfo(
+            child,
+            depth + 1,
+            context,
+            parentPath = currentPath,
+            childIndex = index,
+          )
+        },
+      )
 
       if (elementBounds.hasZeroArea() && children.isEmpty()) {
         return null
       }
 
-      // Extract extra semantics fields
-      var text: String? = null
-      var textSize: Float? = null
-      var textColor: String? = null
-      var tooltipText: String? = null
-      var paneTitle: String? = null
-      var liveRegion: String? = null
-      var collectionInfo: String? = null
-      var collectionItemInfo: String? = null
-      var collectionRowIndex: Int? = null
-      var collectionColumnIndex: Int? = null
-      var rangeInfo: String? = null
-      var inputType: String? = null
-      var actions: List<String>? = null
+      val elementInfo = NodeFields(node, context).build(bounds, currentPath, children)
 
-      val extrasMap = extractExtras(node)
-      val testTag = extractTestTag(extrasMap)
-      val semanticLinks = if (node.isPassword) null else semanticLinksFromText(node.text)
+      if (childCount == 0 && !meetsFilterCriteria(elementInfo, context.textFilter)) {
+        null
+      } else {
+        elementInfo
+      }
+    } catch (e: IllegalArgumentException) {
+      Log.e(TAG, "Error extracting node info at depth $depth", e)
+      null
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.e(TAG, "Error extracting node info at depth $depth", e)
+      null
+    } catch (e: SecurityException) {
+      Log.e(TAG, "Error extracting node info at depth $depth", e)
+      null
+    }
+  }
 
-      // Check direct APIs if available (API 30+) with an extras fallback for Compose on API < 30
-      val stateDescription: String? = extractStateDescription(node, extrasMap)
-      // AccessibilityNodeInfo.getHintText requires API 26 (minSdk is 24)
-      val hintText: String? = if (Build.VERSION.SDK_INT >= 26) node.hintText?.toString() else null
-      val errorMessage: String? = node.error?.toString()
+  /** Reads framework semantics in the same order as the depth-first extraction. */
+  private inner class NodeFields(
+    val node: AccessibilityNodeInfo,
+    val context: NodeExtraction,
+  ) {
+    var text: String? = null
+    var textSize: Float? = null
+    var textColor: String? = null
+    var tooltipText: String? = null
+    var paneTitle: String? = null
+    var liveRegion: String? = null
+    var collectionInfo: String? = null
+    var collectionItemInfo: String? = null
+    var collectionRowIndex: Int? = null
+    var collectionColumnIndex: Int? = null
+    var rangeInfo: String? = null
+    var inputType: String? = null
+    var actions: List<String>? = null
+
+    val extrasMap = extractExtras(node)
+    val testTag = extractTestTag(extrasMap)
+    val semanticLinks = if (node.isPassword) null else semanticLinksFromText(node.text)
+
+    // Check direct APIs if available (API 30+) with an extras fallback for Compose on API < 30
+    val stateDescription: String? = extractStateDescription(node, extrasMap)
+    // AccessibilityNodeInfo.getHintText requires API 26 (minSdk is 24)
+    val hintText: String? = if (Build.VERSION.SDK_INT >= 26) node.hintText?.toString() else null
+    val errorMessage: String? = node.error?.toString()
+
+    init {
       if (Build.VERSION.SDK_INT >= 28) {
         tooltipText = node.tooltipText?.toString()
         paneTitle = node.paneTitle?.toString()
       }
-      val apiGatedFields =
-        apiGatedNodeFields(
-          Build.VERSION.SDK_INT,
-          uniqueId = if (Build.VERSION.SDK_INT >= 33) node.uniqueId else null,
-          containerTitle =
-            if (Build.VERSION.SDK_INT >= 34) node.containerTitle?.toString() else null,
-        )
+    }
 
+    val apiGatedFields =
+      apiGatedNodeFields(
+        Build.VERSION.SDK_INT,
+        uniqueId = if (Build.VERSION.SDK_INT >= 33) node.uniqueId else null,
+        containerTitle = if (Build.VERSION.SDK_INT >= 34) node.containerTitle?.toString() else null,
+      )
+
+    init {
+      readActions()
+      readCollectionFields()
+      readInputAndLiveRegion()
+    }
+
+    val className =
+      if (node.className.isNullOrBlank() || GENERIC_CLASS_NAMES.contains(node.className)) {
+        null
+      } else {
+        node.className?.toString()
+      }
+
+    init {
+      node.text?.toString()?.let {
+        // Mask password content to avoid leaking secrets through the hierarchy.
+        // Mirrors iOS UIElementInfo.value masking for .secureTextField.
+        text = if (node.isPassword) "•".repeat(it.length) else it
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+          textSize = node.extraRenderingInfo?.textSizeInPx
+        }
+        textColor = null // Remove the getTextColorHex(node) call
+      }
+    }
+
+    // Dedupe content-desc when it equals text (keep text, omit content-desc)
+    val rawContentDesc = node.contentDescription?.toString()
+    val contentDesc =
+      if (context.dedupeTextContentDesc && rawContentDesc == text) {
+        null
+      } else {
+        rawContentDesc
+      }
+
+    val recompositionEntry =
+      if (
+        recompositionStore?.isEnabled() == true &&
+          recompositionStore.isForPackage(node.packageName?.toString())
+      ) {
+        recompositionStore.findMatch(extrasMap)
+      } else {
+        null
+      }
+
+    private fun readActions() {
       // Extract accessibility actions
       val actionList = node.actionList
       if (actionList != null && actionList.isNotEmpty()) {
-        actions = actionList.mapNotNull { action ->
-          when (action.id) {
-            AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS -> "accessibility_focus"
-            AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS -> "clear_accessibility_focus"
-            AccessibilityNodeInfo.ACTION_CLEAR_FOCUS -> "clear_focus"
-            AccessibilityNodeInfo.ACTION_CLEAR_SELECTION -> "clear_selection"
-            AccessibilityNodeInfo.ACTION_CLICK -> "click"
-            AccessibilityNodeInfo.ACTION_COLLAPSE -> "collapse"
-            AccessibilityNodeInfo.ACTION_COPY -> "copy"
-            AccessibilityNodeInfo.ACTION_CUT -> "cut"
-            AccessibilityNodeInfo.ACTION_DISMISS -> "dismiss"
-            AccessibilityNodeInfo.ACTION_EXPAND -> "expand"
-            AccessibilityNodeInfo.ACTION_FOCUS -> "focus"
-            AccessibilityNodeInfo.ACTION_LONG_CLICK -> "long_click"
-            AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY ->
-              "next_at_movement_granularity"
-            AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT -> "next_html_element"
-            AccessibilityNodeInfo.ACTION_PASTE -> "paste"
-            AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY ->
-              "previous_at_movement_granularity"
-            AccessibilityNodeInfo.ACTION_PREVIOUS_HTML_ELEMENT -> "previous_html_element"
-            AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> "scroll_backward"
-            AccessibilityNodeInfo.ACTION_SCROLL_FORWARD -> "scroll_forward"
-            AccessibilityNodeInfo.ACTION_SELECT -> "select"
-            AccessibilityNodeInfo.ACTION_SET_SELECTION -> "set_selection"
-            AccessibilityNodeInfo.ACTION_SET_TEXT -> "set_text"
-            else -> null
-          }
-        }
-
-        if (actions.isEmpty()) {
-          actions = null
-        }
+        actions = actionList.mapNotNull { action -> NodeFieldNames.actions[action.id] }
+        if (actions.isNullOrEmpty()) actions = null
       }
+    }
 
+    private fun readCollectionFields() {
       // Extract collection info
       node.collectionInfo?.let { collectionInfo = "rows:${it.rowCount},cols:${it.columnCount}" }
 
@@ -1272,33 +1510,11 @@ internal constructor(
 
       // Extract range info
       node.rangeInfo?.let { rangeInfo = "current:${it.current},min:${it.min},max:${it.max}" }
+    }
 
+    private fun readInputAndLiveRegion() {
       val inputTypeInt = node.inputType
-      if (inputTypeInt != 0) {
-        inputType =
-          when (inputTypeInt) {
-            android.text.InputType.TYPE_CLASS_TEXT -> "text"
-            android.text.InputType.TYPE_CLASS_NUMBER -> "number"
-            android.text.InputType.TYPE_CLASS_PHONE -> "phone"
-            android.text.InputType.TYPE_CLASS_DATETIME -> "datetime"
-            android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS -> "email_address"
-            android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_SUBJECT -> "email_subject"
-            android.text.InputType.TYPE_TEXT_VARIATION_FILTER -> "filter"
-            android.text.InputType.TYPE_TEXT_VARIATION_LONG_MESSAGE -> "long_message"
-            android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD -> "password"
-            android.text.InputType.TYPE_TEXT_VARIATION_PERSON_NAME -> "person_name"
-            android.text.InputType.TYPE_TEXT_VARIATION_PHONETIC -> "phonetic"
-            android.text.InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS -> "postal_address"
-            android.text.InputType.TYPE_TEXT_VARIATION_SHORT_MESSAGE -> "short_message"
-            android.text.InputType.TYPE_TEXT_VARIATION_URI -> "uri"
-            android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD -> "visible_password"
-            android.text.InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT -> "web_edit_text"
-            android.text.InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS -> "web_email_address"
-            android.text.InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD -> "web_password"
-            else -> null
-          }
-      }
-
+      if (inputTypeInt != 0) inputType = NodeFieldNames.inputTypes[inputTypeInt]
       val liveRegionMode = node.liveRegion
       if (liveRegionMode != 0) {
         liveRegion =
@@ -1308,102 +1524,58 @@ internal constructor(
             else -> "live_region_$liveRegionMode"
           }
       }
+    }
 
-      val className =
-        if (node.className.isNullOrBlank() || GENERIC_CLASS_NAMES.contains(node.className)) {
-          null
-        } else {
-          node.className?.toString()
-        }
-
-      node.text?.toString()?.let {
-        // Mask password content to avoid leaking secrets through the hierarchy.
-        // Mirrors iOS UIElementInfo.value masking for .secureTextField.
-        text = if (node.isPassword) "•".repeat(it.length) else it
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-          textSize = node.extraRenderingInfo?.textSizeInPx
-        }
-        textColor = null // Remove the getTextColorHex(node) call
-      }
-
-      // Dedupe content-desc when it equals text (keep text, omit content-desc)
-      val rawContentDesc = node.contentDescription?.toString()
-      val contentDesc =
-        if (dedupeTextContentDesc && rawContentDesc == text) {
-          null
-        } else {
-          rawContentDesc
-        }
-
-      val recompositionEntry =
-        if (
-          recompositionStore?.isEnabled() == true &&
-            recompositionStore.isForPackage(node.packageName?.toString())
-        ) {
-          recompositionStore.findMatch(extrasMap)
-        } else {
-          null
-        }
-
+    fun build(bounds: Rect, currentPath: String, children: List<UIElementInfo>): UIElementInfo {
       // Check if this node has accessibility focus
       val hasAccessibilityFocus =
-        accessibilityFocusedNode != null && node == accessibilityFocusedNode
+        context.accessibilityFocusedNode != null && node == context.accessibilityFocusedNode
 
       // Generate viewId: use resourceId if available, otherwise deterministic UUID from path
       val viewId = node.viewIdResourceName ?: generateDeterministicUuid(currentPath)
 
-      val elementInfo =
-        UIElementInfo(
-          text = text,
-          textSize = textSize,
-          textColor = textColor,
-          contentDesc = contentDesc,
-          className = className,
-          resourceId = node.viewIdResourceName,
-          viewId = viewId,
-          bounds = ElementBounds(bounds),
-          clickable = if (node.isClickable) "true" else null,
-          enabled = if (!node.isEnabled) "false" else null, // Only include if disabled
-          focusable = if (node.isFocusable) "true" else null,
-          focused = if (node.isFocused) "true" else null,
-          accessibilityFocused = if (hasAccessibilityFocus) "true" else null,
-          scrollable = if (node.isScrollable) "true" else null,
-          password = if (node.isPassword) "true" else null,
-          checkable = if (node.isCheckable) "true" else null,
-          checked = if (node.isCheckable) node.isChecked.toString() else null,
-          selected = if (node.isSelected) "true" else null,
-          longClickable = if (node.isLongClickable) "true" else null,
-          children = children,
-          stateDescription = stateDescription,
-          testTag = testTag,
-          semanticLinks = semanticLinks,
-          uniqueId = apiGatedFields.uniqueId,
-          visibleToUser = node.isVisibleToUser,
-          containerTitle = apiGatedFields.containerTitle,
-          hintText = hintText,
-          errorMessage = errorMessage,
-          tooltipText = tooltipText,
-          paneTitle = paneTitle,
-          liveRegion = liveRegion,
-          collectionInfo = collectionInfo,
-          collectionItemInfo = collectionItemInfo,
-          collectionRowIndex = collectionRowIndex,
-          collectionColumnIndex = collectionColumnIndex,
-          rangeInfo = rangeInfo,
-          inputType = inputType,
-          actions = actions,
-          extras = extrasMap,
-          recomposition = recompositionEntry,
-        )
-
-      if (childCount == 0 && !meetsFilterCriteria(elementInfo, textFilter)) {
-        null
-      } else {
-        elementInfo
-      }
-    } catch (e: Exception) {
-      Log.e(TAG, "Error extracting node info at depth $depth", e)
-      null
+      return UIElementInfo(
+        text = text,
+        textSize = textSize,
+        textColor = textColor,
+        contentDesc = contentDesc,
+        className = className,
+        resourceId = node.viewIdResourceName,
+        viewId = viewId,
+        bounds = ElementBounds(bounds),
+        clickable = if (node.isClickable) "true" else null,
+        enabled = if (!node.isEnabled) "false" else null, // Only include if disabled
+        focusable = if (node.isFocusable) "true" else null,
+        focused = if (node.isFocused) "true" else null,
+        accessibilityFocused = if (hasAccessibilityFocus) "true" else null,
+        scrollable = if (node.isScrollable) "true" else null,
+        password = if (node.isPassword) "true" else null,
+        checkable = if (node.isCheckable) "true" else null,
+        checked = if (node.isCheckable) node.isChecked.toString() else null,
+        selected = if (node.isSelected) "true" else null,
+        longClickable = if (node.isLongClickable) "true" else null,
+        children = children,
+        stateDescription = stateDescription,
+        testTag = testTag,
+        semanticLinks = semanticLinks,
+        uniqueId = apiGatedFields.uniqueId,
+        visibleToUser = node.isVisibleToUser,
+        containerTitle = apiGatedFields.containerTitle,
+        hintText = hintText,
+        errorMessage = errorMessage,
+        tooltipText = tooltipText,
+        paneTitle = paneTitle,
+        liveRegion = liveRegion,
+        collectionInfo = collectionInfo,
+        collectionItemInfo = collectionItemInfo,
+        collectionRowIndex = collectionRowIndex,
+        collectionColumnIndex = collectionColumnIndex,
+        rangeInfo = rangeInfo,
+        inputType = inputType,
+        actions = actions,
+        extras = extrasMap,
+        recomposition = recompositionEntry,
+      )
     }
   }
 
@@ -1436,22 +1608,7 @@ internal constructor(
     return links.ifEmpty { null }
   }
 
-  /**
-   * Generate a deterministic UUID from a hierarchy path string. Uses SHA-256 to hash the path and
-   * formats the first 16 bytes as a UUID string.
-   *
-   * NOTE (#3228): this id is *positional* — a list scroll shifts child indices, so a moved row gets
-   * a different UUID and the row now occupying its old slot inherits the departed row's. The
-   * daemon's TS ingest (`StableNodeIdentity.assignStableViewIds`) therefore rewrites every
-   * UUID-shaped viewId into a content-derived stable id before the hierarchy reaches consumers.
-   * Keep the UUID shape here (8-4-4-4-12 lowercase hex): it is the marker the ingest matches;
-   * emitting a different shape would make ids pass through unrewritten.
-   */
-  private fun generateDeterministicUuid(path: String): String {
-    val bytes = java.security.MessageDigest.getInstance("SHA-256").digest(path.toByteArray())
-    val hex = bytes.take(16).joinToString("") { formatHexByte(it) }
-    return "${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}"
-  }
+  private fun generateDeterministicUuid(path: String): String = GeneratedViewId.fromPath(path)
 
   /**
    * Find the accessibility-focused element in the hierarchy. Recursively searches for the element
@@ -1521,14 +1678,15 @@ internal constructor(
     val keys = extras.keySet()
     if (keys.isNullOrEmpty()) return null
 
-    val map = mutableMapOf<String, String>()
+    val map = LinkedHashMap<String, String>()
     for (key in keys) {
+      if (VolatileExtras.isNeverShipped(key)) continue
       val value = extras.get(key)
       if (value != null) {
         map[key] = value.toString()
       }
     }
-    return if (map.isEmpty()) null else map
+    return map.ifEmpty { null }
   }
 
   private fun extractTestTag(extras: Map<String, String>?): String? = testTagFromExtras(extras)
@@ -1575,32 +1733,42 @@ internal constructor(
     // String filter criteria
     val hasStringCriteria = hasStringCriteria(element)
 
-    // Boolean filter criteria
-    val hasBooleanCriteria =
-      element.clickable == "true" ||
-        element.scrollable == "true" ||
-        element.focusable == "true" ||
-        element.focused == "true" ||
-        element.checkable == "true" ||
-        element.checked == "true" ||
-        element.selected == "true" ||
-        element.longClickable == "true"
-
-    // Accessibility feature criteria
-    val hasAccessibilityFeatures =
-      !element.liveRegion.isNullOrBlank() ||
-        !element.collectionInfo.isNullOrBlank() ||
-        !element.collectionItemInfo.isNullOrBlank() ||
-        !element.rangeInfo.isNullOrBlank() ||
-        !element.inputType.isNullOrBlank() ||
-        !element.actions.isNullOrEmpty() ||
-        !element.extras.isNullOrEmpty()
+    val hasBooleanCriteria = hasBooleanCriteria(element)
+    val hasAccessibilityFeatures = hasAccessibilityFeatures(element)
 
     // Apply text filter if provided
     val meetsTextFilter =
       textFilter?.let { filter -> element.text?.contains(filter, true) ?: false } ?: true
 
     return (hasStringCriteria || hasBooleanCriteria || hasAccessibilityFeatures) && meetsTextFilter
+  }
+
+  private fun hasBooleanCriteria(element: UIElementInfo): Boolean {
+    // Boolean filter criteria
+    return element.clickable == "true" ||
+      element.scrollable == "true" ||
+      element.focusable == "true" ||
+      element.focused == "true" ||
+      element.checkable == "true" ||
+      element.checked == "true" ||
+      element.selected == "true" ||
+      element.longClickable == "true"
+  }
+
+  private fun hasAccessibilityFeatures(element: UIElementInfo): Boolean {
+    // Accessibility feature criteria
+    return (pruneBaselineWrappers && element.accessibilityFocused == "true") ||
+      !element.liveRegion.isNullOrBlank() ||
+      !element.collectionInfo.isNullOrBlank() ||
+      !element.collectionItemInfo.isNullOrBlank() ||
+      !element.rangeInfo.isNullOrBlank() ||
+      !element.inputType.isNullOrBlank() ||
+      (if (pruneBaselineWrappers)
+        element.actions?.any { it !in NodeFieldNames.baselineAccessibilityActions } == true
+      else !element.actions.isNullOrEmpty()) ||
+      (if (pruneBaselineWrappers)
+        element.extras?.keys?.any { !VolatileExtras.isNeverShipped(it) } == true
+      else !element.extras.isNullOrEmpty())
   }
 
   private fun hasStringCriteria(element: UIElementInfo): Boolean {
@@ -1629,6 +1797,18 @@ internal constructor(
   }
 
   /**
+   * [optimizeHierarchy] for a window root. With wrapper pruning on, the root itself is kept: it
+   * carries the window's bounds and, once stamped, its id, display and ownership (#13956). Only its
+   * descendants are pruned. Without pruning this is exactly [optimizeHierarchy].
+   */
+  internal fun optimizeWindowRoot(root: UIElementInfo): List<UIElementInfo> =
+    if (pruneBaselineWrappers) {
+      listOf(root.copy(children = root.children.flatMap { optimizeHierarchy(it) }))
+    } else {
+      optimizeHierarchy(root)
+    }
+
+  /**
    * Optimizes the hierarchy by:
    * 1. Promoting children of bounds-only wrapper nodes (structural nodes with only bounds)
    * 2. Filtering out bounds-only intermediate nodes
@@ -1639,7 +1819,7 @@ internal constructor(
    * Walks the typed [UIElementInfo.children] list directly — no per-stage JSON decode/re-encode
    * (issue #5471).
    */
-  private fun optimizeHierarchy(element: UIElementInfo): List<UIElementInfo> {
+  internal fun optimizeHierarchy(element: UIElementInfo): List<UIElementInfo> {
     // Check if this element is a bounds-only wrapper (has no useful properties)
     val isBoundsOnlyWrapper = !meetsFilterCriteria(element)
 
@@ -1671,7 +1851,7 @@ internal constructor(
     return listOf(element.copy(children = optimizedChildren))
   }
 
-  private data class WindowEntry(
+  internal data class WindowEntry(
     val windowId: Int,
     val windowType: String,
     val windowLayer: Int,
@@ -1684,59 +1864,6 @@ internal constructor(
     val isOwnPrototype: Boolean = false,
   )
 
-  private data class OrderCounter(var value: Int = 0)
-
-  private data class NodeKey(val windowKey: Int, val path: String)
-
-  private data class OcclusionNode(
-    val key: NodeKey,
-    val element: UIElementInfo,
-    val bounds: ElementBounds,
-    val windowLayer: Int,
-    val windowKey: Int,
-    val order: Int,
-    val subtreeEnd: Int,
-  )
-
-  private data class OcclusionInfo(
-    val coverage: Double,
-    val occludedBy: String?,
-    val occludedByViewId: String?,
-  )
-
-  private data class OcclusionWindowIndex(
-    val lastIndex: Int,
-    val all: List<OcclusionBoundsGroup>,
-    val buckets: Map<Int, List<OcclusionBoundsGroup>>,
-    val wide: List<OcclusionBoundsGroup>,
-  )
-
-  /**
-   * Identical rectangles have the same intersection and union contribution. Keep their sorted
-   * entries so a query can retain the first eligible label when equal-layer windows interleave.
-   */
-  private data class OcclusionBoundsGroup(
-    val bounds: ElementBounds,
-    val entries: List<IndexedValue<OcclusionNode>>,
-  ) {
-    fun firstAfter(index: Int): IndexedValue<OcclusionNode>? {
-      var low = 0
-      var high = entries.size
-      while (low < high) {
-        val middle = (low + high) ushr 1
-        if (entries[middle].index <= index) low = middle + 1 else high = middle
-      }
-      return entries.getOrNull(low)
-    }
-  }
-
-  private fun occlusionBuckets(bounds: ElementBounds): IntRange? {
-    val first = bounds.left / OCCLUSION_BUCKET_WIDTH
-    val last = (bounds.right - 1) / OCCLUSION_BUCKET_WIDTH
-    return if (last.toLong() - first.toLong() >= MAX_OCCLUSION_BUCKET_SPAN) null else first..last
-  }
-
-  /** Represents the relationship between two nodes in a tree hierarchy. */
   enum class NodeRelationship {
     /** Nodes share the same direct parent */
     SIBLING,
@@ -1835,390 +1962,30 @@ internal constructor(
     windowCount: Int,
   ): Boolean = !disableAllFiltering && occlusionEnabled && windowCount > 1
 
-  private fun buildOcclusionInfo(windowEntries: List<WindowEntry>): Map<NodeKey, OcclusionInfo> {
-    val nodes = mutableListOf<OcclusionNode>()
-    val windowBoundsByKey = windowEntries.associate { it.windowId to it.windowBounds }
-    val imeWindowKeys =
-      windowEntries
-        .asSequence()
-        .filter { it.windowType == "input_method" }
-        .mapTo(mutableSetOf()) {
-          it.windowId
-        }
-    // The host decides what CtrlProxy's own prototype covers
-    // (OwnWindowCoverRule in isFullyCoveredByApplicationWindow, layer:"app", covered-tap refusal),
-    // so
-    // its windows must not prune the app nodes beneath them
-    // here; dropping those nodes left the host nothing to scope or refuse (#10608/#10544).
-    val ownPrototypeWindowKeys =
-      windowEntries
-        .asSequence()
-        .filter { it.isOwnPrototype }
-        .mapTo(mutableSetOf()) {
-          it.windowId
-        }
-    for (windowEntry in windowEntries) {
-      val hierarchy = windowEntry.hierarchy
-      val windowKey = windowEntry.windowId
-      val windowLayer = windowEntry.windowLayer
-      collectOcclusionNodes(
-        hierarchy,
-        windowKey,
-        windowLayer,
-        path = "",
-        orderCounter = OrderCounter(),
-        nodes = nodes,
-      )
-    }
+  private val occlusionCalculator = OcclusionCalculator(stats, GeneratedViewId::fromPath)
 
-    if (nodes.isEmpty()) {
-      return emptyMap()
-    }
-
-    val sortedNodes =
-      nodes.sortedWith(compareBy<OcclusionNode> { it.windowLayer }.thenBy { it.order })
-    // Index cross-window candidates spatially and collapse identical rectangles within each
-    // window. A dense accessibility tree can repeat a full-screen bound hundreds of times; only
-    // the first eligible rectangle affects coverage or the tie-broken occluder label.
-    val nodesByWindow =
-      sortedNodes
-        .withIndex()
-        .groupBy { it.value.windowKey }
-        .mapValues { (windowKey, entries) ->
-          val groups =
-            entries
-              .groupBy { clipOccluderBounds(it.value.bounds, windowBoundsByKey[windowKey]) }
-              .mapNotNull { (bounds, matches) ->
-                bounds?.let { OcclusionBoundsGroup(it, matches) }
-              }
-          val buckets = mutableMapOf<Int, MutableList<OcclusionBoundsGroup>>()
-          val wide = mutableListOf<OcclusionBoundsGroup>()
-          for (group in groups) {
-            val span = occlusionBuckets(group.bounds)
-            if (span == null) wide.add(group)
-            else for (bucket in span) buckets.getOrPut(bucket) { mutableListOf() }.add(group)
-          }
-          OcclusionWindowIndex(entries.last().index, groups, buckets, wide)
-        }
-    val occlusionInfo = mutableMapOf<NodeKey, OcclusionInfo>()
-    var indexEntriesVisited = 0L
-
-    for (i in sortedNodes.indices) {
-      val node = sortedNodes[i]
-      val totalArea = node.bounds.width * node.bounds.height
-      if (totalArea <= 0) continue
-
-      val intersections = mutableListOf<ElementBounds>()
-      var maxOverlap = 0
-      var occludedBy: String? = null
-      var occludedByViewId: String? = null
-
-      // Debug: Track occlusion for text nodes
-      val isDebugNode = node.element.text == "Tap" || node.element.text == "Discover"
-      if (isDebugNode) {
-        Log.d(
-          TAG,
-          "[OCCLUSION] Node text='${node.element.text}', bounds=${node.bounds}, path='${node.key.path}', order=${node.order}, subtreeEnd=${node.subtreeEnd}",
-        )
-      }
-
-      val candidates = mutableListOf<Pair<IndexedValue<OcclusionNode>, ElementBounds>>()
-      val nodeBuckets = occlusionBuckets(node.bounds)
-      for ((windowKey, windowIndex) in nodesByWindow) {
-        if (windowKey == node.windowKey || windowIndex.lastIndex <= i) continue
-        // A query spanning several buckets is cheaper to scan once against the window index.
-        // For narrow queries, stream bucket entries so duplicates never form a flattened list.
-        val possible =
-          if (nodeBuckets == null || nodeBuckets.last - nodeBuckets.first >= 3) {
-            windowIndex.all.asSequence()
-          } else {
-            sequence {
-              yieldAll(windowIndex.wide)
-              for (bucket in nodeBuckets) yieldAll(windowIndex.buckets[bucket].orEmpty())
-            }
-          }
-        val seen = mutableSetOf<ElementBounds>()
-        for (group in possible) {
-          indexEntriesVisited++
-          if (!seen.add(group.bounds)) continue
-          val entry = group.firstAfter(i) ?: continue
-          val bounds = group.bounds
-          if (
-            entry.index > i &&
-              bounds.left < node.bounds.right &&
-              bounds.right > node.bounds.left &&
-              bounds.top < node.bounds.bottom &&
-              bounds.bottom > node.bounds.top
-          ) {
-            candidates.add(entry to bounds)
-          }
-        }
-      }
-      for ((candidate, occluderBounds) in candidates.sortedBy { it.first.index }) {
-        val occluder = candidate.value
-        stats.occlusionCandidateComparisons.incrementAndGet()
-        // Skip cross-window IME occluders: the IME's a11y root has a transparent wrapper that
-        // overstates the keyboard rectangle and would falsely mark the app underneath as hidden.
-        // Same-window IME-vs-IME occlusion is preserved by the `windowKey != node.windowKey` guard.
-        // CtrlProxy's own prototype windows are skipped the same way (see above).
-        if (
-          occluder.windowKey != node.windowKey &&
-            (occluder.windowKey in imeWindowKeys || occluder.windowKey in ownPrototypeWindowKeys)
-        ) {
-          continue
-        }
-        val intersection = intersectBounds(node.bounds, occluderBounds) ?: continue
-        val overlapArea = intersection.width * intersection.height
-        if (overlapArea <= 0) continue
-
-        if (isDebugNode) {
-          Log.d(
-            TAG,
-            "[OCCLUSION]   Occluder: text='${occluder.element.text}', bounds=$occluderBounds, overlap=$overlapArea, order=${occluder.order}",
-          )
-        }
-
-        intersections.add(intersection)
-
-        if (overlapArea > maxOverlap) {
-          maxOverlap = overlapArea
-          occludedBy = resolveOccluderLabel(occluder)
-          occludedByViewId =
-            resolveViewIdForOcclusionNode(
-              occluder.element,
-              occluder.key.windowKey,
-              occluder.key.path,
-            )
-        }
-      }
-
-      if (intersections.isNotEmpty()) {
-        val coveredArea =
-          calculateUnionArea(intersections, maxArea = (totalArea * OCCLUSION_THRESHOLD).toInt())
-        val coverage = coveredArea.toDouble() / totalArea.toDouble()
-        if (isDebugNode) {
-          Log.d(
-            TAG,
-            "[OCCLUSION]   Result: coverage=$coverage (${(coverage*100).toInt()}%), threshold=$OCCLUSION_THRESHOLD, coveredArea=$coveredArea, totalArea=$totalArea",
-          )
-        }
-        if (coverage > 0.0) {
-          occlusionInfo[node.key] =
-            OcclusionInfo(
-              coverage = coverage,
-              occludedBy = occludedBy,
-              occludedByViewId = occludedByViewId,
-            )
-        }
-      }
-    }
-
-    stats.occlusionIndexEntriesVisited.addAndGet(indexEntriesVisited)
-    return occlusionInfo
-  }
-
-  private fun collectOcclusionNodes(
-    element: UIElementInfo,
-    windowKey: Int,
-    windowLayer: Int,
-    path: String,
-    orderCounter: OrderCounter,
-    nodes: MutableList<OcclusionNode>,
-  ): Int {
-    val start = orderCounter.value++
-    var end = start
-    val children = element.children
-
-    for ((index, child) in children.withIndex()) {
-      val childPath = if (path.isBlank()) index.toString() else "$path.$index"
-      val childEnd =
-        collectOcclusionNodes(child, windowKey, windowLayer, childPath, orderCounter, nodes)
-      end = max(end, childEnd)
-    }
-
-    val bounds = element.bounds
-    if (bounds != null && !bounds.hasZeroArea()) {
-      nodes.add(
-        OcclusionNode(
-          key = NodeKey(windowKey, path),
-          element = element,
-          bounds = bounds,
-          windowLayer = windowLayer,
-          windowKey = windowKey,
-          order = start,
-          subtreeEnd = end,
-        ),
-      )
-    }
-
-    return end
-  }
+  // Keep the existing extraction/test entry points while the calculator owns the algorithm.
+  private fun buildOcclusionInfo(
+    windowEntries: List<WindowEntry>,
+  ): Map<OcclusionCalculator.NodeKey, OcclusionCalculator.OcclusionInfo> =
+    occlusionCalculator.buildOcclusionInfo(windowEntries)
 
   private fun filterOccludedHierarchy(
     element: UIElementInfo,
-    occlusionInfo: Map<NodeKey, OcclusionInfo>,
+    occlusionInfo: Map<OcclusionCalculator.NodeKey, OcclusionCalculator.OcclusionInfo>,
     windowKey: Int,
     path: String,
     isRoot: Boolean,
-  ): UIElementInfo? {
-    val key = NodeKey(windowKey, path)
-    val info = occlusionInfo[key]
-    val occlusionState =
-      when {
-        info == null -> null
-        info.coverage >= OCCLUSION_THRESHOLD -> "hidden"
-        info.coverage > 0.0 -> "partial"
-        else -> null
-      }
+  ): UIElementInfo? =
+    occlusionCalculator.filterOccludedHierarchy(element, occlusionInfo, windowKey, path, isRoot)
 
-    // Debug logging for Tab text nodes
-    if (element.text == "Tap" || element.text == "Discover") {
-      Log.d(
-        TAG,
-        "[FILTER] text='${element.text}', path='$path', state=$occlusionState, coverage=${info?.coverage}, occludedBy='${info?.occludedBy}'",
-      )
-    }
-
-    val filteredChildren =
-      element.children.mapIndexedNotNull { index, child ->
-        val childPath = if (path.isBlank()) index.toString() else "$path.$index"
-        filterOccludedHierarchy(child, occlusionInfo, windowKey, childPath, isRoot = false)
-      }
-
-    if (occlusionState == "hidden" && !isRoot) {
-      if (element.text == "Tap" || element.text == "Discover") {
-        Log.d(TAG, "[FILTER] -> REMOVED text='${element.text}'")
-      }
-      return null
-    }
-
-    return element.copy(
-      viewId = resolveViewIdForOcclusionNode(element, windowKey, path),
-      children = filteredChildren,
-      occlusionState = occlusionState,
-      occludedBy = info?.occludedBy,
-      occludedByViewId = info?.occludedByViewId,
-    )
-  }
-
-  /** Clip coverage only; retain the framework's node bounds for targets and host output. */
   internal fun clipOccluderBounds(
     bounds: ElementBounds,
     windowBounds: ElementBounds?,
-  ): ElementBounds? =
-    if (windowBounds == null || windowBounds.hasZeroArea()) bounds
-    else intersectBounds(bounds, windowBounds)
+  ): ElementBounds? = OcclusionGeometry.clipOccluderBounds(bounds, windowBounds)
 
-  private fun intersectBounds(bounds: ElementBounds, other: ElementBounds): ElementBounds? {
-    val left = max(bounds.left, other.left)
-    val top = max(bounds.top, other.top)
-    val right = min(bounds.right, other.right)
-    val bottom = min(bounds.bottom, other.bottom)
-
-    if (left >= right || top >= bottom) {
-      return null
-    }
-
-    return ElementBounds(left, top, right, bottom)
-  }
-
-  internal fun calculateUnionArea(rectangles: List<ElementBounds>, maxArea: Int? = null): Int {
-    data class Event(val x: Int, val y1: Int, val y2: Int, val delta: Int)
-
-    val events =
-      rectangles
-        .flatMap { rect ->
-          listOf(
-            Event(rect.left, rect.top, rect.bottom, 1),
-            Event(rect.right, rect.top, rect.bottom, -1),
-          )
-        }
-        .sortedBy { it.x }
-
-    if (events.isEmpty()) return 0
-
-    val activeIntervals = mutableListOf<Pair<Int, Int>>()
-    var previousX = events.first().x
-    var area = 0
-
-    fun activeUnionLength(): Int {
-      if (activeIntervals.isEmpty()) return 0
-      var total = 0
-      var currentStart = activeIntervals[0].first
-      var currentEnd = activeIntervals[0].second
-
-      for (i in 1 until activeIntervals.size) {
-        val (start, end) = activeIntervals[i]
-        if (start > currentEnd) {
-          total += currentEnd - currentStart
-          currentStart = start
-          currentEnd = end
-        } else {
-          currentEnd = max(currentEnd, end)
-        }
-      }
-      total += currentEnd - currentStart
-      return total
-    }
-
-    for (event in events) {
-      val dx = event.x - previousX
-      if (dx > 0 && activeIntervals.isNotEmpty()) {
-        val unionLength = activeUnionLength()
-        area += unionLength * dx
-        if (maxArea != null && area >= maxArea) {
-          return area
-        }
-      }
-
-      if (event.delta > 0) {
-        // Insert after equal starts to preserve sortedBy's stable tie order.
-        var low = 0
-        var high = activeIntervals.size
-        while (low < high) {
-          val middle = (low + high) ushr 1
-          if (activeIntervals[middle].first <= event.y1) low = middle + 1 else high = middle
-        }
-        activeIntervals.add(low, event.y1 to event.y2)
-      } else {
-        var low = 0
-        var high = activeIntervals.size
-        while (low < high) {
-          val middle = (low + high) ushr 1
-          if (activeIntervals[middle].first < event.y1) low = middle + 1 else high = middle
-        }
-        while (low < activeIntervals.size && activeIntervals[low].first == event.y1) {
-          if (activeIntervals[low].second == event.y2) {
-            activeIntervals.removeAt(low)
-            break
-          }
-          low++
-        }
-      }
-
-      previousX = event.x
-    }
-
-    return area
-  }
-
-  private fun resolveOccluderLabel(occluder: OcclusionNode): String {
-    val element = occluder.element
-    return element.resourceId?.takeIf { it.isNotBlank() }
-      ?: element.contentDesc?.takeIf { it.isNotBlank() }
-      ?: element.text?.takeIf { it.isNotBlank() }
-      ?: element.className?.takeIf { it.isNotBlank() }
-      ?: "unlabeled view"
-  }
-
-  private fun resolveViewIdForOcclusionNode(
-    element: UIElementInfo,
-    windowKey: Int,
-    path: String,
-  ): String {
-    return element.viewId?.takeIf { it.isNotBlank() }
-      ?: generateDeterministicUuid("occlusion/window:$windowKey/path:$path")
-  }
+  internal fun calculateUnionArea(rectangles: List<ElementBounds>, maxArea: Int? = null): Int =
+    OcclusionGeometry.calculateUnionArea(rectangles, maxArea)
 
   /** Extract information about a single focused element. Used for getCurrentFocus command. */
   fun extractFocusedElementInfo(focusedNode: AccessibilityNodeInfo): UIElementInfo? {
@@ -2271,7 +2038,14 @@ internal constructor(
         tooltipText = tooltipText,
         paneTitle = paneTitle,
       )
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.e(TAG, "Error extracting focused element info", e)
+      null
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.e(TAG, "Error extracting focused element info", e)
+      null
+    } catch (e: SecurityException) {
       Log.e(TAG, "Error extracting focused element info", e)
       null
     }
@@ -2301,10 +2075,12 @@ internal constructor(
     collectFocusableElements(
       rootNode,
       0,
-      screenDimensions,
-      accessibilityFocusedNode,
-      focusableElements,
-      truncationReasons,
+      FocusTraversal(
+        screenDimensions,
+        accessibilityFocusedNode,
+        focusableElements,
+        truncationReasons,
+      ),
     )
 
     // Find the focused element index
@@ -2360,10 +2136,12 @@ internal constructor(
       collectFocusableElements(
         rootNode,
         0,
-        screenDimensions,
-        accessibilityFocusedNode,
-        focusableElements,
-        truncationReasons,
+        FocusTraversal(
+          screenDimensions,
+          accessibilityFocusedNode,
+          focusableElements,
+          truncationReasons,
+        ),
       )
     }
 
@@ -2383,13 +2161,17 @@ internal constructor(
    * Collect accessibility-focusable elements in depth-first traversal order. This matches
    * TalkBack's default traversal behavior.
    */
+  private data class FocusTraversal(
+    val screenDimensions: ScreenDimensions?,
+    val accessibilityFocusedNode: AccessibilityNodeInfo?,
+    val result: MutableList<UIElementInfo>,
+    val truncationReasons: MutableSet<String>,
+  )
+
   private fun collectFocusableElements(
     node: AccessibilityNodeInfo,
     depth: Int,
-    screenDimensions: ScreenDimensions?,
-    accessibilityFocusedNode: AccessibilityNodeInfo?,
-    result: MutableList<UIElementInfo>,
-    truncationReasons: MutableSet<String>,
+    context: FocusTraversal,
   ) {
     if (depth > MAX_DEPTH) {
       return
@@ -2405,55 +2187,73 @@ internal constructor(
         return
       }
 
-      if (screenDimensions != null && screenDimensions.isValid()) {
-        if (elementBounds.isCompletelyOffscreen(screenDimensions.width, screenDimensions.height)) {
+      if (context.screenDimensions != null && context.screenDimensions.isValid()) {
+        if (
+          elementBounds.isCompletelyOffscreen(
+            context.screenDimensions.width,
+            context.screenDimensions.height,
+          )
+        ) {
           return
         }
       }
 
-      // Check if this node is accessibility-focusable
-      // A node is focusable if it supports ACTION_ACCESSIBILITY_FOCUS or
-      // ACTION_CLEAR_ACCESSIBILITY_FOCUS
-      // The currently focused node typically has ACTION_CLEAR_ACCESSIBILITY_FOCUS instead
-      val isFocusable =
-        node.actionList?.any {
-          it.id == AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS ||
-            it.id == AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS
-        } ?: false
-
-      // Also include nodes that are currently accessibility focused
-      val isCurrentlyFocused = node.isAccessibilityFocused
-
-      if (isFocusable || isCurrentlyFocused) {
-        // Extract element info for focusable elements
-        val elementInfo = extractSimpleElementInfo(node, accessibilityFocusedNode)
-        if (elementInfo != null) {
-          result.add(elementInfo)
-        }
-      }
-
-      // Recursively collect from children (depth-first traversal)
-      val totalChildCount = node.childCount
-      val childCount = min(totalChildCount, MAX_CHILDREN)
-      if (totalChildCount > MAX_CHILDREN) {
-        truncationReasons += "max_children"
-      }
-      for (i in 0 until childCount) {
-        val child = node.getChild(i)
-        if (child != null) {
-          collectFocusableElements(
-            child,
-            depth + 1,
-            screenDimensions,
-            accessibilityFocusedNode,
-            result,
-            truncationReasons,
-          )
-          child.recycle()
-        }
-      }
-    } catch (e: Exception) {
+      collectFocusableNode(node, context)
+      collectFocusableChildren(node, depth, context)
+    } catch (e: IllegalArgumentException) {
       Log.w(TAG, "Error collecting focusable element at depth $depth", e)
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.w(TAG, "Error collecting focusable element at depth $depth", e)
+    } catch (e: SecurityException) {
+      Log.w(TAG, "Error collecting focusable element at depth $depth", e)
+    }
+  }
+
+  private fun collectFocusableNode(node: AccessibilityNodeInfo, context: FocusTraversal) {
+    // Check if this node is accessibility-focusable
+    // A node is focusable if it supports ACTION_ACCESSIBILITY_FOCUS or
+    // ACTION_CLEAR_ACCESSIBILITY_FOCUS
+    // The currently focused node typically has ACTION_CLEAR_ACCESSIBILITY_FOCUS instead
+    val isFocusable =
+      node.actionList?.any {
+        it.id == AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS ||
+          it.id == AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS
+      } ?: false
+
+    // Also include nodes that are currently accessibility focused
+    val isCurrentlyFocused = node.isAccessibilityFocused
+
+    if (isFocusable || isCurrentlyFocused) {
+      // Extract element info for focusable elements
+      val elementInfo = extractSimpleElementInfo(node, context.accessibilityFocusedNode)
+      if (elementInfo != null) {
+        context.result.add(elementInfo)
+      }
+    }
+  }
+
+  private fun collectFocusableChildren(
+    node: AccessibilityNodeInfo,
+    depth: Int,
+    context: FocusTraversal,
+  ) {
+    // Recursively collect from children (depth-first traversal)
+    val totalChildCount = node.childCount
+    val childCount = min(totalChildCount, MAX_CHILDREN)
+    if (totalChildCount > MAX_CHILDREN) {
+      context.truncationReasons += "max_children"
+    }
+    for (i in 0 until childCount) {
+      val child = node.getChild(i)
+      if (child != null) {
+        collectFocusableElements(
+          child,
+          depth + 1,
+          context,
+        )
+        child.recycle()
+      }
     }
   }
 
@@ -2492,7 +2292,14 @@ internal constructor(
         bounds = elementBounds,
         testTag = testTag,
       )
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Error extracting simple element info", e)
+      null
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.w(TAG, "Error extracting simple element info", e)
+      null
+    } catch (e: SecurityException) {
       Log.w(TAG, "Error extracting simple element info", e)
       null
     }
@@ -2515,7 +2322,15 @@ internal constructor(
       return bounds1 == bounds2 &&
         node1.viewIdResourceName == node2.viewIdResourceName &&
         node1.text?.toString() == node2.text?.toString()
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Could not compare accessibility nodes", e)
+      return false
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.w(TAG, "Could not compare accessibility nodes", e)
+      return false
+    } catch (e: SecurityException) {
+      Log.w(TAG, "Could not compare accessibility nodes", e)
       return false
     }
   }
@@ -2543,4 +2358,26 @@ internal constructor(
       }
       .takeIf { it >= 0 }
   }
+}
+
+/**
+ * Which windows a capture searches for accessibility focus (#13957). Each search costs a
+ * cross-process `getRoot` and `findFocus`, so only windows reporting
+ * [AccessibilityWindowInfo.isAccessibilityFocused] are searched. Without TalkBack no window holds
+ * that focus and nothing is searched. The active window root is still searched when a window
+ * reported focus but its search came back empty, or when there is no window list at all.
+ */
+internal data class AccessibilityFocusSearch(
+  val windows: List<AccessibilityWindowInfo>,
+  val activeRootFallback: Boolean,
+)
+
+internal fun accessibilityFocusSearch(
+  windows: List<AccessibilityWindowInfo>,
+): AccessibilityFocusSearch {
+  val focused = windows.filter { it.isAccessibilityFocused }
+  return AccessibilityFocusSearch(
+    focused,
+    activeRootFallback = windows.isEmpty() || focused.isNotEmpty(),
+  )
 }

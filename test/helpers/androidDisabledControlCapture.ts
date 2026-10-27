@@ -66,6 +66,7 @@ export function androidControlObservation(
     hierarchy: { node: capturedAndroidControl(state) },
   });
   return {
+    observationId: "disabled-control",
     updatedAt: 1,
     display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 1080, height: 2400 },

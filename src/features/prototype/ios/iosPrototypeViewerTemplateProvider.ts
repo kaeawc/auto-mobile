@@ -1,3 +1,4 @@
+import { type SpotlightFileSystem, markSpotlightExcluded } from "../../../utils/spotlightExclusion";
 import AdmZip from "adm-zip";
 import * as fs from "node:fs/promises";
 import path from "node:path";
@@ -14,7 +15,6 @@ import {
 import { type FileDownloader, DefaultFileDownloader } from "../../../utils/FileDownloader";
 import { type IdGenerator, defaultIdGenerator } from "../../../utils/IdGenerator";
 import { type Timer, defaultTimer } from "../../../utils/SystemTimer";
-import { isTruthyEnvValue } from "../../../utils/ctrlProxyDownloadControl";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { ensureSecureTempDirSync, getTempDir } from "../../../utils/tempDir";
@@ -29,12 +29,12 @@ import {
   PrototypeViewerOverrideError,
   PrototypeViewerUnsupportedVersionError,
 } from "./iosPrototypeInstallerErrors";
+import { ENV, readEnvBool } from "../../../config/env";
 
 const CACHE_SUBDIR = "prototype-viewer";
 const APP_NAME = "PrototypeViewer.app";
-export const IOS_PROTOTYPE_VIEWER_ENV = "AUTOMOBILE_IOS_PROTOTYPE_VIEWER";
-export const SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD_ENV =
-  "AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD";
+export const IOS_PROTOTYPE_VIEWER_ENV = ENV.IOS_PROTOTYPE_VIEWER.name;
+export const SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD_ENV = ENV.SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD.name;
 export const PROTOTYPE_VIEWER_METADATA_FILENAME = "AutoMobilePrototypeViewer.json";
 export const PROTOTYPE_VIEWER_DOWNLOAD_TIMEOUT_MS = 30_000;
 
@@ -46,6 +46,8 @@ export interface PrototypeViewerMetadata {
 }
 
 export interface PrototypeViewerTemplateProviderDeps {
+  platform?: NodeJS.Platform;
+  spotlightFileSystem?: SpotlightFileSystem;
   downloader?: FileDownloader;
   checksumCalculator?: ChecksumCalculator;
   cacheDir?: string;
@@ -74,6 +76,7 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
   private readonly idGenerator: IdGenerator;
   private readonly env: NodeJS.ProcessEnv;
   private readonly renameFile: (from: string, to: string) => Promise<void>;
+  private spotlightExclusion: Promise<void> | undefined;
   private inFlight: Promise<ResolvedPrototypeViewerTemplate> | null = null;
 
   constructor(private readonly deps: PrototypeViewerTemplateProviderDeps = {}) {
@@ -118,7 +121,7 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
     if (await this.isCacheUsable(expected)) {
       return { path: this.cachePaths(expected).app, source: "cache" };
     }
-    if (isTruthyEnvValue(this.env[SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD_ENV])) {
+    if (readEnvBool(ENV.SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD, this.env)) {
       throw new PrototypeViewerDownloadDisabledError();
     }
     return { path: await this.download(expected), source: "download" };
@@ -219,6 +222,15 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
     return true;
   }
 
+  private async markCacheExcluded(): Promise<void> {
+    this.spotlightExclusion ??= markSpotlightExcluded(
+      this.cacheDir,
+      this.deps.spotlightFileSystem ?? fs,
+      this.deps.platform ?? process.platform,
+    );
+    await this.spotlightExclusion;
+  }
+
   private async download(expected: string): Promise<string> {
     const paths = this.cachePaths(expected);
     const partial = `${paths.archive}.${this.idGenerator.next()}.download`;
@@ -231,6 +243,7 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
         ensureSecureTempDirSync(CACHE_SUBDIR);
       }
       await fs.mkdir(paths.directory, { recursive: true, mode: 0o700 });
+      await this.markCacheExcluded();
       await this.downloadBytes(url, partial);
       await fs.chmod(partial, 0o600);
       const { checksum: actual } = await this.checksumCalculator.computeFileSha256(partial);

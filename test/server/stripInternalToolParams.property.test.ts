@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
-import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/constants";
+import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/wire/constants";
 import { stripInternalToolParams } from "../../src/server/index";
 
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 100 } as const;
@@ -14,7 +14,7 @@ const ordinaryArgsArb = fc.dictionary(
 const arbitraryArgsArb = fc.dictionary(fc.string({ maxLength: 12 }), valueArb, {
   maxKeys: 8,
 }) as fc.Arbitrary<Record<string, unknown>>;
-const internalSubsetArb = fc.subarray(INTERNAL_TOOL_PARAM_NAMES, { maxLength: 5 });
+const internalSubsetArb = fc.subarray([...INTERNAL_TOOL_PARAM_NAMES], { maxLength: 5 });
 
 function withInternalParams(
   args: Record<string, unknown>,

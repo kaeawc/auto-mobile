@@ -2,11 +2,11 @@ import { errorMessage } from "../utils/describeUnknownError";
 import {
   deriveLatestSessionIdentity,
   deriveSlot,
-  SlotTransitionGuard,
   isSlotKnown,
   isSlotTagBeingRecreated,
   type LegacyLifecycleView,
 } from "./sessionSlots";
+import { SlotTransitionGuard } from "./SlotTransitionGuard";
 
 export type SlotShadowProbeMode = "throw" | "log" | "off";
 

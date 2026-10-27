@@ -1,60 +1,36 @@
-import { BINDINGS_COORDINATION_SCOPE } from "../persistedIdentity";
-export { BINDINGS_COORDINATION_SCOPE } from "../persistedIdentity";
+import { Kysely } from "kysely";
+import { jsonArrayFrom } from "kysely/helpers/sqlite";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { jsonArrayFrom } from "kysely/helpers/sqlite";
-import { Kysely, type Generated, type Selectable, type Transaction, SqliteAdapter } from "kysely";
-import { BunSqliteDialect, type BunSqliteHandle } from "../../../db/bunSqliteDialect";
+import { type BunSqliteHandle } from "../../../db/bunSqliteDialect";
 import { SQLITE_BUSY_TIMEOUT_MS } from "../../../db/database";
 import { classifySqliteError } from "../../../db/databaseFailureClassification";
-import { errorMessage } from "../../../utils/describeUnknownError";
-import { BindingDiscoveryIncompleteError } from "../provisioning/refusal";
 import { isInMemoryDatabasePath } from "../../../db/migrationLock";
-import { ActionableError } from "../../../models/ActionableError";
-import { ensureSecureDirectorySync, getAdbServerScopedAutoMobileDir } from "../../../utils/tempDir";
-import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
-import { defaultBindingExecOwnerLiveness } from "./ownerLiveness";
-import { SqliteSessionBrokerStore } from "../sqliteStore";
-import type { BrokerRequestsTable, BrokerResourcesTable } from "../store";
+import { errorMessage } from "../../../utils/describeUnknownError";
 import type { IdGenerator } from "../../../utils/IdGenerator";
-import type { LegacySlotDeviceRetirement } from "./legacySlotDeviceRetirement";
-import { SqliteLegacySlotRetirementStore } from "./sqliteLegacySlotRetirementStore";
-import { migrateBindingRegistry, assertBindingRegistryCurrent } from "./bindingRegistryMigrations";
+import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
+import { ensureSecureDirectorySync, getAdbServerScopedAutoMobileDir } from "../../../utils/tempDir";
+import { BINDINGS_COORDINATION_SCOPE } from "../persistedIdentity";
+import { BindingDiscoveryIncompleteError } from "../provisioning/refusal";
+import { SqliteSessionBrokerStore } from "../sqliteStore";
+import { SqliteDeviceMutationJournal } from "../mutations/sqliteJournal";
 import {
-  type BindingResourceSnapshot,
+  assertPlatformChangeAllowed,
+  assertSettlerForState,
+  assertValidBindingKey,
+  BINDING_JOURNAL_TERMINAL_PHASES,
+  BINDING_JOURNAL_TERMINAL_RETENTION_MS,
+  bindingMatches,
+  computeBindingScopeKey,
+  entersFencingState,
   isBindingJournalPhaseOpen,
   journalOwnersEqual,
   journalTargetEntries,
   sameBinding,
-  scopeAcceptsSameSessionClaim,
   scopeAcceptsBindingChange,
-  BINDING_JOURNAL_TERMINAL_PHASES,
-  BINDING_JOURNAL_TERMINAL_RETENTION_MS,
+  scopeAcceptsSameSessionClaim,
   type AdvanceBindingJournalInput,
   type AdvanceBindingJournalResult,
-  type ClaimBindingJournalResult,
-  type OpenBindingJournalInput,
-  type OpenBindingJournalResult,
-  type BindingJournalAssignmentChange,
-  type BindingJournalChangeFailure,
-  type BindingJournalEntry,
-  type BindingJournalKind,
-  type BindingJournalOwner,
-  type BindingJournalPhase,
-  type BindingJournalTarget,
-  assertSettlerForState,
-  assertValidBindingKey,
-  bindingMatches,
-  computeBindingScopeKey,
-  entersFencingState,
-  type ClaimExecutionOptions,
-  type ClaimExecutionResult,
-  type CommitBindingResult,
-  type DeviceHolder,
-  type EnsureScopeResult,
-  type InitBindingResult,
-  type ManagedDeviceEntry,
-  type ReleaseExecutionResult,
   type BindingAssignmentRecord,
   type BindingAssignmentState,
   type BindingBindingCommit,
@@ -63,22 +39,59 @@ import {
   type BindingExecOwner,
   type BindingExecOwnerLiveness,
   type BindingInit,
+  type BindingJournalAssignmentChange,
+  type BindingJournalChangeFailure,
+  type BindingJournalEntry,
+  type BindingJournalOwner,
   type BindingKey,
   type BindingPlatform,
   type BindingProcessIdentity,
   type BindingRegistry,
+  type BindingResourceSnapshot,
   type BindingScopeIdentity,
-  type BindingScopeInvalidationReason,
   type BindingScopeRecord,
-  type BindingScopeState,
+  type ClaimBindingJournalResult,
+  type ClaimExecutionOptions,
+  type ClaimExecutionResult,
+  type CommitBindingResult,
+  type DeviceHolder,
+  type EnsureScopeResult,
+  type InitBindingResult,
+  type ManagedDeviceEntry,
+  type OpenBindingJournalInput,
+  type OpenBindingJournalResult,
+  type ReleaseExecutionResult,
   type UpdateBindingStateOptions,
   type UpdateBindingStateResult,
-  assertPlatformChangeAllowed,
 } from "./bindingRegistry";
+import { assertBindingRegistryCurrent, migrateBindingRegistry } from "./bindingRegistryMigrations";
+import {
+  assertOpenPhase,
+  AssignmentRow,
+  BindingRegistryDatabase,
+  Executor,
+  journalAdvanceColumns,
+  JournalRow,
+  ScopeRow,
+  serializeSpec,
+  settlerColumns,
+  toAssignment,
+  toJournalEntry,
+  toScope,
+} from "./bindingRegistryRows";
+import type { LegacySlotDeviceRetirement } from "./legacySlotDeviceRetirement";
+import { defaultBindingExecOwnerLiveness } from "./ownerLiveness";
+import { createRegistryDatabase } from "./RegistryDatabase";
+import { RegistrySqliteDialect } from "./RegistrySqliteDialect";
+import { SqliteLegacySlotRetirementStore } from "./sqliteLegacySlotRetirementStore";
+export { type BindingRegistryDatabase, parseJournalTarget } from "./bindingRegistryRows";
+
+export { BINDINGS_COORDINATION_SCOPE } from "../persistedIdentity";
 
 /** Scope under the ADB-server coordination root: host-wide, independent of any one adb server. */
 
 export const BINDINGS_REGISTRY_SUBDIR = "registry";
+
 export const BINDINGS_REGISTRY_FILE = "slots.sqlite";
 
 /**
@@ -116,263 +129,6 @@ export function bindingRegistryFileExists(dbPath: string = defaultBindingRegistr
   return existsSync(dbPath);
 }
 
-interface BindingScopesTable {
-  scope_key: string;
-  managed_host_scope: string;
-  runner_namespace: string;
-  runner_incarnation: string;
-  state: BindingScopeState;
-  invalidation_reason: BindingScopeInvalidationReason | null;
-  created_at_ms: number;
-  last_acquired_at_ms: number;
-  last_released_at_ms: number | null;
-  invalidating_at_ms: number | null;
-  invalidated_at_ms: number | null;
-}
-
-interface BindingAssignmentsTable {
-  scope_key: string;
-  slot_index: number;
-  role: string;
-  platform: BindingPlatform;
-  generation: number;
-  stable_device_id: string | null;
-  device_name: string | null;
-  requested_spec_json: string;
-  resolved_spec_json: string | null;
-  spec_fingerprint: string | null;
-  state: BindingAssignmentState;
-  exec_owner_daemon_id: string | null;
-  exec_owner_pid: number | null;
-  exec_owner_process_token: string | null;
-  exec_session_uuid: string | null;
-  settler_daemon_id: string | null;
-  settler_pid: number | null;
-  settler_process_token: string | null;
-  updated_at_ms: number;
-}
-
-interface BindingJournalTable {
-  id: Generated<number>;
-  scope_key: string;
-  slot_index: number;
-  kind: BindingJournalKind;
-  phase: BindingJournalPhase;
-  platform: BindingPlatform;
-  from_generation: number;
-  to_generation: number | null;
-  binding_generation: number;
-  binding_stable_device_id: string | null;
-  target_json: string;
-  owner_daemon_id: string;
-  owner_pid: number;
-  owner_process_token: string | null;
-  attempts: number;
-  last_error: string | null;
-  next_attempt_at_ms: number;
-  created_at_ms: number;
-  updated_at_ms: number;
-}
-
-export interface BindingRegistryDatabase {
-  slot_scopes: BindingScopesTable;
-  slot_assignments: BindingAssignmentsTable;
-  slot_journal: BindingJournalTable;
-  session_broker_requests: BrokerRequestsTable;
-  session_broker_resources: BrokerResourcesTable;
-}
-
-type Executor = Kysely<BindingRegistryDatabase> | Transaction<BindingRegistryDatabase>;
-type ScopeRow = Selectable<BindingScopesTable>;
-type AssignmentRow = Selectable<BindingAssignmentsTable>;
-type JournalRow = Selectable<BindingJournalTable>;
-
-function toScope(row: ScopeRow): BindingScopeRecord {
-  return {
-    scopeKey: row.scope_key,
-    managedHostScope: row.managed_host_scope,
-    runnerNamespace: row.runner_namespace,
-    runnerIncarnation: row.runner_incarnation,
-    state: row.state,
-    createdAtMs: row.created_at_ms,
-    lastAcquiredAtMs: row.last_acquired_at_ms,
-    lastReleasedAtMs: row.last_released_at_ms,
-    invalidationReason: row.invalidation_reason,
-    invalidatingAtMs: row.invalidating_at_ms,
-    invalidatedAtMs: row.invalidated_at_ms,
-  };
-}
-
-function parseSpecJson(json: string | null): unknown {
-  if (json === null) {
-    return null;
-  }
-  const parsed: unknown = JSON.parse(json);
-  return parsed;
-}
-
-function toExecOwner(row: AssignmentRow): BindingExecOwner | null {
-  if (
-    row.exec_owner_daemon_id === null ||
-    row.exec_owner_pid === null ||
-    row.exec_session_uuid === null
-  ) {
-    return null;
-  }
-  return {
-    daemonId: row.exec_owner_daemon_id,
-    pid: row.exec_owner_pid,
-    sessionUuid: row.exec_session_uuid,
-    processGenerationToken: row.exec_owner_process_token,
-  };
-}
-
-function toSettler(row: AssignmentRow): BindingProcessIdentity | null {
-  if (row.settler_daemon_id === null || row.settler_pid === null) {
-    return null;
-  }
-  return {
-    daemonId: row.settler_daemon_id,
-    pid: row.settler_pid,
-    processGenerationToken: row.settler_process_token,
-  };
-}
-
-function settlerColumns(settler: BindingProcessIdentity | null) {
-  return {
-    settler_daemon_id: settler?.daemonId ?? null,
-    settler_pid: settler?.pid ?? null,
-    settler_process_token: settler?.processGenerationToken ?? null,
-  };
-}
-
-function toAssignment(row: AssignmentRow): BindingAssignmentRecord {
-  return {
-    scopeKey: row.scope_key,
-    bindingIndex: row.slot_index,
-    role: row.role,
-    platform: row.platform,
-    generation: row.generation,
-    stableDeviceId: row.stable_device_id,
-    deviceName: row.device_name,
-    requestedSpec: parseSpecJson(row.requested_spec_json),
-    resolvedSpec: parseSpecJson(row.resolved_spec_json),
-    specFingerprint: row.spec_fingerprint,
-    state: row.state,
-    execOwner: toExecOwner(row),
-    settler: toSettler(row),
-    updatedAtMs: row.updated_at_ms,
-  };
-}
-
-function nullableString(record: Record<string, unknown>, field: string): string | null {
-  const value = record[field];
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (typeof value !== "string") {
-    throw new ActionableError(`Binding journal target field '${field}' is not a string`);
-  }
-  return value;
-}
-
-function isBindingPlatform(value: unknown): value is BindingPlatform {
-  return value === "android" || value === "ios";
-}
-
-export function parseJournalTarget(json: string): BindingJournalTarget {
-  const parsed: unknown = JSON.parse(json);
-  if (typeof parsed !== "object" || parsed === null) {
-    throw new ActionableError("Binding journal target is not an object");
-  }
-  const record = parsed as Record<string, unknown>;
-  const newPlatform = record.newPlatform;
-  if (newPlatform !== undefined && newPlatform !== null && !isBindingPlatform(newPlatform)) {
-    throw new ActionableError("Binding journal target field 'newPlatform' is not a platform");
-  }
-  return {
-    ...(newPlatform ? { newPlatform } : {}),
-    ...(record.removalRequested === true ? { removalRequested: true as const } : {}),
-    oldStableId: nullableString(record, "oldStableId"),
-    oldName: nullableString(record, "oldName"),
-    newName: nullableString(record, "newName"),
-    newStableId: nullableString(record, "newStableId"),
-    requestedSpec: record.requestedSpec ?? null,
-    resolvedSpec: record.resolvedSpec ?? null,
-    specFingerprint: nullableString(record, "specFingerprint"),
-  };
-}
-
-function toJournalEntry(row: JournalRow): BindingJournalEntry {
-  return {
-    id: row.id,
-    scopeKey: row.scope_key,
-    bindingIndex: row.slot_index,
-    kind: row.kind,
-    phase: row.phase,
-    platform: row.platform,
-    fromGeneration: row.from_generation,
-    toGeneration: row.to_generation,
-    binding: { generation: row.binding_generation, stableDeviceId: row.binding_stable_device_id },
-    target: parseJournalTarget(row.target_json),
-    owner: {
-      daemonId: row.owner_daemon_id,
-      pid: row.owner_pid,
-      processGenerationToken: row.owner_process_token,
-    },
-    attempts: row.attempts,
-    lastError: row.last_error,
-    nextAttemptAtMs: row.next_attempt_at_ms,
-    createdAtMs: row.created_at_ms,
-    updatedAtMs: row.updated_at_ms,
-  };
-}
-
-function serializeSpec(spec: unknown): string {
-  const json = JSON.stringify(spec ?? null);
-  if (json === undefined) {
-    throw new ActionableError("Binding spec must be JSON-serializable");
-  }
-  return json;
-}
-
-/** The journal columns one advance writes: phase, merged target, binding and attempt bookkeeping. */
-function journalAdvanceColumns(
-  entry: BindingJournalEntry,
-  input: AdvanceBindingJournalInput,
-  assignment: BindingAssignmentRecord | null,
-  nowMs: number,
-) {
-  return {
-    phase: input.phase,
-    target_json: serializeSpec({ ...entry.target, ...input.target }),
-    to_generation:
-      assignment && assignment.generation !== entry.binding.generation
-        ? assignment.generation
-        : entry.toGeneration,
-    ...(assignment
-      ? {
-          binding_generation: assignment.generation,
-          binding_stable_device_id: assignment.stableDeviceId,
-        }
-      : {}),
-    ...(input.attempt
-      ? {
-          attempts: entry.attempts + 1,
-          last_error: input.attempt.error,
-          next_attempt_at_ms: input.attempt.nextAttemptAtMs,
-        }
-      : {}),
-    updated_at_ms: nowMs,
-  };
-}
-
-function assertOpenPhase(phase: BindingJournalPhase): void {
-  if (!isBindingJournalPhaseOpen(phase)) {
-    throw new ActionableError(`A binding journal entry cannot open at phase '${phase}'`);
-  }
-}
-
 export interface SqliteBindingRegistryOptions {
   timer?: Timer;
   /** Decides whether a recorded execution owner is alive. Defaults to PID + process generation. */
@@ -408,23 +164,7 @@ export const BINDING_REGISTRY_BUSY_TIMEOUT_MS = Math.min(250, SQLITE_BUSY_TIMEOU
 type RegistrySqliteHandle = BunSqliteHandle;
 
 function openRegistrySqlite(dbPath: string): RegistrySqliteHandle {
-  // Resolved lazily, like database.ts, so importing this module never requires the Bun runtime.
-  const { Database } = require("bun:sqlite") as {
-    Database: new (path: string) => RegistrySqliteHandle;
-  };
-  // The shared driver still finalizes statements, rejects queued work and closes the handle.
-  // Only this registry handle skips its close-time maintenance: both PRAGMAs can each wait a
-  // fresh busy_timeout behind a peer writer, even after a failed open. SQLite's automatic WAL
-  // checkpoints and durable FULL-sync commits suffice; explicit shutdown truncation is optional.
-  class RegistryDatabase extends Database {
-    override exec(sql: string): void {
-      if (sql === "PRAGMA optimize;" || sql === "PRAGMA wal_checkpoint(TRUNCATE);") {
-        return;
-      }
-      super.exec(sql);
-    }
-  }
-  const sqliteDb = new RegistryDatabase(dbPath);
+  const sqliteDb = createRegistryDatabase(dbPath);
   try {
     sqliteDb.exec(`PRAGMA busy_timeout = ${BINDING_REGISTRY_BUSY_TIMEOUT_MS};`);
     sqliteDb.exec("PRAGMA journal_mode = WAL;");
@@ -436,21 +176,6 @@ function openRegistrySqlite(dbPath: string): RegistrySqliteHandle {
     throw error;
   }
   return sqliteDb;
-}
-
-// SQLite supports transactional DDL. Kysely's default SQLite adapter opts out; here a busy
-// migration must roll back its ALTERs AND migration records before a factory retries the open.
-// Kept registry-local so the per-daemon database retains its existing migration behavior.
-class RegistrySqliteAdapter extends SqliteAdapter {
-  override get supportsTransactionalDdl(): boolean {
-    return true;
-  }
-}
-
-class RegistrySqliteDialect extends BunSqliteDialect {
-  override createAdapter(): SqliteAdapter {
-    return new RegistrySqliteAdapter();
-  }
 }
 
 /**
@@ -513,6 +238,10 @@ export class SqliteBindingRegistry implements BindingRegistry {
   /** Shares this connection, transaction lock and physical authority; never opens another DB. */
   sessionBrokerStore(scopeKey: string, ids?: IdGenerator): SqliteSessionBrokerStore {
     return new SqliteSessionBrokerStore(this.db, scopeKey, this.isExecOwnerLive, ids, this.timer);
+  }
+
+  deviceMutationJournal(): SqliteDeviceMutationJournal {
+    return new SqliteDeviceMutationJournal(this.db, this.timer);
   }
 
   async ensureScope(identity: BindingScopeIdentity): Promise<EnsureScopeResult> {

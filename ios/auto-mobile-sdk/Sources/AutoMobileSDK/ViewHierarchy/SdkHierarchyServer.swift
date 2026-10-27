@@ -64,6 +64,7 @@
         private let storageQueue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.storage")
         private weak var tracker: (any SdkHierarchyServing)?
         let databaseRouteHandler = SdkDatabaseRouteHandler()
+        let keychainDeletionRouteHandler = SdkKeychainDeletionRouteHandler()
         let preferenceRouteHandler = SdkPreferenceRouteHandler()
         private let triggerRouteHandler = SdkTriggerRouteHandler()
 
@@ -266,33 +267,37 @@
                     }
 
                     if let rejection = self.authorizeRequest(headers: request, execute: {
-                        guard self.requireApplicationActive(connection) else { return }
-
-                        // Preserve identity authorization first, then the foreground gate, then routing.
-                        // Unknown, wrong-method, and malformed requests retain the existing gate responses.
-                        let requestLine = request.components(separatedBy: "\r\n")[0]
-                        switch Self.route(forRequestLine: requestLine) {
-                        case let .matched(route):
-                            self.dispatch(route, connection: connection, requestData: requestData)
-                        case .notFound:
-                            self.sendResponse(connection, statusCode: 404, body: Data("{\"error\":\"not_found\"}".utf8))
-                        case let .methodNotAllowed(allowed):
-                            self.sendResponse(
-                                connection, statusCode: 405,
-                                body: Data("{\"error\":\"method_not_allowed\"}".utf8),
-                                extraHeaders: [("Allow", allowed.joined(separator: ", "))]
-                            )
-                        case .malformed:
-                            self.sendResponse(
-                                connection,
-                                statusCode: 400,
-                                body: Data("{\"error\":\"bad_request\"}".utf8)
-                            )
-                        }
+                        self.routeAuthorizedRequest(request, connection: connection, requestData: requestData)
                     }) {
                         self.sendRouteResponse(connection, rejection)
                     }
                 }
+            }
+        }
+
+        private func routeAuthorizedRequest(_ request: String, connection: NWConnection, requestData: Data) {
+            guard requireApplicationActive(connection) else { return }
+
+            // Preserve identity authorization first, then the foreground gate, then routing.
+            // Unknown, wrong-method, and malformed requests retain the existing gate responses.
+            let requestLine = request.components(separatedBy: "\r\n")[0]
+            switch Self.route(forRequestLine: requestLine) {
+            case let .matched(route):
+                dispatch(route, connection: connection, requestData: requestData)
+            case .notFound:
+                sendResponse(connection, statusCode: 404, body: Data("{\"error\":\"not_found\"}".utf8))
+            case let .methodNotAllowed(allowed):
+                sendResponse(
+                    connection, statusCode: 405,
+                    body: Data("{\"error\":\"method_not_allowed\"}".utf8),
+                    extraHeaders: [("Allow", allowed.joined(separator: ", "))]
+                )
+            case .malformed:
+                sendResponse(
+                    connection,
+                    statusCode: 400,
+                    body: Data("{\"error\":\"bad_request\"}".utf8)
+                )
             }
         }
 

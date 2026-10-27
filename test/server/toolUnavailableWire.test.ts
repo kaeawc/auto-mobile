@@ -5,7 +5,7 @@ import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { DAEMON_TOOL_UNAVAILABLE_CODE, DAEMON_UNKNOWN_TOOL_CODE } from "../../src/daemon/types";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { isToolUnavailableWireError } from "../../src/server/toolUnavailableError";
+import { isToolUnavailableWireError } from "../../src/daemon/toolUnavailableError";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 
@@ -65,7 +65,7 @@ describe("gated tools carry a structured marker over the MCP wire (issue #10177)
     throw new Error(`${name} unexpectedly succeeded`);
   }
 
-  test.each(GATED)("$name: gate reason text unchanged, marker on the wire", async (gated) => {
+  test.each([...GATED])("$name: gate reason text unchanged, marker on the wire", async (gated) => {
     const error = await callError(gated.name);
     expect(error.code).toBe(-32603);
     expect(error.message).toBe(`Unknown tool: ${gated.name}. ${gated.reason}`);

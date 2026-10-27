@@ -1,12 +1,8 @@
+import { createAndroidHierarchyConverter } from "../../helpers/androidHierarchyConverter";
 import { describe, expect, test } from "bun:test";
 import capture from "../../fixtures/android-launcher/launcher-recents-emulator-5602.json";
-import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
-import type {
-  AccessibilityHierarchy,
-  HierarchyDelegateContext,
-} from "../../../src/features/observe/android/types";
+import type { AccessibilityHierarchy } from "../../../src/features/observe/android/types";
 import type { PrototypeWindowAppearance } from "../../../src/models/ViewHierarchyResult";
-import { FakeTimer } from "../../fakes/FakeTimer";
 import { RELABELLED_CAPTURE } from "../../helpers/prototypeWindowCapture";
 
 /**
@@ -21,9 +17,7 @@ function convert(appearance?: PrototypeWindowAppearance) {
       ? { ...window, prototypePlacement: "sheet", prototypeAppearance: appearance }
       : window,
   );
-  return new CtrlProxyHierarchy({
-    timer: new FakeTimer(),
-  } as HierarchyDelegateContext).convertToViewHierarchyResult(wire);
+  return createAndroidHierarchyConverter().convertToViewHierarchyResult(wire);
 }
 
 describe("prototypeAppearance on a hierarchy window entry (#11223)", () => {

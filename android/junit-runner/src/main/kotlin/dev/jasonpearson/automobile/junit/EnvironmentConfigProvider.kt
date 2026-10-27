@@ -20,21 +20,21 @@ internal class EnvironmentConfigProvider : ConfigProvider {
         ModelProvider.OPENAI ->
           System.getenv("OPENAI_API_KEY")
             ?: System.getProperty("automobile.openai.api.key")
-            ?: throw RuntimeException(
+            ?: throw IllegalStateException(
               "OpenAI API key not found. Set OPENAI_API_KEY environment variable or automobile.openai.api.key system property",
             )
 
         ModelProvider.ANTHROPIC ->
           System.getenv("ANTHROPIC_API_KEY")
             ?: System.getProperty("automobile.anthropic.api.key")
-            ?: throw RuntimeException(
+            ?: throw IllegalStateException(
               "Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable or automobile.anthropic.api.key system property",
             )
 
         ModelProvider.GOOGLE ->
           System.getenv("GOOGLE_API_KEY")
             ?: System.getProperty("automobile.google.api.key")
-            ?: throw RuntimeException(
+            ?: throw IllegalStateException(
               "Google API key not found. Set GOOGLE_API_KEY environment variable or automobile.google.api.key system property",
             )
       }

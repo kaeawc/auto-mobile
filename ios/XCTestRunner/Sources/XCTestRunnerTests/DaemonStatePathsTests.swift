@@ -1,8 +1,8 @@
 import XCTest
 @testable import XCTestRunner
 
-/// #10906: the runner must resolve the same control socket and PID file as the daemon it launches
-/// (`resolveDaemonStatePath` in `src/daemon/constants.ts`). Both are tested against the shared
+/// #10906: the runner must resolve the same control socket, PID and token files as the daemon it launches
+/// (`resolveDaemonStatePath` in `src/daemon/wire/constants.ts`). All are tested against the shared
 /// vectors in `test/fixtures/daemon-isolation-paths.json`, as are the JUnit runner and desktop ports.
 final class DaemonStatePathsTests: XCTestCase {
     private struct Vectors: Decodable {
@@ -16,6 +16,7 @@ final class DaemonStatePathsTests: XCTestCase {
         let suffix: String
         let socketPath: String
         let pidFilePath: String
+        let tokenFilePath: String
     }
 
     private func loadVectors() throws -> Vectors {
@@ -29,7 +30,7 @@ final class DaemonStatePathsTests: XCTestCase {
         return try JSONDecoder().decode(Vectors.self, from: Data(contentsOf: url))
     }
 
-    func testSocketAndPidPathsMatchTheSharedDaemonVectors() throws {
+    func testSocketPidAndTokenPathsMatchTheSharedDaemonVectors() throws {
         let vectors = try loadVectors()
         XCTAssertFalse(vectors.cases.isEmpty)
         // Every vector is absolute or names an absolute launch cwd, so the cwd must never be used.
@@ -52,6 +53,13 @@ final class DaemonStatePathsTests: XCTestCase {
                     .pid, environment: vector.env, userId: { vectors.uid }, currentDirectory: currentDirectory
                 ),
                 vector.pidFilePath,
+                vector.name
+            )
+            XCTAssertEqual(
+                DaemonStatePaths.resolve(
+                    .token, environment: vector.env, userId: { vectors.uid }, currentDirectory: currentDirectory
+                ),
+                vector.tokenFilePath,
                 vector.name
             )
         }

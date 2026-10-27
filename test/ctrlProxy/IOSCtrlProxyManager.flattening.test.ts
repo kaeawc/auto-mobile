@@ -1,6 +1,12 @@
+import { IosRunnerLaunchFailures } from "../../src/ctrlProxy/ios/IosRunnerLaunchFailure";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { DefaultIosTunnelClient } from "../../src/ctrlProxy/ios/IosTunnelClient";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
+import type {
+  IosCtrlProxyLifecycleSteps,
+  IosCtrlProxyStepOverrides,
+} from "../../src/ctrlProxy/ios/IosCtrlProxyLifecycleSteps";
 import { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
 import { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { createExecResult } from "../../src/utils/execResult";
@@ -17,7 +23,9 @@ function getTunnel(manager: IOSCtrlProxyManager): DefaultIosTunnelClient {
   return client;
 }
 
-type RemoteRunner = NonNullable<Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[6]>;
+type RemoteRunner = NonNullable<
+  Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[0]["remoteRunner"]
+>;
 const simulator = {
   platform: "ios" as const,
   deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
@@ -81,18 +89,53 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
-  function makeManager(device = simulator, remote = remoteRunner()) {
-    return IOSCtrlProxyManager.createForTestingWithDeps(
+  function makeManager(
+    device = simulator,
+    remote = remoteRunner(),
+    steps?: IosCtrlProxyStepOverrides,
+  ) {
+    return IOSCtrlProxyManager.createForTestingWithOptions({
       device,
       timer,
-      undefined,
-      new FakeProcessExecutor(),
-      undefined,
-      undefined,
-      remote,
-      { isAvailable: async () => true },
-    );
+      processExecutor: new FakeProcessExecutor(),
+      remoteRunner: remote,
+      hostPortAvailabilityChecker: { isAvailable: async () => true },
+      steps,
+    });
   }
+
+  test.each(["spawned", "adopted"])(
+    "retracking a %s PID clears its previous launch failure",
+    async (mode) => {
+      const remote = remoteRunner();
+      remote.status = async () => ({
+        success: true,
+        data: { running: true, pid: 123, port: 8767 },
+      });
+      const manager = makeManager(simulator, remote);
+      const child = new FakeChildProcess(timer);
+      child.pid = 123;
+      manager.trackStartedXcodebuild(child);
+      child.stdout.emit("data", "CtrlProxy listener failed: Address already in use");
+      const clearFailure = IosRunnerLaunchFailures.prototype.clear;
+      const clear = spyOn(IosRunnerLaunchFailures.prototype, "clear").mockImplementation(function (
+        this: IosRunnerLaunchFailures,
+        pid: number,
+      ) {
+        expect(this.get(pid)?.reason).toBe("listener-bind-failed");
+        clearFailure.call(this, pid);
+        expect(this.get(pid)).toBeUndefined();
+      });
+      restores.push(() => clear.mockRestore());
+      if (mode === "adopted") {
+        expect(await manager.startOnSimulator()).toBe("adopted");
+      } else {
+        manager.trackStartedXcodebuild(child);
+      }
+      expect(manager.getXcTestProcessId()).toBe(123);
+      expect(clear).toHaveBeenCalledWith(123);
+    },
+  );
 
   test.each(["installed", "absent", "failed", "missing data", "throws"])(
     "remote installation: %s preserves result, cache, and warning",
@@ -139,17 +182,17 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
     async (branch) => {
       const events: string[] = [];
       const builder = IosCtrlProxyBuilder.getInstance();
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        simulator,
+      const legacy = mock(async () => {});
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: simulator,
         timer,
         builder,
-        new FakeProcessExecutor(),
-        undefined,
-        fakeDeviceAppManager(),
-      );
+        processExecutor: new FakeProcessExecutor(),
+        deviceAppManager: fakeDeviceAppManager(),
+        steps: { uninstallLegacyAppIfPresent: legacy },
+      });
       const result = { success: branch !== "failed build", message: "built", error: "build error" };
       const pin = spyOn(IosCtrlProxyBuilder, "isPinnedVersionUnverifiable").mockReturnValue(false);
-      const legacy = spyOn(manager, "uninstallLegacyAppIfPresent").mockResolvedValue();
       const running = spyOn(manager, "isRunning").mockResolvedValue(false);
       const needs = spyOn(builder, "needsRebuild").mockImplementation(async () => {
         events.push("needs");
@@ -177,7 +220,7 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
         events.push(message);
       });
       restores.push(
-        ...[pin, legacy, running, needs, cached, waited, build, start, info].map(
+        ...[pin, running, needs, cached, waited, build, start, info].map(
           (mock) => () => mock.mockRestore(),
         ),
       );
@@ -370,35 +413,53 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
     "listener cleanup preserves loop exits: %s",
     async (branch) => {
       const events: string[] = [];
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        simulator,
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: simulator,
         timer,
-        undefined,
-        new FakeProcessExecutor(),
-      );
+        builder: undefined,
+        processExecutor: new FakeProcessExecutor(),
+      });
       const owned = { pid: 5555, port: 8765, command: "xcodebuild" };
       const foreign = { pid: 5556, port: 8765, command: "foreign" };
       let probes = 0;
-      const listeners = spyOn(manager, "findListeningProcessesOnPort").mockImplementation(
-        async () => {
-          probes++;
-          events.push(`probe:${probes}`);
-          if (probes === 1) {
-            return [owned];
-          }
-          if (branch === "graceful") {
-            return [];
-          }
-          if (probes === 2 || branch === "wedged") {
-            return [owned];
-          }
-          return probes === 3 && branch === "foreign" ? [foreign] : [];
-        },
+      const listeners = spyOn(
+        manager.diagnostics.processClient,
+        "findListeningPids",
+      ).mockImplementation(async () => {
+        probes++;
+        events.push(`probe:${probes}`);
+        if (probes === 1) {
+          return [owned.pid];
+        }
+        if (branch === "graceful") {
+          return [];
+        }
+        if (probes === 2 || branch === "wedged") {
+          return [owned.pid];
+        }
+        return probes === 3 && branch === "foreign" ? [foreign.pid] : [];
+      });
+      const ownership = spyOn(
+        manager.diagnostics.processClient,
+        "hasDeviceIdentity",
+      ).mockImplementation((command) => command === owned.command);
+      const runner = spyOn(
+        manager.diagnostics.processClient,
+        "isCtrlProxyRunnerCommand",
+      ).mockReturnValue(true);
+      const root = spyOn(manager.diagnostics.processClient, "getProcessInfo").mockImplementation(
+        async (pid) =>
+          pid === 4444
+            ? {
+                command:
+                  "sh xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun platform=iOS Simulator -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
+                ppid: 1,
+              }
+            : {
+                command: pid === owned.pid ? owned.command : foreign.command,
+                ppid: pid === owned.pid ? 4444 : 1,
+              },
       );
-      const ownership = spyOn(manager, "isOwnedCtrlProxyRunnerProcess").mockImplementation(
-        (process) => process.pid === owned.pid,
-      );
-      const root = spyOn(manager, "findDaemonManagedRunnerTreeRoot").mockResolvedValue(4444);
       const terminate = spyOn(
         manager.diagnostics.processClient,
         "terminateProcessTree",
@@ -412,7 +473,9 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
         events.push(message);
       });
       restores.push(
-        ...[listeners, ownership, root, terminate, warn].map((mock) => () => mock.mockRestore()),
+        ...[listeners, ownership, runner, root, terminate, warn].map(
+          (mock) => () => mock.mockRestore(),
+        ),
       );
       if (branch === "wedged") {
         await expect(manager.ensureServicePortReadyForLaunch()).rejects.toThrow(
@@ -452,7 +515,25 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
   test.each(["success", "collision", "other error"])(
     "alive physical startup preserves tunnel recovery: %s",
     async (branch) => {
-      const manager = makeManager(physical);
+      const events: string[] = [];
+      const health = mock<IosCtrlProxyLifecycleSteps["waitForHealthEndpoint"]>(async () => {
+        events.push("health");
+        return true;
+      });
+      const complete = mock<IosCtrlProxyLifecycleSteps["completeHealthStartup"]>(async () => {
+        events.push("complete");
+      });
+      const restart = mock<IosCtrlProxyLifecycleSteps["startOnDevice"]>(async () => {
+        events.push("restart");
+        return "spawned";
+      });
+      const remote = remoteRunner();
+      const manager = makeManager(physical, remote, {
+        waitForHealthEndpoint: health,
+        completeHealthStartup: complete,
+        startOnDevice: restart,
+      });
+      manager.testHooks.setState({ xcTestProcessId: 123 });
       let failure: unknown = new Error("tunnel unavailable");
       if (branch === "collision") {
         const available = spyOn(
@@ -466,8 +547,10 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
         }
         available.mockRestore();
       }
-      const events: string[] = [];
-      const alive = spyOn(manager, "isCtrlProxyProcessAlive").mockResolvedValue(true);
+      const alive = spyOn(remote, "status").mockResolvedValue({
+        success: true,
+        data: { running: true, pid: 123 },
+      });
       const tunnel = spyOn(manager, "startIproxyTunnel").mockImplementation(async (options) => {
         expect(options).toEqual({ allowServicePortReallocation: false });
         events.push("tunnel");
@@ -475,36 +558,25 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
           throw failure;
         }
       });
-      const restart = spyOn(
-        manager,
-        "restartDeviceProcessAfterHostPortCollision",
-      ).mockImplementation(async () => {
-        events.push("restart");
-      });
       const iproxy = spyOn(getTunnel(manager).diagnostics.supervisor, "start").mockImplementation(
         async () => {
           events.push("iproxy supervision");
         },
       );
-      const supervision = spyOn(manager, "startProcessSupervision").mockImplementation(async () => {
-        events.push("supervision");
-      });
+      const supervision = spyOn(manager.diagnostics.processSupervisor, "start").mockImplementation(
+        async () => {
+          events.push("supervision");
+        },
+      );
       const running = spyOn(manager, "isRunning").mockImplementation(async () => {
         events.push("running");
         return false;
-      });
-      const health = spyOn(manager, "waitForHealthEndpoint").mockImplementation(async () => {
-        events.push("health");
-        return true;
-      });
-      const complete = spyOn(manager, "completeHealthStartup").mockImplementation(async () => {
-        events.push("complete");
       });
       const warn = spyOn(logger, "warn").mockImplementation((message) => {
         events.push(message);
       });
       restores.push(
-        ...[alive, tunnel, restart, iproxy, supervision, running, health, complete, warn].map(
+        ...[alive, tunnel, iproxy, supervision, running, warn].map(
           (mock) => () => mock.mockRestore(),
         ),
       );
@@ -542,16 +614,19 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
 
   test("remote hung-runner stop rejection still clears ownership and rearms supervision before timeout", async () => {
     const remote = remoteRunner();
-    const manager = makeManager(simulator, remote);
+    const own = mock<IosCtrlProxyLifecycleSteps["isOwnRunnerProcessAlive"]>(async () => true);
+    const health = mock<IosCtrlProxyLifecycleSteps["waitForHealthEndpoint"]>(async () => false);
+    const manager = makeManager(simulator, remote, {
+      isOwnRunnerProcessAlive: own,
+      waitForHealthEndpoint: health,
+    });
     manager.testHooks.setState({ xcTestProcessId: 123 });
     const events: string[] = [];
-    const alive = spyOn(manager, "isCtrlProxyProcessAlive").mockResolvedValue(false);
+    const alive = spyOn(remote, "status").mockResolvedValue({
+      success: true,
+      data: { running: false },
+    });
     const running = spyOn(manager, "isRunning").mockResolvedValue(false);
-    const own = spyOn(manager, "isOwnRunnerProcessAlive").mockResolvedValue(true);
-    const health = spyOn(manager, "waitForHealthEndpoint").mockResolvedValue(false);
-    const extension = spyOn(manager, "completeHealthStartupIfDeadlineExtended").mockResolvedValue(
-      false,
-    );
     const stop = spyOn(remote, "stop").mockImplementation(async (options) => {
       expect(options).toEqual({ deviceId: simulator.deviceId, pid: 123 });
       events.push("remote stop");
@@ -573,29 +648,20 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
       expect(manager.diagnostics.xcTestProcessId).toBeNull();
       events.push("supervisor start");
     });
-    const listeners = spyOn(manager, "findListeningProcessesOnPort").mockImplementation(
-      async () => {
-        events.push("listeners");
-        return [];
-      },
-    );
+    const listeners = spyOn(
+      manager.diagnostics.processClient,
+      "findListeningPids",
+    ).mockImplementation(async () => {
+      events.push("listeners");
+      return [];
+    });
     const warn = spyOn(logger, "warn").mockImplementation((message) => {
       events.push(message);
     });
     restores.push(
-      ...[
-        alive,
-        running,
-        own,
-        health,
-        extension,
-        stop,
-        cache,
-        supervisorStop,
-        supervisorStart,
-        listeners,
-        warn,
-      ].map((mock) => () => mock.mockRestore()),
+      ...[alive, running, stop, cache, supervisorStop, supervisorStart, listeners, warn].map(
+        (mock) => () => mock.mockRestore(),
+      ),
     );
     const shared = {
       controller: new AbortController(),
@@ -612,6 +678,7 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
       "CtrlProxy failed to start within timeout (30s)",
     );
     expect(events).toEqual([
+      "[IOSCtrlProxy] Runner launch progress sample unavailable",
       "[IOSCtrlProxy] Deferred-to CtrlProxy runner (PID 123) never became healthy within 30s; terminating it so the next start spawns a fresh runner",
       "remote stop",
       "[IOSCtrlProxy] Remote runner stop of hung runner 123 failed: remote stop unavailable",

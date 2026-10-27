@@ -3,33 +3,41 @@ import type { DaemonManagerLike, DaemonRestartResult } from "../manager";
 import type { DaemonOptions, DaemonStatus } from "../types";
 import type { Timer } from "../../utils/SystemTimer";
 import type { DaemonMcpProxyConfig } from "../daemonMcpProxy";
-import { assertDaemonNamespaceMatchesState } from "../sharedNamespaceGuard";
+import {
+  assertDaemonNamespaceMatchesState,
+  isDaemonNamespaceIsolated,
+} from "../sharedNamespaceGuard";
 import { logger } from "../../utils/logger";
 import {
   DAEMON_STARTUP_TIMEOUT_MS,
+  resolveDaemonVersion,
+  syncSettledDaemonVersion,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
-} from "../constants";
+  DEFAULT_DAEMON_PORT,
+} from "../wire/constants";
 import {
   buildIdentitiesMatch,
   buildIdentityFromStatus,
   type BuildIdentity,
-} from "../buildIdentity";
-import { compareStrictNumericVersions } from "../../server/deviceMatcher";
-import { releaseVersion } from "../../utils/mcpVersion";
+} from "../wire/buildIdentity";
+import { compareStrictNumericVersions } from "../../utils/deviceMatcher";
+import { releaseVersion, withoutDirtyStamp } from "../../utils/mcpVersion";
 import { daemonProcessOptions } from "../daemonOptionScopes";
 import { DaemonRestartDeferredError } from "../daemonRestartAdmission";
-import { startupOptionDeficits, mergeDaemonOptions } from "./startupOptions";
+import {
+  startupOptionDeficits,
+  mergeDaemonOptions,
+  restartOptionsForLostDaemon,
+} from "./startupOptions";
+import { DaemonRestartOptionsUnknownError } from "./DaemonRestartOptionsUnknownError";
 import {
   DaemonVersionMismatchError,
-  DaemonBuildMismatchError,
-  DaemonAssetVersionMismatchError,
-  daemonInternalErrors,
   type VersionMismatchReason,
-  type BuildMismatchReason,
-} from "./daemonErrors";
-const { DaemonPreflightConnectionError } = daemonInternalErrors;
-
+} from "./DaemonVersionMismatchError";
+import { DaemonBuildMismatchError, type BuildMismatchReason } from "./DaemonBuildMismatchError";
+import { DaemonAssetVersionMismatchError } from "./DaemonAssetVersionMismatchError";
+import { DaemonPreflightConnectionError } from "./DaemonPreflightConnectionError";
 export async function runPreflightTransport<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();
@@ -67,6 +75,8 @@ export interface DaemonLifecycleReconcilerDeps {
   readonly clientVersion: string;
   readonly clientAssetVersion: string | null;
   readonly buildIdentity: BuildIdentity;
+  /** Version a daemon spawned from this client's entry script would report now; undefined when it cannot be probed. */
+  readonly readCheckoutVersion?: () => Promise<string | null>;
   invalidateCache(): void;
   assertDaemonLifecycleUnfenced(): void;
 
@@ -113,7 +123,21 @@ export interface DaemonLifecycleReconcilerDeps {
 }
 
 export class DaemonLifecycleReconciler {
+  private lastRunningStatus: DaemonStatus | undefined;
+  private checkoutVersion: string | undefined;
+  private readonly acceptedCheckoutVersions = new Set<string>();
+
   constructor(private readonly deps: DaemonLifecycleReconcilerDeps) {}
+
+  private observeStatus(status: DaemonStatus): DaemonStatus {
+    if (status.running) {
+      this.lastRunningStatus = {
+        ...status,
+        options: status.options ? { ...status.options } : undefined,
+      };
+    }
+    return status;
+  }
 
   createStatusProbe(config: DaemonMcpProxyConfig): (() => Promise<DaemonStatus>) | undefined {
     // Custom transports supply their matching probe separately; constructing a
@@ -132,11 +156,16 @@ export class DaemonLifecycleReconciler {
   }
 
   reconciliationStatus(): Promise<DaemonStatus> {
-    if (!this.deps.daemonStatusProbe) {
-      return this.deps.daemonManager.status();
-    }
-    this.deps.reconciliationSnapshot ??= this.deps.readSocketReconciliationStatus();
-    return this.deps.reconciliationSnapshot;
+    const status = this.deps.daemonStatusProbe
+      ? (this.deps.reconciliationSnapshot ??= this.deps.readSocketReconciliationStatus())
+      : this.deps.daemonManager.status();
+    // Observe before consumers resume, preserving the original promise's reconciliation timing.
+    // Its rejection still propagates through the returned promise to the caller.
+    void status.then(
+      (observed) => this.observeStatus(observed),
+      () => undefined,
+    );
+    return status;
   }
 
   isSameDaemonGeneration(current: DaemonStatus, expected: DaemonStatus): boolean {
@@ -233,14 +262,16 @@ export class DaemonLifecycleReconciler {
       recorded.buildId === actualBuild.buildId &&
       recorded.entryScript === actualBuild.entryScript;
     // Only the socket owner can advertise support, even when PID metadata matches.
-    return matchesRecord
-      ? {
-          ...recorded,
-          ...actual,
-          structuredSessionNotFound: actual.structuredSessionNotFound,
-          structuredToolErrorCodes: actual.structuredToolErrorCodes,
-        }
-      : actual;
+    return this.observeStatus(
+      matchesRecord
+        ? {
+            ...recorded,
+            ...actual,
+            structuredSessionNotFound: actual.structuredSessionNotFound,
+            structuredToolErrorCodes: actual.structuredToolErrorCodes,
+          }
+        : actual,
+    );
   }
 
   assertAutomaticRestartAllowed(status: DaemonStatus, reason: string): void {
@@ -258,11 +289,25 @@ export class DaemonLifecycleReconciler {
   }
 
   /** Newer clients may replace older daemons; mismatches remain a pre-dispatch gate. */
-  async ensureVersionMatches(
+  ensureVersionMatches(
     reconciliationDeadline = this.deps.timer.now() + DAEMON_STARTUP_TIMEOUT_MS,
     observedStatus?: DaemonStatus,
   ): Promise<void> {
-    const status = observedStatus ?? (await this.deps.reconciliationStatus());
+    // Compare the settled (dirty-aware) identity (#14405). Once settled, call through
+    // directly so the gate adds no microtask turns ahead of the status read.
+    if (syncSettledDaemonVersion()) {
+      return this.ensureSettledVersionMatches(reconciliationDeadline, observedStatus);
+    }
+    return resolveDaemonVersion().then(() =>
+      this.ensureSettledVersionMatches(reconciliationDeadline, observedStatus),
+    );
+  }
+
+  private async ensureSettledVersionMatches(
+    reconciliationDeadline: number,
+    observedStatus: DaemonStatus | undefined,
+  ): Promise<void> {
+    const status = this.observeStatus(observedStatus ?? (await this.deps.reconciliationStatus()));
     if (!status.running) {
       return;
     }
@@ -273,6 +318,10 @@ export class DaemonLifecycleReconciler {
     }
 
     if (!this.deps.requiresVersionRestart(status, runningVersion)) {
+      return;
+    }
+
+    if ((await this.staleClientDisposition(status, runningVersion)) === "accept") {
       return;
     }
 
@@ -327,6 +376,14 @@ export class DaemonLifecycleReconciler {
   async verifyRestartedVersion(): Promise<void> {
     const restartedStatus = await this.deps.reconciliationStatus();
     const restartedVersion = restartedStatus.version?.trim() ?? "";
+    if (
+      restartedStatus.running &&
+      restartedVersion !== this.deps.clientVersion &&
+      this.isClientCheckout(restartedStatus)
+    ) {
+      this.acceptCheckoutVersion(restartedStatus, restartedVersion);
+      return;
+    }
     if (!restartedStatus.running || restartedVersion !== this.deps.clientVersion) {
       throw this.deps.versionMismatchError(
         restartedVersion,
@@ -334,6 +391,63 @@ export class DaemonLifecycleReconciler {
         "daemon restart completed but version still differs",
         undefined,
         buildIdentityFromStatus(restartedStatus),
+      );
+    }
+  }
+
+  private isClientCheckout(status: DaemonStatus): boolean {
+    return (
+      !!status.entryScript &&
+      status.entryScript === this.deps.buildIdentity.entryScript &&
+      buildIdentitiesMatch(this.deps.buildIdentity, buildIdentityFromStatus(status))
+    );
+  }
+
+  private async staleClientDisposition(
+    status: DaemonStatus,
+    runningVersion: string,
+  ): Promise<"accept" | "restart"> {
+    if (!this.isClientCheckout(status)) {
+      return "restart";
+    }
+    const checkoutVersion =
+      runningVersion === this.checkoutVersion
+        ? this.checkoutVersion
+        : await this.probeCheckoutVersion();
+    if (checkoutVersion !== runningVersion) {
+      return "restart";
+    }
+    this.acceptCheckoutVersion(status, runningVersion);
+    return "accept";
+  }
+
+  private async probeCheckoutVersion(): Promise<string | undefined> {
+    try {
+      return (await this.deps.readCheckoutVersion?.()) ?? this.checkoutVersion;
+    } catch (error) {
+      logger.warn(
+        "[DaemonMcpProxy] Checkout version probe failed; using last known version",
+        error,
+      );
+      return this.checkoutVersion;
+    }
+  }
+
+  private acceptCheckoutVersion(status: DaemonStatus, runningVersion: string): void {
+    this.checkoutVersion = runningVersion;
+    if (withoutDirtyStamp(runningVersion) !== withoutDirtyStamp(this.deps.clientVersion)) {
+      throw this.deps.versionMismatchError(
+        runningVersion,
+        "staleClient",
+        "the daemon already runs this checkout's current version; restarting cannot reconcile",
+        undefined,
+        buildIdentityFromStatus(status),
+      );
+    }
+    if (!this.acceptedCheckoutVersions.has(runningVersion)) {
+      this.acceptedCheckoutVersions.add(runningVersion);
+      logger.info(
+        `[DaemonMcpProxy] Accepting checkout version ${runningVersion} for MCP client ${this.deps.clientVersion}; only working-tree state differs`,
       );
     }
   }
@@ -475,7 +589,7 @@ export class DaemonLifecycleReconciler {
     reconciliationDeadline = this.deps.timer.now() + DAEMON_STARTUP_TIMEOUT_MS,
     observedStatus?: DaemonStatus,
   ): Promise<void> {
-    const status = observedStatus ?? (await this.deps.reconciliationStatus());
+    const status = this.observeStatus(observedStatus ?? (await this.deps.reconciliationStatus()));
     if (!status.running) {
       return;
     }
@@ -648,17 +762,33 @@ export class DaemonLifecycleReconciler {
     );
   }
 
-  /**
-   * Start the daemon process
-   */
+  /** Choose recovery options only after a previously observed daemon has disappeared. */
+  private daemonStartOptions(): DaemonOptions {
+    const observed = this.lastRunningStatus;
+    const requested = this.deps.config.daemonOptions;
+    if (!observed) {
+      return daemonProcessOptions(requested);
+    }
+    const env = this.deps.config.lifecycleNamespaceEnv;
+    if (!observed.options && observed.port === undefined && env && isDaemonNamespaceIsolated(env)) {
+      throw new DaemonRestartOptionsUnknownError();
+    }
+    const options = restartOptionsForLostDaemon(observed, requested);
+    logger.info(
+      `[DaemonMcpProxy] Restarting lost daemon with its recorded startup options ` +
+        `(port ${options.port ?? DEFAULT_DAEMON_PORT}, flags ${JSON.stringify(options)})`,
+    );
+    return options;
+  }
+
+  /** Start the daemon process or join an in-progress startup. */
   async startDaemon(): Promise<void> {
-    const status = await this.deps.daemonManager.status();
+    const status = this.observeStatus(await this.deps.daemonManager.status());
     this.deps.assertDaemonLifecycleUnfenced();
 
     if (!status.running) {
       logger.info("[DaemonMcpProxy] Starting daemon...");
-      // Pass through daemon options (debug flags, video defaults, etc.)
-      await this.deps.daemonManager.start(daemonProcessOptions(this.deps.config.daemonOptions));
+      await this.deps.daemonManager.start(this.daemonStartOptions());
 
       // Wait for daemon to be ready
       const ready = await this.deps.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
@@ -667,6 +797,8 @@ export class DaemonLifecycleReconciler {
           `Daemon failed to start within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
         );
       }
+      this.deps.reconciliationSnapshot = undefined;
+      await this.deps.reconciliationStatus();
       logger.info("[DaemonMcpProxy] Daemon started successfully");
       return;
     }
@@ -712,6 +844,8 @@ export class DaemonLifecycleReconciler {
           `process is completing its startup`,
       );
     }
+    this.deps.reconciliationSnapshot = undefined;
+    await this.deps.reconciliationStatus();
     logger.info("[DaemonMcpProxy] Daemon reported running; socket became ready");
   }
 }

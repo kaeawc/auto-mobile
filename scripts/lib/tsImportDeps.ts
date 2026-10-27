@@ -60,8 +60,11 @@ interface ResolveRelativeImportPathsOptions {
 
 function isRuntimeRequire(node: ts.CallExpression): boolean {
   return (
-    ts.isIdentifier(node.expression) &&
-    node.expression.text === "require" &&
+    ((ts.isIdentifier(node.expression) && node.expression.text === "require") ||
+      (ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        node.expression.expression.text === "require" &&
+        node.expression.name.text === "resolve")) &&
     node.arguments.length === 1 &&
     ts.isStringLiteralLike(node.arguments[0])
   );
@@ -69,7 +72,7 @@ function isRuntimeRequire(node: ts.CallExpression): boolean {
 
 export function relativeModuleSpecifiers(
   sourceFile: ts.SourceFile,
-  options: { includeTypeOnly?: boolean } = {},
+  options: { includeTypeOnly?: boolean; includeNonRelative?: boolean } = {},
 ): string[] {
   const specifiers: string[] = [];
 
@@ -107,7 +110,7 @@ export function relativeModuleSpecifiers(
       (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
       node.moduleSpecifier &&
       ts.isStringLiteralLike(node.moduleSpecifier) &&
-      node.moduleSpecifier.text.startsWith(".")
+      (options.includeNonRelative || node.moduleSpecifier.text.startsWith("."))
     ) {
       specifiers.push(node.moduleSpecifier.text);
     }
@@ -115,7 +118,7 @@ export function relativeModuleSpecifiers(
       ts.isImportEqualsDeclaration(node) &&
       ts.isExternalModuleReference(node.moduleReference) &&
       ts.isStringLiteralLike(node.moduleReference.expression) &&
-      node.moduleReference.expression.text.startsWith(".")
+      (options.includeNonRelative || node.moduleReference.expression.text.startsWith("."))
     ) {
       specifiers.push(node.moduleReference.expression.text);
     }
@@ -124,14 +127,15 @@ export function relativeModuleSpecifiers(
       node.expression.kind === ts.SyntaxKind.ImportKeyword &&
       node.arguments.length === 1 &&
       ts.isStringLiteralLike(node.arguments[0]) &&
-      node.arguments[0].text.startsWith(".")
+      (options.includeNonRelative || node.arguments[0].text.startsWith("."))
     ) {
       specifiers.push(node.arguments[0].text);
     }
     if (
       ts.isCallExpression(node) &&
       isRuntimeRequire(node) &&
-      node.arguments[0].text.startsWith(".")
+      ts.isStringLiteralLike(node.arguments[0]) &&
+      (options.includeNonRelative || node.arguments[0].text.startsWith("."))
     ) {
       specifiers.push(node.arguments[0].text);
     }

@@ -3,7 +3,6 @@ import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streamSoc
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import type { ObserverReleaseSource } from "../../src/daemon/observerReleaseBroadcast";
 import { describe, it, expect, beforeAll, beforeEach, afterEach, spyOn } from "bun:test";
-import { Socket } from "node:net";
 import {
   DeviceDataStreamSocketServer,
   installDeviceDataStreamSocketServerForTesting,
@@ -23,10 +22,14 @@ import {
 import { DefaultObservationInitialFrameCoordinator } from "../../src/daemon/observationInitialFrameCoordinator";
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
 import type { ScreenshotMetadata } from "../../src/features/observe/ScreenshotMetadata";
+import { buildObserveResult } from "../helpers/observeFixture";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
-import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import {
+  DeviceSessionRegistry,
+  type DeviceSessionRecord,
+} from "../../src/daemon/deviceSessionRegistry";
 import { createRegistryDeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import {
@@ -94,17 +97,17 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
   }
 
   async startFake(): Promise<void> {
-    Object.assign(this, { server: { listening: true } });
+    this.server = new FakeListeningNetServer();
     this.onServerStarted();
   }
 
   async closeFake(): Promise<void> {
     this.onServerClosing();
-    Object.assign(this, { server: null });
+    this.server = null;
   }
 
   simulateSubscription(options: {
-    deviceId?: string;
+    deviceId?: string | null;
     deviceSessionUuid?: string | null;
     screenshotIntervalMs?: number | null;
     hierarchyIntervalMs?: number | null;
@@ -123,7 +126,7 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
       deviceSessionUuid = null;
     }
     this.subscribers.set(subscriptionId, {
-      socket: socket as unknown as Socket,
+      socket: socket,
       subscriptionId,
       lastActivity: timer.now(),
       filter: {
@@ -138,16 +141,20 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
     return { socket, subscriptionId };
   }
 
+  liveFrameGenerationsForTest(): ReadonlyMap<string, number> {
+    return this.liveFrameGenerations;
+  }
+
   async processLineForTest(socket: FakeSocket, line: string): Promise<void> {
-    await this.processLine(socket as unknown as Socket, line);
+    await this.processLine(socket, line);
   }
 
   closeConnectionForTest(socket: FakeSocket): void {
-    this.onConnectionClose(socket as unknown as Socket);
+    this.onConnectionClose(socket);
   }
 
   errorConnectionForTest(socket: FakeSocket): void {
-    this.onConnectionError(socket as unknown as Socket, new Error("socket error"));
+    this.onConnectionError(socket, new Error("socket error"));
   }
 }
 
@@ -219,7 +226,7 @@ describe("DeviceDataStreamSocketServer", () => {
           const client: ObservationStreamAndroidClient = {
             ensureConnected: () => connect(),
             getLatestHierarchy: async () => ({
-              hierarchy: { hierarchy: {}, updatedAt: 1 },
+              hierarchy: { hierarchy: {}, packageName: "app", updatedAt: 1 },
               fresh: true,
               frameContext: capturedContext,
             }),
@@ -413,8 +420,7 @@ describe("DeviceDataStreamSocketServer", () => {
   ];
 
   it("reading generations does not retain capture-only serials", () => {
-    const generations = (server as unknown as { liveFrameGenerations: ReadonlyMap<string, number> })
-      .liveFrameGenerations;
+    const generations = server.liveFrameGenerationsForTest();
     const size = generations.size;
     server.getLiveFrameGeneration("never-pushed-1");
     server.getLiveFrameGeneration("never-pushed-2");
@@ -437,11 +443,7 @@ describe("DeviceDataStreamSocketServer", () => {
     finish.resolve();
     await first;
     expect(h.frames(pane.socket)).toEqual([]);
-    expect(
-      (
-        server as unknown as { liveFrameGenerations: ReadonlyMap<string, number> }
-      ).liveFrameGenerations.has("device-1"),
-    ).toBe(false);
+    expect(server.liveFrameGenerationsForTest().has("device-1")).toBe(false);
   });
 
   for (const event of frameInvalidations) {
@@ -765,7 +767,7 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(hierarchies).toHaveLength(1);
       expect(screenshots).toHaveLength(1);
       expect(screenshots[0].captureSequence).toBe(hierarchies[0].captureSequence);
-      expect(h.recordedSequences).toEqual([hierarchies[0].captureSequence]);
+      expect(h.recordedSequences).toEqual([hierarchies[0].captureSequence ?? null]);
       expect(h.frames(first.socket).filter((f) => f.type === "screenshot_update")).toHaveLength(0);
     } finally {
       hierarchyPush.mockRestore();
@@ -836,7 +838,7 @@ describe("DeviceDataStreamSocketServer", () => {
       frameContext?: string,
     ): RequestedObservation => ({
       deviceId,
-      observation: {
+      observation: buildObserveResult({
         updatedAt: "2026-06-24T00:00:00.000Z",
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -846,7 +848,7 @@ describe("DeviceDataStreamSocketServer", () => {
           hierarchy: {},
           ...(frameContext === undefined ? {} : { frameContext }),
         },
-      },
+      }),
     });
 
     it("drops an explicit observation captured across connection loss", async () => {
@@ -1093,13 +1095,13 @@ describe("DeviceDataStreamSocketServer", () => {
       server.setOnObservationRequested(async () => [
         {
           deviceId: "emulator-5554",
-          observation: {
+          observation: buildObserveResult({
             updatedAt: "2026-06-24T00:00:00.000Z",
             screenSize: { width: 0, height: 0 },
             systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
             errors: [{ phase: "viewHierarchy", message: "Accessibility service unavailable" }],
             error: "Accessibility service unavailable",
-          },
+          }),
         },
       ]);
       const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
@@ -1128,13 +1130,13 @@ describe("DeviceDataStreamSocketServer", () => {
         requestedObservation("emulator-5554"),
         {
           deviceId: "emulator-5556",
-          observation: {
+          observation: buildObserveResult({
             updatedAt: "2026-06-24T00:00:00.000Z",
             screenSize: { width: 0, height: 0 },
             systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
             errors: [{ phase: "viewHierarchy", message: "CtrlProxy unavailable" }],
             error: "CtrlProxy unavailable",
-          },
+          }),
         },
       ]);
       const { socket } = server.simulateSubscription({});
@@ -1615,10 +1617,12 @@ describe("DeviceDataStreamSocketServer", () => {
       const screenshotBase64 = pngFrame(1080, 2340);
       const decodedImage = Buffer.from(screenshotBase64, "base64");
       const fromSpy = spyOn(Buffer, "from");
-      const payloadDecodes = () =>
-        fromSpy.mock.calls.filter(
+      const payloadDecodes = () => {
+        const calls: unknown[][] = fromSpy.mock.calls;
+        return calls.filter(
           ([value, encoding]) => value === screenshotBase64 && encoding === "base64",
         ).length;
+      };
 
       try {
         server.pushScreenshotUpdate("device-1", screenshotBase64, 1080, 2340);
@@ -1940,7 +1944,7 @@ describe("DeviceDataStreamSocketServer", () => {
       const screenshot = socket
         .getWrittenMessages(deviceStreamFrameSchema)
         .find((m) => m.type === "screenshot_update");
-      expect(screenshot?.captureSequence).toBe(captureSequence);
+      expect(screenshot?.captureSequence).toBe(captureSequence ?? undefined);
       // The MEASURED dimensions are still what gets published, so a client maps through the pixels
       // it actually renders rather than the claim.
       expect(screenshot?.screenWidth).toBe(1170);
@@ -2076,8 +2080,8 @@ describe("DeviceDataStreamSocketServer", () => {
       const screenshot = socket
         .getWrittenMessages(deviceStreamFrameSchema)
         .find((m) => m.type === "screenshot_update");
-      expect(screenshot?.captureSequence).toBe(screenA);
-      expect(screenshot?.captureSequence).not.toBe(screenB);
+      expect(screenshot?.captureSequence).toBe(screenA ?? undefined);
+      expect(screenshot?.captureSequence).not.toBe(screenB ?? undefined);
     });
 
     it("never reuses a capture identity after a reconnect", () => {
@@ -2096,7 +2100,7 @@ describe("DeviceDataStreamSocketServer", () => {
         .map((m) => m.captureSequence);
 
       expect(new Set(ids).size).toBe(ids.length);
-      expect(ids[2]).toBeGreaterThan(ids[1]);
+      expect(ids[2]!).toBeGreaterThan(ids[1]!);
     });
 
     it("drops the device's current capture so a pre-reconnect screenshot cannot pair", () => {
@@ -2955,7 +2959,7 @@ describe("DeviceDataStreamSocketServer", () => {
         .find((m) => m.type === "screenshot_update");
       expect(shot?.coordinateSpace).toBe("px");
       expect(shot?.nativeScale).toBe(3);
-      expect(shot?.captureSequence).toBe(seq);
+      expect(shot?.captureSequence).toBe(seq ?? undefined);
     });
 
     it("omits coordinateSpace on a screenshot from a legacy (non-px) caller", () => {
@@ -3004,7 +3008,7 @@ describe("DeviceDataStreamSocketServer", () => {
           .getWrittenMessages(deviceStreamFrameSchema)
           .find((m) => m.type === "screenshot_update");
         if (vector.expectedMatch === 1) {
-          expect(screenshot?.captureSequence).toBe(captureSequence);
+          expect(screenshot?.captureSequence).toBe(captureSequence ?? undefined);
         } else {
           expect(screenshot?.captureSequence).toBeUndefined();
         }
@@ -3318,12 +3322,10 @@ describe("DeviceDataStreamSocketServer", () => {
     });
 
     describe("session lifecycle frames (AC5)", () => {
-      const record = (
-        over: Partial<{ deviceSessionUuid: string; deviceId: string; platform: string }> = {},
-      ) => ({
+      const record = (over: Partial<DeviceSessionRecord> = {}): DeviceSessionRecord => ({
         deviceSessionUuid: "session-device-a",
         deviceId: "device-a",
-        platform: "android" as const,
+        platform: "android",
         epochStartedAt: 0,
         ...over,
       });
@@ -4620,6 +4622,7 @@ describe("device-session release ends observation streams (#11130)", () => {
       value: "b",
       valueType: "STRING",
       timestamp: 3,
+      sequenceNumber: 1,
     });
 
     const types = socketA.getWrittenMessages(codeFrameSchema);

@@ -25,11 +25,9 @@ Inventory reads have separate response budgets: `BOOTED_DEVICES_RESOURCE_BUDGET_
 `CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS` (2,000 ms) for `listDevices` image enrichment.
 Android inventory device-list reads use `ANDROID_INVENTORY_DEVICE_LIST_BUDGET_MS`
 (2,000 ms); existing per-device name/model and display probes remain bounded at 2,000 ms.
-The five-emulator mixed-capture fixture verifies a sequential `listDevices` → booted resource
-→ images resource bound of 25,000 ms, with every individual response before a 15,000 ms
-client deadline. The review-fix run completes in 23,200 FakeTimer ms (6,200 ms for
-`listDevices`, 8,000 ms for the booted resource, 9,000 ms for images). This is a
-deterministic workload bound, not a host performance guarantee.
+A five-emulator mixed-capture fixture bounds a sequential `listDevices` -> booted
+resource -> images read at 25,000 ms, each response inside a 15,000 ms client
+deadline (a deterministic FakeTimer bound, not a host performance guarantee).
 
 On budget expiry, known devices/images remain in the response. The booted resource adds
 `enrichment: { complete: false, pending: string[], retryable: true, retryAfterMs: 1000, reason }`,
@@ -57,7 +55,9 @@ enablement, running and compatibility flags; nullable installed and expected che
 runner `version`; and nullable `supportedCommandsComplete` / `supportedFeaturesComplete` flags.
 The booted resource's top-level `serviceStatus` is a resource-specific diagnostic sibling, not a
 `DeviceDescription` alias. Canonical top-level `formFactor` always uses `phone`, `tablet`,
-`foldable`, or `unknown`.
+`foldable`, `tv`, `watch`, `automotive`, or `unknown`. Android derives `tv`, `watch` and
+`automotive` from the system-image tag (`android-tv`, `android-wear`, `android-automotive`, ...)
+first, then the avdmanager profile id, then geometry.
 
 `DeviceResource` describes observed resource state for one device. Its `resources`
 property is a JSON object keyed by logical resource name. `AndroidDeviceResource`
@@ -93,13 +93,15 @@ observed state.
 | `liveActivities`     | Both     | Live Activities and Dynamic Island updates; excludes wallpaper and widgets.                                   |
 | `googlePlayServices` | Android  | Google Play services background infrastructure, including account sync and push; excludes the Play Store app. |
 | `icloudSync`         | iOS      | OS-managed iCloud data synchronization, including photo sync; excludes app-owned networking.                  |
+| `siriAndAppIntents`  | iOS      | Siri requests, Shortcuts actions, and App Intents.                                                            |
+| `speechServices`     | iOS      | Speech recognition, dictation, and Siri speech synthesis.                                                     |
+| `mediaTranscoding`   | iOS      | Photos image and video conversion.                                                                            |
 | `photoAnalysis`      | iOS      | On-device analysis of the system photo library; excludes photo synchronization.                               |
 
-The groups describe separate functions even when they share infrastructure. For
-example, photo sync belongs to `icloudSync`, while local photo analysis belongs to
-`photoAnalysis`. Common background scheduling and platform-specific account
-services may share dependencies; changing one does not establish the other's state.
-Native service names and commands stay inside platform implementations.
+Groups describe separate functions even when they share infrastructure (photo sync
+is `icloudSync`, local analysis is `photoAnalysis`); changing one does not establish
+the other's state. Native service names and commands stay inside platform
+implementations.
 
 ## Observed state
 
@@ -146,10 +148,9 @@ start AutoMobile with `--enable-tool setDeviceResources`. Tool names are
 case-sensitive. The optional `provisionDevice.resources` field does not require
 enabling the standalone tool.
 
-Both tools accept the same partial map of resource names to `enabled` or
-`disabled`. Omitted entries remain untouched; an empty map, raw service names,
-unknown keys, and profile names are rejected. Ordinary provisioning without
-`resources` preserves existing behavior.
+Both tools accept the same partial map of resource names to `enabled`/`disabled`.
+Omitted entries are untouched; an empty map, raw service names, unknown keys and
+profile names are rejected.
 
 ```json
 {
@@ -163,11 +164,9 @@ unknown keys, and profile names are rejected. Ordinary provisioning without
 }
 ```
 
-Pass this map to `setDeviceResources` with the usual session/device targeting,
-or add it alongside `device` in `provisionDevice`. Provisioning requires
-`boot: true` when resources are supplied and applies settings before automation
-readiness. Every provision call runs its own lifecycle, so a retry re-reads and
-reconciles resource state.
+Pass the map to `setDeviceResources` (usual targeting) or alongside `device` in
+`provisionDevice`, which requires `boot: true` and applies settings before
+automation readiness; each provision call re-reads and reconciles state.
 
 `setDeviceResources.timeoutMs` defaults to 300,000 milliseconds for requests
 that configure many services. Provisioning uses its existing shared deadline
@@ -175,12 +174,10 @@ for creation, boot, resource configuration, and automation readiness.
 Within that deadline, resource configuration reserves time for readiness and
 session binding. It cannot consume the whole remaining provisioning budget.
 
-The iOS Simulator implementation controls narrow, disjoint service groups.
-Wallpaper, widgets, and Live Activities are three independent controls: disabling
-wallpaper never disables widget updates or Live Activities. No resource is disabled
-by default. Settings can affect optional system features; they are choices for the
-test workload, not a claim that every app remains fully functional with every
-resource disabled.
+The iOS Simulator implementation controls narrow, disjoint service groups
+(disabling wallpaper never disables widgets or Live Activities). Nothing is
+disabled by default; settings are workload choices and can degrade optional system
+features.
 
 | Controls                                                                   | Scope and tradeoff                                                                                                                                                                                                               |
 | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -190,6 +187,7 @@ resource disabled.
 | `newsServices`, `weatherServices`, `tipsServices`, `gameServices`          | Apple content apps and Game Center/save sync; controller input remains untouched.                                                                                                                                                |
 | `mapsSync`                                                                 | Maps synchronization and suggested destinations; MapKit rendering and general location services remain untouched.                                                                                                                |
 | `advertising`, `diagnosticReporting`                                       | Promoted Apple content and selected diagnostic reporting. Ad privacy, DeviceCheck, setup state, and feature configuration remain untouched. Disabling reporting reduces diagnostic evidence.                                     |
+| `siriAndAppIntents`, `speechServices`, `mediaTranscoding`                  | Separate Siri/App Intents, speech/dictation, and Photos conversion services; dependent integrations may fail.                                                                                                                    |
 | `photoAnalysis`                                                            | Only background Photos analysis. Library access, cloud transfers, and shared media-analysis services remain untouched. Photo search and recognition can degrade.                                                                 |
 | `assistantSuggestions`, `appleIntelligence`                                | Selected Siri suggestion and Apple Intelligence background services. Speech, system voices, shared language/model services, and runtime-gated intelligence workflows remain untouched. System intelligence features may degrade. |
 | `searchIndexing`                                                           | System search and app-provided Spotlight indexes; excludes an app's own search service. Settings/Spotlight search may fail.                                                                                                      |
@@ -207,7 +205,7 @@ The shared schema is defined by `src/models/deviceResourceDescriptions.ts`; nati
 labels are scoped in `src/utils/iosDeviceResourceCatalog.ts`. Callers cannot supply
 raw launchd labels, shell commands, or arbitrary service paths. Every group is
 preflighted against the exact booted runtime before writing. Missing labels are
-reported individually and excluded from that runtime's group; a group with no
+reported individually and excluded from the group; a group with no
 installed services is unsupported. A mismatched, default-disabled, or conditional
 definition makes the whole group unsupported without mutations. Native read
 failures are unknown, not evidence that a service is absent.
@@ -313,6 +311,92 @@ are not booted are rejected before any command runs.
 automation readiness under the provisioning lifecycle lease; its writes are recorded
 the same way, so a later reconciliation recognizes them. On an iOS Simulator it
 fails closed when the profile cannot be proven (see above).
+
+## Impact of disabling iOS Simulator services
+
+Disabling `calendarServices` (`com.apple.calaccessd`) on a booted simulator is refused with
+`unsafe_device_resource_combination` whenever the service is still loaded, because booting
+it out makes the Calendar app (MobileCal) retry its invalidated connection in a tight loop
+(about 100-130% of a core, plus 20-50% in diagnosticd) for the rest of the boot (#15218).
+The same label disabled before first boot, or one that is already unloaded, is safe, so
+request it when `provisionDevice` creates the simulator (applied by the preboot profile),
+or leave it enabled. `provisionDevice` adopting an existing simulator that boots first, and
+`setDeviceResources`, `reconcileDeviceResources` repair, take the refusal. A hazard is
+judged on the resources requested in the one call; members already disabled earlier are
+not counted. Disabled resource impacts expose `unsafeWith` (empty `withResources` for this
+single-resource hazard), the applicable phases, reason, and evidence.
+
+Verified means exercised on a device; inferred means a dependency-based expectation,
+not a measured feature result. The #15097 14-step driving check passed: startDevice runner start and process presence, non-degraded
+observe, screenshot, launchApp/terminateApp for Settings and Safari, tapOn, and
+sendKeys with typed text visible. This verifies only the shared core driving claim
+below, on the measured runtime; it does not verify Siri, Health, wallpaper/widget
+visuals, push, or App Intents. All feature-specific AutoMobile and app impacts are
+inferred, including where the table says unavailable.
+
+`disabledResources` is the structured companion to the inventory in `observed.resources`.
+It appears on `setDeviceResources`, under `provisionDevice.resources`, and on
+`reconcileDeviceResources` results when any catalog group is proven disabled.
+Each entry contains `resource`, `labels`, `automobileImpact`, and `appImpact`;
+each impact has `description`, `confidence`, and optional `evidence`.
+Entries follow catalog order, include observed disabled groups outside the requested
+map, and exclude unknown/unsupported states. For configuration results, controller-proven
+states survive absent or unreadable observations; direct enabled/disabled observations
+win. If observation fails, proven controller states still produce the report.
+The field is omitted when no catalog resource is disabled and on Android results.
+Reconciliation uses its final observed snapshot. Booted-device MCP resources remain
+free of resource probes.
+
+`startDevice` and `provisionDevice` also report top-level `disabledResources` for
+newly created iOS simulators. This lists catalog resources disabled before first
+boot by the default `minimal` profile and explicit requests (explicit enabled
+resources remove profile entries). It records the successful host disabled-database
+write; it is not independently re-read, unlike `setDeviceResources` verification.
+It is omitted for adopted devices, Android, failed writes and empty profiles, and
+appears on both boot and no-boot provisioning paths alongside any
+`resources.disabledResources` post-boot evidence. Set
+`AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE=none` to opt out of the default profile.
+
+| Resource               | Launchd labels                                                                                                                                                                        | AutoMobile functionality affected                                                                                                                                                                                                                                                                                                                                             | App functionality affected                                                                                         | Confidence                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `wallpaperRendering`   | `com.apple.PosterBoard`                                                                                                                                                               | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Wallpaper visuals may be missing in `observe` results and screenshots.                                                                                                                                                                    | Home and Lock Screen wallpaper does not render.                                                                    | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `widgets`              | `com.apple.chronod`                                                                                                                                                                   | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Home and Lock Screen widget visuals may be missing or stale in `observe` results and screenshots.                                                                                                                                         | Widgets do not render or update.                                                                                   | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `liveActivities`       | `com.apple.liveactivitiesd`                                                                                                                                                           | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Live Activity visuals may be missing in `observe` results and screenshots.                                                                                                                                                                | Live Activities and Dynamic Island updates do not show.                                                            | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `healthServices`       | `com.apple.healthd`<br>`com.apple.healthappd`<br>`com.apple.healthcontentd`<br>`com.apple.healtheventsd`<br>`com.apple.healthrecordsd`                                                | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect HealthKit-backed data may be unavailable.                                                                                                                                                                          | HealthKit data and Health app background functionality are unavailable.                                            | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `homeServices`         | `com.apple.homed`<br>`com.apple.homeeventsd`                                                                                                                                          | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that exercise HomeKit accessories or automations may fail.                                                                                                                                                                      | HomeKit accessory control and automations are unavailable.                                                         | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `fitnessServices`      | `com.apple.fitcore`<br>`com.apple.fitcore.session`<br>`com.apple.fitnesscoachingd`<br>`com.apple.fitnessintelligenced`<br>`com.apple.activityawardsd`<br>`com.apple.activitysharingd` | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect Fitness coaching, awards, or shared activity may fail.                                                                                                                                                             | Fitness coaching, activity awards, and activity sharing may be unavailable.                                        | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `familyServices`       | `com.apple.familycircled`<br>`com.apple.FamilyControlsAgent`<br>`com.apple.familynotification`<br>`com.apple.askpermissiond`<br>`com.apple.asktod`                                    | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that exercise family approvals or parental controls may behave differently.                                                                                                                                                     | Family Sharing approvals and parental controls may stop working.                                                   | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `screenTime`           | `com.apple.ScreenTimeAgent`<br>`com.apple.ScreenTimeSettingsAgent`<br>`com.apple.UsageTrackingAgent`                                                                                  | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that exercise usage tracking or Screen Time restrictions may behave differently.                                                                                                                                                | Screen Time limits and usage tracking may stop working.                                                            | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `newsServices`         | `com.apple.newsd`                                                                                                                                                                     | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect refreshed Apple News content may see stale content.                                                                                                                                                                | Apple News background content may not refresh.                                                                     | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `weatherServices`      | `com.apple.weatherd`                                                                                                                                                                  | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect Apple Weather forecasts may see stale content.                                                                                                                                                                     | Apple Weather background forecasts may not refresh.                                                                | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `tipsServices`         | `com.apple.tipsd`                                                                                                                                                                     | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect Apple Tips content may see stale content.                                                                                                                                                                          | Apple Tips background content may not refresh.                                                                     | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `gameServices`         | `com.apple.gamed`<br>`com.apple.gamesaved`                                                                                                                                            | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that exercise Game Center or saved-game synchronization may fail.                                                                                                                                                               | Game Center and saved-game synchronization may be unavailable.                                                     | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `mapsSync`             | `com.apple.Maps.mapssyncd`<br>`com.apple.Maps.mapspushd`<br>`com.apple.Maps.geocorrectiond`<br>`com.apple.maps.destinationd`                                                          | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect synced Maps favorites, history, or destinations may fail.                                                                                                                                                          | Maps favorites, history, and suggested destinations may not synchronize.                                           | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `advertising`          | `com.apple.ap.promotedcontentd`                                                                                                                                                       | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect promoted Apple content may see missing content.                                                                                                                                                                    | Promoted Apple content may not appear.                                                                             | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `diagnosticReporting`  | `com.apple.diagnosticextensionsd`<br>`com.apple.feedbackd`<br>`com.apple.rtcreportingd`<br>`com.apple.geoanalyticsd`                                                                  | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that depend on system diagnostic evidence may have less evidence.                                                                                                                                                               | Diagnostic collection, feedback, location analytics, and call-quality reports may be unavailable.                  | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `siriAndAppIntents`    | `com.apple.assistantd`<br>`com.apple.assistant_service`<br>`com.apple.assistant_cdmd`<br>`com.apple.siriactionsd`<br>`com.apple.linkd`                                                | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. The future siri tool (#14892) will need these services once shipped, and App Intents workflows may fail.                                                                                                                                  | Siri requests, Shortcuts actions, App Intents, and widget configuration or Controls that use them are unavailable. | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `speechServices`       | `com.apple.corespeechd`<br>`com.apple.speechmaintenanced`<br>`com.apple.sirittsd`                                                                                                     | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that exercise dictation or speech input may fail.                                                                                                                                                                               | Dictation, speech recognition, and Siri speech synthesis are unavailable.                                          | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `mediaTranscoding`     | `com.apple.photos.ImageConversionService`<br>`com.apple.photos.VideoConversionService`                                                                                                | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. `putAppFile` with media_library imports and workflows using photo-picker conversions may fail when transcoding is required.                                                                                                               | Image and video transcoding may fail during media imports or photo selection.                                      | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `photoAnalysis`        | `com.apple.photoanalysisd`                                                                                                                                                            | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect photo recognition or photo-search results may fail.                                                                                                                                                                | Photo analysis, recognition, and analysis-backed photo search are unavailable.                                     | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `assistantSuggestions` | `com.apple.siriinferenced`<br>`com.apple.siriknowledged`<br>`com.apple.parsecd`<br>`com.apple.parsec-fbf`<br>`com.apple.proactiveeventtrackerd`                                       | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect Siri or proactive suggestions may see missing suggestions.                                                                                                                                                         | Siri inference, knowledge, and proactive suggestions may be unavailable.                                           | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `appleIntelligence`    | `com.apple.intelligenceplatformd`<br>`com.apple.intelligencecontextd`<br>`com.apple.intelligencetasksd`<br>`com.apple.generativeexperiencesd`                                         | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that exercise Writing Tools or Apple Intelligence integrations may fail.                                                                                                                                                        | Writing Tools and Apple Intelligence integrations are unavailable.                                                 | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `searchIndexing`       | `com.apple.searchd`<br>`com.apple.searchtoold`<br>`com.apple.spotlightknowledged`<br>`com.apple.spotlightknowledged.updater`<br>`com.apple.corespotlightservice`                      | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that use Spotlight or Settings search lookups may fail.                                                                                                                                                                         | Spotlight donations do nothing and system-indexed search results may be unavailable.                               | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `appStoreServices`     | `com.apple.appstored`<br>`com.apple.appstorecomponentsd`                                                                                                                              | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that use App Store installation or updates may fail.                                                                                                                                                                            | App Store installations and updates may be unavailable.                                                            | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `appleMediaSync`       | `com.apple.itunescloudd`<br>`com.apple.musicd`<br>`com.apple.videosubscriptionsd`<br>`com.apple.assetsubscriptiond`                                                                   | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect Apple Music or subscribed media may see missing or stale content.                                                                                                                                                  | Apple Music and subscribed or purchased media may not synchronize.                                                 | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `mailServices`         | `com.apple.email.maild`                                                                                                                                                               | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that retrieve sign-in email through Apple Mail may fail.                                                                                                                                                                        | Apple Mail background mail access may be unavailable.                                                              | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `calendarServices`     | `com.apple.calaccessd`                                                                                                                                                                | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Disabling on a running simulator is refused with unsafe_device_resource_combination because it makes Calendar spin the CPU. Applying before first boot is allowed. Workflows that inspect or change the local Calendar database may fail. | Local Calendar database access may be unavailable.                                                                 | Core driving: verified (#15097); bootout CPU hazard: verified (#15218); feature impacts: inferred |
+| `reminderServices`     | `com.apple.remindd`                                                                                                                                                                   | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect or change Apple Reminders may fail.                                                                                                                                                                                | Apple Reminders database access and background updates may be unavailable.                                         | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `personalDataSync`     | `com.apple.exchangesyncd`<br>`com.apple.dataaccess.dataaccessd`                                                                                                                       | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect synchronized Exchange, CalDAV, or CardDAV data may see stale data.                                                                                                                                                 | Exchange, CalDAV, and CardDAV synchronization may stop working.                                                    | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `safariSync`           | `com.apple.SafariBookmarksSyncAgent`<br>`com.apple.Safari.History`                                                                                                                    | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect synchronized Safari history or bookmarks may see stale data.                                                                                                                                                       | Safari bookmarks and history may not synchronize.                                                                  | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `icloudSettingsSync`   | `com.apple.cloudsettingssyncagent`<br>`com.apple.syncdefaultsd`<br>`com.apple.icloudsubscriptionoptimizerd`                                                                           | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect synchronized iCloud system settings may see stale settings.                                                                                                                                                        | iCloud system settings may not synchronize and storage-plan recommendations may be unavailable.                    | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `messagingMaintenance` | `com.apple.imautomatichistorydeletionagent`<br>`com.apple.imcore.imtransferagent`<br>`com.apple.facetimemessagestored`                                                                | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect Messages attachment transfers or FaceTime messages may fail.                                                                                                                                                       | Messages history cleanup, attachment transfer, and FaceTime message storage may stop working.                      | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `watchConnectivity`    | `com.apple.wcd`<br>`com.apple.companiond`                                                                                                                                             | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that exercise paired Watch or companion-device communication may fail.                                                                                                                                                          | Paired Watch and companion-device communication may be unavailable.                                                | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `carPlay`              | `com.apple.carkitd`                                                                                                                                                                   | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that exercise CarPlay connectivity may fail.                                                                                                                                                                                    | CarPlay vehicle connectivity may be unavailable.                                                                   | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `tvRemote`             | `com.apple.tvremoted`                                                                                                                                                                 | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that exercise Apple TV discovery or remote control may fail.                                                                                                                                                                    | Apple TV discovery and remote control may be unavailable.                                                          | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `findMy`               | `com.apple.findmy.findmylocated`                                                                                                                                                      | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that inspect Find My device locations may fail.                                                                                                                                                                                 | Find My device-location functionality may be unavailable.                                                          | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `continuity`           | `com.apple.rapportd`                                                                                                                                                                  | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that exercise cross-device Continuity discovery may fail.                                                                                                                                                                       | Nearby-device discovery and cross-device Continuity workflows may stop working.                                    | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `walletServices`       | `com.apple.passd`<br>`com.apple.financed`<br>`com.apple.merchantd`<br>`com.apple.coreidvd`                                                                                            | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that exercise Wallet, payment sheets, or digital identity may fail.                                                                                                                                                             | Wallet, Apple Pay, digital identity, and dependent StoreKit payment sheets may fail.                               | Core driving: verified (#15097); feature impacts: inferred                                        |
+| `businessServices`     | `com.apple.businessservicesd`                                                                                                                                                         | Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected. Workflows that exercise Apple business messaging may fail.                                                                                                                                                                                | Apple business messaging may be unavailable.                                                                       | Core driving: verified (#15097); feature impacts: inferred                                        |
 
 ## Automation capabilities
 
@@ -465,3 +549,46 @@ and `retryAfterMs: 1000`; their timeout leaves the shared read running and able 
 into the 5,000 ms cache. Bypass readers run a fresh subprocess. Coalesced AVD listings use a
 30,000 ms shared cap and independent caller deadlines/signals, so a 2,000 ms waiter cannot
 cancel a longer reader's listing.
+
+## Tool preflight: device_service_disabled
+
+A scoped provider checks known disabled services before staging or invoking the
+simulator operation. The typed dependency map in
+`src/utils/deviceServiceDependencies.ts` registers only shipped tools that use a
+catalog resource. The provider enforces the scope; the preflight checks the
+registered tool's resources in stable catalog order.
+
+| Tool         | Scope                                        | Resource           | Labels                                                                               | Unavailable                                      |
+| ------------ | -------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| `putAppFile` | iOS Simulator, `target.domain=media_library` | `mediaTranscoding` | `com.apple.photos.ImageConversionService`, `com.apple.photos.VideoConversionService` | Photo/video media-library import and transcoding |
+
+Any catalog label with the boolean override `true` disables its resource. The
+first disabled resource produces an `ActionableError` with this wire payload:
+
+```typescript
+{
+  code: "device_service_disabled",
+  tool: "putAppFile",
+  resource: "mediaTranscoding",
+  labels: ["com.apple.photos.ImageConversionService", "com.apple.photos.VideoConversionService"],
+  disabledLabels: ["com.apple.photos.ImageConversionService"],
+  unavailable: "iOS Simulator photo/video media-library import and transcoding",
+  howToEnable: "Call setDeviceResources with {resources:{mediaTranscoding:\"enabled\"}} (enable this default-disabled tool with setToolEnabled or --enable-tool setDeviceResources), or provision/start the simulator without {resources:{mediaTranscoding:\"disabled\"}}.",
+  retryable: false,
+  deviceId: "<simulator UDID>"
+}
+```
+
+The single source for this fast-path check is the host launchd disabled database,
+`/private/var/tmp/com.apple.CoreSimulator.SimDevice.<UDID>/disabled.plist`, read
+through `PlistReader.readJsonFile`. Both `launchctl disable` and pre-first-boot
+writes feed this per-UDID database, which survives reboot and erase. Application
+DB state is unsuitable here: it requires runtime/device-type identity and extra
+simctl calls, and may not reflect external changes. Each call reads once without
+caching. A missing file means no known disabled labels; other read failures log a
+warning and pass. Unknown state never blocks the tool. This check is not a
+service-health guarantee. Physical devices, Android devices and unmapped tools
+skip the read; cancellation remains cancellation.
+
+Tools for Siri (#14892), dictation, HealthKit, widgets and Spotlight lookups
+register a dependency and a scoped preflight call when they ship.

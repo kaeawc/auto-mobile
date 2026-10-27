@@ -1,5 +1,5 @@
 import { deliverDaemonHeartbeatIfKnown } from "../helpers/daemonHeartbeatHandler";
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test, mock, beforeEach } from "bun:test";
 import {
   STUCK_REAP_WARN_MS,
   SessionHeartbeatMonitor,
@@ -9,8 +9,7 @@ import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
-} from "../../src/daemon/sessionLivenessWindows";
-import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -31,9 +30,11 @@ const DEVICE = "emulator-5554";
 class ParkablePersistence extends FakeDeviceSessionPersistence {
   parkUpsert: Promise<void> | undefined;
 
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  override async upsertActiveSession(
+    ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+  ): Promise<number> {
     await this.parkUpsert;
-    await super.upsertActiveSession(record);
+    return await super.upsertActiveSession(...args);
   }
 }
 
@@ -145,52 +146,41 @@ async function stuckRelease(
   return result;
 }
 
-/** Run `body` with warnings silenced: every case here logs the stuck release. */
-async function quietly(body: () => Promise<void>): Promise<void> {
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  try {
-    await body();
-  } finally {
-    warn.mockRestore();
-  }
-}
+// Every case logs a stuck release; silence warnings for the test's lifetime.
+beforeEach(() => {
+  spyOn(logger, "warn").mockImplementation(() => {});
+});
 
 describe("a stuck heartbeat release is forced whatever the session's idle deadline", () => {
   test("control: forced when the idle deadline is still far away", async () => {
-    await quietly(async () => {
-      const result = await stuckRelease(600_000, 90_000);
-      expect(result.reapedAt).toBeLessThanOrEqual(90_000 + NO_HEARTBEAT_RELEASE_BUDGET_MS);
-      expect(result.forced).toEqual(["s"]);
-      expect(result.manager.getSessionForDevice(DEVICE)).toBeNull();
-    });
+    const result = await stuckRelease(600_000, 90_000);
+    expect(result.reapedAt).toBeLessThanOrEqual(90_000 + NO_HEARTBEAT_RELEASE_BUDGET_MS);
+    expect(result.forced).toEqual(["s"]);
+    expect(result.manager.getSessionForDevice(DEVICE)).toBeNull();
   });
 
   test("forced when the idle deadline passes while the release is stuck", async () => {
-    await quietly(async () => {
-      // Default 2-minute idle window; the owner dies 90 s after its last tool call, so the idle
-      // deadline (120 s) falls between the reap (~100 s) and the stuck deadline (~140 s).
-      const result = await stuckRelease(DEFAULT_SESSION_IDLE_TIMEOUT_MS, 90_000);
-      expect(result.reapedAt).toBeLessThanOrEqual(90_000 + NO_HEARTBEAT_RELEASE_BUDGET_MS);
-      expect(result.forced).toEqual(["s"]);
-      expect(result.manager.getSessionForDevice(DEVICE)).toBeNull();
-      // The forced release keeps the reason the stuck release carried (#11361).
-      expect(result.released).toEqual(["s:heartbeat-timeout"]);
-    });
+    // Default 2-minute idle window; the owner dies 90 s after its last tool call, so the idle
+    // deadline (120 s) falls between the reap (~100 s) and the stuck deadline (~140 s).
+    const result = await stuckRelease(DEFAULT_SESSION_IDLE_TIMEOUT_MS, 90_000);
+    expect(result.reapedAt).toBeLessThanOrEqual(90_000 + NO_HEARTBEAT_RELEASE_BUDGET_MS);
+    expect(result.forced).toEqual(["s"]);
+    expect(result.manager.getSessionForDevice(DEVICE)).toBeNull();
+    // The forced release keeps the reason the stuck release carried (#11361).
+    expect(result.released).toEqual(["s:heartbeat-timeout"]);
   });
 
   test("forced once; the wedged release completing later releases nothing again", async () => {
-    await quietly(async () => {
-      const result = await stuckRelease(DEFAULT_SESSION_IDLE_TIMEOUT_MS, 90_000);
-      await result.runFor(2 * STUCK_REAP_WARN_MS);
-      expect(result.forced).toEqual(["s"]);
+    const result = await stuckRelease(DEFAULT_SESSION_IDLE_TIMEOUT_MS, 90_000);
+    await result.runFor(2 * STUCK_REAP_WARN_MS);
+    expect(result.forced).toEqual(["s"]);
 
-      await result.unwedge();
-      await result.runFor(2 * STUCK_REAP_WARN_MS);
-      expect(result.forced).toEqual(["s"]);
-      expect(result.released).toEqual(["s:heartbeat-timeout"]);
-      expect(result.manager.getSessionForDevice(DEVICE)).toBeNull();
-      expect(result.manager.getIdleReleasesInProgress()).toEqual([]);
-    });
+    await result.unwedge();
+    await result.runFor(2 * STUCK_REAP_WARN_MS);
+    expect(result.forced).toEqual(["s"]);
+    expect(result.released).toEqual(["s:heartbeat-timeout"]);
+    expect(result.manager.getSessionForDevice(DEVICE)).toBeNull();
+    expect(result.manager.getIdleReleasesInProgress()).toEqual([]);
   });
 });
 
@@ -202,78 +192,74 @@ describe("a stuck idle release is held to the same deadline", () => {
     });
 
   test("an idle release that is stuck is forced too", async () => {
-    await quietly(async () => {
-      // The idle sweep (which the monitor runs on every scan) releases the session at its
-      // 2-minute deadline. That release wedges the same way, and is not one of the monitor's reaps.
-      const result = await idleRelease();
-      expect(result.reapedAt).toBeUndefined();
-      expect(result.manager.getSessionForDevice(DEVICE)).toBeNull();
-      expect(result.forced).toEqual(["s"]);
-      expect(result.released).toEqual(["s:cleanup-expired"]);
-    });
+    // The idle sweep (which the monitor runs on every scan) releases the session at its
+    // 2-minute deadline. That release wedges the same way, and is not one of the monitor's reaps.
+    const result = await idleRelease();
+    expect(result.reapedAt).toBeUndefined();
+    expect(result.manager.getSessionForDevice(DEVICE)).toBeNull();
+    expect(result.forced).toEqual(["s"]);
+    expect(result.released).toEqual(["s:cleanup-expired"]);
   });
 
   test("not before the stuck deadline, and at the first scan past it", async () => {
-    await quietly(async () => {
-      const result = await idleRelease();
-      const startedAt = result.idleReleaseStartedAt ?? Number.NaN;
-      // Released by the first scan past the idle deadline, then forced by the first scan past
-      // the release's own stuck deadline.
-      expect(startedAt).toBeGreaterThan(DEFAULT_SESSION_IDLE_TIMEOUT_MS);
-      expect(startedAt).toBeLessThanOrEqual(DEFAULT_SESSION_IDLE_TIMEOUT_MS + SCAN_MS);
-      expect(result.forcedAt).toHaveLength(1);
-      expect(result.forcedAt[0]).toBeGreaterThanOrEqual(startedAt + STUCK_REAP_WARN_MS);
-      expect(result.forcedAt[0]).toBeLessThan(startedAt + STUCK_REAP_WARN_MS + SCAN_MS);
-    });
+    const result = await idleRelease();
+    const startedAt = result.idleReleaseStartedAt ?? Number.NaN;
+    // Released by the first scan past the idle deadline, then forced by the first scan past
+    // the release's own stuck deadline.
+    expect(startedAt).toBeGreaterThan(DEFAULT_SESSION_IDLE_TIMEOUT_MS);
+    expect(startedAt).toBeLessThanOrEqual(DEFAULT_SESSION_IDLE_TIMEOUT_MS + SCAN_MS);
+    expect(result.forcedAt).toHaveLength(1);
+    expect(result.forcedAt[0]).toBeGreaterThanOrEqual(startedAt + STUCK_REAP_WARN_MS);
+    expect(result.forcedAt[0]).toBeLessThan(startedAt + STUCK_REAP_WARN_MS + SCAN_MS);
   });
 
   test("forced once; the wedged release completing later releases nothing again", async () => {
-    await quietly(async () => {
-      const result = await idleRelease();
-      await result.runFor(2 * STUCK_REAP_WARN_MS);
-      expect(result.forced).toEqual(["s"]);
+    const result = await idleRelease();
+    await result.runFor(2 * STUCK_REAP_WARN_MS);
+    expect(result.forced).toEqual(["s"]);
 
-      await result.unwedge();
-      await result.runFor(2 * STUCK_REAP_WARN_MS);
-      expect(result.forced).toEqual(["s"]);
-      expect(result.released).toEqual(["s:cleanup-expired"]);
-      expect(result.manager.getSessionForDevice(DEVICE)).toBeNull();
-      expect(result.manager.getIdleReleasesInProgress()).toEqual([]);
-    });
+    await result.unwedge();
+    await result.runFor(2 * STUCK_REAP_WARN_MS);
+    expect(result.forced).toEqual(["s"]);
+    expect(result.released).toEqual(["s:cleanup-expired"]);
+    expect(result.manager.getSessionForDevice(DEVICE)).toBeNull();
+    expect(result.manager.getIdleReleasesInProgress()).toEqual([]);
   });
 
   test("an idle release that settles in time is never forced", async () => {
-    await quietly(async () => {
-      const timer = new FakeTimer();
-      timer.setCurrentTime(0);
-      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
-        barrier: () => new FakeDbWriteBarrier(),
-      });
-      cleanups.push(() => manager.stopCleanupTimer());
-      await manager.createSession("s", DEVICE, "android", {
-        timeoutMs: DEFAULT_SESSION_IDLE_TIMEOUT_MS,
-      });
-      const forced: string[] = [];
-      const monitor = new SessionHeartbeatMonitor(
-        manager,
-        () => false,
-        async () => {},
-        timer,
-        {
-          forceStuckRelease: async (sessionId) => {
-            forced.push(sessionId);
-          },
-        },
-      );
-      monitor.start();
-      cleanups.push(() => void monitor.stop());
-      const until = DEFAULT_SESSION_IDLE_TIMEOUT_MS + 2 * STUCK_REAP_WARN_MS;
-      while (timer.now() < until) {
-        await deliverDaemonHeartbeatIfKnown(manager, "s");
-        await timer.advanceTimeAsync(SCAN_MS, () => drainMicrotasks(20));
-      }
-      expect(manager.getSessionForDevice(DEVICE)).toBeNull();
-      expect(forced).toEqual([]);
+    const timer = new FakeTimer();
+    timer.setCurrentTime(0);
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
     });
+    cleanups.push(() => manager.stopCleanupTimer());
+    await manager.createSession("s", DEVICE, "android", {
+      timeoutMs: DEFAULT_SESSION_IDLE_TIMEOUT_MS,
+    });
+    const forced: string[] = [];
+    const monitor = new SessionHeartbeatMonitor(
+      manager,
+      () => false,
+      async () => {},
+      timer,
+      {
+        forceStuckRelease: async (sessionId) => {
+          forced.push(sessionId);
+        },
+      },
+    );
+    monitor.start();
+    cleanups.push(() => void monitor.stop());
+    const until = DEFAULT_SESSION_IDLE_TIMEOUT_MS + 2 * STUCK_REAP_WARN_MS;
+    while (timer.now() < until) {
+      await deliverDaemonHeartbeatIfKnown(manager, "s");
+      await timer.advanceTimeAsync(SCAN_MS, () => drainMicrotasks(20));
+    }
+    expect(manager.getSessionForDevice(DEVICE)).toBeNull();
+    expect(forced).toEqual([]);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

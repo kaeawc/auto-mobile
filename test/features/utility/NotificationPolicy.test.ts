@@ -50,7 +50,7 @@ const primaryLineTail = "com.google.android.GoogleCamera (user: 0 isPrimary: tru
 const otherLineTail = "com.google.android.apps.nexuslauncher (user: 0 isPrimary: false)";
 
 describe("NotificationPolicy", () => {
-  describe.each(CAPTURE_EMULATORS)("captured API 36 dumpsys on %s", (emulator) => {
+  describe.each([...CAPTURE_EMULATORS])("captured API 36 dumpsys on %s", (emulator) => {
     const before = dumpsysNotificationFromCapture("before", emulator);
     const afterAllow = dumpsysNotificationFromCapture("after-allow", emulator);
     const afterDisallow = dumpsysNotificationFromCapture("after-disallow", emulator);

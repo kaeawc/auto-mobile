@@ -1,7 +1,8 @@
 /// Pure text field input policy (#12066). The host validates the authored options before show.
 struct PrototypeTextFieldOptions {
     enum ImeAction: String {
-        case done, next, search, send, go
+        case done, next, search, send
+        case proceed = "go"
     }
 
     enum Keyboard: String {
@@ -30,6 +31,19 @@ struct PrototypeTextFieldOptions {
         supportingAccessibilityValue = node.supportingText
         imeAction = node.imeAction.flatMap(ImeAction.init(rawValue:))
             ?? (node.onSubmit?.isEmpty == false ? .done : nil)
+    }
+
+    /// Number, decimal and phone pads draw no Return key, so a single-line field with a keyboard
+    /// action gets a keyboard toolbar button with this title that submits it instead (#12998).
+    var submitAccessoryTitle: String? {
+        guard [.number, .decimal, .phone].contains(keyboard), !isMultiline, let imeAction else { return nil }
+        switch imeAction {
+        case .done: return "Done"
+        case .next: return "Next"
+        case .search: return "Search"
+        case .send: return "Send"
+        case .proceed: return "Go"
+        }
     }
 
     /// Count UTF-16 units like the host; a scalar is appended whole, never half a surrogate pair.

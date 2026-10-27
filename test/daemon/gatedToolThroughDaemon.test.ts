@@ -1,16 +1,18 @@
-import type { Client } from "@modelcontextprotocol/client";
-import { ErrorCode, McpError } from "../../src/server/mcpError";
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
+import type { ForwardMcpClient } from "../../src/daemon/socketServer/forwardSessionKey";
+import { ErrorCode, McpError } from "../../src/daemon/mcpError";
+import { FakeSocket } from "../fakes/FakeNetServer";
+import {
+  createConnectableServer,
+  uninitializedDaemonState,
+} from "./helpers/ideMutationServerHarness";
+import { Duplex } from "node:stream";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import toolDefinitionsJson from "../../schemas/tool-definitions.json";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { DaemonMcpProxy, DaemonToolUnavailableError } from "../../src/daemon/daemonMcpProxy";
-import { DAEMON_TOOL_UNAVAILABLE_CODE, type DaemonResponse } from "../../src/daemon/types";
-import { ToolUnavailableError } from "../../src/server/toolUnavailableError";
+import { DAEMON_TOOL_UNAVAILABLE_CODE } from "../../src/daemon/types";
+import { ToolUnavailableError } from "../../src/daemon/toolUnavailableError";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -28,52 +30,22 @@ import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
  * resetting the shared client (which would abort the sibling install on the same connection).
  */
 
-/** The daemon's end of the connection. Frames it writes are delivered to the client. */
-class DaemonSideSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
-  deliver: (frame: string) => void = () => {};
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    this.deliver(data);
-    callback?.();
-    return true;
-  }
-  destroy(): this {
-    this.destroyed = true;
-    this.emit("close", false);
-    return this;
-  }
-  receive(frame: string): void {
-    this.emit("data", Buffer.from(frame));
-  }
-}
-
 /** The client's end: every frame the proxy writes reaches the daemon socket. */
-class ClientSideSocket extends EventEmitter {
-  destroyed = false;
-  constructor(private readonly daemonSide: DaemonSideSocket) {
+class ClientSideSocket extends Duplex {
+  constructor(private readonly daemonSide: FakeSocket) {
     super();
   }
-  write(data: string): boolean {
-    this.daemonSide.receive(data);
-    return true;
-  }
-  destroy(): this {
-    this.destroyed = true;
-    this.emit("close", false);
-    return this;
-  }
-}
 
-interface ServerInternals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
+  override _read(): void {}
+
+  override _write(
+    chunk: Buffer | string,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    this.daemonSide.simulateData(chunk.toString());
+    callback();
+  }
 }
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -92,8 +64,8 @@ const GATE_REASON = "--debug is disabled; start the daemon with --debug";
 
 describe("a gated tool through socket server, DaemonClient and proxy (#10179)", () => {
   let timer: FakeTimer;
-  let internals: ServerInternals;
-  let daemonSide: DaemonSideSocket;
+  let server: ReturnType<typeof createConnectableServer>;
+  let daemonSide: FakeSocket;
   let clientSide: ClientSideSocket;
   let daemonClient: DaemonClient;
   let proxy: DaemonMcpProxy;
@@ -108,21 +80,18 @@ describe("a gated tool through socket server, DaemonClient and proxy (#10179)", 
     loopbackCalls.length = 0;
     installStarted = Promise.withResolvers<void>();
     installRelease = Promise.withResolvers<void>();
-    const server = createTestUnixSocketServer(
-      "unused",
-      { isInitialized: () => false } as DaemonStateAccess,
-      timer,
-    );
-    internals = server as unknown as ServerInternals;
-    internals.acceptingRequests = true;
+    server = createConnectableServer("unused", uninitializedDaemonState(), timer);
     server.mcpClientFactory = async () => {
-      const loopback = {
+      const unused = async (): Promise<never> => {
+        throw new Error("not exercised by this suite");
+      };
+      const loopback: ForwardMcpClient = {
         callTool: async (params: { name: string }) => {
           loopbackCalls.push(params.name);
           if (params.name === "installApp") {
             installStarted.resolve();
             await installRelease.promise;
-            return { content: [{ type: "text", text: "installed" }] };
+            return { content: [{ type: "text" as const, text: "installed" }] };
           }
           // What the loopback MCP client rebuilds from the daemon server's JSON-RPC error:
           // the -32603 code, the unchanged text and the marker in `data`.
@@ -130,23 +99,22 @@ describe("a gated tool through socket server, DaemonClient and proxy (#10179)", 
           throw new McpError(ErrorCode.InternalError, gate.message, gate.data);
         },
         listTools: async () => ({ tools: [] }),
+        listResources: unused,
+        readResource: unused,
+        listResourceTemplates: unused,
+        request: unused,
         close: async () => {},
       };
-      return loopback as unknown as Client;
+      return loopback;
     };
-    daemonSide = new DaemonSideSocket();
+    daemonSide = new FakeSocket();
     clientSide = new ClientSideSocket(daemonSide);
-    internals.handleConnection(daemonSide as unknown as Socket);
-    daemonClient = new DaemonClient(
-      "/fake/socket",
-      60_000,
-      timer,
-      ISOLATED_DAEMON_RECOVERY,
-      null,
-      new FakeIdGenerator(),
-    );
-    daemonClient.testHooks.attachSocket(clientSide as never);
-    daemonSide.deliver = (frame) => daemonClient.testHooks.simulateIncomingData(Buffer.from(frame));
+    server.connect(daemonSide);
+    daemonClient = new DaemonClient("/fake/socket", 60_000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+      idGenerator: new FakeIdGenerator(),
+    });
+    daemonClient.testHooks.attachSocket(clientSide);
+    daemonSide.onWrite = (frame) => daemonClient.testHooks.simulateIncomingData(Buffer.from(frame));
     const manager = new FakeDaemonManager();
     manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
     proxy = new DaemonMcpProxy({
@@ -166,7 +134,7 @@ describe("a gated tool through socket server, DaemonClient and proxy (#10179)", 
     await proxy.close();
     await daemonClient.close();
     daemonSide.destroy();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await server.settleActiveHandlers();
   });
 
   test("the caller gets the gate reason, the shared client is not closed, and the sibling completes", async () => {

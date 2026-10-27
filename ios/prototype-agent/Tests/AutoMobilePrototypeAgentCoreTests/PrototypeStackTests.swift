@@ -138,7 +138,7 @@ final class PrototypeStackTests: XCTestCase {
         var session = PrototypeSession()
         try session.show(spec(column([stack("nav"), pager]), state: ["n": .number(2)]))
         let event = try XCTUnwrap(session.run([action("push", "detail")]).first)
-        XCTAssertEqual(event.kind, "screen_changed")
+        XCTAssertEqual(event.wireKind, "screen_changed")
         XCTAssertEqual(event.name, "nav")
         XCTAssertEqual(event.payload, .object(["screen": .string("detail"), "depth": .number(2)]))
         XCTAssertEqual(event.state, ["n": .number(2)])
@@ -413,7 +413,7 @@ final class PrototypeStackTests: XCTestCase {
         XCTAssertEqual(session.appearance?.dark, false)
         let push = try action("push", "detail")
         let events = session.transition { $0.run([push]) }
-        XCTAssertEqual(events.map(\.kind), ["screen_changed", "appearance_changed"])
+        XCTAssertEqual(events.map(\.wireKind), ["screen_changed", "appearance_changed"])
         XCTAssertEqual(events.last?.stacks["nav"]?.path, ["home", "detail"])
         XCTAssertEqual(session.appearance?.dark, true)
     }

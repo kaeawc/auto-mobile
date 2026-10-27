@@ -1,6 +1,6 @@
 name: Rerun contended runner
 
-# Dispatched by a unit job that qualified its own failure as runner contention
+# Dispatched by a unit job (including On Merge TypeScript coverage) that qualified its own failure as runner contention
 # (scripts/ci/rerun-contended-runner.sh dispatch, #12758). Nothing triggers it
 # automatically, so green and ordinarily failing runs start no extra run.
 on:

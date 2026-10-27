@@ -82,6 +82,13 @@ const swallowedLaunch =
 
 describe("classification independent of the process argv file", () => {
   const results = new Map<string, ReturnType<typeof runFiles>>();
+  const resultFor = (name: string): ReturnType<typeof runFiles> => {
+    const recorded = results.get(name);
+    if (!recorded) {
+      throw new Error(`no run recorded for "${name}"`);
+    }
+    return recorded;
+  };
   beforeAll(() => {
     if (process.platform === "win32") {
       return;
@@ -134,19 +141,17 @@ describe("classification independent of the process argv file", () => {
   });
   // Child startup is setup work; each separate assertion stays below 100ms.
   guardedTest("unit spawn fails when followed by an integration file", () => {
-    const result = results.get("unit followed by integration");
-    expect(result).toBeDefined();
-    expect(result?.exitCode).not.toBe(0);
-    const output = result?.stdout.toString() + result?.stderr.toString();
+    const result = resultFor("unit followed by integration");
+    expect(result.exitCode).not.toBe(0);
+    const output = result.stdout.toString() + result.stderr.toString();
     expect(output).toContain(
       "real device tool spawned: " + join(fixtureDir, "argv-unit.test.ts").slice(root.length),
     );
   });
   guardedTest("unit spawn fails when process argv selects an integration file", () => {
-    const result = results.get("integration followed by unit");
-    expect(result).toBeDefined();
-    expect(result?.exitCode).not.toBe(0);
-    const output = result?.stdout.toString() + result?.stderr.toString();
+    const result = resultFor("integration followed by unit");
+    expect(result.exitCode).not.toBe(0);
+    const output = result.stdout.toString() + result.stderr.toString();
     expect(output).toContain(
       "real device tool spawned: " + join(fixtureDir, "argv-after.test.ts").slice(root.length),
     );
@@ -156,10 +161,9 @@ describe("classification independent of the process argv file", () => {
   });
   for (const name of ["integration alone", "clean unit followed by integration"]) {
     guardedTest(`${name} permits an integration spawn`, () => {
-      const result = results.get(name);
-      expect(result).toBeDefined();
-      expect(result?.exitCode).toBe(0);
-      expect(result?.stdout.toString() + result?.stderr.toString()).not.toContain(
+      const result = resultFor(name);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.toString() + result.stderr.toString()).not.toContain(
         "real device tool spawned",
       );
     });

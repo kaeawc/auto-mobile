@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ProtocolError, SdkError, SdkErrorCode } from "@modelcontextprotocol/server";
-import { ErrorCode, McpError, withV1ClientErrors } from "../../src/server/mcpError";
+import { ErrorCode, McpError, withV1ClientErrors } from "../../src/daemon/mcpError";
 
 // Issue #4678: script clients (mcp-drive, manual-test proxy-session) report SDK v2 client
 // failures in the v1 shape, so a timeout keeps its numeric code and prefixed message.

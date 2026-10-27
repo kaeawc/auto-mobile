@@ -15,8 +15,8 @@ import {
   resolveIosScreenCaptureHelperPath,
 } from "../screen-stream/screenCaptureHelperPath";
 
-import { IOSCtrlProxyClient } from "../observe/ios";
 import { parseCapabilityMarker } from "../screen-stream/IosScreenCaptureHelper";
+import { iosCtrlProxyClientFor } from "../observe/ios/iosCtrlProxyClientFor";
 
 export interface SimulatorHighlightsDependencies {
   fallback?: () => {
@@ -61,7 +61,7 @@ export class SimulatorHighlights {
     private readonly device: BootedDevice,
     deps?: SimulatorHighlightsDependencies,
   ) {
-    this.fallback = deps?.fallback ?? (() => IOSCtrlProxyClient.getInstance(device));
+    this.fallback = deps?.fallback ?? (() => iosCtrlProxyClientFor(device));
     this.executor = deps?.executor ?? new DefaultHostCommandExecutor();
     this.timer = deps?.timer ?? defaultTimer;
     this.hosts = deps ? new Map() : sharedHosts;

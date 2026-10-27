@@ -1,5 +1,7 @@
+import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { PROTOTYPE_SPEC_CAPABILITY_GATES } from "../../src/features/prototype/prototypeCapabilityGates";
 import type { BootedDevice } from "../../src/models";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
@@ -23,9 +25,39 @@ const base = {
   state: { liked: false, name: "Ada", query: "", active: false },
   root: { type: "column", children: [label] },
 };
+const chart = {
+  type: "chart",
+  id: "label",
+  variant: "line",
+  series: [{ path: "/points", y: "y", label: "Points" }],
+};
+const chartData = { points: [{ y: 1 }, { y: 2 }] };
 // `with` lists capabilities a fixture needs besides the one under test: a device-run request also
 // needs the network capability, so the device gate is exercised with that one already advertised.
 const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: string[] }> = {
+  prototype_style_polish_v2: fixture({ ...label, style: { cornerStyle: "continuous" } }),
+  prototype_tooltip_v1: fixture({
+    type: "column",
+    id: "label",
+    children: [
+      { type: "spacer", id: "target" },
+      {
+        type: "tooltip",
+        text: "Tip",
+        anchorTo: "target",
+        openWhen: { key: "liked", equals: true },
+      },
+    ],
+  }),
+  prototype_drawer_v1: fixture({
+    ...{
+      type: "drawer",
+      edge: "start",
+      openWhen: { key: "liked", equals: true },
+      child: { type: "spacer" },
+    },
+    id: "label",
+  }),
   prototype_theme_modes_v1: fixture({
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },
@@ -89,7 +121,50 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     activeKey: "active",
     child: label,
   }),
+  prototype_loading_states_v1: fixture({
+    type: "box",
+    id: "label",
+    style: { shimmer: true },
+    children: [{ type: "spacer" }],
+  }),
+  prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
+  prototype_effects_v1: fixture({ ...label, style: { effects: [{ type: "noise" }] } }),
+  prototype_stack_transitions_v1: {
+    ...fixture({
+      type: "stack",
+      id: "label",
+      start: "home",
+      transition: "slide",
+      screens: { home: { type: "spacer" } },
+    }),
+    with: ["prototype_stack_v1"],
+  },
+  prototype_choreography_v1: fixture({ ...label, transition: { type: "fade", delayMs: 100 } }),
+  // A chart reads a /data array, so the spec carries data and the data capability is advertised.
+  prototype_chart_v1: {
+    minimalSpec: { ...fixture(chart).minimalSpec, data: chartData },
+    ops: [{ op: "add", path: "/data", value: chartData }, ...fixture(chart).ops],
+    with: ["prototype_data_model_v1"],
+  },
   prototype_rich_text_v1: fixture({ type: "text", id: "label", spans: [{ text: "Hello" }] }),
+  prototype_linkify_v1: fixture({
+    type: "text",
+    id: "label",
+    text: "@ana",
+    linkify: { kinds: ["mention"], onTap: [{ type: "emit", name: "link" }] },
+  }),
+  prototype_timers_v1: fixture({
+    ...label,
+    onTap: [
+      { type: "startTimer", id: "tick", afterMs: 100, actions: [{ type: "emit", name: "tick" }] },
+    ],
+  }),
+  prototype_chat_scroll_v1: fixture({
+    type: "scroll",
+    id: "label",
+    reverse: true,
+    child: { type: "spacer" },
+  }),
   prototype_menus_v1: fixture({
     type: "menu",
     id: "label",
@@ -131,6 +206,45 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
       onTap: [{ type: "request", url: "http://localhost:8080/feed", via: "device" }],
     }),
     with: ["prototype_network_v1"],
+  },
+  // `requires` is a root-level block a patch cannot introduce, and every module use must be
+  // declared there (#14294), so only the show half applies. A permission-only block needs just the
+  // vocabulary capability; a declared module also needs its own, with the vocabulary advertised.
+  prototype_platform_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { permissions: [{ name: "camera", purpose: "Scan a code" }] },
+    },
+    ops: [],
+  },
+  prototype_platform_device_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["device"] },
+      root: {
+        ...base.root,
+        children: [{ ...label, text: "{platform:/device/os}" }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_test_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["test"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [{ type: "platform", call: "test.echo", args: { message: { value: "hi" } } }],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
   },
 };
 function fixture(root: { type: string; id: string } & Record<string, unknown>) {
@@ -181,9 +295,9 @@ function setup() {
     adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
   });
 }
-async function call(device: BootedDevice, input: unknown) {
+async function call(device: BootedDevice, input: Record<string, unknown>) {
   const result = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
-  return prototypeOutputSchema.parse(result.structuredContent);
+  return prototypeOutputSchema.parse(readToolResponse(result).structuredContent);
 }
 const show = (device: BootedDevice, spec: unknown) => call(device, { action: "show", spec });
 const patch = (device: BootedDevice, ops: unknown, extra = {}) =>
@@ -301,11 +415,18 @@ test.each(["android", "ios"] as const)(
     }
   },
 );
+let capabilitySource: string;
+beforeAll(() => {
+  const server = new URL("../../src/server/", import.meta.url);
+  const files = [
+    "prototypeTools.ts",
+    ...new Bun.Glob("prototypeTools/**/*.ts").scanSync({ cwd: fileURLToPath(server) }),
+  ];
+  expect(files.length).toBeGreaterThan(1);
+  capabilitySource = files.map((file) => readFileSync(new URL(file, server), "utf8")).join("\n");
+});
 test("prototypeTools routes spec feature detection through the registry", () => {
-  const source = readFileSync(
-    new URL("../../src/server/prototypeTools.ts", import.meta.url),
-    "utf8",
-  );
+  const source = capabilitySource;
   expect(source.includes("prototypeThemeModeFields")).toBe(false);
   expect(source.includes("prototypeDataModelFields")).toBe(false);
 });

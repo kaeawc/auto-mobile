@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { toolIsError, toolStructured, toolText } from "../helpers/toolResponse";
+import { appLifecycleResultSchema } from "../../src/server/appToolOutputSchemas";
 import {
   appLifecycleSchema,
-  appLifecycleResultSchema,
   registerAppTools,
   resetInstalledAppResourceRefresh,
   setInstalledAppResourceRefresh,
@@ -64,6 +65,37 @@ describe("appLifecycle registration and handler", () => {
       expect(appLifecycleSchema.safeParse(bad).success).toBe(false);
     }
   });
+  test("trimMemory takes an onTrimMemory level and forwards it (#14090)", async () => {
+    expect(
+      appLifecycleSchema.parse({ appId, action: "trimMemory", level: "COMPLETE" }),
+    ).toMatchObject({ action: "trimMemory", level: "COMPLETE" });
+    expect(
+      appLifecycleSchema.safeParse({ appId, action: "trimMemory", level: "HIDDEN" }).success,
+    ).toBe(false);
+    let received: AppLifecycleExecutionOptions | undefined;
+    ToolRegistry.clearTools();
+    registerAppTools({
+      appLifecycle: {
+        createAppLifecycle: () => ({
+          execute: async (_appId, action, options) => {
+            received = options;
+            return {
+              ...successful,
+              action,
+              mechanism: "am-send-trim-memory",
+              trimLevel: "COMPLETE",
+              message: "Sent onTrimMemory(COMPLETE)",
+            };
+          },
+        }),
+      },
+    });
+    const response = await handler()(device, { appId, action: "trimMemory", level: "COMPLETE" });
+    expect(received?.trimLevel).toBe("COMPLETE");
+    expect(appLifecycleResultSchema.safeParse(toolStructured(response)).success).toBe(true);
+    expect(toolStructured(response)).toMatchObject({ message: "Sent onTrimMemory(COMPLETE)" });
+    expect(refreshes).toEqual([]);
+  });
   test("structured success forwards options and refreshes only after actual mutation", async () => {
     const controller = new AbortController();
     ToolRegistry.clearTools();
@@ -82,8 +114,8 @@ describe("appLifecycle registration and handler", () => {
       },
     });
     const response = await handler()(device, args, undefined, controller.signal);
-    expect(response.structuredContent).toMatchObject(successful);
-    expect(appLifecycleResultSchema.safeParse(response.structuredContent).success).toBe(true);
+    expect(toolStructured(response)).toMatchObject(successful);
+    expect(appLifecycleResultSchema.safeParse(toolStructured(response)).success).toBe(true);
     expect(refreshes).toEqual([device.deviceId]);
   });
   for (const failure of [
@@ -109,9 +141,9 @@ describe("appLifecycle registration and handler", () => {
         },
       });
       const response = await handler()(device, args);
-      expect(response.structuredContent).toMatchObject({ success: false, message: failure.error });
-      expect(response.isError).toBe(true);
-      expect(response.content[0].text).toBe(JSON.stringify({ ...failure, message: failure.error }));
+      expect(toolStructured(response)).toMatchObject({ success: false, message: failure.error });
+      expect(toolIsError(response)).toBe(true);
+      expect(toolText(response)).toBe(JSON.stringify({ ...failure, message: failure.error }));
       expect(refreshes).toEqual([]);
     });
   }
@@ -146,7 +178,7 @@ describe("appLifecycle registration and handler", () => {
         }),
       },
     });
-    expect((await handler()(device, args)).structuredContent).toMatchObject({
+    expect(toolStructured(await handler()(device, args))).toMatchObject({
       message: "Process was not reclaimed",
       success: true,
     });
@@ -168,7 +200,7 @@ describe("appLifecycle registration and handler", () => {
         }),
       },
     });
-    expect((await handler()(device, args)).structuredContent).toMatchObject({
+    expect(toolStructured(await handler()(device, args))).toMatchObject({
       message: "kill failed",
       success: false,
     });

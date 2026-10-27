@@ -1,15 +1,16 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
 import { parseInputSwipeParams, parseInputTapParams } from "../../src/daemon/inputRouteParams";
 import { INPUT_ROUTES } from "../../src/daemon/inputRoutes";
 import { PressButton } from "../../src/features/action/PressButton";
 import { resolveAndroidKeyCode } from "../../src/features/action/pressButtonPolicy";
 
-const doc = readFileSync(
-  join(import.meta.dir, "../../docs/using/screen-control.md"),
-  "utf8",
-).replace(/\r\n?/g, "\n");
+const doc = readGuardFile(join(import.meta.dir, "../../docs/using/screen-control.md")).replace(
+  /\r\n?/g,
+  "\n",
+);
 
 // These are the parser-backed input routes in handleLocalSocketRequest. No listener is started.
 const parsers = new Map<string, (params: unknown) => unknown>(

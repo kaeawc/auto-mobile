@@ -345,6 +345,24 @@ const noUnknownCastRule = {
   },
 };
 
+const noAsAnyRule = {
+  meta: {
+    type: "problem",
+    messages: {
+      asAny:
+        "Avoid `as any` (and `<any>x`): it switches the type checker off for the expression. Use a typed fake or builder, a `Pick<Interface, ...>` view, `satisfies`, or a type guard.",
+    },
+  },
+  create(context) {
+    const report = (node) => {
+      if (node.typeAnnotation?.type === "TSAnyKeyword") {
+        context.report({ node, messageId: "asAny" });
+      }
+    };
+    return { TSAsExpression: report, TSTypeAssertion: report };
+  },
+};
+
 // Building a collection by mutating it inside a callback. These are the forms
 // that have a direct declarative replacement (map/filter/flatMap), as opposed to
 // a callback that logs or recurses, where the only rewrite is a loop.
@@ -1005,7 +1023,7 @@ const RAW_ACCESSOR_NAMES = new Set([
 ]);
 // Files whose raw-accessor use is hint extraction / diagnostics, not selection.
 const RAW_ACCESSOR_ALLOWED_FILES =
-  /(?:^|\/)src\/features\/(?:systemTray\/(?:notificationHints|systemTrayHelpers)|action\/(?:AndroidHierarchyFallback|LongPressMetadataDetector))\.ts$/;
+  /(?:^|\/)src\/features\/(?:systemTray\/(?:notificationHints|helpers\/(?:hierarchy|matching|groupExpansion|dismissal))|action\/(?:AndroidHierarchyFallback|LongPressMetadataDetector))\.ts$/;
 const noRawSelectorFieldReadRule = {
   meta: {
     type: "problem",
@@ -1026,24 +1044,49 @@ const noRawSelectorFieldReadRule = {
       !/(?:^|\/)src\/features\/talkback\//.test(filename)
     )
       return {};
+    const accessorAllowed = RAW_ACCESSOR_ALLOWED_FILES.test(filename);
+    const fromAccessorModule = (node) =>
+      /(?:^|\/)elementProperties$/.test(String(node.source?.value ?? ""));
+    const reportAccessor = (node) => context.report({ node, messageId: "rawAccessor" });
+    // A namespace import, a re-export, or a dynamic import of the accessor module
+    // exposes every raw accessor without naming one, so each is gated like a named import.
+    const reportsNamespaceAccess = (specifier, fromAccessors) =>
+      fromAccessors &&
+      (specifier.type === "ImportNamespaceSpecifier" ||
+        specifier.type === "ImportDefaultSpecifier");
     return {
       // Importing a raw accessor is the only way to read a raw field without a
-      // `.text`-style member read, so gate the import with an allow-list.
+      // `.text`-style member read, so gate the import with an allow-list. Named
+      // accessors are matched by name from any source, so a barrel cannot launder them.
       ImportDeclaration(node) {
-        if (
-          node.importKind === "type" ||
-          !/(?:^|\/)elementProperties$/.test(String(node.source?.value ?? "")) ||
-          RAW_ACCESSOR_ALLOWED_FILES.test(filename)
-        )
-          return;
+        if (node.importKind === "type" || accessorAllowed) return;
+        const fromAccessors = fromAccessorModule(node);
+        for (const specifier of node.specifiers ?? []) {
+          if (specifier.importKind === "type") continue;
+          if (
+            reportsNamespaceAccess(specifier, fromAccessors) ||
+            (specifier.type === "ImportSpecifier" &&
+              RAW_ACCESSOR_NAMES.has(propertyName(specifier.imported)))
+          )
+            reportAccessor(specifier);
+        }
+      },
+      ExportNamedDeclaration(node) {
+        if (node.exportKind === "type" || accessorAllowed || !fromAccessorModule(node)) return;
         for (const specifier of node.specifiers ?? []) {
           if (
-            specifier.type === "ImportSpecifier" &&
-            specifier.importKind !== "type" &&
-            RAW_ACCESSOR_NAMES.has(propertyName(specifier.imported))
+            specifier.exportKind !== "type" &&
+            RAW_ACCESSOR_NAMES.has(propertyName(specifier.local))
           )
-            context.report({ node: specifier, messageId: "rawAccessor" });
+            reportAccessor(specifier);
         }
+      },
+      ExportAllDeclaration(node) {
+        if (node.exportKind !== "type" && !accessorAllowed && fromAccessorModule(node))
+          reportAccessor(node);
+      },
+      ImportExpression(node) {
+        if (!accessorAllowed && fromAccessorModule(node)) reportAccessor(node);
       },
       Program(program) {
         const fields = new Set(["text", "content-desc", "resource-id"]);
@@ -1827,6 +1870,7 @@ const plugin = {
     "no-inline-error-normalize": noInlineErrorNormalizeRule,
     "no-caught-error-interpolation": noCaughtErrorInterpolationRule,
     "no-unknown-cast": noUnknownCastRule,
+    "no-as-any": noAsAnyRule,
     "no-accumulator-foreach": noAccumulatorForEachRule,
     "no-bare-expect": noBareExpectRule,
     "stress-explicit-timeout": stressExplicitTimeoutRule,

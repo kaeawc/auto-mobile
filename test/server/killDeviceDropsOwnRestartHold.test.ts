@@ -1,6 +1,7 @@
 import { describe, expect, spyOn } from "bun:test";
 import { assertLifecycleCallerHoldsDevice } from "../../src/server/lifecycleDeviceOwnership";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
+import { toolJson } from "../helpers/toolResponse";
 import { drainUntil, drainMicrotasks, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { BASE, LABEL, SIBLING, restartStopHarness } from "../helpers/restartStopHarness";
 
@@ -13,15 +14,14 @@ describe("lifecycle stops drop the confirmed device-restart hold", () => {
     const replacement = { ...hold, stableDeviceId: "replacement-avd" };
     f.internals.rehydrationReservations.set(SIBLING, replacement);
     f.pool.getDevice(f.device.deviceId)!.name = "replacement-avd";
-    const cohort = Reflect.get(f.pool, "adbServerResetRecoveryReservations") as Map<
-      string,
-      {
-        deviceId: string;
-        image: { name: string };
-        cancelled?: boolean;
-      }
-    >;
-    const reset = { deviceId: f.device.deviceId, image: { name: f.device.name }, cancelled: false };
+    const cohort = f.pool.testHooks.adbServerResetRecoveryReservations;
+    const reset = {
+      deviceId: f.device.deviceId,
+      image: { name: f.device.name, platform: f.device.platform, isRunning: false },
+      cancelled: false,
+      settled: Promise.resolve(),
+      resolve: () => {},
+    };
     cohort.set("captured-reset", reset);
     const commit = f.pool.markIntentionalShutdown(f.device.deviceId, BASE);
     expect(reset.cancelled).toBe(true);
@@ -66,7 +66,11 @@ describe("lifecycle stops drop the confirmed device-restart hold", () => {
     test(`${platform}: successful commit uses the mark-time identity after pooled eviction`, async () => {
       const f = await fixture(platform);
       const commit = f.pool.releaseDeviceRestartReservationForStop(f.device.deviceId, BASE);
-      await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+      await f.pool.removeDevice(
+        f.device.deviceId,
+        true,
+        f.pool.getDevice(f.device.deviceId) ?? undefined,
+      );
       expect(f.internals.rehydrationReservations.get(BASE)?.restartHandoff).toBe(true);
       await commit();
       expect(f.internals.rehydrationReservations.has(BASE)).toBe(false);
@@ -174,9 +178,10 @@ describe("lifecycle stops drop the confirmed device-restart hold", () => {
       f.manager.beforeKill = () => {
         throw new Error("platform stop failed");
       };
-      expect(
-        JSON.parse((await f.call("deleteDevice", BASE, false, "owner-conn")).content[0].text),
-      ).toMatchObject({ success: false, failure: { phase: "stop" } });
+      expect(toolJson(await f.call("deleteDevice", BASE, false, "owner-conn"))).toMatchObject({
+        success: false,
+        failure: { phase: "stop" },
+      });
       expect(f.internals.rehydrationReservations.get(BASE)).toBe(hold);
       expect(hold).toEqual(snapshot);
       expect(f.pool.genericAvailability(f.device.deviceId)).toBe("reserved");
@@ -198,7 +203,7 @@ describe("lifecycle stops drop the confirmed device-restart hold", () => {
         if (tool === "killDevice") {
           await expect(result).rejects.toBeInstanceOf(InputDeviceOwnedError);
         } else {
-          expect(JSON.parse((await result).content[0].text)).toMatchObject({
+          expect(toolJson(await result)).toMatchObject({
             failure: { code: "device_owned_by_other_session", phase: "stop" },
           });
         }
@@ -214,8 +219,8 @@ describe("lifecycle stops drop the confirmed device-restart hold", () => {
           const hold = f.internals.rehydrationReservations.get(BASE)!;
           expect(hold.ownerMcpSessionIds).toEqual(new Set(["owner-conn"]));
           const snapshot = { ...hold };
-          const row = { ...(await f.persistence.getSession!(BASE)) };
-          const device = f.pool.getDevice(f.device.deviceId);
+          const row = structuredClone(await f.persistence.getSession!(BASE));
+          const device = f.pool.getDevice(f.device.deviceId)!;
           const deviceSnapshot = { ...device };
           const shutdownReservation = spyOn(f.pool, "reserveDeviceForShutdown");
           cleanups.push(() => shutdownReservation.mockRestore());
@@ -234,7 +239,7 @@ describe("lifecycle stops drop the confirmed device-restart hold", () => {
               `killDevice refused: device '${f.device.deviceId}' is reserved for session ${BASE}'s device-restart recovery, and this connection did not own that session when the device restarted. Call from the owning connection, or wait for the recovery window to end. force: true does not override naming another client's session.`,
             );
           } else {
-            expect(JSON.parse((await pending).content[0].text)).toMatchObject({
+            expect(toolJson(await pending)).toMatchObject({
               success: false,
               failure: {
                 code: "device_owned_by_other_session",
@@ -265,7 +270,7 @@ describe("lifecycle stops drop the confirmed device-restart hold", () => {
             if (tool === "killDevice") {
               await expect(result).rejects.toBeInstanceOf(InputDeviceOwnedError);
             } else {
-              expect(JSON.parse((await result).content[0].text)).toMatchObject({
+              expect(toolJson(await result)).toMatchObject({
                 failure: { code: "device_owned_by_other_session" },
               });
             }
@@ -306,7 +311,7 @@ describe("lifecycle stops drop the confirmed device-restart hold", () => {
                 retryable: true,
               });
             } else {
-              expect(JSON.parse((await pending).content[0].text)).toMatchObject({
+              expect(toolJson(await pending)).toMatchObject({
                 failure: { code: "device_owned_by_other_session", retryable: true },
               });
             }

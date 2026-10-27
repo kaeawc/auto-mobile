@@ -25,7 +25,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class FailuresPushSocketClientTest {
+internal class FailuresPushSocketClientTest : FailuresPushSocketClientDispatcherFixture() {
   private val options =
     FailuresPushSocketOptions(jitter = { 0.0 }, socketPath = { "fake-failures.sock" })
 
@@ -313,7 +313,7 @@ class FailuresPushSocketClientTest {
           socket
         },
         delays,
-        CoroutineScope(scopeJob + Dispatchers.IO),
+        CoroutineScope(scopeJob + testDispatcher),
         { true },
         SilentLogger,
         options,
@@ -325,19 +325,7 @@ class FailuresPushSocketClientTest {
       scopeJob.children.single().invokeOnCompletion { connectionFinished.countDown() }
       assertEquals(ConnectionState.Connected(subscribed), client.connectionState.value)
 
-      val guard =
-        Thread(
-          {
-            try {
-              client.disconnect()
-            } catch (failure: Throwable) {
-              disconnectFailure.set(failure)
-            } finally {
-              disconnectReturned.countDown()
-            }
-          },
-          "failures-disconnect-guard",
-        )
+      val guard = disconnectGuard(client, disconnectFailure, disconnectReturned)
       guard.isDaemon = true
       guard.start()
       guardStarted = true
@@ -515,4 +503,26 @@ class FailuresPushSocketClientTest {
 
     override fun debug(message: String) = Unit
   }
+
+  private fun disconnectGuard(
+    client: FailuresPushSocketClient,
+    disconnectFailure: AtomicReference<Throwable?>,
+    disconnectReturned: CountDownLatch,
+  ): Thread =
+    Thread(
+      {
+        try {
+          client.disconnect()
+        } catch (failure: Throwable) {
+          disconnectFailure.set(failure)
+        } finally {
+          disconnectReturned.countDown()
+        }
+      },
+      "failures-disconnect-guard",
+    )
 }
+
+internal abstract class FailuresPushSocketClientDispatcherFixture(
+  protected val testDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+)

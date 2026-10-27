@@ -1,0 +1,130 @@
+{
+  "id": "motion-v2",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "liked": false,
+    "drawer": false
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "icon",
+        "id": "heart",
+        "name": "favorite",
+        "animate": {
+          "durationMs": 250,
+          "easing": "spring"
+        },
+        "style": {
+          "color": "onSurface",
+          "scale": 1
+        },
+        "styleWhen": [
+          {
+            "when": {
+              "key": "liked",
+              "equals": true
+            },
+            "style": {
+              "color": "error",
+              "scale": 1.4,
+              "rotation": -10
+            }
+          }
+        ],
+        "onTap": [
+          {
+            "type": "toggle",
+            "key": "liked"
+          }
+        ]
+      },
+      {
+        "type": "box",
+        "id": "drawer",
+        "visibleWhen": {
+          "key": "drawer",
+          "equals": true
+        },
+        "transition": "slideStart",
+        "children": [
+          {
+            "type": "text",
+            "text": "Drawer"
+          }
+        ]
+      },
+      {
+        "type": "box",
+        "visibleWhen": {
+          "key": "drawer",
+          "equals": true
+        },
+        "transition": "slideEnd",
+        "children": [
+          {
+            "type": "text",
+            "text": "Panel"
+          }
+        ]
+      },
+      {
+        "type": "box",
+        "visibleWhen": {
+          "key": "liked",
+          "equals": true
+        },
+        "transition": "scale",
+        "children": [
+          {
+            "type": "text",
+            "text": "Liked!"
+          }
+        ]
+      },
+      {
+        "type": "image",
+        "asset": "photo",
+        "contentScale": "fit",
+        "zoomable": {
+          "maxScale": 4
+        },
+        "contentDescription": "Photo"
+      },
+      {
+        "type": "button",
+        "label": "Menu",
+        "onTap": [
+          {
+            "type": "toggle",
+            "key": "drawer"
+          }
+        ],
+        "animate": {},
+        "style": {
+          "alpha": 1
+        },
+        "styleWhen": [
+          {
+            "when": {
+              "key": "drawer",
+              "equals": true
+            },
+            "style": {
+              "alpha": 0.6,
+              "offset": {
+                "x": 8,
+                "y": 0
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

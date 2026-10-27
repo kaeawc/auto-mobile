@@ -1,7 +1,10 @@
 import { expect, spyOn, test } from "bun:test";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
-import { MCP_QUEUE_TIMEOUT_ERROR_CODE, McpTimeoutError } from "../../src/daemon/McpTimeoutError";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import {
+  MCP_QUEUE_TIMEOUT_ERROR_CODE,
+  McpTimeoutError,
+} from "../../src/daemon/wire/McpTimeoutError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { logger } from "../../src/utils/logger";
 
 /**

@@ -1,3 +1,4 @@
+import { wireCapture } from "../../helpers/wireCapture";
 import { describe, expect, test } from "bun:test";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
@@ -6,7 +7,6 @@ import { projectSkeleton } from "../../../src/features/observe/output/SkeletonPr
 import { iosFormsSwitch } from "../../fixtures/observe/ios-forms-switch";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import type { ViewHierarchyResult } from "../../../src/models";
-import { wireCapture } from "../../helpers/wireCapture";
 
 const bounds = { left: 0, top: 0, right: 100, bottom: 100 };
 const node = (id: string, text = "", extra = {}) => ({
@@ -542,7 +542,7 @@ test("the folded and trimmed displayed label resolves exactly to its row", () =>
 
 test("labels copied from skeleton resolve hoisted, whitespace-normalized, and upstream-truncated rows", () => {
   const truncated = `${"A long notification title ".repeat(7)}…`;
-  const hierarchy: ViewHierarchyResult = {
+  const hierarchy: ViewHierarchyResult = wireCapture({
     hierarchy: {
       node: [
         {
@@ -574,7 +574,7 @@ test("labels copied from skeleton resolve hoisted, whitespace-normalized, and up
         },
       ],
     },
-  };
+  });
   const rows = projectSkeleton(
     new DefaultObserveElementCollector().collect(hierarchy, "android")!,
   ).skeleton;
@@ -860,11 +860,13 @@ describe("ensureChecked selection intent", () => {
         ],
       },
     };
-    expect(selector.selectByText(capture, "Wi-Fi", options).element?.["resource-id"]).toBe("exact");
+    expect(
+      selector.selectByText(wireCapture(capture), "Wi-Fi", options).element?.["resource-id"],
+    ).toBe("exact");
     const partialOnly = { hierarchy: { node: capture.hierarchy.node.slice(0, 2) } };
-    expect(selector.selectByText(partialOnly, "Wi-Fi", options).element?.["resource-id"]).toBe(
-      "row",
-    );
+    expect(
+      selector.selectByText(wireCapture(partialOnly), "Wi-Fi", options).element?.["resource-id"],
+    ).toBe("row");
   });
   test("toggle intent keeps the exact row when only a substring has a switch", () => {
     const capture = {
@@ -872,14 +874,17 @@ describe("ensureChecked selection intent", () => {
         node: [node("row", "Wi-Fi"), node("backup", "Wi-Fi backup", { checkable: true })],
       },
     };
-    expect(selector.selectByText(capture, "Wi-Fi", options).element?.["resource-id"]).toBe("row");
+    expect(
+      selector.selectByText(wireCapture(capture), "Wi-Fi", options).element?.["resource-id"],
+    ).toBe("row");
   });
   test("toggle intent selects the exact row's descendant before a substring switch", () => {
     const capture = settings("");
-    capture.hierarchy.node = [
-      node("backup", "Wi-Fi backup", { checkable: true }),
-      capture.hierarchy.node,
-    ];
+    capture.hierarchy = wireCapture({
+      hierarchy: {
+        node: [node("backup", "Wi-Fi backup", { checkable: true }), capture.hierarchy.node],
+      },
+    }).hierarchy;
     expect(selector.selectByText(capture, "Wi-Fi", options).element?.["resource-id"]).toBe(
       "switch",
     );
@@ -895,7 +900,7 @@ describe("ensureChecked selection intent", () => {
   test("toggle candidates retain window and size ordering", () => {
     const capture = settings();
     capture.windows = [
-      { windowLayer: 10, hierarchy: { node: node("dialog", "Wi-Fi", { checkable: true }) } },
+      { windowLayer: 10, hierarchy: { node: [node("dialog", "Wi-Fi", { checkable: true })] } },
     ];
     expect(selector.selectByText(capture, "Wi-Fi", options).element?.["resource-id"]).toBe(
       "dialog",

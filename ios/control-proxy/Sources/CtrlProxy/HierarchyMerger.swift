@@ -514,13 +514,13 @@ public enum HierarchyMerger {
             var bestDistance = Int.max
             for entry in candidates {
                 let node = allNodes[entry.id]
-                let nb = node.bounds
-                guard leftRange.contains(nb.left), topRange.contains(nb.top),
-                      rightRange.contains(nb.right), bottomRange.contains(nb.bottom),
+                let nodeBounds = node.bounds
+                guard leftRange.contains(nodeBounds.left), topRange.contains(nodeBounds.top),
+                      rightRange.contains(nodeBounds.right), bottomRange.contains(nodeBounds.bottom),
                       className.map({ node.className == $0 }) ?? true,
                       accept(node)
                 else { continue }
-                let distance = boundsDistance(nb, bounds)
+                let distance = boundsDistance(nodeBounds, bounds)
                 guard distance <= boundsTolerance else { continue }
                 if distance < bestDistance || (distance == bestDistance && entry.id < (bestID ?? Int.max)) {
                     bestID = entry.id
@@ -546,9 +546,14 @@ public enum HierarchyMerger {
             for entry in candidates {
                 let node = allNodes[entry.id]
                 if let className, node.className != className { continue }
-                let nb = node.bounds
-                guard boundsDistance(nb, bounds) <= tol else { continue }
-                let key = BoundsKey(left: nb.left, top: nb.top, right: nb.right, bottom: nb.bottom)
+                let nodeBounds = node.bounds
+                guard boundsDistance(nodeBounds, bounds) <= tol else { continue }
+                let key = BoundsKey(
+                    left: nodeBounds.left,
+                    top: nodeBounds.top,
+                    right: nodeBounds.right,
+                    bottom: nodeBounds.bottom
+                )
                 if let existing = representatives[key], existing <= entry.id { continue }
                 representatives[key] = entry.id
             }
@@ -942,8 +947,28 @@ public enum HierarchyMerger {
             let gestures = node.gestureRecognizers.map { "\($0.type)(\($0.isEnabled ? "enabled" : "disabled"))" }
             set("sdk.gestureRecognizers", gestures.joined(separator: ","))
         }
-        if let bg = node.backgroundColor {
-            set("sdk.backgroundColor", bg)
+        appendVisualExtras(from: node, set: set)
+        if node.isAccessibilityElement {
+            set("sdk.isAccessibilityElement", "true")
+        }
+        if node.accessibilityElementsHidden {
+            set("sdk.accessibilityElementsHidden", "true")
+        }
+        if node.hasTapTarget {
+            set("sdk.hasTapTarget", "true")
+        }
+        if node.isOccluded {
+            set("sdk.isOccluded", "true")
+        }
+        if !node.isUserInteractionEnabled {
+            set("sdk.isUserInteractionEnabled", "false")
+        }
+        return extras
+    }
+
+    private static func appendVisualExtras(from node: SdkViewNode, set: (String, String) -> Void) {
+        if let backgroundColor = node.backgroundColor {
+            set("sdk.backgroundColor", backgroundColor)
         }
         // Defaults per SdkViewNode: alpha 1.0, isAccessibilityElement false,
         // hasTapTarget false, isUserInteractionEnabled true. Skip them so default matches
@@ -963,22 +988,6 @@ public enum HierarchyMerger {
         if node.isLayerNode {
             set("sdk.isLayerNode", "true")
         }
-        if node.isAccessibilityElement {
-            set("sdk.isAccessibilityElement", "true")
-        }
-        if node.accessibilityElementsHidden {
-            set("sdk.accessibilityElementsHidden", "true")
-        }
-        if node.hasTapTarget {
-            set("sdk.hasTapTarget", "true")
-        }
-        if node.isOccluded {
-            set("sdk.isOccluded", "true")
-        }
-        if !node.isUserInteractionEnabled {
-            set("sdk.isUserInteractionEnabled", "false")
-        }
-        return extras
     }
 
     // MARK: - Injection helpers
@@ -993,6 +1002,10 @@ public enum HierarchyMerger {
         if node.hasTapTarget { return true }
         if node.accessibilityElementsHidden { return true }
         if node.isAccessibilityElement { return true }
+        return hasMeaningfulVisualContent(node)
+    }
+
+    private static func hasMeaningfulVisualContent(_ node: SdkViewNode) -> Bool {
         // Has meaningful visual properties (background, corner radius, border)
         if node.backgroundColor != nil { return true }
         if node.cornerRadius > 0 { return true }

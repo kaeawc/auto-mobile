@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import packageJson from "../../package.json";
 import { loadJobSteps, loadWorkflow, stepNamed } from "../helpers/workflowSteps";
+
+const PINNED_BUN = packageJson.packageManager.replace(/^bun@/, "");
 
 // Guards the GitHub-hosted (Linux) nightly diagnostics. The macOS nightly lanes,
 // including the Xcode sweeps that #4128 parallelized, run on CircleCI since
@@ -17,7 +20,7 @@ describe("nightly auto-advance race guard", () => {
     expect(guard?.["timeout-minutes"]).toBe(20);
     expect(guard?.needs).toBeUndefined();
     const steps = loadJobSteps(WORKFLOW, "auto-advance-race-guard");
-    expect(stepNamed(steps, "Setup Bun")?.with?.["bun-version"]).toBe("1.3.14");
+    expect(stepNamed(steps, "Setup Bun")?.with?.["bun-version"]).toBe(PINNED_BUN);
     expect(stepNamed(steps, "Install Bun dependencies")?.run).toBe(
       "scripts/ci/install-bun-deps.sh",
     );
@@ -55,7 +58,7 @@ describe("nightly randomized unit diagnostic", () => {
   });
 
   test("runs the canonical selector with a reproducible run-derived seed", () => {
-    expect(stepNamed(steps, "Setup Bun")?.with?.["bun-version"]).toBe("1.3.14");
+    expect(stepNamed(steps, "Setup Bun")?.with?.["bun-version"]).toBe(PINNED_BUN);
     expect(stepNamed(steps, "Install Bun dependencies")?.run).toBe(
       "scripts/ci/install-bun-deps.sh",
     );
@@ -79,40 +82,5 @@ describe("nightly unit process recycling", () => {
         expect(step.env?.AUTOMOBILE_UNIT_TEST_CHUNK_FILES).toBeUndefined();
       }
     }
-  });
-});
-
-describe("nightly Bun 1.4 canary", () => {
-  const jobId = "node-bun-14-canary";
-  const workflow = loadWorkflow(WORKFLOW);
-  const job = workflow.jobs?.[jobId];
-  const steps = loadJobSteps(WORKFLOW, jobId);
-
-  test("is an independent advisory ubuntu job exclusive to nightly", () => {
-    expect(job).toHaveProperty("continue-on-error", true);
-    expect(job?.["runs-on"]).toBe("ubuntu-latest");
-    expect(job?.["timeout-minutes"]).toBe(60);
-    expect(job?.needs).toBeUndefined();
-    for (const other of Object.values(workflow.jobs ?? {})) {
-      const needs = other?.needs;
-      expect(Array.isArray(needs) ? needs : needs ? [needs] : []).not.toContain(jobId);
-    }
-    for (const file of ["pull_request.yml", "merge.yml"]) {
-      expect(loadWorkflow(`.github/workflows/${file}`).jobs?.[jobId]).toBeUndefined();
-    }
-  });
-
-  test("runs the unit and integration lanes on Bun 1.4.x only", () => {
-    expect(String(stepNamed(steps, "Setup Bun 1.4")?.with?.["bun-version"])).toMatch(/^1\.4\.\d+$/);
-    const run = stepNamed(steps, "Run unit and integration lanes on Bun 1.4");
-    expect(run?.run).toContain("scripts/test-ts.sh");
-    expect(run?.run).toContain("unit integration");
-  });
-
-  test("always uploads the summary artifact", () => {
-    const upload = stepNamed(steps, "Upload Bun 1.4 canary summary");
-    expect(upload?.uses).toBe("actions/upload-artifact@v6");
-    expect(upload?.if).toBe("always()");
-    expect(String(upload?.with?.path)).toContain("scratch/bun-14-canary/");
   });
 });

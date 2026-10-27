@@ -110,7 +110,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     expect(upgradedNames).toEqual(folderNames);
   });
 
-  describe.each(directoryEnvKeys)("injected %s", (key) => {
+  describe.each([...directoryEnvKeys])("injected %s", (key) => {
     let names: string[];
     let hasMarker: boolean;
 

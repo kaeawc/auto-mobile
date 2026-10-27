@@ -26,7 +26,7 @@ describe("MCP Server Memory Leak Tests", () => {
 
     try {
       if (supportsGc) {
-        global.gc();
+        global.gc?.();
       }
       const startUsage = process.memoryUsage().heapUsed;
 
@@ -38,7 +38,7 @@ describe("MCP Server Memory Leak Tests", () => {
       });
 
       if (supportsGc) {
-        global.gc();
+        global.gc?.();
       }
       const endUsage = process.memoryUsage().heapUsed;
 

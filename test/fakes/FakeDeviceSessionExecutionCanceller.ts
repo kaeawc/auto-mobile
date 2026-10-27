@@ -1,5 +1,5 @@
 import type { DeviceSessionExecutionCanceller } from "../../src/daemon/devicePool";
-import type { ExecutionTracker } from "../../src/server/executionTracker";
+import type { ExecutionTracker } from "../../src/daemon/executionTracker";
 
 type DeviceSessionExecutionCancellerContract = {
   readonly cancel: DeviceSessionExecutionCanceller;

@@ -13,10 +13,10 @@ import {
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 const batch = "/batch";
 const device = {
-  schemaVersion: 1,
-  platform: "android",
-  hardware: { kind: "archetype", archetype: "phone" },
-  os: { kind: "omitted" },
+  schemaVersion: 1 as const,
+  platform: "android" as const,
+  hardware: { kind: "archetype" as const, archetype: "phone" as const },
+  os: { kind: "omitted" as const },
 };
 /** Keys are slash-normalized so the fake tree behaves the same with Windows path separators. */
 class SlashPathMap extends Map<string, string> {

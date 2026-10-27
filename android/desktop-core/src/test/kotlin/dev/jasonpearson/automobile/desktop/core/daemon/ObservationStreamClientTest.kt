@@ -22,16 +22,246 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 
-class ObservationStreamClientTest {
+internal abstract class ObservationStreamClientFixture {
+
+  // Uses the same configuration as ObservationStreamClient so these assertions match the socket.
+  protected val wireJson = DaemonJson
+
+  protected fun assertAuthenticatedFrame(
+    command: String,
+    action: (ObservationStreamClient) -> Unit,
+  ) {
+    // The helper drives each command through the same fake writer as the production socket.
+    val frame = captureCommandFrame(command, "desktop-session", action)
+    assertTrue(frame.contains("\"sessionUuid\":\"desktop-session\""), frame)
+  }
+
+  protected fun captureCommandFrame(
+    command: String,
+    sessionUuid: String?,
+    action: ((ObservationStreamClient) -> Unit)? = null,
+  ): String = runBlocking {
+    val tempSocket = Files.createTempFile("obs-stream-auth", ".sock")
+    val factory = RecordingTransportFactory(blocking = true)
+    val client =
+      if (sessionUuid == null) {
+        ObservationStreamClient(
+          transportFactory = factory,
+          socketPathProvider = { tempSocket.toString() },
+        )
+      } else {
+        ObservationStreamClient(
+          transportFactory = factory,
+          socketPathProvider = { tempSocket.toString() },
+          sessionUuidProvider = { sessionUuid },
+        )
+      }
+    try {
+      client.connect("emulator-5554")
+      val transport = factory.opened.single()
+      transport.awaitReadEntered()
+      val invoke = action ?: commandAction(command)
+
+      if (command == "unsubscribe_storage") {
+        client.subscribeStorage("com.example", "prefs.xml")
+        val subscription =
+          transport
+            .writtenFrames()
+            .lineSequence()
+            .filter { it.isNotBlank() }
+            .map {
+              wireJson.decodeFromString(StreamRequest.serializer(), it)
+            }
+            .last()
+        client.handleMessage(
+          """{"id":"${subscription.id}","type":"subscription_response","success":true}""",
+        )
+      }
+      invoke(client)
+      transport
+        .writtenFrames()
+        .lineSequence()
+        .filter { it.isNotBlank() }
+        .last { frame ->
+          wireJson.decodeFromString(StreamRequest.serializer(), frame).command == command
+        }
+    } finally {
+      client.dispose()
+      factory.opened.firstOrNull()?.releaseEof()
+      Files.deleteIfExists(tempSocket)
+    }
+  }
+
+  /**
+   * Await the EOF-driven terminal state. The read loop runs on the client's own Dispatchers.IO
+   * scope, so the StateFlow flips from a real background coroutine; `first { ... }` replays the
+   * current value and returns as soon as the death point has published it (AC1: once observers can
+   * see Disconnected, the transport is already closed).
+   */
+  protected suspend fun ObservationStreamClient.awaitStreamEnded() {
+    withTimeout(5_000) {
+      connectionState.first { it is ConnectionState.Disconnected && it.reason == "Stream ended" }
+    }
+  }
+
+  /**
+   * Records every transport it hands out so a test can assert each one was closed (issue #5261). In
+   * [blocking] mode the transports park their read loop until [FakeStreamTransport.releaseEof].
+   */
+  protected class RecordingTransportFactory(private val blocking: Boolean = false) :
+    ObservationStreamTransportFactory {
+    val opened = mutableListOf<FakeStreamTransport>()
+
+    override fun open(socketPath: String): ObservationStreamTransport =
+      FakeStreamTransport(blocking).also { opened += it }
+  }
+
+  /**
+   * In-memory [ObservationStreamTransport] over a discarding writer, counting [close] calls in
+   * place of releasing a real fd. Its reader yields EOF immediately, or (in blocking mode) blocks
+   * until [releaseEof] so a test can interleave a reconnect before the read loop terminates.
+   */
+  protected class FakeStreamTransport(blocking: Boolean = false) : ObservationStreamTransport {
+    private val controllableReader = ControllableReader(blocking)
+    private val recordedWriter = StringWriter()
+    override val reader: BufferedReader = BufferedReader(controllableReader)
+    override val writer: BufferedWriter = BufferedWriter(recordedWriter)
+
+    var closeCount = 0
+      private set
+
+    val isClosed: Boolean
+      get() = closeCount > 0
+
+    /** Block until this transport's read loop has entered its (blocking) read. */
+    fun awaitReadEntered() = controllableReader.awaitReadEntered()
+
+    /** Release the parked read so it returns EOF, ending the read loop. */
+    fun releaseEof() = controllableReader.releaseEof()
+
+    fun writtenFrames(): String = recordedWriter.toString()
+
+    override fun close() {
+      closeCount++
+    }
+  }
+
+  /**
+   * A [Reader] whose single read returns EOF. In [blocking] mode it first parks until [releaseEof],
+   * letting a test drive exactly when the read loop terminates relative to a reconnect; otherwise
+   * it EOFs immediately.
+   */
+  protected class ControllableReader(private val blocking: Boolean) : Reader() {
+    private val readEntered = CountDownLatch(1)
+    private val eofGate = CountDownLatch(1)
+
+    fun awaitReadEntered() =
+      check(readEntered.await(5, TimeUnit.SECONDS)) { "read loop never entered its read" }
+
+    fun releaseEof() = eofGate.countDown()
+
+    override fun read(cbuf: CharArray, off: Int, len: Int): Int {
+      readEntered.countDown()
+      if (blocking) {
+        check(eofGate.await(5, TimeUnit.SECONDS)) { "EOF was never released" }
+      }
+      return -1
+    }
+
+    override fun close() = Unit
+  }
+
+  protected fun deviceConnectionLostMessage(): String =
+    """
+    {
+      "type": "error",
+      "success": false,
+      "deviceId": "emulator-5554",
+      "timestamp": 1234,
+      "error": "device connection lost"
+    }
+    """
+      .trimIndent()
+
+  protected suspend fun seedHierarchyReplay(client: ObservationStreamClient) {
+    client.handleMessage(
+      """
+      {
+        "type": "hierarchy_update",
+        "deviceId": "emulator-5554",
+        "timestamp": 1000,
+        "data": { "packageName": "com.example" }
+      }
+      """
+        .trimIndent(),
+    )
+  }
+
+  protected suspend fun seedScreenshotReplay(client: ObservationStreamClient) {
+    client.handleMessage(
+      """
+      {
+        "type": "screenshot_update",
+        "deviceId": "emulator-5554",
+        "timestamp": 1001,
+        "screenshotBase64": "aW1hZ2U=",
+        "screenWidth": 100,
+        "screenHeight": 200
+      }
+      """
+        .trimIndent(),
+    )
+  }
+
+  protected suspend fun seedPerformanceReplay(client: ObservationStreamClient) {
+    client.handleMessage(
+      """
+      {
+        "type": "performance_update",
+        "deviceId": "emulator-5554",
+        "timestamp": 1002,
+        "performanceData": {
+          "fps": 60.0,
+          "frameTimeMs": 16.67,
+          "jankFrames": 0,
+          "droppedFrames": 0,
+          "memoryUsageMb": 128.0,
+          "cpuUsagePercent": 10.0
+        }
+      }
+      """
+        .trimIndent(),
+    )
+  }
+
+  protected fun commandAction(command: String): (ObservationStreamClient) -> Unit =
+    when (command) {
+      "subscribe" -> { _: ObservationStreamClient ->
+        Unit
+      }
+      "request_navigation_graph" -> { stream: ObservationStreamClient ->
+        stream.requestNavigationGraph("com.example")
+      }
+      "request_observation" -> { stream: ObservationStreamClient ->
+        stream.requestObservation("emulator-5554")
+      }
+      "subscribe_storage" -> { stream: ObservationStreamClient ->
+        stream.subscribeStorage("com.example", "prefs.xml")
+      }
+      "unsubscribe_storage" -> { stream: ObservationStreamClient ->
+        stream.unsubscribeStorage("com.example", "prefs.xml")
+      }
+      else -> error("Unexpected command $command")
+    }
+}
+
+internal class ObservationStreamClientTest : ObservationStreamClientFixture() {
   @Test
   fun `read error log includes exception class when message is null`() {
     val message = ObservationStreamClient.readErrorLogMessage(java.net.SocketException())
     assertTrue(message.contains("SocketException"))
     assertFalse(message.contains("null"))
   }
-
-  // Uses the same configuration as ObservationStreamClient so these assertions match the socket.
-  private val wireJson = DaemonJson
 
   @Test
   fun `stream request round trips session UUID`() {
@@ -185,87 +415,6 @@ class ObservationStreamClientTest {
       )) {
       val frame = captureCommandFrame(command, null)
       assertFalse(frame.contains("sessionUuid"), "$command: $frame")
-    }
-  }
-
-  private fun assertAuthenticatedFrame(command: String, action: (ObservationStreamClient) -> Unit) {
-    // The helper drives each command through the same fake writer as the production socket.
-    val frame = captureCommandFrame(command, "desktop-session", action)
-    assertTrue(frame.contains("\"sessionUuid\":\"desktop-session\""), frame)
-  }
-
-  private fun captureCommandFrame(
-    command: String,
-    sessionUuid: String?,
-    action: ((ObservationStreamClient) -> Unit)? = null,
-  ): String = runBlocking {
-    val tempSocket = Files.createTempFile("obs-stream-auth", ".sock")
-    val factory = RecordingTransportFactory(blocking = true)
-    val client =
-      if (sessionUuid == null) {
-        ObservationStreamClient(
-          transportFactory = factory,
-          socketPathProvider = { tempSocket.toString() },
-        )
-      } else {
-        ObservationStreamClient(
-          transportFactory = factory,
-          socketPathProvider = { tempSocket.toString() },
-          sessionUuidProvider = { sessionUuid },
-        )
-      }
-    try {
-      client.connect("emulator-5554")
-      val transport = factory.opened.single()
-      transport.awaitReadEntered()
-      val invoke =
-        action
-          ?: when (command) {
-            "subscribe" -> { _: ObservationStreamClient ->
-              Unit
-            }
-            "request_navigation_graph" -> { stream: ObservationStreamClient ->
-              stream.requestNavigationGraph("com.example")
-            }
-            "request_observation" -> { stream: ObservationStreamClient ->
-              stream.requestObservation("emulator-5554")
-            }
-            "subscribe_storage" -> { stream: ObservationStreamClient ->
-              stream.subscribeStorage("com.example", "prefs.xml")
-            }
-            "unsubscribe_storage" -> { stream: ObservationStreamClient ->
-              stream.unsubscribeStorage("com.example", "prefs.xml")
-            }
-            else -> error("Unexpected command $command")
-          }
-
-      if (command == "unsubscribe_storage") {
-        client.subscribeStorage("com.example", "prefs.xml")
-        val subscription =
-          transport
-            .writtenFrames()
-            .lineSequence()
-            .filter { it.isNotBlank() }
-            .map {
-              wireJson.decodeFromString(StreamRequest.serializer(), it)
-            }
-            .last()
-        client.handleMessage(
-          """{"id":"${subscription.id}","type":"subscription_response","success":true}""",
-        )
-      }
-      invoke(client)
-      transport
-        .writtenFrames()
-        .lineSequence()
-        .filter { it.isNotBlank() }
-        .last { frame ->
-          wireJson.decodeFromString(StreamRequest.serializer(), frame).command == command
-        }
-    } finally {
-      client.dispose()
-      factory.opened.firstOrNull()?.releaseEof()
-      Files.deleteIfExists(tempSocket)
     }
   }
 
@@ -519,7 +668,9 @@ class ObservationStreamClientTest {
       assertEquals(null, awaitItem().diff)
     }
   }
+}
 
+internal class ObservationStreamConnectionLossTest : ObservationStreamClientFixture() {
   @Test
   fun `emits device connection lost event for disconnect error message`() = runTest {
     val client = ObservationStreamClient()
@@ -543,48 +694,9 @@ class ObservationStreamClientTest {
     runTest {
       val client = ObservationStreamClient()
 
-      client.handleMessage(
-        """
-        {
-          "type": "hierarchy_update",
-          "deviceId": "emulator-5554",
-          "timestamp": 1000,
-          "data": { "packageName": "com.example" }
-        }
-        """
-          .trimIndent(),
-      )
-      client.handleMessage(
-        """
-        {
-          "type": "screenshot_update",
-          "deviceId": "emulator-5554",
-          "timestamp": 1001,
-          "screenshotBase64": "aW1hZ2U=",
-          "screenWidth": 100,
-          "screenHeight": 200
-        }
-        """
-          .trimIndent(),
-      )
-      client.handleMessage(
-        """
-        {
-          "type": "performance_update",
-          "deviceId": "emulator-5554",
-          "timestamp": 1002,
-          "performanceData": {
-            "fps": 60.0,
-            "frameTimeMs": 16.67,
-            "jankFrames": 0,
-            "droppedFrames": 0,
-            "memoryUsageMb": 128.0,
-            "cpuUsagePercent": 10.0
-          }
-        }
-        """
-          .trimIndent(),
-      )
+      seedHierarchyReplay(client)
+      seedScreenshotReplay(client)
+      seedPerformanceReplay(client)
 
       client.hierarchyUpdates.test {
         assertEquals("emulator-5554", awaitItem().deviceId)
@@ -812,95 +924,4 @@ class ObservationStreamClientTest {
       }
     }
   }
-
-  /**
-   * Await the EOF-driven terminal state. The read loop runs on the client's own Dispatchers.IO
-   * scope, so the StateFlow flips from a real background coroutine; `first { ... }` replays the
-   * current value and returns as soon as the death point has published it (AC1: once observers can
-   * see Disconnected, the transport is already closed).
-   */
-  private suspend fun ObservationStreamClient.awaitStreamEnded() {
-    withTimeout(5_000) {
-      connectionState.first { it is ConnectionState.Disconnected && it.reason == "Stream ended" }
-    }
-  }
-
-  /**
-   * Records every transport it hands out so a test can assert each one was closed (issue #5261). In
-   * [blocking] mode the transports park their read loop until [FakeStreamTransport.releaseEof].
-   */
-  private class RecordingTransportFactory(private val blocking: Boolean = false) :
-    ObservationStreamTransportFactory {
-    val opened = mutableListOf<FakeStreamTransport>()
-
-    override fun open(socketPath: String): ObservationStreamTransport =
-      FakeStreamTransport(blocking).also { opened += it }
-  }
-
-  /**
-   * In-memory [ObservationStreamTransport] over a discarding writer, counting [close] calls in
-   * place of releasing a real fd. Its reader yields EOF immediately, or (in blocking mode) blocks
-   * until [releaseEof] so a test can interleave a reconnect before the read loop terminates.
-   */
-  private class FakeStreamTransport(blocking: Boolean = false) : ObservationStreamTransport {
-    private val controllableReader = ControllableReader(blocking)
-    private val recordedWriter = StringWriter()
-    override val reader: BufferedReader = BufferedReader(controllableReader)
-    override val writer: BufferedWriter = BufferedWriter(recordedWriter)
-
-    var closeCount = 0
-      private set
-
-    val isClosed: Boolean
-      get() = closeCount > 0
-
-    /** Block until this transport's read loop has entered its (blocking) read. */
-    fun awaitReadEntered() = controllableReader.awaitReadEntered()
-
-    /** Release the parked read so it returns EOF, ending the read loop. */
-    fun releaseEof() = controllableReader.releaseEof()
-
-    fun writtenFrames(): String = recordedWriter.toString()
-
-    override fun close() {
-      closeCount++
-    }
-  }
-
-  /**
-   * A [Reader] whose single read returns EOF. In [blocking] mode it first parks until [releaseEof],
-   * letting a test drive exactly when the read loop terminates relative to a reconnect; otherwise
-   * it EOFs immediately.
-   */
-  private class ControllableReader(private val blocking: Boolean) : Reader() {
-    private val readEntered = CountDownLatch(1)
-    private val eofGate = CountDownLatch(1)
-
-    fun awaitReadEntered() =
-      check(readEntered.await(5, TimeUnit.SECONDS)) { "read loop never entered its read" }
-
-    fun releaseEof() = eofGate.countDown()
-
-    override fun read(cbuf: CharArray, off: Int, len: Int): Int {
-      readEntered.countDown()
-      if (blocking) {
-        check(eofGate.await(5, TimeUnit.SECONDS)) { "EOF was never released" }
-      }
-      return -1
-    }
-
-    override fun close() = Unit
-  }
-
-  private fun deviceConnectionLostMessage(): String =
-    """
-    {
-      "type": "error",
-      "success": false,
-      "deviceId": "emulator-5554",
-      "timestamp": 1234,
-      "error": "device connection lost"
-    }
-    """
-      .trimIndent()
 }

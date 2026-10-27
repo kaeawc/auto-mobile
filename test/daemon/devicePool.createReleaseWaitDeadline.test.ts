@@ -30,9 +30,9 @@ class ParkablePersistence extends FakeDeviceSessionPersistence {
   parkCreate: Promise<void> | undefined;
   parkRelease: Promise<void> | undefined;
 
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  override async upsertActiveSession(record: DeviceSessionRecord): Promise<number> {
     await this.parkCreate;
-    await super.upsertActiveSession(record);
+    return await super.upsertActiveSession(record);
   }
 
   override async markReleased(
@@ -52,7 +52,9 @@ class NeverSettlingReleaseManager extends SessionManager {
   stuck = false;
 
   constructor(private readonly fakeTimer: FakeTimer) {
-    super(fakeTimer, new FakeDeviceSessionPersistence(), () => new FakeDbWriteBarrier());
+    super(fakeTimer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
   }
 
   override async waitForSessionReleaseWithin(sessionId: string, timeoutMs: number) {

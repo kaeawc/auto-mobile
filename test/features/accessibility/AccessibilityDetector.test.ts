@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidTapStrategy } from "../../../src/features/action/strategies/AndroidTapStrategy";
-import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
-import { DefaultAccessibilityDetector } from "../../../src/features/accessibility/AccessibilityDetector";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { DefaultAccessibilityDetector } from "../../../src/ctrlProxy/accessibility/AccessibilityDetector";
 import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT } from "../../../src/ctrlProxy/constants";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { ExecResult } from "../../../src/models";

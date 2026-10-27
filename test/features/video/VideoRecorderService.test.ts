@@ -450,7 +450,7 @@ describe("VideoRecorderService", () => {
         },
       },
     });
-    const device = { deviceId: "terminal-device", platform: "ios" as const };
+    const device = { deviceId: "terminal-device", platform: "ios" as const, name: "Test device" };
     const recording = await recorder.startRecording({ device });
     backend.stop = async () => {
       throw new VideoCaptureFinalizationError(
@@ -467,6 +467,9 @@ describe("VideoRecorderService", () => {
     expect(error).toMatchObject({
       message: "Recording produced no usable video. Start a new recording.",
     });
+    if (!(error instanceof ActionableError)) {
+      throw new Error("Expected an ActionableError");
+    }
     expect(toActionableError(error, "Failed to stop video recording")).toBe(error);
     await expect(recorder.startRecording({ device })).resolves.toBeDefined();
   });
@@ -488,7 +491,11 @@ describe("VideoRecorderService", () => {
       },
       logger: { info() {}, debug() {}, error() {}, warn },
     });
-    const device = { deviceId: "cleanup-device", platform: "android" as const };
+    const device = {
+      deviceId: "cleanup-device",
+      platform: "android" as const,
+      name: "Test device",
+    };
     const recording = await recorder.startRecording({ device });
     backend.stop = async () => {
       throw failure;
@@ -516,6 +523,9 @@ describe("VideoRecorderService", () => {
       cause: failure,
       message: `Recording ${recording.recordingId} ownership retained; stop again to finalize its device artifact: ${failure.message}`,
     });
+    if (!(error instanceof ActionableError)) {
+      throw new Error("Expected an ActionableError");
+    }
     expect(toActionableError(error, "Failed to stop video recording")).toBe(error);
     expect(service.listActiveRecordingIds()).toEqual([recording.recordingId]);
   });
@@ -533,7 +543,7 @@ describe("VideoRecorderService", () => {
       },
       idGenerator: new CountingIdGenerator("raw"),
     });
-    const device = { deviceId: "raw-device", platform: "ios" as const };
+    const device = { deviceId: "raw-device", platform: "ios" as const, name: "Test device" };
     const recording = await recorder.startRecording({ device });
     const failure = new VideoCaptureFinalizationError("Raw capture retained at raw.mov", {
       retainedCapturePath: path.join(path.dirname(recording.outputPath), "raw.mov"),
@@ -602,11 +612,12 @@ describe("VideoRecorderService", () => {
     const recording = await service.startRecording();
     let resolveStop: (() => void) | undefined;
     let resolveForceStop: (() => void) | undefined;
-    backend.stop = async () => {
+    const stop = backend.stop.bind(backend);
+    backend.stop = async (handle) => {
       await new Promise<void>((resolve) => {
         resolveStop = resolve;
       });
-      return backend.stopResult;
+      return stop(handle);
     };
     backend.forceStop = async () => {
       await new Promise<void>((resolve) => {

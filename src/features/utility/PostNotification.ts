@@ -18,6 +18,7 @@ import { detectImageMimeType } from "../../utils/screenshot/imageHeaderDimension
 import { shellQuote } from "../../utils/shellQuote";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
+import { buildIosPushPayload } from "./iosPushPayload";
 
 export { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
 
@@ -33,6 +34,10 @@ export interface PostNotificationOptions {
   imagePath?: string;
   actions?: PostNotificationAction[];
   channelId?: string;
+  /** iOS: `aps.category`, naming a UNNotificationCategory the app registered (#14097). */
+  category?: string;
+  /** iOS: raw APNs JSON merged over the generated payload (#14097). */
+  payload?: Record<string, unknown>;
   /** Android package name or iOS bundle identifier to target; required on iOS. */
   appId?: string;
 }
@@ -55,6 +60,17 @@ const SDK_RESULT_POSTED_WITHOUT_IMAGE = 2;
 const NOTIFICATION_IMAGE_MAX_BYTES = 16 * 1024 * 1024;
 /** Leading bytes the format sniffer needs (the ISO-BMFF `ftyp` box brand ends at byte 12). */
 const NOTIFICATION_IMAGE_HEADER_BYTES = 32;
+/** `category` and `payload` shape an APNs push; the Android SDK broadcast has no equivalent. */
+function iosOnlyFieldsWarning(options: PostNotificationOptions): string | undefined {
+  const ignored = [
+    options.category !== undefined ? "category" : undefined,
+    options.payload !== undefined ? "payload" : undefined,
+  ].filter(Boolean);
+  return ignored.length > 0
+    ? `${ignored.join(" and ")} ${ignored.length > 1 ? "are" : "is"} iOS-only and ${ignored.length > 1 ? "were" : "was"} ignored.`
+    : undefined;
+}
+
 const IMAGE_PATH_IGNORED_WARNING =
   'imagePath was ignored because imageType is not "bigPicture"; set imageType to "bigPicture" to show the image.';
 const POSTED_WITHOUT_IMAGE_WARNING =
@@ -169,40 +185,13 @@ export class PostNotification {
       };
     }
 
-    const warnings: string[] = [];
-    if (options.imageType === "bigPicture" || options.imagePath) {
-      warnings.push(
-        "bigPicture/image attachments are not supported via simctl push and were ignored.",
-      );
-    }
-    if (options.actions && options.actions.length > 0) {
-      warnings.push(
-        "action buttons require a pre-registered UNNotificationCategory and were ignored.",
-      );
-    }
-    const warning = warnings.join(" ") || undefined;
-
-    const aps: Record<string, unknown> = {
-      alert: { title: options.title, body: options.body },
-      sound: "default",
-    };
-    if (options.channelId) {
-      aps.category = options.channelId; // reuse channelId as the APNs category
-    }
-    const payload = { "Simulator Target Bundle": bundleId, aps };
-    const json = JSON.stringify(payload);
-
-    if (Buffer.byteLength(json, "utf8") > 4096) {
-      return {
-        success: false,
-        supported: true,
-        appId: bundleId,
-        error: "APNs payload exceeds the 4096-byte simctl push limit.",
-        warning,
-      };
+    const built = buildIosPushPayload(options, bundleId);
+    const warning = built.warnings.join(" ") || undefined;
+    if (!built.ok) {
+      return { success: false, supported: true, appId: bundleId, error: built.error, warning };
     }
 
-    const result = await this.simctl.pushNotification(this.device.deviceId, bundleId, json);
+    const result = await this.simctl.pushNotification(this.device.deviceId, bundleId, built.json);
     if (!result.success) {
       return {
         success: false,
@@ -260,7 +249,9 @@ export class PostNotification {
       }
 
       const sdkResult = await this.trySdkPost({ ...options, imagePath }, imageType, signal);
-      const warning = [hostWarning, sdkResult.warning].filter(Boolean).join(" ") || undefined;
+      const warning =
+        [hostWarning, iosOnlyFieldsWarning(options), sdkResult.warning].filter(Boolean).join(" ") ||
+        undefined;
       return warning === sdkResult.warning ? sdkResult : { ...sdkResult, warning };
     } catch (error) {
       logger.warn(`Failed to post notification: ${errorMessage(error)}`, error);

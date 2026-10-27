@@ -3,7 +3,7 @@ import "./harnessLogSink";
 import {
   AUX_SOCKET_MAX_FRAME_BYTES,
   FAILURES_STREAM_MAX_FRAME_BYTES,
-} from "../../src/daemon/socketServer/LineFramer";
+} from "../../src/daemon/wire/LineFramer";
 import { basename, join, isAbsolute } from "node:path";
 import {
   DEVICE_GESTURE_RECORDING_SOCKET_CONFIG,
@@ -15,7 +15,7 @@ import {
   DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_RELEASE_SESSION_METHOD,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import type {
   DeviceGestureRecordingCommand,
   DeviceGestureRecordingResponse,
@@ -23,7 +23,7 @@ import type {
 import type {
   VideoStreamSocketRequest,
   VideoStreamSocketResponse,
-} from "../../src/daemon/videoStreamSocketTypes";
+} from "../../src/daemon/wire/videoStreamSocketTypes";
 import type { WebRtcStreamSocketRequest } from "../../src/daemon/webrtcStreamSocketTypes";
 import { sendWebRtcStreamRequest } from "../lib/webrtcStreamClient";
 import { defaultTimer, MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../src/utils/SystemTimer";
@@ -50,7 +50,6 @@ import {
 
 import {
   AUX_SOCKET_COMMANDS,
-  AUX_SOCKET_ACTIONS,
   AUX_SOCKET_FLAGS,
   RECORDING_SESSION_GUIDANCE,
   auxSocketHelp,
@@ -95,21 +94,27 @@ export function parseAuxSocketArgs(
       if (value.action !== "subscribe") {
         return { error: "video requires a subscribe JSON object." };
       }
-      request = value as unknown as VideoStreamSocketRequest;
+      request = { ...value, action: "subscribe" };
     } else if (kind === "recording") {
-      if (!(AUX_SOCKET_ACTIONS.recording as readonly string[]).includes(action)) {
+      if (action !== "start" && action !== "stop" && action !== "status") {
         return { error: usage };
       }
       request = { command: action };
     } else {
-      if (!(AUX_SOCKET_ACTIONS.webrtc as readonly string[]).includes(action)) {
+      if (
+        action !== "start" &&
+        action !== "stop" &&
+        action !== "status" &&
+        action !== "list" &&
+        action !== "await"
+      ) {
         return { error: usage };
       }
       const value = argv[index] && !argv[index].startsWith("--") ? jsonRequest(argv[index++]) : {};
       request = { ...value, action };
       if (
         action === "start" &&
-        (typeof request.whipEndpoint !== "string" || !request.whipEndpoint.trim())
+        (typeof value.whipEndpoint !== "string" || !value.whipEndpoint.trim())
       ) {
         return { error: "webrtc start requires whipEndpoint in request JSON." };
       }

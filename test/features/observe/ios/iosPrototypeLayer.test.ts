@@ -264,6 +264,7 @@ describe("iOS prototype agent window with layer (iphone D2)", () => {
   test("observe with layer prototype returns the agent's controls", () => {
     const viewHierarchy = convert();
     const result: ObserveResult = {
+      observationId: "prototype-layer",
       updatedAt: 1,
       display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
       screenSize: { width: 402, height: 874 },

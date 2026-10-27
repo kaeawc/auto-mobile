@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "q": ""
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "visibleWhen": {
+        "data": "/feed",
+        "equals": 1,
+        "empty": true
+      }
+    },
+    "data": {
+      "feed": []
+    }
+  },
+  "expectedPath": "root.visibleWhen.empty",
+  "expectedMessage": "Exactly one of equals, notEquals, gt, lt, empty is required"
+}

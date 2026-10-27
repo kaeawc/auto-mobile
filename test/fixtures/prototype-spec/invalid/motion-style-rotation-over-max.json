@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "style": {
+        "rotation": 720
+      }
+    }
+  },
+  "expectedPath": "root.style.rotation",
+  "expectedMessage": "Invalid number value"
+}

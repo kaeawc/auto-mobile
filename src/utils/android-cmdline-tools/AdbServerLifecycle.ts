@@ -2,9 +2,10 @@ import type { AdbClientFactory } from "./AdbClientFactory";
 import { defaultAdbClientFactory } from "./AdbClientFactory";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
+import { ENV, readEnvRaw } from "../../config/env";
 
-export const MANAGED_ADB_SERVER_ENV = "AUTOMOBILE_MANAGED_ADB_SERVER";
-export const LEGACY_MANAGED_ADB_SERVER_ENV = "AUTO_MOBILE_MANAGED_ADB_SERVER";
+export const MANAGED_ADB_SERVER_ENV = ENV.MANAGED_ADB_SERVER.name;
+export const LEGACY_MANAGED_ADB_SERVER_ENV = ENV.MANAGED_ADB_SERVER.legacyName;
 export const MANAGED_ADB_SERVER_SHUTDOWN_TIMEOUT_MS = 5_000;
 
 export interface ManagedAdbServerShutdownDependencies {
@@ -19,7 +20,7 @@ export interface ManagedAdbServerShutdownDependencies {
  * default so that routine client shutdowns never stop a shared local server.
  */
 export function isManagedAdbServerEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
-  const value = environment[MANAGED_ADB_SERVER_ENV] ?? environment[LEGACY_MANAGED_ADB_SERVER_ENV];
+  const value = readEnvRaw(ENV.MANAGED_ADB_SERVER, environment);
   return value?.trim().toLowerCase() === "1" || value?.trim().toLowerCase() === "true";
 }
 

@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import type { ObserveResult, ViewHierarchyNode } from "../../../src/models";
 import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
@@ -26,5 +27,10 @@ export function typedObservation(value: string, secure = false, omitValue = fals
       }
     });
   }
-  return { timestamp: 1, viewHierarchy: hierarchy } as ObserveResult;
+  return buildObserveResult({
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    updatedAt: 1,
+    viewHierarchy: hierarchy,
+  });
 }

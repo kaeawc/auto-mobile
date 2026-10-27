@@ -8,7 +8,7 @@ import {
   startWebRtcStream,
   stopWebRtcStream,
   WEBRTC_STREAM_LEASE_TTL_MS,
-} from "../../src/server/webrtcStreamManager";
+} from "../../src/daemon/webrtcStreamManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";

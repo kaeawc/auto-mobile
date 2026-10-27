@@ -46,13 +46,13 @@ describe("installed-app resources resync on resources/list", () => {
     });
     installedAppResourceResyncGate.reset();
     registerAppResources();
-    registerInstalledAppResourceListRefresher(() => syncInstalledAppResources({ timer }), timer);
-    await syncInstalledAppResources({ timer });
+    registerInstalledAppResourceListRefresher(() => syncInstalledAppResources(), timer);
+    await syncInstalledAppResources();
   });
 
   afterEach(async () => {
     booted = [];
-    await syncInstalledAppResources({ timer });
+    await syncInstalledAppResources();
     ResourceRegistry.clearResources();
     PlatformDeviceManagerFactory.reset();
     installedAppResourceResyncGate.reset();
@@ -92,14 +92,8 @@ describe("installed-app resources resync on resources/list", () => {
     timer.advanceTime(6000);
 
     await Promise.all([
-      installedAppResourceResyncGate.resyncIfStale(
-        () => syncInstalledAppResources({ timer }),
-        timer,
-      ),
-      installedAppResourceResyncGate.resyncIfStale(
-        () => syncInstalledAppResources({ timer }),
-        timer,
-      ),
+      installedAppResourceResyncGate.resyncIfStale(() => syncInstalledAppResources(), timer),
+      installedAppResourceResyncGate.resyncIfStale(() => syncInstalledAppResources(), timer),
     ]);
 
     expect(probes).toBe(before + 1);

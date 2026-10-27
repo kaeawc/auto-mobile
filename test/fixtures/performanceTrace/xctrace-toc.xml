@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<trace-toc>
+  <run number="1">
+    <info>
+      <target>
+        <device platform="iOS Simulator" model="iPhone 16" name="iPhone 16" os-version="18.1 (22B81)" uuid="AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"/>
+      </target>
+      <summary>
+        <start-date>2026-10-21T10:00:00.000+00:00</start-date>
+        <end-date>2026-10-21T10:00:05.250+00:00</end-date>
+        <duration>5.250117</duration>
+        <end-reason>Time limit reached</end-reason>
+        <instruments-version>16.0 (16A242d)</instruments-version>
+        <template-name>Hangs</template-name>
+      </summary>
+    </info>
+    <processes>
+      <process name="Playground" pid="4321" path="/Users/dev/Library/Developer/CoreSimulator/Devices/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Bundle/Application/X/Playground.app/Playground"/>
+    </processes>
+    <data>
+      <table schema="potential-hangs" target-pid="ALL"/>
+      <table schema="hang-risks"/>
+      <table schema="time-profile"/>
+    </data>
+  </run>
+</trace-toc>

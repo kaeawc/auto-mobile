@@ -68,7 +68,7 @@ test("strict image argument schema preserves the bare coordinate and hitTest for
   ).toBe(true);
 });
 
-test.each([
+const malformedTapAtInputs: unknown[] = [
   {},
   { x: 10 },
   { y: 20 },
@@ -93,7 +93,9 @@ test.each([
       source: { screenshot: { ...screenshot, screenSize: { ...screenshot.screenSize, extra: 1 } } },
     },
   },
-])("rejects malformed or ambiguous shape %j", (value) => {
+];
+
+test.each(malformedTapAtInputs)("rejects malformed or ambiguous shape %j", (value) => {
   expect(tapAtSchema.safeParse(value).success).toBe(false);
 });
 

@@ -1,30 +1,13 @@
 import { expect, test } from "bun:test";
-import { EventEmitter } from "node:events";
 import { DaemonUnavailableError } from "../../src/daemon/client";
-import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/LineFramer";
+import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/DaemonFrameTooLargeError";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { InMemoryDaemonClient } from "./inMemoryDaemonWire";
+import { InMemoryDaemonClient, SocketEnd } from "./inMemoryDaemonWire";
 
-class WireEnd extends EventEmitter {
-  destroyed = false;
-  peer!: WireEnd;
-  write(data: string | Uint8Array): boolean {
-    this.peer.emit("data", Buffer.from(data));
-    return true;
-  }
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close");
-      this.peer.destroy();
-    }
-    return this;
-  }
-}
 function pair() {
-  const socket = new WireEnd(),
-    peer = new WireEnd();
+  const socket = new SocketEnd(),
+    peer = new SocketEnd();
   socket.peer = peer;
   peer.peer = socket;
   return { socket, peer };

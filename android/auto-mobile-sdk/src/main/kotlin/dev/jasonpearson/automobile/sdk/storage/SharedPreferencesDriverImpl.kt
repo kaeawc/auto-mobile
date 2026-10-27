@@ -2,8 +2,8 @@ package dev.jasonpearson.automobile.sdk.storage
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.net.Uri
 import android.os.Looper
+import androidx.core.net.toUri
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import java.io.File
 import java.util.ArrayDeque
@@ -246,7 +246,7 @@ internal class SharedPreferencesDriverImpl(
   private fun notifyChangesAvailable() {
     try {
       val authority = context.packageName + CHANGES_AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority/$CHANGES_PATH")
+      val uri = "content://$authority/$CHANGES_PATH".toUri()
       context.contentResolver.notifyChange(uri, null)
     } catch (e: Exception) {
       // Log but don't fail if notification fails

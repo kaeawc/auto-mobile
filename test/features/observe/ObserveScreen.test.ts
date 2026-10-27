@@ -4,6 +4,9 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { ObserveResult } from "../../../src/models/ObserveResult";
+import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createExecResult } from "../../../src/utils/execResult";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { logger } from "../../../src/utils/logger";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
@@ -22,6 +25,8 @@ import { resolveViewHierarchyForSearch } from "../../../src/features/utility/vie
 import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
 import { noopObserveAudits } from "../../fakes/noopObserveAudits";
 import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
+
+const namedHierarchy = (text: string): ViewHierarchyResult => ({ hierarchy: { node: { text } } });
 
 describe("ObserveScreen", function () {
   describe("Unit Tests for Extracted Methods", function () {
@@ -120,11 +125,11 @@ describe("ObserveScreen", function () {
     });
 
     test("should append error message to empty error field", function () {
-      const result: ObserveResult = {
+      const result: ObserveResult = buildObserveResult({
         updatedAt: "2023-01-01T00:00:00.000Z",
         screenSize: { width: 0, height: 0 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      };
+      });
 
       observeScreen.appendError(result, "Test error");
 
@@ -132,12 +137,12 @@ describe("ObserveScreen", function () {
     });
 
     test("should append error message to existing error field", function () {
-      const result: ObserveResult = {
+      const result: ObserveResult = buildObserveResult({
         updatedAt: "2023-01-01T00:00:00.000Z",
         screenSize: { width: 0, height: 0 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
         error: "Existing error",
-      };
+      });
 
       observeScreen.appendError(result, "New error");
 
@@ -313,7 +318,10 @@ describe("ObserveScreen", function () {
         const screen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb), {
           cacheStore,
         });
-        const result = { ...screen.createBaseResult(), viewHierarchy: "deferred-hierarchy" };
+        const result = {
+          ...screen.createBaseResult(),
+          viewHierarchy: namedHierarchy("deferred-hierarchy"),
+        };
         const generation = screen.captureCacheGeneration();
 
         await screen.cacheObserveResult(result, generation);
@@ -338,13 +346,13 @@ describe("ObserveScreen", function () {
           // A device clock ahead of the host must not make this deferred write
           // rank ahead of a later host-clock capture.
           updatedAt: 1_600_000,
-          viewHierarchy: "future-device-time-deferred-hierarchy",
+          viewHierarchy: namedHierarchy("future-device-time-deferred-hierarchy"),
         };
         const newerResult = {
           ...screen.createBaseResult(),
           observationId: "newer-observation",
           updatedAt: 1_000_000,
-          viewHierarchy: "newer-hierarchy",
+          viewHierarchy: namedHierarchy("newer-hierarchy"),
         };
         const generation = screen.captureCacheGeneration();
 
@@ -369,13 +377,13 @@ describe("ObserveScreen", function () {
         const newerResult = {
           ...screen.createBaseResult(),
           updatedAt: 1,
-          viewHierarchy: "newer-host-cached-hierarchy",
+          viewHierarchy: namedHierarchy("newer-host-cached-hierarchy"),
         };
         const deferredResult = {
           ...screen.createBaseResult(),
           observationId: "older-observation",
           updatedAt: 1_600_000,
-          viewHierarchy: "future-device-time-deferred-hierarchy",
+          viewHierarchy: namedHierarchy("future-device-time-deferred-hierarchy"),
         };
         const generation = screen.captureCacheGeneration();
 
@@ -457,7 +465,7 @@ describe("ObserveScreen", function () {
         const result = {
           ...screen.createBaseResult(),
           updatedAt: 1_600_000,
-          viewHierarchy: "future-device-time-direct-caller-hierarchy",
+          viewHierarchy: namedHierarchy("future-device-time-direct-caller-hierarchy"),
         };
 
         await screen.cacheObserveResult(result);
@@ -480,12 +488,12 @@ describe("ObserveScreen", function () {
         const currentResult = {
           ...screen.createBaseResult(),
           updatedAt: 1_600_000,
-          viewHierarchy: "current-hierarchy",
+          viewHierarchy: namedHierarchy("current-hierarchy"),
         };
         const equalTimestampResult = {
           ...screen.createBaseResult(),
           updatedAt: 1,
-          viewHierarchy: "equal-timestamp-deferred-hierarchy",
+          viewHierarchy: namedHierarchy("equal-timestamp-deferred-hierarchy"),
         };
         const generation = screen.captureCacheGeneration();
 
@@ -603,6 +611,12 @@ describe("ObserveScreen", function () {
 
     test("prefers an SDK-backed iOS screen identity for the observed bundle", async function () {
       const viewHierarchy = new FakeViewHierarchy();
+      const getIdentity = viewHierarchy.getScreenIdentity.bind(viewHierarchy);
+      let identityCaptureTimestamp: number | undefined;
+      viewHierarchy.getScreenIdentity = (appId?: string, capturedAt?: number) => {
+        identityCaptureTimestamp = capturedAt;
+        return getIdentity(appId);
+      };
       viewHierarchy.configureHierarchy({
         packageName: "dev.jasonpearson.automobile.Playground",
         updatedAt: 123,
@@ -640,6 +654,7 @@ describe("ObserveScreen", function () {
           confidence: "high",
           components: { navigationRoute: "SettingsTab" },
         });
+        expect(identityCaptureTimestamp).toBe(123);
       } finally {
         resetObserveCacheStore();
       }
@@ -949,6 +964,7 @@ describe("ObserveScreen", function () {
   describe("Integration Tests", function () {
     let observeScreen: RealObserveScreen | undefined;
     let mockDevice: BootedDevice | null;
+    let adb: FakeAdbExecutor | undefined;
 
     beforeEach(async function () {
       // Clear cache before each test to prevent interference between tests
@@ -988,7 +1004,7 @@ describe("ObserveScreen", function () {
 
       expect(result).toHaveProperty("viewHierarchy");
       expect(result.viewHierarchy).toHaveProperty("hierarchy");
-      expect(result.viewHierarchy.hierarchy).not.toBeNull();
+      expect(result.viewHierarchy?.hierarchy).not.toBeNull();
 
       expect(result).toHaveProperty("activeWindow");
       expect(result.activeWindow).toHaveProperty("appId");
@@ -1084,7 +1100,7 @@ describe("ObserveScreen", function () {
     });
 
     test("should handle errors gracefully if device is disconnected", async function () {
-      if (!mockDevice || !observeScreen) {
+      if (!mockDevice || !observeScreen || !adb) {
         return;
       } // Skip if no device available
 
@@ -1107,7 +1123,7 @@ describe("ObserveScreen", function () {
       // Pass fakeAdb to avoid creating real AdbClient
       const invalidObserveScreen = new RealObserveScreen(
         invalidDevice,
-        new FakeAdbClientFactory(fakeAdb),
+        new FakeAdbClientFactory(adb),
       );
 
       // Should still return a result object with error info
@@ -1225,11 +1241,11 @@ describe("ObserveScreen", function () {
 
       const resultA: ObserveResult = {
         ...screenA.createBaseResult(),
-        viewHierarchy: "hierarchy-A",
+        viewHierarchy: namedHierarchy("hierarchy-A"),
       };
       const resultB: ObserveResult = {
         ...screenB.createBaseResult(),
-        viewHierarchy: "hierarchy-B",
+        viewHierarchy: namedHierarchy("hierarchy-B"),
       };
 
       await screenA.cacheObserveResult(resultA);
@@ -1238,8 +1254,8 @@ describe("ObserveScreen", function () {
       const cachedA = RealObserveScreen.getRecentCachedResultForDevice(deviceA.deviceId);
       const cachedB = RealObserveScreen.getRecentCachedResultForDevice(deviceB.deviceId);
 
-      expect(cachedA?.viewHierarchy).toBe("hierarchy-A");
-      expect(cachedB?.viewHierarchy).toBe("hierarchy-B");
+      expect(cachedA?.viewHierarchy).toEqual(namedHierarchy("hierarchy-A"));
+      expect(cachedB?.viewHierarchy).toEqual(namedHierarchy("hierarchy-B"));
     });
 
     test("cached-result getters bound an uncapped layoutWarnings list (issue #5074)", async function () {
@@ -1298,12 +1314,18 @@ describe("ObserveScreen", function () {
         timerB,
       );
 
-      await screenA.cacheObserveResult({ ...screenA.createBaseResult(), viewHierarchy: "A" });
-      await screenB.cacheObserveResult({ ...screenB.createBaseResult(), viewHierarchy: "B" });
+      await screenA.cacheObserveResult({
+        ...screenA.createBaseResult(),
+        viewHierarchy: namedHierarchy("A"),
+      });
+      await screenB.cacheObserveResult({
+        ...screenB.createBaseResult(),
+        viewHierarchy: namedHierarchy("B"),
+      });
 
       // Most recent should be B (timerB is 1s newer than timerA)
       const recent = RealObserveScreen.getRecentCachedResult();
-      expect(recent?.viewHierarchy).toBe("B");
+      expect(recent?.viewHierarchy).toEqual(namedHierarchy("B"));
     });
 
     test("clearCache with deviceId only clears that device", async function () {
@@ -1356,17 +1378,17 @@ describe("ObserveScreen", function () {
 
       const resultA: ObserveResult = {
         ...screenA.createBaseResult(),
-        viewHierarchy: "A-hierarchy",
+        viewHierarchy: namedHierarchy("A-hierarchy"),
       };
       await screenA.cacheObserveResult(resultA);
       await screenB.cacheObserveResult({
         ...screenB.createBaseResult(),
-        viewHierarchy: "B-hierarchy",
+        viewHierarchy: namedHierarchy("B-hierarchy"),
       });
 
       // screenA's getMostRecentCachedObserveResult should return A's result, not B's
       const cached = await screenA.getMostRecentCachedObserveResult();
-      expect(cached.viewHierarchy).toBe("A-hierarchy");
+      expect(cached.viewHierarchy).toEqual(namedHierarchy("A-hierarchy"));
     });
   });
 });
@@ -1402,14 +1424,16 @@ describe("ObserveScreen terminal screenshot display selection", () => {
   ])("$name", async (scenario) => {
     const timer = new FakeTimer();
     const executor = new FakeAdbExecutor();
-    executor.setCommandResponse("cmd display get-displays", {
-      stdout:
+    executor.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 100 x 100}' +
-        (scenario.disconnected
-          ? ""
-          : '\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}'),
-      stderr: "",
-    });
+          (scenario.disconnected
+            ? ""
+            : '\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}'),
+        "",
+      ),
+    );
     const device: BootedDevice = {
       deviceId: "terminal-screenshot-display",
       name: "Screenshot display",
@@ -1451,7 +1475,7 @@ describe("ObserveScreen terminal screenshot display selection", () => {
     }
     const debug = spyOn(logger, "debug");
     try {
-      await observe.captureScreenshot(undefined, undefined, observation, "fresh");
+      await observe.captureScreenshot(undefined, undefined, observation, "async");
       expect(recorder.ids).toEqual([scenario.expected]);
       if (scenario.fallback) {
         expect(debug.mock.calls).toContainEqual([
@@ -1478,7 +1502,7 @@ describe("ObserveScreen terminal screenshot display selection", () => {
     );
     const observation = observe.createBaseResult();
     await expect(
-      observe.captureScreenshot(undefined, undefined, observation, "fresh"),
+      observe.captureScreenshot(undefined, undefined, observation, "async"),
     ).rejects.toThrow('display: "all" is not supported for single-panel targeting');
     expect(recorder.captureFreshCalls).toBe(0);
   });

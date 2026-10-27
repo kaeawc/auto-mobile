@@ -1,3 +1,7 @@
+import * as hierarchyFingerprintModule from "../../../src/utils/hierarchyFingerprint";
+import { runBlockWith, runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
@@ -27,7 +31,7 @@ import {
   TALKBACK_ACTIVATION_WARNING,
   TalkBackTapStrategy,
 } from "../../../src/features/talkback/TalkBackTapStrategy";
-import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 
 const device = {
   deviceId: "tap-display-verification",
@@ -125,7 +129,7 @@ function harness(
   let current = hierarchy({ checked: options.checked });
   const observation = (): ObserveResult => ({
     observationId: "panel",
-    timestamp: timer.now(),
+    updatedAt: timer.now(),
     displayRevision: transitions.fullRevision,
     display: {
       key: "external",
@@ -179,8 +183,8 @@ function harness(
   const client = AndroidCtrlProxyClient.getExistingInstance(device.deviceId)!;
   const capability = spyOn(client, "supportsCommand").mockResolvedValue(ctrlProxy);
   const tap = spyOn(client, "requestTapCoordinates").mockImplementation(async (...args) => {
-    args[9]?.();
-    dispatches.push({ x: args[0], y: args[1], displayId: args[8] });
+    args[0].beforeSend?.();
+    dispatches.push({ x: args[0].x, y: args[0].y, displayId: args[0].displayId });
     onDispatch();
     return { success: true, totalTimeMs: 0 };
   });
@@ -244,19 +248,19 @@ describe("tapOn display verification", () => {
       const h = harness(true, { checked: false });
       if (extra.action === "focus") {
         const tree = hierarchy();
-        tree.hierarchy.node = {
+        tree.hierarchy.node = createFlatNodeForTest({
           text: "Wi-Fi",
           class: "android.widget.EditText",
           editable: true,
           clickable: true,
           focused: false,
           bounds: { left: 20, top: 30, right: 80, bottom: 90 },
-        };
+        });
         h.setCurrent(tree);
         h.capture.read = () => tree;
       }
       h.action.observedInteraction = async (run, options) => {
-        const result = await run(h.observation());
+        const result = await runBlockWith(h.observation)(run, options);
         h.transitions.transition();
         return { ...result, observation: h.observation() };
       };
@@ -285,13 +289,15 @@ describe("tapOn display verification", () => {
     test(`legacy display path does not finalize invalidated post-state: ${JSON.stringify(extra)}`, async () => {
       const h = harness(true);
       h.action["executeOnDisplay"] = async () => undefined;
-      h.action.observedInteraction = async () => ({
+      const delivered = {
         success: true,
         action: extra.action ?? "tap",
         element: { text: "Wi-Fi", bounds: { left: 20, top: 30, right: 80, bottom: 90 } },
         observation: { ...h.observation(), settled: false },
-        staleDisplay: { observedGeneration: 7, currentGeneration: 8, retry: "observe" },
-      });
+        staleDisplay: { observedGeneration: 7, currentGeneration: 8, retry: "observe" as const },
+      };
+      const interaction = spyOn(h.action, "observedInteraction").mockResolvedValue(delivered);
+      restores.push(() => interaction.mockRestore());
       const finalize = spyOn(h.action, "deriveTapEffectAfterPostTapObservation");
       restores.push(() => finalize.mockRestore());
       const result = await h.execute(extra);
@@ -318,18 +324,21 @@ describe("tapOn display verification", () => {
         currentGeneration: 8,
         retry: "observe",
       });
-      h.action.observedInteraction = async () => {
-        if (phase === "first read") {
-          throw new DispatchedObservationError(stale);
-        }
-        return {
-          success: true,
-          action: "tap",
-          element: { bounds: { left: 20, top: 30, right: 80, bottom: 90 } },
-          observation: h.observation(),
-        };
+      const delivered = {
+        success: true,
+        action: "tap",
+        element: { bounds: { left: 20, top: 30, right: 80, bottom: 90 } },
+        observation: h.observation(),
       };
+      const interaction = spyOn(h.action, "observedInteraction");
+      if (phase === "first read") {
+        interaction.mockRejectedValue(new DispatchedObservationError(stale));
+      } else {
+        interaction.mockResolvedValue(delivered);
+      }
+      restores.push(() => interaction.mockRestore());
       h.action.deriveTapEffectAfterPostTapObservation = async (_previous, observation) => ({
+        effect: undefined,
         observation,
       });
       h.action["applyEnsureCheckedResult"] = async () => {
@@ -380,8 +389,8 @@ describe("tapOn display verification", () => {
 
   test("ensureChecked display verification read after delivery carries the dispatched marker", async () => {
     const h = harness(true, { checked: false });
-    h.action.observedInteraction = async (run) => ({
-      ...(await run(h.observation())),
+    h.action.observedInteraction = async (run, options) => ({
+      ...(await runBlockWith(h.observation)(run, options)),
       observation: h.observation(),
     });
     const sleep = h.timer.sleep.bind(h.timer);
@@ -585,7 +594,10 @@ describe("tapOn display verification", () => {
       const h = harness(ctrlProxy);
       // Hash stays unchanged, but a new obstruction changes the visible target's point.
       // Returning an identical hash is the existing shared probe seam.
-      h.action.hashViewHierarchy = () => "same";
+      const fingerprint = spyOn(hierarchyFingerprintModule, "hierarchyFingerprint").mockReturnValue(
+        "same",
+      );
+      restores.push(() => fingerprint.mockRestore());
       h.capture.read = () => hierarchy({ left: 120 });
       expect((await h.execute({ retryIfNoChange: true })).success).toBe(true);
       expect(h.dispatches).toEqual([
@@ -616,7 +628,10 @@ describe("tapOn display verification", () => {
     });
     test(`${route} ensureChecked does not invert a toggle that reached the requested state`, async () => {
       const h = harness(ctrlProxy, { checked: false });
-      h.action.hashViewHierarchy = () => "same";
+      const fingerprint = spyOn(hierarchyFingerprintModule, "hierarchyFingerprint").mockReturnValue(
+        "same",
+      );
+      restores.push(() => fingerprint.mockRestore());
       h.onDispatch(() => h.setCurrent(hierarchy({ checked: true })));
       expect((await h.execute({ ensureChecked: true, retryIfNoChange: true })).success).toBe(true);
       expect(h.dispatches.length).toBe(1);
@@ -641,7 +656,9 @@ describe("tapOn display verification", () => {
       const requests: Array<number | undefined> = [];
       const sync = spyOn(h.client, "requestHierarchySync").mockImplementation(async (...args) => {
         requests.push(args[5]);
-        return { hierarchy: { updatedAt: h.timer.now() } };
+        return {
+          hierarchy: { updatedAt: h.timer.now(), packageName: "app", hierarchy: { node: {} } },
+        };
       });
       const convert = spyOn(h.client, "convertToViewHierarchyResult").mockImplementation(() =>
         hierarchy(),
@@ -689,7 +706,7 @@ describe("tapOn display verification", () => {
       h.setCurrent(hierarchy({ checked: true }));
     });
     h.action.observedInteraction = async (run, options) => {
-      const result = await run(h.observation());
+      const result = await runBlockWith(h.observation)(run, options);
       floor = options.observationHostTimestampProvider?.();
       expect(options.display).toBe("external");
       return { ...result, observation: h.observation() };
@@ -702,6 +719,7 @@ describe("tapOn display verification", () => {
     test(`ensureChecked floor is the tap time in the device clock with one device read (skew ${skewMs}ms, #9879)`, async () => {
       const h = harness(true, { checked: false });
       let deviceClockReads = 0;
+      h.executor.setDeviceTimestampSource("device-ms");
       h.executor.getDeviceTimestampMs = async () => {
         deviceClockReads++;
         return h.timer.now() + skewMs;
@@ -789,16 +807,22 @@ describe("tapOn display verification", () => {
     const h = harness(false);
     const before = { ...hierarchy(), displayId: undefined };
     h.capture.read = () => before;
-    h.action.observedInteraction = async (run) => ({
-      ...(await run({ screenSize: { width: 200, height: 200 }, viewHierarchy: before })),
-      observation: { viewHierarchy: before },
-    });
+    h.action.observedInteraction = runBlockWithEnvelope(
+      buildObserveResult({
+        updatedAt: 1,
+        systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
+        screenSize: { width: 200, height: 200 },
+        viewHierarchy: before,
+      }),
+      { observation: { ...h.observation(), viewHierarchy: before } },
+    );
     h.action.executeAndroidTap = async () => {};
     h.action.deriveTapEffectAfterPostTapObservation = async (_previous, observation) => ({
+      effect: undefined,
       observation,
     });
-    h.action.captureTerminalObservationScreenshot = async () => {};
-    h.action.recordDeferredPredictionOutcome = async () => {};
+    h.action.testHooks.setTerminalScreenshotCapture(async () => {});
+    h.action.testHooks.setDeferredPredictionRecorder(async () => {});
     h.action.enforceFreshnessConsistencyWithEffect = () => {};
     expect(
       (await h.action.execute({ text: "Wi-Fi", action: "tap", preTapStability: true })).success,
@@ -879,20 +903,22 @@ describe("tapOn targeted display resolution", () => {
     test(`${route} multi textAny skips off-screen first candidate`, async () => {
       const h = harness(ctrlProxy);
       const tree = hierarchy();
-      tree.hierarchy.node = [
-        {
-          text: "Offscreen",
-          clickable: true,
-          class: "android.widget.Button",
-          bounds: { left: 220, top: 30, right: 280, bottom: 90 },
-        },
-        {
-          text: "Wi-Fi",
-          clickable: true,
-          class: "android.widget.Button",
-          bounds: { left: 80, top: 30, right: 140, bottom: 90 },
-        },
-      ];
+      tree.hierarchy.node = {
+        node: [
+          {
+            text: "Offscreen",
+            clickable: true,
+            class: "android.widget.Button",
+            bounds: { left: 220, top: 30, right: 280, bottom: 90 },
+          },
+          {
+            text: "Wi-Fi",
+            clickable: true,
+            class: "android.widget.Button",
+            bounds: { left: 80, top: 30, right: 140, bottom: 90 },
+          },
+        ],
+      };
       h.setCurrent(tree);
       const result = await h.execute({ text: undefined, textAny: ["Offscreen", "Wi-Fi"] });
       expect(result.success).toBe(true);
@@ -1016,7 +1042,10 @@ describe("tapOn targeted display resolution", () => {
       h.setCurrent(hierarchy({ text: "Loading" }));
       h.capture.read = (index) =>
         index === 1 ? hierarchy({ text: "Loading" }) : siblingHierarchy();
-      h.action.hashViewHierarchy = () => "same";
+      const fingerprint = spyOn(hierarchyFingerprintModule, "hierarchyFingerprint").mockReturnValue(
+        "same",
+      );
+      restores.push(() => fingerprint.mockRestore());
       const result = await h.execute({
         text: undefined,
         textAny: ["Missing", "Wi-Fi"],
@@ -1059,19 +1088,25 @@ describe("tapOn targeted display resolution", () => {
     const h = harness(false);
     const before = { ...hierarchy({ text: "Loading" }), displayId: undefined };
     h.capture.read = () => ({ ...hierarchy({ left: 120 }), displayId: undefined });
-    h.action.observedInteraction = async (run) => ({
-      ...(await run({ screenSize: { width: 200, height: 200 }, viewHierarchy: before })),
-      observation: { viewHierarchy: before },
-    });
+    h.action.observedInteraction = runBlockWithEnvelope(
+      buildObserveResult({
+        updatedAt: 1,
+        systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
+        screenSize: { width: 200, height: 200 },
+        viewHierarchy: before,
+      }),
+      { observation: { ...h.observation(), viewHierarchy: before } },
+    );
     const points: Array<{ x: number; y: number }> = [];
     h.action.executeAndroidTap = async (_action, x, y) => {
       points.push({ x, y });
     };
     h.action.deriveTapEffectAfterPostTapObservation = async (_previous, observation) => ({
+      effect: undefined,
       observation,
     });
-    h.action.captureTerminalObservationScreenshot = async () => {};
-    h.action.recordDeferredPredictionOutcome = async () => {};
+    h.action.testHooks.setTerminalScreenshotCapture(async () => {});
+    h.action.testHooks.setDeferredPredictionRecorder(async () => {});
     h.action.enforceFreshnessConsistencyWithEffect = () => {};
     const result = await h.action.execute({
       action: "tap",
@@ -1090,19 +1125,25 @@ describe("tapOn targeted display resolution", () => {
     const h = harness(false);
     const before = { ...siblingHierarchy(), displayId: undefined };
     h.capture.read = () => ({ ...siblingHierarchy({ left: 140 }), displayId: undefined });
-    h.action.observedInteraction = async (run) => ({
-      ...(await run({ screenSize: { width: 200, height: 200 }, viewHierarchy: before })),
-      observation: { viewHierarchy: before },
-    });
+    h.action.observedInteraction = runBlockWithEnvelope(
+      buildObserveResult({
+        updatedAt: 1,
+        systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
+        screenSize: { width: 200, height: 200 },
+        viewHierarchy: before,
+      }),
+      { observation: { ...h.observation(), viewHierarchy: before } },
+    );
     const points: Array<{ x: number; y: number }> = [];
     h.action.executeAndroidTap = async (_action, x, y) => {
       points.push({ x, y });
     };
     h.action.deriveTapEffectAfterPostTapObservation = async (_previous, observation) => ({
+      effect: undefined,
       observation,
     });
-    h.action.captureTerminalObservationScreenshot = async () => {};
-    h.action.recordDeferredPredictionOutcome = async () => {};
+    h.action.testHooks.setTerminalScreenshotCapture(async () => {});
+    h.action.testHooks.setDeferredPredictionRecorder(async () => {});
     h.action.enforceFreshnessConsistencyWithEffect = () => {};
     const result = await h.action.execute({
       action: "tap",

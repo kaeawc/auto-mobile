@@ -22,7 +22,7 @@ struct PrototypeViewerApp: App {
         if documents != nil {
             launch = PrototypeViewerLayoutLoader(
                 reader: PrototypeViewerLayoutReader(), fallback: fallback,
-                registrar: PrototypeViewerAssetRegistrar(model: model)
+                registrar: PrototypeAssetRegistrar(model: model)
             ).load(directory: layoutDirectory)
         } else {
             launch = PrototypeViewerLaunch(
@@ -49,13 +49,14 @@ struct PrototypeViewerApp: App {
     var body: some Scene {
         WindowGroup {
             switch content {
-            case .none:
+            case .absent:
                 Text("No prototype saved")
+                    .accessibilityAddTraits(.isHeader)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case let .invalid(path, message):
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Invalid prototype").font(.headline)
+                        Text("Invalid prototype").font(.headline).accessibilityAddTraits(.isHeader)
                         Text(path).font(.system(.body, design: .monospaced))
                         Text(message)
                     }
@@ -66,7 +67,7 @@ struct PrototypeViewerApp: App {
             case let .unsupportedFormat(version):
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Unsupported prototype format").font(.headline)
+                        Text("Unsupported prototype format").font(.headline).accessibilityAddTraits(.isHeader)
                         Text("Version \(version); expected \(PrototypeSavedLayout.formatVersion)")
                     }
                     .textSelection(.enabled)
@@ -76,7 +77,7 @@ struct PrototypeViewerApp: App {
             case let .corrupt(message):
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Prototype data is corrupt").font(.headline)
+                        Text("Prototype data is corrupt").font(.headline).accessibilityAddTraits(.isHeader)
                         Text(message)
                     }
                     .textSelection(.enabled)
@@ -94,42 +95,6 @@ struct PrototypeViewerApp: App {
                     }
             }
         }
-    }
-}
-
-@MainActor
-private final class PrototypeViewerAssetRegistrar: PrototypeAssetRegistering {
-    let model: PrototypeModel
-    private var registeredFontDigests: [String: SHA256.Digest] = [:]
-
-    init(model: PrototypeModel) {
-        self.model = model
-    }
-
-    func registerImage(id: String, data: Data) -> Bool {
-        guard let image = UIImage(data: data) else { return false }
-        model.putAsset(id, image)
-        return true
-    }
-
-    func registerFont(id _: String, data: Data) -> String? {
-        guard let provider = CGDataProvider(data: data as CFData),
-              let font = CGFont(provider), let name = font.postScriptName
-        else { return nil }
-        let face = name as String
-        let digest = SHA256.hash(data: data)
-        if let registeredDigest = registeredFontDigests[face], registeredDigest != digest { return nil }
-        var error: Unmanaged<CFError>?
-        let registered = CTFontManagerRegisterGraphicsFont(font, &error)
-        let registrationError = error?.takeRetainedValue()
-        var alreadyRegistered = false
-        if let registrationError, registeredFontDigests[face] == digest {
-            alreadyRegistered = CFErrorGetDomain(registrationError) as String == kCTFontManagerErrorDomain as String
-                && CFErrorGetCode(registrationError) == CTFontManagerError.alreadyRegistered.rawValue
-        }
-        guard registered || alreadyRegistered else { return nil }
-        registeredFontDigests[face] = digest
-        return face
     }
 }
 
@@ -162,160 +127,11 @@ private final class ViewerTerminationObserver: NSObject {
 private struct ViewerRenderer: UIViewControllerRepresentable {
     let model: PrototypeModel
 
-    func makeUIViewController(context _: Context) -> ViewerContentController {
-        ViewerContentController(model: model)
+    func makeUIViewController(context _: Context) -> PrototypeContentController {
+        PrototypeContentController(model: model, geometry: .window, accessibilityNotification: .screenChanged)
     }
 
-    func updateUIViewController(_ controller: ViewerContentController, context _: Context) {
+    func updateUIViewController(_ controller: PrototypeContentController, context _: Context) {
         controller.syncAppearance()
-    }
-}
-
-/// A normal app content controller. Its opaque root receives touches outside authored hit rects;
-/// the shared child only routes touches between the renderer's page and modal layers.
-@MainActor
-private final class ViewerContentController: UIViewController {
-    private let model: PrototypeModel
-    private let layers: PrototypeLayersViewController
-    private weak var observedScene: UIWindowScene?
-    private var appearanceObservation: (any UITraitChangeRegistration)?
-    private var appliedAccessibility: PrototypeHostAccessibility?
-
-    init(model: PrototypeModel) {
-        self.model = model
-        layers = PrototypeLayersViewController(model: model)
-        super.init(nibName: nil, bundle: nil)
-    }
-
-    @available(*, unavailable)
-    required init?(coder _: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .systemBackground
-        addChild(layers)
-        layers.view.frame = view.bounds
-        layers.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(layers.view)
-        layers.didMove(toParent: self)
-        model.onEndEditing = { [weak self] in self?.view.endEditing(true) }
-        model.onSessionChange = { [weak self] session in
-            self?.apply(session)
-        }
-        let center = NotificationCenter.default
-        center.addObserver(
-            self,
-            selector: #selector(keyboardChanged(_:)),
-            name: UIResponder.keyboardWillChangeFrameNotification,
-            object: nil
-        )
-        center.addObserver(
-            self,
-            selector: #selector(keyboardHidden(_:)),
-            name: UIResponder.keyboardWillHideNotification,
-            object: nil
-        )
-        for name in [
-            UIAccessibility.voiceOverStatusDidChangeNotification,
-            UIAccessibility.switchControlStatusDidChangeNotification,
-        ] {
-            center.addObserver(self, selector: #selector(assistiveEscapeChanged(_:)), name: name, object: nil)
-        }
-        syncAssistiveEscape()
-        syncAppearance()
-    }
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        syncAppearanceObservation()
-        syncAppearance()
-    }
-
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        unregisterAppearanceObservation()
-    }
-
-    override func willMove(toParent parent: UIViewController?) {
-        if parent == nil { unregisterAppearanceObservation() }
-        super.willMove(toParent: parent)
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        syncAppearanceObservation()
-        guard let window = view.window else { return }
-        let origin = window.convert(CGPoint.zero, to: window.screen.coordinateSpace)
-        if model.windowOrigin != origin { model.windowOrigin = origin }
-        if model.windowSize != window.bounds.size { model.windowSize = window.bounds.size }
-        if model.safeInsets != window.safeAreaInsets { model.safeInsets = window.safeAreaInsets }
-        syncAppearance()
-    }
-
-    private func syncAppearanceObservation() {
-        guard let scene = view.window?.windowScene else {
-            unregisterAppearanceObservation()
-            return
-        }
-        guard observedScene !== scene else { return }
-        unregisterAppearanceObservation()
-        observedScene = scene
-        appearanceObservation = scene.registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self]
-        ) { [weak self] (_: UIWindowScene, _: UITraitCollection) in
-            self?.syncAppearance()
-        }
-    }
-
-    private func unregisterAppearanceObservation() {
-        if let observedScene, let appearanceObservation {
-            observedScene.unregisterForTraitChanges(appearanceObservation)
-        }
-        appearanceObservation = nil
-        observedScene = nil
-    }
-
-    func syncAppearance() {
-        // Read the scene, as PrototypeAgent.syncDeviceAppearance does: the content's override
-        // carries the resolved prototype mode and cannot tell us the device's own setting.
-        let traits = view.window?.windowScene?.traitCollection ?? UITraitCollection.current
-        model.setDeviceDark(traits.userInterfaceStyle == .dark)
-        apply(model.session)
-    }
-
-    private func apply(_ session: PrototypeSession) {
-        if let appearance = session.appearance {
-            let style: UIUserInterfaceStyle = appearance.dark ? .dark : .light
-            if overrideUserInterfaceStyle != style { overrideUserInterfaceStyle = style }
-        }
-        let flags = PrototypeHostAccessibility(session: session, windowShown: true)
-        guard flags != appliedAccessibility else { return }
-        appliedAccessibility = flags
-        layers.apply(flags)
-        UIAccessibility.post(notification: .screenChanged, argument: nil)
-    }
-
-    @objc
-    private func keyboardChanged(_ note: Notification) {
-        let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
-        let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue
-        model.setKeyboard(frame: frame, duration: duration)
-    }
-
-    @objc
-    private func keyboardHidden(_ note: Notification) {
-        let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue
-        model.setKeyboard(frame: nil, duration: duration)
-    }
-
-    @objc
-    private func assistiveEscapeChanged(_: Notification) {
-        syncAssistiveEscape()
-    }
-
-    private func syncAssistiveEscape() {
-        model.assistiveEscapeVisible = UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning
     }
 }

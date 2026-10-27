@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models";
 import { DefaultSendKeysCommandExecutor, SendKeys } from "../../../src/features/action/SendKeys";
@@ -444,7 +445,7 @@ describe("IME failure diagnostics", () => {
 
   test("a restoration failure retains acknowledged dispatch progress", async () => {
     const h = harness("@everyone");
-    h.adb.setCommandResponse("shell ime disable", { stdout: "", stderr: "disable failed" });
+    h.adb.setCommandResponse("shell ime disable", createExecResult("", "disable failed"));
     h.client.commitViaIme = async () => ({ success: true, committedUnits: 9 });
     const result = await h.executor.type({ action: "type", text: "@everyone" });
     expect(result).toMatchObject({
@@ -460,7 +461,7 @@ describe("IME failure diagnostics", () => {
   test("span restoration diagnostics belong to the last IME type and retain its progress", async () => {
     const h = harness("@everyone");
     const priors: (string | null)[] = [];
-    h.adb.setCommandResponse("shell ime disable", { stdout: "", stderr: "disable failed" });
+    h.adb.setCommandResponse("shell ime disable", createExecResult("", "disable failed"));
     h.client.commitViaIme = async (_text, prior) => {
       priors.push(prior);
       return { success: true, committedUnits: 9, committedGraphemes: 4 };
@@ -498,7 +499,7 @@ describe("IME failure diagnostics", () => {
 
   test("span cleanup retains the original verification diagnostic when restoration also fails", async () => {
     const h = harness("@every");
-    h.adb.setCommandResponse("shell ime disable", { stdout: "", stderr: "disable failed" });
+    h.adb.setCommandResponse("shell ime disable", createExecResult("", "disable failed"));
     h.client.commitViaIme = async () => ({ success: true, committedUnits: 9 });
     const result = await h.action.execute([{ action: "type", text: "@everyone" }]);
     expect(result).toMatchObject({ success: false, failedIndex: 0 });

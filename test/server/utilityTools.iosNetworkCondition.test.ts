@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -13,7 +13,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
-import { FakeNetworkFilterBridge } from "../fakes/FakeNetworkFilterBridge";
+import { FakeNetworkFilterBridge, type FakeRuleCommand } from "../fakes/FakeNetworkFilterBridge";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -66,7 +66,7 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
    * delivery of the apply is fenced. Exact reset revisions are not pinned: each
    * restore-target capture allocates one.
    */
-  const expectFencedResets = (expected: string[]) => {
+  const expectFencedResets = (expected: FakeRuleCommand[]) => {
     expect(bridge.ruleCalls.map((entry) => entry.command)).toEqual(expected);
     expect(bridge.ruleCalls.every((entry) => entry.ownership.owner === SESSION)).toBe(true);
     const revisions = bridge.ruleCalls.map((entry) => entry.ownership.revision);
@@ -76,7 +76,7 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
     ).toBe(true);
   };
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     warn = spyOn(logger, "warn").mockImplementation(() => {});
     bridge = new FakeNetworkFilterBridge();
     bridge.setState("ready");
@@ -112,7 +112,19 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
     ToolRegistry.clearTools();
     registerUtilityTools({ networkFilterBridge: bridge });
     await manager.createSession(SESSION, SIM, "ios");
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     manager.stopCleanupTimer();
@@ -122,39 +134,47 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
     warn.mockRestore();
   });
 
-  test("applies, reads back from the provider, and renews the lease on the session timer", async () => {
-    const applied = await offline();
+  arranged(
+    "applies, reads back from the provider, and renews the lease on the session timer",
+    async () => {
+      const applied = await offline();
 
-    expect(applied.success).toBe(true);
-    expect(applied.networkCondition).toMatchObject({
-      scope: "app",
-      appId: APP,
-      appliedProfile: "offline",
-      acknowledged: true,
-      rule: { revision: 1 },
-    });
-    const slot = manager.getNetworkCondition(SESSION)?.iosAppRule;
-    expect(slot).toMatchObject({ udid: SIM, bundleId: APP, installedRevision: 1, lastRevision: 1 });
-    expect(slot?.ownerGeneration).toBe(1_759_900_000_000);
+      expect(applied.success).toBe(true);
+      expect(applied.networkCondition).toMatchObject({
+        scope: "app",
+        appId: APP,
+        appliedProfile: "offline",
+        acknowledged: true,
+        rule: { revision: 1 },
+      });
+      const slot = manager.getNetworkCondition(SESSION)?.iosAppRule;
+      expect(slot).toMatchObject({
+        udid: SIM,
+        bundleId: APP,
+        installedRevision: 1,
+        lastRevision: 1,
+      });
+      expect(slot?.ownerGeneration).toBe(1_759_900_000_000);
 
-    const read = await call("getDeviceState", { include: ["networkCondition"] });
-    expect(read.networkCondition).toMatchObject({
-      supported: true,
-      capability: "partial",
-      scope: "app",
-      rules: [{ appId: APP, revision: 1, owner: SESSION }],
-    });
+      const read = await call("getDeviceState", { include: ["networkCondition"] });
+      expect(read.networkCondition).toMatchObject({
+        supported: true,
+        capability: "partial",
+        scope: "app",
+        rules: [{ appId: APP, revision: 1, owner: SESSION }],
+      });
 
-    await timer.advanceTimeAsync(10_000);
-    expect(commands()).toEqual([
-      ["apply", SESSION, 1],
-      ["renew", SESSION, 1],
-      ["renew", SESSION, 1],
-    ]);
-    expect(timer.getSleepCallCount()).toBe(0);
-  });
+      await timer.advanceTimeAsync(10_000);
+      expect(commands()).toEqual([
+        ["apply", SESSION, 1],
+        ["renew", SESSION, 1],
+        ["renew", SESSION, 1],
+      ]);
+      expect(timer.getSleepCallCount()).toBe(0);
+    },
+  );
 
-  test("release removes the rule with a newer revision and stops renewing", async () => {
+  arranged("release removes the rule with a newer revision and stops renewing", async () => {
     await offline();
 
     await manager.releaseSession(SESSION);
@@ -164,22 +184,25 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
     expect(bridge.activeRules()).toEqual([]);
   });
 
-  test("an explicit reset removes the rule, drops the slot, and release sends nothing more", async () => {
-    await offline();
+  arranged(
+    "an explicit reset removes the rule, drops the slot, and release sends nothing more",
+    async () => {
+      await offline();
 
-    const reset = await restore();
-    await manager.releaseSession(SESSION);
-    await timer.advanceTimeAsync(15_000);
+      const reset = await restore();
+      await manager.releaseSession(SESSION);
+      await timer.advanceTimeAsync(15_000);
 
-    expect(reset.success).toBe(true);
-    expect(reset.networkCondition).toMatchObject({ appliedProfile: "none", acknowledged: true });
-    expect(commands()).toEqual([
-      ["apply", SESSION, 1],
-      ["reset", SESSION, 2],
-    ]);
-  });
+      expect(reset.success).toBe(true);
+      expect(reset.networkCondition).toMatchObject({ appliedProfile: "none", acknowledged: true });
+      expect(commands()).toEqual([
+        ["apply", SESSION, 1],
+        ["reset", SESSION, 2],
+      ]);
+    },
+  );
 
-  test("a failed apply is rolled back; the slot stays so release still resets", async () => {
+  arranged("a failed apply is rolled back; the slot stays so release still resets", async () => {
     bridge.ruleScripts.push("dropped");
 
     const applied = await offline();
@@ -190,7 +213,7 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
     expectFencedResets(["apply", "reset", "reset"]);
   });
 
-  test("an uncertain apply found installed by read-back starts renewing", async () => {
+  arranged("an uncertain apply found installed by read-back starts renewing", async () => {
     bridge.ruleScripts.push("lost");
 
     const applied = await offline();
@@ -204,7 +227,7 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
     ]);
   });
 
-  test("a TTL elapses into a reset that also stops the lease", async () => {
+  arranged("a TTL elapses into a reset that also stops the lease", async () => {
     await offline({ expiresInSeconds: 7 });
 
     await timer.advanceTimeAsync(20_000);
@@ -218,7 +241,7 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
     expect(manager.activeIosAppNetworkLease(SESSION)).toBeUndefined();
   });
 
-  test("rebind removes the old simulator's rule", async () => {
+  arranged("rebind removes the old simulator's rule", async () => {
     await offline();
 
     await manager.rebindSession(SESSION, OTHER_SIM, "ios");
@@ -228,7 +251,7 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
     expect(bridge.activeRules()).toEqual([]);
   });
 
-  test("a lease the provider no longer holds stops renewing", async () => {
+  arranged("a lease the provider no longer holds stops renewing", async () => {
     await offline();
     bridge.expireAll();
 
@@ -241,7 +264,7 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
     expect(manager.activeIosAppNetworkLease(SESSION)).toBeUndefined();
   });
 
-  test("one app per session: another app must be reset first", async () => {
+  arranged("one app per session: another app must be reset first", async () => {
     await offline();
 
     const second = await call("setDeviceState", {
@@ -253,7 +276,7 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
     expect(commands()).toEqual([["apply", SESSION, 1]]);
   });
 
-  test("outside a session an iOS app condition is refused and nothing is sent", async () => {
+  arranged("outside a session an iOS app condition is refused and nothing is sent", async () => {
     const result = await call("setDeviceState", {
       networkCondition: { profile: "offline", appId: APP },
     });

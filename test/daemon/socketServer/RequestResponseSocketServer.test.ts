@@ -1,5 +1,5 @@
 import { InputDeviceOwnedError } from "../../../src/daemon/inputDeviceOwnership";
-import { SessionNoLongerOwnsDeviceError } from "../../../src/daemon/sessionNoLongerOwnsDevice";
+import { SessionNoLongerOwnsDeviceError } from "../../../src/models/sessionNoLongerOwnsDevice";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { RequestResponseSocketServer } from "../../../src/daemon/socketServer/RequestResponseSocketServer";
 import { SocketRequest, SocketResponse } from "../../../src/daemon/socketServer/SocketServerTypes";

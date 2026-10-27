@@ -1,3 +1,6 @@
+import * as resourceIndexes011 from "./migrations/2026_10_20_011_session_broker_resource_indexes";
+import * as deviceMutations012 from "./migrations/2026_10_21_012_device_mutation_journal";
+import * as brokerTiming013 from "./migrations/2026_10_21_013_session_broker_timing";
 import { sql, type Kysely } from "kysely";
 import { Migrator, type Migration, type MigrationProvider } from "kysely/migration";
 import { ActionableError } from "../../../models/ActionableError";
@@ -13,7 +16,10 @@ import * as freeDeviceDeletionFailedDeletes005 from "./migrations/2026_10_13_005
 import * as freeDeviceStop003 from "./migrations/2026_10_10_003_free_device_stop_state";
 import * as sessionBrokerFailure007 from "./migrations/2026_10_15_007_session_broker_failure_retryable";
 import * as sessionBroker006 from "./migrations/2026_10_15_006_session_broker";
+import * as sessionBrokerExports010 from "./migrations/2026_10_19_010_session_broker_exports";
 import * as receiptRetention009 from "./migrations/2026_10_16_009_session_broker_receipt_retention";
+
+export const BROKER_TIMING_MIGRATION = "2026_10_21_013_session_broker_timing";
 
 /**
  * The binding registry's own migration set (#11174). Statically imported rather than read from a
@@ -31,6 +37,10 @@ export const BINDING_REGISTRY_MIGRATIONS: Readonly<Record<string, Migration>> = 
   "2026_10_15_007_session_broker_failure_retryable": sessionBrokerFailure007,
   "2026_10_16_008_retire_slot_features": retireSlot008,
   "2026_10_16_009_session_broker_receipt_retention": receiptRetention009,
+  "2026_10_19_010_session_broker_exports": sessionBrokerExports010,
+  "2026_10_20_011_session_broker_resource_indexes": resourceIndexes011,
+  "2026_10_21_012_device_mutation_journal": deviceMutations012,
+  [BROKER_TIMING_MIGRATION]: brokerTiming013,
 };
 
 export const bindingRegistryMigrationProvider: MigrationProvider = {

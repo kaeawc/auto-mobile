@@ -3,8 +3,8 @@
  * mock rules and error simulation, and the accessibility flag configuration. Extracted from
  * `AndroidCtrlProxyClient` (#11846); behaviour is unchanged.
  */
-import { NetworkState, simulationRemainingMs } from "../../../server/NetworkState";
-import { buildNetworkMockRules } from "../../../server/networkMockRules";
+import { NetworkState, simulationRemainingMs } from "../../../utils/NetworkState";
+import { buildNetworkMockRules } from "../../../utils/networkMockRules";
 import { logger } from "../../../utils/logger";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
@@ -23,7 +23,7 @@ export class AndroidDeviceStateSync {
    * Runs on every (re)connect, and after a session release clears the store so
    * the device drops what that session installed (issue #10061).
    */
-  syncNetworkState(): void {
+  syncNetworkState(): boolean {
     try {
       const state = NetworkState.getInstance();
       const deviceId = this.context.deviceId;
@@ -32,14 +32,14 @@ export class AndroidDeviceStateSync {
       // store keeps consumption per mockId across a re-push (#10060). Sending an
       // empty list clears stale rules that may linger from a previous connection.
       const rules = buildNetworkMockRules(state, deviceId);
-      this.context.sendMessage(
+      const rulesSent = this.context.sendMessage(
         serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkMockRules({ rules })),
       );
 
       // Always re-sync error simulation state (including disabled) so the
       // device doesn't keep stale simulation config from a previous connection
       const sim = state.getSimulation(deviceId);
-      this.context.sendMessage(
+      const simulationSent = this.context.sendMessage(
         serializeCtrlProxyRequest(
           ctrlProxyRequests.setNetworkErrorSimulation({
             enabled: sim !== null,
@@ -52,8 +52,10 @@ export class AndroidDeviceStateSync {
           }),
         ),
       );
+      return rulesSent && simulationSent;
     } catch (e) {
       logger.debug(`[AndroidCtrlProxyClient] Failed to sync network state on reconnect: ${e}`);
+      return false;
     }
   }
 

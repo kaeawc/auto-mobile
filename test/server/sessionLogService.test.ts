@@ -1,4 +1,16 @@
-import { describe, expect, test } from "bun:test";
+import { GetLogs } from "../../src/features/deviceLogs/GetLogs";
+import { readFileSync } from "node:fs";
+import type { SpawnOptions } from "node:child_process";
+import { StreamingChildProcess } from "../fakes/StreamingChildProcess";
+import { SessionLogTimeoutError } from "../../src/server/SessionLogTimeoutError";
+import { join } from "node:path";
+import { IosSimulatorSessionLogProvider } from "../../src/server/IosSimulatorSessionLogProvider";
+import { SimulatorContainerOwnershipError } from "../../src/utils/ios-cmdline-tools/simulatorOwnContainer";
+import { cloneContainerFixture } from "../helpers/simulatorContainerFixture";
+import { simulatorOwnership, simulatorDataContainer } from "../helpers/simulatorContainerFixture";
+import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { drainUntil } from "../helpers/fakeTimerStepping";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ExecResult } from "../../src/models";
 import type { AppFileFileSystem, AppFileStats } from "../../src/server/appFileService";
 import { createSessionLogService, type SessionLogSimctl } from "../../src/server/sessionLogService";
@@ -37,6 +49,7 @@ function base64Read(content: string, byteCount = Buffer.byteLength(content)): st
 }
 
 class RecordingSimctl implements SessionLogSimctl {
+  readonly children: StreamingChildProcess[] = [];
   readonly commands: string[] = [];
   readonly argv: string[][] = [];
   readonly signals: Array<AbortSignal | undefined> = [];
@@ -49,6 +62,24 @@ class RecordingSimctl implements SessionLogSimctl {
 
   onArgs(result: ExecResult | Error | (() => Promise<ExecResult>)): void {
     this.argvResult = result;
+  }
+
+  async startCommandArgs(args: string[], options?: SpawnOptions): Promise<StreamingChildProcess> {
+    const child = new StreamingChildProcess();
+    this.children.push(child);
+    void this.executeCommandArgs(args, undefined, options?.signal).then(
+      (result) =>
+        queueMicrotask(() => {
+          const bytes = Buffer.from(result.stdout);
+          for (let offset = 0; offset < bytes.length; offset += 65536) {
+            child.stdout.write(bytes.subarray(offset, offset + 65536));
+          }
+          child.stderr.write(result.stderr);
+          child.finish();
+        }),
+      (error: Error) => queueMicrotask(() => child.emit("error", error)),
+    );
+    return child;
   }
 
   async executeCommand(command: string): Promise<ExecResult> {
@@ -158,27 +189,31 @@ class MemoryFileSystem implements AppFileFileSystem {
 
   async rm(rawPath: string): Promise<void> {
     const path = this.normalize(rawPath);
-    this.removed.push(path);
+    this.removed.push(rawPath);
     this.files.delete(path);
   }
 }
 
-const DATA_ROOT = "/sim/data/com.example.app";
-const GROUP_ROOT = "/sim/groups/group.com.example.shared";
+const DATA_ROOT = simulatorDataContainer(simulator.deviceId);
+const GROUP_ROOT = simulatorDataContainer(simulator.deviceId).replace(
+  "Data/Application",
+  "Shared/AppGroup",
+);
 
 function iosHarness(options: { timeoutMs?: number } = {}) {
   const simctl = new RecordingSimctl();
   simctl.onCommand(
-    `get_app_container '${simulator.deviceId}' 'com.example.app' 'data'`,
+    `'get_app_container' '${simulator.deviceId}' 'com.example.app' 'data'`,
     execResult(`${DATA_ROOT}\n`),
   );
   simctl.onCommand(
-    `get_app_container '${simulator.deviceId}' 'com.example.app' 'group.com.example.shared'`,
+    `'get_app_container' '${simulator.deviceId}' 'com.example.app' 'group.com.example.shared'`,
     execResult(`${GROUP_ROOT}\n`),
   );
   const fileSystem = new MemoryFileSystem();
   const timer = new FakeTimer();
   const service = createSessionLogService({
+    containerOwnership: simulatorOwnership,
     adbFactory: {
       create: () => {
         throw new Error("adb must not be used for iOS");
@@ -208,7 +243,10 @@ describe("SessionLogService (#7006)", () => {
         "shell run-as 'com.example.app' sh -c 'if [ -f '\\''files/logs/denied.log'\\'' ]; then wc -c < '\\''files/logs/denied.log'\\''; head -c 8 '\\''files/logs/denied.log'\\'' | base64; else echo __AUTOMOBILE_MISSING__; fi'",
         new Error("run-as: package not debuggable: com.example.app"),
       );
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       const result = await service.collect({
         sessionUuid: "session-1",
@@ -250,7 +288,10 @@ describe("SessionLogService (#7006)", () => {
       const adb = new FakeAdbExecutor();
       adb.setDefaultResponse(execResult(base64Read("ok")));
       adb.setCommandResponse("shell pidof 'com.example.app'", execResult("\n"));
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       const result = await service.collect({
         sessionUuid: "session-1",
@@ -283,7 +324,10 @@ describe("SessionLogService (#7006)", () => {
       const adb = new FakeAdbExecutor();
       adb.setCommandResponse("shell pidof 'com.example.app'", execResult("4321\n"));
       adb.setDefaultResponse(execResult("one\ntwo\nthree\n"));
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       const result = await service.collect({
         sessionUuid: "s",
@@ -315,7 +359,10 @@ describe("SessionLogService (#7006)", () => {
       const adb = new FakeAdbExecutor();
       adb.setCommandResponse("shell pidof 'com.example.app'", execResult("4321\n"));
       adb.setDefaultResponse(execResult(`${"line\n".repeat(1000)}`));
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       const result = await service.collect({
         sessionUuid: "s",
@@ -341,7 +388,10 @@ describe("SessionLogService (#7006)", () => {
       const adb = new FakeAdbExecutor();
       adb.setCommandResponse("shell pidof 'com.example.app'", execResult("4321\n"));
       adb.setCommandError("logcat -d", new Error("logcat: permission denied"));
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       const result = await service.collect({
         sessionUuid: "s",
@@ -365,7 +415,10 @@ describe("SessionLogService (#7006)", () => {
       adb.setCommandResponse(resetScript("files/logs/app.log"), execResult("reset\n"));
       adb.setCommandResponse(resetScript("files/logs/gone.log"), execResult("missing\n"));
       adb.setCommandError(resetScript("files/logs/denied.log"), new Error("Permission denied"));
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       const result = await service.resetAppLogs({
         device: androidDevice,
@@ -397,7 +450,10 @@ describe("SessionLogService (#7006)", () => {
     test("uses plain shell, not run-as, for the externalFiles container", async () => {
       const adb = new FakeAdbExecutor();
       adb.setDefaultResponse(execResult("reset\n"));
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       await service.resetAppLogs({
         device: androidDevice,
@@ -414,7 +470,10 @@ describe("SessionLogService (#7006)", () => {
 
     test("reports the unsupported library container per path instead of throwing", async () => {
       const adb = new FakeAdbExecutor();
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       const result = await service.collect({
         sessionUuid: "s",
@@ -497,6 +556,8 @@ describe("SessionLogService (#7006)", () => {
         lastSeconds: 90,
         level: "debug",
         predicate: 'subsystem == "com.example.app" OR subsystem BEGINSWITH "com.example.app."',
+        mechanism: "simctl-log-show",
+        collectionMs: 0,
         timeoutMs: 5_000,
         byteCount: 132,
         truncated: true,
@@ -538,6 +599,40 @@ describe("SessionLogService (#7006)", () => {
       expect(simctl.argv[1]!.slice(-1)).toEqual(["--info"]);
     });
 
+    test("preserves typed timeout with the real simctl spawn wrapper and an inert child", async () => {
+      const timer = new FakeTimer();
+      const child = new StreamingChildProcess();
+      let childSignal: AbortSignal | undefined;
+      const simctl = new SimCtlClient(simulator, null, {
+        timer,
+        spawnProcess: (_file, _args, options) => {
+          childSignal = options?.signal;
+          return child;
+        },
+      });
+      const provider = new IosSimulatorSessionLogProvider(
+        () => simctl,
+        new MemoryFileSystem(),
+        timer,
+        120_000,
+      );
+      const pending = provider.collectUnifiedLog(
+        simulator,
+        "com.example.app",
+        { lastSeconds: 300, level: "default" },
+        100,
+      );
+      await drainUntil(() => child.stdout.listenerCount("data") > 0, {
+        description: "stream collector",
+      });
+      expect(timer.getPendingTimeouts()).toEqual([120_000]);
+      timer.advanceTime(120_000);
+      await expect(pending).rejects.toBeInstanceOf(SessionLogTimeoutError);
+      expect(childSignal).toBeUndefined();
+      expect(child.killSignals).toEqual(["SIGTERM"]);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+    });
+
     test("times out the unified-log window on the injected timer and aborts the child", async () => {
       const { simctl, timer, service } = iosHarness({ timeoutMs: 2_000 });
       simctl.onArgs(() => new Promise<ExecResult>(() => {}));
@@ -560,7 +655,7 @@ describe("SessionLogService (#7006)", () => {
         status: "timedOut",
         reason: expect.stringContaining("timed out after 2000ms"),
       });
-      expect(simctl.signals[0]?.aborted).toBe(true);
+      expect(simctl.children[0]?.killSignals).toEqual(["SIGTERM"]);
       expect(timer.getPendingTimeouts()).toHaveLength(0);
     });
 
@@ -568,7 +663,7 @@ describe("SessionLogService (#7006)", () => {
       const { simctl, fileSystem, service } = iosHarness();
       fileSystem.files.set(`${DATA_ROOT}/Documents/app.log`, Buffer.from("fine"));
       simctl.onCommand(
-        `get_app_container '${simulator.deviceId}' 'com.example.app' 'group.com.example.shared'`,
+        `'get_app_container' '${simulator.deviceId}' 'com.example.app' 'group.com.example.shared'`,
         new Error("No such file or directory"),
       );
       simctl.onArgs(new Error("log: simulator not booted"));
@@ -618,15 +713,15 @@ describe("SessionLogService (#7006)", () => {
         { path: "nodir/x.log", status: "missing" },
       ]);
       expect(fileSystem.removed.sort()).toEqual([
-        `${DATA_ROOT}/Documents/logs/app.log`,
-        `${DATA_ROOT}/Documents/logs/app.log.1`,
-        `${DATA_ROOT}/Documents/logs/app.log.2`,
+        join(DATA_ROOT, "Documents", "logs", "app.log"),
+        join(DATA_ROOT, "Documents", "logs", "app.log.1"),
+        join(DATA_ROOT, "Documents", "logs", "app.log.2"),
       ]);
       expect(fileSystem.files.has(`${DATA_ROOT}/Documents/logs/app.log.bak`)).toBe(true);
       expect(fileSystem.files.has(`${DATA_ROOT}/Documents/logs/other.log`)).toBe(true);
     });
 
-    test("refuses physical iOS devices as unavailable without touching simctl", async () => {
+    test("refuses app-container logs on physical iOS without touching simctl", async () => {
       const { simctl, service } = iosHarness();
 
       const result = await service.collect({
@@ -636,7 +731,7 @@ describe("SessionLogService (#7006)", () => {
           appId: "com.example.app",
           maxBytes: 100,
           files: { container: "documents", paths: ["app.log"] },
-          unifiedLog: { lastSeconds: 10, level: "default" },
+          appGroup: { groupId: "group.com.example.shared", paths: [] },
         },
       });
 
@@ -644,7 +739,7 @@ describe("SessionLogService (#7006)", () => {
         status: "unavailable",
         reason: expect.stringContaining("only supported on iOS simulators"),
       });
-      expect(result.unifiedLog).toEqual({
+      expect(result.appGroup).toEqual({
         status: "unavailable",
         reason: expect.stringContaining("only supported on iOS simulators"),
       });
@@ -652,4 +747,203 @@ describe("SessionLogService (#7006)", () => {
       expect(simctl.argv).toEqual([]);
     });
   });
+});
+
+for (const proven of [true, false]) {
+  test(`session log data and App Group clone ownership: ${proven}`, async () => {
+    for (const kind of ["data", "group.com.example.shared"]) {
+      const clone = cloneContainerFixture(
+        simulator.deviceId,
+        proven ? (kind === "data" ? "com.example.app" : kind) : null,
+      );
+      const reported =
+        kind === "data"
+          ? clone.reported
+          : clone.reported.replace("Data/Application", "Shared/AppGroup");
+      const own =
+        kind === "data" ? clone.own : clone.own.replace("Data/Application", "Shared/AppGroup");
+      const simctl = new RecordingSimctl();
+      simctl.onCommand(
+        `'get_app_container' '${simulator.deviceId}' 'com.example.app' '${kind}'`,
+        execResult(reported),
+      );
+      if (!proven) {
+        simctl.onCommand(
+          `'get_app_container' '${simulator.deviceId}' 'com.example.app' 'data'`,
+          execResult(clone.reported),
+        );
+      }
+      const fs = new MemoryFileSystem();
+      const read = spyOn(fs, "readFileBuffer");
+      const stat = spyOn(fs, "lstat");
+      const provider = new IosSimulatorSessionLogProvider(
+        () => simctl,
+        fs,
+        new FakeTimer(),
+        5_000,
+        clone.ownership,
+      );
+      fs.files.set(
+        `${own}/${kind === "data" ? "Documents/" : ""}log.txt`,
+        Buffer.from("clone log"),
+      );
+      const pending =
+        kind === "data"
+          ? provider.readAppLogs(
+              simulator,
+              "com.example.app",
+              { container: "documents", paths: ["log.txt"] },
+              100,
+            )
+          : provider.readAppGroup(
+              simulator,
+              "com.example.app",
+              { groupId: kind, paths: ["log.txt"] },
+              100,
+            );
+      if (!proven) {
+        await expect(pending).rejects.toBeInstanceOf(SimulatorContainerOwnershipError);
+        await expect(
+          provider.resetAppLogs({
+            device: simulator,
+            appId: "com.example.app",
+            container: "documents",
+            paths: ["log.txt"],
+          }),
+        ).rejects.toBeInstanceOf(SimulatorContainerOwnershipError);
+        expect(read).not.toHaveBeenCalled();
+        expect(stat).not.toHaveBeenCalled();
+        expect(fs.removed).toEqual([]);
+        continue;
+      }
+      expect(await pending).toMatchObject({ entries: [{ status: "read", text: "clone log" }] });
+      expect(read).toHaveBeenCalled();
+      expect(read.mock.calls.map(([path]) => path)).toEqual([
+        join(own, ...(kind === "data" ? ["Documents"] : []), "log.txt"),
+      ]);
+      if (kind === "data") {
+        await provider.resetAppLogs({
+          device: simulator,
+          appId: "com.example.app",
+          container: "documents",
+          paths: ["log.txt"],
+        });
+        expect(fs.removed).toEqual([join(own, "Documents", "log.txt")]);
+      }
+      expect(stat).toHaveBeenCalled();
+      expect(stat.mock.calls.every(([path]) => path.startsWith(join(own, "")))).toBe(true);
+    }
+  });
+}
+
+const capturedLog = readFileSync(
+  new URL("../fixtures/ios-simctl/log-show-compact-mobilesafari-ios27.txt", import.meta.url),
+  "utf8",
+);
+const oversizedLog =
+  "first line\n" +
+  capturedLog.repeat(Math.ceil(5_500_000 / Buffer.byteLength(capturedLog))) +
+  "last line\n";
+for (const retain of ["head", "tail"] as const) {
+  test(`simulator streams over 5 MB retaining ${retain} without execFile buffering`, async () => {
+    const simctl = new RecordingSimctl();
+    simctl.onArgs(execResult(oversizedLog));
+    const provider = new IosSimulatorSessionLogProvider(
+      () => simctl,
+      new MemoryFileSystem(),
+      new FakeTimer(),
+      5000,
+    );
+    const result = await provider.collectUnifiedLog(
+      simulator,
+      "com.apple.mobilesafari",
+      { lastSeconds: 300, level: "debug" },
+      4 * 1024 * 1024,
+      undefined,
+      retain,
+    );
+    expect(simctl.children).toHaveLength(1);
+    expect(result.truncated).toBe(true);
+    expect(result.byteCount).toBe(Buffer.byteLength(oversizedLog));
+    expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(4 * 1024 * 1024);
+    if (retain === "head") {
+      expect(result.text.startsWith("first line\n")).toBe(true);
+    } else {
+      expect(result.text.endsWith("last line\n")).toBe(true);
+      expect(oversizedLog.endsWith(result.text)).toBe(true);
+      expect(result.text.startsWith("first line\n")).toBe(false);
+    }
+  });
+}
+
+test("simulator caller cancellation kills the streamed child and preserves reason", async () => {
+  const child = new StreamingChildProcess();
+  const timer = new FakeTimer();
+  const simctl = new SimCtlClient(simulator, null, { timer, spawnProcess: () => child });
+  const provider = new IosSimulatorSessionLogProvider(
+    () => simctl,
+    new MemoryFileSystem(),
+    timer,
+    5000,
+  );
+  const controller = new AbortController();
+  const reason = new Error("caller stopped log read");
+  const pending = provider.collectUnifiedLog(
+    simulator,
+    "com.example.app",
+    { lastSeconds: 300, level: "default" },
+    100,
+    controller.signal,
+    "tail",
+  );
+  await drainUntil(() => child.stdout.listenerCount("data") > 0, {
+    description: "collector attached",
+  });
+  controller.abort(reason);
+  await expect(pending).rejects.toBe(reason);
+  expect(child.killSignals).toEqual(["SIGTERM"]);
+  expect(timer.getPendingTimeouts()).toEqual([]);
+});
+
+test("getLogs default 300s window reads newest lines from an oversized streamed source", async () => {
+  const simctl = new RecordingSimctl();
+  simctl.onArgs(
+    execResult(oversizedLog + "2026-10-25 17:53:10.000 I MobileSafari[15900:1] newest marker\n"),
+  );
+  const timer = new FakeTimer();
+  const provider = new IosSimulatorSessionLogProvider(
+    () => simctl,
+    new MemoryFileSystem(),
+    timer,
+    5000,
+  );
+  const result = await new GetLogs({
+    clock: {
+      now: () => timer.now(),
+      lastActionStartMs: () => undefined,
+      sessionStartMs: () => undefined,
+    },
+    android: () => {
+      throw new Error("Android must not be used");
+    },
+    ios: () => ({
+      collect: (appId, lastSeconds, level, signal, processName) =>
+        provider.collectUnifiedLog(
+          simulator,
+          appId,
+          { lastSeconds, level, processName },
+          4 * 1024 * 1024,
+          signal,
+          "tail",
+        ),
+    }),
+  }).execute(simulator, { appId: "com.apple.mobilesafari", maxLines: 2 });
+  expect(result.sinceSeconds).toBe(300);
+  expect(simctl.argv[0]).toContain("300");
+  expect(result.lines).toHaveLength(2);
+  expect(result.lines.at(-1)?.message).toContain("newest marker");
+  expect(result.truncated).toBe(true);
+  expect(result.warnings).toContain(
+    "The unified log window exceeded the byte bound; only the newest lines were read.",
+  );
 });

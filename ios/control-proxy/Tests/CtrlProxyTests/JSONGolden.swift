@@ -12,7 +12,7 @@ enum JSONGolden {
         -> [String: Any]?
     {
         guard var dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-            XCTFail("not a JSON object: \(String(decoding: data, as: UTF8.self))", file: file, line: line)
+            XCTFail("not a JSON object: \(String(data: data, encoding: .utf8) ?? "")", file: file, line: line)
             return nil
         }
         if strippingTimestamp {

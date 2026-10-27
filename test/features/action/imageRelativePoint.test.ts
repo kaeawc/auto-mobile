@@ -519,7 +519,7 @@ describe("upright framebuffer crop pixels resolve in native display space", () =
     async (rotation, rasterBounds, rows) => {
       const screenSize = rotation === 2 ? { width: 4, height: 6 } : { width: 6, height: 4 };
       const geometry = { platform: "ios" as const, screenSize, rotation };
-      let output = Buffer.alloc(0);
+      let output: Buffer = Buffer.alloc(0);
       const crop = await cropSource(
         geometry,
         { width: 8, height: 12 },

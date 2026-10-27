@@ -17,10 +17,13 @@ import {
   DEFAULT_PID_FILE_PATH,
   DEFAULT_SOCKET_PATH,
   READINESS_PROBE_MAX_ATTEMPTS,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import type { DaemonClientLike } from "../../src/daemon/client";
-import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
-import type { PidFileData } from "../../src/daemon/types";
+import type {
+  DaemonSocketReachabilityLike,
+  SocketReachability,
+} from "../../src/daemon/daemonSocketReachability";
+import type { DaemonStatus, PidFileData } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 class ProbeClient implements DaemonClientLike {
@@ -56,7 +59,11 @@ class ProbeClient implements DaemonClientLike {
     throw new Error("not used");
   }
 
-  async callDaemonMethod(): Promise<any> {
+  status?: DaemonStatus;
+  async callDaemonMethod(method: string): Promise<unknown> {
+    if (method === "ide/status" && this.status) {
+      return this.status;
+    }
     throw new Error("not used");
   }
 }
@@ -72,9 +79,9 @@ class FakePeerSocketReachability implements DaemonSocketReachabilityLike {
   reachable: () => boolean = () => false;
   calls = 0;
 
-  isReachable(_socketPath: string, _timeoutMs: number): Promise<boolean> {
+  probe(_socketPath: string, _timeoutMs: number): Promise<SocketReachability> {
     this.calls++;
-    return Promise.resolve(this.reachable());
+    return Promise.resolve(this.reachable() ? "answered" : "absent");
   }
 }
 
@@ -725,6 +732,7 @@ describe("DaemonManager readiness", () => {
     const manager = new DaemonManager({
       clientFactory: () => {
         const client = new ProbeClient(true);
+        client.status = { running: true, pid: spawner.process.pid, startedAt: 20, version: "test" };
         clients.push(client);
         return client;
       },
@@ -745,6 +753,7 @@ describe("DaemonManager readiness", () => {
       return {
         running: true,
         pid: spawner.process.pid,
+        startedAt: 20,
         port: 31879,
         socketPath,
       };
@@ -1224,10 +1233,10 @@ describe("DaemonManager readiness", () => {
     class BudgetExhaustingReachability implements DaemonSocketReachabilityLike {
       calls = 0;
       constructor(private readonly timer: FakeTimer) {}
-      async isReachable(_socketPath: string, timeoutMs: number): Promise<boolean> {
+      async probe(_socketPath: string, timeoutMs: number): Promise<SocketReachability> {
         this.calls++;
         await this.timer.sleep(timeoutMs);
-        return false;
+        return "absent";
       }
     }
     const reachability = new BudgetExhaustingReachability(fakeTimer);
@@ -1242,9 +1251,7 @@ describe("DaemonManager readiness", () => {
       processTable,
     });
 
-    const internals = manager as unknown as {
-      tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;
-    };
+    const internals = manager.getInternalsForTesting();
     // Budget equals the single-probe cap, so the first probe alone exhausts it.
     await expect(internals.tryJoinPeerDaemonAfterSpawnExit(1000)).resolves.toBe(false);
     expect(reachability.calls).toBe(1);
@@ -1277,9 +1284,7 @@ describe("DaemonManager readiness", () => {
     // An unrelated auto-mobile daemon (a different worktree/namespace) is always
     // "live" per the unscoped process-table scan.
 
-    const internals = manager as unknown as {
-      tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;
-    };
+    const internals = manager.getInternalsForTesting();
     const start = fakeTimer.getCurrentTime();
     // A generous budget that would, on the default namespace, poll for a long
     // time on the strength of the (unrelated) live-process signal alone.
@@ -1301,7 +1306,7 @@ describe("DaemonManager readiness", () => {
   // instead, which stays fixed regardless of any env override.
   describe("isolated-namespace detection (#6140)", () => {
     function internalsOf(manager: DaemonManager) {
-      return manager as unknown as { isIsolatedSocketNamespace(): boolean };
+      return manager.getInternalsForTesting();
     }
 
     test("is false for the built-in default PID file and socket paths", () => {
@@ -1344,9 +1349,9 @@ describe("DaemonManager readiness", () => {
     // reporting a miss, simulating a probe that burns most of the remaining time.
     class NearBudgetExhaustingReachability implements DaemonSocketReachabilityLike {
       constructor(private readonly timer: FakeTimer) {}
-      async isReachable(_socketPath: string, timeoutMs: number): Promise<boolean> {
+      async probe(_socketPath: string, timeoutMs: number): Promise<SocketReachability> {
         await this.timer.sleep(Math.max(0, timeoutMs - 40));
-        return false;
+        return "absent";
       }
     }
     const reachability = new NearBudgetExhaustingReachability(fakeTimer);
@@ -1368,9 +1373,7 @@ describe("DaemonManager readiness", () => {
       peerSocketReachability: reachability,
     });
 
-    const internals = manager as unknown as {
-      tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;
-    };
+    const internals = manager.getInternalsForTesting();
 
     await expect(internals.tryJoinPeerDaemonAfterSpawnExit(1000)).resolves.toBe(false);
     expect(scanTimeouts.length).toBeGreaterThan(0);

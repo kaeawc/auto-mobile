@@ -1,20 +1,20 @@
 import type { Timer } from "../../utils/SystemTimer";
-import type { ListChangedKind } from "../../server/listChangedBroadcast";
+import type { ListChangedKind } from "../listChangedBroadcast";
 import {
   declaresDeviceSessionInvalid,
   getDeviceSessionIdFromResult,
   getDevicePlatformFromResult,
   getDeviceIdFromResult,
   isDeviceSessionAcquisitionTool,
-} from "../../server/deviceSessionResult";
+} from "../deviceSessionResult";
 import {
   foreignOwnedSessionUuidFromResult,
   routedSessionUuidFromResult,
-} from "../../server/routedSessionMeta";
+} from "../routedSessionMeta";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../../features/toolSelection/toolSelectionControl";
 import { isDeviceInventoryTool } from "../daemonMcpProxy";
-import type { SessionReleaseSnapshot } from "../sessionManager";
-import { DaemonBoundSessionExpiredError } from "./daemonErrors";
+import type { SessionReleaseSnapshot } from "../sessionManager/releaseTypes";
+import { DaemonBoundSessionExpiredError } from "./DaemonBoundSessionExpiredError";
 import type { ProxySessionState } from "./ProxySessionState";
 
 /**

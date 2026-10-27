@@ -1,3 +1,4 @@
+import { isAndroidHintText } from "./androidHintText";
 import { getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { clearIosFieldWithVerification } from "./iosClearVerification";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
@@ -23,6 +24,9 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { toSearchable } from "../utility/SearchableNode";
+import { nodeBounds } from "../../models/ViewHierarchyResult";
+import { parseBounds } from "../../utils/bounds";
+import { IosKeyboardNativeEditableTracker } from "./iosKeyboardNativeEditable";
 import { ANDROID_INPUT_CLASSES, isTruthyFlag } from "../utility/elementProperties";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
@@ -54,15 +58,12 @@ function getEditableTextLength(
 ): number | undefined {
   const searchable = toSearchable(properties);
   const text = searchable.textSources.value ?? searchable.textSources.text;
-  const hint = properties["hint-text"];
   const android = ["android.", "androidx."].some((prefix) =>
     searchable.className?.startsWith(prefix),
   );
-  // Android hierarchy nodes carry no showing-hint flag. Typed text identical to
-  // the hint is indistinguishable and counts as empty for verification/skip-clear.
   // SendKeys includes the raw hint length for deletes so replace cannot under-delete
   // that real text; the existing clear sequence runs before verification and typing.
-  if (!includeHintText && android && typeof hint === "string" && hint !== "" && text === hint) {
+  if (!includeHintText && isAndroidHintText(searchable.className, properties["hint-text"], text)) {
     return 0;
   }
   const capturedLength = typeof text === "string" ? text.length : searchable.capturedTextLength;
@@ -134,6 +135,38 @@ export function hasFocusedTextInput(
   return false;
 }
 
+/**
+ * Stable identity of the focused editable control: resource id, class and top-left corner. The
+ * size is left out so a multiline field that grows after a newline keeps its identity.
+ */
+export function getFocusedTextFieldIdentity(
+  viewHierarchy: ViewHierarchyResult,
+  parser: ElementParser = new DefaultElementParser(),
+): string | undefined {
+  for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
+    let identity: string | undefined;
+    for (const rootNode of rootGroup) {
+      parser.traverseNode(rootNode, (node: ViewHierarchyNode) => {
+        const properties = parser.extractNodeProperties(node);
+        if (identity !== undefined || !isFocusedTextInputProperties(properties)) {
+          return;
+        }
+        const searchable = toSearchable(properties);
+        identity = JSON.stringify([
+          searchable.nativeId ?? null,
+          searchable.className ?? null,
+          searchable.bounds?.left ?? null,
+          searchable.bounds?.top ?? null,
+        ]);
+      });
+    }
+    if (identity !== undefined) {
+      return identity;
+    }
+  }
+  return undefined;
+}
+
 /** Read the editable value, never an iOS field's accessibility label or placeholder. */
 export function getFocusedTextValue(
   viewHierarchy: ViewHierarchyResult,
@@ -145,9 +178,15 @@ export function getFocusedTextValue(
 export interface FocusedTextField {
   value?: string;
   secure: boolean;
+  /** Non-secure native iOS values, used only when native focus is unavailable. */
+  nativeEditableValues?: Readonly<Record<string, string>>;
+  /** Value of the sole native iOS editable above the on-screen keyboard (blank reads as ""). */
+  keyboardNativeEditableValue?: string;
 }
 
 export interface FocusedTextFieldOptions {
+  /** Typing verification can compare native inputs when WebKit focus is unreliable. */
+  includeIosNativeEditableValues?: boolean;
   /**
    * iOS runners omit an empty field's value and XCUI can report the placeholder as the value, so a
    * focused editable with no value, or a value equal to its placeholder, reads as "" (#9078).
@@ -165,21 +204,125 @@ export function getFocusedTextField(
   options: FocusedTextFieldOptions = {},
 ): FocusedTextField | undefined {
   for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
+    let firstField: FocusedTextField | undefined;
+    const nativeEditableValues: Record<string, string> | undefined =
+      options.includeIosNativeEditableValues ? {} : undefined;
+    const keyboardTracker = options.includeIosNativeEditableValues
+      ? new IosKeyboardNativeEditableTracker()
+      : undefined;
     for (const root of rootGroup) {
-      let field: FocusedTextField | undefined;
-      parser.traverseNode(root, (node: ViewHierarchyNode) => {
+      let nativeField: FocusedTextField | undefined;
+      let webViewDepth: number | undefined;
+      parser.traverseNode(root, (node: ViewHierarchyNode, depth: number) => {
+        if (webViewDepth !== undefined && depth <= webViewDepth) {
+          webViewDepth = undefined;
+        }
         const properties = parser.extractNodeProperties(node);
-        if (field !== undefined || !isFocusedTextInputProperties(properties)) {
+        const nodeClass = properties.class ?? properties.className;
+        if (webViewDepth === undefined && nodeClass === "WKWebView") {
+          webViewDepth = depth;
+        }
+        if (webViewDepth === undefined) {
+          captureIosNativeEditableValue(properties, nativeEditableValues);
+          trackKeyboardNativeEditable(node, properties, keyboardTracker);
+        }
+        if (!isFocusedTextInputProperties(properties)) {
           return;
         }
-        field = readFocusedTextField(properties, options);
+        const field = readFocusedTextField(properties, options);
+        if (field === undefined) {
+          return;
+        }
+        // Web content can report its own focused field (a page search box) beside the native
+        // one that owns the keyboard (Safari's URL field); the native field is the typing target.
+        firstField ??= field;
+        nativeField ??= webViewDepth === undefined ? field : undefined;
       });
-      if (field !== undefined) {
-        return field;
+      if (nativeField !== undefined) {
+        return nativeField;
       }
+    }
+    if (nativeEditableValues && Object.keys(nativeEditableValues).length > 0) {
+      return withNativeEditables(firstField, nativeEditableValues, keyboardTracker);
+    }
+    if (firstField !== undefined) {
+      return firstField;
     }
   }
   return undefined;
+}
+
+/** Snapshot stable native input identities without ever copying secure values. */
+function captureIosNativeEditableValue(
+  properties: Record<string, unknown>,
+  values: Record<string, string> | undefined,
+): void {
+  if (!values || isTruthyFlag(properties.focused) || !isNonSecureIosEditable(properties)) {
+    return;
+  }
+  const searchable = toSearchable(properties);
+  const id = properties["view-id"] ?? searchable.nativeId;
+  if (typeof id === "string" && id !== "") {
+    // Runner omissions represent empty native values; labels are never editable values.
+    const value = typeof properties.value === "string" ? properties.value : "";
+    // XCUI reports an empty field's placeholder as its value.
+    values[id] = value === properties["hint-text"] ? "" : value;
+  }
+}
+
+function withNativeEditables(
+  field: FocusedTextField | undefined,
+  nativeEditableValues: Record<string, string>,
+  tracker: IosKeyboardNativeEditableTracker | undefined,
+): FocusedTextField {
+  const keyboardNativeEditableValue = tracker?.soleValueAboveKeyboard();
+  return {
+    ...(field ?? { secure: false }),
+    nativeEditableValues,
+    ...(keyboardNativeEditableValue === undefined ? {} : { keyboardNativeEditableValue }),
+  };
+}
+
+function trackKeyboardNativeEditable(
+  node: ViewHierarchyNode,
+  properties: Record<string, unknown>,
+  tracker: IosKeyboardNativeEditableTracker | undefined,
+): void {
+  if (!tracker) {
+    return;
+  }
+  const nodeClass = properties.class ?? properties.className;
+  if (nodeClass === "UIKeyboard") {
+    tracker.recordKeyboard(parseBounds(nodeBounds(node)));
+    return;
+  }
+  if (isNonSecureIosEditable(properties)) {
+    const value = typeof properties.value === "string" ? properties.value : "";
+    tracker.recordEditable(
+      value === properties["hint-text"] ? "" : value,
+      parseBounds(nodeBounds(node)),
+    );
+  }
+}
+
+function isSecureTextInput(properties: Record<string, unknown>): boolean {
+  const nodeClass = properties.class ?? properties.className;
+  return (
+    isTruthyFlag(properties.password) ||
+    (typeof nodeClass === "string" && nodeClass.includes("SecureTextField"))
+  );
+}
+
+function isNonSecureIosEditable(properties: Record<string, unknown>): boolean {
+  const nodeClass = properties.class ?? properties.className;
+  if (isSecureTextInput(properties)) {
+    return false;
+  }
+  return (
+    properties.role === "textfield" ||
+    (Array.isArray(properties.actions) && properties.actions.includes("set_text")) ||
+    (typeof nodeClass === "string" && /UITextField|UISearchBar|UITextView/.test(nodeClass))
+  );
 }
 
 function readFocusedTextField(
@@ -187,10 +330,7 @@ function readFocusedTextField(
   options: FocusedTextFieldOptions,
 ): FocusedTextField | undefined {
   const searchable = toSearchable(properties);
-  const nodeClass = properties.class ?? properties.className;
-  const secure =
-    isTruthyFlag(properties.password) ||
-    (typeof nodeClass === "string" && nodeClass.includes("SecureTextField"));
+  const secure = isSecureTextInput(properties);
   // Text sources preserve editable values; captured length distinguishes empty text from absence.
   const defaultValue =
     searchable.textSources.value ??
@@ -206,7 +346,11 @@ function readFocusedTextField(
         ? undefined
         : iosFieldValueOrBlank(searchable.textSources)
       : defaultValue;
-  return value !== undefined ? { value, secure } : undefined;
+  // A known native focused input remains the target even when its value is unreadable.
+  // Typing verification must not substitute unrelated native inputs in that case.
+  return value !== undefined || options.includeIosNativeEditableValues
+    ? { value, secure }
+    : undefined;
 }
 
 function iosFieldValueOrBlank(textSources: Readonly<Record<string, string>>): string {
@@ -372,7 +516,10 @@ export class ClearText extends BaseVisualChange {
    */
   /** @internal Typed view of private execution paths for unit tests; not part of the public API. */
   get testHooks() {
-    return { executeAndroidClearText: this.executeAndroidClearText.bind(this) };
+    return {
+      executeAndroidClearText: this.executeAndroidClearText.bind(this),
+      executeiOSClearText: this.executeiOSClearText.bind(this),
+    };
   }
 
   private async executeAndroidClearText(

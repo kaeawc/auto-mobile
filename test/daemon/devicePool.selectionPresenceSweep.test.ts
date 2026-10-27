@@ -1,6 +1,6 @@
 import { makePool } from "../helpers/makePool";
 import { statusOf } from "../../src/daemon/deviceBinding";
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -41,10 +41,6 @@ describe("DevicePool idle selection Android presence sweep", () => {
       timeout,
     );
   }
-
-  afterEach(() => {
-    timer.clearAllTimers?.();
-  });
 
   async function assignWithLiveDevices(liveCount: number): Promise<string> {
     // Keep only the last `liveCount` emulators booted; the rest are stale.

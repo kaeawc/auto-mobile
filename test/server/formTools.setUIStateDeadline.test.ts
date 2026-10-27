@@ -12,14 +12,13 @@ import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   registerLiveDeadline,
   unregisterLiveDeadline,
 } from "../../src/daemon/liveDeadlineRegistry";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import type { BootedDevice } from "../../src/models";
-import type { SetUIStateArgs } from "../../src/server/formTools";
 import type { LiveDeadlineSubscriber } from "../../src/features/action/SetUIState";
 
 const androidDevice: BootedDevice = {
@@ -30,7 +29,7 @@ const androidDevice: BootedDevice = {
 
 const baseArgs = {
   fields: [{ selector: { elementId: "firstName" }, value: "Grace" }],
-} as unknown as SetUIStateArgs;
+};
 
 describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", () => {
   test("passes both the frozen transportDeadlineMs snapshot and a live getter through to execute()", async () => {
@@ -63,7 +62,7 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
       [INTERNAL_EXECUTION_START_TIME_PARAM]: executionStartTime,
       [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: remainingMs,
       [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: liveKey,
-    } as unknown as SetUIStateArgs;
+    };
 
     await setUIStateHandler(androidDevice, argsWithInternalParams);
 
@@ -181,7 +180,7 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
     const argsWithLiveKeyOnly = {
       ...baseArgs,
       [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: liveKey,
-    } as unknown as SetUIStateArgs;
+    };
 
     await setUIStateHandler(androidDevice, argsWithLiveKeyOnly);
 
@@ -214,7 +213,7 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
       [INTERNAL_EXECUTION_START_TIME_PARAM]: executionStartTime,
       [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: remainingMs,
       [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: anchoredDeadlineMs,
-    } as unknown as SetUIStateArgs;
+    };
 
     await setUIStateHandler(androidDevice, argsWithBothParams);
 
@@ -242,7 +241,7 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
       ...baseArgs,
       [INTERNAL_EXECUTION_START_TIME_PARAM]: executionStartTime,
       [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: remainingMs,
-    } as unknown as SetUIStateArgs;
+    };
 
     await setUIStateHandler(androidDevice, argsWithLegacyParamsOnly);
 

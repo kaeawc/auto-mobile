@@ -1,3 +1,4 @@
+import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 import { describe, it, expect } from "bun:test";
 import { CtrlProxyText as IosCtrlProxyText } from "../../../../src/features/observe/ios/CtrlProxyText";
 import { SharedTextDelegate } from "../../../../src/features/observe/shared/SharedTextDelegate";
@@ -17,12 +18,9 @@ function createFakeContext(overrides?: Partial<DelegateContext>): {
   const sent: string[] = [];
   const context: DelegateContext = {
     getWebSocket: () =>
-      ({
-        send: (data: string) => {
-          sent.push(data);
-        },
-        readyState: 1,
-      }) as any,
+      new FakeOpenSocket((data) => {
+        sent.push(data);
+      }),
     requestManager: new RequestManager(timer),
     timer,
     ensureConnected: async () => true,

@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlPolicy
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSource
+import dev.jasonpearson.automobile.desktop.domain.DeviceGeometryComparison
 import dev.jasonpearson.automobile.desktop.domain.ElementBounds
 import dev.jasonpearson.automobile.desktop.domain.HierarchyFrameFacts
 import dev.jasonpearson.automobile.desktop.domain.LiveFrameFacts
@@ -24,12 +25,12 @@ import kotlin.test.assertNull
  *
  * All time is passed in, so these run with no timers and no device.
  */
-class DeviceControlPolicyTest {
+internal abstract class DeviceControlPolicyFixture {
 
-  private val device = "emulator-5554"
-  private val now = 10_000L
+  protected val device = "emulator-5554"
+  protected val now = 10_000L
 
-  private fun hierarchyOf(width: Int, height: Int): ParsedHierarchy {
+  protected fun hierarchyOf(width: Int, height: Int): ParsedHierarchy {
     val root =
       UIElementInfo(
         id = "root",
@@ -52,57 +53,108 @@ class DeviceControlPolicyTest {
   }
 
   /** Every condition satisfied; each test flips exactly one to prove it gates. */
-  private fun inputs(
-    enabled: Boolean = true,
-    realDeviceMode: Boolean = true,
-    selectedDeviceId: String? = device,
-    transportSupportsInput: Boolean = true,
-    observationStreamConnected: Boolean = true,
-    screenshot: ScreenshotFrameFacts? =
-      ScreenshotFrameFacts(
-        deviceId = device,
-        sequence = 10L,
-        captureSequence = 7L,
-        receivedAtMs = 9_900L,
-        width = 1080,
-        height = 2340,
-        data = null,
-        frameContext = "epoch:7",
-        rotation = 0,
-      ),
-    hierarchy: HierarchyFrameFacts? =
-      HierarchyFrameFacts(
-        deviceId = device,
-        sequence = 11L,
-        captureSequence = 7L,
-        receivedAtMs = 9_950L,
-        hierarchy = hierarchyOf(1080, 2340),
-        rootWidth = 1080,
-        rootHeight = 2340,
-        frameContext = "epoch:7",
-        rotation = 0,
-      ),
-    liveFrame: LiveFrameFacts? = null,
-  ) =
+  protected val defaultInputs =
     DeviceControlInputs(
-      enabled = enabled,
-      realDeviceMode = realDeviceMode,
-      selectedDeviceId = selectedDeviceId,
-      transportSupportsInput = transportSupportsInput,
-      observationStreamConnected = observationStreamConnected,
-      screenshot = screenshot,
-      hierarchy = hierarchy,
-      liveFrame = liveFrame,
+      enabled = true,
+      realDeviceMode = true,
+      selectedDeviceId = device,
+      transportSupportsInput = true,
+      observationStreamConnected = true,
+      screenshot =
+        ScreenshotFrameFacts(
+          deviceId = device,
+          sequence = 10L,
+          captureSequence = 7L,
+          receivedAtMs = 9_900L,
+          width = 1080,
+          height = 2340,
+          data = null,
+          frameContext = "epoch:7",
+          rotation = 0,
+        ),
+      hierarchy =
+        HierarchyFrameFacts(
+          deviceId = device,
+          sequence = 11L,
+          captureSequence = 7L,
+          receivedAtMs = 9_950L,
+          hierarchy = hierarchyOf(1080, 2340),
+          rootWidth = 1080,
+          rootHeight = 2340,
+          frameContext = "epoch:7",
+          rotation = 0,
+        ),
+      liveFrame = null,
     )
 
-  private fun blockedReason(inputs: DeviceControlInputs, nowMs: Long = now) =
+  protected fun blockedReason(inputs: DeviceControlInputs, nowMs: Long = now) =
     (DeviceControlPolicy.evaluate(inputs, nowMs) as? DeviceControlDecision.Blocked)?.reason
 
   // ---- Host / transport conditions (carried over from the #3347 gate) -------
 
+  // ---- The two cases dimensions cannot detect (the reason for #3348) --------
+
+  // ---- Geometry cross-check: LEGACY aspect-only fallback --------------------
+  // These pin the behavior for frames that declare no coordinate space (a pre-#4548 runner). The
+  // px-mode exact checks are in the canonical-pixels section at the bottom of this file.
+
+  // ---- Canonical pixels: exact vs legacy geometry (issue #4550) -------------
+
+  protected fun screenshotFacts(
+    width: Int,
+    height: Int,
+    coordinateSpace: CoordinateSpace?,
+    nativeScale: Double? = if (coordinateSpace == CoordinateSpace.Pixels) 3.0 else null,
+  ) =
+    ScreenshotFrameFacts(
+      deviceId = device,
+      sequence = 10L,
+      captureSequence = 7L,
+      receivedAtMs = 9_900L,
+      width = width,
+      height = height,
+      data = null,
+      coordinateSpace = coordinateSpace,
+      nativeScale = nativeScale,
+      frameContext = "epoch:7",
+      // Proven rotation so the #4502 gate passes and these tests isolate the COORDINATE-SPACE
+      // behavior they were written for. Rotation has its own dedicated tests.
+      rotation = 0,
+    )
+
+  protected fun hierarchyFacts(
+    width: Int,
+    height: Int,
+    coordinateSpace: CoordinateSpace?,
+    nativeScale: Double? = if (coordinateSpace == CoordinateSpace.Pixels) 3.0 else null,
+  ) =
+    HierarchyFrameFacts(
+      deviceId = device,
+      sequence = 11L,
+      captureSequence = 7L,
+      receivedAtMs = 9_950L,
+      hierarchy = hierarchyOf(width, height),
+      rootWidth = width,
+      rootHeight = height,
+      coordinateSpace = coordinateSpace,
+      nativeScale = nativeScale,
+      frameContext = "epoch:7",
+      rotation = 0,
+    )
+
+  /**
+   * The whole point of the campaign, stated as one pair of assertions: the SAME geometry is
+   * rejected under `"px"` and accepted under the legacy declaration-less frame. A 720x1560 frame
+   * against 1080x2340 mapping bounds is an exact 2/3 uniform scale, so its aspect matches to the
+   * bit; only an absolute comparison can see it. Under px both sides are physical pixels, so the
+   * absolute comparison is meaningful and this pair cannot be anything but a mis-scale.
+   */
+}
+
+internal class DeviceControlPolicyTest : DeviceControlPolicyFixture() {
   @Test
   fun `available when every source agrees on the selected device`() {
-    val decision = DeviceControlPolicy.evaluate(inputs(), now)
+    val decision = DeviceControlPolicy.evaluate(defaultInputs.copy(), now)
     val snapshot = assertNotNull(decision.snapshotOrNull)
     assertEquals(device, snapshot.deviceId)
     assertEquals(DeviceFrameSource.Screenshot, snapshot.source)
@@ -115,14 +167,17 @@ class DeviceControlPolicyTest {
 
   @Test
   fun `blocked when the host did not opt in`() {
-    assertEquals(DeviceControlBlockReason.NotEnabled, blockedReason(inputs(enabled = false)))
+    assertEquals(
+      DeviceControlBlockReason.NotEnabled,
+      blockedReason(defaultInputs.copy(enabled = false)),
+    )
   }
 
   @Test
   fun `blocked in fake data mode`() {
     assertEquals(
       DeviceControlBlockReason.NotRealDeviceMode,
-      blockedReason(inputs(realDeviceMode = false)),
+      blockedReason(defaultInputs.copy(realDeviceMode = false)),
     )
   }
 
@@ -132,7 +187,7 @@ class DeviceControlPolicyTest {
     // would let the daemon pick a device the user never chose.
     assertEquals(
       DeviceControlBlockReason.NoDeviceSelected,
-      blockedReason(inputs(selectedDeviceId = null)),
+      blockedReason(defaultInputs.copy(selectedDeviceId = null)),
     )
   }
 
@@ -140,7 +195,7 @@ class DeviceControlPolicyTest {
   fun `blocked on an input-incapable transport`() {
     assertEquals(
       DeviceControlBlockReason.TransportCannotCarryInput,
-      blockedReason(inputs(transportSupportsInput = false)),
+      blockedReason(defaultInputs.copy(transportSupportsInput = false)),
     )
   }
 
@@ -148,14 +203,20 @@ class DeviceControlPolicyTest {
   fun `blocked while the observation stream is down`() {
     assertEquals(
       DeviceControlBlockReason.ObservationStreamDisconnected,
-      blockedReason(inputs(observationStreamConnected = false)),
+      blockedReason(defaultInputs.copy(observationStreamConnected = false)),
     )
   }
 
   @Test
   fun `blocked before any frame has been applied`() {
-    assertEquals(DeviceControlBlockReason.NoFrame, blockedReason(inputs(screenshot = null)))
-    assertEquals(DeviceControlBlockReason.NoFrame, blockedReason(inputs(hierarchy = null)))
+    assertEquals(
+      DeviceControlBlockReason.NoFrame,
+      blockedReason(defaultInputs.copy(screenshot = null)),
+    )
+    assertEquals(
+      DeviceControlBlockReason.NoFrame,
+      blockedReason(defaultInputs.copy(hierarchy = null)),
+    )
   }
 
   @Test
@@ -163,12 +224,12 @@ class DeviceControlPolicyTest {
     // Device just switched: the previous device's screenshot or hierarchy still renders.
     assertEquals(
       DeviceControlBlockReason.DeviceMismatch,
-      blockedReason(inputs(selectedDeviceId = "emulator-5556")),
+      blockedReason(defaultInputs.copy(selectedDeviceId = "emulator-5556")),
     )
     assertEquals(
       DeviceControlBlockReason.DeviceMismatch,
       blockedReason(
-        inputs(
+        defaultInputs.copy(
           hierarchy =
             HierarchyFrameFacts(
               deviceId = "emulator-5556",
@@ -184,8 +245,6 @@ class DeviceControlPolicyTest {
     )
   }
 
-  // ---- The two cases dimensions cannot detect (the reason for #3348) --------
-
   @Test
   fun `an equal-aspect resolution change cannot produce a mis-scaled tap`() {
     // The reviewer's P1, reproduced at the timing it ACTUALLY happens at. The device drops
@@ -200,7 +259,7 @@ class DeviceControlPolicyTest {
     // capture.
     val decision =
       DeviceControlPolicy.evaluate(
-        inputs(
+        defaultInputs.copy(
           screenshot =
             ScreenshotFrameFacts(
               deviceId = device,
@@ -243,7 +302,7 @@ class DeviceControlPolicyTest {
     assertEquals(
       DeviceControlBlockReason.UnpairedHierarchy,
       blockedReason(
-        inputs(
+        defaultInputs.copy(
           hierarchy =
             HierarchyFrameFacts(
               deviceId = device,
@@ -265,7 +324,9 @@ class DeviceControlPolicyTest {
   fun `missing frame context keeps the client in inspector mode`() {
     assertEquals(
       DeviceControlBlockReason.FrameContextUnavailable,
-      blockedReason(inputs(screenshot = inputs().screenshot?.copy(frameContext = null))),
+      blockedReason(
+        defaultInputs.copy(screenshot = defaultInputs.copy().screenshot?.copy(frameContext = null)),
+      ),
     )
   }
 
@@ -274,9 +335,9 @@ class DeviceControlPolicyTest {
     assertEquals(
       DeviceControlBlockReason.FrameContextMismatch,
       blockedReason(
-        inputs(
-          screenshot = inputs().screenshot?.copy(frameContext = "epoch:7"),
-          hierarchy = inputs().hierarchy?.copy(frameContext = "epoch:8"),
+        defaultInputs.copy(
+          screenshot = defaultInputs.copy().screenshot?.copy(frameContext = "epoch:7"),
+          hierarchy = defaultInputs.copy().hierarchy?.copy(frameContext = "epoch:8"),
         ),
       ),
     )
@@ -290,7 +351,7 @@ class DeviceControlPolicyTest {
     assertEquals(
       DeviceControlBlockReason.RotationMismatch,
       blockedReason(
-        inputs(
+        defaultInputs.copy(
           screenshot =
             ScreenshotFrameFacts(
               deviceId = device,
@@ -325,7 +386,7 @@ class DeviceControlPolicyTest {
     assertEquals(
       DeviceControlBlockReason.RotationMismatch,
       blockedReason(
-        inputs(
+        defaultInputs.copy(
           screenshot =
             ScreenshotFrameFacts(
               deviceId = device,
@@ -362,7 +423,7 @@ class DeviceControlPolicyTest {
     // keep its existing screenshot-rotation detection without disabling a valid frame.
     assertNotNull(
       DeviceControlPolicy.evaluate(
-          inputs(
+          defaultInputs.copy(
             screenshot =
               ScreenshotFrameFacts(
                 deviceId = device,
@@ -403,7 +464,7 @@ class DeviceControlPolicyTest {
     // bounds. The two share an aspect ratio, so no geometry check downstream could catch it.
     val decision =
       DeviceControlPolicy.evaluate(
-        inputs(
+        defaultInputs.copy(
           screenshot =
             ScreenshotFrameFacts(
               deviceId = device,
@@ -431,7 +492,7 @@ class DeviceControlPolicyTest {
     assertEquals(
       DeviceControlBlockReason.CaptureIdentityUnavailable,
       blockedReason(
-        inputs(
+        defaultInputs.copy(
           screenshot =
             ScreenshotFrameFacts(
               deviceId = device,
@@ -461,7 +522,10 @@ class DeviceControlPolicyTest {
         height = 2340,
         rotation = 0,
       )
-    assertEquals(DeviceControlBlockReason.StaleFrame, blockedReason(inputs(liveFrame = stalled)))
+    assertEquals(
+      DeviceControlBlockReason.StaleFrame,
+      blockedReason(defaultInputs.copy(liveFrame = stalled)),
+    )
   }
 
   @Test
@@ -476,7 +540,9 @@ class DeviceControlPolicyTest {
         rotation = 0,
       )
     val snapshot =
-      assertNotNull(DeviceControlPolicy.evaluate(inputs(liveFrame = live), now).snapshotOrNull)
+      assertNotNull(
+        DeviceControlPolicy.evaluate(defaultInputs.copy(liveFrame = live), now).snapshotOrNull,
+      )
     assertEquals(DeviceFrameSource.LiveVideo, snapshot.source)
     assertEquals(901L, snapshot.liveFrameSequence, "the mirror's provenance is carried separately")
     // Ordering comes from the OBSERVATION counter alone: the mirror's counter is a different
@@ -497,7 +563,7 @@ class DeviceControlPolicyTest {
 
     assertEquals(
       DeviceControlBlockReason.RotationMismatch,
-      blockedReason(inputs(liveFrame = unproven)),
+      blockedReason(defaultInputs.copy(liveFrame = unproven)),
     )
   }
 
@@ -517,10 +583,12 @@ class DeviceControlPolicyTest {
 
     assertEquals(
       DeviceControlBlockReason.RotationMismatch,
-      blockedReason(inputs(liveFrame = upsideDown)),
+      blockedReason(defaultInputs.copy(liveFrame = upsideDown)),
     )
   }
+}
 
+internal class DeviceControlFrameFreshnessTest : DeviceControlPolicyFixture() {
   @Test
   fun `a screenshot that stopped arriving retires control even on a connected stream`() {
     val stale =
@@ -535,12 +603,11 @@ class DeviceControlPolicyTest {
         frameContext = "epoch:7",
         rotation = 0,
       )
-    assertEquals(DeviceControlBlockReason.StaleFrame, blockedReason(inputs(screenshot = stale)))
+    assertEquals(
+      DeviceControlBlockReason.StaleFrame,
+      blockedReason(defaultInputs.copy(screenshot = stale)),
+    )
   }
-
-  // ---- Geometry cross-check: LEGACY aspect-only fallback --------------------
-  // These pin the behavior for frames that declare no coordinate space (a pre-#4548 runner). The
-  // px-mode exact checks are in the canonical-pixels section at the bottom of this file.
 
   @Test
   fun `legacy geometry is consistent up to rotation and scale for a polled screenshot`() {
@@ -549,10 +616,12 @@ class DeviceControlPolicyTest {
     // here, so the aspect-only tolerance is all this path has — and it must NOT disable control.
     assert(
       DeviceControlPolicy.isGeometryConsistent(
-        frameWidth = 2340,
-        frameHeight = 1080,
-        deviceWidth = 360,
-        deviceHeight = 780,
+        DeviceGeometryComparison(
+          frameWidth = 2340,
+          frameHeight = 1080,
+          deviceWidth = 360,
+          deviceHeight = 780,
+        ),
       ),
     )
   }
@@ -561,10 +630,12 @@ class DeviceControlPolicyTest {
   fun `legacy geometry is inconsistent when aspect ratios disagree beyond rotation`() {
     assert(
       !DeviceControlPolicy.isGeometryConsistent(
-        frameWidth = 1920,
-        frameHeight = 1080,
-        deviceWidth = 1024,
-        deviceHeight = 768,
+        DeviceGeometryComparison(
+          frameWidth = 1920,
+          frameHeight = 1080,
+          deviceWidth = 1024,
+          deviceHeight = 768,
+        ),
       ),
     )
   }
@@ -586,7 +657,7 @@ class DeviceControlPolicyTest {
       )
     assertEquals(
       DeviceControlBlockReason.LiveFrameGeometryUnverifiable,
-      blockedReason(inputs(liveFrame = scaled)),
+      blockedReason(defaultInputs.copy(liveFrame = scaled)),
     )
   }
 
@@ -607,7 +678,7 @@ class DeviceControlPolicyTest {
       )
     assertEquals(
       DeviceControlBlockReason.LiveFrameGeometryUnverifiable,
-      blockedReason(inputs(liveFrame = points)),
+      blockedReason(defaultInputs.copy(liveFrame = points)),
     )
   }
 
@@ -627,7 +698,7 @@ class DeviceControlPolicyTest {
       )
     assertEquals(
       DeviceControlBlockReason.LiveFrameGeometryUnverifiable,
-      blockedReason(inputs(liveFrame = rotatedMirror)),
+      blockedReason(defaultInputs.copy(liveFrame = rotatedMirror)),
     )
   }
 
@@ -637,7 +708,7 @@ class DeviceControlPolicyTest {
     val snapshot =
       assertNotNull(
         DeviceControlPolicy.evaluate(
-            inputs(
+            defaultInputs.copy(
               hierarchy =
                 HierarchyFrameFacts(
                   deviceId = device,
@@ -659,63 +730,12 @@ class DeviceControlPolicyTest {
     assertEquals(2340, snapshot.deviceHeight)
   }
 
-  // ---- Canonical pixels: exact vs legacy geometry (issue #4550) -------------
-
-  private fun screenshotFacts(
-    width: Int,
-    height: Int,
-    coordinateSpace: CoordinateSpace?,
-    nativeScale: Double? = if (coordinateSpace == CoordinateSpace.Pixels) 3.0 else null,
-  ) =
-    ScreenshotFrameFacts(
-      deviceId = device,
-      sequence = 10L,
-      captureSequence = 7L,
-      receivedAtMs = 9_900L,
-      width = width,
-      height = height,
-      data = null,
-      coordinateSpace = coordinateSpace,
-      nativeScale = nativeScale,
-      frameContext = "epoch:7",
-      // Proven rotation so the #4502 gate passes and these tests isolate the COORDINATE-SPACE
-      // behavior they were written for. Rotation has its own dedicated tests.
-      rotation = 0,
-    )
-
-  private fun hierarchyFacts(
-    width: Int,
-    height: Int,
-    coordinateSpace: CoordinateSpace?,
-    nativeScale: Double? = if (coordinateSpace == CoordinateSpace.Pixels) 3.0 else null,
-  ) =
-    HierarchyFrameFacts(
-      deviceId = device,
-      sequence = 11L,
-      captureSequence = 7L,
-      receivedAtMs = 9_950L,
-      hierarchy = hierarchyOf(width, height),
-      rootWidth = width,
-      rootHeight = height,
-      coordinateSpace = coordinateSpace,
-      nativeScale = nativeScale,
-      frameContext = "epoch:7",
-      rotation = 0,
-    )
-
-  /**
-   * The whole point of the campaign, stated as one pair of assertions: the SAME geometry is
-   * rejected under `"px"` and accepted under the legacy declaration-less frame. A 720x1560 frame
-   * against 1080x2340 mapping bounds is an exact 2/3 uniform scale, so its aspect matches to the
-   * bit; only an absolute comparison can see it. Under px both sides are physical pixels, so the
-   * absolute comparison is meaningful and this pair cannot be anything but a mis-scale.
-   */
   @Test
   fun `px mode rejects an equal-aspect scale that the legacy tolerance accepts`() {
     assertEquals(
       DeviceControlBlockReason.GeometryMismatch,
       blockedReason(
-        inputs(
+        defaultInputs.copy(
           screenshot = screenshotFacts(720, 1560, CoordinateSpace.Pixels),
           hierarchy = hierarchyFacts(1080, 2340, CoordinateSpace.Pixels),
         ),
@@ -724,7 +744,7 @@ class DeviceControlPolicyTest {
 
     assertNotNull(
       DeviceControlPolicy.evaluate(
-          inputs(
+          defaultInputs.copy(
             screenshot = screenshotFacts(720, 1560, coordinateSpace = null),
             hierarchy = hierarchyFacts(1080, 2340, coordinateSpace = null),
           ),
@@ -743,7 +763,7 @@ class DeviceControlPolicyTest {
     val snapshot =
       assertNotNull(
         DeviceControlPolicy.evaluate(
-            inputs(
+            defaultInputs.copy(
               screenshot = screenshotFacts(1170, 2532, CoordinateSpace.Pixels),
               hierarchy = hierarchyFacts(1170, 2532, CoordinateSpace.Pixels),
             ),
@@ -762,12 +782,12 @@ class DeviceControlPolicyTest {
   @Test
   fun `px mode fails closed when native scale is missing or differs between sources`() {
     val missing =
-      inputs(
+      defaultInputs.copy(
         screenshot = screenshotFacts(1170, 2532, CoordinateSpace.Pixels, nativeScale = null),
         hierarchy = hierarchyFacts(1170, 2532, CoordinateSpace.Pixels, nativeScale = 3.0),
       )
     val mismatched =
-      inputs(
+      defaultInputs.copy(
         screenshot = screenshotFacts(1170, 2532, CoordinateSpace.Pixels, nativeScale = 3.0),
         hierarchy = hierarchyFacts(1170, 2532, CoordinateSpace.Pixels, nativeScale = 3.5),
       )
@@ -781,7 +801,7 @@ class DeviceControlPolicyTest {
     val snapshot =
       assertNotNull(
         DeviceControlPolicy.evaluate(
-            inputs(
+            defaultInputs.copy(
               screenshot = screenshotFacts(1080, 2340, coordinateSpace = null),
               hierarchy = hierarchyFacts(1080, 2340, coordinateSpace = null),
             ),
@@ -799,7 +819,7 @@ class DeviceControlPolicyTest {
     val snapshot =
       assertNotNull(
         DeviceControlPolicy.evaluate(
-            inputs(
+            defaultInputs.copy(
               screenshot = screenshotFacts(1080, 2340, CoordinateSpace.Pixels),
               hierarchy = hierarchyFacts(1080, 2340, coordinateSpace = null),
             ),
@@ -817,7 +837,7 @@ class DeviceControlPolicyTest {
     // rotates it. Exact comparison must not break landscape control.
     assertNotNull(
       DeviceControlPolicy.evaluate(
-          inputs(
+          defaultInputs.copy(
             screenshot = screenshotFacts(1170, 2532, CoordinateSpace.Pixels),
             hierarchy = hierarchyFacts(2532, 1170, CoordinateSpace.Pixels),
           ),
@@ -834,7 +854,7 @@ class DeviceControlPolicyTest {
     assertEquals(
       DeviceControlBlockReason.GeometryMismatch,
       blockedReason(
-        inputs(
+        defaultInputs.copy(
           screenshot = screenshotFacts(1170, 2532, CoordinateSpace.Pixels),
           hierarchy = hierarchyFacts(2534, 1172, CoordinateSpace.Pixels),
         ),
@@ -849,7 +869,7 @@ class DeviceControlPolicyTest {
     // together, so a disagreement means a transition is in flight — take the conservative path.
     assertNotNull(
       DeviceControlPolicy.evaluate(
-          inputs(
+          defaultInputs.copy(
             screenshot = screenshotFacts(720, 1560, CoordinateSpace.Pixels),
             hierarchy = hierarchyFacts(1080, 2340, coordinateSpace = null),
           ),
@@ -860,7 +880,7 @@ class DeviceControlPolicyTest {
     )
     assertNotNull(
       DeviceControlPolicy.evaluate(
-          inputs(
+          defaultInputs.copy(
             screenshot = screenshotFacts(720, 1560, coordinateSpace = null),
             hierarchy = hierarchyFacts(1080, 2340, CoordinateSpace.Pixels),
           ),
@@ -888,7 +908,7 @@ class DeviceControlPolicyTest {
     val snapshot =
       assertNotNull(
         DeviceControlPolicy.evaluate(
-            inputs(
+            defaultInputs.copy(
               screenshot = screenshotFacts(1170, 2532, CoordinateSpace.Pixels),
               hierarchy = hierarchyFacts(1170, 2532, CoordinateSpace.Pixels),
               liveFrame = mirror,
@@ -906,7 +926,7 @@ class DeviceControlPolicyTest {
     // and daemon-published hierarchy. Pixels mode requires this exact equality.
     assertNotNull(
       DeviceControlPolicy.evaluate(
-          inputs(
+          defaultInputs.copy(
             screenshot = screenshotFacts(1313, 2839, CoordinateSpace.Pixels),
             hierarchy = hierarchyFacts(1313, 2839, CoordinateSpace.Pixels),
           ),
@@ -921,42 +941,50 @@ class DeviceControlPolicyTest {
     // The pure function, exercised directly on the one input that separates the two modes.
     assert(
       DeviceControlPolicy.isGeometryConsistent(
-        frameWidth = 720,
-        frameHeight = 1560,
-        deviceWidth = 1080,
-        deviceHeight = 2340,
-        coordinateSpace = null,
+        DeviceGeometryComparison(
+          frameWidth = 720,
+          frameHeight = 1560,
+          deviceWidth = 1080,
+          deviceHeight = 2340,
+          coordinateSpace = null,
+        ),
       ),
     )
     assert(
       !DeviceControlPolicy.isGeometryConsistent(
-        frameWidth = 720,
-        frameHeight = 1560,
-        deviceWidth = 1080,
-        deviceHeight = 2340,
-        coordinateSpace = CoordinateSpace.Pixels,
+        DeviceGeometryComparison(
+          frameWidth = 720,
+          frameHeight = 1560,
+          deviceWidth = 1080,
+          deviceHeight = 2340,
+          coordinateSpace = CoordinateSpace.Pixels,
+        ),
       ),
     )
     // allowRotation still gates the transpose in exact mode.
     assert(
       !DeviceControlPolicy.isGeometryConsistent(
-        frameWidth = 2340,
-        frameHeight = 1080,
-        deviceWidth = 1080,
-        deviceHeight = 2340,
-        allowRotation = false,
-        coordinateSpace = CoordinateSpace.Pixels,
+        DeviceGeometryComparison(
+          frameWidth = 2340,
+          frameHeight = 1080,
+          deviceWidth = 1080,
+          deviceHeight = 2340,
+          allowRotation = false,
+          coordinateSpace = CoordinateSpace.Pixels,
+        ),
       ),
     )
     // Neither mode can judge a frame with no reported device bounds; the renderer falls back to the
     // frame itself, so the two are consistent by construction.
     assert(
       DeviceControlPolicy.isGeometryConsistent(
-        frameWidth = 1170,
-        frameHeight = 2532,
-        deviceWidth = 0,
-        deviceHeight = 0,
-        coordinateSpace = CoordinateSpace.Pixels,
+        DeviceGeometryComparison(
+          frameWidth = 1170,
+          frameHeight = 2532,
+          deviceWidth = 0,
+          deviceHeight = 0,
+          coordinateSpace = CoordinateSpace.Pixels,
+        ),
       ),
     )
   }
@@ -973,7 +1001,9 @@ class DeviceControlPolicyTest {
     // a sloppy "px" to be accepted.
     assertEquals(CoordinateSpace.Unrecognized("PX"), CoordinateSpace.fromWire("PX"))
   }
+}
 
+internal class DeviceControlCoordinateSpaceTest : DeviceControlPolicyFixture() {
   @Test
   fun `a declared but unrecognized space blocks control instead of falling back to legacy`() {
     // Forward compatibility: a daemon newer than this client declares a space whose geometry AND
@@ -984,7 +1014,7 @@ class DeviceControlPolicyTest {
     assertEquals(
       DeviceControlBlockReason.UnsupportedCoordinateSpace,
       blockedReason(
-        inputs(
+        defaultInputs.copy(
           screenshot = screenshotFacts(1080, 2340, unknown),
           hierarchy = hierarchyFacts(1080, 2340, unknown),
         ),
@@ -994,7 +1024,7 @@ class DeviceControlPolicyTest {
     assertEquals(
       DeviceControlBlockReason.UnsupportedCoordinateSpace,
       blockedReason(
-        inputs(
+        defaultInputs.copy(
           screenshot = screenshotFacts(1080, 2340, unknown),
           hierarchy = hierarchyFacts(1080, 2340, coordinateSpace = null),
         ),
@@ -1004,7 +1034,7 @@ class DeviceControlPolicyTest {
     assertEquals(
       DeviceControlBlockReason.UnsupportedCoordinateSpace,
       blockedReason(
-        inputs(
+        defaultInputs.copy(
           screenshot = screenshotFacts(1080, 2340, CoordinateSpace.Pixels),
           hierarchy = hierarchyFacts(1080, 2340, unknown),
         ),
@@ -1019,7 +1049,7 @@ class DeviceControlPolicyTest {
     // unknown declaration is available under no declaration at all.
     assertNotNull(
       DeviceControlPolicy.evaluate(
-          inputs(
+          defaultInputs.copy(
             screenshot = screenshotFacts(1080, 2340, coordinateSpace = null),
             hierarchy = hierarchyFacts(1080, 2340, coordinateSpace = null),
           ),
@@ -1037,7 +1067,7 @@ class DeviceControlPolicyTest {
     fun snapshotIn(space: CoordinateSpace?) =
       assertNotNull(
         DeviceControlPolicy.evaluate(
-            inputs(
+            defaultInputs.copy(
               screenshot = screenshotFacts(1080, 2340, space),
               hierarchy = hierarchyFacts(1080, 2340, space),
             ),

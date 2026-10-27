@@ -1,7 +1,9 @@
-import type { HostChildProcess, HostSpawnOptions } from "../HostCommandExecutor";
+import type { HostSpawnOptions } from "../HostCommandExecutor";
 import { StringDecoder } from "node:string_decoder";
 import type { Timer } from "../SystemTimer";
 import { appendBounded } from "./appendBounded";
+import { AndroidCommandTerminatedError } from "./AndroidCommandTerminatedError";
+export { AndroidCommandTerminatedError } from "./AndroidCommandTerminatedError";
 
 export interface AndroidCommandResult {
   stdout: string;
@@ -11,8 +13,24 @@ export interface AndroidCommandResult {
   stderrTruncated: boolean;
 }
 
+type ChildOutputStream = { on(event: "data", listener: (data: Buffer) => void): unknown };
+
+/**
+ * The slice of a spawned child the runner drives. A real `ChildProcess` satisfies it;
+ * fakes implement exactly this surface instead of the full node type.
+ */
+export interface AndroidCommandChild {
+  readonly stdout: ChildOutputStream | null;
+  readonly stderr: ChildOutputStream | null;
+  readonly stdin: { write(chunk: string): unknown; end(): unknown } | null;
+  on(event: "close", listener: (code: number | null) => void): unknown;
+  on(event: "exit", listener: () => void): unknown;
+  on(event: "error", listener: (error: Error) => void): unknown;
+  kill(signal?: NodeJS.Signals): unknown;
+}
+
 interface AndroidCommandDependencies {
-  spawn: (command: string, args: string[], options: HostSpawnOptions) => HostChildProcess;
+  spawn: (command: string, args: string[], options: HostSpawnOptions) => AndroidCommandChild;
   timer: Timer;
 }
 
@@ -32,20 +50,6 @@ interface AndroidCommandRequest {
   forcedSettlementDelayMs?: number;
   onStart: () => void;
   onOutput?: (stream: "stdout" | "stderr", output: string) => void;
-}
-
-/**
- * The command was stopped by its timeout or caller cancellation rather than
- * exiting on its own, so whatever it was doing may be half done.
- */
-export class AndroidCommandTerminatedError extends Error {
-  constructor(
-    message: string,
-    public readonly reason: "timeout" | "cancelled",
-  ) {
-    super(message);
-    this.name = "AndroidCommandTerminatedError";
-  }
 }
 
 /** Orchestration over the existing injectable host spawn seam, not a new process seam. */
@@ -68,7 +72,7 @@ class AndroidCommandRun {
   constructor(
     private readonly dependencies: AndroidCommandDependencies,
     private readonly request: AndroidCommandRequest,
-    private readonly child: HostChildProcess,
+    private readonly child: AndroidCommandChild,
     private readonly resolve: (result: AndroidCommandResult) => void,
     private readonly reject: (error: Error) => void,
   ) {}

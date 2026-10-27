@@ -3,6 +3,7 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { Element, ViewHierarchyResult, ViewHierarchyNode } from "../../../src/models";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
 import {
   extractNavigationElements,
@@ -42,12 +43,12 @@ describe("ExploreElementExtraction", () => {
     nodes: ViewHierarchyNode[] = [],
     packageName: string = "com.test.app",
   ): ViewHierarchyResult {
-    return {
+    return createHierarchyForTest({
       hierarchy: {
         node: nodes,
       },
       packageName,
-    };
+    });
   }
 
   function createMockNode(overrides: Partial<ViewHierarchyNode["$"]> = {}): ViewHierarchyNode {

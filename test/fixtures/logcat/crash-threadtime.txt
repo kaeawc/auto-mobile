@@ -1,0 +1,11 @@
+--------- beginning of main
+10-21 08:15:28.001  4211  4211 D Playground: onCreate MainActivity
+10-21 08:15:29.510  4211  4230 I OkHttp  : --> GET https://example.com/feed
+10-21 08:15:29.900  4211  4230 W Playground: feed parse slow (390 ms)
+--------- beginning of crash
+10-21 08:15:30.123  4211  4211 E AndroidRuntime: FATAL EXCEPTION: main
+10-21 08:15:30.123  4211  4211 E AndroidRuntime: Process: dev.jasonpearson.automobile.playground, PID: 4211
+10-21 08:15:30.123  4211  4211 E AndroidRuntime: java.lang.IllegalStateException: boom
+10-21 08:15:30.123  4211  4211 E AndroidRuntime: 	at dev.jasonpearson.Crash.run(Crash.kt:12)
+--------- beginning of main
+10-21 08:15:31.004  4377  4377 I Playground: onCreate MainActivity (restarted)

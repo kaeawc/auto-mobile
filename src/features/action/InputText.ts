@@ -1,8 +1,4 @@
-import { assertInputNotAborted } from "./assertInputNotAborted";
-import { executeIosTextInput, type IosTextInputDeps } from "./iosTextInput";
-import { unsupportedPlatformError } from "../../models/ActionableError";
-import { errorMessage } from "../../utils/describeUnknownError";
-import { BaseVisualChange, type DisplayFenceDependencies } from "./BaseVisualChange";
+import type { ActionCall } from "./ActionCall";
 import {
   type AppendTextFailureSource,
   BootedDevice,
@@ -10,99 +6,56 @@ import {
   KeyboardResult,
   SendTextResult,
 } from "../../models";
-import { logger } from "../../utils/logger";
-import { executeAndroidInputText } from "../../utils/android-cmdline-tools/AndroidInputText";
+import { unsupportedPlatformError } from "../../models/ActionableError";
+import { getRequestContext } from "../../utils/AbortContext";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
-import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
-import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
-import { resolveAutoInputMode } from "./resolveAutoInputMode";
-import { withEpilogueWarning } from "../../utils/bestEffortEpilogue";
 import { serverConfig } from "../../utils/ServerConfig";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { executeAndroidInputText } from "../../utils/android-cmdline-tools/AndroidInputText";
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
   asciiKeyEventNeedsKeyCombination,
   buildAsciiKeyEventPlan,
   type KeyEventPlan,
 } from "../../utils/android-cmdline-tools/asciiKeyEvents";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
+import { withEpilogueWarning } from "../../utils/bestEffortEpilogue";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
+import { BaseVisualChange, type DisplayFenceDependencies } from "./BaseVisualChange";
 import { Keyboard } from "./Keyboard";
-import { TapOnElement } from "./TapOnElement";
-import { getRequestContext } from "../../utils/AbortContext";
+import {
+  defaultTargetFocuserFactory,
+  describeFocusTarget,
+  isFocusResultConfirmed,
+  type TextInputTargetFocuser,
+  type TextInputTargetFocuserFactory,
+  type TextInputTargetSelector,
+} from "./TextInputTargetFocus";
+import { assertInputNotAborted } from "./assertInputNotAborted";
+import { executeIosTextInput, type IosTextInputDeps } from "./iosTextInput";
 import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
+import { resolveAutoInputMode } from "./resolveAutoInputMode";
+export { type TextInputTargetFocuser, type TextInputTargetSelector } from "./TextInputTargetFocus";
 
 // The UI needs a brief settle after a key event.
 export const KEY_EVENT_SETTLE_MS = 100;
 
 export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "append";
 
-/** Selector variants that identify a field to focus before typing (issue #5872). */
-export interface TextInputTargetSelector {
-  elementId?: string;
-  testTag?: string;
-  text?: string;
-  textAny?: string[];
+/** Named `InputText.execute` options; the request-scoped signal travels on the {@link ActionCall} (#11835). */
+export interface InputTextOptions {
+  imeAction?: ImeAction;
+  dismissKeyboard?: boolean;
+  /** Android input mode; unset lets event-all markers auto-promote. Ignored on iOS. */
+  mode?: InputTextMode;
+  /** Focus this field before typing. */
+  selector?: TextInputTargetSelector;
 }
-
-/**
- * Focuses the field a `selector` names before {@link InputText} types into it,
- * collapsing the mandatory focus-then-type pair into one call (issue #5872 AC3).
- * Interface + fake so the focus step is unit-testable without a real tap.
- */
-export interface TextInputTargetFocuser {
-  focus(
-    selector: TextInputTargetSelector,
-    signal?: AbortSignal,
-  ): Promise<{
-    success: boolean;
-    error?: string;
-    focusVerified?: boolean;
-    matchedId?: string;
-    matchedText?: string;
-  }>;
-}
-
-type TextInputTargetFocuserFactory = (device: BootedDevice) => TextInputTargetFocuser;
-
-function isFocusResultConfirmed(
-  result: Awaited<ReturnType<TextInputTargetFocuser["focus"]>>,
-): boolean {
-  // The focuser verifies the selected field's own keyboard focus or its nearest
-  // editable ancestor/descendant before any text is sent.
-  return result.success && result.focusVerified === true;
-}
-
-function describeFocusTarget(
-  result: Awaited<ReturnType<TextInputTargetFocuser["focus"]>>,
-  selector: TextInputTargetSelector,
-): string {
-  const target =
-    result.matchedText ??
-    selector.text ??
-    selector.textAny?.[0] ??
-    selector.elementId ??
-    selector.testTag;
-  return target ? JSON.stringify(target) : "for the selector";
-}
-
-const defaultTargetFocuserFactory: TextInputTargetFocuserFactory = (device) => ({
-  focus: async (selector, signal) => {
-    const result = await new TapOnElement(device).execute(
-      { ...selector, action: "focus" },
-      undefined,
-      signal,
-    );
-    return {
-      success: result.success,
-      error: result.error,
-      focusVerified: result.focusVerified === true,
-      matchedId: result.selectedElement?.resourceId,
-      matchedText: result.selectedElement?.text,
-    };
-  },
-});
 
 /**
  * Runs once, immediately before the append's FIRST key event, to confirm the
@@ -123,7 +76,7 @@ interface KeyboardCloser {
 type KeyboardCloserFactory = (device: BootedDevice, adbFactory: AdbClientFactory) => KeyboardCloser;
 
 const defaultKeyboardCloserFactory: KeyboardCloserFactory = (device, adbFactory) => {
-  const keyboard = new Keyboard(device, adbFactory);
+  const keyboard = new Keyboard(device, { adbFactory });
   return {
     close: (signal) => keyboard.execute("close", signal),
   };
@@ -155,6 +108,13 @@ export interface InputTextTestHooks {
     imeAction?: ImeAction,
     signal?: AbortSignal,
   ) => ReturnType<typeof executeIosTextInput>;
+}
+
+function inputTextArgs(
+  options: InputTextOptions = {},
+  call: ActionCall = {},
+): InputTextOptions & { dismissKeyboard: boolean; signal?: AbortSignal } {
+  return { ...options, dismissKeyboard: options.dismissKeyboard ?? false, signal: call.signal };
 }
 
 export class InputText extends BaseVisualChange {
@@ -190,12 +150,10 @@ export class InputText extends BaseVisualChange {
 
   async execute(
     text: string | null | undefined,
-    imeAction?: ImeAction,
-    dismissKeyboard: boolean = false,
-    mode?: InputTextMode,
-    signal?: AbortSignal,
-    selector?: TextInputTargetSelector,
+    options?: InputTextOptions,
+    call?: ActionCall,
   ): Promise<SendTextResult & { method?: InputTextMode; retryable?: false }> {
+    const { imeAction, dismissKeyboard, mode, selector, signal } = inputTextArgs(options, call);
     const perf = createGlobalPerformanceTracker();
     perf.serial("inputText");
 

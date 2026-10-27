@@ -5,9 +5,10 @@ import { ActionableError } from "../../src/models";
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { toolText } from "../helpers/toolResponse";
 
 describe("session tool binding after failed calls", () => {
   let fixture: McpTestFixture | undefined;
@@ -56,7 +57,7 @@ describe("session tool binding after failed calls", () => {
       arguments: { sessionUuid: "session-b" },
     });
     expect(rejectedCall).toMatchObject({ isError: true });
-    expect(rejectedCall.content[0].text).toContain("session rejected");
+    expect(toolText(rejectedCall)).toContain("session rejected");
     await expect(fixture.client.listTools()).resolves.toMatchObject({
       tools: expect.arrayContaining([expect.objectContaining({ name: "bindingProbe" })]),
     });

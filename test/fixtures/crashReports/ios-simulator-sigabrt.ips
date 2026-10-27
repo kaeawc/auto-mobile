@@ -1,0 +1,43 @@
+{"app_name":"Playground","timestamp":"2026-10-21 10:00:01.00 +0000","app_version":"1.4.0","slice_uuid":"5e1d3c2b-8a9f-3c41-9b7e-2f4d6a8c0e11","adam_id":"0","build_version":"42","platform":7,"bundleID":"com.example.app","share_with_app_devs":0,"is_first_party":0,"bug_type":"309","os_version":"macOS 15.1 (24B83)","roots_installed":0,"name":"Playground","incident_id":"8E5D1F2A-3B4C-4D5E-8F60-718293A4B5C6"}
+{
+  "uptime" : 86000,
+  "procRole" : "Foreground",
+  "version" : 2,
+  "userID" : 501,
+  "deployVersion" : 210,
+  "modelCode" : "Mac15,6",
+  "coalitionID" : 4242,
+  "osVersion" : {
+    "train" : "macOS 15.1",
+    "build" : "24B83",
+    "releaseType" : "User"
+  },
+  "captureTime" : "2026-10-21 10:00:00.8123 +0000",
+  "codeSigningMonitor" : 1,
+  "incident" : "8E5D1F2A-3B4C-4D5E-8F60-718293A4B5C6",
+  "pid" : 4321,
+  "translated" : false,
+  "cpuType" : "ARM-64",
+  "roots_installed" : 0,
+  "bug_type" : "309",
+  "procName" : "Playground",
+  "procPath" : "\/Users\/dev\/Library\/Developer\/CoreSimulator\/Devices\/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE\/data\/Containers\/Bundle\/Application\/0F1E2D3C-4B5A-6978-8796-A5B4C3D2E1F0\/Playground.app\/Playground",
+  "bundleInfo" : {"CFBundleShortVersionString":"1.4.0","CFBundleVersion":"42","CFBundleIdentifier":"com.example.app"},
+  "parentProc" : "launchd_sim",
+  "parentPid" : 1200,
+  "coalitionName" : "com.apple.CoreSimulator.SimDevice.AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+  "crashReporterKey" : "0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9",
+  "exception" : {"codes":"0x0000000000000000, 0x0000000000000000","rawCodes":[0,0],"type":"EXC_CRASH","signal":"SIGABRT"},
+  "termination" : {"flags":0,"code":6,"namespace":"SIGNAL","indicator":"Abort trap: 6","byProc":"launchctl","byPid":5678},
+  "asi" : {"libsystem_c.dylib":["abort() called"]},
+  "faultingThread" : 0,
+  "threads" : [{"triggered":true,"id":90001,"queue":"com.apple.main-thread","frames":[{"imageOffset":36196,"symbol":"__pthread_kill","symbolLocation":8,"imageIndex":0},{"imageOffset":28432,"symbol":"pthread_kill","symbolLocation":256,"imageIndex":1},{"imageOffset":481160,"symbol":"abort","symbolLocation":104,"imageIndex":2},{"imageOffset":17220,"symbol":"PlaygroundApp.crashButtonTapped()","symbolLocation":44,"imageIndex":3,"sourceFile":"PlaygroundApp.swift","sourceLine":88},{"imageOffset":17020,"symbol":"main","symbolLocation":28,"imageIndex":3},{"imageOffset":5932,"symbol":"start_sim","symbolLocation":20,"imageIndex":4}]},{"id":90002,"frames":[{"imageOffset":7452,"symbol":"start_wqthread","symbolLocation":0,"imageIndex":1}]}],
+  "usedImages" : [
+  {"source":"P","arch":"arm64","base":6442450944,"size":245760,"uuid":"11111111-2222-3333-4444-555555555555","path":"\/Library\/Developer\/CoreSimulator\/Volumes\/iOS_22B81\/usr\/lib\/system\/libsystem_kernel.dylib","name":"libsystem_kernel.dylib"},
+  {"source":"P","arch":"arm64","base":6442708992,"size":53248,"uuid":"22222222-3333-4444-5555-666666666666","path":"\/Library\/Developer\/CoreSimulator\/Volumes\/iOS_22B81\/usr\/lib\/system\/libsystem_pthread.dylib","name":"libsystem_pthread.dylib"},
+  {"source":"P","arch":"arm64","base":6443016192,"size":528384,"uuid":"33333333-4444-5555-6666-777777777777","path":"\/Library\/Developer\/CoreSimulator\/Volumes\/iOS_22B81\/usr\/lib\/system\/libsystem_c.dylib","name":"libsystem_c.dylib"},
+  {"source":"P","arch":"arm64","base":4295000064,"size":65536,"uuid":"5e1d3c2b-8a9f-3c41-9b7e-2f4d6a8c0e11","path":"\/Users\/dev\/Library\/Developer\/CoreSimulator\/Devices\/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE\/data\/Containers\/Bundle\/Application\/0F1E2D3C-4B5A-6978-8796-A5B4C3D2E1F0\/Playground.app\/Playground","name":"Playground"},
+  {"source":"P","arch":"arm64","base":4296048640,"size":32768,"uuid":"44444444-5555-6666-7777-888888888888","path":"\/Library\/Developer\/CoreSimulator\/Volumes\/iOS_22B81\/usr\/lib\/dyld_sim","name":"dyld_sim"}
+  ],
+  "vmSummary" : "ReadOnly portion of Libraries: Total=1.1G"
+}

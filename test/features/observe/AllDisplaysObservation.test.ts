@@ -32,7 +32,19 @@ function baseResult(): ObserveResult {
   };
 }
 
-const protection: ScreenshotPathProtection = { protect: async () => 1 };
+const protection: ScreenshotPathProtection = {
+  removeIfUnprotected: async () => {
+    throw new Error("Unexpected removal");
+  },
+  isProtected: () => false,
+  start: () => {},
+  sweep: async () => {},
+  sweepOnce: async () => {},
+  write: async () => {
+    throw new Error("Unexpected write");
+  },
+  protect: async () => 1,
+};
 
 function build(overrides: Partial<AllDisplaysObservationDependencies> = {}) {
   const calls: Array<{ display?: string; skipScreenshot?: boolean }> = [];

@@ -241,6 +241,11 @@ describe("root SPM toolchain floor workflow", () => {
     expect(desktopCleanup?.run).toContain(
       'rm -rf -- "$RUNNER_TEMP/desktop-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"',
     );
+    // A daemon still flushing after --stop makes rm fail with "Directory not empty".
+    expect(desktopCleanup?.run).toContain("for attempt in 1 2 3 4; do");
+    expect(desktopCleanup?.run).toMatch(
+      /rm -rf -- "\$RUNNER_TEMP\/desktop-home-[^"]+" 2>\/dev\/null && exit 0\n\s*sleep "\$attempt"\n\s*done\n\s*rm -rf -- "\$RUNNER_TEMP\/desktop-home-[^"]+"\n?$/,
+    );
   });
 
   test("cancels superseded PR runs at workflow scope", () => {
@@ -365,5 +370,8 @@ describe("root SPM toolchain floor workflow", () => {
     expect(selfHosted?.run).toBe('bash scripts/ci/select-self-hosted-xcode.sh "26.5"');
     expect(steps.indexOf(selectXcode!)).toBeLessThan(build);
     expect(steps.indexOf(selfHosted!)).toBeLessThan(build);
+    const prototypeBuild = stepNamed(steps, "Build AutoMobilePrototype library and embed consumer");
+    expect(prototypeBuild?.run).toBe("bash scripts/ios/prototype-library-build.sh");
+    expect(steps.indexOf(prototypeBuild!)).toBeGreaterThan(build);
   });
 });

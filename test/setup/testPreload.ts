@@ -13,10 +13,10 @@ afterAll(cleanupTestDirectories);
 // Install before portAvailabilityPreload imports AndroidCtrlProxyClient ->
 // deviceDataStreamSocketServer -> daemonFiles -> constants (DAEMON_VERSION).
 // An env override would leak to child server/daemon processes in integration tests.
-testOverrides.gitMetadataClient = { readVersion: () => null };
+testOverrides.gitMetadataClient = { readVersion: () => null, readDirtyState: async () => null };
 
 /**
- * Match GitMetadataClient's three initial version probes, ignoring other test
+ * Match GitMetadataClient's version probes (including legacy argv), ignoring other test
  * files' git commands. Keep this local so importing production code cannot bind
  * spawnSync before the recording hooks are installed.
  */
@@ -26,6 +26,8 @@ export function isGitVersionProbe(argv: readonly string[]): boolean {
   }
   return (
     (argv.length === 3 && argv[1] === "rev-parse" && argv[2] === "--show-toplevel") ||
+    (argv.length === 3 && argv[1] === "rev-parse" && argv[2] === "HEAD") ||
+    (argv.length === 3 && argv[1] === "diff" && argv[2] === "HEAD") ||
     (argv.length === 4 &&
       argv[1] === "rev-parse" &&
       argv[2] === "--short=12" &&
@@ -66,9 +68,13 @@ const auxSocketDir = ensureAuxSocketDir();
 testOverrides.auxSocketDir = auxSocketDir;
 
 const cleanupFlagKey = `__automobile_aux_socket_cleanup_registered_${process.pid}`;
-const globalFlags = globalThis as unknown as Record<string, boolean>;
-if (!globalFlags[cleanupFlagKey]) {
-  globalFlags[cleanupFlagKey] = true;
+if (!(cleanupFlagKey in globalThis)) {
+  Object.defineProperty(globalThis, cleanupFlagKey, {
+    value: true,
+    configurable: true,
+    writable: true,
+    enumerable: true,
+  });
   process.once("exit", () => {
     try {
       rmSync(auxSocketDir, { recursive: true, force: true });
@@ -148,3 +154,6 @@ testOverrides.deviceReadinessProxyDriverProvider = () => ({
   isInstalled: async () => true,
   isVersionCompatible: async () => true,
 });
+
+// Unit tests must not scale budgets by the real host load.
+testOverrides.hostLoad = { loadAverage1m: () => 0, cpuCount: () => 1 };

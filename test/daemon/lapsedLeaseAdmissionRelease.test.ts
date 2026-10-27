@@ -1,17 +1,18 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionSuspectError, TerminalSessionError } from "../../src/daemon/sessionManager";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   SUSPECT_GRACE_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../src/models";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
-import { executionTracker, type ActiveExecution } from "../../src/server/executionTracker";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
+import { executionTracker, type ActiveExecution } from "../../src/daemon/executionTracker";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -24,6 +25,48 @@ import { FakeTimer } from "../fakes/FakeTimer";
 const SESSION = "hunt-lapsed-lease-session";
 const DEVICE_ID = "emulator-5554";
 const OWNER_TOKEN = "hunt-owner-token";
+
+beforeAll(async () => {
+  // Issue #14016: constructing a daemon alone does not warm terminal lease
+  // admission/release. Exercise it with the same fakes outside JUnit test timing.
+  resetDbWriteBarrier();
+  const timer = new FakeTimer();
+  const daemon = new Daemon(
+    {},
+    {
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      timer,
+      deviceSessionRepository: new FakeDeviceSessionRepository(),
+    },
+  );
+  const sessionManager = daemon.getSessionManager();
+  sessionManager.stopCleanupTimer();
+  let call: ActiveExecution | undefined;
+  try {
+    await sessionManager.createSession(SESSION, DEVICE_ID, "android");
+    expect(await sessionManager.claimLivenessOwnership(SESSION, OWNER_TOKEN)).toBe("claimed");
+    await deliverDaemonHeartbeat(sessionManager, SESSION);
+    timer.advanceTime(DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS + 1);
+    call = executionTracker.startExecution("tapOn", undefined, SESSION);
+    const refusal = await sessionManager
+      .getOrCreateSession(SESSION, undefined, undefined, {
+        executionId: call.id,
+        startTime: call.startTime,
+      })
+      .catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(TerminalSessionError);
+    expect(sessionManager.hasSession(SESSION)).toBe(false);
+  } finally {
+    if (call) {
+      executionTracker.endExecution(call.id);
+    }
+    if (DaemonState.getInstance().isInitialized()) {
+      DaemonState.getInstance().reset();
+    }
+    NavigationGraphManager.resetInstance();
+    resetDbWriteBarrier();
+  }
+});
 
 describe("a control call on a lapsed owner lease before the monitor's scan (#11285)", () => {
   let timer: FakeTimer;
@@ -46,7 +89,7 @@ describe("a control call on a lapsed owner lease before the monitor's scan (#112
     started = [];
     await sessionManager.createSession(SESSION, DEVICE_ID, "android");
     expect(await sessionManager.claimLivenessOwnership(SESSION, OWNER_TOKEN)).toBe("claimed");
-    sessionManager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(sessionManager, SESSION);
   });
 
   afterEach(() => {
@@ -178,7 +221,7 @@ describe("an implicit call reusing its holder on a lapsed owner lease (#11400)",
     const devicePool = daemon.getDevicePool();
     const deviceManager = new FakeDeviceManager();
     deviceManager.bootedDevices = [DEVICE];
-    Object.assign(devicePool, { deviceManager });
+    devicePool.testHooks.deviceManager = deviceManager;
     await devicePool.initializeWithDevices([DEVICE]);
   });
 
@@ -197,7 +240,7 @@ describe("an implicit call reusing its holder on a lapsed owner lease (#11400)",
   async function lapseOwnerLease(sessionId: string): Promise<void> {
     const sessionManager = daemon.getSessionManager();
     expect(await sessionManager.claimLivenessOwnership(sessionId, OWNER_TOKEN)).toBe("claimed");
-    sessionManager.recordHeartbeat(sessionId);
+    await deliverDaemonHeartbeat(sessionManager, sessionId);
     timer.advanceTime(DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS + 1);
     expect(sessionManager.getSessionLeaseState(sessionId)?.phase).toBe("lapsed");
   }

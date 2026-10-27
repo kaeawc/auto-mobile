@@ -1,3 +1,5 @@
+import { tryOrElse } from "./tryOrElse";
+
 /**
  * Produces a single-line string for logging `unknown` errors (including non-Error throws
  * and empty objects that stringify to `{}`).
@@ -20,31 +22,29 @@ export function describeUnknownError(value: unknown): string {
     if (keys.length === 0) {
       return `${Object.prototype.toString.call(value)} (no enumerable keys)`;
     }
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return Object.prototype.toString.call(value);
-    }
+    return tryOrElse(
+      () => JSON.stringify(value),
+      () => Object.prototype.toString.call(value),
+    );
   }
   return String(value);
 }
 
 /** Extracts a single-line message from an unknown thrown value (message-only; no stack/cause). */
 export function errorMessage(value: unknown): string {
-  try {
-    // This IS the canonical implementation the no-inline-error-normalize rule
-    // steers every other call site toward, so the idiom is expected here.
-    // oxlint-disable-next-line auto-mobile/no-inline-error-normalize
-    return value instanceof Error ? value.message : String(value);
-    // Formatting failures must not escape the caller's error handler; logging here could recurse.
-    // oxlint-disable-next-line auto-mobile/catch-convention
-  } catch {
-    try {
-      return Object.prototype.toString.call(value);
-      // A hostile Symbol.toStringTag getter can also throw; keep error formatting non-throwing.
-      // oxlint-disable-next-line auto-mobile/catch-convention
-    } catch {
-      return "Unknown error";
-    }
-  }
+  // Formatting failures must not escape the caller's error handler; logging here could recurse.
+  return tryOrElse(
+    () => {
+      if (value instanceof Error) {
+        return value.message;
+      }
+      return String(value);
+    },
+    // A hostile Symbol.toStringTag getter can also throw; keep error formatting non-throwing.
+    () =>
+      tryOrElse(
+        () => Object.prototype.toString.call(value),
+        () => "Unknown error",
+      ),
+  );
 }

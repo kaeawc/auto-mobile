@@ -1,14 +1,15 @@
+import { toolJson, toolIsError } from "../helpers/toolResponse";
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ElementResolver } from "../../src/features/utility/ElementResolver";
-import { VisualHighlightClient } from "../../src/features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../../src/features/debug/VisualHighlightClient";
 import type { HighlightShape } from "../../src/models";
 import type { PinchOnArgs } from "../../src/server/interactionToolTypes";
 import {
   nestedElementContainerSchema,
   resolverSelectorSchema,
   resolverSelectionStrategySchema,
-} from "../../src/server/elementSelectorSchemas";
+} from "../../src/models/elementSelectorSchemas";
 import { highlightSchema, registerHighlightTools } from "../../src/server/highlightTools";
 import {
   dragAndDropSchema,
@@ -22,7 +23,7 @@ import { observeSchema, waitForSchema } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import nestedCapture from "../fixtures/android-focus/playground-text-field-pre-tap.json";
-import type { ViewHierarchyResult } from "../../src/models";
+import { viewHierarchyFromFixture } from "../helpers/observeFixture";
 import captureFixture from "../fixtures/observe/android-container-scope.json";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -211,8 +212,8 @@ describe("highlight resolver parity on a captured hierarchy", () => {
   afterEach(() => ToolRegistry.clearTools());
 
   test.each([false, true])("nested highlight shares tapOn's target (unique=%s)", async (unique) => {
-    const capture = new FakeHierarchyCapture(
-      () => nestedCapture.viewHierarchy as ViewHierarchyResult,
+    const capture = new FakeHierarchyCapture(() =>
+      viewHierarchyFromFixture(nestedCapture.viewHierarchy),
     );
     const snapshot = await capture.capture({ freshness: "fresh" });
     const target = snapshot.nodes.find(
@@ -265,7 +266,7 @@ describe("highlight resolver parity on a captured hierarchy", () => {
       { deviceId: "capture", name: "Captured Android", platform: "android" },
       highlightSchema.parse(selector),
     );
-    expect(JSON.parse(result.content[0].text)).toEqual({ success: true });
+    expect(toolJson(result)).toEqual({ success: true });
     const bounds = tap.chosen!.bounds!;
     expect(shapes).toEqual([
       {
@@ -302,7 +303,7 @@ describe("highlight resolver parity on a captured hierarchy", () => {
         selectionStrategy: "unique",
       }),
     );
-    expect(JSON.parse(result.content[0].text)).toEqual({ success: true });
+    expect(toolJson(result)).toEqual({ success: true });
     expect(shapes).toEqual([{ type: "circle", bounds: { x: 20, y: 40, width: 200, height: 60 } }]);
   });
 
@@ -332,8 +333,8 @@ describe("highlight resolver parity on a captured hierarchy", () => {
       { deviceId: "capture", name: "Captured Android", platform: "android" },
       highlightSchema.parse(selector),
     );
-    expect(result.isError).toBe(true);
-    expect(JSON.parse(result.content[0].text)).toEqual({ success: false, error: resolution.error });
+    expect(toolIsError(result)).toBe(true);
+    expect(toolJson(result)).toEqual({ success: false, error: resolution.error });
     expect(additions).toBe(0);
   });
 });

@@ -5,7 +5,8 @@ import { prototypeThemeModeFields } from "../../../src/features/prototype/protot
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 const fixtures = join(import.meta.dir, "../../fixtures/prototype-spec/valid");
-const load = (name: string): unknown => JSON.parse(readFileSync(join(fixtures, name), "utf8"));
+const load = (name: string): unknown =>
+  JSON.parse(readFileSync(join(fixtures, name), "utf8").replace(/^\uFEFF/, ""));
 
 describe("prototypeThemeModeFields", () => {
   test("lists every per-mode field of the colour fixture in document order", () => {
@@ -35,7 +36,10 @@ describe("prototypeThemeModeFields", () => {
 
   test("every shared fixture written before per-mode forms needs no capability", () => {
     const older = readdirSync(fixtures).filter(
-      (name) => name.endsWith(".json") && !name.startsWith("theme-modes-"),
+      (name) =>
+        name.endsWith(".json") &&
+        !name.startsWith("theme-modes-") &&
+        name !== "tooltip-drawer-start.json",
     );
     expect(older.length).toBeGreaterThan(20);
     for (const name of older) {

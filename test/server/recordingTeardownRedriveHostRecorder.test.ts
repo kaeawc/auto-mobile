@@ -6,7 +6,7 @@ import {
   redriveUnconfirmedCaptureTeardowns,
   type RecordingTeardownRedriveDeps,
   type StartupOrphanCaptures,
-} from "../../src/server/recordingTeardownRedrive";
+} from "../../src/daemon/recordingTeardownRedrive";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTimer } from "../fakes/FakeTimer";

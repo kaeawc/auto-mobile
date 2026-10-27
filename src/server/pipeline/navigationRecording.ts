@@ -1,6 +1,9 @@
 import type { NavigationToolCallHandle } from "../../utils/interfaces/NavigationGraph";
 import { BootedDevice } from "../../models";
-import { NavigationGraphManager } from "../../features/navigation/NavigationGraphManager";
+import {
+  NavigationGraphManager,
+  type NavigationGraphService,
+} from "../../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../../features/observe/ObserveScreen";
 import { stripNavigationToolParams } from "../../models/navigationToolParams";
@@ -68,7 +71,7 @@ export class DefaultNavigationToolCallRecorder implements NavigationToolCallReco
     );
   }
 
-  private navigationManager(sessionUuid: string | undefined): NavigationGraphManager {
+  private navigationManager(sessionUuid: string | undefined): NavigationGraphService {
     return sessionUuid
       ? NavigationGraphManager.getInstanceForSession(sessionUuid)
       : NavigationGraphManager.getInstance();

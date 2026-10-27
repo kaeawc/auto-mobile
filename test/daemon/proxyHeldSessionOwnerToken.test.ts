@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from "bun:test";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
@@ -11,7 +11,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import {
   DAEMON_VERSION,
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -27,6 +27,7 @@ const INTERVAL_MS = 2_000;
 const LEASE_MS = 5_000;
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
+  releaseDevice: async () => {},
   getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
 };
 
@@ -69,7 +70,7 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
   let clients: FakeDaemonClient[];
   let toolRefusal: Error | undefined;
   let isAvailableSpy: ReturnType<typeof spyOn>;
-  let warnSpy: ReturnType<typeof spyOn>;
+  let warnSpy: Mock<typeof logger.warn>;
   const proxies: DaemonMcpProxy[] = [];
 
   function daemonBackedClient(): FakeDaemonClient {

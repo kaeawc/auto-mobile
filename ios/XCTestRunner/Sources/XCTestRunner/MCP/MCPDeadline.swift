@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 enum TimeoutConversion {
     /// 24 hours, matching DaemonManager.maximumReceiveTimeoutSeconds.
@@ -33,6 +34,54 @@ public struct SystemDeadlineScheduler: DeadlineScheduler {
     }
 }
 
+/// One request's daemon-resolved budget, shared by the receive and deadline tasks.
+struct RequestBudget: Sendable {
+    private let seconds: OSAllocatedUnfairLock<TimeInterval>
+
+    init(seconds: TimeInterval) {
+        self.seconds = OSAllocatedUnfairLock(initialState: seconds)
+    }
+
+    var current: TimeInterval { seconds.withLock { $0 } }
+
+    func update(seconds: TimeInterval) {
+        self.seconds.withLock { $0 = seconds }
+    }
+}
+
+/// Keep in sync with DAEMON_RESPONSE_GRACE_MS in src/daemon/client.ts.
+private let daemonResponseGraceSeconds: TimeInterval = 2
+
+/// Follow budgets measured from the start of the send, not from notification receipt. Re-read after
+/// each sleep so growth during a sleep extends the backstop. A shortened budget takes effect at the
+/// next wake; the daemon's own deadline error arrives first. No clock beyond the scheduler is needed.
+func withDeadline<Value: Sendable>(
+    budget: RequestBudget,
+    scheduler: any DeadlineScheduler,
+    onTimeout: @escaping @Sendable () -> Void = {},
+    timeoutError: @autoclosure @escaping @Sendable () -> any Error,
+    operation: @escaping @Sendable () async throws -> Value
+)
+    async throws -> Value
+{
+    try await raceDeadline(
+        wait: {
+            var elapsedSlept: TimeInterval = 0
+            while true {
+                try Task.checkCancellation()
+                let remaining = budget.current + daemonResponseGraceSeconds - elapsedSlept
+                if remaining <= 0 { return }
+                // SystemDeadlineScheduler clamps each sleep to 24 hours. Split larger waits so
+                // the full budget and grace elapse even at that boundary.
+                let delay = min(remaining, TimeoutConversion.maximumSeconds)
+                try await scheduler.sleep(seconds: delay)
+                elapsedSlept += delay
+            }
+        },
+        onTimeout: onTimeout, timeoutError: timeoutError(), operation: operation
+    )
+}
+
 /// Races an operation against one deadline without joining an operation that ignores cancellation.
 /// Only the single-resume cell owns completion. Losing tasks are cancelled outside locks; an
 /// uncooperative operation may retain its captures until it finishes, but its late result is inert.
@@ -41,6 +90,20 @@ func withDeadline<Value: Sendable>(
     seconds: TimeInterval,
     scheduler: any DeadlineScheduler,
     onTimeout: @escaping @Sendable () -> Void = {},
+    timeoutError: @autoclosure @escaping @Sendable () -> any Error,
+    operation: @escaping @Sendable () async throws -> Value
+)
+    async throws -> Value
+{
+    try await raceDeadline(
+        wait: { try await scheduler.sleep(seconds: seconds) },
+        onTimeout: onTimeout, timeoutError: timeoutError(), operation: operation
+    )
+}
+
+private func raceDeadline<Value: Sendable>(
+    wait: @escaping @Sendable () async throws -> Void,
+    onTimeout: @escaping @Sendable () -> Void,
     timeoutError: @autoclosure @escaping @Sendable () -> any Error,
     operation: @escaping @Sendable () async throws -> Value
 )
@@ -59,7 +122,7 @@ func withDeadline<Value: Sendable>(
     }
     let deadline = Task.detached(priority: Task.currentPriority) {
         do {
-            try await scheduler.sleep(seconds: seconds)
+            try await wait()
             try Task.checkCancellation()
             if result.resume(throwing: timeoutError()) { onTimeout() }
         } catch {

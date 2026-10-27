@@ -57,6 +57,19 @@ internal class CommandOriginContext(val origin: QueuedCommandOrigin) :
   }
 }
 
+/** Reply routing and ownership checks supplied by the connection's server. */
+internal data class ConnectionReplyDependencies(
+  val reply: suspend (String?, WebSocketResponse, QueuedReplyRouting) -> Unit,
+  val hasRequestOwner: (String) -> Boolean,
+)
+
+/** Diagnostics for the connection worker, without binding it to Android logging. */
+internal data class ConnectionLogDependencies(
+  val logError: (String, Throwable) -> Unit,
+  val logWarning: (String) -> Unit,
+  val logDebug: (String) -> Unit,
+)
+
 /**
  * One bounded FIFO and sequential worker per connection, on the injected dispatcher. Inline
  * delegate Android calls occupy that connection's IO worker, never Ktor's read loop. Suspend action
@@ -73,13 +86,16 @@ internal class ConnectionCommandQueue(
   private val scope: CoroutineScope,
   private val dispatcher: CoroutineDispatcher,
   private val delegate: WebSocketMessageHandler,
-  private val reply: suspend (String?, WebSocketResponse, QueuedReplyRouting) -> Unit,
-  private val hasRequestOwner: (String) -> Boolean,
-  private val logError: (String, Throwable) -> Unit,
-  private val logWarning: (String) -> Unit,
-  private val logDebug: (String) -> Unit,
+  replies: ConnectionReplyDependencies,
+  logging: ConnectionLogDependencies,
   private val capacity: Int = INBOUND_COMMAND_CAPACITY,
 ) {
+  private val reply = replies.reply
+  private val hasRequestOwner = replies.hasRequestOwner
+  private val logError = logging.logError
+  private val logWarning = logging.logWarning
+  private val logDebug = logging.logDebug
+
   init {
     require(capacity > 0) { "Command capacity must be positive" }
   }

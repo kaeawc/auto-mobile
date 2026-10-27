@@ -6,10 +6,7 @@
 > open/close/list/find/tap/dismiss/clearAll actions. Collapsed notification groups
 > are automatically expanded before tapping.
 
-## Goal
-
-Enable agents to open the notification shade and wait for a matching
-notification by text.
+Goal: let agents open the notification shade and wait for a matching notification by text.
 
 ## MCP tool
 
@@ -98,23 +95,38 @@ not the shade the outcome is indeterminate and the existing success result is
 kept. A confirmed dismiss costs no extra device call; a stuck row costs one sleep
 and one observe. iOS is unchanged.
 
+## Clear-all outcome (Android)
+
+Android `clearAll` expands collapsed groups before swiping individual rows and
+verifies each dismissal. If a post-swipe read finds the shade closed, it reopens
+the shade before another fresh read, throttled to once per second within the
+current notification's deadline. An unreadable shade or a read/reopen timeout after a
+swipe returns a partial result with `stalled: true` and a separate `swipeCount`;
+unverified swipes do not count as dismissals. App-filtered `dismissedCount`
+continues to use the before/after notification inventory. Cancellation still
+aborts the operation, and an unreadable shade before any swipe remains an error.
+
+Before the first swipe, every step that a loaded host can make slow is retried
+instead of failing the call: the initial shade read, the app-filtered listing
+(a collapse that times out, a shade read mid-render that no notification record
+explains) and the notification-count `dumpsys`. Each step gets up to three
+attempts with a short exponential backoff (250 ms, then 500 ms); the shade
+readiness attempts each use the full `awaitTimeout`, so an unreadable shade fails
+after about three budgets. Device errors and cancellation are never retried. The
+listing leaves the shade collapsed and the drain expands it directly, skipping a
+second collapse/expand cycle and two probe reads.
+
+The initial shade read uses the initial `awaitTimeout` budget per attempt. Each verified
+dismissal starts a fresh per-notification budget for expansion, swiping and
+verification, so a progressing drain can exceed `awaitTimeout` overall. A row
+that does not leave within its budget stalls the drain without another swipe on
+that row; the inventory swipe limit, 25-swipe safety cap and cancellation still
+bound the operation.
+
 ## Android implementation
 
-Open/close the tray (preferred, emulator):
-
-- `adb -s <device> shell cmd statusbar expand-notifications`
-- `adb -s <device> shell cmd statusbar collapse` (also exposed as `systemTray` action `close`)
-
-Fallback (gesture):
-
-- Swipe down from status bar if `cmd statusbar` is unavailable.
-
-Finding notifications:
-
-- Use AccessibilityService to read the System UI node tree.
-- Search for a node with matching text or resource ID in
-  `com.android.systemui`.
-- Return bounding box + hierarchy path for use in follow-up taps.
+- Open/close (preferred): `adb -s <device> shell cmd statusbar expand-notifications` / `cmd statusbar collapse` (also `systemTray` action `close`). Fallback: swipe down from the status bar when `cmd statusbar` is unavailable.
+- Find: read the `com.android.systemui` node tree via the AccessibilityService, match text or resource ID, and return bounding box plus hierarchy path for follow-up taps.
 
 ### Collapsed notification group handling
 
@@ -210,29 +222,12 @@ notification candidates):
 - `shared_notification_container` — another broad wrapper with full-screen
   bounds
 
-## ADB validation (API 35)
+## ADB commands (confirmed on API 35)
 
-Status:
-
-- API 29 not validated yet (no local AVD available).
-
-Confirmed commands:
-
-- Expand/collapse notification shade:
-  - `adb -s <device> shell cmd statusbar expand-notifications`
-  - `adb -s <device> shell uiautomator dump /sdcard/notification_dump.xml`
-  - `adb -s <device> shell cat /sdcard/notification_dump.xml`
-  - `adb -s <device> shell cmd statusbar collapse`
-
-Observed results:
-
-- Notification shade expands and collapses on command.
-- uiautomator dump contains notification text suitable for lookFor matching.
-
-Notes:
-
-- `adb shell cmd statusbar expand-settings` is also available to expand quick
-  settings when needed.
+`cmd statusbar expand-notifications`, `cmd statusbar collapse` and
+`cmd statusbar expand-settings` (quick settings) work as expected, and a
+`uiautomator dump` of the open shade contains notification text suitable for
+matching. API 29 is not validated.
 
 ## Risks
 

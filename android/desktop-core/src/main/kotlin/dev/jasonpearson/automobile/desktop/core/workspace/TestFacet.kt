@@ -34,6 +34,7 @@ import dev.jasonpearson.automobile.desktop.core.datasource.TestDataSource
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.test.TestRun
 import dev.jasonpearson.automobile.desktop.core.test.TestStatus
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -63,7 +64,11 @@ private sealed interface TestFacetState {
  * standalone Test dashboard.
  */
 @Composable
-fun TestFacet(column: DeviceColumn, dataSource: TestDataSource? = null) {
+fun TestFacet(
+  column: DeviceColumn,
+  dataSource: TestDataSource? = null,
+  ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) {
   val graph = LocalAutoMobileGraph.current
   val source: TestDataSource =
     remember(column.deviceId, dataSource) {
@@ -78,7 +83,7 @@ fun TestFacet(column: DeviceColumn, dataSource: TestDataSource? = null) {
     // Read off the UI thread: the resource read hits the daemon and would otherwise block
     // recomposition. Injected test data sources run inline (deterministic).
     state =
-      when (val result = withContext(Dispatchers.IO) { source.getTestRuns() }) {
+      when (val result = withContext(ioDispatcher) { source.getTestRuns() }) {
         is Result.Success ->
           if (result.data.isEmpty()) TestFacetState.Empty else TestFacetState.Resolved(result.data)
         is Result.Error -> TestFacetState.Error(result.message ?: "Failed to load test runs")

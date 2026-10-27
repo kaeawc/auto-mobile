@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
 import java.text.SimpleDateFormat
-import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,7 +53,11 @@ data class DetailedEventStats(
   val hourlyDistribution: Map<Int, Int>,
 )
 
-class AnalyticsRepository(context: Context) {
+class AnalyticsRepository
+private constructor(context: Context, private val events: AnalyticsEventHistory) :
+  AnalyticsReports by events {
+  constructor(context: Context) : this(context, AnalyticsEventHistory())
+
   private val sharedPreferences: SharedPreferences =
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -65,87 +68,27 @@ class AnalyticsRepository(context: Context) {
   val userStats: StateFlow<UserStats> = _userStats.asStateFlow()
 
   private val breakdownJson = Json
+  private val preferences = AnalyticsPreferences(sharedPreferences)
 
   private var sessionStartTime = System.currentTimeMillis()
-  private val eventHistory = mutableListOf<AnalyticsEvent>()
-
-  // Performance monitoring
-  private var lastEventTime = 0L
-  private val performanceMetrics = mutableMapOf<String, MutableList<Long>>()
-
   var isTrackingEnabled: Boolean
     get() = sharedPreferences.getBoolean(KEY_TRACKING_ENABLED, true)
     set(value) = sharedPreferences.edit { putBoolean(KEY_TRACKING_ENABLED, value) }
 
   init {
     // Initialize session
-    initializeSession()
-    // Initialize the StateFlow with current stats
-    _userStats.value = loadUserStats()
-  }
-
-  private fun initializeSession() {
     sessionStartTime = System.currentTimeMillis()
     val sessionCount = sharedPreferences.getInt(KEY_TOTAL_SESSIONS, 0) + 1
     sharedPreferences.edit {
       putInt(KEY_TOTAL_SESSIONS, sessionCount)
       putLong(KEY_SESSION_START_TIME, sessionStartTime)
     }
+    // Initialize the StateFlow with current stats
+    _userStats.value = preferences.loadUserStats(sessionStartTime)
   }
 
   fun getUserStats(): UserStats {
     return _userStats.value
-  }
-
-  private fun loadUserStats(): UserStats {
-    val taps = sharedPreferences.getInt(KEY_TAPS, 0)
-    val swipes = sharedPreferences.getInt(KEY_SWIPES, 0)
-    val screensNavigated = sharedPreferences.getInt(KEY_SCREENS_NAVIGATED, 0)
-    val lastUpdated = sharedPreferences.getLong(KEY_LAST_UPDATED, System.currentTimeMillis())
-    val totalSessions = sharedPreferences.getInt(KEY_TOTAL_SESSIONS, 1)
-    val avgSessionDuration = sharedPreferences.getLong(KEY_AVG_SESSION_DURATION, 0)
-
-    return UserStats(
-      taps = taps,
-      swipes = swipes,
-      screensNavigated = screensNavigated,
-      lastUpdated = lastUpdated,
-      sessionStartTime = sessionStartTime,
-      totalSessions = totalSessions,
-      averageSessionDuration = avgSessionDuration,
-      tapBreakdown = getTapBreakdown(),
-      swipeBreakdown = getSwipeBreakdown(),
-      screenBreakdown = getScreenBreakdown(),
-      todayStats = getTodayStats(),
-      weeklyStats = getWeeklyStats(),
-    )
-  }
-
-  private fun getTapBreakdown(): Map<String, Int> {
-    val breakdownJson = sharedPreferences.getString(KEY_TAP_BREAKDOWN, "{}")
-    return parseBreakdownJson(breakdownJson ?: "{}")
-  }
-
-  private fun getSwipeBreakdown(): Map<String, Int> {
-    val breakdownJson = sharedPreferences.getString(KEY_SWIPE_BREAKDOWN, "{}")
-    return parseBreakdownJson(breakdownJson ?: "{}")
-  }
-
-  private fun getScreenBreakdown(): Map<String, Int> {
-    val breakdownJson = sharedPreferences.getString(KEY_SCREEN_BREAKDOWN, "{}")
-    return parseBreakdownJson(breakdownJson ?: "{}")
-  }
-
-  private fun parseBreakdownJson(json: String): Map<String, Int> {
-    return try {
-      breakdownJson.decodeFromString<Map<String, Int>>(json)
-    } catch (e: Exception) {
-      emptyMap()
-    }
-  }
-
-  private fun saveBreakdown(key: String, breakdown: Map<String, Int>) {
-    sharedPreferences.edit { putString(key, breakdownJson.encodeToString(breakdown)) }
   }
 
   fun trackEvent(eventName: String, properties: Map<String, Any> = emptyMap()) {
@@ -178,43 +121,6 @@ class AnalyticsRepository(context: Context) {
     }
   }
 
-  private fun getTodayStats(): DailyStats {
-    val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-    val todayTaps = sharedPreferences.getInt("${KEY_TODAY_TAPS}_$today", 0)
-    val todaySwipes = sharedPreferences.getInt("${KEY_TODAY_SWIPES}_$today", 0)
-    val todayScreens = sharedPreferences.getInt("${KEY_TODAY_SCREENS}_$today", 0)
-    val todaySessions = sharedPreferences.getInt("${KEY_TODAY_SESSIONS}_$today", 0)
-    val todayDuration = sharedPreferences.getLong("${KEY_TODAY_DURATION}_$today", 0)
-
-    return DailyStats(
-      date = today,
-      taps = todayTaps,
-      swipes = todaySwipes,
-      screens = todayScreens,
-      sessionCount = todaySessions,
-      totalDuration = todayDuration,
-    )
-  }
-
-  private fun getWeeklyStats(): List<DailyStats> {
-    val stats = mutableListOf<DailyStats>()
-    val calendar = Calendar.getInstance()
-
-    repeat(7) { i ->
-      val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(calendar.time)
-      val taps = sharedPreferences.getInt("${KEY_TODAY_TAPS}_$date", 0)
-      val swipes = sharedPreferences.getInt("${KEY_TODAY_SWIPES}_$date", 0)
-      val screens = sharedPreferences.getInt("${KEY_TODAY_SCREENS}_$date", 0)
-      val sessions = sharedPreferences.getInt("${KEY_TODAY_SESSIONS}_$date", 0)
-      val duration = sharedPreferences.getLong("${KEY_TODAY_DURATION}_$date", 0)
-
-      stats.add(DailyStats(date, taps, swipes, screens, sessions, duration))
-      calendar.add(Calendar.DAY_OF_YEAR, -1)
-    }
-
-    return stats.reversed()
-  }
-
   fun incrementTaps(
     count: Int = 1,
     elementId: String? = null,
@@ -233,22 +139,31 @@ class AnalyticsRepository(context: Context) {
 
     // Update breakdowns
     elementType?.let { type ->
-      val breakdown = getTapBreakdown().toMutableMap()
+      val breakdown = preferences.getTapBreakdown().toMutableMap()
       breakdown[type] = (breakdown[type] ?: 0) + count
-      saveBreakdown(KEY_TAP_BREAKDOWN, breakdown)
+      preferences.saveBreakdown(KEY_TAP_BREAKDOWN, breakdown)
     }
 
     // Update daily stats
-    updateDailyStats(taps = count)
+    preferences.updateDailyStats(taps = count)
 
     // Track detailed event
-    trackDetailedEvent("tap", elementId, elementType, coordinates)
+    events.trackDetailedEvent(
+      AnalyticsEvent(
+        eventName = "tap",
+        timestamp = System.currentTimeMillis(),
+        elementId = elementId,
+        elementType = elementType,
+        coordinates = coordinates,
+        screenName = _currentScreen.value,
+      ),
+    )
 
     // Performance monitoring
-    monitorPerformance("tap")
+    events.monitorPerformance("tap")
 
     // Update the StateFlow with new stats
-    _userStats.value = loadUserStats()
+    _userStats.value = preferences.loadUserStats(sessionStartTime)
   }
 
   fun incrementSwipes(
@@ -277,27 +192,31 @@ class AnalyticsRepository(context: Context) {
         else -> "unknown"
       }
 
-    val breakdown = getSwipeBreakdown().toMutableMap()
+    val breakdown = preferences.getSwipeBreakdown().toMutableMap()
     breakdown[breakdownKey] = (breakdown[breakdownKey] ?: 0) + count
-    saveBreakdown(KEY_SWIPE_BREAKDOWN, breakdown)
+    preferences.saveBreakdown(KEY_SWIPE_BREAKDOWN, breakdown)
 
     // Update daily stats
-    updateDailyStats(swipes = count)
+    preferences.updateDailyStats(swipes = count)
 
     // Track detailed event
-    trackDetailedEvent(
-      "swipe",
-      elementId,
-      elementType,
-      coordinates,
-      mapOf("direction" to (direction ?: "unknown")),
+    events.trackDetailedEvent(
+      AnalyticsEvent(
+        eventName = "swipe",
+        timestamp = System.currentTimeMillis(),
+        elementId = elementId,
+        elementType = elementType,
+        coordinates = coordinates,
+        properties = mapOf("direction" to (direction ?: "unknown")),
+        screenName = _currentScreen.value,
+      ),
     )
 
     // Performance monitoring
-    monitorPerformance("swipe")
+    events.monitorPerformance("swipe")
 
     // Update the StateFlow with new stats
-    _userStats.value = loadUserStats()
+    _userStats.value = preferences.loadUserStats(sessionStartTime)
   }
 
   fun incrementScreensNavigated(count: Int = 1, screenName: String? = null) {
@@ -313,143 +232,38 @@ class AnalyticsRepository(context: Context) {
 
     // Update screen breakdown
     screenName?.let { screen ->
-      val breakdown = getScreenBreakdown().toMutableMap()
+      val breakdown = preferences.getScreenBreakdown().toMutableMap()
       breakdown[screen] = (breakdown[screen] ?: 0) + count
-      saveBreakdown(KEY_SCREEN_BREAKDOWN, breakdown)
+      preferences.saveBreakdown(KEY_SCREEN_BREAKDOWN, breakdown)
     }
 
     // Update current screen
     _currentScreen.value = screenName
 
     // Update daily stats
-    updateDailyStats(screens = count)
+    preferences.updateDailyStats(screens = count)
 
     // Track detailed event
-    trackDetailedEvent("screen_view", elementId = screenName)
+    events.trackDetailedEvent(
+      AnalyticsEvent(
+        eventName = "screen_view",
+        timestamp = System.currentTimeMillis(),
+        elementId = screenName,
+        screenName = _currentScreen.value,
+      ),
+    )
 
     // Performance monitoring
-    monitorPerformance("screen_navigation")
+    events.monitorPerformance("screen_navigation")
 
     // Update the StateFlow with new stats
-    _userStats.value = loadUserStats()
-  }
-
-  private fun updateDailyStats(taps: Int = 0, swipes: Int = 0, screens: Int = 0) {
-    val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-
-    sharedPreferences.edit {
-      if (taps > 0) {
-        val currentTaps = sharedPreferences.getInt("${KEY_TODAY_TAPS}_$today", 0)
-        putInt("${KEY_TODAY_TAPS}_$today", currentTaps + taps)
-      }
-      if (swipes > 0) {
-        val currentSwipes = sharedPreferences.getInt("${KEY_TODAY_SWIPES}_$today", 0)
-        putInt("${KEY_TODAY_SWIPES}_$today", currentSwipes + swipes)
-      }
-      if (screens > 0) {
-        val currentScreens = sharedPreferences.getInt("${KEY_TODAY_SCREENS}_$today", 0)
-        putInt("${KEY_TODAY_SCREENS}_$today", currentScreens + screens)
-      }
-    }
-  }
-
-  private fun trackDetailedEvent(
-    eventType: String,
-    elementId: String? = null,
-    elementType: String? = null,
-    coordinates: Pair<Float, Float>? = null,
-    additionalProperties: Map<String, Any> = emptyMap(),
-  ) {
-    val event =
-      AnalyticsEvent(
-        eventName = eventType,
-        timestamp = System.currentTimeMillis(),
-        properties = additionalProperties,
-        elementId = elementId,
-        elementType = elementType,
-        screenName = _currentScreen.value,
-        coordinates = coordinates,
-      )
-
-    // Keep only last 1000 events to prevent memory issues
-    if (eventHistory.size >= 1000) {
-      eventHistory.removeAt(0)
-    }
-    eventHistory.add(event)
-  }
-
-  private fun monitorPerformance(eventType: String) {
-    val currentTime = System.currentTimeMillis()
-    if (lastEventTime > 0) {
-      val timeDiff = currentTime - lastEventTime
-      performanceMetrics.getOrPut(eventType) { mutableListOf() }.add(timeDiff)
-
-      // Keep only last 100 measurements per event type
-      performanceMetrics[eventType]?.let { list ->
-        if (list.size > 100) {
-          list.removeAt(0)
-        }
-      }
-    }
-    lastEventTime = currentTime
-  }
-
-  fun getDetailedEventStats(eventType: String): DetailedEventStats {
-    val filteredEvents = eventHistory.filter { it.eventName == eventType }
-    val topElements =
-      filteredEvents
-        .mapNotNull { it.elementType }
-        .groupingBy { it }
-        .eachCount()
-        .entries
-        .sortedByDescending { it.value }
-        .take(10)
-        .associate { it.key to it.value }
-
-    val topScreens =
-      filteredEvents
-        .mapNotNull { it.screenName }
-        .groupingBy { it }
-        .eachCount()
-        .entries
-        .sortedByDescending { it.value }
-        .take(10)
-        .associate { it.key to it.value }
-
-    val hourlyDistribution =
-      filteredEvents
-        .groupBy {
-          Calendar.getInstance().apply { timeInMillis = it.timestamp }.get(Calendar.HOUR_OF_DAY)
-        }
-        .mapValues { it.value.size }
-
-    return DetailedEventStats(
-      totalEvents = filteredEvents.size,
-      recentEvents = filteredEvents.takeLast(50),
-      topElements = topElements,
-      topScreens = topScreens,
-      hourlyDistribution = hourlyDistribution,
-    )
-  }
-
-  fun getPerformanceMetrics(): Map<String, Map<String, Double>> {
-    return performanceMetrics.mapValues { (_, times) ->
-      if (times.isEmpty()) {
-        mapOf("avg" to 0.0, "min" to 0.0, "max" to 0.0)
-      } else {
-        mapOf(
-          "avg" to times.average(),
-          "min" to (times.minOrNull()?.toDouble() ?: 0.0),
-          "max" to (times.maxOrNull()?.toDouble() ?: 0.0),
-        )
-      }
-    }
+    _userStats.value = preferences.loadUserStats(sessionStartTime)
   }
 
   fun exportData(): Map<String, Any> {
     return mapOf(
       "userStats" to getUserStats(),
-      "eventHistory" to eventHistory.takeLast(500), // Export last 500 events
+      "eventHistory" to events.eventHistory.takeLast(500), // Export last 500 events
       "performanceMetrics" to getPerformanceMetrics(),
       "exportTimestamp" to System.currentTimeMillis(),
     )
@@ -479,15 +293,13 @@ class AnalyticsRepository(context: Context) {
       putString(KEY_SWIPE_BREAKDOWN, "{}")
       putString(KEY_SCREEN_BREAKDOWN, "{}")
     }
-    eventHistory.clear()
-    performanceMetrics.clear()
+    events.clear()
     _userStats.value = UserStats()
   }
 
   fun clearAnalyticsData() {
     sharedPreferences.edit { clear() }
-    eventHistory.clear()
-    performanceMetrics.clear()
+    events.clear()
     _userStats.value = UserStats()
   }
 
@@ -524,9 +336,6 @@ class AnalyticsRepository(context: Context) {
     private const val KEY_TAP_BREAKDOWN = "tap_breakdown"
     private const val KEY_SWIPE_BREAKDOWN = "swipe_breakdown"
     private const val KEY_SCREEN_BREAKDOWN = "screen_breakdown"
-    private const val KEY_TODAY_TAPS = "today_taps"
-    private const val KEY_TODAY_SWIPES = "today_swipes"
-    private const val KEY_TODAY_SCREENS = "today_screens"
     private const val KEY_TODAY_SESSIONS = "today_sessions"
     private const val KEY_TODAY_DURATION = "today_duration"
   }

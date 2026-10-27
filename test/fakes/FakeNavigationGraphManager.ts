@@ -1,5 +1,4 @@
 import {
-  NavigationGraph,
   NavigationEvent,
   NavigationNode,
   NavigationEdge,
@@ -8,21 +7,26 @@ import {
   ToolCallInteraction,
   ExportedGraph,
   UIState,
-  BackStackInfo,
   HierarchyNavigationEvent,
   NavigationSuggestionInfo,
   NavigationGraphSummary,
   NavigationGraphSummaryEdge,
   NavigationGraphSummaryNode,
-  NavigationGraphSummaryProvider,
   NavigationGraphNodeDetail,
   NavigationGraphNodeResource,
-  NavigationGraphNodeResourceProvider,
   NavigationAppSummary,
-  NavigationAppListProvider,
-  NavigationGraphHistoryProvider,
   NavigationGraphHistoryPage,
+  NavigationToolCallHandle,
+  ScrollPosition,
 } from "../../src/utils/interfaces/NavigationGraph";
+import type { NavigationEdgeTarget } from "../../src/db/navigationRepositoryTypes";
+import type { TestCoverageSession } from "../../src/db/types";
+import type {
+  NavigationBuildContext,
+  NavigationBuildContextChange,
+  NavigationGraphService,
+} from "../../src/features/navigation/NavigationGraphManager";
+import type { RecordedBackStack } from "../../src/features/navigation/NavigationGraphService";
 
 interface StashedGraph {
   nodes: Map<string, NavigationNode>;
@@ -38,14 +42,7 @@ interface StashedGraph {
  * Fake implementation of NavigationGraph for testing.
  * Allows full control over navigation graph state and behavior.
  */
-export class FakeNavigationGraphManager
-  implements
-    NavigationGraph,
-    NavigationGraphSummaryProvider,
-    NavigationGraphNodeResourceProvider,
-    NavigationAppListProvider,
-    NavigationGraphHistoryProvider
-{
+export class FakeNavigationGraphManager implements NavigationGraphService {
   private currentAppId: string | null = null;
   private currentScreen: string | null = null;
   private nodes: Map<string, NavigationNode> = new Map();
@@ -66,6 +63,10 @@ export class FakeNavigationGraphManager
   // Configurable responses
   private pathResult: PathResult | null = null;
   private historyPage: NavigationGraphHistoryPage | null = null;
+  private readonly buildContexts = new Map<string, NavigationBuildContext>();
+  private buildContextListener: ((change: NavigationBuildContextChange) => void) | null = null;
+  private readonly nodeScreenshots = new Map<string, string | null>();
+  private activeTestSession: TestCoverageSession | null = null;
 
   // ==================== Configuration Methods ====================
 
@@ -304,11 +305,76 @@ export class FakeNavigationGraphManager
     this.emitGraphUpdated();
   }
 
-  recordBackStack(backStack: BackStackInfo): void {
+  async recordBackStack(backStack: RecordedBackStack): Promise<void> {
     this.trackCall("recordBackStack", [backStack]);
   }
 
-  recordToolCall(toolName: string, args: Record<string, any>, uiState?: UIState): () => void {
+  setBuildContext(context: NavigationBuildContext): void {
+    this.trackCall("setBuildContext", [context]);
+    this.buildContexts.set(context.appId, context);
+    this.buildContextListener?.({
+      appId: context.appId,
+      deviceId: context.deviceId,
+      buildContext: context,
+    });
+  }
+
+  clearBuildContext(appId: string): void {
+    this.trackCall("clearBuildContext", [appId]);
+    const previous = this.buildContexts.get(appId);
+    this.buildContexts.delete(appId);
+    if (previous) {
+      this.buildContextListener?.({ appId, deviceId: previous.deviceId, buildContext: null });
+    }
+  }
+
+  getBuildContexts(): NavigationBuildContext[] {
+    this.trackCall("getBuildContexts", []);
+    return [...this.buildContexts.values()].map((context) => ({ ...context }));
+  }
+
+  setBuildContextUpdateListener(
+    listener: ((change: NavigationBuildContextChange) => void) | null,
+  ): void {
+    this.trackCall("setBuildContextUpdateListener", [listener]);
+    this.buildContextListener = listener;
+  }
+
+  getDeviceIdForApp(appId: string | null): string | null {
+    this.trackCall("getDeviceIdForApp", [appId]);
+    return appId ? (this.buildContexts.get(appId)?.deviceId ?? null) : null;
+  }
+
+  async recordAppForeground(appId: string, deviceId?: string): Promise<void> {
+    this.trackCall("recordAppForeground", [appId, deviceId]);
+  }
+
+  forgetAppScreen(appId: string): void {
+    this.trackCall("forgetAppScreen", [appId]);
+    if (this.currentAppId === appId) {
+      this.currentScreen = null;
+    }
+  }
+
+  forgetAllAppScreens(): void {
+    this.trackCall("forgetAllAppScreens", []);
+    this.currentScreen = null;
+  }
+
+  /** The build context last given to `setBuildContext` for an app, if any. */
+  getBuildContext(appId: string): NavigationBuildContext | undefined {
+    return this.buildContexts.get(appId);
+  }
+
+  updateScrollPosition(scrollPosition: ScrollPosition): void {
+    this.trackCall("updateScrollPosition", [scrollPosition]);
+  }
+
+  recordToolCall(
+    toolName: string,
+    args: Record<string, any>,
+    uiState?: UIState,
+  ): NavigationToolCallHandle {
     this.trackCall("recordToolCall", [toolName, args, uiState]);
     const interaction: ToolCallInteraction = {
       toolName,
@@ -434,6 +500,71 @@ export class FakeNavigationGraphManager
     };
   }
 
+  async getEdgeTargetsFrom(screenName: string): Promise<NavigationEdgeTarget[]> {
+    this.trackCall("getEdgeTargetsFrom", [screenName]);
+    return this.edges
+      .filter((edge) => edge.from === screenName)
+      .map((edge) => ({
+        toScreen: edge.to,
+        toolName: edge.interaction?.toolName ?? null,
+        toolArgs: edge.interaction ? JSON.stringify(edge.interaction.args) : null,
+      }));
+  }
+
+  async getStatsForApp(appId: string | null): Promise<NavigationGraphStats> {
+    this.trackCall("getStatsForApp", [appId]);
+    if (appId !== null && appId === this.currentAppId) {
+      return this.getStats();
+    }
+    const stashed = appId ? this.stashedGraphs.get(appId) : undefined;
+    return {
+      nodeCount: stashed?.nodes.size ?? 0,
+      edgeCount: stashed?.edges.length ?? 0,
+      currentScreen: null,
+      knownEdgeCount: stashed?.edges.filter((e) => e.edgeType === "tool").length ?? 0,
+      unknownEdgeCount: stashed?.edges.filter((e) => e.edgeType === "unknown").length ?? 0,
+      toolCallHistorySize: 0,
+    };
+  }
+
+  async updateNodeScreenshot(
+    appId: string,
+    screenName: string,
+    screenshotPath: string | null,
+  ): Promise<void> {
+    this.trackCall("updateNodeScreenshot", [appId, screenName, screenshotPath]);
+    this.nodeScreenshots.set(`${appId}:${screenName}`, screenshotPath);
+  }
+
+  /** The screenshot path last given to `updateNodeScreenshot`, if any. */
+  getNodeScreenshot(appId: string, screenName: string): string | null | undefined {
+    return this.nodeScreenshots.get(`${appId}:${screenName}`);
+  }
+
+  async startTestSession(sessionUuid: string): Promise<void> {
+    this.trackCall("startTestSession", [sessionUuid]);
+    this.activeTestSession = {
+      id: 1,
+      session_uuid: sessionUuid,
+      app_id: this.currentAppId ?? "",
+      start_time: 0,
+      end_time: null,
+      total_nodes_visited: 0,
+      total_edges_traversed: 0,
+      created_at: "1970-01-01T00:00:00.000Z",
+    };
+  }
+
+  async endTestSession(): Promise<void> {
+    this.trackCall("endTestSession", []);
+    this.activeTestSession = null;
+  }
+
+  getActiveTestSession(): TestCoverageSession | null {
+    this.trackCall("getActiveTestSession", []);
+    return this.activeTestSession;
+  }
+
   async clearCurrentGraph(): Promise<void> {
     this.trackCall("clearCurrentGraph", []);
     this.nodes.clear();
@@ -500,7 +631,28 @@ export class FakeNavigationGraphManager
     };
   }
 
-  setGraphUpdateListener(listener: (() => void) | null): void {
+  async exportGraphSummaryForApp(appId: string | null): Promise<NavigationGraphSummary> {
+    this.trackCall("exportGraphSummaryForApp", [appId]);
+    if (appId !== null && appId === this.currentAppId) {
+      return this.exportGraphSummary();
+    }
+    const stashed = appId ? this.stashedGraphs.get(appId) : undefined;
+    if (!appId || !stashed) {
+      return { appId, nodes: [], edges: [], currentScreen: null };
+    }
+    return {
+      appId,
+      nodes: Array.from(stashed.nodes.values()).map((node) => ({
+        id: stashed.nodeSummaryIds.get(node.screenName) ?? 0,
+        screenName: node.screenName,
+        visitCount: node.visitCount,
+      })),
+      edges: [...stashed.edgeSummaries],
+      currentScreen: stashed.currentScreen,
+    };
+  }
+
+  setGraphUpdateListener(listener: (() => void | Promise<void>) | null): void {
     if (listener === null) {
       this.graphUpdateListeners = [];
     } else if (!this.graphUpdateListeners.includes(listener)) {

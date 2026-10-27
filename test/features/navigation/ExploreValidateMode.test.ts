@@ -77,7 +77,7 @@ describe("ExploreValidateMode", () => {
     test("should populate state from existing graph", async () => {
       const navManager = NavigationGraphManager.getInstance();
 
-      navManager.recordNavigationEvent({
+      void navManager.recordNavigationEvent({
         destination: "Screen1",
         source: "TEST",
         arguments: {},
@@ -96,7 +96,7 @@ describe("ExploreValidateMode", () => {
         },
       );
 
-      navManager.recordNavigationEvent({
+      void navManager.recordNavigationEvent({
         destination: "Screen2",
         source: "TEST",
         arguments: {},
@@ -335,7 +335,7 @@ describe("ExploreValidateMode", () => {
         },
       });
 
-      markEdgeTraversed(state, edge, "B", true, fakeTimer);
+      markEdgeTraversed(state, edge, { actualTo: "B", success: true }, fakeTimer);
 
       expect(state.traversedEdges.size).toBe(1);
       expect(state.traversedEdges.has(getEdgeKey(edge))).toBe(true);
@@ -351,7 +351,12 @@ describe("ExploreValidateMode", () => {
         },
       });
 
-      markEdgeTraversed(state, edge, "B", true, fakeTimer, undefined, 0.95);
+      markEdgeTraversed(
+        state,
+        edge,
+        { actualTo: "B", success: true, matchConfidence: 0.95 },
+        fakeTimer,
+      );
 
       const result = state.edgeValidationResults.get(getEdgeKey(edge));
       expect(result).toBeDefined();
@@ -371,7 +376,12 @@ describe("ExploreValidateMode", () => {
         },
       });
 
-      markEdgeTraversed(state, edge, "C", false, fakeTimer, "Went to wrong screen", 0.7);
+      markEdgeTraversed(
+        state,
+        edge,
+        { actualTo: "C", success: false, error: "Went to wrong screen", matchConfidence: 0.7 },
+        fakeTimer,
+      );
 
       const result = state.edgeValidationResults.get(getEdgeKey(edge));
       expect(result?.success).toBe(false);
@@ -393,7 +403,7 @@ describe("ExploreValidateMode", () => {
       addPendingEdge(state, edge);
       const initialLength = state.pendingEdges.size;
 
-      markEdgeTraversed(state, edge, "B", true, fakeTimer);
+      markEdgeTraversed(state, edge, { actualTo: "B", success: true }, fakeTimer);
 
       expect(state.pendingEdges.size).toBeLessThan(initialLength);
       // The `from` index must stay in sync with the key map.
@@ -480,11 +490,11 @@ describe("ExploreValidateMode", () => {
       addPendingEdge(state, edge2);
 
       // Traversing edge1 leaves edge2 as the next selection from "Current".
-      markEdgeTraversed(state, edge1, "A", true, fakeTimer);
+      markEdgeTraversed(state, edge1, { actualTo: "A", success: true }, fakeTimer);
       expect(selectNextEdgeToTraverse(state, "Current")).toBe(edge2);
 
       // Traversing edge2 empties the bucket, which must be dropped entirely.
-      markEdgeTraversed(state, edge2, "B", true, fakeTimer);
+      markEdgeTraversed(state, edge2, { actualTo: "B", success: true }, fakeTimer);
       expect(selectNextEdgeToTraverse(state, "Current")).toBeNull();
       expect(state.pendingEdgesByFrom.has("Current")).toBe(false);
       expect(state.pendingEdges.size).toBe(0);

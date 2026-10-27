@@ -14,9 +14,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 class RecordingDeviceSessionRepository extends FakeDeviceSessionRepository {
   readonly records: DeviceSessionRecord[] = [];
 
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  override async upsertActiveSession(record: DeviceSessionRecord): Promise<number> {
     this.records.push(record);
-    await super.upsertActiveSession(record);
+    return await super.upsertActiveSession(record);
   }
 }
 

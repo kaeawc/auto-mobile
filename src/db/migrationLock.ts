@@ -1,3 +1,4 @@
+import { NoOpMigrationLock } from "./NoOpMigrationLock";
 import { defaultLockOwnerGenerationProbe } from "../utils/lockOwnerGeneration";
 import { errorMessage } from "../utils/describeUnknownError";
 import { existsSync, realpathSync } from "fs";
@@ -42,26 +43,6 @@ export interface MigrationLock {
   acquire(): Promise<void>;
   /** Release the lock. Best-effort; safe to call once per successful acquire. */
   release(): Promise<void>;
-}
-
-/**
- * No-op lock for the single-opener default and in-memory test databases, where
- * no second process can share the connection. Keeps the migrator's DB-path-
- * agnostic callers unchanged.
- *
- * NOTE: this default provides NO cross-process protection — it is correct only
- * for `:memory:` DBs and the single-daemon path (already serialized by the
- * in-process mutex). Production DB openers must pass a {@link FileMigrationLock}
- * via {@link createFileMigrationLock}; `database.ts#startMigrations` does so.
- */
-export class NoOpMigrationLock implements MigrationLock {
-  async acquire(): Promise<void> {
-    // Nothing to serialize.
-  }
-
-  async release(): Promise<void> {
-    // No lock file to remove.
-  }
 }
 
 export interface FileMigrationLockOptions {
@@ -279,7 +260,7 @@ export function resolveMigrationLockTimeoutMs(
  * per-uid) because the trigger — two openers on one DB file — is per-file. The
  * busy-wait ceiling can be overridden via `AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS`
  * (with the legacy `AUTO_MOBILE_` alias), mirroring the daemon timeout knobs in
- * `src/daemon/constants.ts`.
+ * `src/daemon/wire/constants.ts`.
  */
 export function createFileMigrationLock(dbPath: string): MigrationLock {
   const lockFilePath = migrationLockPathFor(dbPath);

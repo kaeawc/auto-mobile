@@ -25,7 +25,9 @@ internal class FileDaemonSocketChecker(
     if (!File(socketPath).exists()) return false
     return try {
       SocketChannel.open(UnixDomainSocketAddress.of(socketPath)).use { true }
-    } catch (_: Exception) {
+    } catch (_: java.io.IOException) {
+      false
+    } catch (_: SecurityException) {
       false
     }
   }
@@ -70,7 +72,9 @@ internal fun healthProbeFor(client: AutoMobileClient): DaemonHealthProbe = Daemo
   try {
     client.getDaemonStatus()
     DaemonHealth.HEALTHY
-  } catch (_: Exception) {
+  } catch (_: java.io.IOException) {
+    DaemonHealth.UNHEALTHY
+  } catch (_: SecurityException) {
     DaemonHealth.UNHEALTHY
   }
 }
@@ -108,7 +112,9 @@ internal class JsonDaemonPidFileReader(
           launchArguments = (pidData["options"] as? JsonObject)?.toLaunchArguments().orEmpty(),
         ),
       )
-    } catch (_: Exception) {
+    } catch (_: java.io.IOException) {
+      DaemonPidReadResult.Unreadable
+    } catch (_: SecurityException) {
       DaemonPidReadResult.Unreadable
     }
   }
@@ -350,7 +356,9 @@ internal class SystemDaemonPackageRunnerResolver(
       val process =
         try {
           ProcessBuilder(locator, runner).redirectErrorStream(true).start()
-        } catch (_: Exception) {
+        } catch (_: java.io.IOException) {
+          return null
+        } catch (_: SecurityException) {
           return null
         }
       return try {
@@ -366,7 +374,9 @@ internal class SystemDaemonPackageRunnerResolver(
         // Restore the flag and rethrow so a cancelled lifecycle call launches no daemon.
         Thread.currentThread().interrupt()
         throw interrupted
-      } catch (_: Exception) {
+      } catch (_: java.io.IOException) {
+        null
+      } catch (_: SecurityException) {
         null
       } finally {
         // Terminate the locator and close its streams on every path — otherwise the timeout,
@@ -458,7 +468,12 @@ internal class SystemDesktopBunInstaller(
           listOf("/bin/bash", script.absolutePath)
         }
       commandExecutor.execute(command)
-    } catch (error: Exception) {
+    } catch (error: java.io.IOException) {
+      DaemonCommandResult(
+        exitCode = INSTALL_FAILURE_EXIT_CODE,
+        output = error.message ?: error.javaClass.simpleName,
+      )
+    } catch (error: SecurityException) {
       DaemonCommandResult(
         exitCode = INSTALL_FAILURE_EXIT_CODE,
         output = error.message ?: error.javaClass.simpleName,
@@ -557,26 +572,30 @@ internal interface DaemonLifecycleEnsurer {
  * desktop jar. The socket protocol gate remains the final authority; this lifecycle makes the UI
  * restart a skewed shared daemon before that gate rejects every ordinary request.
  */
+internal data class DesktopDaemonLifecycleOptions(
+  val packageRunnerResolver: DaemonPackageRunnerResolver = SystemDaemonPackageRunnerResolver(),
+  val bunInstaller: DesktopBunInstaller = SystemDesktopBunInstaller(),
+  val verificationAttempts: Int = DEFAULT_VERIFICATION_ATTEMPTS,
+  val phaseListener: (DaemonLifecyclePhase) -> Unit = {},
+  val healthProbe: DaemonHealthProbe = DaemonHealthProbe { DaemonHealth.UNKNOWN },
+)
+
 internal class DesktopDaemonLifecycle(
   private val expectedVersionProvider: () -> String? = DaemonSocketPaths::resolveClientVersion,
   private val socketChecker: DaemonSocketChecker = FileDaemonSocketChecker(),
   private val pidFileReader: DaemonPidFileReader = JsonDaemonPidFileReader(),
   private val commandExecutor: DaemonCommandExecutor = SystemDaemonCommandExecutor,
   private val timer: DaemonRetryTimer = SystemDaemonRetryTimer,
-  private val packageRunnerResolver: DaemonPackageRunnerResolver =
-    SystemDaemonPackageRunnerResolver(),
-  private val bunInstaller: DesktopBunInstaller = SystemDesktopBunInstaller(),
-  private val verificationAttempts: Int = DEFAULT_VERIFICATION_ATTEMPTS,
-  /**
-   * Observes [DaemonLifecyclePhase] transitions of every pass. Invoked under [lifecycleLock], so
-   * implementations must be non-blocking (e.g. a `StateFlow.value` write).
-   */
-  private val phaseListener: (DaemonLifecyclePhase) -> Unit = {},
-  healthProbe: DaemonHealthProbe = DaemonHealthProbe { DaemonHealth.UNKNOWN },
+  options: DesktopDaemonLifecycleOptions = DesktopDaemonLifecycleOptions(),
 ) : DaemonLifecycleEnsurer {
+  private val packageRunnerResolver = options.packageRunnerResolver
+  private val bunInstaller = options.bunInstaller
+  private val verificationAttempts = options.verificationAttempts
+  private val phaseListener = options.phaseListener
+
   // Wired after the daemon client exists (see [attachHealthProbe]); until then it reads UNKNOWN, so
   // the recovery pass preserves the legacy socket-open+version-match short-circuit.
-  @Volatile private var healthProbe: DaemonHealthProbe = healthProbe
+  @Volatile private var healthProbe: DaemonHealthProbe = options.healthProbe
 
   override fun attachHealthProbe(probe: DaemonHealthProbe) {
     healthProbe = probe
@@ -639,36 +658,94 @@ internal class DesktopDaemonLifecycle(
 
     val action = if (daemonAvailable) "restart" else "start"
     val osName = System.getProperty("os.name", "")
+    val runner =
+      when (val resolution = resolvePackageRunner(osName)) {
+        is PackageRunnerResolution.Ready -> resolution.runner
+        is PackageRunnerResolution.Failed -> return resolution.failure
+      }
+    phaseListener(DaemonLifecyclePhase.LaunchingDaemon(action, expectedVersion))
+    launchDaemon(
+        DaemonLaunchRequest(
+          runner,
+          expectedVersion,
+          action,
+          currentDaemon?.launchArguments.orEmpty(),
+          osName,
+        ),
+      )
+      ?.let {
+        return it
+      }
+    return verifyStartedDaemon(expectedVersion)
+  }
+
+  private fun resolvePackageRunner(osName: String): PackageRunnerResolution {
     var runner = packageRunnerResolver.resolve(osName)
     if (runner == null) {
       phaseListener(DaemonLifecyclePhase.InstallingRuntime)
       val installResult = bunInstaller.install(osName)
       if (installResult.cancelled) {
-        return DaemonLifecycleResult.Failure("Bun installation was cancelled.")
+        return PackageRunnerResolution.Failed(
+          DaemonLifecycleResult.Failure("Bun installation was cancelled."),
+        )
       }
       if (installResult.timedOut) {
-        return DaemonLifecycleResult.Failure(
-          "Timed out while installing Bun. Check your network connection and retry.",
+        return PackageRunnerResolution.Failed(
+          DaemonLifecycleResult.Failure(
+            "Timed out while installing Bun. Check your network connection and retry.",
+          ),
         )
       }
       if (installResult.exitCode != 0) {
         val detail = installResult.output.trim().takeIf { it.isNotEmpty() }
-        return DaemonLifecycleResult.Failure(
-          buildString {
-            append("Could not install Bun automatically")
-            detail?.let { append(": $it") }
-            append(". Install Bun manually, then try again.")
-          },
+        return PackageRunnerResolution.Failed(
+          DaemonLifecycleResult.Failure(
+            buildString {
+              append("Could not install Bun automatically")
+              detail?.let { append(": $it") }
+              append(". Install Bun manually, then try again.")
+            },
+          ),
         )
       }
       runner = packageRunnerResolver.resolve(osName)
       if (runner == null) {
-        return DaemonLifecycleResult.Failure(
-          "Bun installed, but bunx could not be found. Restart AutoMobile and try again.",
+        return PackageRunnerResolution.Failed(
+          DaemonLifecycleResult.Failure(
+            "Bun installed, but bunx could not be found. Restart AutoMobile and try again.",
+          ),
         )
       }
     }
-    phaseListener(DaemonLifecyclePhase.LaunchingDaemon(action, expectedVersion))
+    return PackageRunnerResolution.Ready(
+      requireNotNull(runner) { "A successful runtime resolution requires bunx" },
+    )
+  }
+
+  private fun verifyStartedDaemon(expectedVersion: String): DaemonLifecycleResult {
+    phaseListener(DaemonLifecyclePhase.Verifying)
+    var actualVersion: String? = null
+    repeat(verificationAttempts.coerceAtLeast(1)) { attempt ->
+      actualVersion = (pidFileReader.read() as? DaemonPidReadResult.Present)?.state?.version
+      if (socketChecker.isReady() && versionsMatch(actualVersion, expectedVersion)) {
+        return DaemonLifecycleResult.Ready(restarted = true)
+      }
+      if (attempt + 1 < verificationAttempts.coerceAtLeast(1)) {
+        timer.sleep(VERIFICATION_RETRY_DELAY_MS)
+      }
+    }
+    return DaemonLifecycleResult.Failure(
+      "AutoMobile daemon version mismatch: desktop requires $expectedVersion, but the daemon " +
+        "reports ${actualVersion ?: "no version"}. Stop the existing daemon and retry so " +
+        "@kaeawc/auto-mobile@$expectedVersion can start.",
+    )
+  }
+
+  private fun launchDaemon(request: DaemonLaunchRequest): DaemonLifecycleResult.Failure? {
+    val runner = request.runner
+    val expectedVersion = request.version
+    val action = request.action
+    val osName = request.osName
     val commandResult =
       try {
         val command =
@@ -676,11 +753,16 @@ internal class DesktopDaemonLifecycle(
             runner,
             expectedVersion,
             action,
-            currentDaemon?.launchArguments.orEmpty(),
+            request.existingOptions,
             osName,
           )
         commandExecutor.execute(command)
-      } catch (error: Exception) {
+      } catch (error: java.io.IOException) {
+        return DaemonLifecycleResult.Failure(
+          "Could not $action AutoMobile $expectedVersion: ${error.message ?: error.javaClass.simpleName}. " +
+            "Install Bun so bunx is available, then try again.",
+        )
+      } catch (error: SecurityException) {
         return DaemonLifecycleResult.Failure(
           "Could not $action AutoMobile $expectedVersion: ${error.message ?: error.javaClass.simpleName}. " +
             "Install Bun so bunx is available, then try again.",
@@ -704,41 +786,7 @@ internal class DesktopDaemonLifecycle(
       )
     }
 
-    phaseListener(DaemonLifecyclePhase.Verifying)
-    var actualVersion: String? = null
-    repeat(verificationAttempts.coerceAtLeast(1)) { attempt ->
-      actualVersion = (pidFileReader.read() as? DaemonPidReadResult.Present)?.state?.version
-      if (socketChecker.isReady() && versionsMatch(actualVersion, expectedVersion)) {
-        return DaemonLifecycleResult.Ready(restarted = true)
-      }
-      if (attempt + 1 < verificationAttempts.coerceAtLeast(1)) {
-        timer.sleep(VERIFICATION_RETRY_DELAY_MS)
-      }
-    }
-    return DaemonLifecycleResult.Failure(
-      "AutoMobile daemon version mismatch: desktop requires $expectedVersion, but the daemon " +
-        "reports ${actualVersion ?: "no version"}. Stop the existing daemon and retry so " +
-        "@kaeawc/auto-mobile@$expectedVersion can start.",
-    )
-  }
-
-  private fun packageDaemonCommand(
-    runner: String,
-    version: String,
-    action: String,
-    existingOptions: List<String>,
-    osName: String,
-  ): List<String> {
-    // `bunx` auto-installs the pinned package without prompting, and is a self-contained native
-    // binary, so it needs no `-y` flag and no PATH manipulation.
-    val runnerArguments =
-      listOf(
-        runner,
-        "@kaeawc/auto-mobile@${DaemonSocketPaths.releaseVersion(version)}",
-        "--daemon",
-        action,
-      ) + existingOptions
-    return commandForPlatform(runnerArguments, osName)
+    return null
   }
 
   private fun readPidStateWithRetry(): DaemonPidReadResult {
@@ -761,39 +809,8 @@ internal class DesktopDaemonLifecycle(
     return false
   }
 
-  private fun versionsMatch(
-    actualVersion: String?,
-    expectedVersion: String,
-  ): Boolean {
-    val actual = actualVersion?.trim().orEmpty()
-    val expected = expectedVersion.trim()
-    if (declaresFullVersion(expected)) {
-      return actual.isNotEmpty() && actual == expected
-    }
-    val actualRelease = DaemonSocketPaths.releaseVersion(actual)
-    val expectedRelease = DaemonSocketPaths.releaseVersion(expected)
-    return actualRelease.isNotEmpty() && actualRelease == expectedRelease
-  }
-
-  private fun declaresFullVersion(version: String): Boolean =
-    DaemonSocketPaths.releaseVersion(version) != version
-
-  internal fun commandForPlatform(command: List<String>, osName: String): List<String> {
-    if (!osName.lowercase().contains("win")) return command
-    val quotedCommand = command.joinToString(" ") { quoteForWindowsCmd(it) }
-    return listOf("cmd.exe", "/d", "/v:off", "/s", "/c", "\"$quotedCommand\"")
-  }
-
-  private fun quoteForWindowsCmd(value: String): String {
-    require(!value.contains('"') && !value.contains('\n') && !value.contains('\r')) {
-      "AutoMobile daemon arguments cannot contain Windows command-line quotes or newlines"
-    }
-    return "\"${value.replace("%", "%%")}\""
-  }
-
   private companion object {
     val lifecycleLock = Any()
-    const val DEFAULT_VERIFICATION_ATTEMPTS = 20
     const val VERIFICATION_RETRY_DELAY_MS = 100L
     const val PID_READ_ATTEMPTS = 3
     const val PID_READ_RETRY_DELAY_MS = 100L
@@ -801,3 +818,19 @@ internal class DesktopDaemonLifecycle(
     const val SOCKET_PROBE_RETRY_DELAY_MS = 150L
   }
 }
+
+private sealed interface PackageRunnerResolution {
+  data class Ready(val runner: String) : PackageRunnerResolution
+
+  data class Failed(val failure: DaemonLifecycleResult.Failure) : PackageRunnerResolution
+}
+
+private data class DaemonLaunchRequest(
+  val runner: String,
+  val version: String,
+  val action: String,
+  val existingOptions: List<String>,
+  val osName: String,
+)
+
+private const val DEFAULT_VERIFICATION_ATTEMPTS = 20

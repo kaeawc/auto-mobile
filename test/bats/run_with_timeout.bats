@@ -106,3 +106,70 @@ EOF
   # RSS descending; optional sampler failures do not replace timeout status.
   [ "$(sed -n '/macOS CPU\/RSS/{n;p;}' "$snapshot")" = '2 3 200 large' ]
 }
+
+@test "fractional portable deadlines still bound a long command" {
+  run env AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 \
+    AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS=0.1 \
+    AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE="$BATS_TEST_TMPDIR/snapshot" \
+    bash -c 'source scripts/ios/run_with_timeout.sh; run_with_timeout 0.1 sleep 5'
+  [[ "$status" -eq 124 ]]
+}
+
+@test "fractional portable deadline preserves an early command exit status" {
+  run env AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 \
+    bash -c 'source scripts/ios/run_with_timeout.sh; run_with_timeout 1.5 bash -c "exit 7"'
+  [[ "$status" -eq 7 ]]
+}
+
+@test "watchdog coordination variable is private to the timeout wrapper" {
+  run env AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="$BATS_TEST_TMPDIR/pgid" \
+    bash -c '
+      source scripts/ios/run_with_timeout.sh
+      run_with_timeout 5 bash -c "test -z \"\${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE+x}\""
+    '
+  [[ "$status" -eq 0 ]]
+}
+
+@test "run_with_timeout keeps the caller's PGID file variable across calls (#14497)" {
+  run env AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 \
+    AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="$BATS_TEST_TMPDIR/pgid" bash -c '
+    source scripts/ios/run_with_timeout.sh
+    run_with_timeout 5 true || exit 10
+    [ "${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE:-}" = "$1/pgid" ] || exit 11
+    run_with_timeout 5 true || exit 12
+    [ -z "$(ls "$1" | grep "^pgid\.")" ] || exit 13
+    case "$(declare -p AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE)" in "declare -x"*) ;; *) exit 14 ;; esac
+  ' bash "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+}
+
+@test "run_with_timeout leaves the PGID file variable unset when the caller had none (#14497)" {
+  run env -u AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 bash -c '
+    source scripts/ios/run_with_timeout.sh
+    run_with_timeout 5 true
+    [ -z "${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE+x}" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "run_with_timeout hides the PGID file variable from the timed command (#14497)" {
+  run env AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 \
+    AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="$BATS_TEST_TMPDIR/pgid" bash -c '
+    source scripts/ios/run_with_timeout.sh
+    run_with_timeout 5 bash -c "[ -z \"\${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE+x}\" ]"
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "portable watchdog bounds a command under a leading-zero timeout (#14498)" {
+  # `08` is an invalid octal literal in $(( )); the watcher died silently and the
+  # bound never applied, so the 12s command ran to completion instead of 124.
+  run env AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS=0 bash -c '
+    source scripts/ios/run_with_timeout.sh
+    start=$SECONDS
+    run_with_timeout 08 sleep 12
+    echo "rc=$? elapsed=$((SECONDS - start))"
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ rc=124\ elapsed=(8|9|10)$ ]]
+}

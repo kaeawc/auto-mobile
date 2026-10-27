@@ -36,14 +36,8 @@ enum PrototypeStorageKey: Equatable {
         return nil
     }
 
-    /// `^[A-Za-z_][A-Za-z0-9_]{0,63}$`
     private static func isStateKey(_ key: String) -> Bool {
-        let scalars = Array(key.unicodeScalars)
-        func letter(_ scalar: Unicode.Scalar) -> Bool {
-            ("A" ... "Z").contains(scalar) || ("a" ... "z").contains(scalar) || scalar == "_"
-        }
-        guard (1 ... 64).contains(scalars.count), let first = scalars.first, letter(first) else { return false }
-        return scalars.allSatisfy { letter($0) || ("0" ... "9").contains($0) }
+        PrototypeContractValidator.matches("stateKey", key)
     }
 }
 
@@ -96,10 +90,6 @@ struct FilePrototypeStorageStore: PrototypeStorageStore {
     static let maxFileBytes = 4 * PrototypeLimits.maxStorageBytes
 
     let directory: URL
-
-    init(directory: URL) {
-        self.directory = directory
-    }
 
     static func defaultDirectory(fileManager: FileManager = .default) -> URL? {
         fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?

@@ -102,7 +102,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   const declarations: DeclarationBinding[] = [];
   const functionBindings: Array<{
     name: string;
-    node: ts.FunctionLikeDeclaration;
+    node: ts.SignatureDeclaration;
     scope: ts.Node;
     position: number;
     receiverDeclaration?: DeclarationBinding;
@@ -126,7 +126,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   const executionSeamAliases = new Set(["executeCommand", "runExecSeam", "execute"]);
   const runExecSeamAliases = new Set(["runExecSeam"]);
   const childProcessNamespaces = new Set<string>();
-  const functionName = (node: ts.FunctionLikeDeclaration): string | undefined => {
+  const functionName = (node: ts.SignatureDeclaration): string | undefined => {
     if (
       ts.isConstructorDeclaration(node) &&
       ts.isClassDeclaration(node.parent) &&
@@ -264,8 +264,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
         position: node.getStart(sourceFile),
       }));
       declarations.push(...variableDeclarations);
-      const receiverDeclaration = ts.isIdentifier(node.name)
-        ? variableDeclarations.find((declaration) => declaration.name === node.name.text)
+      const bindingName = node.name;
+      const receiverDeclaration = ts.isIdentifier(bindingName)
+        ? variableDeclarations.find((declaration) => declaration.name === bindingName.text)
         : undefined;
       if (ts.isIdentifier(node.name) && node.initializer && ts.isFunctionLike(node.initializer)) {
         functionBindings.push({
@@ -502,11 +503,12 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     ) {
       continue;
     }
-    const constructorScopes = scopeChain(value.expression);
+    const constructor = value.expression;
+    const constructorScopes = scopeChain(constructor);
     const classDeclaration = declarations
       .filter(
         (declaration) =>
-          declaration.name === value.expression.text &&
+          declaration.name === constructor.text &&
           constructorScopes.includes(declaration.scope) &&
           declaration.position <= value.expression.getStart(sourceFile) &&
           classInstanceMethods.some((method) => method.classDeclaration === declaration),
@@ -569,7 +571,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   };
   const identifierResolvesToFunction = (
     name: string,
-    target: ts.FunctionLikeDeclaration,
+    target: ts.SignatureDeclaration,
     callScopes: readonly ts.Node[],
     beforePosition: number,
     seen = new Set<string>(),
@@ -579,7 +581,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     }
     const nextSeen = new Set([...seen, name]);
     const definitions: Array<
-      | { kind: "function"; node: ts.FunctionLikeDeclaration; scope: ts.Node; position: number }
+      | { kind: "function"; node: ts.SignatureDeclaration; scope: ts.Node; position: number }
       | { kind: "value"; value: ts.Expression; scope: ts.Node; position: number }
     > = [
       ...functionBindings
@@ -641,12 +643,12 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
 
   const callResolutionCache = new Map<
     InvocationExpression,
-    Map<ts.FunctionLikeDeclaration, boolean>
+    Map<ts.SignatureDeclaration, boolean>
   >();
 
   const callResolvesToFunction = (
     call: InvocationExpression,
-    target: ts.FunctionLikeDeclaration,
+    target: ts.SignatureDeclaration,
   ): boolean => {
     const cached = callResolutionCache.get(call)?.get(target);
     if (cached !== undefined) {
@@ -658,7 +660,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       callResolutionCache.set(call, resolutions);
       return result;
     };
-    if (target.asteriskToken) {
+    if ("asteriskToken" in target && target.asteriskToken) {
       return finish(false);
     }
     if (unwrapTransparentExpression(call.expression) === target) {
@@ -724,9 +726,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
 
   const assignmentRequiresCompletedAsyncCall = (
     assignment: ts.Expression,
-    owner: ts.FunctionLikeDeclaration,
+    owner: ts.SignatureDeclaration,
   ): boolean => {
-    if (!owner.body || !ts.isBlock(owner.body)) {
+    if (!("body" in owner) || !owner.body || !ts.isBlock(owner.body)) {
       return false;
     }
     let containingStatement: ts.Statement | undefined;
@@ -786,7 +788,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   const callCanExecuteBefore = (
     call: InvocationExpression,
     beforePosition: number,
-    seenFunctions = new Set<ts.FunctionLikeDeclaration>(),
+    seenFunctions = new Set<ts.SignatureDeclaration>(),
   ): boolean => {
     const cached =
       seenFunctions.size === 0 ? callExecutionCache.get(call)?.get(beforePosition) : undefined;
@@ -865,7 +867,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
               .find((item) => item !== undefined);
             candidateScope = declaration?.scope ?? candidateScope;
           }
-          const useFunctions: ts.FunctionLikeDeclaration[] = [];
+          const useFunctions: ts.SignatureDeclaration[] = [];
           let current: ts.Node | undefined = node.parent;
           while (current && current !== candidateScope) {
             if (ts.isFunctionLike(current)) {
@@ -887,7 +889,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
           const useExecutionPosition =
             useInvocationPositions.length > 0 ? Math.max(...useInvocationPositions) : usePosition;
 
-          const candidateFunctions: ts.FunctionLikeDeclaration[] = [];
+          const candidateFunctions: ts.SignatureDeclaration[] = [];
           current = candidate.value.parent;
           while (current && current !== candidateScope) {
             if (ts.isFunctionLike(current)) {

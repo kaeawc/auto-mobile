@@ -51,7 +51,7 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+      const hierarchy: ViewHierarchyNode = { class: "View" };
       const config: AccessibilityAuditConfig = {
         level: "AA",
         failureMode: "report",
@@ -75,7 +75,7 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+      const hierarchy: ViewHierarchyNode = { class: "View" };
       const config: AccessibilityAuditConfig = {
         level: "AA",
         failureMode: "report",
@@ -99,7 +99,7 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+      const hierarchy: ViewHierarchyNode = { class: "View" };
       const config: AccessibilityAuditConfig = {
         level: "AA",
         failureMode: "report",
@@ -123,7 +123,7 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+      const hierarchy: ViewHierarchyNode = { class: "View" };
       const config: AccessibilityAuditConfig = {
         level: "AA",
         failureMode: "report",
@@ -147,7 +147,7 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+      const hierarchy: ViewHierarchyNode = { class: "View" };
       const config: AccessibilityAuditConfig = {
         level: "AA",
         failureMode: "report",
@@ -174,7 +174,7 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+      const hierarchy: ViewHierarchyNode = { class: "View" };
       const config: AccessibilityAuditConfig = {
         level: "AA",
         failureMode: "report",
@@ -197,7 +197,7 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+      const hierarchy: ViewHierarchyNode = { class: "View" };
       const config: AccessibilityAuditConfig = {
         level: "AA",
         failureMode: "report",
@@ -219,7 +219,7 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+      const hierarchy: ViewHierarchyNode = { class: "View" };
       const config: AccessibilityAuditConfig = {
         level: "AA",
         failureMode: "report",
@@ -241,7 +241,7 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+      const hierarchy: ViewHierarchyNode = { class: "View" };
       const config: AccessibilityAuditConfig = {
         level: "AA",
         failureMode: "report",
@@ -270,7 +270,7 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+      const hierarchy: ViewHierarchyNode = { class: "View" };
       const config: AccessibilityAuditConfig = {
         level: "AA",
         failureMode: "strict", // Use strict mode to fail on any violations
@@ -299,7 +299,7 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+      const hierarchy: ViewHierarchyNode = { class: "View" };
       const config: AccessibilityAuditConfig = {
         level: "AA",
         failureMode: "report",
@@ -324,7 +324,7 @@ describe("WcagAudit", function () {
     });
 
     it("omits notEvaluated when a screenshot was supplied", async function () {
-      const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+      const hierarchy: ViewHierarchyNode = { class: "View" };
       const config: AccessibilityAuditConfig = {
         level: "AA",
         failureMode: "report",
@@ -348,7 +348,7 @@ describe("WcagAudit", function () {
       import.meta.dir,
       "../../fixtures/screenshots/wcag-aa-large-text.png",
     );
-    const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+    const hierarchy: ViewHierarchyNode = { class: "View" };
     const config: AccessibilityAuditConfig = {
       level: "AA",
       failureMode: "report",
@@ -409,7 +409,7 @@ describe("WcagAudit", function () {
       failureMode: "report",
       useBaseline: false,
     };
-    const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+    const hierarchy: ViewHierarchyNode = { class: "View" };
 
     async function formInputViolations(elements: Element[], density?: number) {
       const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, density);
@@ -566,7 +566,7 @@ describe("WcagAudit", function () {
   });
 
   describe("Touch Target Size (parameterized)", function () {
-    const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+    const hierarchy: ViewHierarchyNode = { class: "View" };
 
     // width × height × level → (violation?, severity). checkTouchTargetSizes
     // flags a clickable element when EITHER axis is < 44dp, and the severity is
@@ -614,7 +614,7 @@ describe("WcagAudit", function () {
   });
 
   describe("Touch Target Size (density scaling)", function () {
-    const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+    const hierarchy: ViewHierarchyNode = { class: "View" };
     const config: AccessibilityAuditConfig = {
       level: "AA",
       failureMode: "report",
@@ -749,7 +749,7 @@ describe("WcagAudit", function () {
       expect(sizeViolations[0].message).toBe(
         "Touch target is too small: 43x43dp (minimum: 44x44dp)",
       );
-      expect(sizeViolations[0].details.actualSize).toEqual({ width: 43, height: 43 });
+      expect(sizeViolations[0].details?.actualSize).toEqual({ width: 43, height: 43 });
     });
   });
 
@@ -976,7 +976,7 @@ describe("WcagAudit", function () {
   });
 
   describe("Baseline Suppression", function () {
-    const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+    const hierarchy: ViewHierarchyNode = { class: "View" };
     // Two clickable, unlabelled, undersized elements → 4 violations.
     const elements: Element[] = [
       { bounds: { left: 0, top: 0, right: 20, bottom: 20 }, clickable: true },

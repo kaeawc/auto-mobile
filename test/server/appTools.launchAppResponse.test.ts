@@ -1,11 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { buildLaunchAppResponse } from "../../src/server/appTools";
+import { buildObserveResult } from "../helpers/observeFixture";
 import { ActionableError, type LaunchAppResult, type ObserveResult } from "../../src/models";
 
+const observation = (fields: Partial<ObserveResult> = {}): ObserveResult =>
+  buildObserveResult({
+    updatedAt: "2023-01-01T00:00:00.000Z",
+    screenSize: { width: 0, height: 0 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    ...fields,
+  });
+
 const observationForApp = (appId: string | undefined): ObserveResult =>
-  ({
+  observation({
     activeWindow: appId ? { appId, activityName: "MainActivity", layoutSeqSum: 1 } : undefined,
-  }) as ObserveResult;
+  });
 
 describe("buildLaunchAppResponse", () => {
   // AC1: launchApp must return a real error when the package is not installed,
@@ -70,10 +79,10 @@ describe("buildLaunchAppResponse", () => {
     const result: LaunchAppResult = {
       success: true,
       packageName: "com.expected",
-      observation: {
+      observation: observation({
         activeWindow: { appId: "com.expected", activityName: "MainActivity", layoutSeqSum: 1 },
-        viewHierarchy: { packageName: "com.other" },
-      },
+        viewHierarchy: { hierarchy: {}, packageName: "com.other" },
+      }),
     };
 
     const payload = buildLaunchAppResponse("com.expected", result);
@@ -122,7 +131,7 @@ describe("buildLaunchAppResponse", () => {
           layoutSeqSum: 1,
           type: "notification_permission_dialog",
         },
-      } as ObserveResult,
+      },
     };
 
     const payload = buildLaunchAppResponse("com.android.settings", result);
@@ -139,9 +148,9 @@ describe("buildLaunchAppResponse", () => {
     const result: LaunchAppResult = {
       success: true,
       packageName: "com.android.settings",
-      observation: {
-        viewHierarchy: { packageName: "com.android.settings" },
-      } as ObserveResult,
+      observation: observation({
+        viewHierarchy: { hierarchy: {}, packageName: "com.android.settings" },
+      }),
     };
 
     const payload = buildLaunchAppResponse("com.android.settings", result);
@@ -177,10 +186,10 @@ describe("buildLaunchAppResponse", () => {
     const result: LaunchAppResult = {
       success: true,
       packageName: "com.android.settings",
-      observation: {
+      observation: observation({
         activeWindow: { appId: "", activityName: "", layoutSeqSum: 0 },
         freshness: { isFresh: false, verified: false, warning: "no foreground window" },
-      } as ObserveResult,
+      }),
     };
 
     const payload = buildLaunchAppResponse("com.android.settings", result);
@@ -201,12 +210,12 @@ describe("buildLaunchAppResponse", () => {
     const result: LaunchAppResult = {
       success: true,
       packageName: "com.android.settings",
-      observation: {
+      observation: observation({
         viewHierarchy: {
-          node: {},
+          hierarchy: {},
           foregroundActivity: "com.android.settings/.SubSettings",
         },
-      } as ObserveResult,
+      }),
     };
 
     const payload = buildLaunchAppResponse("com.android.settings", result);
@@ -220,9 +229,9 @@ describe("buildLaunchAppResponse", () => {
     const result: LaunchAppResult = {
       success: true,
       packageName: "com.android.settings",
-      observation: {
+      observation: observation({
         viewHierarchy: {
-          node: {},
+          hierarchy: {},
           foregroundActivity: "com.google.android.permissioncontroller/.GrantPermissionsActivity",
         },
         notificationPermissionDetected: true,
@@ -232,7 +241,7 @@ describe("buildLaunchAppResponse", () => {
           layoutSeqSum: 1,
           type: "notification_permission_dialog",
         },
-      } as ObserveResult,
+      }),
     };
 
     const payload = buildLaunchAppResponse("com.android.settings", result);
@@ -249,19 +258,19 @@ describe("buildLaunchAppResponse", () => {
     const result: LaunchAppResult = {
       success: true,
       packageName: "com.android.settings",
-      observation: {
+      observation: observation({
         activeWindow: {
           appId: "com.android.settings",
           activityName: "SubSettings",
           layoutSeqSum: 1,
         },
         viewHierarchy: {
-          node: {},
+          hierarchy: {},
           packageName: "com.android.settings",
           // Stale/lagging raw signal still naming the PREVIOUS app.
           foregroundActivity: "com.example.previous/.MainActivity",
         },
-      } as ObserveResult,
+      }),
     };
 
     const payload = buildLaunchAppResponse("com.android.settings", result);

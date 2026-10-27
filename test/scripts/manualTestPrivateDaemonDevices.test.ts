@@ -499,7 +499,7 @@ test.each(["refusal", "malformed", "payload", "transport"])(
         }
         return kind === "refusal"
           ? { success: false, error: "inventory refused" }
-          : { invalid: true };
+          : { success: true, result: { invalid: true } };
       }
       return request(path, frame);
     };

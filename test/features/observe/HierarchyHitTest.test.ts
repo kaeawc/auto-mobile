@@ -1,10 +1,10 @@
+import {
+  createAndroidHierarchyConverter,
+  wireHierarchyFrom,
+} from "../../helpers/androidHierarchyConverter";
+import { wireCapture } from "../../helpers/wireCapture";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { describe, expect, test } from "bun:test";
-import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
-import type {
-  AccessibilityHierarchy,
-  HierarchyDelegateContext,
-} from "../../../src/features/observe/android/types";
 import {
   applicationWindowSafeTapPoint,
   previewHierarchyHitTest,
@@ -14,7 +14,6 @@ import { DefaultObserveElementCollector } from "../../../src/features/observe/Ob
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
 import { ownPrototypeSafeGesturePoint } from "../../../src/features/observe/ApplicationWindowCover";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
-import { FakeTimer } from "../../fakes/FakeTimer";
 import capturedIme from "../../fixtures/android-ime-window/playground-gboard-api36.json";
 import { nestedClickableHierarchy } from "../../fixtures/nestedClickableHierarchy";
 import { loadAndroidHomeObserve } from "../../fixtures/observe/observeFixture";
@@ -28,7 +27,7 @@ const observe = (viewHierarchy?: ViewHierarchyResult): ObserveResult => ({
 
 describe("hierarchy hitTest preview", () => {
   test("ranks the top window before a smaller node in the lower window", () => {
-    const hierarchy: ViewHierarchyResult = {
+    const hierarchy: ViewHierarchyResult = wireCapture({
       hierarchy: { node: [] },
       windows: [
         {
@@ -48,7 +47,7 @@ describe("hierarchy hitTest preview", () => {
           },
         },
       ],
-    };
+    });
     const result = previewHierarchyHitTest({ x: 10, y: 10 }, observe(hierarchy), "android");
     expect(result.candidates.map((entry) => entry.elementId)).toEqual(["upper", "lower"]);
     expect(result.firstCandidate?.elementId).toBe("upper");
@@ -56,10 +55,8 @@ describe("hierarchy hitTest preview", () => {
   });
 
   test("lists a node once with its owning window's rank on a captured linked-window hierarchy", () => {
-    const hierarchy = new CtrlProxyHierarchy({
-      timer: new FakeTimer(),
-    } as HierarchyDelegateContext).convertToViewHierarchyResult(
-      structuredClone(capturedIme) as AccessibilityHierarchy,
+    const hierarchy = createAndroidHierarchyConverter().convertToViewHierarchyResult(
+      wireHierarchyFrom(structuredClone(capturedIme)),
     );
     // The capture links each accessibility window to the merged tree's own root object.
     expect(hierarchy.windows).toHaveLength(3);
@@ -133,7 +130,7 @@ describe("hierarchy hitTest preview", () => {
   });
 
   test("caps candidates at 25 with deterministic ties", () => {
-    const hierarchy: ViewHierarchyResult = {
+    const hierarchy: ViewHierarchyResult = wireCapture({
       hierarchy: {
         node: Array.from({ length: 30 }, (_, index) => ({
           "resource-id": `node-${index}`,
@@ -141,7 +138,7 @@ describe("hierarchy hitTest preview", () => {
           bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         })),
       },
-    };
+    });
     const result = previewHierarchyHitTest({ x: 10, y: 10 }, observe(hierarchy), "android");
     expect(result.candidates).toHaveLength(25);
     expect(result.candidates[0]?.elementId).toBe("node-0");
@@ -164,14 +161,14 @@ test("application fallback avoids multiple covering windows and the IME", () => 
   const row = { text: "Row", bounds: { left: 0, top: 0, right: 400, bottom: 100 } };
   const dialog = { text: "Dialog", bounds: { left: 40, top: 0, right: 360, bottom: 100 } };
   const popup = { text: "Popup", bounds: { left: 0, top: 0, right: 40, bottom: 100 } };
-  const hierarchy: ViewHierarchyResult = {
+  const hierarchy: ViewHierarchyResult = wireCapture({
     hierarchy: { node: [row, dialog, popup] },
     windows: [
       { type: 1, windowLayer: 0, hierarchy: row },
       { type: 1, windowLayer: 2, hierarchy: dialog },
       { type: 1, windowLayer: 1, hierarchy: popup },
     ],
-  };
+  });
   const target = new DefaultElementParser().parseNodeBounds(row)!;
   expect(
     applicationWindowSafeTapPoint(hierarchy, target, row.bounds, { x: 200, y: 50 }).point,
@@ -195,7 +192,7 @@ describe("skeleton occlusion by application windows", () => {
     bounds,
   });
   const project = (windows: ViewHierarchyResult["windows"]) => {
-    const hierarchy: ViewHierarchyResult = { hierarchy: { node: [] }, windows };
+    const hierarchy: ViewHierarchyResult = wireCapture({ hierarchy: { node: [] }, windows });
     const elements = new DefaultObserveElementCollector().collect(hierarchy, "android")!;
     return projectSkeleton(elements, { width: 400, height: 400 }, hierarchy);
   };
@@ -259,7 +256,7 @@ describe("AutoMobile prototype covers (#10715)", () => {
     windows: NonNullable<ViewHierarchyResult["windows"]>,
   ): ViewHierarchyResult {
     return {
-      hierarchy: { node: [] },
+      hierarchy: { node: { node: [] } },
       windows: [{ type: 1, windowLayer: 0, hierarchy: row }, ...windows],
     };
   }
@@ -325,10 +322,10 @@ describe("AutoMobile prototype covers (#10715)", () => {
   test("observe tests the screen-clipped row, as tapOn does: an off-screen remainder is not exposed", () => {
     // The row runs past the 400px-wide screen; the prototype covers its whole on-screen part.
     const wide = { ...row, bounds: { left: 0, top: 0, right: 600, bottom: 100 } };
-    const hierarchy: ViewHierarchyResult = {
+    const hierarchy: ViewHierarchyResult = wireCapture({
       hierarchy: { node: [] },
       windows: [{ type: 1, windowLayer: 0, hierarchy: wide }, prototypeWindow(rect(0, 400))],
-    };
+    });
     expect(rowState(hierarchy)).toMatchObject({ occluded: true, affordances: [] });
   });
 });

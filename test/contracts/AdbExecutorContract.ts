@@ -1,3 +1,4 @@
+import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { describe, expect, test } from "bun:test";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
@@ -7,7 +8,7 @@ import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfac
  * both run the same assertions.
  */
 export interface ScriptedAdb {
-  adb: AdbExecutor;
+  adb: AdbExecutor & Pick<AdbClient, "getAndroidApiLevel">;
   /** Make every command containing `pattern` succeed with this output. */
   script(pattern: string, output: { stdout: string; stderr?: string }): void;
   /** Make every command containing `pattern` fail with this error. */

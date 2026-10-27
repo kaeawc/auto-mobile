@@ -153,7 +153,7 @@ fun ProfileSection(
 }
 
 @Composable
-fun ProfileWithBottomSheet(
+fun profileWithBottomSheet(
   name: String,
   email: String,
   scrollProgress: Float,

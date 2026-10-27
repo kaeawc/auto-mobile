@@ -1,0 +1,27 @@
+[
+  {
+    "name": "omitted via without handler",
+    "via": null,
+    "hostHandler": false,
+    "expectedRoute": "device"
+  },
+  {
+    "name": "host without handler",
+    "via": "host",
+    "hostHandler": false,
+    "expectedRoute": "device"
+  },
+  { "name": "host with handler", "via": "host", "hostHandler": true, "expectedRoute": "handler" },
+  {
+    "name": "device with handler",
+    "via": "device",
+    "hostHandler": true,
+    "expectedRoute": "device"
+  },
+  {
+    "name": "omitted via with handler",
+    "via": null,
+    "hostHandler": true,
+    "expectedRoute": "handler"
+  }
+]

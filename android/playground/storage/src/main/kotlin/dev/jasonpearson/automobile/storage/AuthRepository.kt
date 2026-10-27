@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.core.content.edit
 
 data class LoggedInUserRecord(val userId: String, val displayName: String)
@@ -45,7 +46,8 @@ class AuthRepository(context: Context) {
       } else {
         LoginResult(error = 1) // Invalid credentials
       }
-    } catch (e: Throwable) {
+    } catch (e: IllegalStateException) {
+      Log.w("AuthRepository", "Unable to persist logged-in user", e)
       LoginResult(error = 2) // Network error
     }
   }

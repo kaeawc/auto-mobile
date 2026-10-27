@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="semantic_links_xml_description">This screen uses a TextView with ClickableSpan links.</string>
+    <string name="semantic_links_none_activated">Last activated: None</string>
+    <string name="semantic_links_last_activated">Last activated: %1$s</string>
+</resources>

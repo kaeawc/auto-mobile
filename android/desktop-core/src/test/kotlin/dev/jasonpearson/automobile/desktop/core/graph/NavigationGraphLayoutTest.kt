@@ -38,7 +38,7 @@ class NavigationGraphLayoutTest {
         paddingPx = 10f,
       )
     assertEquals(1, layout.nodeLayouts.size)
-    val node = layout.nodeLayouts["Home"]!!
+    val node = layout.nodeLayouts.getValue("Home")
     assertEquals(200.0, node.center.x.toDouble(), 0.01)
     assertEquals(200.0, node.center.y.toDouble(), 0.01)
     assertEquals(0, node.ring)
@@ -62,8 +62,8 @@ class NavigationGraphLayoutTest {
         baseRadiusPx = 20f,
         paddingPx = 10f,
       )
-    assertEquals(0, layout.nodeLayouts["Home"]!!.ring)
-    assertEquals(1, layout.nodeLayouts["Profile"]!!.ring)
+    assertEquals(0, layout.nodeLayouts.getValue("Home").ring)
+    assertEquals(1, layout.nodeLayouts.getValue("Profile").ring)
   }
 
   @Test
@@ -90,9 +90,9 @@ class NavigationGraphLayoutTest {
         baseRadiusPx = 20f,
         paddingPx = 10f,
       )
-    val ringA = layout.nodeLayouts["A"]!!.ring
-    val ringB = layout.nodeLayouts["B"]!!.ring
-    val ringC = layout.nodeLayouts["C"]!!.ring
+    val ringA = layout.nodeLayouts.getValue("A").ring
+    val ringB = layout.nodeLayouts.getValue("B").ring
+    val ringC = layout.nodeLayouts.getValue("C").ring
     assertTrue(ringA < ringB, "B should be one hop from root")
     assertTrue(ringB < ringC, "C should be two hops from root")
   }
@@ -116,8 +116,8 @@ class NavigationGraphLayoutTest {
         baseRadiusPx = 20f,
         paddingPx = 10f,
       )
-    val ringB = layout.nodeLayouts["B"]!!.ring
-    val ringOrphan = layout.nodeLayouts["Orphan"]!!.ring
+    val ringB = layout.nodeLayouts.getValue("B").ring
+    val ringOrphan = layout.nodeLayouts.getValue("Orphan").ring
     assertTrue(ringOrphan > ringB, "Orphan (unreachable) should sit outside connected nodes")
   }
 
@@ -137,8 +137,8 @@ class NavigationGraphLayoutTest {
         baseRadiusPx = 20f,
         paddingPx = 10f,
       )
-    val heavyRadius = layout.nodeLayouts["Heavy"]!!.radius
-    val lightRadius = layout.nodeLayouts["Light"]!!.radius
+    val heavyRadius = layout.nodeLayouts.getValue("Heavy").radius
+    val lightRadius = layout.nodeLayouts.getValue("Light").radius
     assertTrue(heavyRadius > lightRadius, "Node with more visits should be larger")
   }
 
@@ -159,8 +159,8 @@ class NavigationGraphLayoutTest {
         paddingPx = 10f,
       )
     assertEquals(
-      layout.nodeLayouts["A"]!!.radius.toDouble(),
-      layout.nodeLayouts["B"]!!.radius.toDouble(),
+      layout.nodeLayouts.getValue("A").radius.toDouble(),
+      layout.nodeLayouts.getValue("B").radius.toDouble(),
       0.001,
     )
   }
@@ -191,6 +191,6 @@ class NavigationGraphLayoutTest {
         baseRadiusPx = 20f,
         paddingPx = 10f,
       )
-    assertEquals(node, layout.nodeLayouts["Target"]!!.node)
+    assertEquals(node, layout.nodeLayouts.getValue("Target").node)
   }
 }

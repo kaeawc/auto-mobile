@@ -112,7 +112,7 @@ final class HierarchyModelParityTests: XCTestCase {
         }
 
         // Sanity: the kebab-case wire keys actually survived the round trip.
-        let encodedString = String(decoding: first.encoded, as: UTF8.self)
+        let encodedString = (String(data: first.encoded, encoding: .utf8) ?? "")
         for key in [
             "content-desc",
             "resource-id",
@@ -129,9 +129,9 @@ final class HierarchyModelParityTests: XCTestCase {
 
     func testStructuralHashIsDeterministic() throws {
         let data = Data(goldenJSON.utf8)
-        let a = try HierarchyDecoder.decodeReencodeAndHash(data).structuralHash
-        let b = try HierarchyDecoder.decodeReencodeAndHash(data).structuralHash
-        XCTAssertEqual(a, b, "StructuralHasher must be deterministic (stable combine sequence)")
-        XCTAssertNotEqual(a, 0, "hash should be non-trivial for a populated hierarchy")
+        let firstHash = try HierarchyDecoder.decodeReencodeAndHash(data).structuralHash
+        let secondHash = try HierarchyDecoder.decodeReencodeAndHash(data).structuralHash
+        XCTAssertEqual(firstHash, secondHash, "StructuralHasher must be deterministic (stable combine sequence)")
+        XCTAssertNotEqual(firstHash, 0, "hash should be non-trivial for a populated hierarchy")
     }
 }

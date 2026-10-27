@@ -220,7 +220,7 @@ describe("qualification case runner", () => {
       ["--fixture", "bad"],
       ["--fixture", "fixture-host"],
       ["--not-exercised"],
-    ].map((extra) => ({ extra, command: true })),
+    ].map((extra) => ({ extra, command: true, empty: false })),
   ])("rejects malformed arguments %j", ({ extra, command, empty }) => {
     const args = [...flags, ...extra, ...(command ? (empty ? ["--"] : ["--", "bun"]) : [])];
     expect(() => parseRunCaseArgs(args)).toThrow(UsageError);

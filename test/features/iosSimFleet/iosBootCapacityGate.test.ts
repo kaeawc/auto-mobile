@@ -1,4 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { FleetBootInstrumentation } from "../../../src/features/iosSimFleet/IosBootInstrumentation";
+import { BootConcurrencyGate } from "../../../src/features/iosSimFleet/BootConcurrencyGate";
+import { logger } from "../../../src/utils/logger";
+import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
+import { describe, expect, test, spyOn } from "bun:test";
 import { IosSimCapacityGate } from "../../../src/features/iosSimFleet/CapacityGate";
 import { InMemoryBootDurationHistory } from "../../../src/features/iosSimFleet/BootDurationHistory";
 import { IosSimFleetCostCollector } from "../../../src/features/iosSimFleet/FleetCostCollector";
@@ -47,10 +51,14 @@ class ScriptedSource implements FleetHostSource {
   }
 }
 
-function build(source: ScriptedSource, env: NodeJS.ProcessEnv = ENV) {
+function build(
+  source: ScriptedSource,
+  env: NodeJS.ProcessEnv = ENV,
+  bootGate?: BootConcurrencyGate,
+) {
   const timer = new FakeTimer();
   const collector = new IosSimFleetCostCollector(source, new InMemoryBootDurationHistory(), timer);
-  return { gate: new IosSimCapacityGate(collector, timer, { env }), timer };
+  return { gate: new IosSimCapacityGate(collector, timer, { env, bootGate }), timer };
 }
 
 /** Let queued promise continuations run; no timer involved. */
@@ -61,6 +69,57 @@ async function tick(): Promise<void> {
 }
 
 describe("iOS boot capacity gate", () => {
+  test("holds a reset slot at the host limit across shutdown and rejects concurrent create", async () => {
+    const source = new ScriptedSource();
+    const { gate } = build(source, { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "2" });
+    source.immediate = [sim(A, "Booted"), sim(B, "Booted")];
+    const held = await gate.reserveBoot({ replacingDeviceId: A, timeoutMs: 1000, reason: "reset" });
+    expect((await gate.describeCapacity()).admissionsByReason).toEqual({
+      reset: 1,
+      create: 0,
+      restart: 0,
+    });
+    const startCreate = Promise.withResolvers<void>();
+    const concurrentCreate = startCreate.promise.then(() =>
+      gate.admitBoot(undefined, { bootUdid: "new", reason: "create" }),
+    );
+    await held.run(async () => {
+      source.immediate = [sim(A, "Shutdown"), sim(B, "Booted")];
+      expect(await gate.describeCapacity()).toMatchObject({
+        limit: 2,
+        booted: 1,
+        inFlight: 1,
+        admissionsByReason: { reset: 1, create: 0, restart: 0 },
+      });
+      startCreate.resolve();
+      expect((await concurrentCreate).decision.outcome).toBe("refuse");
+      const reset = await gate.admitBoot(undefined, { bootUdid: A, reason: "reset" });
+      expect(reset.releaseAdmission).toBeDefined();
+      source.immediate = [sim(A, "Booted"), sim(B, "Booted")];
+      reset.releaseAdmission?.();
+    });
+    held.release();
+    expect(await gate.describeCapacity()).toMatchObject({
+      booted: 2,
+      inFlight: 0,
+      admissionsByReason: { reset: 0, create: 0, restart: 0 },
+    });
+  });
+
+  test("capacity distinguishes create and restart admissions", async () => {
+    const source = new ScriptedSource();
+    const { gate } = build(source, { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "2" });
+    source.immediate = [];
+    const create = await gate.admitBoot(undefined, { bootUdid: A, reason: "create" });
+    const restart = await gate.admitBoot(undefined, { bootUdid: B, reason: "restart" });
+    expect((await gate.describeCapacity()).admissionsByReason).toEqual({
+      reset: 0,
+      create: 1,
+      restart: 1,
+    });
+    create.releaseAdmission?.();
+    restart.releaseAdmission?.();
+  });
   // A listing taken before boot A's slot was visible, still in flight when A finishes booting
   // and releases its ledger entry, undercounts A: neither the ledger nor the stale listing
   // holds A's slot, so a second boot is admitted over a limit of 1.
@@ -164,4 +223,240 @@ describe("iOS boot capacity gate", () => {
     timer.advanceTime(15_000);
     await expect(admission).rejects.toBeInstanceOf(BootedDeviceDiscoveryIncompleteError);
   });
+});
+
+test("replacement reserves one slot before deletion and binds without another fleet sample", async () => {
+  const source = new ScriptedSource();
+  const { gate } = build(source, { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "2" });
+  source.immediate = [sim(A, "Booted"), sim(B, "Booted")];
+  const reservation = await gate.reserveBoot({ replacingDeviceId: A, timeoutMs: 60_000 });
+  expect(await gate.describeCapacity()).toMatchObject({ booted: 2, inFlight: 0 });
+  source.immediate = [sim(B, "Booted")];
+  reservation.markReplacedDeviceGone();
+  expect(await gate.describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  expect((await gate.admitBoot(undefined, { bootUdid: "COMPETITOR" })).decision.outcome).toBe(
+    "refuse",
+  );
+  const admitted = await reservation.run(async () => {
+    await gate.assertCapacityAvailable();
+    // No post-delete count: even failed discovery cannot take away the admitted slot.
+    source.immediate = undefined;
+    return await gate.admitBoot(undefined, { bootUdid: "NEW" });
+  });
+  expect(source.pending).toHaveLength(0);
+  reservation.release();
+  source.immediate = [sim(B, "Booted")];
+  expect(await gate.describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  source.immediate.push(sim("NEW", "Booted"));
+  expect(await gate.describeCapacity()).toMatchObject({ booted: 2, inFlight: 0 });
+  admitted.releaseAdmission?.();
+  admitted.releaseAdmission?.();
+  await expect(reservation.run(async () => {})).rejects.toThrow("consumed");
+});
+
+test("unused iOS replacement reservations release idempotently", async () => {
+  const source = new ScriptedSource();
+  const { gate } = build(source);
+  source.immediate = [sim(A, "Booted")];
+  const held = await gate.reserveBoot({ replacingDeviceId: A, timeoutMs: 60_000 });
+  source.immediate = [];
+  held.release();
+  held.release();
+  expect(await gate.describeCapacity()).toMatchObject({ booted: 0, inFlight: 0 });
+  const next = await gate.admitBoot(undefined, { bootUdid: B });
+  expect(next.decision.outcome).toBe("allow");
+  next.releaseAdmission?.();
+});
+
+test.each(["Booted", "Booting"])("replacement carries its %s slot above the cap", async (state) => {
+  const source = new ScriptedSource();
+  const { gate } = build(source, { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "2" });
+  source.immediate = [sim(A, state), sim(B, "Booted"), sim("C", "Booted")];
+  const held = await gate.reserveBoot({ replacingDeviceId: A, timeoutMs: 1000, reason: "reset" });
+  source.immediate = [sim(A, "Shutdown"), sim(B, "Booted"), sim("C", "Booted")];
+  expect(await gate.describeCapacity()).toMatchObject({ inFlight: 1 });
+  expect((await gate.admitBoot(undefined, { bootUdid: "NEW" })).decision.outcome).toBe("refuse");
+  held.release();
+});
+
+test("Shutdown replacement still refuses and names external simulators", async () => {
+  const source = new ScriptedSource();
+  const { gate } = build(source, { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "2" });
+  source.immediate = [sim(A, "Shutdown"), sim(B, "Booted"), sim("C", "Booted")];
+  const reservation = gate.reserveBoot({ replacingDeviceId: A, timeoutMs: 1000, reason: "reset" });
+  await expect(reservation).rejects.toBeInstanceOf(BootCapacityExhaustedError);
+  await expect(reservation).rejects.toMatchObject({ details: { externalDevices: [B, "C"] } });
+});
+
+test("reservation without replacement refuses at the cap", async () => {
+  const source = new ScriptedSource();
+  const { gate } = build(source, { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "2" });
+  source.immediate = [sim(A, "Booted"), sim(B, "Booted")];
+  await expect(gate.reserveBoot({ timeoutMs: 1000 })).rejects.toBeInstanceOf(
+    BootCapacityExhaustedError,
+  );
+});
+
+test("a non-reset replacement still refuses when other simulators fill the cap", async () => {
+  const source = new ScriptedSource();
+  const { gate } = build(source, { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "2" });
+  source.immediate = [sim(A, "Booted"), sim(B, "Booted"), sim("C", "Booted")];
+  await expect(gate.reserveBoot({ replacingDeviceId: A, timeoutMs: 1000 })).rejects.toBeInstanceOf(
+    BootCapacityExhaustedError,
+  );
+});
+
+const QUEUED_ENV = {
+  AUTOMOBILE_IOS_SIM_MAX_BOOTED: "3",
+  AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY: "1",
+};
+
+test("boot bursts queue with their ledger slots, log the wait, and release once", async () => {
+  const source = new ScriptedSource();
+  source.immediate = [];
+  const pool = new BootConcurrencyGate();
+  const { gate, timer } = build(source, QUEUED_ENV, pool);
+  const info = spyOn(logger, "info").mockImplementation(() => {});
+  try {
+    const first = await gate.admitBoot(undefined, { bootUdid: A });
+    let settled = false;
+    const second = gate.admitBoot(undefined, { bootUdid: B }).then((result) => {
+      settled = true;
+      return result;
+    });
+    await tick();
+    expect(settled).toBe(false);
+    expect(pool.status()).toEqual({ limit: 1, running: 1, queued: 1 });
+    expect(await gate.describeCapacity()).toMatchObject({ inFlight: 2 });
+    timer.advanceTime(123);
+    first.releaseAdmission?.();
+    first.releaseAdmission?.();
+    const admitted = await second;
+    expect(admitted.decision.outcome).toBe("allow");
+    expect(pool.status().running).toBe(1);
+    expect(info).toHaveBeenCalledWith(
+      "[BootAdmission] iOS simulator boot queued behind 1 running boots (limit 1)",
+    );
+    expect(info).toHaveBeenCalledWith(
+      "[BootAdmission] iOS simulator boot granted after 123ms queued",
+    );
+    admitted.releaseAdmission?.();
+    expect(pool.status().running).toBe(0);
+  } finally {
+    info.mockRestore();
+  }
+});
+
+test("queued abort returns its ledger slot and preserves the abort reason", async () => {
+  const source = new ScriptedSource();
+  source.immediate = [];
+  const pool = new BootConcurrencyGate();
+  const { gate } = build(source, QUEUED_ENV, pool);
+  const first = await gate.admitBoot(undefined, { bootUdid: A });
+  const controller = new AbortController();
+  const second = gate.admitBoot(undefined, { bootUdid: B, signal: controller.signal });
+  await tick();
+  expect((await gate.describeCapacity()).inFlight).toBe(2);
+  const reason = new Error("outer deadline");
+  controller.abort(reason);
+  await expect(second).rejects.toBe(reason);
+  expect((await gate.describeCapacity()).inFlight).toBe(1);
+  expect(pool.status()).toEqual({ limit: 1, running: 1, queued: 0 });
+  first.releaseAdmission?.();
+  expect(pool.status().running).toBe(0);
+});
+
+test.each([false, true])(
+  "reservation takes a boot permit only when consumed; abort=%s",
+  async (abort) => {
+    const source = new ScriptedSource();
+    source.immediate = [];
+    const pool = new BootConcurrencyGate();
+    const { gate } = build(source, QUEUED_ENV, pool);
+    const reserved = await gate.reserveBoot({ timeoutMs: 1000, reason: "reset" });
+    expect(pool.status()).toEqual({ limit: 1, running: 0, queued: 0 });
+    const first = await gate.admitBoot(undefined, { bootUdid: A });
+    const controller = new AbortController();
+    const pending = reserved.run(() =>
+      gate.admitBoot(undefined, { bootUdid: B, signal: controller.signal }),
+    );
+    await tick();
+    expect(pool.status().queued).toBe(1);
+    expect((await gate.describeCapacity()).inFlight).toBe(2);
+    if (abort) {
+      const reason = new Error("cancel reserved boot");
+      controller.abort(reason);
+      await expect(pending).rejects.toBe(reason);
+      expect((await gate.describeCapacity()).inFlight).toBe(1);
+    } else {
+      first.releaseAdmission?.();
+      const result = await pending;
+      expect(result.decision.outcome).toBe("allow");
+      result.releaseAdmission?.();
+      result.releaseAdmission?.();
+    }
+    first.releaseAdmission?.();
+    reserved.release();
+    expect(pool.status()).toEqual({ limit: 1, running: 0, queued: 0 });
+  },
+);
+
+test("count overflow refuses immediately even when a boot permit is busy", async () => {
+  const source = new ScriptedSource();
+  source.immediate = [];
+  const pool = new BootConcurrencyGate();
+  const { gate } = build(source, { ...QUEUED_ENV, AUTOMOBILE_IOS_SIM_MAX_BOOTED: "1" }, pool);
+  const first = await gate.admitBoot(undefined, { bootUdid: A });
+  const second = await gate.admitBoot(undefined, { bootUdid: B });
+  expect(second.decision).toMatchObject({
+    outcome: "refuse",
+    limits: { maxBooted: 1, source: "env" },
+  });
+  if (second.decision.outcome === "refuse") {
+    expect(Object.keys(second.decision.limits)).toEqual(["maxBooted", "source"]);
+  }
+  expect(second.releaseAdmission).toBeUndefined();
+  expect(pool.status().queued).toBe(0);
+  first.releaseAdmission?.();
+});
+
+test("invalid boot concurrency warns once and uses the derived pool limit", async () => {
+  const source = new ScriptedSource();
+  source.immediate = [];
+  const pool = new BootConcurrencyGate();
+  const { gate } = build(source, { AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY: "bad" }, pool);
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    await gate.describeCapacity();
+    await gate.describeCapacity();
+    expect(pool.status().limit).toBe(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain("AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY");
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("queue wait does not consume the boot budget or recorded boot duration", async () => {
+  const source = new ScriptedSource();
+  source.immediate = [];
+  const pool = new BootConcurrencyGate();
+  const { gate, timer } = build(source, QUEUED_ENV, pool);
+  const history = new InMemoryBootDurationHistory();
+  const instrumentation = new FleetBootInstrumentation({ gate, timer, history });
+  const first = await gate.admitBoot(undefined, { bootUdid: A });
+  let budget: number | undefined;
+  const boot = instrumentation.run({ udid: B, timeoutMs: 1000 }, async (remainingMs) => {
+    budget = remainingMs;
+    timer.advanceTime(7);
+  });
+  await tick();
+  expect(pool.status().queued).toBe(1);
+  expect(budget).toBeUndefined();
+  timer.advanceTime(2000);
+  first.releaseAdmission?.();
+  await boot;
+  expect(budget).toBe(1000);
+  expect(history.latestFor(B)?.durationMs).toBe(7);
+  expect(pool.status().running).toBe(0);
 });

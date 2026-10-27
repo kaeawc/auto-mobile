@@ -1,7 +1,14 @@
 import { Platform } from "./Platform";
 import type { Posture } from "./DisplayPanel";
 
-export type FormFactor = "phone" | "tablet" | "foldable" | "unknown";
+export type FormFactor =
+  | "phone"
+  | "tablet"
+  | "foldable"
+  | "tv"
+  | "watch"
+  | "automotive"
+  | "unknown";
 export type MatchingStrategy = "LATEST" | "RANDOM" | "MINIMUM";
 
 export interface DeviceMatchCriteria {

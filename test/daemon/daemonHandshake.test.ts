@@ -4,8 +4,8 @@ import {
   extractClientHandshake,
   hasClientHandshake,
   type DaemonSelfIdentity,
-} from "../../src/daemon/daemonHandshake";
-import type { BuildIdentity } from "../../src/daemon/buildIdentity";
+} from "../../src/daemon/wire/daemonHandshake";
+import type { BuildIdentity } from "../../src/daemon/wire/buildIdentity";
 
 const daemonBuild: BuildIdentity = { entryScript: "/repo/dist/index.js", buildId: "abc123def456" };
 
@@ -27,15 +27,16 @@ describe("extractClientHandshake", () => {
 
   test("ignores non-string fields", () => {
     const handshake = extractClientHandshake({
-      clientVersion: 42 as unknown as string,
-      clientBuildId: null as unknown as string,
+      clientVersion: 42,
+      clientBuildId: null,
     });
     expect(handshake.clientVersion).toBeUndefined();
     expect(handshake.clientBuildId).toBeUndefined();
   });
 
   test("returns empty handshake for a legacy request", () => {
-    const handshake = extractClientHandshake({ id: "1", method: "tools/call" });
+    const legacyRequest: Record<string, unknown> = { id: "1", method: "tools/call" };
+    const handshake = extractClientHandshake(legacyRequest);
     expect(hasClientHandshake(handshake)).toBe(false);
   });
 });
@@ -81,6 +82,20 @@ describe("evaluateClientHandshake", () => {
     if (!result.ok) {
       expect(result.reason).toBe("version");
     }
+  });
+
+  test("accepts a client whose version differs from the daemon only in the dirty stamp (#14658)", () => {
+    const clean = "0.0.87+gf514d78885fa";
+    const dirty = "0.0.87+gf514d78885fa.dirty.e0f955f354af";
+    expect(evaluateClientHandshake(daemon(dirty), { clientVersion: clean })).toEqual({ ok: true });
+    expect(evaluateClientHandshake(daemon(clean), { clientVersion: dirty })).toEqual({ ok: true });
+  });
+
+  test("still rejects a client on a different commit even when both are dirty (#14658)", () => {
+    const result = evaluateClientHandshake(daemon("0.0.87+gaaaaaaaaaaaa.dirty.111111111111"), {
+      clientVersion: "0.0.87+gbbbbbbbbbbbb.dirty.111111111111",
+    });
+    expect(result.ok).toBe(false);
   });
 
   test("accepts a git-stamped client version identical to the daemon", () => {

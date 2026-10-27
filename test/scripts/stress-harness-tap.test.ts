@@ -11,7 +11,7 @@ test("stress harness dispatches one tap with the typed legacy call shape", async
   const tap = spyOn(
     AndroidCtrlProxyClient.getInstance(harness.resources.device),
     "requestTapCoordinates",
-  ).mockResolvedValue({ success: false, error: "Fake pre-dispatch rejection" });
+  ).mockResolvedValue({ success: false, error: "Fake pre-dispatch rejection", totalTimeMs: 0 });
   try {
     const result = await runStressOperations(harness, {
       iterations: 1,

@@ -19,7 +19,7 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { DefaultFocusedInputQuery } from "../utility/FocusedInput";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import type { CtrlProxyKeyboardResult } from "../observe/ios/types";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
@@ -128,6 +128,16 @@ function sameBounds(a: ElementBounds[] | undefined, b: ElementBounds[]): boolean
   );
 }
 
+export interface KeyboardOptions {
+  adbFactory?: AdbClientFactory;
+  hierarchyProvider?: KeyboardHierarchyProvider;
+  timer?: Timer;
+  parser?: ElementParser;
+  geometry?: ElementGeometry;
+  finder?: FocusedInputQuery;
+  openClient?: KeyboardOpenClient;
+}
+
 export class Keyboard {
   private static readonly INPUT_METHOD_WINDOW_TYPE = 2;
   // The IME show/hide animation runs ~200-400ms on typical devices, so a single
@@ -148,16 +158,16 @@ export class Keyboard {
   private adbFactory: AdbClientFactory;
   private openClient: KeyboardOpenClient | undefined;
 
-  constructor(
-    device: BootedDevice,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    hierarchyProvider?: KeyboardHierarchyProvider,
-    timer: Timer = defaultTimer,
-    parser: ElementParser = new DefaultElementParser(),
-    geometry: ElementGeometry = new DefaultElementGeometry(),
-    finder: FocusedInputQuery = new DefaultFocusedInputQuery(),
-    openClient?: KeyboardOpenClient,
-  ) {
+  constructor(device: BootedDevice, options: KeyboardOptions = {}) {
+    const {
+      adbFactory = defaultAdbClientFactory,
+      hierarchyProvider,
+      timer = defaultTimer,
+      parser = new DefaultElementParser(),
+      geometry = new DefaultElementGeometry(),
+      finder = new DefaultFocusedInputQuery(),
+      openClient,
+    } = options;
     this.device = device;
     this.adbFactory = adbFactory;
     this.openClient = openClient;
@@ -300,7 +310,7 @@ export class Keyboard {
   private async iosFailure(
     action: KeyboardAction,
     result: CtrlProxyKeyboardResult,
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     signal?: AbortSignal,
   ): Promise<KeyboardResult> {
     if (
@@ -315,6 +325,16 @@ export class Keyboard {
           "Keyboard closed after the close request timed out; dismissal method unknown (Return may have submitted the field)",
       };
     }
+    if (action === "close" && (await this.isIOSKeyboardOnScreen(signal)) === false) {
+      // A hardware-keyboard simulator keeps the return key in the AX tree off screen, so the
+      // runner's dismissal fails on a keyboard that is not shown; closed is the goal (#14953).
+      logger.warn(`iOS keyboard close failed but no software keyboard is visible: ${result.error}`);
+      return {
+        success: true,
+        open: false,
+        message: "Keyboard is closed (no visible on-screen software keyboard)",
+      };
+    }
     const message = result.error ?? `Failed to ${action} iOS keyboard`;
     return {
       success: false,
@@ -325,7 +345,7 @@ export class Keyboard {
   }
 
   private async confirmIOSCloseAfterTimeout(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     signal?: AbortSignal,
   ): Promise<boolean> {
     try {

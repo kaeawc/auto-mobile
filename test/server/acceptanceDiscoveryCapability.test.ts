@@ -18,11 +18,12 @@ import {
   DAEMON_VERSION,
   INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { DaemonClient } from "../../src/daemon/client";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { createStructuredToolResponse, getStructuredField } from "../../src/utils/toolUtils";
+import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { toolField } from "../helpers/toolResponse";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -116,7 +117,7 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
       },
     });
 
-    expect(getStructuredField(result, "receivedOrder")).toBeNull();
+    expect(toolField(result, "receivedOrder")).toBeNull();
   });
 
   test("a daemon without the harness capability ignores a normal caller argument", async () => {
@@ -128,7 +129,7 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
       },
     });
 
-    expect(getStructuredField(result, "receivedOrder")).toBeNull();
+    expect(toolField(result, "receivedOrder")).toBeNull();
   });
 
   test("the live harness proxy overwrites a client-forged order and authenticates every acceptance call", async () => {
@@ -212,7 +213,7 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
       },
     });
 
-    expect(getStructuredField(result, "receivedOrder")).toBe("reverse");
+    expect(toolField(result, "receivedOrder")).toBe("reverse");
   });
 
   test("retains no-schema structuredContent only for an authenticated acceptance request", async () => {

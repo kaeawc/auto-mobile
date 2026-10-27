@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { McpError } from "../../../src/server/mcpError";
-import { missingTasksCapabilityError } from "../../../src/server/tasks/mcpTasksExtension";
+import { McpError } from "../../../src/daemon/mcpError";
+import { missingTasksCapabilityError } from "../../../src/daemon/tasks/mcpTasksExtension";
 import {
   parseTaskRelayFrame,
   relayedJsonRpcError,
   restoreCreateTaskResult,
   withCompleteResultType,
-} from "../../../src/server/tasks/taskRelay";
+} from "../../../src/daemon/tasks/taskRelay";
 
 /* The control-socket half of the Tasks relay (#4668): shapes the in-process SDK client lost. */
 

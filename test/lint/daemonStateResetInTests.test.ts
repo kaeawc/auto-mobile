@@ -1,8 +1,14 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import { join, relative, sep } from "node:path";
-import { Visitor, type Expression } from "oxc-parser";
-import { parseGuardSource, unwrapCallee } from "./astGuard";
+import { type Expression } from "oxc-parser";
+import {
+  parseGuardSource,
+  unwrapCallee,
+  guardDirectoryEntries,
+  readGuardFile,
+  GuardVisitor as Visitor,
+} from "./astGuard";
 
 /**
  * Leak guard for the process-wide `DaemonState` singleton (issue #11614).
@@ -66,7 +72,7 @@ export function daemonStateUsage(
 }
 
 function testFiles(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(dir).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
       return testFiles(path);
@@ -104,7 +110,7 @@ describe("test files that initialize DaemonState reset it (issue #11614)", () =>
     offendersByBucket = buckets.map((bucket) =>
       bucket
         .filter((file) => {
-          const usage = daemonStateUsage(file, readFileSync(file, "utf8"));
+          const usage = daemonStateUsage(file, readGuardFile(file));
           return usage.initializes && !usage.resets;
         })
         .map((file) => relative(ROOT, file).split(sep).join("/")),

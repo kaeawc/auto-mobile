@@ -1,3 +1,4 @@
+import { AndroidCtrlProxyClient } from "../src/features/observe/android/AndroidCtrlProxyClient";
 /**
  * Deterministic fixtures for the `observe`, `pressButton`, `tapOn`, `launchApp` and `installApp`
  * benchmarks (#11375).
@@ -78,7 +79,7 @@ function installObserveFixture(): ToolFixture {
     pathProtection: new FakeScreenshotPathProtection(timer),
     createScreen: () => ({
       execute: screen.execute.bind(screen),
-      executeDeviceRead: screen.execute.bind(screen),
+      executeDeviceRead: () => screen.execute(),
       captureScreenshot: screen.captureScreenshot.bind(screen),
       appendRawViewHierarchy: screen.appendRawViewHierarchy.bind(screen),
       getMostRecentCachedObserveResult: screen.getMostRecentCachedObserveResult.bind(screen),
@@ -141,7 +142,10 @@ async function installTapOnFixture(): Promise<ToolFixture> {
     });
     tap.observeScreen = observe;
     tap.window.getCachedActiveWindow = async () => null;
-    tap["accessibilityService"].requestTapCoordinates = async () => ({ success: true });
+    AndroidCtrlProxyClient.getInstance(device).requestTapCoordinates = async () => ({
+      success: true,
+      totalTimeMs: 0,
+    });
     return tap;
   };
   setInteractionToolFake("tapOnElementFactory", tapOnElementFactory);

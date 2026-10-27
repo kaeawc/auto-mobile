@@ -43,7 +43,7 @@ describe("parseClaudeResponse", () => {
   test("preserves all populated fields from an inline response", () => {
     const expected = {
       elementFound: true,
-      elementLocation: { x: 1, y: 2 },
+      elementLocation: { width: 0, height: 0, x: 1, y: 2 },
       suggestedText: "OK",
       suggestedResourceId: "id",
       navigationRequired: true,

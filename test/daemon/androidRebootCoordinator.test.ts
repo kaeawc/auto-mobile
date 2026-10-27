@@ -4,15 +4,17 @@ import type { BootedDevice } from "../../src/models";
 import { EmulatorLaunchCancelledError } from "../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import {
   AndroidRebootCoordinator,
-  UnconfirmedRecoveryShutdownError,
   type AndroidRebootCoordinatorPoolPort,
 } from "../../src/daemon/androidRebootCoordinator";
+import { UnconfirmedRecoveryShutdownError } from "../../src/daemon/UnconfirmedRecoveryShutdownError";
 import { AndroidRecoveryRecordLedger } from "../../src/daemon/androidRecoveryRecordLedger";
 import type { IdentityEvidence } from "../../src/devices/deviceIdentityEvidence";
 import type { DeviceRecoveryPolicy, PooledDevice } from "../../src/daemon/devicePool";
 import { DeviceCriteriaMatcher } from "../../src/daemon/DeviceCriteriaMatcher";
 import { BoundedAndroidDeviceReboot } from "../../src/devices/androidDeviceReboot";
 import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const oldDevice: PooledDevice = {
@@ -154,16 +156,38 @@ class FakePoolPort implements AndroidRebootCoordinatorPoolPort {
   }
 }
 
+// Scripted start/ready outcomes over the otherwise inert fake manager.
+class ScriptedDeviceManager extends FakeDeviceManager {
+  constructor(
+    private readonly onStart: () => Promise<ChildProcess | null>,
+    private readonly onReady: () => Promise<BootedDevice>,
+  ) {
+    super();
+  }
+
+  override startDevice(): Promise<ChildProcess | null> {
+    return this.onStart();
+  }
+
+  override waitForDeviceReady(): Promise<BootedDevice> {
+    return this.onReady();
+  }
+}
+
+// A process the coordinator must never kill directly.
+class DirectKillForbiddenChildProcess extends FakeChildProcess {
+  override kill(): boolean {
+    throw new Error("unexpected direct kill");
+  }
+}
+
 function setup(
   startDevice: () => Promise<ChildProcess | null> = async () => null,
   waitForDeviceReady: () => Promise<BootedDevice> = async () => ready,
   maxAttempts = 1,
 ) {
   const timer = new FakeTimer();
-  const manager = {
-    startDevice,
-    waitForDeviceReady,
-  } as PlatformDeviceManager;
+  const manager = new ScriptedDeviceManager(startDevice, waitForDeviceReady);
   const port = new FakePoolPort(manager, timer);
   const { outcomes, attempts } = port;
   const recordLedger = new AndroidRecoveryRecordLedger(
@@ -366,11 +390,7 @@ describe("AndroidRebootCoordinator", () => {
     async (cleanupFails) => {
       const controller = new AbortController();
       const failure = new Error("owned boot cleanup failed");
-      const child = {
-        kill: () => {
-          throw new Error("unexpected direct kill");
-        },
-      } as ChildProcess;
+      const child = new DirectKillForbiddenChildProcess();
       const { coordinator, port, outcomes, attempts, timer } = setup(
         async () => child,
         async () => {

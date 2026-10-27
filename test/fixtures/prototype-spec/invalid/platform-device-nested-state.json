@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "{platform:/device/widthClass/x}"
+    },
+    "requires": {
+      "platform": ["device"]
+    }
+  },
+  "expectedPath": "root.text",
+  "expectedMessage": "Unknown platform state /device/widthClass/x"
+}

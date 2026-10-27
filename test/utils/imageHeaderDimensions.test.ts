@@ -171,7 +171,7 @@ describe("detectImageMimeType", () => {
     ["JPEG", Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg"],
     ["PNG", png(1, 1), "image/png"],
     ["WebP", Buffer.from("RIFF\x00\x00\x00\x00WEBPVP8 ", "binary"), "image/webp"],
-  ])("detects %s bytes", (_name, buffer, mimeType) => {
+  ] as const)("detects %s bytes", (_name, buffer, mimeType) => {
     expect(detectImageMimeType(buffer)).toBe(mimeType);
   });
 

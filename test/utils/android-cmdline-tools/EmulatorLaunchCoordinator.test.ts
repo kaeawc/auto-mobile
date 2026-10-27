@@ -1,6 +1,4 @@
 import { resolve } from "node:path";
-import { EventEmitter } from "node:events";
-import type { ChildProcess } from "node:child_process";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import type { BootAdmission } from "../../../src/models/BootAdmission";
@@ -15,16 +13,16 @@ import type {
   EmulatorLauncher,
   EmulatorProcessLaunch,
   EmulatorProcessOptions,
-} from "../../../src/utils/android-cmdline-tools/EmulatorLaunchSupport";
+} from "../../../src/utils/android-cmdline-tools/EmulatorLauncher";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-function child(): ChildProcess {
-  const process = new EventEmitter() as ChildProcess;
-  process.killed = false;
-  process.kill = (() => {
+function child(): FakeChildProcess {
+  const process = new FakeChildProcess(new FakeTimer());
+  process.kill = () => {
     process.killed = true;
     return true;
-  }) as ChildProcess["kill"];
+  };
   return process;
 }
 
@@ -97,6 +95,31 @@ function setup(options: { posterExists?: boolean } = {}) {
 }
 
 describe("DefaultEmulatorLaunchCoordinator.launchEmulator", () => {
+  test("releasing a launch detaches its cancellation lifetime without killing the emulator", async () => {
+    const { coordinator, launcher } = setup();
+    const controller = new AbortController();
+    const spawned = child();
+    launcher.onStart = async () => ({ process: spawned, outcome: "launched" });
+    const handle = await coordinator.launchEmulator({
+      avdName: "Pixel",
+      signal: controller.signal,
+    });
+    handle.release();
+    handle.release();
+    controller.abort(new Error("later reset failure"));
+    expect(spawned.killed).toBe(false);
+  });
+  test("refuses launching an AVD already owned by another daemon", async () => {
+    const { coordinator, launcher, setBooted } = setup();
+    setBooted([
+      { name: "Pixel", platform: "android", deviceId: "emulator-5556", foreignOwned: true },
+    ]);
+    await expect(
+      coordinator.adoptsExistingAvdLaunch("Pixel", new NoOpPerformanceTracker()),
+    ).rejects.toThrow(/another daemon.*Pixel/);
+    expect(launcher.calls).toHaveLength(0);
+  });
+
   test("an already aborted request is cancelled before launching", async () => {
     const { coordinator, launcher } = setup();
     const controller = new AbortController();
@@ -145,11 +168,11 @@ describe("DefaultEmulatorLaunchCoordinator.launchEmulator", () => {
     const { coordinator, launcher } = setup();
     const spawned = child();
     let kills = 0;
-    spawned.kill = (() => {
+    spawned.kill = () => {
       kills++;
       spawned.killed = true;
       return true;
-    }) as ChildProcess["kill"];
+    };
     launcher.onStart = async () => ({ process: spawned, outcome: "launched" });
     const handle = await coordinator.launchEmulator({ avdName: "Pixel" });
     handle.dispose();
@@ -180,8 +203,8 @@ describe("DefaultEmulatorLaunchCoordinator.launchEmulator", () => {
       release: () => {
         released++;
       },
-      markSpawned: () => {},
-    } as BootAdmission;
+      handOff: () => {},
+    };
     launcher.onStart = async (options) => {
       options.onAdmitted?.(admission);
       throw new Error("spawn failed");
@@ -254,7 +277,7 @@ describe("DefaultEmulatorLaunchCoordinator cancellation helpers", () => {
     const { coordinator, reservations } = setup();
     const reservation = {
       deviceId: "emulator-5554",
-      ports: { console: 5554, adb: 5555 },
+      ports: { consolePort: 5554, adbPort: 5555 },
       appendPort: true,
       avdName: "Pixel",
     };

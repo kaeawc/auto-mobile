@@ -9,7 +9,12 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 class ProbeConnection implements FrameConnection {
   ended = false;
-  frames: Array<{ id: string; method: string }> = [];
+  frames: Array<{
+    id: string;
+    method: string;
+    params?: Record<string, never>;
+    type?: "daemon_request";
+  }> = [];
   data: (chunk: Buffer) => void = () => {};
   close: (error?: Error) => void = () => {};
   success = true;

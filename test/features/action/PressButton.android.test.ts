@@ -1,3 +1,7 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
+import { createExecResult } from "../../../src/utils/execResult";
 import {
   beforeEach as beforeOutputSchema,
   afterEach as afterOutputSchema,
@@ -7,8 +11,11 @@ import { pressButtonResultSchema } from "../../../src/server/toolOutputSchemas";
 import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { PressButton } from "../../../src/features/action/PressButton";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  PressButton,
+  acceptAndroidHomeAlreadyOnLauncher,
+} from "../../../src/features/action/PressButton";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -61,7 +68,8 @@ describe("PressButton Android keycode dispatch", () => {
 
   let fakeAdb: FakeAdbExecutor;
   let fakeTimer: FakeTimer;
-  let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
+  let globalActionClient: Pick<AndroidCtrlProxyClient, "requestGlobalAction"> | undefined;
+  let frameContextClient: Pick<AndroidCtrlProxyClient, "validateFrameContext"> | undefined;
 
   beforeEach(() => {
     fakeAdb = new FakeAdbExecutor();
@@ -71,10 +79,46 @@ describe("PressButton Android keycode dispatch", () => {
   });
 
   afterEach(() => {
-    getInstanceSpy?.mockRestore();
-    getInstanceSpy = null;
+    globalActionClient = undefined;
+    frameContextClient = undefined;
     setDeviceIncarnationResolver(undefined);
     clearResolvedHomePackageCache();
+  });
+
+  test.each([
+    ["home", "com.android.launcher3", true],
+    ["home", "com.android.settings", false],
+    ["back", "com.android.launcher3", false],
+  ] as const)("identical hierarchy for %s on %s (#15028)", async (button, appId, success) => {
+    const window = new FakeWindow();
+    window.configureCachedActiveWindow(null);
+    window.configureActiveWindow({ appId, activityName: "Main", layoutSeqSum: 1 });
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(
+      buildObserveResult({
+        updatedAt: 1,
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: { packageName: appId, hierarchy: { node: {} } },
+      }),
+    );
+    const action = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      window,
+      observeScreen: observe,
+      awaitIdle: new FakeAwaitIdle(),
+      globalActionClient: {
+        requestGlobalAction: async () => ({ success: true, action: button, totalTimeMs: 0 }),
+      },
+    });
+    const result = await action.execute(button);
+    expect(result.success).toBe(success);
+    if (success) {
+      expect(result.error).toBeUndefined();
+    } else {
+      expect(result.error).toContain(
+        button === "home" ? "did not background the foreground app" : "No visual change observed",
+      );
+    }
   });
 
   test.each(["plain", "refused", "cancelled", "deadline"] as const)(
@@ -82,7 +126,7 @@ describe("PressButton Android keycode dispatch", () => {
     async (outcome) => {
       const controller = new AbortController();
       let marks = 0;
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      frameContextClient = {
         validateFrameContext: async () => {
           expect(marks).toBe(0);
           if (outcome === "cancelled") {
@@ -91,10 +135,13 @@ describe("PressButton Android keycode dispatch", () => {
           if (outcome === "deadline") {
             fakeTimer.advanceTime(500);
           }
-          return { success: outcome !== "refused", error: "stale frame" };
+          return { success: outcome !== "refused", totalTimeMs: 0, error: "stale frame" };
         },
+      };
+      const action = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        globalActionClient,
+        frameContextClient,
       });
-      const action = new PressButton(androidDevice, fakeAdb, fakeTimer);
       const pending = action.press(
         "volume_up",
         500,
@@ -117,36 +164,36 @@ describe("PressButton Android keycode dispatch", () => {
 
   test("global action followed by ADB fallback marks once", async () => {
     let marks = 0;
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+    globalActionClient = {
       requestGlobalAction: async (
         ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
       ) => {
         args[5]?.();
         expect(marks).toBe(1);
-        return { success: false, acknowledged: true, error: "global action refused" };
+        return {
+          success: false,
+          action: "back",
+          totalTimeMs: 0,
+          acknowledged: true,
+          error: "global action refused",
+        };
       },
-    });
-    const result = await new PressButton(androidDevice, fakeAdb, fakeTimer).press(
-      "back",
-      500,
-      undefined,
-      undefined,
-      () => marks++,
-    );
+    };
+    const result = await new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      globalActionClient,
+      frameContextClient,
+    }).press("back", 500, undefined, undefined, () => marks++);
     expect(result.success).toBe(true);
     expect(fakeAdb.getExecutedArgv()).toEqual([["shell", "input", "keyevent", "4"]]);
     expect(marks).toBe(1);
   });
 
   const press = async (button: string, window?: WindowInterface) => {
-    const pressButton = new PressButton(
-      androidDevice,
-      fakeAdb,
-      fakeTimer,
-      undefined,
-      undefined,
-      window ? { window } : {},
-    );
+    const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      ...(window ? { window } : {}),
+      globalActionClient,
+      frameContextClient,
+    });
     const result = await dispatch(pressButton, button);
     expect(pressButtonResultSchema.parse({ message: "Result", ...result })).toBeDefined();
     return result;
@@ -204,6 +251,22 @@ describe("PressButton Android keycode dispatch", () => {
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 
+  test.each(["action", "camera"])(
+    "refuses the iOS-only %s button with a typed error and no keyevent",
+    async (button) => {
+      const result = await press(button);
+
+      expect(result).toMatchObject({
+        success: false,
+        keyCode: -1,
+        code: "unsupported_button",
+        retryable: false,
+      });
+      expect(result.error).toContain("iOS-only");
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    },
+  );
+
   // Navigation buttons fall back to an ADB keyevent when the a11y global action
   // is unavailable. This pins the keycode each navigation button maps to — e.g.
   // "back" must be 4 (KEYCODE_BACK), never 3 (KEYCODE_HOME).
@@ -211,11 +274,11 @@ describe("PressButton Android keycode dispatch", () => {
     ["back", 4],
     ["recent", 187],
   ])("falls back to keyevent %i for navigation button %s", async (button, keyCode) => {
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+    globalActionClient = {
       requestGlobalAction: async () => {
         throw new Error("global action unavailable");
       },
-    });
+    };
 
     const result = await press(button);
 
@@ -231,7 +294,7 @@ describe("PressButton Android keycode dispatch", () => {
       test.each(["timeout", "socket closed", "thrown after send"])(
         `${button} does not repeat a press after %s`,
         async (reason) => {
-          getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+          globalActionClient = {
             requestGlobalAction: async (
               ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
             ) => {
@@ -247,7 +310,7 @@ describe("PressButton Android keycode dispatch", () => {
                 acknowledged: false,
               };
             },
-          });
+          };
           const result = await press(button);
           expect(result.success).toBe(false);
           expect(result.error).toContain("may have been applied");
@@ -258,7 +321,7 @@ describe("PressButton Android keycode dispatch", () => {
       test.each(["WebSocket not connected", "send failed", "device refused", "unsupported"])(
         `${button} falls back exactly once after %s`,
         async (reason) => {
-          getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+          globalActionClient = {
             requestGlobalAction: async (
               ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
             ) => {
@@ -274,26 +337,26 @@ describe("PressButton Android keycode dispatch", () => {
                 acknowledged,
               };
             },
-          });
+          };
           expect(await press(button)).toEqual({ success: true, button, keyCode });
           expect(fakeAdb.getExecutedCommands()).toEqual([`shell input keyevent ${keyCode}`]);
         },
       );
       test(`${button} acknowledged success does not use ADB`, async () => {
-        getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        globalActionClient = {
           requestGlobalAction: async (
             ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
           ) => {
             args[5]?.();
             return { success: true, action: button, totalTimeMs: 1, acknowledged: true };
           },
-        });
+        };
         expect(await press(button)).toEqual({ success: true, button, keyCode });
         expect(fakeAdb.getExecutedCommands()).toEqual([]);
       });
     }
     test("home still falls back after a dispatched timeout and verifies the launcher", async () => {
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      globalActionClient = {
         requestGlobalAction: async (
           ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
         ) => {
@@ -306,7 +369,7 @@ describe("PressButton Android keycode dispatch", () => {
             acknowledged: false,
           };
         },
-      });
+      };
       expect((await press("home", launcherWindow())).success).toBe(true);
       expect(
         fakeAdb.getExecutedCommands().filter((command) => command.includes("input keyevent")),
@@ -319,11 +382,11 @@ describe("PressButton Android keycode dispatch", () => {
   // the global action or the ADB keyevent fallback.
   describe("home button (issue #6147)", () => {
     test("falls back to keyevent 3 and succeeds once the launcher is confirmed foreground", async () => {
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      globalActionClient = {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      });
+      };
 
       const result = await press("home", launcherWindow());
 
@@ -339,9 +402,9 @@ describe("PressButton Android keycode dispatch", () => {
     // success, but the foreground app never actually changes. Must not
     // report success on that self-reported result alone.
     test("does not trust an inert global action on API 28 and falls back to the ADB keyevent", async () => {
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: true }),
-      });
+      globalActionClient = {
+        requestGlobalAction: async () => ({ success: true, action: "home", totalTimeMs: 0 }),
+      };
       // The post-global-action verification retries internally (initial
       // attempt + 2 backoff retries) before giving up, so it must see the
       // original app on all 3 of those checks; only the post-ADB-keyevent
@@ -367,9 +430,9 @@ describe("PressButton Android keycode dispatch", () => {
     });
 
     test("surfaces failure instead of false success when neither path reaches the launcher", async () => {
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: true }),
-      });
+      globalActionClient = {
+        requestGlobalAction: async () => ({ success: true, action: "home", totalTimeMs: 0 }),
+      };
       const stuckWindow = new FakeWindow();
       stuckWindow.configureActiveWindow({
         appId: "com.android.settings",
@@ -402,6 +465,8 @@ describe("PressButton Android keycode dispatch", () => {
   describe("home verification self-heals a stale launcher cache", () => {
     const verifier = (window: WindowInterface): PressButton => {
       const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        globalActionClient,
+        frameContextClient,
         window,
       });
       return pressButton;
@@ -411,10 +476,7 @@ describe("PressButton Android keycode dispatch", () => {
       // An epoch token is registered, so the entry would otherwise survive the
       // full TTL -- only the failure eviction can make the next call re-resolve.
       setDeviceIncarnationResolver(() => 1);
-      fakeAdb.setCommandResponse("resolve-activity", {
-        stdout: "com.launcher.a/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("resolve-activity", createExecResult("com.launcher.a/.Main", ""));
 
       await expect(
         verifier(sequencedWindow(["com.other.app"])).testHooks.verifyAndroidHomeForeground({
@@ -422,10 +484,7 @@ describe("PressButton Android keycode dispatch", () => {
         }),
       ).resolves.toBe(false);
 
-      fakeAdb.setCommandResponse("resolve-activity", {
-        stdout: "com.launcher.b/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("resolve-activity", createExecResult("com.launcher.b/.Main", ""));
       expect(
         await resolveConfiguredHomePackage(fakeAdb, androidDevice.deviceId, fakeTimer, "1"),
       ).toBe("com.launcher.b");
@@ -433,10 +492,7 @@ describe("PressButton Android keycode dispatch", () => {
 
     test("keeps the cached HOME package when verification succeeds", async () => {
       setDeviceIncarnationResolver(() => 1);
-      fakeAdb.setCommandResponse("resolve-activity", {
-        stdout: "com.launcher.a/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("resolve-activity", createExecResult("com.launcher.a/.Main", ""));
 
       await expect(
         verifier(sequencedWindow(["com.launcher.a"])).testHooks.verifyAndroidHomeForeground({
@@ -444,10 +500,7 @@ describe("PressButton Android keycode dispatch", () => {
         }),
       ).resolves.toBe(true);
 
-      fakeAdb.setCommandResponse("resolve-activity", {
-        stdout: "com.launcher.b/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("resolve-activity", createExecResult("com.launcher.b/.Main", ""));
       expect(
         await resolveConfiguredHomePackage(fakeAdb, androidDevice.deviceId, fakeTimer, "1"),
       ).toBe("com.launcher.a");
@@ -456,15 +509,17 @@ describe("PressButton Android keycode dispatch", () => {
 
   describe("AbortSignal propagation (issue #6289)", () => {
     test("forwards the signal into the ADB keyevent fallback and home verification", async () => {
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      globalActionClient = {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      });
+      };
       const window = launcherWindow();
       const controller = new AbortController();
 
       const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        globalActionClient,
+        frameContextClient,
         window,
       });
       const result = await dispatch(pressButton, "home", undefined, undefined, controller.signal);
@@ -477,16 +532,18 @@ describe("PressButton Android keycode dispatch", () => {
     });
 
     test("combined signal: an ambient request abort cancels the ADB keyevent fallback", async () => {
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      globalActionClient = {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      });
+      };
       fakeAdb.setThrowOnAbortedSignal();
       const controller = new AbortController();
       controller.abort();
 
       const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        globalActionClient,
+        frameContextClient,
         window: launcherWindow(),
       });
 
@@ -502,13 +559,15 @@ describe("PressButton Android keycode dispatch", () => {
     });
 
     test("home verification spends the REMAINING deadline, not a fresh full getActive timeout", async () => {
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      globalActionClient = {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      });
+      };
       const window = launcherWindow();
       const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        globalActionClient,
+        frameContextClient,
         window,
       });
 
@@ -531,6 +590,8 @@ describe("PressButton Android keycode dispatch", () => {
       // production constructor here because it allocates a CtrlProxy port that
       // is unrelated to this pre-read deadline gate.
       const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        globalActionClient,
+        frameContextClient,
         window,
       });
 
@@ -554,6 +615,8 @@ describe("PressButton Android keycode dispatch", () => {
       }
       const window = new BudgetSpendingWindow();
       const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        globalActionClient,
+        frameContextClient,
         window,
       });
 
@@ -565,7 +628,7 @@ describe("PressButton Android keycode dispatch", () => {
 
     test("forwards the signal into the CtrlProxy global-action wait", async () => {
       let capturedSignal: AbortSignal | undefined;
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      globalActionClient = {
         requestGlobalAction: async (
           _action: string,
           _timeoutMs?: number,
@@ -577,9 +640,11 @@ describe("PressButton Android keycode dispatch", () => {
           // Report failure so the flow falls back to the ADB keyevent path.
           return { success: false, action: "home", totalTimeMs: 0, error: "not now" };
         },
-      });
+      };
       const controller = new AbortController();
       const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        globalActionClient,
+        frameContextClient,
         window: launcherWindow(),
       });
 
@@ -590,8 +655,10 @@ describe("PressButton Android keycode dispatch", () => {
 
     test("forwards the signal into the CtrlProxy frame-context validation wait", async () => {
       let capturedSignal: AbortSignal | undefined;
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      globalActionClient = {
         requestGlobalAction: async () => ({ success: false, action: "back", totalTimeMs: 0 }),
+      };
+      frameContextClient = {
         validateFrameContext: async (
           _frameContext: string,
           _timeoutMs?: number,
@@ -600,9 +667,12 @@ describe("PressButton Android keycode dispatch", () => {
           capturedSignal = signal;
           return { success: true, totalTimeMs: 0 };
         },
-      });
+      };
       const controller = new AbortController();
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        globalActionClient,
+        frameContextClient,
+      });
 
       const result = await dispatch(pressButton, "back", 500, "frame-1", controller.signal);
 
@@ -623,6 +693,8 @@ describe("PressButton Android keycode dispatch", () => {
         layoutSeqSum: 0,
       });
       const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        globalActionClient,
+        frameContextClient,
         window,
       });
       const controller = new AbortController();
@@ -639,15 +711,26 @@ describe("PressButton Android keycode dispatch", () => {
   });
 
   test("rejects a stale context instead of falling back from a failed global action to ADB", async () => {
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-      requestGlobalAction: async () => ({ success: false, error: "global action unavailable" }),
+    globalActionClient = {
+      requestGlobalAction: async () => ({
+        success: false,
+        action: "back",
+        totalTimeMs: 0,
+        error: "global action unavailable",
+      }),
+    };
+    frameContextClient = {
       validateFrameContext: async () => ({
         success: false,
+        totalTimeMs: 0,
         error: "Stale frame context; observe a fresh frame before retrying",
       }),
-    });
+    };
 
-    const pressButton = new PressButton(androidDevice, fakeAdb);
+    const pressButton = new PressButton(androidDevice, fakeAdb, undefined, undefined, undefined, {
+      globalActionClient,
+      frameContextClient,
+    });
     const result = await dispatch(pressButton, "back", 500, "epoch:2");
 
     expect(result.success).toBe(false);
@@ -656,14 +739,18 @@ describe("PressButton Android keycode dispatch", () => {
   });
 
   test("validates a context before dispatching an ADB-only hardware button", async () => {
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+    frameContextClient = {
       validateFrameContext: async () => ({
         success: false,
+        totalTimeMs: 0,
         error: "Stale frame context; observe a fresh frame before retrying",
       }),
-    });
+    };
 
-    const pressButton = new PressButton(androidDevice, fakeAdb);
+    const pressButton = new PressButton(androidDevice, fakeAdb, undefined, undefined, undefined, {
+      globalActionClient,
+      frameContextClient,
+    });
     const result = await dispatch(pressButton, "volume_up", 500, "epoch:3");
 
     expect(result.success).toBe(false);
@@ -673,12 +760,12 @@ describe("PressButton Android keycode dispatch", () => {
 });
 
 // Validate the actual fake-backed branch results before and after finalization.
-const executeForOutputSchema = PressButton.prototype.execute;
-let executeOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
+const pressForOutputSchema = PressButton.prototype.press;
+let pressOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
 beforeOutputSchema(() => {
-  executeOutputSchemaSpy = spyOnOutputSchema(PressButton.prototype, "execute").mockImplementation(
-    async function (this: PressButton, ...args: Parameters<PressButton["execute"]>) {
-      const result = await executeForOutputSchema.apply(this, args);
+  pressOutputSchemaSpy = spyOnOutputSchema(PressButton.prototype, "press").mockImplementation(
+    async function (this: PressButton, ...args: Parameters<PressButton["press"]>) {
+      const result = await pressForOutputSchema.apply(this, args);
       const payload = { message: "Result", ...result };
       expect(pressButtonResultSchema.parse(payload)).toBeDefined();
       const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
@@ -691,7 +778,7 @@ beforeOutputSchema(() => {
     },
   );
 });
-afterOutputSchema(() => executeOutputSchemaSpy.mockRestore());
+afterOutputSchema(() => pressOutputSchemaSpy.mockRestore());
 
 // Dispatch tests drive the transport seam through testHooks and still validate the result schema.
 async function dispatch(
@@ -702,3 +789,28 @@ async function dispatch(
   expect(pressButtonResultSchema.parse({ message: "Result", ...result })).toBeDefined();
   return result;
 }
+
+describe("acceptAndroidHomeAlreadyOnLauncher (#15028)", () => {
+  test.each([
+    ["android", "home", false],
+    ["android", "back", true],
+    ["ios", "home", true],
+  ] as const)(
+    "preserves no-change failure for %s %s, press ok=%s",
+    (platform, button, pressSucceeded) => {
+      const result = { success: false, error: "No visual change observed" };
+      acceptAndroidHomeAlreadyOnLauncher(result, { platform, button, pressSucceeded });
+      expect(result).toEqual({ success: false, error: "No visual change observed" });
+    },
+  );
+
+  test("preserves other errors and successful screen changes", () => {
+    const context = { platform: "android", button: "home", pressSucceeded: true };
+    const failed = { success: false, error: "Observation failed" };
+    acceptAndroidHomeAlreadyOnLauncher(failed, context);
+    expect(failed).toEqual({ success: false, error: "Observation failed" });
+    const changed = { success: true };
+    acceptAndroidHomeAlreadyOnLauncher(changed, context);
+    expect(changed).toEqual({ success: true });
+  });
+});

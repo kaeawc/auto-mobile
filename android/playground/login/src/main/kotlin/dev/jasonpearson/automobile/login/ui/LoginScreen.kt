@@ -54,28 +54,11 @@ fun LoginScreenCore(
   val loginFormState by viewModel.loginFormState.collectAsStateWithLifecycle()
   val loginResult by viewModel.loginResult.collectAsStateWithLifecycle()
 
-  var username by remember { mutableStateOf("") }
-  var password by remember { mutableStateOf("") }
+  val form = remember { LoginInteractionState() }
   var isLoading by remember { mutableStateOf(false) }
 
-  // Track user interaction to control when to show errors
-  var usernameHadContent by remember { mutableStateOf(false) }
-  var passwordHadContent by remember { mutableStateOf(false) }
-  var usernameBlurred by remember { mutableStateOf(false) }
-  var passwordBlurred by remember { mutableStateOf(false) }
-
-  // Update interaction tracking
-  LaunchedEffect(username) {
-    if (username.length >= 5) {
-      usernameHadContent = true
-    }
-  }
-
-  LaunchedEffect(password) {
-    if (password.length >= 5) {
-      passwordHadContent = true
-    }
-  }
+  LaunchedEffect(form.username) { form.recordUsernameContent() }
+  LaunchedEffect(form.password) { form.recordPasswordContent() }
 
   // Handle login result
   LaunchedEffect(loginResult) {
@@ -87,11 +70,53 @@ fun LoginScreenCore(
   }
 
   // Handle form validation
-  LaunchedEffect(username, password) { viewModel.loginDataChanged(username, password) }
+  LaunchedEffect(form.username, form.password) {
+    viewModel.loginDataChanged(form.username, form.password)
+  }
 
   // Check if form is valid for button animation
-  val isFormValid = loginFormState.isDataValid && username.isNotEmpty() && password.isNotEmpty()
+  val isFormValid =
+    loginFormState.isDataValid && form.username.isNotEmpty() && form.password.isNotEmpty()
 
+  LoginContent(
+    form = form,
+    loginFormState = loginFormState,
+    isFormValid = isFormValid,
+    isLoading = isLoading,
+    actions =
+      LoginContentActions(
+        onPasswordDone = {
+          form.passwordBlurred = true
+          if (isFormValid) {
+            isLoading = true
+            viewModel.login(form.username, form.password)
+          }
+        },
+        onSignInClick = {
+          form.usernameBlurred = true
+          form.passwordBlurred = true
+          isLoading = true
+          viewModel.login(form.username, form.password)
+        },
+        onGuestMode = onGuestMode,
+      ),
+  )
+}
+
+private data class LoginContentActions(
+  val onPasswordDone: () -> Unit,
+  val onSignInClick: () -> Unit,
+  val onGuestMode: () -> Unit,
+)
+
+@Composable
+private fun LoginContent(
+  form: LoginInteractionState,
+  loginFormState: LoginFormState,
+  isFormValid: Boolean,
+  isLoading: Boolean,
+  actions: LoginContentActions,
+) {
   val configuration = LocalConfiguration.current
   val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
@@ -113,28 +138,20 @@ fun LoginScreenCore(
     Spacer(modifier = Modifier.height(AutoMobileDimensions.spacing12))
 
     LoginForm(
-      username = username,
-      password = password,
-      onUsernameChange = {
-        username = it
-        if (it.length >= 5) usernameHadContent = true
-      },
-      onPasswordChange = {
-        password = it
-        if (it.length >= 5) passwordHadContent = true
-      },
-      loginFormState = loginFormState,
-      usernameHadContent = usernameHadContent,
-      passwordHadContent = passwordHadContent,
-      usernameBlurred = usernameBlurred,
-      passwordBlurred = passwordBlurred,
-      onPasswordDone = {
-        passwordBlurred = true
-        if (isFormValid) {
-          isLoading = true
-          viewModel.login(username, password)
-        }
-      },
+      username = form.usernameField(loginFormState),
+      password = form.passwordField(loginFormState),
+      actions =
+        LoginFormActions(
+          onUsernameChange = {
+            form.username = it
+            if (it.length >= 5) form.usernameHadContent = true
+          },
+          onPasswordChange = {
+            form.password = it
+            if (it.length >= 5) form.passwordHadContent = true
+          },
+          onPasswordDone = actions.onPasswordDone,
+        ),
     )
 
     Spacer(modifier = Modifier.height(AutoMobileDimensions.spacing6))
@@ -142,13 +159,8 @@ fun LoginScreenCore(
     LoginActions(
       isFormValid = isFormValid,
       isLoading = isLoading,
-      onSignInClick = {
-        usernameBlurred = true
-        passwordBlurred = true
-        isLoading = true
-        viewModel.login(username, password)
-      },
-      onGuestModeClick = onGuestMode,
+      onSignInClick = actions.onSignInClick,
+      onGuestModeClick = actions.onGuestMode,
     )
 
     Spacer(modifier = Modifier.weight(1f))
@@ -204,7 +216,8 @@ fun LoginScreen(
     )
 
     // Show error message if login fails
-    if (showErrorMessage && loginError != null) {
+    val errorMessage = loginError
+    if (showErrorMessage && errorMessage != null) {
       LaunchedEffect(loginError) {
         // Auto-hide error after 3 seconds
         delay(3000)
@@ -215,7 +228,7 @@ fun LoginScreen(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
         contentAlignment = Alignment.BottomCenter,
       ) {
-        AutoMobileOutlinedCard { AutoMobileText(text = loginError!!) }
+        AutoMobileOutlinedCard { AutoMobileText(text = errorMessage) }
       }
     }
   }

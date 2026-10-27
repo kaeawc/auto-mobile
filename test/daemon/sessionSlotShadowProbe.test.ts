@@ -8,8 +8,8 @@ import {
   isSlotCurrentSession,
   isSlotKnown,
   isSlotTagBeingRecreated,
-  SlotTransitionError,
 } from "../../src/daemon/sessionSlots";
+import { SlotTransitionError } from "../../src/daemon/SlotTransitionError";
 import { FakeLegacyLifecycleView } from "../fakes/FakeLegacyLifecycleView";
 import { FakeLogger } from "../fakes/FakeLogger";
 

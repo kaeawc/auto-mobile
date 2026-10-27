@@ -1,5 +1,10 @@
-import { parseGuardSource, unwrapCallee } from "./astGuard";
-import { Visitor, type Expression } from "oxc-parser";
+import {
+  parseGuardSource,
+  unwrapCallee,
+  guardTextMayMatch,
+  GuardVisitor as Visitor,
+} from "./astGuard";
+import { type Expression, type PropertyKey } from "oxc-parser";
 
 /** `foo`, `x.foo`, `x["foo"]` and a static template key name the same callee. */
 function calleeName(callee: Expression): string | undefined {
@@ -27,7 +32,10 @@ function calleeName(callee: Expression): string | undefined {
  * `.call/.apply/.bind`. Syntax errors fail the inventory instead of silently skipping a file.
  */
 function namedCallOffsets(file: string, source: string, name: string): number[] {
-  const program = parseGuardSource(file, source);
+  const program = parseGuardSource(file, source, guardTextMayMatch(source, name));
+  if (!program) {
+    return [];
+  }
   const offsets: number[] = [];
   new Visitor({
     CallExpression(node) {
@@ -62,7 +70,7 @@ interface NamedRange {
   end: number;
 }
 
-function keyName(node: { type: string; name?: string; value?: unknown }): string | undefined {
+function keyName(node: PropertyKey): string | undefined {
   if (node.type === "Identifier" || node.type === "PrivateIdentifier") {
     return node.name;
   }
@@ -76,7 +84,10 @@ function keyName(node: { type: string; name?: string; value?: unknown }): string
  * prohibited one from trading places inside the same file.
  */
 export function scanNamedCallOwners(file: string, source: string, name: string): string[] {
-  const program = parseGuardSource(file, source);
+  const program = parseGuardSource(file, source, guardTextMayMatch(source, name));
+  if (!program) {
+    return [];
+  }
   const ranges: NamedRange[] = [];
   const isFunction = (node: { type?: string } | null | undefined): boolean =>
     node?.type === "ArrowFunctionExpression" || node?.type === "FunctionExpression";

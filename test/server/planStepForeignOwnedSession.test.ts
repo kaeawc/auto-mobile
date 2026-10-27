@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { describe, expect, spyOn } from "bun:test";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -24,6 +24,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
+import { warmedTests } from "../helpers/warmedTests";
 
 /**
  * #11469: a plan step runs for the connection that called `executePlan`. A step naming a session
@@ -61,7 +62,10 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
   const tap: PlanStep = { tool: "tapAt", params: { x: 10, y: 10, sessionUuid: SESSION } };
   const read: PlanStep = { tool: "observe", params: { sessionUuid: SESSION } };
 
+  let harnessArranged = false;
+
   async function arrangeHarness(): Promise<void> {
+    harnessArranged = true;
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     spies = [
@@ -97,19 +101,11 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
     });
   }
 
-  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
-  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
-    test(
-      name,
-      async () => {
-        await arrangeHarness();
-        await fn();
-      },
-      timeout,
-    );
-  }
-
-  afterEach(() => {
+  function teardownHarness(): void {
+    if (!harnessArranged) {
+      return;
+    }
+    harnessArranged = false;
     tools.uninstall();
     DaemonState.getInstance().reset();
     manager.stopCleanupTimer();
@@ -121,7 +117,21 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
     } else {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
     }
-  });
+  }
+
+  // First-use costs (the tool call path, the refusal) are paid in beforeAll. The harness is still
+  // built inside each test, so its cost is paid in the test body.
+  const test = warmedTests(teardownHarness);
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   describe("in a plan another connection started", () => {
     arranged("setActiveDevice is refused, typed, and moves nothing", async () => {
@@ -132,7 +142,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
       expect(manager.getSession(SESSION)?.assignedDevice).toBe(held.deviceId);
       expect(pool.getDevice(held.deviceId)?.sessionId).toBe(SESSION);
       expect(pool.getDevice(free.deviceId)?.sessionId ?? null).toBeNull();
-      expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
+      expect(tools.deviceReadiness.getEnsureDeviceReadyCalls()).toBe(0);
     });
 
     arranged("a control step is refused, typed, before any input reaches the device", async () => {

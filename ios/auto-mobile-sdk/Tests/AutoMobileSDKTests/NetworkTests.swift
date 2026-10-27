@@ -1,6 +1,3 @@
-// swiftlint:disable force_unwrapping
-// Force-unwrap is idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
-
 @testable import AutoMobileSDK
 import os
 import XCTest
@@ -253,7 +250,7 @@ final class AutoMobileNetworkTests: XCTestCase {
 
     // MARK: - recordFromTask (delegate-based API)
 
-    func testRecordFromTaskWithError() {
+    func testRecordFromTaskWithError() throws {
         let collector = EventCollector()
         let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
             collector.collect(events)
@@ -261,7 +258,7 @@ final class AutoMobileNetworkTests: XCTestCase {
         AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
         AutoMobileNetwork.shared.setCaptureHeaders(true)
 
-        var request = URLRequest(url: URL(string: "https://api.example.com/fail")!)
+        var request = try URLRequest(url: XCTUnwrap(URL(string: "https://api.example.com/fail")))
         request.httpMethod = "POST"
         request.setValue("Bearer token", forHTTPHeaderField: "Authorization")
         let task = URLSession.shared.dataTask(with: request)
@@ -283,14 +280,14 @@ final class AutoMobileNetworkTests: XCTestCase {
         XCTAssertGreaterThan(event?.durationMs ?? 0, 0)
     }
 
-    func testRecordFromTaskSuccessWithoutResponseStillRecords() {
+    func testRecordFromTaskSuccessWithoutResponseStillRecords() throws {
         let collector = EventCollector()
         let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
             collector.collect(events)
         }
         AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
 
-        var request = URLRequest(url: URL(string: "https://api.example.com/users?page=1")!)
+        var request = try URLRequest(url: XCTUnwrap(URL(string: "https://api.example.com/users?page=1")))
         request.httpMethod = "GET"
         let task = URLSession.shared.dataTask(with: request)
 
@@ -312,7 +309,7 @@ final class AutoMobileNetworkTests: XCTestCase {
         XCTAssertNotNil(event?.durationMs)
     }
 
-    func testRecordFromTaskShortCircuitsWhenDisabled() {
+    func testRecordFromTaskShortCircuitsWhenDisabled() throws {
         let collector = EventCollector()
         let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
             collector.collect(events)
@@ -320,7 +317,7 @@ final class AutoMobileNetworkTests: XCTestCase {
         AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
         AutoMobileNetwork.shared.setEnabled(false)
 
-        let task = URLSession.shared.dataTask(with: URL(string: "https://api.example.com/x")!)
+        let task = try URLSession.shared.dataTask(with: XCTUnwrap(URL(string: "https://api.example.com/x")))
         AutoMobileNetwork.shared.recordFromTask(
             task,
             startTime: Date(),
@@ -890,7 +887,8 @@ final class AutoMobileNetworkTests: XCTestCase {
             config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
             let session = URLSession(configuration: config)
 
-            let (data, response) = try await session.data(from: URL(string: "https://api.example.com/v1/items")!)
+            let (data, response) = try await session
+                .data(from: XCTUnwrap(URL(string: "https://api.example.com/v1/items")))
 
             XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 500)
             XCTAssertEqual(String(data: data, encoding: .utf8), "{\"error\":\"mocked\"}")
@@ -936,7 +934,8 @@ final class AutoMobileNetworkTests: XCTestCase {
             config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
             let session = URLSession(configuration: config)
 
-            let (data, response) = try await session.data(from: URL(string: "https://api.example.com/v1/items")!)
+            let (data, response) = try await session
+                .data(from: XCTUnwrap(URL(string: "https://api.example.com/v1/items")))
 
             XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 418)
             XCTAssertEqual(String(data: data, encoding: .utf8), "mock-wins")
@@ -949,7 +948,7 @@ final class AutoMobileNetworkTests: XCTestCase {
             XCTAssertEqual(event?.error, "mocked:mock-1")
         }
 
-        func testMockRuleRecordsBeforeFinishCallback() {
+        func testMockRuleRecordsBeforeFinishCallback() throws {
             let client = makeEventObservingClient()
             let url = "https://api.example.com/v1/items"
             NetworkMockRuleStore.shared.setRules([
@@ -962,7 +961,7 @@ final class AutoMobileNetworkTests: XCTestCase {
             NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
                 enabled: true, errorType: "timeout", limit: nil, expiresAtEpochMs: nil
             ))
-            let request = URLRequest(url: URL(string: url)!)
+            let request = try URLRequest(url: XCTUnwrap(URL(string: url)))
             let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
 
             proto.startLoading()
@@ -970,7 +969,7 @@ final class AutoMobileNetworkTests: XCTestCase {
             assertRecordedEvent(client, url: url, error: "mocked:mock-1")
         }
 
-        func testFaultResponseRecordsBeforeFinishCallback() {
+        func testFaultResponseRecordsBeforeFinishCallback() throws {
             let client = makeEventObservingClient()
             let url = "https://api.example.com/v1/fault-response"
             NetworkMockRuleStore.shared.setFaultRules([
@@ -983,7 +982,7 @@ final class AutoMobileNetworkTests: XCTestCase {
                     limit: nil, expiresAtEpochMs: nil, scope: nil, dryRun: false
                 ),
             ])
-            let request = URLRequest(url: URL(string: url)!)
+            let request = try URLRequest(url: XCTUnwrap(URL(string: url)))
             let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
 
             proto.startLoading()
@@ -991,7 +990,7 @@ final class AutoMobileNetworkTests: XCTestCase {
             assertRecordedEvent(client, url: url, error: "fault:fault-response:response")
         }
 
-        func testFaultErrorRecordsBeforeFailureCallback() {
+        func testFaultErrorRecordsBeforeFailureCallback() throws {
             let client = makeEventObservingClient()
             let url = "https://api.example.com/v1/fault-error"
             NetworkMockRuleStore.shared.setFaultRules([
@@ -1004,7 +1003,7 @@ final class AutoMobileNetworkTests: XCTestCase {
                     limit: nil, expiresAtEpochMs: nil, scope: nil, dryRun: false
                 ),
             ])
-            let request = URLRequest(url: URL(string: url)!)
+            let request = try URLRequest(url: XCTUnwrap(URL(string: url)))
             let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
 
             proto.startLoading()
@@ -1012,13 +1011,13 @@ final class AutoMobileNetworkTests: XCTestCase {
             assertRecordedEvent(client, url: url, error: "fault:fault-error:error")
         }
 
-        func testSimulatedHttp500RecordsBeforeFinishCallback() {
+        func testSimulatedHttp500RecordsBeforeFinishCallback() throws {
             let client = makeEventObservingClient()
             let url = "https://api.example.com/v1/simulated-http500"
             NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
                 enabled: true, errorType: "http500", limit: nil, expiresAtEpochMs: nil
             ))
-            let request = URLRequest(url: URL(string: url)!)
+            let request = try URLRequest(url: XCTUnwrap(URL(string: url)))
             let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
 
             proto.startLoading()
@@ -1026,13 +1025,13 @@ final class AutoMobileNetworkTests: XCTestCase {
             assertRecordedEvent(client, url: url, error: "simulated:http500")
         }
 
-        func testSimulatedErrorRecordsBeforeFailureCallback() {
+        func testSimulatedErrorRecordsBeforeFailureCallback() throws {
             let client = makeEventObservingClient()
             let url = "https://api.example.com/v1/simulated-timeout"
             NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
                 enabled: true, errorType: "timeout", limit: nil, expiresAtEpochMs: nil
             ))
-            let request = URLRequest(url: URL(string: url)!)
+            let request = try URLRequest(url: XCTUnwrap(URL(string: url)))
             let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
 
             proto.startLoading()
@@ -1040,10 +1039,10 @@ final class AutoMobileNetworkTests: XCTestCase {
             assertRecordedEvent(client, url: url, error: "simulated:timeout")
         }
 
-        func testPassthroughSuccessRecordsBeforeFinishCallback() {
+        func testPassthroughSuccessRecordsBeforeFinishCallback() throws {
             let client = makeEventObservingClient()
             let url = "https://api.example.com/v1/passthrough-success"
-            let request = URLRequest(url: URL(string: url)!)
+            let request = try URLRequest(url: XCTUnwrap(URL(string: url)))
             let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
             let task = URLSession.shared.dataTask(with: request)
 
@@ -1052,10 +1051,10 @@ final class AutoMobileNetworkTests: XCTestCase {
             assertRecordedEvent(client, url: url, error: nil)
         }
 
-        func testPassthroughFailureRecordsBeforeFailureCallback() {
+        func testPassthroughFailureRecordsBeforeFailureCallback() throws {
             let client = makeEventObservingClient()
             let url = "https://api.example.com/v1/passthrough-failure"
-            let request = URLRequest(url: URL(string: url)!)
+            let request = try URLRequest(url: XCTUnwrap(URL(string: url)))
             let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
             let task = URLSession.shared.dataTask(with: request)
             let error = URLError(.timedOut)
@@ -1081,7 +1080,7 @@ final class AutoMobileNetworkTests: XCTestCase {
             let config = URLSessionConfiguration.ephemeral
             config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
             let session = URLSession(configuration: config)
-            var request = URLRequest(url: URL(string: "https://api.example.com/fail")!)
+            var request = try URLRequest(url: XCTUnwrap(URL(string: "https://api.example.com/fail")))
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = Data("{\"query\":\"mutation\"}".utf8)
@@ -1116,7 +1115,7 @@ final class AutoMobileNetworkTests: XCTestCase {
             let config = URLSessionConfiguration.ephemeral
             config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
             let session = URLSession(configuration: config)
-            var request = URLRequest(url: URL(string: "https://api.example.com/stream")!)
+            var request = try URLRequest(url: XCTUnwrap(URL(string: "https://api.example.com/stream")))
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBodyStream = InputStream(data: Data("{\"query\":\"mutation with a long payload\"}".utf8))
@@ -1133,7 +1132,7 @@ final class AutoMobileNetworkTests: XCTestCase {
             XCTAssertEqual(event?.error, "simulated:http500")
         }
 
-        func testURLProtocolServesTransportErrorSimulationsAndRecordsRequests() async {
+        func testURLProtocolServesTransportErrorSimulationsAndRecordsRequests() async throws {
             let cases: [(String, URLError.Code)] = [
                 ("timeout", .timedOut),
                 ("connectionRefused", .cannotConnectToHost),
@@ -1158,7 +1157,7 @@ final class AutoMobileNetworkTests: XCTestCase {
                 let config = URLSessionConfiguration.ephemeral
                 config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
                 let session = URLSession(configuration: config)
-                var request = URLRequest(url: URL(string: "https://api.example.com/\(errorType)")!)
+                var request = try URLRequest(url: XCTUnwrap(URL(string: "https://api.example.com/\(errorType)")))
                 request.httpMethod = "POST"
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 request.httpBody = Data("{\"operation\":\"\(errorType)\"}".utf8)
@@ -1528,17 +1527,17 @@ final class NetworkCaptureRecorderTests: XCTestCase {
             AutoMobileNetwork.shared.initialize(bundleId: "test.bundle", buffer: buffer)
             AutoMobileNetwork.shared.setCaptureBodies(true)
             AutoMobileNetwork.shared.setMaxBodyBytes(8)
-            let request = URLRequest(url: URL(string: "https://example.com/concurrent-callbacks")!)
+            let request = try URLRequest(url: XCTUnwrap(URL(string: "https://example.com/concurrent-callbacks")))
             let client = RecordingURLProtocolClient(onCallback: { $0.stopLoading() })
             let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
             let session = URLSession(configuration: .ephemeral)
             defer { session.invalidateAndCancel() }
             // Drive delegate callbacks directly. The task is never resumed, so no I/O occurs.
             let task = session.dataTask(with: request)
-            let response = HTTPURLResponse(
-                url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: XCTUnwrap(request.url), statusCode: 200, httpVersion: "HTTP/1.1",
                 headerFields: ["Content-Type": "text/plain"]
-            )!
+            ))
             proto.urlSession(session, dataTask: task, didReceive: response) { disposition in
                 XCTAssertEqual(disposition, .allow)
             }
@@ -1558,16 +1557,21 @@ final class NetworkCaptureRecorderTests: XCTestCase {
             XCTAssertEqual(client.calls, ["didReceive"])
         }
 
-        func testConcurrentProtocolDataCallbacksAllReachTheClientWhileLoading() {
+        func testConcurrentProtocolDataCallbacksAllReachTheClientWhileLoading() throws {
             AutoMobileNetwork.shared.initialize(bundleId: "test.bundle", buffer: SdkEventBuffer { _ in })
-            let request = URLRequest(url: URL(string: "https://example.com/concurrent-callbacks")!)
+            let request = try URLRequest(url: XCTUnwrap(URL(string: "https://example.com/concurrent-callbacks")))
             let client = RecordingURLProtocolClient()
             let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
             let session = URLSession(configuration: .ephemeral)
             defer { session.invalidateAndCancel() }
             // Drive delegate callbacks directly. The task is never resumed, so no I/O occurs.
             let task = session.dataTask(with: request)
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            ))
             proto.urlSession(session, dataTask: task, didReceive: response) { _ in }
 
             DispatchQueue.concurrentPerform(iterations: 32) { _ in
@@ -1580,7 +1584,7 @@ final class NetworkCaptureRecorderTests: XCTestCase {
             XCTAssertEqual(client.calls.last, "finish")
         }
 
-        private func makeDelayedFaultProtocol(client: RecordingURLProtocolClient) -> AutoMobileURLProtocol {
+        private func makeDelayedFaultProtocol(client: RecordingURLProtocolClient) throws -> AutoMobileURLProtocol {
             AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: SdkEventBuffer { _ in })
             NetworkMockRuleStore.shared.setFaultRules([
                 NetworkFaultRuleDTO(
@@ -1592,7 +1596,7 @@ final class NetworkCaptureRecorderTests: XCTestCase {
                     expiresAtEpochMs: nil, scope: nil, dryRun: false
                 ),
             ])
-            let request = URLRequest(url: URL(string: "https://api.example.com/v1/x")!)
+            let request = try URLRequest(url: XCTUnwrap(URL(string: "https://api.example.com/v1/x")))
             return AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
         }
 
@@ -1631,7 +1635,7 @@ final class NetworkCaptureRecorderTests: XCTestCase {
         }
 
         // The delayed fault fires normally when the protocol has NOT been stopped.
-        func testDelayedFaultFiresWhenNotStopped() {
+        func testDelayedFaultFiresWhenNotStopped() throws {
             let scheduler = FakeFaultScheduler()
             AutoMobileURLProtocol.faultScheduler = scheduler
             defer {
@@ -1640,7 +1644,7 @@ final class NetworkCaptureRecorderTests: XCTestCase {
             }
 
             let client = RecordingURLProtocolClient()
-            let proto = makeDelayedFaultProtocol(client: client)
+            let proto = try makeDelayedFaultProtocol(client: client)
             proto.startLoading() // schedules the fault via the fake scheduler (captured, not fired)
 
             scheduler.captured?() // fire the delayed fault
@@ -1650,7 +1654,7 @@ final class NetworkCaptureRecorderTests: XCTestCase {
 
         // A delayed closure fired AFTER stopLoading must not invoke the client:
         // serveFault checks the stopped flag before making client callbacks.
-        func testDelayedFaultFiringAfterStopDoesNotCallClient() {
+        func testDelayedFaultFiringAfterStopDoesNotCallClient() throws {
             let scheduler = FakeFaultScheduler()
             AutoMobileURLProtocol.faultScheduler = scheduler
             defer {
@@ -1659,7 +1663,7 @@ final class NetworkCaptureRecorderTests: XCTestCase {
             }
 
             let client = RecordingURLProtocolClient()
-            let proto = makeDelayedFaultProtocol(client: client)
+            let proto = try makeDelayedFaultProtocol(client: client)
             proto.startLoading() // captures the delayed closure
             proto.stopLoading() // marks the protocol stopped
 

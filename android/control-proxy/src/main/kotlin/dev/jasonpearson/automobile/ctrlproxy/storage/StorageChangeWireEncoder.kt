@@ -1,7 +1,12 @@
 package dev.jasonpearson.automobile.ctrlproxy.storage
 
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
+import dev.jasonpearson.automobile.ctrlproxy.explicitNullsResultFrame
+import dev.jasonpearson.automobile.protocol.StorageChangedEvent
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonUnquotedLiteral
 
 /**
  * Infers the change kind from SDK metadata forwarded unchanged by StorageSubscriptionManager. A
@@ -37,52 +42,46 @@ internal fun storageChangeType(event: PreferenceChangeEvent): String? =
 internal fun buildStorageChangedMessage(
   event: PreferenceChangeEvent,
   messageTimestampMs: Long,
-  json: Json,
-): String = buildString {
-  append("""{"type":"storage_changed","timestamp":$messageTimestampMs""")
-  append(""","packageName":${json.encodeToString(event.packageName)}""")
-  append(""","fileName":${json.encodeToString(event.fileName)}""")
-  if (event.key != null) {
-    append(""","key":${json.encodeToString(event.key)}""")
-  } else {
-    append(""","key":null""")
-  }
-  append(""","value":${encodeTypedValue(event.value, event.type, json)}""")
-  append(""","valueType":${json.encodeToString(event.type)}""")
-  storageChangeType(event)?.let { append(""","changeType":${json.encodeToString(it)}""") }
-  // Emit `previousValue` ONLY when the SDK actually supplied a prior-value type — i.e.
-  // it captured the change and knows the prior value (a genuine "no prior value" add
-  // still carries previousValueType = UNKNOWN, so it is emitted as null). A legacy SDK
-  // that predates #3000 omits previousValueType (it decodes to null through the protocol
-  // and StorageSubscriptionManager), so we omit `previousValue` entirely. That leaves the
-  // field absent on the wire, so the TS ingest's `previousValue !== undefined` guard falls
-  // through to the DB auto-lookup instead of recording a spurious null for a legacy-SDK
-  // change that lands after an existing row.
-  if (event.previousValueType != null) {
-    append(
-      ""","previousValue":${encodeTypedValue(event.previousValue, event.previousValueType, json)}""",
-    )
-  }
-  append(""","eventTimestamp":${event.timestamp}""")
-  append(""","sequenceNumber":${event.sequenceNumber}""")
-  append("}")
-}
+): String =
+  explicitNullsResultFrame(
+    StorageChangedEvent(
+      timestamp = messageTimestampMs,
+      packageName = event.packageName,
+      fileName = event.fileName,
+      key = event.key,
+      value = typedValueElement(event.value, event.type),
+      valueType = event.type,
+      changeType = storageChangeType(event),
+      // Emit `previousValue` ONLY when the SDK actually supplied a prior-value type — i.e.
+      // it captured the change and knows the prior value (a genuine "no prior value" add
+      // still carries previousValueType = UNKNOWN, so it is emitted as null). A legacy SDK
+      // that predates #3000 omits previousValueType (it decodes to null through the protocol
+      // and StorageSubscriptionManager), so we omit `previousValue` entirely. That leaves the
+      // field absent on the wire, so the TS ingest's `previousValue !== undefined` guard falls
+      // through to the DB auto-lookup instead of recording a spurious null for a legacy-SDK
+      // change that lands after an existing row.
+      previousValue = event.previousValueType?.let { typedValueElement(event.previousValue, it) },
+      eventTimestamp = event.timestamp,
+      sequenceNumber = event.sequenceNumber,
+    ),
+  )
 
 /**
- * Encodes a JSON value fragment for a preference value. Returns the literal `null` for a null
- * value, a JSON-quoted+escaped string for STRING, LONG, and non-finite FLOAT, and the
- * already-valid-JSON [value] verbatim for every other type (numbers, booleans, and SDK-produced
- * STRING_SET arrays).
+ * The JSON value for a preference value: [JsonNull] for a null value, a quoted+escaped string for
+ * STRING, LONG, and non-finite FLOAT, and the already-valid-JSON [value] verbatim for every other
+ * type (numbers, booleans, and SDK-produced STRING_SET arrays).
  */
-private fun encodeTypedValue(value: String?, type: String?, json: Json): String {
-  if (value == null) return "null"
-  return if (
+@OptIn(ExperimentalSerializationApi::class)
+private fun typedValueElement(value: String?, type: String?): JsonElement {
+  if (value == null) return JsonNull
+  val requiresQuotedValue =
     type == "STRING" ||
       type == "LONG" ||
       (type == "FLOAT" && value.toDoubleOrNull()?.isFinite() != true)
-  ) {
-    json.encodeToString(value)
-  } else {
-    value
+  return when {
+    requiresQuotedValue -> JsonPrimitive(value)
+    // JsonUnquotedLiteral refuses "null"; the old frame wrote the same bare literal.
+    value == "null" -> JsonNull
+    else -> JsonUnquotedLiteral(value)
   }
 }

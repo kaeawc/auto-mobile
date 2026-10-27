@@ -1,13 +1,5 @@
 <?xml version="1.0" ?>
 <SmellBaseline>
   <ManuallySuppressedIssues/>
-  <CurrentIssues>
-    <ID>ComplexCondition:DeviceControlPolicy.kt:DeviceControlPolicy$liveFrame != null &amp;&amp; (liveFrame.rotation == null || liveFrame.rotation !in 0..3 || liveFrame.rotation != screenshotRotation)</ID>
-    <ID>ComplexCondition:DeviceControlPolicy.kt:DeviceControlPolicy$screenshotRotation == null || hierarchyRotation == null || screenshotRotation !in 0..3 || hierarchyRotation !in 0..3 || screenshotRotation != hierarchyRotation</ID>
-    <ID>ComplexCondition:DeviceScreenCoordinateMapper.kt:DeviceScreenCoordinateMapper$imageWidth &lt;= 0 || imageHeight &lt;= 0 || rootWidth &lt;= 0 || rootHeight &lt;= 0</ID>
-    <ID>CyclomaticComplexMethod:DeviceControlPolicy.kt:DeviceControlPolicy$public fun evaluate: DeviceControlDecision</ID>
-    <ID>LongMethod:DeviceControlPolicy.kt:DeviceControlPolicy$public fun evaluate: DeviceControlDecision</ID>
-    <ID>LongParameterList:DeviceControlPolicy.kt:DeviceControlPolicy$public fun isGeometryConsistent: Boolean</ID>
-    <ID>LongParameterList:DeviceDragGesturePolicy.kt:DeviceDragGesturePolicy$public fun evaluate: DeviceDragDecision</ID>
-  </CurrentIssues>
+  <CurrentIssues/>
 </SmellBaseline>

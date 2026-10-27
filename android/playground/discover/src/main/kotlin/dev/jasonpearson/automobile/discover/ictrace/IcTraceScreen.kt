@@ -64,45 +64,19 @@ fun IcTraceScreen() {
           modifier = Modifier.fillMaxWidth().padding(12.dp),
         )
       }
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        AutoMobileTextField(
-          value = scenario,
-          onValueChange = {
-            scenario = it
-            recorder.updateScenario(it)
-          },
-          label = { Text("Scenario") },
-          singleLine = true,
-          modifier = Modifier.weight(1f),
-        )
-        Row {
-          Checkbox(
-            checked = captureText,
-            onCheckedChange = {
-              captureText = it
-              recorder.setCaptureText(it)
-            },
-          )
-          Text("Include text")
-        }
-      }
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        AutoMobileContentButton(onClick = { recorder.clear() }) { Text("Clear") }
-        AutoMobileContentButton(
-          onClick = {
-            exportIcTrace(recorder) { jsonl ->
-              val send =
-                Intent(Intent.ACTION_SEND).apply {
-                  type = "text/plain"
-                  putExtra(Intent.EXTRA_TEXT, jsonl)
-                }
-              context.startActivity(Intent.createChooser(send, "Export IC trace"))
-            }
-          },
-        ) {
-          Text("Export")
-        }
-      }
+      IcTraceOptions(
+        scenario,
+        captureText,
+        {
+          scenario = it
+          recorder.updateScenario(it)
+        },
+        {
+          captureText = it
+          recorder.setCaptureText(it)
+        },
+      )
+      IcTraceActions(recorder, context)
       Text("${events.size} events; ${recorder.droppedEventCount()} older events dropped")
       LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         items(events, key = { it.seq }) { event ->
@@ -117,6 +91,52 @@ fun IcTraceScreen() {
           }
         }
       }
+    }
+  }
+}
+
+@Composable
+private fun IcTraceOptions(
+  scenario: String,
+  captureText: Boolean,
+  onScenarioChange: (String) -> Unit,
+  onCaptureChange: (Boolean) -> Unit,
+) {
+  Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    AutoMobileTextField(
+      value = scenario,
+      onValueChange = onScenarioChange,
+      label = { Text("Scenario") },
+      singleLine = true,
+      modifier = Modifier.weight(1f),
+    )
+    Row {
+      Checkbox(
+        checked = captureText,
+        onCheckedChange = onCaptureChange,
+      )
+      Text("Include text")
+    }
+  }
+}
+
+@Composable
+private fun IcTraceActions(recorder: IcTraceRecorder, context: android.content.Context) {
+  Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    AutoMobileContentButton(onClick = { recorder.clear() }) { Text("Clear") }
+    AutoMobileContentButton(
+      onClick = {
+        exportIcTrace(recorder) { jsonl ->
+          val send =
+            Intent(Intent.ACTION_SEND).apply {
+              type = "text/plain"
+              putExtra(Intent.EXTRA_TEXT, jsonl)
+            }
+          context.startActivity(Intent.createChooser(send, "Export IC trace"))
+        }
+      },
+    ) {
+      Text("Export")
     }
   }
 }

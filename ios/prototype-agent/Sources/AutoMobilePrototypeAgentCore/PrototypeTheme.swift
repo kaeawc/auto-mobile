@@ -44,9 +44,9 @@ struct PrototypeRGBA: Equatable {
     }
 
     func contrast(with other: PrototypeRGBA) -> Double {
-        let a = luminance
-        let b = other.luminance
-        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+        let ownLuminance = luminance
+        let otherLuminance = other.luminance
+        return (max(ownLuminance, otherLuminance) + 0.05) / (min(ownLuminance, otherLuminance) + 0.05)
     }
 
     /// Hue in degrees [0, 360) and HSL saturation [0, 1].
@@ -69,13 +69,13 @@ struct PrototypeRGBA: Equatable {
     }
 
     static func hsl(_ hue: Double, _ saturation: Double, _ lightness: Double) -> PrototypeRGBA {
-        let h = (hue.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
-        let s = min(max(saturation, 0), 1)
-        let l = min(max(lightness, 0), 1)
-        let chroma = (1 - abs(2 * l - 1)) * s
-        let x = chroma * (1 - abs((h / 60).truncatingRemainder(dividingBy: 2) - 1))
-        let m = l - chroma / 2
-        let (r, g, b): (Double, Double, Double) = switch Int(h / 60) {
+        let normalizedHue = (hue.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
+        let clampedSaturation = min(max(saturation, 0), 1)
+        let clampedLightness = min(max(lightness, 0), 1)
+        let chroma = (1 - abs(2 * clampedLightness - 1)) * clampedSaturation
+        let x = chroma * (1 - abs((normalizedHue / 60).truncatingRemainder(dividingBy: 2) - 1))
+        let offset = clampedLightness - chroma / 2
+        let (red, green, blue): (Double, Double, Double) = switch Int(normalizedHue / 60) {
         case 0: (chroma, x, 0)
         case 1: (x, chroma, 0)
         case 2: (0, chroma, x)
@@ -83,7 +83,7 @@ struct PrototypeRGBA: Equatable {
         case 4: (x, 0, chroma)
         default: (chroma, 0, x)
         }
-        return PrototypeRGBA(red: r + m, green: g + m, blue: b + m)
+        return PrototypeRGBA(red: red + offset, green: green + offset, blue: blue + offset)
     }
 }
 
@@ -348,6 +348,13 @@ struct PrototypePalette: Equatable {
         return color
     }
 
+    /// A bottomSheet's scrim: the authored slot through `scrim`, or the `scrim` role at
+    /// `scrimRoleAlpha` when the sheet has none, the fallback Android draws
+    /// (`prototypeSheetScrimFallback`, #15117). A tap on it closes the sheet like an authored one.
+    func sheetScrim(_ spec: PrototypeModeValue?) -> PrototypeRGBA? {
+        scrim(spec ?? .single("scrim"))
+    }
+
     /// The asset id an image slot names in this palette's mode.
     func asset(_ slot: PrototypeModeValue?) -> String? {
         slot?.value(dark: dark)
@@ -390,25 +397,25 @@ struct PrototypePalette: Equatable {
         let chroma = seedSaturation == 0 ? 0 : min(max(seedSaturation, 0.25), 0.85)
         let neutral = 0.06
 
-        func tone(_ h: Double, _ s: Double, _ light: Double, _ darkTone: Double) -> PrototypeRGBA {
-            .hsl(h, s, dark ? darkTone : light)
+        func tone(_ hue: Double, _ saturation: Double, _ light: Double, _ darkTone: Double) -> PrototypeRGBA {
+            .hsl(hue, saturation, dark ? darkTone : light)
         }
         let surface = tone(hue, neutral, 0.98, 0.07)
 
         // HSL lightness is not perceptual: walk the accent away from the surface until legible.
-        func accent(_ h: Double, _ s: Double) -> PrototypeRGBA {
+        func accent(_ hue: Double, _ saturation: Double) -> PrototypeRGBA {
             let step = dark ? 0.02 : -0.02
             var lightness = dark ? 0.80 : 0.40
-            var color = PrototypeRGBA.hsl(h, s, lightness)
+            var color = PrototypeRGBA.hsl(hue, saturation, lightness)
             while color.contrast(with: surface) < 3, (0.05 ... 0.95).contains(lightness + step) {
                 lightness += step
-                color = .hsl(h, s, lightness)
+                color = .hsl(hue, saturation, lightness)
             }
             return color
         }
-        func onRole(_ role: PrototypeRGBA, _ h: Double, _ s: Double) -> PrototypeRGBA {
-            let light = PrototypeRGBA.hsl(h, s, 0.98)
-            let darkOn = PrototypeRGBA.hsl(h, s, 0.04)
+        func onRole(_ role: PrototypeRGBA, _ hue: Double, _ saturation: Double) -> PrototypeRGBA {
+            let light = PrototypeRGBA.hsl(hue, saturation, 0.98)
+            let darkOn = PrototypeRGBA.hsl(hue, saturation, 0.04)
             return role.contrast(with: light) >= role.contrast(with: darkOn) ? light : darkOn
         }
 

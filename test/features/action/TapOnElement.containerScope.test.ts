@@ -1,3 +1,5 @@
+import { flatHierarchyFromFixture } from "../../helpers/flatHierarchyFixture";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { describe, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
@@ -24,7 +26,7 @@ class ClickableRowProjection extends SearchableHierarchy {
   }
 }
 
-const capture = { hierarchy: { node: fixture.expanded } } as ViewHierarchyResult;
+const capture = flatHierarchyFromFixture({ hierarchy: { node: fixture.expanded } });
 const projection = new ClickableRowProjection();
 const nodes = projection.project(capture);
 const snapshot = { id: "captured-notification-rows", nodes };
@@ -178,7 +180,7 @@ test.each(["tap", "focus"] as const)(
     const resolve = spyOn(resolver, "resolve");
     const fieldCapture: ViewHierarchyResult = {
       hierarchy: {
-        node: {
+        node: createFlatNodeForTest({
           bounds: { left: 0, top: 0, right: 100, bottom: 50 },
           class: "android.widget.EditText",
           "resource-id": "phone",
@@ -186,7 +188,7 @@ test.each(["tap", "focus"] as const)(
           "hint-text": "Phone",
           clickable: true,
           focusable: true,
-        },
+        }),
       },
     };
     try {

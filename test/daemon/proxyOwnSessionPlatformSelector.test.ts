@@ -1,5 +1,5 @@
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import {
   DaemonBoundSessionExpiredError,
   DaemonConnectionSessionReleasedError,
@@ -14,9 +14,9 @@ import {
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_VERSION,
-} from "../../src/daemon/constants";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
+} from "../../src/daemon/wire/constants";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
+import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -789,4 +789,8 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
     expect(refusals[0]).toEqual(refusals[1]);
     expect(forwarded.length).toBe(before);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

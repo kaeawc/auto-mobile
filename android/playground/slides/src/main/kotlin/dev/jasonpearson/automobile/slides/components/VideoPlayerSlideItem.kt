@@ -25,6 +25,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
+import dev.jasonpearson.automobile.slides.model.SlideContent
 
 /**
  * Video player slide component using ExoPlayer with proper lifecycle management. Auto-pauses when
@@ -32,13 +33,14 @@ import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCar
  */
 @Composable
 fun VideoPlayerSlideItem(
-  videoUrl: String,
-  caption: String? = null,
-  contentDescription: String? = null,
+  content: SlideContent.Video,
   modifier: Modifier = Modifier,
   captionColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
   autoPlay: Boolean = false,
 ) {
+  val videoUrl = content.videoUrl
+  val caption = content.caption
+
   val context = LocalContext.current
 
   val exoPlayer = remember {
@@ -98,7 +100,7 @@ fun VideoPlayerSlideItem(
 
 /** Simplified video player for preview purposes. */
 @Composable
-private fun VideoPlayerPreview(caption: String? = null, modifier: Modifier = Modifier) {
+private fun VideoPlayerPreview(modifier: Modifier = Modifier, caption: String? = null) {
   Column(
     modifier = modifier.fillMaxSize().padding(24.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp),

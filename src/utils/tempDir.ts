@@ -15,7 +15,7 @@ import fs from "node:fs";
 import os from "os";
 import path from "path";
 import { ActionableError, toActionableError } from "../models/ActionableError";
-import { ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
+import { AMBIENT_ENV, ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
 import { resolveDaemonLaunchWorkingDirectory } from "./workingDirectory";
 
 /**
@@ -96,7 +96,7 @@ export function resolveAutoMobileLogsDir(
  * @param env - Environment to inspect (injectable for tests)
  */
 export function assertUnitTestLogsDirIsolated(env: NodeJS.ProcessEnv = process.env): void {
-  if (env.NODE_ENV !== "test") {
+  if (readEnvRaw(AMBIENT_ENV.NODE_ENV, env) !== "test") {
     return;
   }
   // Same `??` precedence as resolveAutoMobileLogsDir/resolveAutoMobileBaseDir: an
@@ -157,6 +157,25 @@ export function getSharedAutoMobileDir(
   if (homeDir.length === 0) {
     throw new Error(
       "Unable to resolve a shared AutoMobile directory without a home directory. Set AUTOMOBILE_COORDINATION_DIR to a writable shared directory.",
+    );
+  }
+  return path.join(path.resolve(homeDir), ".auto-mobile", subdirectory);
+}
+
+/**
+ * Resolve state describing host-global resources (CoreSimulator devices) that
+ * every daemon of this OS user must share regardless of coordination root.
+ * Deliberately ignores AUTOMOBILE_COORDINATION_DIR. Like getSharedAutoMobileDir,
+ * follows os.userInfo().homedir (HOME under Bun), so daemons started with
+ * different HOME values do not share this directory.
+ */
+export function getHostGlobalAutoMobileDir(
+  subdirectory: string,
+  homeDir: string = os.userInfo().homedir,
+): string {
+  if (homeDir.length === 0) {
+    throw new Error(
+      "Unable to resolve a host-global AutoMobile directory without an OS account home directory.",
     );
   }
   return path.join(path.resolve(homeDir), ".auto-mobile", subdirectory);
@@ -260,6 +279,7 @@ export const TEMP_SUBDIRS = {
   SCREENSHOTS: "screenshots",
   SNAPSHOTS: "snapshots",
   VIDEO_ARCHIVE: "video-archive",
+  PERFORMANCE_TRACES: "performance-traces",
   NAVIGATION_SCREENSHOTS: "navigation-screenshots",
   VIEW_HIERARCHY: "view_hierarchy",
   OBSERVE_RESULTS: "observe_results",

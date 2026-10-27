@@ -79,7 +79,16 @@ class InputAllocatingClientTest {
   fun `an allocated device receives the input after the allocation`() {
     val client = client(allowed = true)
 
-    val tap = client.inputTap(540.0, 1200.0, "android", "emulator-5554")
+    val tap =
+      client.inputTap(
+        input =
+          TapInput(
+            x = 540.0,
+            y = 1200.0,
+            platform = "android",
+            deviceId = "emulator-5554",
+          ),
+      )
     val key = client.inputKey("enter", "android", "emulator-5554")
 
     assertTrue(tap.success)
@@ -94,10 +103,36 @@ class InputAllocatingClientTest {
 
     val results =
       listOf(
-        client.inputTap(1.0, 2.0, "android", "emulator-5554"),
-        client.inputSwipe(1.0, 2.0, 3.0, 4.0, "android", "emulator-5554"),
+        client.inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+              platform = "android",
+              deviceId = "emulator-5554",
+            ),
+        ),
+        client.inputSwipe(
+          input =
+            SwipeInput(
+              startX = 1.0,
+              startY = 2.0,
+              endX = 3.0,
+              endY = 4.0,
+              platform = "android",
+              deviceId = "emulator-5554",
+            ),
+        ),
         client.inputPressButton("back", "android", "emulator-5554"),
-        client.inputTypeText("hi", "android", "emulator-5554", append = true),
+        client.inputTypeText(
+          input =
+            TextInput(
+              text = "hi",
+              platform = "android",
+              deviceId = "emulator-5554",
+              append = true,
+            ),
+        ),
         client.inputKey("enter", "android", "emulator-5554"),
       )
 
@@ -121,7 +156,17 @@ class InputAllocatingClientTest {
 
   @Test
   fun `input without a device id targets no device and is not gated`() {
-    val tap = client(allowed = false).inputTap(1.0, 2.0, "android", deviceId = null)
+    val tap =
+      client(allowed = false)
+        .inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+              platform = "android",
+              deviceId = null,
+            ),
+        )
 
     assertTrue(tap.success)
     assertEquals(emptyList(), allocations)
@@ -167,8 +212,26 @@ class InputAllocatingClientTest {
   fun `key-value writes allocate before the frame and carry the desktop session`() {
     val client = client(allowed = true, sessionUuid = "desktop-1")
 
-    client.setKeyValue("emulator-5554", "app", "prefs", "k", "v", "string")
-    client.removeKeyValue("emulator-5554", "app", "prefs", "k")
+    client.setKeyValue(
+      input =
+        SetKeyValueRequest(
+          deviceId = "emulator-5554",
+          appId = "app",
+          fileName = "prefs",
+          key = "k",
+          value = "v",
+          type = "string",
+        ),
+    )
+    client.removeKeyValue(
+      input =
+        RemoveKeyValueRequest(
+          deviceId = "emulator-5554",
+          appId = "app",
+          fileName = "prefs",
+          key = "k",
+        ),
+    )
     client.clearKeyValueFile("emulator-5554", "app", "prefs")
 
     assertEquals(
@@ -191,8 +254,30 @@ class InputAllocatingClientTest {
 
     val results =
       listOf(
-        client.setKeyValue("emulator-5554", "app", "prefs", "k", "v", "string").message,
-        client.removeKeyValue("emulator-5554", "app", "prefs", "k").message,
+        client
+          .setKeyValue(
+            input =
+              SetKeyValueRequest(
+                deviceId = "emulator-5554",
+                appId = "app",
+                fileName = "prefs",
+                key = "k",
+                value = "v",
+                type = "string",
+              ),
+          )
+          .message,
+        client
+          .removeKeyValue(
+            input =
+              RemoveKeyValueRequest(
+                deviceId = "emulator-5554",
+                appId = "app",
+                fileName = "prefs",
+                key = "k",
+              ),
+          )
+          .message,
         client.clearKeyValueFile("emulator-5554", "app", "prefs").message,
       )
 

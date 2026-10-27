@@ -29,7 +29,7 @@ open class AutoMobileTestCase: XCTestCase {
         let timingAvailable = TestTimingCache.shared.hasTimings(sessionUuid: timingSessionIdGenerator())
         logTimingOrdering(selection: orderingSelection, timingAvailable: timingAvailable)
 
-        let timingOrderingActive = orderingSelection.resolved != .none && timingAvailable
+        let timingOrderingActive = orderingSelection.resolved != .disabled && timingAvailable
         guard timingOrderingActive else {
             PerfTimer.log("defaultTestSuite: timing ordering inactive; returning default suite")
             return super.defaultTestSuite
@@ -266,7 +266,7 @@ open class AutoMobileTestCase: XCTestCase {
     }
 
     private enum TimingOrderingStrategy: String {
-        case none
+        case disabled = "none"
         case auto
         case durationAsc
         case durationDesc
@@ -306,9 +306,9 @@ open class AutoMobileTestCase: XCTestCase {
         case "duration-desc", "duration_desc", "longest-first", "longest_first", "longest":
             return .durationDesc
         case "none", "off", "false", "disabled":
-            return .none
+            return .disabled
         default:
-            return .none
+            return .disabled
         }
     }
 
@@ -352,7 +352,7 @@ open class AutoMobileTestCase: XCTestCase {
     )
         -> [XCTest]
     {
-        if strategy == .none || tests.isEmpty {
+        if strategy == .disabled || tests.isEmpty {
             return tests
         }
 
@@ -391,7 +391,7 @@ open class AutoMobileTestCase: XCTestCase {
                 }
                 return ($0.durationMs ?? 0) < ($1.durationMs ?? 0)
             }
-        case .auto, .none:
+        case .auto, .disabled:
             sortedWithTiming = withTiming
         }
 

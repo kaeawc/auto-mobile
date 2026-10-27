@@ -1,3 +1,4 @@
+import { buildElement } from "../../helpers/elementBuilder";
 import { describe, expect, test } from "bun:test";
 import {
   isNodeNotFoundReply,
@@ -25,7 +26,9 @@ describe("resource-ID action guard", () => {
     expect(await resourceIdActionError("row", async () => unique)).toBeUndefined();
     const duplicate: ViewHierarchyResult = {
       hierarchy: {
-        node: [{ $: { "resource-id": "app:id/row" } }, { $: { "resource-id": "other:id/row" } }],
+        node: {
+          node: [{ $: { "resource-id": "app:id/row" } }, { $: { "resource-id": "other:id/row" } }],
+        },
       },
     };
     expect(await resourceIdActionError("row", async () => duplicate)).toContain(
@@ -33,18 +36,15 @@ describe("resource-ID action guard", () => {
     );
   });
 
-  test.each([
+  test.each<ViewHierarchyResult | null>([
     null,
     { hierarchy: { error: "capture failed" } },
     { ...unique, ctrlProxyIncomplete: true },
     { ...unique, truncationReasons: ["max_children"] },
-    { hierarchy: { node: [] } },
-  ] satisfies (ViewHierarchyResult | null)[])(
-    "unverifiable hierarchy fails closed: %j",
-    async (hierarchy) => {
-      expect(await resourceIdActionError("app:id/row", async () => hierarchy)).toBeDefined();
-    },
-  );
+    { hierarchy: { node: { node: [] } } },
+  ])("unverifiable hierarchy fails closed: %j", async (hierarchy) => {
+    expect(await resourceIdActionError("app:id/row", async () => hierarchy)).toBeDefined();
+  });
 
   test("read failure skips the action but a stale display still propagates", async () => {
     expect(
@@ -68,7 +68,7 @@ describe("resource-ID action guard", () => {
     const driver = new FakeTalkBackNavigationDriver();
     expect(
       await new TalkBackTapStrategy().executeDirectActivation(
-        { "resource-id": "app:id/row" },
+        buildElement({ "resource-id": "app:id/row" }),
         driver,
       ),
     ).toMatchObject({ success: false, method: "accessibility-action" });

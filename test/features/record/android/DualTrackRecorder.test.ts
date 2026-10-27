@@ -25,7 +25,7 @@ import type { RawTouchFrame } from "../../../../src/features/record/android/type
 // Fakes
 // ---------------------------------------------------------------------------
 
-type InteractionListener = (event: { type: string; [key: string]: unknown }) => void;
+type InteractionListener = Parameters<A11ySource["onInteraction"]>[0];
 
 class FakeGestureEmitter implements GestureEmitter {
   startCount = 0;
@@ -76,7 +76,7 @@ class FakeA11ySource implements A11ySource {
     };
   }
 
-  emit(event: { type: string; [key: string]: unknown }): void {
+  emit(event: Parameters<InteractionListener>[0]): void {
     this.listener?.(event);
   }
 }
@@ -1219,7 +1219,6 @@ describe("DualTrackRecorder", () => {
       const steps = await recordedSwipe({
         startX: 500,
         startY: 1200,
-        endX: 500,
         endY: 600,
         ...overrides,
       });
@@ -1935,7 +1934,7 @@ describe("resolveSwipeDirection (scroll-delta axis mapping)", () => {
     [10, 10, "left", "an axis tie resolves on the X branch"],
     [undefined, undefined, null, "absent deltas mean no direction"],
   ])("resolveSwipeDirection(%p, %p) → %p (%s)", (dx, dy, expected, _why) => {
-    expect(resolveSwipeDirection(dx, dy)).toBe(expected);
+    expect<unknown>(resolveSwipeDirection(dx, dy)).toBe(expected);
   });
 });
 

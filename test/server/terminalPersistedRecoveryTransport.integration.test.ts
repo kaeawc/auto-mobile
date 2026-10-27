@@ -1,3 +1,4 @@
+import { toolText } from "../helpers/toolResponse";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterEach, describe, expect, test, beforeAll, afterAll } from "bun:test";
@@ -80,6 +81,7 @@ describe("terminal persisted recovery MCP transport", () => {
       session_uuid: SESSION_UUID,
       device_id: "emulator-5554",
       stable_device_id: "Pixel_8_API_35",
+      stable_identity_generation: 0,
       platform: "android",
       status: "expired",
       source: "session-manager",
@@ -94,6 +96,14 @@ describe("terminal persisted recovery MCP transport", () => {
       session_timeout_ms: 10,
       heartbeat_timeout_ms: 5,
       has_received_heartbeat: 1,
+      activity_seq: 0,
+      heartbeat_timeout_source: null,
+      liveness_contract_generation: 0,
+      liveness_owner_token: null,
+      liveness_policy: null,
+      pre_cli_heartbeat_timeout_ms: null,
+      pre_cli_heartbeat_timeout_source: null,
+      pre_cli_session_timeout_ms: null,
       created_at: "2026-09-15T00:00:00.000Z",
       updated_at: "2026-09-15T00:00:00.000Z",
     };
@@ -144,9 +154,7 @@ describe("terminal persisted recovery MCP transport", () => {
       arguments: { sessionUuid: SESSION_UUID, platform: "android" },
     });
     expect(blockedRecovery).toMatchObject({ isError: true });
-    expect(blockedRecovery.content[0].text).toContain(
-      `Cannot safely recover session ${SESSION_UUID}`,
-    );
+    expect(toolText(blockedRecovery)).toContain(`Cannot safely recover session ${SESSION_UUID}`);
     expect(devicePool.assignments).toBe(1);
     expect(persisted.release_reason).toBe("identity-recovery-target-busy");
 

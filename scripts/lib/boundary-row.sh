@@ -7,7 +7,7 @@
 # Usage: run_boundary_row <row-id> <label> <fetch-pr-base: 0|1> <base-ref>
 # Exit: 0 clean, 1 violations, 2 base ref missing.
 
-# shellcheck disable=SC1091 # Resolved relative to this script's location.
+# shellcheck source=scripts/lib/vcs-diff.sh
 source "$(dirname "${BASH_SOURCE[0]}")/vcs-diff.sh"
 
 run_boundary_row() {

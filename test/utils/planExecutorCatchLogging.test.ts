@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -7,6 +7,11 @@ import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { loggerCallsWithPrefix } from "../helpers/loggerCallsWithPrefix";
 import { FakeLogger } from "../fakes/FakeLogger";
+import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
+
+afterEach(() => {
+  mock.restore();
+});
 
 function registerThrowingTool(name: string): void {
   ToolRegistry.register(name, "Throws for catch logging tests", z.object({}), async () => {
@@ -36,6 +41,10 @@ function registerStructuredFailureTool(name: string): void {
     }),
   );
 }
+
+// Runs with an empty registry and restores the exact pre-existing tools afterwards, so a shared
+// process never sees the registry emptied by this file's per-test clearTools().
+isolateEmptyToolRegistry();
 
 afterEach(() => {
   ToolRegistry.clearTools();
@@ -142,8 +151,10 @@ describe("PlanExecutor result boundary warnings", () => {
       const error = new Error(`${boundary} failed`);
       const failure =
         boundary === "step"
-          ? spyOn(executor, "executeStep").mockRejectedValue(error)
-          : spyOn(executor, "executeDeviceTrack").mockRejectedValue(error);
+          ? spyOn(ToolRegistry, "getToolForPlan").mockImplementation(() => {
+              throw error;
+            })
+          : spyOn(executor.planDeviceTrackExecutor, "executeDeviceTrack").mockRejectedValue(error);
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         const result = await executor.executePlan(

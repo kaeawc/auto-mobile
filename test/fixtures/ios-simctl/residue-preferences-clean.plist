@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>isAppAndAccessoryAnalyticsAllowedRemoval</key>
+	<true/>
+	<key>locationBasedAlertsMigrationVersionHash</key>
+	<integer>5489259180350329020</integer>
+	<key>locationHomeKitMigrationVersionHash</key>
+	<integer>-6631042078203184308</integer>
+	<key>locationSystemCustomizationMigrationVersionHash</key>
+	<integer>7221500314431908556</integer>
+	<key>locationWifiBluetoothUWBMigrationVersionHash</key>
+	<integer>7511997438320812976</integer>
+	<key>ranHTTP3DeveloperOptInMigrator16.0</key>
+	<true/>
+	<key>ranRestrictionsPINMigrator12.0</key>
+	<true/>
+	<key>ranSoundMigrator13.0</key>
+	<true/>
+	<key>ranTigrisAutoBrightnessMigrator11.0</key>
+	<true/>
+</dict>
+</plist>

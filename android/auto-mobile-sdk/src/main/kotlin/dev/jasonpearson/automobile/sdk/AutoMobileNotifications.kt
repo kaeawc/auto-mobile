@@ -10,8 +10,11 @@ import android.graphics.BitmapFactory
 import android.os.Build
 import android.util.Base64
 import androidx.core.app.NotificationCompat
+import androidx.core.graphics.scale
+import androidx.core.net.toUri
 import java.io.File
 import java.io.FileInputStream
+import java.io.IOException
 import java.io.InputStream
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -224,9 +227,7 @@ object AutoMobileNotifications {
         putExtra(EXTRA_NOTIFICATION_ID, notificationId)
       }
 
-    val flags =
-      PendingIntent.FLAG_UPDATE_CURRENT or
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+    val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 
     val pendingIntent =
       PendingIntent.getBroadcast(context, action.actionId.hashCode(), intent, flags)
@@ -253,14 +254,7 @@ object AutoMobileNotifications {
     }
 
     if (trimmed.startsWith("content://")) {
-      return try {
-        decodeBitmapFromStream(
-          context.contentResolver.openInputStream(android.net.Uri.parse(trimmed)),
-        )
-      } catch (e: Exception) {
-        AutoMobileSDK.logger.w(TAG, e) { "Failed to open content URI for image" }
-        null
-      }
+      return loadContentBitmap(context, trimmed)
     }
 
     val candidatePaths =
@@ -277,7 +271,9 @@ object AutoMobileNotifications {
           FileInputStream(file).use { stream ->
             return decodeBitmapFromStream(stream)
           }
-        } catch (e: Exception) {
+        } catch (e: IOException) {
+          AutoMobileSDK.logger.w(TAG, e) { "Failed to read image file at $path" }
+        } catch (e: SecurityException) {
           AutoMobileSDK.logger.w(TAG, e) { "Failed to read image file at $path" }
         }
       }
@@ -286,11 +282,23 @@ object AutoMobileNotifications {
     return decodeBitmapFromBase64(trimmed)
   }
 
+  private fun loadContentBitmap(context: Context, uri: String): Bitmap? {
+    return try {
+      decodeBitmapFromStream(
+        context.contentResolver.openInputStream(uri.toUri()),
+      )
+    } catch (e: Exception) {
+      // Content providers belong to other apps and can fail with arbitrary runtime exceptions.
+      AutoMobileSDK.logger.w(TAG, e) { "Failed to open content URI for image" }
+      null
+    }
+  }
+
   private fun decodeBitmapFromBase64(base64Data: String): Bitmap? {
     return try {
       val bytes = Base64.decode(base64Data, Base64.DEFAULT)
       decodeBitmapFromBytes(bytes)
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
       AutoMobileSDK.logger.w(TAG, e) { "Failed to decode base64 image" }
       null
     }
@@ -339,6 +347,6 @@ object AutoMobileNotifications {
     val ratio = min(maxDim.toFloat() / width, maxDim.toFloat() / height)
     val newWidth = (width * ratio).roundToInt().coerceAtLeast(1)
     val newHeight = (height * ratio).roundToInt().coerceAtLeast(1)
-    return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+    return bitmap.scale(newWidth, newHeight, true)
   }
 }

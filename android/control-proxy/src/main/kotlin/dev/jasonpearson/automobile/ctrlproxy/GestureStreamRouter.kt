@@ -1,5 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.protocol.RequestGestureEnd
+import dev.jasonpearson.automobile.protocol.RequestGestureStart
+
 /**
  * Routes wire requests to streamed gestures. Every map access and [GestureStreamSession] finish
  * callback runs on the gesture thread; callers may invoke [start], [move], and [end] from IO
@@ -36,28 +39,29 @@ internal class GestureStreamRouter(
   private val terminalFailures = linkedMapOf<String, Outcome>()
   private var closed = false
 
-  fun start(
-    requestId: String?,
-    gestureId: String,
-    x: Float,
-    y: Float,
-    displayId: Int? = null,
-    owner: WebSocketServer.ConnectedClient? = null,
-  ) = runOnGestureThread {
-    // A command can post its start just after the disconnect hook posts cancellation.
-    if (closed || owner?.isConnected == false) return@runOnGestureThread
-    if (sessions.containsKey(gestureId)) {
-      onResult(requestId, false, "Gesture $gestureId is already active")
-      return@runOnGestureThread
+  fun start(request: RequestGestureStart, owner: WebSocketServer.ConnectedClient? = null): Boolean {
+    val requestId = request.requestId
+    val gestureId = request.gestureId
+    val x = request.x.toFloat()
+    val y = request.y.toFloat()
+    val displayId = request.displayId
+
+    return runOnGestureThread {
+      // A command can post its start just after the disconnect hook posts cancellation.
+      if (closed || owner?.isConnected == false) return@runOnGestureThread
+      if (sessions.containsKey(gestureId)) {
+        onResult(requestId, false, "Gesture $gestureId is already active")
+        return@runOnGestureThread
+      }
+      // A new stream with the same wire id supersedes an unclaimed old result.
+      terminalFailures.remove(gestureId)
+      lateinit var gesture: Gesture
+      val session = newSession { success, error -> finish(gestureId, gesture, success, error) }
+      gesture = Gesture(owner, session)
+      sessions[gestureId] = gesture
+      session.start(x, y, displayId)
+      onResult(requestId, true, null)
     }
-    // A new stream with the same wire id supersedes an unclaimed old result.
-    terminalFailures.remove(gestureId)
-    lateinit var gesture: Gesture
-    val session = newSession { success, error -> finish(gestureId, gesture, success, error) }
-    gesture = Gesture(owner, session)
-    sessions[gestureId] = gesture
-    session.start(x, y, displayId)
-    onResult(requestId, true, null)
   }
 
   /** Fail other connected awaiters before cancelling on the existing gesture thread. */
@@ -86,28 +90,29 @@ internal class GestureStreamRouter(
     onResult(requestId, true, null)
   }
 
-  fun end(
-    requestId: String?,
-    gestureId: String,
-    x: Float,
-    y: Float,
-    cancel: Boolean,
-    requester: WebSocketServer.ConnectedClient? = null,
-  ) = runOnGestureThread {
-    if (closed) return@runOnGestureThread
-    val session = sessions[gestureId]?.session
-    if (session == null) {
-      // A failure can arrive before the end frame. Return its actual result to that awaiter.
-      val outcome = terminalFailures.remove(gestureId)
-      onResult(requestId, outcome?.success ?: true, outcome?.error)
-      return@runOnGestureThread
+  fun end(request: RequestGestureEnd, requester: WebSocketServer.ConnectedClient? = null): Boolean {
+    val requestId = request.requestId
+    val gestureId = request.gestureId
+    val x = request.x.toFloat()
+    val y = request.y.toFloat()
+    val cancel = request.cancel
+
+    return runOnGestureThread {
+      if (closed) return@runOnGestureThread
+      val session = sessions[gestureId]?.session
+      if (session == null) {
+        // A failure can arrive before the end frame. Return its actual result to that awaiter.
+        val outcome = terminalFailures.remove(gestureId)
+        onResult(requestId, outcome?.success ?: true, outcome?.error)
+        return@runOnGestureThread
+      }
+      if (requestId != null) {
+        pendingEndRequests
+          .getOrPut(gestureId) { mutableListOf() }
+          .add(PendingEnd(requestId, requester))
+      }
+      session.end(x, y, cancel)
     }
-    if (requestId != null) {
-      pendingEndRequests
-        .getOrPut(gestureId) { mutableListOf() }
-        .add(PendingEnd(requestId, requester))
-    }
-    session.end(x, y, cancel)
   }
 
   private fun finish(gestureId: String, gesture: Gesture, success: Boolean, error: String?) {

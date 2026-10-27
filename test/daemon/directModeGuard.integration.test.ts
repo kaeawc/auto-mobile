@@ -231,7 +231,6 @@ describe("createDefaultDirectModeGuardDeps", () => {
     // Where `ps` should work, a scan failure means we can't rule out a live daemon
     // on this DB file — refuse rather than risk a second writer. #2795
     const deps = createDefaultDirectModeGuardDeps({
-      platform: "linux",
       manager: {
         findLiveDaemonProcesses: () => {
           throw new Error("ps: command failed");

@@ -2,7 +2,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { DefaultAfterToolCallHandler, ToolRegistry } from "../../src/server/toolRegistry";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -17,6 +17,8 @@ import {
 } from "../../src/utils/toolUtils";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+import { toolJson, toolStructured, toolText } from "../helpers/toolResponse";
+import { buildObserveResult } from "../helpers/observeFixture";
 
 const observationSchema = z.looseObject({
   viewHierarchy: z.looseObject({
@@ -47,10 +49,10 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     platform: "android",
   };
 
-  let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: ReturnType<
+  let fakeDeviceReadiness: FakeDeviceReadiness;
+  let originalDeviceReadiness: ReturnType<
     typeof ToolRegistry.getCollaboratorsForTesting
-  >["deviceSessionManager"];
+  >["deviceReadiness"];
   let originalAfterToolCall: ReturnType<
     typeof ToolRegistry.getCollaboratorsForTesting
   >["afterToolCall"];
@@ -58,7 +60,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
   let restorePipelineOverrides: (() => void) | undefined;
 
   function makeObserveResult(): ObserveResult {
-    return {
+    return buildObserveResult({
       updatedAt: 42,
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -72,7 +74,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
           },
         },
       },
-    };
+    });
   }
 
   /**
@@ -81,7 +83,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
    * resolved autolock sessionId whose cache the tool call will populate.
    */
   async function setupAutolockedSession(): Promise<string> {
-    fakeDeviceSessionManager.setConnectedDevices([androidA]);
+    fakeDeviceReadiness.setConnectedDevices([androidA]);
 
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -108,9 +110,9 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
-    fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    fakeDeviceReadiness = new FakeDeviceReadiness();
+    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceReadiness;
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     // #6866: the after-tool-call pipeline now settles a navigation-class action's
     // embedded observation against the DEVICE before finalizing. These tests drive
     // stub handlers with canned observations against a fake device, so swap in a
@@ -132,7 +134,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: originalDeviceReadiness });
     ToolRegistry.setPipelineOverridesForTesting({ afterToolCall: originalAfterToolCall });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
@@ -184,7 +186,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     expect((cacheData as Record<string, unknown>).customData).toBeUndefined();
 
     // Returned wire response is sanitized at the chokepoint.
-    const returnedRoot = observationSchema.parse(response.structuredContent).viewHierarchy.hierarchy
+    const returnedRoot = observationSchema.parse(toolStructured(response)).viewHierarchy.hierarchy
       .node;
     expect(returnedRoot["view-id"]).toBeUndefined();
     expect(returnedRoot.clickable).toBeUndefined();
@@ -213,15 +215,15 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     });
 
     // Action's nested observation is sanitized in BOTH representations.
-    const actionResponse = actionResponseSchema.parse(response.structuredContent);
+    const actionResponse = actionResponseSchema.parse(toolStructured(response));
     const scRoot = actionResponse.observation.viewHierarchy.hierarchy.node;
     expect(scRoot["view-id"]).toBeUndefined();
     expect(scRoot.clickable).toBeUndefined();
     expect(actionResponse.success).toBe(true);
 
-    const parsed = JSON.parse(response.content[0].text);
+    const parsed = actionResponseSchema.parse(toolJson(response));
     expect(parsed.observation.viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
-    expect(response.content[0].text).toBe(stringifyToolResponse(response.structuredContent));
+    expect(toolText(response)).toBe(stringifyToolResponse(toolStructured(response)));
 
     const cacheData = daemonSessionManager!.getSession(sessionId)!.cacheData;
     const cachedHierarchy = cacheData.lastHierarchy;

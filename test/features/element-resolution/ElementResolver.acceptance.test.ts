@@ -1,3 +1,4 @@
+import { wireCapture } from "../../helpers/wireCapture";
 import { expect, test } from "bun:test";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
@@ -13,7 +14,10 @@ const tap = { action: "tap" as const };
 test("nested scopes resolve outer to inner and identify the failing level", () => {
   const original = containerFixture.viewHierarchy.hierarchy.node;
   const hierarchy = { hierarchy: { node: { "resource-id": "cart_A", node: original } } };
-  const capture = { id: "nested", nodes: new SearchableHierarchy().project(hierarchy) };
+  const capture = {
+    id: "nested",
+    nodes: new SearchableHierarchy().project(wireCapture(hierarchy)),
+  };
   const query = {
     elementId: "action",
     selectionStrategy: "unique" as const,
@@ -80,7 +84,10 @@ test("unique scopes fail before considering a matching descendant and indices st
       ],
     },
   };
-  const capture = { id: "duplicates", nodes: new SearchableHierarchy().project(hierarchy) };
+  const capture = {
+    id: "duplicates",
+    nodes: new SearchableHierarchy().project(wireCapture(hierarchy)),
+  };
   const selector = {
     elementId: "action",
     container: {
@@ -133,7 +140,10 @@ test("text container stays on its matching child instead of promoted row", () =>
       ],
     },
   };
-  const capture = { id: "text-container", nodes: new SearchableHierarchy().project(hierarchy) };
+  const capture = {
+    id: "text-container",
+    nodes: new SearchableHierarchy().project(wireCapture(hierarchy)),
+  };
   expect(
     resolver.resolve(capture, { text: "Target", container: { text: "Header" } }, tap).chosen,
   ).toBeNull();
@@ -159,7 +169,10 @@ test("duplicate container IDs use the same smallest-area scope as direct selecti
       ],
     },
   };
-  const capture = { id: "containers", nodes: new SearchableHierarchy().project(hierarchy) };
+  const capture = {
+    id: "containers",
+    nodes: new SearchableHierarchy().project(wireCapture(hierarchy)),
+  };
   const direct = resolver.resolve(capture, { elementId: "app:id/list" }, tap);
   const scoped = resolver.resolve(
     capture,
@@ -233,9 +246,13 @@ test.each([false, true])(
       clickable: true,
       bounds,
     };
-    const nodes = new SearchableHierarchy().project({
-      hierarchy: { node: duplicate ? [original, { ...original, "view-id": "other" }] : [original] },
-    });
+    const nodes = new SearchableHierarchy().project(
+      wireCapture({
+        hierarchy: {
+          node: duplicate ? [original, { ...original, "view-id": "other" }] : [original],
+        },
+      }),
+    );
     const result = resolver.resolve(
       { id: "new", nodes },
       { elementId: nodeKey },

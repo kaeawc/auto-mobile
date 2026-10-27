@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { readObservationForInteractions } from "./identifyInteractionsObservation";
 import { toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -30,8 +31,12 @@ import {
   platformSchema,
   withAppIdAliases,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
-import { hierarchyLayerSchema, nestedElementContainerSchema } from "./elementSelectorSchemas";
+  includeExtrasSchema,
+} from "../utils/schemaHelpers";
+import {
+  hierarchyLayerSchema,
+  nestedElementContainerSchema,
+} from "../models/elementSelectorSchemas";
 import {
   scopeHierarchyForSelector,
   scopeObserveResultToLayer,
@@ -40,8 +45,8 @@ import { observeToolResultSchema } from "./toolOutputSchemas";
 import { defaultTimer } from "../utils/SystemTimer";
 import { consumeSetupTiming } from "./ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
-import { accessibilityDetector } from "../features/accessibility/AccessibilityDetector";
-import type { AccessibilityDetector } from "../features/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector } from "../ctrlProxy/accessibility/AccessibilityDetector";
+import type { AccessibilityDetector } from "../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { logger } from "../utils/logger";
 import { type ScreenshotMode } from "../features/observe/automaticScreenshotPolicy";
@@ -178,6 +183,7 @@ const observeBaseSchema = withJsonSchemaOverride(
           .optional()
           .describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)"),
         raw: z.boolean().optional().describe("Include raw view hierarchy"),
+        includeExtras: includeExtrasSchema,
         screenshot: z
           .enum(["settled", "async", "none"])
           .optional()
@@ -401,7 +407,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       }
 
       if (shouldPublishObservation(deviceRead, aggregate)) {
-        attachSnapshotReference(device.deviceId, result);
+        attachSnapshotReference(device.deviceId, result, dependencies.snapshotReferences);
       }
 
       if (shouldAppendRawObserveHierarchy(args, deviceRead)) {
@@ -503,6 +509,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     observeSchema,
     observeHandler,
     {
+      ...PLAN_RELEVANT,
       defaultEnabled: true,
       // Watching is allowed on any device, whichever session holds it (#10730).
       deviceReadOnly: true,
@@ -588,13 +595,16 @@ function observeWaitParameters(
   return [
     observeScreen,
     { ...args.waitFor, settled: args.settled, layer: args.layer },
-    signal,
-    args.skipBackStack ?? false,
-    dependencies.timer ?? defaultTimer,
-    device.platform,
-    screenshot.mode,
-    screenshot.options,
-    ...displayWaitInventory(device),
+    {
+      signal,
+      skipBackStack: args.skipBackStack ?? false,
+      timer: dependencies.timer ?? defaultTimer,
+      platform: device.platform,
+      screenshot: screenshot.mode,
+      screenshotOptions: screenshot.options,
+      displayInventory: displayWaitInventory(device)[0],
+      displayPanels: displayWaitInventory(device)[1],
+    },
   ];
 }
 

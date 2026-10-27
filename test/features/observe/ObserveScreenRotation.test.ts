@@ -141,6 +141,9 @@ test("post-action observation inherits the fallback from real ObserveScreen", as
     changeExpected: false,
     deferPostActionScreenshot: true,
   });
+  if (!result.observation) {
+    throw new Error("Expected post-action observation");
+  }
   expect(result.observation.rotation).toBe(1);
   expect(result.observation.viewHierarchy?.rotation).toBeUndefined();
 });
@@ -181,6 +184,9 @@ test("tapOn hierarchy replacements reconcile rotation from the replacement size"
     [{ ...landscape, rotation: 3 }, 3],
   ] as const) {
     action["replaceObservationHierarchy"](result, hierarchy, false);
+    if (hierarchy.screenWidth === undefined || hierarchy.screenHeight === undefined) {
+      throw new Error("Expected captured dimensions");
+    }
     expect(result.screenSize).toEqual({
       width: hierarchy.screenWidth,
       height: hierarchy.screenHeight,

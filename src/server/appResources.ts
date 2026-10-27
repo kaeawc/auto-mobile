@@ -1,15 +1,10 @@
 import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
+import type { AppResourceDependencies } from "../features/deviceLifecycle/deviceLifecycleServerHost";
 import { GetAppMetadata } from "../features/observe/GetAppMetadata";
 import { createIosMetadataSource } from "../utils/iosAppMetadataSource";
-import {
-  BootedDevice,
-  InstalledApp,
-  InstalledAppsByProfile,
-  Platform,
-  SystemInstalledApp,
-} from "../models";
+import { BootedDevice, Platform } from "../models";
 import { logger } from "../utils/logger";
 import {
   getInstalledAppsCacheWriteCoordinator,
@@ -25,13 +20,39 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import {
-  getIosInstalledAppBundleId,
-  getIosInstalledAppPath,
-} from "../utils/ios-cmdline-tools/iosInstalledApp";
-import {
   findBootedDeviceForResource,
   listBootedDevicesForResource,
 } from "./resourceDeviceResolver";
+import type {
+  AppsCacheEntry,
+  AppsQueryDeviceContent,
+  AppsQueryOptions,
+  AppsQueryResourceContent,
+  AppsQueryType,
+  AppsResourceContent,
+  InstalledAppInfo,
+} from "./appResourcesTypes";
+import {
+  buildAppsByPackage,
+  normalizeAndroidApps,
+  normalizeIosApps,
+} from "./appResourcesNormalization";
+import {
+  assertRequestedTypeIsAnswerable,
+  filterAppsByQuery,
+  isLaunchabilityUnknown,
+  launchabilityUnknownApps,
+  launchabilityUnknownProfiles,
+  resolveEffectiveAppsQueryType,
+} from "./appResourcesQuery";
+
+export type {
+  AppsQueryAppInfo,
+  AppsQueryOptions,
+  AppsQueryResourceContent,
+} from "./appResourcesTypes";
+export { extractIosApplicationType, toQueryIosApp } from "./appResourcesNormalization";
+export { filterAppsByQuery } from "./appResourcesQuery";
 
 // Resource URI templates
 export const APP_RESOURCE_TEMPLATES = {
@@ -47,15 +68,6 @@ export const APPS_RESOURCE_URIS = {
 const APPS_QUERY_KEYS = ["deviceId", "platform", "search", "type", "profile"] as const;
 const APPS_QUERY_TEMPLATE = `${APPS_RESOURCE_URIS.BASE}{?${APPS_QUERY_KEYS.join(",")}}`;
 const APPS_QUERY_PARAM_KEYS = new Set<string>(APPS_QUERY_KEYS);
-type InstalledAppType = "user" | "system";
-/**
- * `launchable` is a cross-cutting filter, not a fourth classification: an app
- * keeps its "user"/"system" type and is additionally selected by whether it has
- * a launcher entry point. It is the default because the previous "user" default
- * hid every system app a human names in a task — Contacts, Clock, Settings —
- * while still returning providers and RRO overlays under type=all (#6798).
- */
-export type AppsQueryType = InstalledAppType | "all" | "launchable";
 /** Single source of truth for the accepted `type` values (tool schema + resource query string). */
 export const APPS_QUERY_TYPES: ReadonlySet<string> = new Set<AppsQueryType>([
   "user",
@@ -63,144 +75,6 @@ export const APPS_QUERY_TYPES: ReadonlySet<string> = new Set<AppsQueryType>([
   "all",
   "launchable",
 ]);
-
-export interface AppsQueryOptions {
-  platform?: Platform;
-  search?: string;
-  type?: AppsQueryType;
-  profile?: number;
-  deviceId?: string;
-}
-
-export interface AppsQueryAppInfo {
-  packageName: string;
-  type: InstalledAppType;
-  foreground: boolean;
-  recent: boolean;
-  userId?: number;
-  userProfile?: "personal" | "work" | "secondary" | "unknown";
-  userIds?: number[];
-  /**
-   * Launcher label as a human sees it ("Contacts"). Absent when no source
-   * reported one — on Android that means CtrlProxy was unavailable, since adb
-   * cannot resolve a package's label resource (#6798).
-   */
-  label?: string;
-  /**
-   * iOS-only legacy alias for client compatibility; `label` is canonical
-   * going forward (#6798).
-   */
-  displayName?: string;
-  /**
-   * Whether the app has a launchable entry point. For a deduplicated Android
-   * system app this summarizes "launches for at least one of `userIds`".
-   * `undefined` means "not reported", never "no" (#6798).
-   */
-  launchable?: boolean;
-  /**
-   * Launchability per Android user id, where it was reported. A launcher
-   * activity can be disabled for the owner and enabled in a work profile, so a
-   * profile-scoped query reads this rather than the scalar (#6798 review).
-   */
-  launchableByUserId?: Record<number, boolean>;
-}
-
-interface AppsQueryDeviceContent {
-  deviceId: string;
-  platform: Platform;
-  totalCount: number;
-  lastUpdated: string;
-  apps: AppsQueryAppInfo[];
-}
-
-export interface AppsQueryResourceContent {
-  query: AppsQueryOptions;
-  observationComplete: boolean;
-  totalCount: number;
-  /**
-   * Apps installed on the device before any filter was applied. Lets a caller
-   * see that a small result is a filter effect rather than a short device
-   * inventory, so the default no longer hides apps silently (#6798).
-   */
-  installedCount: number;
-  deviceCount: number;
-  lastUpdated: string;
-  devices: AppsQueryDeviceContent[];
-  /**
-   * Android user ids whose apps carried no launchability signal at all (their
-   * launcher probe failed while another profile's succeeded). Present only when
-   * non-empty: the `launchable` filter cannot judge those profiles, so naming
-   * them keeps a device-wide query from dropping them silently (#6798 review).
-   */
-  launchabilityUnknownProfiles?: number[];
-  /**
-   * Apps matching this query's profile and search filters whose launchability
-   * was not reported. Present only when non-empty: the `launchable` filter
-   * excludes them until they are proven launchable rather than silently
-   * presenting missing metadata as a negative answer (#6798 review).
-   */
-  launchabilityUnknownApps?: string[];
-}
-
-// Resource content schema
-interface AppsResourceContent {
-  deviceId: string;
-  platform: Platform;
-  observationComplete: boolean;
-  apps: InstalledAppInfo[];
-  totalCount: number;
-  foregroundApp: string | null;
-  lastUpdated: string; // ISO 8601
-  message?: string;
-}
-
-interface AndroidInstalledAppInfo {
-  packageName: string;
-  userId: number;
-  userProfile: "personal" | "work" | "secondary" | "unknown";
-  foreground: boolean;
-  recent: boolean;
-  label?: string;
-  launchable?: boolean;
-}
-
-export interface IosInstalledAppInfo {
-  bundleId: string;
-  type: InstalledAppType;
-  displayName?: string;
-  version?: string;
-  path?: string;
-  launchable?: boolean;
-}
-
-type InstalledAppInfo = AndroidInstalledAppInfo | IosInstalledAppInfo;
-
-interface AppsCacheEntry {
-  expiresAt: number;
-  content: AppsResourceContent;
-  appsByPackage: Map<string, InstalledAppInfo[]>;
-  queryApps: AppsQueryAppInfo[];
-  /**
-   * True when at least one iOS app on this (physical) device could not be
-   * reliably classified user/system (#6216 review, round 5). Gates whether an
-   * explicit type=system/type=user filter is honored or rejected — see
-   * queryInstalledApps. Always false/undefined for Android and the simulator.
-   */
-  iosTypeClassificationUnreliable?: boolean;
-  /**
-   * True when this device reported apps but none of them carried a
-   * launchability signal, so the `launchable` filter (the documented default)
-   * cannot be applied honestly and degrades to "user" (#6798).
-   */
-  launchabilityUnknown?: boolean;
-  /**
-   * The subset of profiles for which that is true. A launcher probe is issued
-   * per Android user, so one can fail while another succeeds; a device-wide
-   * boolean would then report the failed profile's apps as "not launchable"
-   * (#6798 review).
-   */
-  launchabilityUnknownProfiles?: number[];
-}
 
 const APPS_CACHE_TTL_MS = 60000;
 const APPS_QUERY_URI_TTL_MS = 300000;
@@ -219,241 +93,6 @@ let installedAppResourceRegistryGeneration = 0;
 // completing refresh hands it to its caller for publication.
 let installedAppResourceRegistryRevision = 0;
 let installedAppResourceRegistryHandoffRevision = 0;
-
-function userProfileForUserId(
-  userId: number,
-  profileType?: InstalledApp["profileType"],
-): "personal" | "work" | "secondary" | "unknown" {
-  if (profileType === "managed") {
-    return "work";
-  }
-  if (profileType === "secondary") {
-    return "secondary";
-  }
-  if (profileType === "primary" || userId === 0) {
-    return "personal";
-  }
-  return "unknown";
-}
-
-function toInstalledAppInfo(app: InstalledApp): InstalledAppInfo {
-  return {
-    packageName: app.packageName,
-    userId: app.userId,
-    userProfile: userProfileForUserId(app.userId, app.profileType),
-    foreground: app.foreground,
-    recent: app.recent,
-    ...(app.label ? { label: app.label } : {}),
-    ...(app.launchable === undefined ? {} : { launchable: app.launchable }),
-  };
-}
-
-function toQueryAndroidApp(app: AndroidInstalledAppInfo): AppsQueryAppInfo {
-  return {
-    packageName: app.packageName,
-    type: "user",
-    userId: app.userId,
-    userProfile: app.userProfile,
-    foreground: app.foreground,
-    recent: app.recent,
-    ...(app.label ? { label: app.label } : {}),
-    ...(app.launchable === undefined ? {} : { launchable: app.launchable }),
-  };
-}
-
-function toQuerySystemApp(app: SystemInstalledApp): AppsQueryAppInfo {
-  return {
-    packageName: app.packageName,
-    type: "system",
-    userIds: app.userIds,
-    foreground: app.foreground,
-    recent: app.recent,
-    ...(app.label ? { label: app.label } : {}),
-    ...(app.launchable === undefined ? {} : { launchable: app.launchable }),
-    ...(app.launchableByUserId === undefined ? {} : { launchableByUserId: app.launchableByUserId }),
-  };
-}
-
-function normalizeAndroidApps(installedApps: InstalledAppsByProfile): {
-  userApps: AndroidInstalledAppInfo[];
-  queryApps: AppsQueryAppInfo[];
-} {
-  const userApps: AndroidInstalledAppInfo[] = [];
-  const queryApps: AppsQueryAppInfo[] = [];
-
-  for (const profileApps of Object.values(installedApps.profiles)) {
-    for (const app of profileApps) {
-      const info = toInstalledAppInfo(app) as AndroidInstalledAppInfo;
-      userApps.push(info);
-      queryApps.push(toQueryAndroidApp(info));
-    }
-  }
-
-  for (const systemApp of installedApps.system) {
-    queryApps.push(toQuerySystemApp(systemApp));
-  }
-
-  return { userApps, queryApps };
-}
-
-function readIosStringField(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function readIosAppField(app: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = readIosStringField(app[key]);
-    if (value) {
-      return value;
-    }
-  }
-  return undefined;
-}
-
-function extractIosDisplayName(app: Record<string, unknown>): string | undefined {
-  return readIosAppField(app, [
-    "bundleDisplayName",
-    "bundleName",
-    "CFBundleDisplayName",
-    "CFBundleName",
-    "displayName",
-    "name",
-  ]);
-}
-
-function extractIosVersion(app: Record<string, unknown>): string | undefined {
-  return readIosAppField(app, [
-    "bundleShortVersionString",
-    "bundleVersion",
-    "CFBundleShortVersionString",
-    "CFBundleVersion",
-    "BundleShortVersionString",
-    "BundleVersion",
-    "version",
-  ]);
-}
-
-function extractIosPath(app: Record<string, unknown>): string | undefined {
-  // Shared with the devicectl listing so a physical device's `file://` bundle
-  // URL reaches this resource as a filesystem path, same as a simulator's.
-  return getIosInstalledAppPath(app);
-}
-
-/**
- * Classifies an iOS app as "user" or "system" so `type=user` (the documented
- * default, #6155) actually excludes preinstalled apps on iOS the same way it
- * excludes them on Android.
- *
- * `simctl listapps` reports an explicit `ApplicationType` ("System"/"Hidden"
- * vs "User") — when present it always wins. When it's absent:
- *  - On the simulator, an unexpected/incomplete record still falls back to
- *    Apple's `com.apple.` bundle-id namespace, which only first-party system
- *    apps use there.
- *  - On a PHYSICAL device, `devicectl device info apps --json-output` exposes
- *    no equivalent field at all (only bundleIdentifier/name/version/
- *    bundleVersion/url/appClip, per Apple's devicectl output), so the
- *    `com.apple.` heuristic would misclassify a user's own Apple-published
- *    apps (Pages, Numbers, Keynote, TestFlight, ...) as hidden system apps and
- *    silently drop them from `type=user`. Without a reliable signal there,
- *    default to "user" rather than guessing "system" (#6216 review).
- */
-const IOS_APPLICATION_TYPE_KEYS = ["ApplicationType", "applicationType", "type", "Type"];
-
-function readIosRawApplicationType(app: Record<string, unknown>): string | undefined {
-  return readIosAppField(app, IOS_APPLICATION_TYPE_KEYS);
-}
-
-function hasIosHiddenSpringBoardTag(app: Record<string, unknown>): boolean {
-  return (
-    Array.isArray(app.SBAppTags) &&
-    app.SBAppTags.some((tag) => typeof tag === "string" && tag.toLowerCase() === "hidden")
-  );
-}
-
-// Exported for tests: pure classification, no device/cache I/O (#6155).
-export function extractIosApplicationType(
-  app: Record<string, unknown>,
-  bundleId: string,
-  isPhysicalDevice: boolean,
-): InstalledAppType {
-  const raw = readIosRawApplicationType(app);
-  if (raw) {
-    const normalized = raw.toLowerCase();
-    if (normalized === "system" || normalized === "hidden") {
-      return "system";
-    }
-    if (normalized === "user") {
-      return "user";
-    }
-  }
-  if (isPhysicalDevice) {
-    return "user";
-  }
-  return bundleId.startsWith("com.apple.") ? "system" : "user";
-}
-
-/**
- * True when `extractIosApplicationType` had no reliable signal and had to
- * default a physical-device app to "user" — i.e. devicectl reported no
- * `ApplicationType`-equivalent field. An explicit `type=system`/`type=user`
- * filter must not be silently applied against such apps: it would report an
- * empty or over-inclusive result that looks like "no system apps exist"
- * rather than "we can't tell" (#6216 review, round 5). Always false on the
- * simulator and for apps that do carry a real classification.
- */
-// Exported for tests: pure check, no device/cache I/O (#6216 review, round 5).
-export function isIosApplicationTypeUnclassified(
-  app: Record<string, unknown>,
-  isPhysicalDevice: boolean,
-): boolean {
-  return isPhysicalDevice && !readIosRawApplicationType(app);
-}
-
-/**
- * iOS launchability from simctl's `ApplicationType` (#6798). "Hidden" is
- * Apple's marker for a bundle with no home-screen entry point (SpringBoard's
- * own internal apps, app extensions); "User" and "System" both launch. A
- * physical device has no equivalent field, so launchability stays undefined
- * there rather than being guessed.
- */
-// Exported for tests: pure classification, no device/cache I/O (#6798).
-export function extractIosLaunchable(app: Record<string, unknown>): boolean | undefined {
-  if (hasIosHiddenSpringBoardTag(app)) {
-    return false;
-  }
-  const raw = readIosRawApplicationType(app)?.toLowerCase();
-  if (raw === "hidden") {
-    return false;
-  }
-  if (raw === "user" || raw === "system") {
-    return true;
-  }
-  return undefined;
-}
-
-// Exported for tests: pure conversion, no device/cache I/O (#6216 review).
-export function toQueryIosApp(app: IosInstalledAppInfo): AppsQueryAppInfo {
-  return {
-    packageName: app.bundleId,
-    type: app.type,
-    userId: 0,
-    // iOS has no Android-style multi-user profiles — every app belongs to the
-    // single (profile 0) user. filterAppsByQuery's profile check only reads
-    // `userIds` for non-"user" apps; without this, any profile filter (e.g.
-    // the common profile:0 case) would silently drop every iOS system app
-    // because `userIds` was left undefined (#6216 review).
-    userIds: [0],
-    userProfile: "personal",
-    foreground: false,
-    recent: false,
-    ...(app.displayName ? { displayName: app.displayName, label: app.displayName } : {}),
-    ...(app.launchable === undefined ? {} : { launchable: app.launchable }),
-  };
-}
 
 function recordAppsQueryUri(deviceId: string, uri: string, timer: Timer = defaultTimer): void {
   const now = timer.now();
@@ -498,24 +137,6 @@ function getAppsQueryUrisForDevice(deviceId: string, timer: Timer = defaultTimer
   return uris;
 }
 
-function getInstalledAppIdentifier(app: InstalledAppInfo): string {
-  return "bundleId" in app ? app.bundleId : app.packageName;
-}
-
-function buildAppsByPackage(apps: InstalledAppInfo[]): Map<string, InstalledAppInfo[]> {
-  const appsByPackage = new Map<string, InstalledAppInfo[]>();
-  for (const app of apps) {
-    const identifier = getInstalledAppIdentifier(app);
-    const existing = appsByPackage.get(identifier);
-    if (existing) {
-      existing.push(app);
-    } else {
-      appsByPackage.set(identifier, [app]);
-    }
-  }
-  return appsByPackage;
-}
-
 function getDeviceAppsUri(deviceId: string): string {
   return `automobile:devices/${deviceId}/apps`;
 }
@@ -553,23 +174,12 @@ interface FetchedAppsCacheEntry {
   cacheable: boolean;
 }
 
-/** Narrow surface `fetchAppsForDevice` needs from `ListInstalledApps`, so tests can
- * inject a fake without driving the real adb/simctl/devicectl command chain. */
-type InstalledAppsLister = Pick<
-  ListInstalledApps,
-  "executeDetailedResult" | "executeIosDetailedResult"
->;
-type ListInstalledAppsFactory = (device: BootedDevice) => InstalledAppsLister;
+const defaultListInstalledAppsFactory: NonNullable<
+  AppResourceDependencies["listInstalledAppsFactory"]
+> = (device) => new ListInstalledApps(device);
 
-const defaultListInstalledAppsFactory: ListInstalledAppsFactory = (device) =>
-  new ListInstalledApps(device);
+export type { AppResourceDependencies };
 
-export interface AppResourceDependencies {
-  listInstalledAppsFactory?: ListInstalledAppsFactory;
-}
-
-// Dependency injection preserves this existing algorithm and its control flow.
-// oxlint-disable-next-line complexity
 async function fetchAppsForDevice(
   device: BootedDevice,
   timer: Timer = defaultTimer,
@@ -587,7 +197,6 @@ async function fetchAppsForDevice(
     const foregroundApp = queryApps.find((app) => app.foreground)?.packageName ?? null;
     const message = getAndroidAppsMessage(device.deviceId);
     const launchabilityUnknown = isLaunchabilityUnknown(queryApps);
-    const unknownProfiles = launchabilityUnknownProfiles(queryApps);
 
     return {
       cacheable: result.successful,
@@ -604,44 +213,16 @@ async function fetchAppsForDevice(
         appsByPackage: buildAppsByPackage(userApps),
         queryApps,
         launchabilityUnknown,
-        launchabilityUnknownProfiles: unknownProfiles,
+        launchabilityUnknownProfiles: launchabilityUnknownProfiles(queryApps),
       },
     };
   }
 
   const result = await listInstalledApps.executeIosDetailedResult();
-  const apps: IosInstalledAppInfo[] = [];
-  const queryApps: AppsQueryAppInfo[] = [];
-  const isPhysicalDevice = isIosPhysicalUdid(device.deviceId);
-  let iosTypeClassificationUnreliable = false;
-
-  for (const app of result.apps) {
-    const bundleId = getIosInstalledAppBundleId(app);
-    if (!bundleId) {
-      continue;
-    }
-    const rawApp = app as Record<string, unknown>;
-    const displayName = extractIosDisplayName(rawApp);
-    const version = extractIosVersion(rawApp);
-    const path = extractIosPath(rawApp);
-    const type = extractIosApplicationType(rawApp, bundleId, isPhysicalDevice);
-    if (isIosApplicationTypeUnclassified(rawApp, isPhysicalDevice)) {
-      iosTypeClassificationUnreliable = true;
-    }
-    const launchable = extractIosLaunchable(rawApp);
-    const info: IosInstalledAppInfo = {
-      bundleId,
-      type,
-      displayName,
-      ...(version ? { version } : {}),
-      ...(path ? { path } : {}),
-      ...(launchable === undefined ? {} : { launchable }),
-    };
-    apps.push(info);
-    queryApps.push({
-      ...toQueryIosApp(info),
-    });
-  }
+  const { apps, queryApps, iosTypeClassificationUnreliable } = normalizeIosApps(
+    result.apps,
+    isIosPhysicalUdid(device.deviceId),
+  );
 
   return {
     cacheable: result.successful,
@@ -655,48 +236,6 @@ async function fetchAppsForDevice(
       launchabilityUnknownProfiles: launchabilityUnknownProfiles(queryApps),
     },
   };
-}
-
-/**
- * True when the device reported apps but not one of them carried a
- * launchability signal — an old on-device CtrlProxy plus a failed `cmd package`
- * probe, or a physical iOS device. The `launchable` filter must degrade rather
- * than report every app as unlaunchable (#6798). A device with zero apps is not
- * "unknown": there is nothing to misreport.
- */
-function isLaunchabilityUnknown(queryApps: AppsQueryAppInfo[]): boolean {
-  return queryApps.length > 0 && queryApps.every((app) => app.launchable === undefined);
-}
-
-/** The profiles an app belongs to: its own user for a user app, every user it is installed for otherwise. */
-function profilesForQueryApp(app: AppsQueryAppInfo): number[] {
-  if (app.type === "user") {
-    return app.userId === undefined ? [] : [app.userId];
-  }
-  return app.userIds ?? [];
-}
-
-/**
- * Profiles that reported apps but no launchability for any of them. The launcher
- * probe runs once per Android user, so a work profile's probe can fail while the
- * owner's succeeds — and the device-wide `every` check would then call
- * launchability "known" and quietly report every work-profile app as
- * unlaunchable (#6798 review).
- */
-function launchabilityUnknownProfiles(queryApps: AppsQueryAppInfo[]): number[] {
-  const known = new Set<number>();
-  const seen = new Set<number>();
-  for (const app of queryApps) {
-    for (const profile of profilesForQueryApp(app)) {
-      seen.add(profile);
-      if (launchabilityForProfile(app, profile) !== undefined) {
-        known.add(profile);
-      }
-    }
-  }
-  return Array.from(seen)
-    .filter((profile) => !known.has(profile))
-    .sort((a, b) => a - b);
 }
 
 async function ensureAppsCacheEntry(
@@ -834,85 +373,6 @@ function buildAppsUri(options: AppsQueryOptions): string {
   return queryString ? `${APPS_RESOURCE_URIS.BASE}?${queryString}` : APPS_RESOURCE_URIS.BASE;
 }
 
-// Exported for tests: pure filtering, no device/cache I/O (#6155).
-export function filterAppsByQuery(
-  apps: AppsQueryAppInfo[],
-  options: AppsQueryOptions,
-): AppsQueryAppInfo[] {
-  // Trim + lowercase so callers get case-insensitive, whitespace-tolerant
-  // search (" Camera " matches "Camera") whether search arrives from the
-  // listApps tool schema (unnormalized) or the apps resource's query string
-  // (#6216 review).
-  const searchTerm = options.search?.trim().toLowerCase() || undefined;
-  // Documented default is "launchable" (#6798, superseding the "user" default of
-  // #6155) — an omitted type must not fall through to "no filter" and return
-  // providers and overlays too.
-  const effectiveType = options.type ?? "launchable";
-
-  return apps.filter(
-    (app) =>
-      matchesAppsQueryType(app, effectiveType, options.profile) &&
-      matchesAppsQueryProfile(app, options.profile) &&
-      matchesAppsQuerySearch(app, searchTerm),
-  );
-}
-
-/**
- * Launchability as it applies to one profile, or to the app as a whole when no
- * profile was requested. A deduplicated system app can launch in a work profile
- * and not for the owner, so a profile-scoped query must read that profile's
- * value rather than the "launches somewhere" scalar (#6798 review).
- */
-export function launchabilityForProfile(
-  app: AppsQueryAppInfo,
-  profile: number | undefined,
-): boolean | undefined {
-  if (profile === undefined || app.launchableByUserId === undefined) {
-    return app.launchable;
-  }
-  return app.launchableByUserId[profile];
-}
-
-// Exported for tests: keeps the existing profile and search predicates authoritative.
-export function launchabilityUnknownApps(
-  queryApps: AppsQueryAppInfo[],
-  options: AppsQueryOptions,
-): string[] {
-  return filterAppsByQuery(queryApps, { ...options, type: "all" })
-    .filter((app) => launchabilityForProfile(app, options.profile) === undefined)
-    .map((app) => app.packageName);
-}
-
-function matchesAppsQueryType(
-  app: AppsQueryAppInfo,
-  effectiveType: AppsQueryType,
-  profile: number | undefined,
-): boolean {
-  if (effectiveType === "launchable") {
-    // Strictly `=== true`: an app whose launchability was never reported is not
-    // evidence that it launches.
-    return launchabilityForProfile(app, profile) === true;
-  }
-  return effectiveType === "all" || app.type === effectiveType;
-}
-
-function matchesAppsQueryProfile(app: AppsQueryAppInfo, profile: number | undefined): boolean {
-  if (profile === undefined) {
-    return true;
-  }
-  return app.type === "user" ? app.userId === profile : (app.userIds?.includes(profile) ?? false);
-}
-
-function matchesAppsQuerySearch(app: AppsQueryAppInfo, searchTerm: string | undefined): boolean {
-  if (!searchTerm) {
-    return true;
-  }
-  return (
-    app.packageName.toLowerCase().includes(searchTerm) ||
-    (app.label?.toLowerCase().includes(searchTerm) ?? false)
-  );
-}
-
 async function getAppsQueryDevice(
   options: AppsQueryOptions,
   signal?: AbortSignal,
@@ -1013,113 +473,6 @@ export async function queryInstalledApps(
       ? { launchabilityUnknownApps: unknownApps }
       : {}),
   };
-}
-
-/**
- * Rejects an explicit `type` the cached listing cannot answer honestly.
- *
- * An EXPLICIT type=system/type=user filter on a physical iOS device with no
- * reliable classification signal must not silently return an empty (or
- * over-inclusive) result — that reads as "no system apps exist" rather than
- * "we can't tell". type=all is unaffected (#6216 review, round 5).
- *
- * An OMITTED type on such a device is the more common case, and must not be
-  // silently defaulted to "user" either: `--include-all-apps` is passed
-  // unconditionally when listing a physical device (DeviceAppManager), so the
-  // cached apps already include system records, and every unclassified one
-  // was defaulted to "user" (extractIosApplicationType). Applying the normal
-  // "user" default filter here would therefore let system apps straight
-  // through while the response still claimed `query.type: "user"` — exactly
-  // the over-inclusive-but-mislabeled result Codex flagged (#6216 review,
-  // round 6). Report the effective type as "all" (the truthful description
-  // of what this transport can actually filter) and skip the "user" default
- * filter, rather than rejecting the common omitted-type call outright.
- *
- * An explicit type=launchable against a device that reported no launchability
- * signal at all would return an empty list that reads as "nothing on this
- * device can be launched". Reject it the same way an unclassifiable
- * type=user/type=system is rejected (#6798). The same reasoning applies per
- * profile: the launcher probe runs once per Android user, so an explicit
- * type=launchable scoped to a profile whose probe failed must be rejected
- * rather than answered with an authoritative-looking empty list (#6798 review).
- */
-function assertRequestedTypeIsAnswerable(
-  deviceId: string,
-  platform: Platform,
-  options: AppsQueryOptions,
-  cacheEntry: AppsCacheEntry,
-): void {
-  if (
-    options.type !== undefined &&
-    options.type !== "all" &&
-    cacheEntry.iosTypeClassificationUnreliable
-  ) {
-    throw new Error(
-      `Cannot filter by type=${options.type} for device ${deviceId}: iOS user/system ` +
-        "app classification is not available on this transport (physical device via devicectl). " +
-        "Use type=all (or omit type) to list every app.",
-    );
-  }
-  if (
-    options.type === "launchable" &&
-    isLaunchabilityUnknownForQuery(cacheEntry, options.profile)
-  ) {
-    if (platform === "ios") {
-      throw new Error(
-        `Cannot filter by type=launchable for device ${deviceId}${
-          options.profile === undefined ? "" : ` profile ${options.profile}`
-        }: simctl's app listing omitted ApplicationType for every app on this device, so ` +
-          "launchability could not be determined. Re-run after the simulator finishes booting, " +
-          `or check \`xcrun simctl listapps ${deviceId}\` output directly. Use type=user, ` +
-          "type=system or type=all.",
-      );
-    }
-    throw new Error(
-      `Cannot filter by type=launchable for device ${deviceId}${
-        options.profile === undefined ? "" : ` profile ${options.profile}`
-      }: no launchability signal is available (the installed CtrlProxy APK predates the field ` +
-        "and the `cmd package query-activities` probe did not answer). Use type=user, type=system " +
-        "or type=all.",
-    );
-  }
-}
-
-/**
- * The type actually applied, reported back to the caller as `query.type` so a
- * response never claims a filter it did not apply. Precedence:
- *  1. A physical iOS device with no user/system signal reports "all" for an
- *     omitted type (#6216 review, round 6) — it cannot honor any narrower one.
- *  2. An omitted type is "launchable" (#6798), degrading to "user" when no app
- *     reported launchability, which is the pre-#6798 behavior.
- *  3. Anything explicit is honored verbatim.
- */
-function resolveEffectiveAppsQueryType(
-  requested: AppsQueryType | undefined,
-  cacheEntry: AppsCacheEntry,
-  profile: number | undefined,
-): AppsQueryType {
-  if (requested !== undefined) {
-    return requested;
-  }
-  if (cacheEntry.iosTypeClassificationUnreliable) {
-    return "all";
-  }
-  return isLaunchabilityUnknownForQuery(cacheEntry, profile) ? "user" : "launchable";
-}
-
-/**
- * Whether the `launchable` filter can be applied honestly to what this query
- * asks for: the whole device when no profile was named, otherwise just that
- * profile (#6798 review).
- */
-function isLaunchabilityUnknownForQuery(
-  cacheEntry: AppsCacheEntry,
-  profile: number | undefined,
-): boolean {
-  if (profile === undefined) {
-    return cacheEntry.launchabilityUnknown === true;
-  }
-  return cacheEntry.launchabilityUnknownProfiles?.includes(profile) === true;
 }
 
 async function getAppsQueryResource(
@@ -1247,26 +600,10 @@ function unregisterDeviceAppResource(deviceId: string): void {
   invalidateMetadataCacheForDevice(deviceId);
 }
 
-// Dependency injection preserves this existing algorithm and its control flow.
-// oxlint-disable-next-line complexity
-export async function syncInstalledAppResourceRegistry(
-  deps: AppResourceDependencies = {},
-): Promise<boolean> {
-  const generation = ++installedAppResourceRegistryGeneration;
-  let devices: BootedDevice[] = [];
-  try {
-    devices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("either");
-  } catch (error) {
-    logger.warn(`[AppResources] Failed to get booted devices: ${error}`);
-    // An unobservable device list says nothing about which devices disappeared: keep the registry
-    // and every device's installed-apps cache rather than treating all of them as gone.
-    return false;
-  }
-
-  if (generation !== installedAppResourceRegistryGeneration) {
-    return false;
-  }
-
+function reconcileInstalledAppResourceDevices(
+  devices: BootedDevice[],
+  deps: AppResourceDependencies,
+): string[] {
   const currentDeviceIds = new Set(devices.map((device) => device.deviceId));
   let changed = false;
 
@@ -1289,6 +626,29 @@ export async function syncInstalledAppResourceRegistry(
   if (changed) {
     installedAppResourceRegistryRevision++;
   }
+
+  return disappearedDeviceIds;
+}
+
+export async function syncInstalledAppResourceRegistry(
+  deps: AppResourceDependencies = {},
+): Promise<boolean> {
+  const generation = ++installedAppResourceRegistryGeneration;
+  let devices: BootedDevice[] = [];
+  try {
+    devices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("either");
+  } catch (error) {
+    logger.warn(`[AppResources] Failed to get booted devices: ${error}`);
+    // An unobservable device list says nothing about which devices disappeared: keep the registry
+    // and every device's installed-apps cache rather than treating all of them as gone.
+    return false;
+  }
+
+  if (generation !== installedAppResourceRegistryGeneration) {
+    return false;
+  }
+
+  const disappearedDeviceIds = reconcileInstalledAppResourceDevices(devices, deps);
 
   for (const deviceId of disappearedDeviceIds) {
     // All registry mutation above is synchronous, so a newer refresh cannot

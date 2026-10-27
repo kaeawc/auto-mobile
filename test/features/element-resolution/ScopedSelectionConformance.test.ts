@@ -1,3 +1,10 @@
+import type {
+  ObservedActionResult,
+  ObservedChangeOptions,
+  ObservedEnvelope,
+} from "../../../src/features/action/observedInteractionTypes";
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, it, spyOn } from "bun:test";
 import fc from "fast-check";
@@ -145,15 +152,12 @@ function selector(scenario: Scenario) {
 // Preserve concrete AdbClient constructor contracts while all process output
 // comes from the existing fake; spawning is forbidden even on a fallback path.
 function boundaryAdb(fake = new FakeAdbClient()) {
-  return new AdbClient(
-    android,
-    (command: string) => fake.executeCommand(command),
-    () => {
+  return new AdbClient(android, (command: string) => fake.executeCommand(command), {
+    spawnFn: () => {
       throw new Error("Conformance must not spawn a process");
     },
-    undefined,
-    timer(),
-  );
+    timer: timer(),
+  });
 }
 class ScopedObserver extends FakeObserveScreen {
   override captureCacheGeneration(): number {
@@ -182,8 +186,9 @@ function buildTap(scenario: Scenario) {
     elementSelector: new ResolverElementSelector(new ElementResolver(() => 0)),
     tapStrategy: new FakeTapStrategy(),
   });
-  action.observedInteraction = (run) =>
-    run(recordObservationRead(observation(hierarchy(scenario))));
+  action.observedInteraction = runBlockWith(() =>
+    recordObservationRead(observation(hierarchy(scenario))),
+  );
   return action;
 }
 async function tapOn(scenario: Scenario): Promise<Outcome> {
@@ -202,8 +207,9 @@ async function tapAny(scenario: Scenario): Promise<Outcome> {
     accessibilityService: service,
   });
   action.testHooks.setRefreshViewHierarchy(async () => null);
-  action.observedInteraction = (run) =>
-    run(recordObservationRead(observation(hierarchy(scenario))));
+  action.observedInteraction = runBlockWith(() =>
+    recordObservationRead(observation(hierarchy(scenario))),
+  );
   const result = await action.execute({
     container: scope(scenario),
     selectionStrategy: "unique",
@@ -225,7 +231,7 @@ async function drag(scenario: Scenario, endpoint: "source" | "target"): Promise<
     hierarchyCapture: new FakeHierarchyCapture(() => capture),
     selector: new ResolverElementSelector(new ElementResolver(() => 0)),
   });
-  action.observedInteraction = (run) => run(observation(capture));
+  action.observedInteraction = runBlockWith(() => observation(capture));
   const client = AndroidCtrlProxyClient.getExistingInstance(android.deviceId)!;
   const dispatch = spyOn(client, "requestDrag").mockResolvedValue({
     success: true,
@@ -260,7 +266,7 @@ async function pinch(scenario: Scenario): Promise<Outcome> {
     resolver: new ElementResolver(() => 0),
   });
   action.observeScreen = observe;
-  action.observedInteraction = (run) => run(observation(capture));
+  action.observedInteraction = runBlockWith(() => observation(capture));
   const client = IOSCtrlProxyClient.getInstance(ios, 9999);
   const dispatch = spyOn(client, "requestPinch").mockResolvedValue({
     success: true,
@@ -274,10 +280,12 @@ async function pinch(scenario: Scenario): Promise<Outcome> {
     });
     return {
       ...result,
-      gestures: dispatch.mock.calls.map(([x, y]: Parameters<typeof client.requestPinch>) => ({
-        x,
-        y,
-      })),
+      gestures: dispatch.mock.calls.map(
+        ([{ centerX: x, centerY: y }]: Parameters<typeof client.requestPinch>) => ({
+          x,
+          y,
+        }),
+      ),
     };
   } finally {
     dispatch.mockRestore();
@@ -333,15 +341,25 @@ async function swipe(scenario: Scenario, lookFor: boolean, reveal = false): Prom
   observe.setObserveResult(() => frame);
   const runner = new FakeTalkBackSwipeExecutor();
   class BoundarySwipe extends SwipeOn {
-    override async observedInteraction<T>(
-      run: (current: ObserveResult) => Promise<T>,
-    ): Promise<T & { observation: ObserveResult }> {
-      const result = await run(frame);
-      clock.advanceTime(200);
-      if (reveal) {
-        frame = observation(capture);
-      }
-      return { ...result, observation: frame };
+    override observedInteraction<R extends ObservedActionResult>(
+      run: (current: ObserveResult) => Promise<R | ObservedActionResult>,
+      options: ObservedChangeOptions,
+    ): Promise<R & ObservedEnvelope> {
+      const initial = frame;
+      return runBlockWithEnvelope(
+        initial,
+        {
+          get observation() {
+            return frame;
+          },
+        },
+        () => {
+          clock.advanceTime(200);
+          if (reveal) {
+            frame = observation(capture);
+          }
+        },
+      )<R>(run, options);
     }
   }
   const action = new BoundarySwipe(ios, null, {
@@ -534,6 +552,9 @@ it("property: scoped resolution never selects a node outside its structural scop
         return;
       }
       expect(result.chosen).not.toBeNull();
+      if (result.chosen === null) {
+        throw new Error("Expected a chosen candidate");
+      }
       expect(result.candidates).toContain(result.chosen);
       expect(result.scope).toBeDefined();
       for (const candidate of result.candidates) {

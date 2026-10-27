@@ -1,4 +1,14 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, test } from "bun:test";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
+import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
+import { drainUntil } from "../../helpers/fakeTimerStepping";
+import {
+  detectDeviceIdFromEmulatorOutput,
+  launchFailureCategory,
+  accelerationCheckCategory,
+} from "../../../src/utils/android-cmdline-tools/emulatorLaunchFailure";
+import type { HostChildProcess } from "../../../src/utils/HostCommandExecutor";
 import type { DeviceInfo } from "../../../src/models";
 import {
   DefaultEmulatorLauncher,
@@ -70,4 +80,297 @@ describe("DefaultEmulatorLauncher pre-flight", () => {
     expect(launch).toEqual({ process: null, outcome: "joined-in-process-launch" });
     expect(posterChecks).toEqual(["p.png"]);
   });
+});
+
+function startupHarness(
+  probe: EmulatorLauncherHost["isEmulatorSerialListed"] = async () => false,
+  onSpawn?: (args: readonly string[]) => void,
+) {
+  resetEmulatorLaunchReservations();
+  const timer = new FakeTimer();
+  const child = new FakeChildProcess(timer);
+  const targets = new WeakMap<HostChildProcess, string>();
+  const reservations = new DefaultEmulatorPortReservations({
+    timer: () => timer,
+    adbFactory: () => new FakeAdbClientFactory(),
+    hostPortAvailabilityChecker: () => new FakePortAvailabilityChecker(),
+  });
+  reservations.addReservedEmulatorPort = async () => undefined;
+  const overrides = {
+    reservations: () => reservations,
+    timer: () => timer,
+    listAvds: async () => [{ name: "Pixel_9", platform: "android" } as DeviceInfo],
+    adoptsExistingAvdLaunch: async () => false,
+    avdConfigReader: () => new FakeAvdConfigReader(),
+    validateAvdMemory: () => {},
+    checkArchitectureCompatibility: async () => ({ compatible: true, hostArch: "arm64" }),
+    emulatorAudioArguments: () => [],
+    throwIfLaunchCancelled: () => {},
+    releaseReservationIfLaunchCancelled: () => {},
+    emulatorPath: () => "fake-emulator",
+    spawnFn: () => (_command, args) => {
+      onSpawn?.(args ?? []);
+      return child;
+    },
+    launchTargetDeviceIds: () => targets,
+    captureLaunchTargetDeviceId: (_child: HostChildProcess, output: string) => {
+      const serial = detectDeviceIdFromEmulatorOutput(output);
+      if (serial) {
+        targets.set(child, serial);
+      }
+    },
+    launchFailureCategory,
+    accelerationCheckCategory,
+    sandboxFailure: () => null,
+    detectArchitecturePanic: () => ({ isPanic: false }),
+    detectCorruptImage: () => ({ isCorrupt: false }),
+    detectDisplayError: () => ({ isDisplayError: false }),
+    isEmulatorSerialListed: probe,
+  } satisfies Partial<EmulatorLauncherHost>;
+  const launcher = new DefaultEmulatorLauncher(createHost(overrides));
+  return { timer, child, launcher };
+}
+
+async function launchStartup(
+  harness: ReturnType<typeof startupHarness>,
+  expectedDeviceId?: string,
+) {
+  let result: HostChildProcess | null | undefined;
+  const launch = harness.launcher
+    .startEmulatorProcess("Pixel_9", { expectedDeviceId })
+    .then((value) => {
+      result = value.process;
+      return value;
+    });
+  await drainUntil(() => harness.child.stdout.listenerCount("data") > 0, {
+    description: "startup listeners",
+  });
+  return { launch, result: () => result };
+}
+
+function expectNoStartupTimers(timer: FakeTimer) {
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+  expect(timer.getPendingIntervalCount()).toBe(0);
+}
+
+test("wipe-data arguments append to operator GPU and memory arguments rather than replacing them", async () => {
+  const previous = process.env.AUTOMOBILE_EMULATOR_ARGS;
+  process.env.AUTOMOBILE_EMULATOR_ARGS = JSON.stringify([
+    "-gpu",
+    "swiftshader_indirect",
+    "-memory",
+    "4096",
+  ]);
+  const args: string[][] = [];
+  const harness = startupHarness(
+    async () => true,
+    (spawnArgs) => {
+      args.push([...spawnArgs]);
+    },
+  );
+  try {
+    const launch = harness.launcher.startEmulatorProcess("Pixel_9", {
+      expectedDeviceId: "emulator-5554",
+      requestedExtraArgs: ["-wipe-data", "-no-snapshot-load", "-no-snapshot-save"],
+    });
+    await drainUntil(() => harness.child.stdout.listenerCount("data") > 0, {
+      description: "argument composition startup",
+    });
+    harness.child.stdout.emit("data", Buffer.from("emulator-5554"));
+    await harness.timer.advanceTimeAsync(500);
+    await launch;
+    expect(args[0]).toEqual(
+      expect.arrayContaining([
+        "-gpu",
+        "swiftshader_indirect",
+        "-memory",
+        "4096",
+        "-wipe-data",
+        "-no-snapshot-load",
+        "-no-snapshot-save",
+      ]),
+    );
+  } finally {
+    if (previous === undefined) {
+      delete process.env.AUTOMOBILE_EMULATOR_ARGS;
+    } else {
+      process.env.AUTOMOBILE_EMULATOR_ARGS = previous;
+    }
+  }
+});
+
+describe("DefaultEmulatorLauncher early validation", () => {
+  test("lists the expected serial on the second poll and clears every timer", async () => {
+    const serials: string[] = [];
+    const harness = startupHarness(async (serial) => {
+      serials.push(serial);
+      return serials.length === 2;
+    });
+    const pending = await launchStartup(harness, "emulator-5556");
+    await harness.timer.advanceTimeAsync(500);
+    expect(pending.result()).toBeUndefined();
+    await harness.timer.advanceTimeAsync(500);
+    expect(pending.result()).toBe(harness.child);
+    expect(serials).toEqual(["emulator-5556", "emulator-5556"]);
+    expect(harness.timer.now()).toBe(1000);
+    expectNoStartupTimers(harness.timer);
+    await harness.timer.advanceTimeAsync(5000);
+    await pending.launch;
+  });
+
+  test("starts polling only after stdout captures a launch serial", async () => {
+    const serials: string[] = [];
+    const harness = startupHarness(async (serial) => {
+      serials.push(serial);
+      return true;
+    });
+    const pending = await launchStartup(harness);
+    await harness.timer.advanceTimeAsync(500);
+    expect(serials).toEqual([]);
+    harness.child.stdout.emit(
+      "data",
+      readFileSync(
+        new URL("../../fixtures/android-emulator/startup-console-port.txt", import.meta.url),
+        "utf8",
+      ),
+    );
+    await harness.timer.advanceTimeAsync(500);
+    expect(pending.result()).toBe(harness.child);
+    expect(serials).toEqual(["emulator-5556"]);
+    expectNoStartupTimers(harness.timer);
+    await harness.timer.advanceTimeAsync(5000);
+    await pending.launch;
+  });
+
+  test("waits 1000 ms from the first stdout line without resetting on later lines", async () => {
+    const harness = startupHarness();
+    const pending = await launchStartup(harness);
+    await harness.timer.advanceTimeAsync(200);
+    harness.child.stdout.emit("data", "INFO | Android emulator version 36.1.9.0\n");
+    await harness.timer.advanceTimeAsync(500);
+    harness.child.stdout.emit("data", "INFO | initialization continues\n");
+    await harness.timer.advanceTimeAsync(499);
+    expect(pending.result()).toBeUndefined();
+    await harness.timer.advanceTimeAsync(1);
+    expect(pending.result()).toBe(harness.child);
+    expect(harness.timer.now()).toBe(1200);
+    expectNoStartupTimers(harness.timer);
+    await harness.timer.advanceTimeAsync(5000);
+    await pending.launch;
+  });
+
+  test("keeps the 5000 ms fallback without output or a known serial", async () => {
+    let probes = 0;
+    const harness = startupHarness(async () => {
+      probes++;
+      return true;
+    });
+    const pending = await launchStartup(harness);
+    await harness.timer.advanceTimeAsync(4999);
+    expect(pending.result()).toBeUndefined();
+    await harness.timer.advanceTimeAsync(1);
+    expect(pending.result()).toBe(harness.child);
+    expect(probes).toBe(0);
+    expectNoStartupTimers(harness.timer);
+    await pending.launch;
+  });
+});
+
+describe("early startup probe boundaries", () => {
+  test("skips polling ticks while a serial probe is in flight", async () => {
+    let probes = 0;
+    let finishProbe!: (listed: boolean) => void;
+    const harness = startupHarness(() => {
+      probes++;
+      return new Promise<boolean>((resolve) => {
+        finishProbe = resolve;
+      });
+    });
+    const pending = await launchStartup(harness, "emulator-5556");
+    await harness.timer.advanceTimeAsync(1500);
+    expect(probes).toBe(1);
+    expect(pending.result()).toBeUndefined();
+    finishProbe(true);
+    await harness.timer.advanceTimeAsync(0);
+    await drainUntil(() => pending.result() !== undefined, { description: "serial completion" });
+    expect(pending.result()).toBe(harness.child);
+    expectNoStartupTimers(harness.timer);
+    await pending.launch;
+  });
+
+  test("ignores a late serial result after stdout grace completes", async () => {
+    let finishProbe!: (listed: boolean) => void;
+    const harness = startupHarness(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishProbe = resolve;
+        }),
+    );
+    const pending = await launchStartup(harness, "emulator-5556");
+    harness.child.stdout.emit("data", "INFO | booting\n");
+    await harness.timer.advanceTimeAsync(1000);
+    expect(pending.result()).toBe(harness.child);
+    expectNoStartupTimers(harness.timer);
+    finishProbe(true);
+    await harness.timer.advanceTimeAsync(5000);
+    expectNoStartupTimers(harness.timer);
+    await pending.launch;
+  });
+
+  test("stderr and partial stdout do not start the first-line grace", async () => {
+    const harness = startupHarness();
+    const pending = await launchStartup(harness);
+    harness.child.stderr.emit("data", "INFO | stderr boot message\n");
+    harness.child.stdout.emit("data", "INFO | partial stdout");
+    await harness.timer.advanceTimeAsync(1000);
+    expect(pending.result()).toBeUndefined();
+    harness.child.stdout.emit("data", " line\n");
+    await harness.timer.advanceTimeAsync(999);
+    expect(pending.result()).toBeUndefined();
+    await harness.timer.advanceTimeAsync(1);
+    expect(pending.result()).toBe(harness.child);
+    expectNoStartupTimers(harness.timer);
+    await pending.launch;
+  });
+
+  for (const failure of [
+    "Running multiple emulators with the same AVD\n",
+    "ProbeKVM: Could not open /dev/kvm: Permission denied\n",
+    "hardware acceleration is not available on this host\n",
+  ]) {
+    test(`suppresses early signals after ${failure.trim()}`, async () => {
+      const harness = startupHarness(async () => true);
+      const pending = await launchStartup(harness);
+      harness.child.stdout.emit("data", "INFO | booting\n");
+      await harness.timer.advanceTimeAsync(500);
+      harness.child.stderr.emit(
+        "data",
+        "emulator: Android emulator console on port 5556\n" + failure,
+      );
+      await harness.timer.advanceTimeAsync(500);
+      expect(pending.result()).toBeUndefined();
+      expect(harness.timer.getPendingIntervals()).toEqual([]);
+      expect(harness.timer.getPendingTimeouts()).toEqual([5000]);
+      await harness.timer.advanceTimeAsync(4000);
+      expect(pending.result()).toBe(harness.child);
+      expectNoStartupTimers(harness.timer);
+      await pending.launch;
+    });
+  }
+});
+
+describe("existing stdout startup markers", () => {
+  for (const marker of ["INFO         | emuDirName:", "Hax is enabled", "Detected GPU type"]) {
+    test(`${marker} still resolves immediately and clears grace and polling timers`, async () => {
+      const harness = startupHarness();
+      const pending = await launchStartup(harness, "emulator-5556");
+      harness.child.stdout.emit("data", "INFO | booting\n");
+      await harness.timer.advanceTimeAsync(750);
+      expect(pending.result()).toBeUndefined();
+      harness.child.stdout.emit("data", marker);
+      expect((await pending.launch).process).toBe(harness.child);
+      expect(harness.timer.now()).toBe(750);
+      expectNoStartupTimers(harness.timer);
+    });
+  }
 });

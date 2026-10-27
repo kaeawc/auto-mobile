@@ -16,24 +16,27 @@ describe("accessibility flag configuration", () => {
     ["5", 9],
     [null, 9],
     [undefined, 9],
-  ])("preserves contrast fields and validates sampling points %j", (samplingPoints, expected) => {
-    applier.apply("accessibility-audit", true, {
-      contrast: {
-        samplingPoints,
+  ] as const)(
+    "preserves contrast fields and validates sampling points %j",
+    (samplingPoints, expected) => {
+      applier.apply("accessibility-audit", true, {
+        contrast: {
+          samplingPoints,
+          useMultiPointSampling: false,
+          detectGradients: false,
+          compositeOverlays: true,
+          detectTextShadows: true,
+        },
+      });
+      expect(serverConfig.getAccessibilityAuditConfig()?.contrast).toEqual({
+        samplingPoints: expected,
         useMultiPointSampling: false,
         detectGradients: false,
         compositeOverlays: true,
         detectTextShadows: true,
-      },
-    });
-    expect(serverConfig.getAccessibilityAuditConfig()?.contrast).toEqual({
-      samplingPoints: expected,
-      useMultiPointSampling: false,
-      detectGradients: false,
-      compositeOverlays: true,
-      detectTextShadows: true,
-    });
-  });
+      });
+    },
+  );
 
   test.each([undefined, null, false, 1, "contrast", {}])(
     "uses defaults for absent or invalid contrast %j",

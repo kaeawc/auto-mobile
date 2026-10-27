@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["test"]
+    },
+    "platform": {},
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "platform.on",
+  "expectedMessage": "Required property"
+}

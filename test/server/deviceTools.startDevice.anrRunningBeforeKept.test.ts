@@ -1,6 +1,8 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { EventEmitter } from "node:events";
-import type { ChildProcess } from "node:child_process";
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { z } from "zod/v4";
+import { bindDevice } from "../../src/daemon/deviceBinding";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -12,7 +14,7 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -36,6 +38,11 @@ import {
 } from "../../src/daemon/inputDeviceOwnership";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+
+const toolResponseSchema = z.object({
+  isError: z.boolean().optional(),
+  content: z.array(z.object({ text: z.string() })),
+});
 
 isolateToolRegistry();
 
@@ -155,6 +162,7 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
       new DeviceSessionRegistry(timer, idGenerator),
     );
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env,
       timer,
       lifecycleCoordinator,
@@ -208,7 +216,17 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     PlatformDeviceManagerFactory.reset();
     timer.reset();
   };
-  beforeEach(arrange);
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrange();
+        await fn();
+      },
+      timeout,
+    );
+  }
   afterEach(dispose);
 
   // Pay the one-off startDevice and System UI recovery cost on a throwaway pool.
@@ -225,8 +243,8 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
         },
       });
       const originalKill = devices.killDevice.bind(devices);
-      devices.killDevice = async (target, options) => {
-        await originalKill(target, options);
+      devices.killDevice = async (target) => {
+        await originalKill(target);
         devices.setBootedDevices("android", []);
       };
       await ToolRegistry.getTool("startDevice")!.handler({
@@ -277,43 +295,46 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     expect(routeReleases).toBe(0);
   };
 
-  test("recovery refuses a named caller that is not the session already holding the device", async () => {
-    const original = pool.getDevice(device.deviceId);
-    const kill = devices.killDevice.bind(devices);
-    devices.killDevice = async (...args) => {
-      await kill(...args);
-      devices.setBootedDevices("android", []);
-    };
-    let readinessCalls = 0;
-    setDeviceToolsDependencies({
-      ensureCtrlProxyReady: async () => {
-        if (++readinessCalls === 1) {
-          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-        }
-      },
-    });
-    const error = await runWithToolSelectionContext({ routingSessionUuid: "third-session" }, () =>
-      ToolRegistry.getTool("startDevice")!.handler({ platform: "android", name: device.name }),
-    ).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-    expect(error).toBeInstanceOf(InputDeviceOwnedError);
-    expect(error).toMatchObject({ code: "device_owned_by_other_session" });
-    expect(readinessCalls).toBe(1);
-    expect(devices.getExecutedOperations().filter((op) => op.startsWith("killDevice:"))).toEqual(
-      [],
-    );
-    expect(pool.getDevice(device.deviceId)).toBe(original);
-    expect(original).toMatchObject({ sessionId: "owner-session", status: "busy" });
-    expect(sessions.getSession("owner-session")?.assignedDevice).toBe(device.deviceId);
-    expect(pool.isReservedForReadiness(device.deviceId)).toBe(false);
-    expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
-    expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(false);
-    expect(lifecycleReleases).toBe(1);
-  });
+  arranged(
+    "recovery refuses a named caller that is not the session already holding the device",
+    async () => {
+      const original = pool.getDevice(device.deviceId);
+      const kill = devices.killDevice.bind(devices);
+      devices.killDevice = async (...args) => {
+        await kill(...args);
+        devices.setBootedDevices("android", []);
+      };
+      let readinessCalls = 0;
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          if (++readinessCalls === 1) {
+            throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+          }
+        },
+      });
+      const error = await runWithToolSelectionContext({ routingSessionUuid: "third-session" }, () =>
+        ToolRegistry.getTool("startDevice")!.handler({ platform: "android", name: device.name }),
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(error).toBeInstanceOf(InputDeviceOwnedError);
+      expect(error).toMatchObject({ code: "device_owned_by_other_session" });
+      expect(readinessCalls).toBe(1);
+      expect(devices.getExecutedOperations().filter((op) => op.startsWith("killDevice:"))).toEqual(
+        [],
+      );
+      expect(pool.getDevice(device.deviceId)).toBe(original);
+      expect(original).toMatchObject({ sessionId: "owner-session", status: "busy" });
+      expect(sessions.getSession("owner-session")?.assignedDevice).toBe(device.deviceId);
+      expect(pool.isReservedForReadiness(device.deviceId)).toBe(false);
+      expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
+      expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(false);
+      expect(lifecycleReleases).toBe(1);
+    },
+  );
 
-  test("recovery proceeds when the named caller already holds the device", async () => {
+  arranged("recovery proceeds when the named caller already holds the device", async () => {
     const kill = devices.killDevice.bind(devices);
     devices.killDevice = async (...args) => {
       await kill(...args);
@@ -327,8 +348,10 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
         }
       },
     });
-    const result = await runWithToolSelectionContext({ routingSessionUuid: "owner-session" }, () =>
-      ToolRegistry.getTool("startDevice")!.handler({ platform: "android", name: device.name }),
+    const result = toolResponseSchema.parse(
+      await runWithToolSelectionContext({ routingSessionUuid: "owner-session" }, () =>
+        ToolRegistry.getTool("startDevice")!.handler({ platform: "android", name: device.name }),
+      ),
     );
     expect(result.isError).not.toBe(true);
     expect(readinessCalls).toBe(2);
@@ -339,45 +362,48 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     expect(sessions.getSession("owner-session")?.assignedDevice).toBe(device.deviceId);
   });
 
-  test("recovery refuses a device another session bound while this call was preparing it", async () => {
-    await releaseOriginalHolder();
-    const original = pool.getDevice(device.deviceId);
-    const marker = spyOn(pool, "markIntentionalShutdown");
-    let readinessCalls = 0;
-    setDeviceToolsDependencies({
-      ensureCtrlProxyReady: async () => {
-        if (++readinessCalls === 1) {
-          await pool.bindOrReuseDeviceSession({
-            sessionId: "other-session",
-            deviceId: device.deviceId,
+  arranged(
+    "recovery refuses a device another session bound while this call was preparing it",
+    async () => {
+      await releaseOriginalHolder();
+      const original = pool.getDevice(device.deviceId);
+      const marker = spyOn(pool, "markIntentionalShutdown");
+      let readinessCalls = 0;
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          if (++readinessCalls === 1) {
+            await pool.bindOrReuseDeviceSession({
+              sessionId: "other-session",
+              deviceId: device.deviceId,
+              platform: "android",
+              sourceImage: image,
+            });
+            throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+          }
+        },
+      });
+      try {
+        const error = await ToolRegistry.getTool("startDevice")!
+          .handler({
             platform: "android",
-            sourceImage: image,
-          });
-          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-        }
-      },
-    });
-    try {
-      const error = await ToolRegistry.getTool("startDevice")!
-        .handler({
-          platform: "android",
-          name: device.name,
-        })
-        .then(
-          () => undefined,
-          (error: unknown) => error,
-        );
-      expect(error).toBeInstanceOf(InputDeviceOwnedError);
-      expect(error).toMatchObject({ code: "device_owned_by_other_session" });
-      expect(readinessCalls).toBe(1);
-      expect(marker).not.toHaveBeenCalled();
-      await expectOtherHolderUntouched(original, 1);
-    } finally {
-      marker.mockRestore();
-    }
-  });
+            name: device.name,
+          })
+          .then(
+            () => undefined,
+            (error: unknown) => error,
+          );
+        expect(error).toBeInstanceOf(InputDeviceOwnedError);
+        expect(error).toMatchObject({ code: "device_owned_by_other_session" });
+        expect(readinessCalls).toBe(1);
+        expect(marker).not.toHaveBeenCalled();
+        await expectOtherHolderUntouched(original, 1);
+      } finally {
+        marker.mockRestore();
+      }
+    },
+  );
 
-  test("recovery proceeds when the named caller binds during readiness", async () => {
+  arranged("recovery proceeds when the named caller binds during readiness", async () => {
     await releaseOriginalHolder();
     let readinessCalls = 0;
     setDeviceToolsDependencies({
@@ -393,8 +419,10 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
         }
       },
     });
-    const result = await runWithToolSelectionContext({ routingSessionUuid: "other-session" }, () =>
-      ToolRegistry.getTool("startDevice")!.handler({ platform: "android", name: device.name }),
+    const result = toolResponseSchema.parse(
+      await runWithToolSelectionContext({ routingSessionUuid: "other-session" }, () =>
+        ToolRegistry.getTool("startDevice")!.handler({ platform: "android", name: device.name }),
+      ),
     );
     expect(result.isError).not.toBe(true);
     expect(readinessCalls).toBe(2);
@@ -405,7 +433,7 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     expect(sessions.getSession("other-session")?.assignedDevice).toBe(device.deviceId);
   });
 
-  test("recovery refuses a readiness holder different from the named caller", async () => {
+  arranged("recovery refuses a readiness holder different from the named caller", async () => {
     await releaseOriginalHolder();
     const original = pool.getDevice(device.deviceId);
     let readinessCalls = 0;
@@ -433,36 +461,39 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     await expectOtherHolderUntouched(original, 1);
   });
 
-  test("recovery refuses an unadmitted sessionUuid argument when that session binds during readiness", async () => {
-    await releaseOriginalHolder();
-    const original = pool.getDevice(device.deviceId);
-    let readinessCalls = 0;
-    setDeviceToolsDependencies({
-      ensureCtrlProxyReady: async () => {
-        readinessCalls++;
-        await pool.bindOrReuseDeviceSession({
-          sessionId: "other-session",
-          deviceId: device.deviceId,
-          platform: "android",
-          sourceImage: image,
-        });
-        throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-      },
-    });
-    // A raw argument cannot supply the admitted ambient identity startDevice requires.
-    const error = await ToolRegistry.getTool("startDevice")!
-      .handler({ platform: "android", name: device.name, sessionUuid: "other-session" })
-      .then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-    expect(error).toBeInstanceOf(InputDeviceOwnedError);
-    expect(error).toMatchObject({ code: "device_owned_by_other_session" });
-    expect(readinessCalls).toBe(1);
-    await expectOtherHolderUntouched(original, 1);
-  });
+  arranged(
+    "recovery refuses an unadmitted sessionUuid argument when that session binds during readiness",
+    async () => {
+      await releaseOriginalHolder();
+      const original = pool.getDevice(device.deviceId);
+      let readinessCalls = 0;
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          readinessCalls++;
+          await pool.bindOrReuseDeviceSession({
+            sessionId: "other-session",
+            deviceId: device.deviceId,
+            platform: "android",
+            sourceImage: image,
+          });
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        },
+      });
+      // A raw argument cannot supply the admitted ambient identity startDevice requires.
+      const error = await ToolRegistry.getTool("startDevice")!
+        .handler({ platform: "android", name: device.name, sessionUuid: "other-session" })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      expect(error).toBeInstanceOf(InputDeviceOwnedError);
+      expect(error).toMatchObject({ code: "device_owned_by_other_session" });
+      expect(readinessCalls).toBe(1);
+      await expectOtherHolderUntouched(original, 1);
+    },
+  );
 
-  test("recovery re-checks the holder under the shutdown reservation", async () => {
+  arranged("recovery re-checks the holder under the shutdown reservation", async () => {
     await releaseOriginalHolder();
     const original = pool.getDevice(device.deviceId);
     const marker = spyOn(pool, "markIntentionalShutdown");
@@ -509,67 +540,24 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     }
   });
 
-  test("cancellation after another session binds during readiness leaves its device running", async () => {
-    await releaseOriginalHolder();
-    const original = pool.getDevice(device.deviceId);
-    const controller = new AbortController();
-    let readinessCalls = 0;
-    setDeviceToolsDependencies({
-      ensureCtrlProxyReady: async () => {
-        readinessCalls++;
-        await pool.bindOrReuseDeviceSession({
-          sessionId: "other-session",
-          deviceId: device.deviceId,
-          platform: "android",
-          sourceImage: image,
-        });
-        controller.abort(new Error("caller disconnected after other bind"));
-        throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-      },
-    });
-    await expect(
-      ToolRegistry.getTool("startDevice")!.handler(
-        { platform: "android", name: device.name },
-        undefined,
-        controller.signal,
-      ),
-    ).rejects.toThrow();
-    expect(readinessCalls).toBe(1);
-    await expectOtherHolderUntouched(original, 1);
-  });
-
-  for (const runningBefore of [true, false]) {
-    test(`cancellation leaves a replacement held by a different session alone (running before: ${runningBefore})`, async () => {
-      if (!runningBefore) {
-        await releaseOriginalHolder();
-        devices.setBootedDevices("android", []);
-        matcher.setBootedResult(null);
-      }
-      const originalProcess = new ExitOnKillProcess();
-      const replacementProcess = new ExitOnKillProcess();
-      devices.setMockChildProcess(device.name, originalProcess as ChildProcess);
-      const kill = devices.killDevice.bind(devices);
-      devices.killDevice = async (...args) => {
-        await kill(...args);
-        devices.setBootedDevices("android", []);
-        originalProcess.exit();
-      };
+  arranged(
+    "cancellation after another session binds during readiness leaves its device running",
+    async () => {
+      await releaseOriginalHolder();
+      const original = pool.getDevice(device.deviceId);
       const controller = new AbortController();
       let readinessCalls = 0;
       setDeviceToolsDependencies({
         ensureCtrlProxyReady: async () => {
-          if (++readinessCalls === 1) {
-            devices.setMockChildProcess(device.name, replacementProcess as ChildProcess);
-            throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-          }
-          const replacement = pool.getDevice(device.deviceId)!;
-          await sessions.releaseSession("owner-session");
-          await sessions.createSession("other-session", replacement.id, "android");
-          // Pin cleanup directly even when a later handoff has changed the holder.
-          replacement.sessionId = "other-session";
-          replacement.status = "busy";
-          controller.abort(new Error("cancelled after replacement changed holder"));
-          throw controller.signal.reason;
+          readinessCalls++;
+          await pool.bindOrReuseDeviceSession({
+            sessionId: "other-session",
+            deviceId: device.deviceId,
+            platform: "android",
+            sourceImage: image,
+          });
+          controller.abort(new Error("caller disconnected after other bind"));
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
         },
       });
       await expect(
@@ -578,27 +566,75 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
           undefined,
           controller.signal,
         ),
-      ).rejects.toThrow("cancelled after replacement changed holder");
-      for (let turn = 0; turn < 400; turn++) {
-        await Promise.resolve();
-      }
-      expect(readinessCalls).toBe(2);
-      expect(pool.getDevice(device.deviceId)).toMatchObject({
-        sessionId: "other-session",
-        status: "busy",
-      });
-      expect(sessions.getSession("other-session")?.assignedDevice).toBe(device.deviceId);
-      expect(
-        devices.getExecutedOperations().filter((op) => op.startsWith("killDevice:")),
-      ).toHaveLength(1);
-      expect(await devices.getBootedDevices("android")).toContainEqual(device);
-      expect(lifecycleReleases).toBe(1);
-      expect(pool.isReservedForReadiness(device.deviceId)).toBe(false);
-      expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(false);
-    });
+      ).rejects.toThrow();
+      expect(readinessCalls).toBe(1);
+      await expectOtherHolderUntouched(original, 1);
+    },
+  );
+
+  for (const runningBefore of [true, false]) {
+    arranged(
+      `cancellation leaves a replacement held by a different session alone (running before: ${runningBefore})`,
+      async () => {
+        if (!runningBefore) {
+          await releaseOriginalHolder();
+          devices.setBootedDevices("android", []);
+          matcher.setBootedResult(null);
+        }
+        const originalProcess = new ExitOnKillProcess();
+        const replacementProcess = new ExitOnKillProcess();
+        devices.setMockChildProcess(device.name, originalProcess);
+        const kill = devices.killDevice.bind(devices);
+        devices.killDevice = async (...args) => {
+          await kill(...args);
+          devices.setBootedDevices("android", []);
+          originalProcess.exit();
+        };
+        const controller = new AbortController();
+        let readinessCalls = 0;
+        setDeviceToolsDependencies({
+          ensureCtrlProxyReady: async () => {
+            if (++readinessCalls === 1) {
+              devices.setMockChildProcess(device.name, replacementProcess);
+              throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+            }
+            const replacement = pool.getDevice(device.deviceId)!;
+            await sessions.releaseSession("owner-session");
+            await sessions.createSession("other-session", replacement.id, "android");
+            // Pin cleanup directly even when a later handoff has changed the holder.
+            bindDevice(replacement, "other-session");
+            controller.abort(new Error("cancelled after replacement changed holder"));
+            throw controller.signal.reason;
+          },
+        });
+        await expect(
+          ToolRegistry.getTool("startDevice")!.handler(
+            { platform: "android", name: device.name },
+            undefined,
+            controller.signal,
+          ),
+        ).rejects.toThrow("cancelled after replacement changed holder");
+        for (let turn = 0; turn < 400; turn++) {
+          await Promise.resolve();
+        }
+        expect(readinessCalls).toBe(2);
+        expect(pool.getDevice(device.deviceId)).toMatchObject({
+          sessionId: "other-session",
+          status: "busy",
+        });
+        expect(sessions.getSession("other-session")?.assignedDevice).toBe(device.deviceId);
+        expect(
+          devices.getExecutedOperations().filter((op) => op.startsWith("killDevice:")),
+        ).toHaveLength(1);
+        expect(await devices.getBootedDevices("android")).toContainEqual(device);
+        expect(lifecycleReleases).toBe(1);
+        expect(pool.isReservedForReadiness(device.deviceId)).toBe(false);
+        expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(false);
+      },
+    );
   }
 
-  test("cancellation releases only a session the recovery handoff preserved", async () => {
+  arranged("cancellation releases only a session the recovery handoff preserved", async () => {
     const kill = devices.killDevice.bind(devices);
     devices.killDevice = async (...args) => {
       await kill(...args);
@@ -639,226 +675,243 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     expect(await devices.getBootedDevices("android")).toContainEqual(device);
   });
 
-  test("cancellation after replacement launch dispatch rejects promptly and leaves its tail unowned", async () => {
-    let readinessCalls = 0;
-    setDeviceToolsDependencies({
-      ensureCtrlProxyReady: async () => {
-        readinessCalls++;
-        if (readinessCalls === 1) {
-          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-        }
-      },
-    });
-
-    const originalKill = devices.killDevice.bind(devices);
-    devices.killDevice = async (target, options) => {
-      await originalKill(target, options);
-      devices.setBootedDevices("android", []);
-    };
-
-    let launchStarted!: () => void;
-    const started = new Promise<void>((resolve) => {
-      launchStarted = resolve;
-    });
-    let finishLaunch!: () => void;
-    const launchGate = new Promise<void>((resolve) => {
-      finishLaunch = resolve;
-    });
-    beforePlatformLaunch = async () => {
-      launchStarted();
-      await launchGate;
-    };
-
-    const controller = new AbortController();
-    let startSettled = false;
-    const start = ToolRegistry.getTool("startDevice")!
-      .handler({ platform: "android", name: device.name }, undefined, controller.signal)
-      .finally(() => {
-        startSettled = true;
+  arranged(
+    "cancellation after replacement launch dispatch rejects promptly and leaves its tail unowned",
+    async () => {
+      let readinessCalls = 0;
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          readinessCalls++;
+          if (readinessCalls === 1) {
+            throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+          }
+        },
       });
-    for (let turn = 0; turn < 400 && !startSettled; turn++) {
-      await Promise.resolve();
-    }
-    expect(startSettled).toBe(false);
-    expect(devices.getExecutedOperations()).toContain("killDevice:Pixel_8_API_35");
-    await started;
-    controller.abort(new Error("caller disconnected"));
-    await expect(start).rejects.toThrow("caller disconnected");
-    const select = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
-    const beforeSelection = { ...pool.getDevice(device.deviceId)! };
-    const refused = await select({
-      deviceId: device.deviceId,
-      sessionUuid: "other-session",
-      __mcpSessionId: "other-mcp",
-    }).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-    expect(refused).toBeInstanceOf(Error);
-    expect([
-      deviceAssignedToOtherSessionError(device.deviceId, "owner-session", "other-session").message,
-      devicePreparedForOtherRequestError(device.deviceId).message,
-    ]).toContain((refused as Error).message);
-    expect(pool.getDevice(device.deviceId)).toEqual(beforeSelection);
-    expect(sessions.getSession("other-session")).toBeNull();
-    expect(pool.getDevice(device.deviceId)).toMatchObject({
-      sessionId: "owner-session",
-      status: "busy",
-    });
-    expect(sessions.getSession("owner-session")?.assignedDevice).toBe(device.deviceId);
-    expect(lifecycleReleases).toBe(0);
-    expect(shutdownReleases).toBe(0);
-    expect(routeReleases).toBe(0);
-    expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(true);
-    expect(await gates.capacity("android")).toEqual({ booted: 0, inFlight: 1 });
-    expect(gates.admissions).toHaveLength(1);
-    expect(gates.admissions[0]?.releaseCalls).toBe(0);
-    expect(bootHandoffs).toBe(0);
 
-    finishLaunch();
-    for (let turn = 0; turn < 400; turn++) {
-      await Promise.resolve();
-    }
+      const originalKill = devices.killDevice.bind(devices);
+      devices.killDevice = async (target) => {
+        await originalKill(target);
+        devices.setBootedDevices("android", []);
+      };
 
-    expect(readinessCalls).toBe(1);
-    const operations = devices.getExecutedOperations();
-    expect(operations.filter((operation) => operation.startsWith("startDevice:"))).toHaveLength(1);
-    expect(
-      (await devices.getBootedDevices("android")).map((running) => running.deviceId),
-    ).toContain(device.deviceId);
-    expect(operations.filter((operation) => operation.startsWith("killDevice:"))).toEqual([
-      "killDevice:Pixel_8_API_35",
-    ]);
-    expect(operations.filter((operation) => operation.startsWith("startDevice:"))).toHaveLength(1);
-    expect(pool.getDevice(device.deviceId)?.sessionId).toBeNull();
-    expect(pool.getIdleDevices().map((idle) => idle.id)).toContain(device.deviceId);
-    expect(await gates.capacity("android")).toEqual({ booted: 1, inFlight: 0 });
-    expect(gates.admissions).toHaveLength(1);
-    expect(gates.admissions[0]?.releaseCalls).toBe(0);
-    expect(bootHandoffs).toBe(1);
-    expect(await gates.capacity("android")).toEqual({ booted: 1, inFlight: 0 });
-    expect(sessions.getSession("owner-session")).toBeNull();
-    expect(lifecycleReleases).toBe(1);
-    expect(shutdownReleases).toBe(1);
-    expect(readinessReleases).toBe(2);
-    expect(routeReleases).toBe(1);
-    expect(releaseOrder).toEqual(["readiness", "shutdown", "readiness", "route", "lifecycle"]);
-    expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(false);
-    expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
-    expect(pool.isReservedForReadiness(device.deviceId)).toBe(false);
+      let launchStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        launchStarted = resolve;
+      });
+      let finishLaunch!: () => void;
+      const launchGate = new Promise<void>((resolve) => {
+        finishLaunch = resolve;
+      });
+      beforePlatformLaunch = async () => {
+        launchStarted();
+        await launchGate;
+      };
 
-    await pool.bindOrReuseDeviceSession({
-      sessionId: "other-session",
-      deviceId: device.deviceId,
-      platform: "android",
-      sourceImage: image,
-    });
-    expect(pool.getDevice(device.deviceId)?.sessionId).toBe("other-session");
-  });
+      const controller = new AbortController();
+      let startSettled = false;
+      const start = ToolRegistry.getTool("startDevice")!
+        .handler({ platform: "android", name: device.name }, undefined, controller.signal)
+        .finally(() => {
+          startSettled = true;
+        });
+      for (let turn = 0; turn < 400 && !startSettled; turn++) {
+        await Promise.resolve();
+      }
+      expect(startSettled).toBe(false);
+      expect(devices.getExecutedOperations()).toContain("killDevice:Pixel_8_API_35");
+      await started;
+      controller.abort(new Error("caller disconnected"));
+      await expect(start).rejects.toThrow("caller disconnected");
+      const select = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+      const beforeSelection = { ...pool.getDevice(device.deviceId)! };
+      const refused = await select({
+        deviceId: device.deviceId,
+        sessionUuid: "other-session",
+        __mcpSessionId: "other-mcp",
+      }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(refused).toBeInstanceOf(Error);
+      expect([
+        deviceAssignedToOtherSessionError(device.deviceId, "owner-session", "other-session")
+          .message,
+        devicePreparedForOtherRequestError(device.deviceId).message,
+      ]).toContain((refused as Error).message);
+      expect(pool.getDevice(device.deviceId)).toEqual(beforeSelection);
+      expect(sessions.getSession("other-session")).toBeNull();
+      expect(pool.getDevice(device.deviceId)).toMatchObject({
+        sessionId: "owner-session",
+        status: "busy",
+      });
+      expect(sessions.getSession("owner-session")?.assignedDevice).toBe(device.deviceId);
+      expect(lifecycleReleases).toBe(0);
+      expect(shutdownReleases).toBe(0);
+      expect(routeReleases).toBe(0);
+      expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(true);
+      expect(await gates.capacity("android")).toEqual({ booted: 0, inFlight: 1 });
+      expect(gates.admissions).toHaveLength(1);
+      expect(gates.admissions[0]?.releaseCalls).toBe(0);
+      expect(bootHandoffs).toBe(0);
 
-  test("cancellation after relaunch keeps one running device and returns every recovery reservation once", async () => {
-    const replacement = new ExitOnKillProcess();
-    devices.setMockChildProcess(device.name, replacement as ChildProcess);
-    const kill = devices.killDevice.bind(devices);
-    devices.killDevice = async (...args) => {
-      await kill(...args);
-      devices.setBootedDevices("android", []);
-    };
-    const controller = new AbortController();
-    let attempts = 0;
-    setDeviceToolsDependencies({
-      ensureCtrlProxyReady: async () => {
-        attempts++;
-        if (attempts === 1) {
-          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-        }
-        controller.abort(new Error("cancelled after replacement readiness started"));
-        throw controller.signal.reason;
-      },
-    });
-    await expect(
-      ToolRegistry.getTool("startDevice")!.handler(
-        { platform: "android", name: device.name },
-        undefined,
-        controller.signal,
-      ),
-    ).rejects.toThrow("cancelled after replacement readiness started");
-    for (let turn = 0; turn < 200; turn++) {
-      await Promise.resolve();
-    }
-    expect(replacement.killCalls).toBe(0);
-    expect(pool.getDevice(device.deviceId)).toMatchObject({ status: "idle", sessionId: null });
-    expect(sessions.getSession("owner-session")).toBeNull();
-    expect(gates.admissions).toHaveLength(1);
-    expect(gates.admissions[0]?.releaseCalls).toBe(0);
-    expect(bootHandoffs).toBe(1);
-    // A listed replacement hands its admission back to discovery, counted once on each sample.
-    expect(await gates.capacity("android")).toEqual({ booted: 1, inFlight: 0 });
-    expect(await gates.capacity("android")).toEqual({ booted: 1, inFlight: 0 });
-    expect(lifecycleReleases).toBe(1);
-    expect(shutdownReleases).toBe(1);
-    expect(readinessReleases).toBe(2);
-    expect(routeReleases).toBe(1);
-    expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
-    expect(pool.isReservedForReadiness(device.deviceId)).toBe(false);
-  });
+      finishLaunch();
+      for (let turn = 0; turn < 400; turn++) {
+        await Promise.resolve();
+      }
 
-  test("runningBeforeCall suppresses cancellation cleanup while an ordinary cold boot is stopped", async () => {
-    const handle = new ExitOnKillProcess();
-    const runningBeforeCall: DeviceBootResult = {
-      device: { ...device, deviceId: "unit-unheld" },
-      source: "cold-boot",
-      runningBeforeCall: true,
-      processHandle: handle as ChildProcess,
-      provisioned: false,
-    };
-    const coldBoot: DeviceBootResult = {
-      device: { ...device, deviceId: "unit-unheld" },
-      source: "cold-boot",
-      processHandle: handle as ChildProcess,
-      provisioned: false,
-    };
+      expect(readinessCalls).toBe(1);
+      const operations = devices.getExecutedOperations();
+      expect(operations.filter((operation) => operation.startsWith("startDevice:"))).toHaveLength(
+        1,
+      );
+      expect(
+        (await devices.getBootedDevices("android")).map((running) => running.deviceId),
+      ).toContain(device.deviceId);
+      expect(operations.filter((operation) => operation.startsWith("killDevice:"))).toEqual([
+        "killDevice:Pixel_8_API_35",
+      ]);
+      expect(operations.filter((operation) => operation.startsWith("startDevice:"))).toHaveLength(
+        1,
+      );
+      expect(pool.getDevice(device.deviceId)?.sessionId).toBeNull();
+      expect(pool.getIdleDevices().map((idle) => idle.id)).toContain(device.deviceId);
+      expect(await gates.capacity("android")).toEqual({ booted: 1, inFlight: 0 });
+      expect(gates.admissions).toHaveLength(1);
+      expect(gates.admissions[0]?.releaseCalls).toBe(0);
+      expect(bootHandoffs).toBe(1);
+      expect(await gates.capacity("android")).toEqual({ booted: 1, inFlight: 0 });
+      expect(sessions.getSession("owner-session")).toBeNull();
+      expect(lifecycleReleases).toBe(1);
+      expect(shutdownReleases).toBe(1);
+      expect(readinessReleases).toBe(2);
+      expect(routeReleases).toBe(1);
+      expect(releaseOrder).toEqual(["readiness", "shutdown", "readiness", "route", "lifecycle"]);
+      expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(false);
+      expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
+      expect(pool.isReservedForReadiness(device.deviceId)).toBe(false);
 
-    expect(await cancelUnownedColdBoot(runningBeforeCall)).toBeUndefined();
-    expect(handle.killCalls).toBe(0);
-    await cancelUnownedColdBoot(coldBoot);
-    expect(handle.killCalls).toBe(1);
-  });
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "other-session",
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: image,
+      });
+      expect(pool.getDevice(device.deviceId)?.sessionId).toBe("other-session");
+    },
+  );
 
-  test("rollBackUndeliveredBoot preserves an already-running Android device and stops a new boot", async () => {
-    const identity = {
-      kind: "stable" as const,
-      platform: "android" as const,
-      stableId: device.name,
-    };
-    const kept = new ExitOnKillProcess();
-    const created = new ExitOnKillProcess();
-    const alreadyRunning: DeviceBootResult = {
-      device: { ...device, deviceId: "unit-unheld" },
-      source: "cold-boot",
-      runningBeforeCall: true,
-      processHandle: kept as ChildProcess,
-      provisioned: false,
-    };
-    const coldBoot: DeviceBootResult = {
-      device: { ...device, deviceId: "unit-unheld" },
-      source: "cold-boot",
-      processHandle: created as ChildProcess,
-      provisioned: false,
-    };
+  arranged(
+    "cancellation after relaunch keeps one running device and returns every recovery reservation once",
+    async () => {
+      const replacement = new ExitOnKillProcess();
+      devices.setMockChildProcess(device.name, replacement);
+      const kill = devices.killDevice.bind(devices);
+      devices.killDevice = async (...args) => {
+        await kill(...args);
+        devices.setBootedDevices("android", []);
+      };
+      const controller = new AbortController();
+      let attempts = 0;
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          attempts++;
+          if (attempts === 1) {
+            throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+          }
+          controller.abort(new Error("cancelled after replacement readiness started"));
+          throw controller.signal.reason;
+        },
+      });
+      await expect(
+        ToolRegistry.getTool("startDevice")!.handler(
+          { platform: "android", name: device.name },
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toThrow("cancelled after replacement readiness started");
+      for (let turn = 0; turn < 200; turn++) {
+        await Promise.resolve();
+      }
+      expect(replacement.killCalls).toBe(0);
+      expect(pool.getDevice(device.deviceId)).toMatchObject({ status: "idle", sessionId: null });
+      expect(sessions.getSession("owner-session")).toBeNull();
+      expect(gates.admissions).toHaveLength(1);
+      expect(gates.admissions[0]?.releaseCalls).toBe(0);
+      expect(bootHandoffs).toBe(1);
+      // A listed replacement hands its admission back to discovery, counted once on each sample.
+      expect(await gates.capacity("android")).toEqual({ booted: 1, inFlight: 0 });
+      expect(await gates.capacity("android")).toEqual({ booted: 1, inFlight: 0 });
+      expect(lifecycleReleases).toBe(1);
+      expect(shutdownReleases).toBe(1);
+      expect(readinessReleases).toBe(2);
+      expect(routeReleases).toBe(1);
+      expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
+      expect(pool.isReservedForReadiness(device.deviceId)).toBe(false);
+    },
+  );
 
-    let deletes = 0;
-    await rollBackUndeliveredBoot(alreadyRunning, identity, async () => {
-      deletes++;
-    });
-    expect(deletes).toBe(0);
-    await rollBackUndeliveredBoot(coldBoot, identity);
+  arranged(
+    "runningBeforeCall suppresses cancellation cleanup while an ordinary cold boot is stopped",
+    async () => {
+      const handle = new ExitOnKillProcess();
+      const runningBeforeCall: DeviceBootResult = {
+        device: { ...device, deviceId: "unit-unheld" },
+        source: "cold-boot",
+        runningBeforeCall: true,
+        processHandle: handle,
+        provisioned: false,
+      };
+      const coldBoot: DeviceBootResult = {
+        device: { ...device, deviceId: "unit-unheld" },
+        source: "cold-boot",
+        processHandle: handle,
+        provisioned: false,
+      };
 
-    expect(kept.killCalls).toBe(0);
-    expect(created.killCalls).toBe(1);
-  });
+      expect(await cancelUnownedColdBoot(runningBeforeCall)).toBeUndefined();
+      expect(handle.killCalls).toBe(0);
+      await cancelUnownedColdBoot(coldBoot);
+      expect(handle.killCalls).toBe(1);
+    },
+  );
 
-  test("iOS booted devices are kept and an iOS cold boot is stopped on rollback", async () => {
+  arranged(
+    "rollBackUndeliveredBoot preserves an already-running Android device and stops a new boot",
+    async () => {
+      const identity = {
+        kind: "stable" as const,
+        platform: "android" as const,
+        stableId: device.name,
+      };
+      const kept = new ExitOnKillProcess();
+      const created = new ExitOnKillProcess();
+      const alreadyRunning: DeviceBootResult = {
+        device: { ...device, deviceId: "unit-unheld" },
+        source: "cold-boot",
+        runningBeforeCall: true,
+        processHandle: kept,
+        provisioned: false,
+      };
+      const coldBoot: DeviceBootResult = {
+        device: { ...device, deviceId: "unit-unheld" },
+        source: "cold-boot",
+        processHandle: created,
+        provisioned: false,
+      };
+
+      let deletes = 0;
+      await rollBackUndeliveredBoot(alreadyRunning, identity, async () => {
+        deletes++;
+      });
+      expect(deletes).toBe(0);
+      await rollBackUndeliveredBoot(coldBoot, identity);
+
+      expect(kept.killCalls).toBe(0);
+      expect(created.killCalls).toBe(1);
+    },
+  );
+
+  arranged("iOS booted devices are kept and an iOS cold boot is stopped on rollback", async () => {
     const iosDevice: BootedDevice = {
       name: "iPhone 16",
       platform: "ios",
@@ -874,13 +927,13 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     const alreadyBooted: DeviceBootResult = {
       device: iosDevice,
       source: "booted",
-      processHandle: kept as ChildProcess,
+      processHandle: kept,
       provisioned: false,
     };
     const coldBoot: DeviceBootResult = {
       device: iosDevice,
       source: "cold-boot",
-      processHandle: created as ChildProcess,
+      processHandle: created,
       provisioned: false,
     };
 
@@ -890,132 +943,140 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     await rollBackUndeliveredBoot(coldBoot, identity);
     expect(created.killCalls).toBe(1);
     const cancelled = new ExitOnKillProcess();
-    await cancelUnownedColdBoot({ ...coldBoot, processHandle: cancelled as ChildProcess });
+    await cancelUnownedColdBoot({ ...coldBoot, processHandle: cancelled });
     expect(cancelled.killCalls).toBe(1);
   });
 
-  test("a rejected cancelled replacement tail warns and releases the preserved session", async () => {
-    let readinessCalls = 0;
-    setDeviceToolsDependencies({
-      ensureCtrlProxyReady: async () => {
-        readinessCalls++;
-        if (readinessCalls === 1) {
-          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-        }
-      },
-    });
-    const originalKill = devices.killDevice.bind(devices);
-    devices.killDevice = async (target, options) => {
-      await originalKill(target, options);
-      devices.setBootedDevices("android", []);
-    };
-    const launchStarted = Promise.withResolvers<void>();
-    const launchGate = Promise.withResolvers<void>();
-    beforePlatformLaunch = async () => {
-      launchStarted.resolve();
-      await launchGate.promise;
-    };
-    const warning = spyOn(logger, "warn").mockImplementation(() => {});
-    const controller = new AbortController();
-    const start = ToolRegistry.getTool("startDevice")!.handler(
-      { platform: "android", name: device.name },
-      undefined,
-      controller.signal,
-    );
+  arranged(
+    "a rejected cancelled replacement tail warns and releases the preserved session",
+    async () => {
+      let readinessCalls = 0;
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          readinessCalls++;
+          if (readinessCalls === 1) {
+            throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+          }
+        },
+      });
+      const originalKill = devices.killDevice.bind(devices);
+      devices.killDevice = async (target) => {
+        await originalKill(target);
+        devices.setBootedDevices("android", []);
+      };
+      const launchStarted = Promise.withResolvers<void>();
+      const launchGate = Promise.withResolvers<void>();
+      beforePlatformLaunch = async () => {
+        launchStarted.resolve();
+        await launchGate.promise;
+      };
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      const controller = new AbortController();
+      const start = ToolRegistry.getTool("startDevice")!.handler(
+        { platform: "android", name: device.name },
+        undefined,
+        controller.signal,
+      );
 
-    try {
-      await launchStarted.promise;
-      controller.abort(new Error("caller disconnected"));
-      await expect(start).rejects.toThrow("caller disconnected");
-      expect(await gates.capacity("android")).toEqual({ booted: 0, inFlight: 1 });
-      expect(gates.admissions[0]?.releaseCalls).toBe(0);
-      expect(lifecycleReleases).toBe(0);
-      launchGate.reject(new Error("deferred replacement failed"));
+      try {
+        await launchStarted.promise;
+        controller.abort(new Error("caller disconnected"));
+        await expect(start).rejects.toThrow("caller disconnected");
+        expect(await gates.capacity("android")).toEqual({ booted: 0, inFlight: 1 });
+        expect(gates.admissions[0]?.releaseCalls).toBe(0);
+        expect(lifecycleReleases).toBe(0);
+        launchGate.reject(new Error("deferred replacement failed"));
+        for (let turn = 0; turn < 400; turn++) {
+          await Promise.resolve();
+        }
+
+        expect(warning).toHaveBeenCalledWith(
+          expect.stringContaining("Background System UI ANR recovery failed"),
+          expect.any(Error),
+        );
+        expect(gates.admissions).toHaveLength(1);
+        expect(gates.admissions[0]?.releaseCalls).toBe(1);
+        expect(bootHandoffs).toBe(0);
+        expect(await gates.capacity("android")).toEqual({ booted: 0, inFlight: 0 });
+        expect(pool.getDevice(device.deviceId)).toBeNull();
+        expect(sessions.getSession("owner-session")).toBeNull();
+        expect(pool.isReservedForReadiness(device.deviceId)).toBe(false);
+        expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
+        expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(false);
+        expect(lifecycleReleases).toBe(1);
+        expect(shutdownReleases).toBe(1);
+        expect(readinessReleases).toBe(2);
+        expect(routeReleases).toBe(1);
+        expect(releaseOrder).toEqual(["readiness", "shutdown", "readiness", "route", "lifecycle"]);
+      } finally {
+        warning.mockRestore();
+      }
+    },
+  );
+
+  arranged(
+    "a call-cold-boot replacement is killed when recovery is cancelled after relaunch",
+    async () => {
+      const heldSessionId = pool.getDevice(device.deviceId)?.sessionId;
+      if (heldSessionId) {
+        await sessions.releaseSession(heldSessionId);
+        await pool.releaseDevice(device.deviceId, heldSessionId);
+      }
+      devices.setBootedDevices("android", []);
+      matcher.setBootedResult(null);
+      const originalProcess = new ExitOnKillProcess();
+      const replacementProcess = new ExitOnKillProcess(() =>
+        devices.setBootedDevices("android", []),
+      );
+      devices.setMockChildProcess(device.name, originalProcess);
+      let readinessCalls = 0;
+      const controller = new AbortController();
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          readinessCalls++;
+          if (readinessCalls === 1) {
+            devices.setMockChildProcess(device.name, replacementProcess);
+            throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+          }
+          controller.abort(new Error("caller disconnected after relaunch"));
+        },
+      });
+      const originalKill = devices.killDevice.bind(devices);
+      devices.killDevice = async (target) => {
+        await originalKill(target);
+        devices.setBootedDevices("android", []);
+        originalProcess.exit();
+      };
+      const start = ToolRegistry.getTool("startDevice")!.handler(
+        { platform: "android", name: device.name },
+        undefined,
+        controller.signal,
+      );
+
+      await expect(start).rejects.toThrow("caller disconnected after relaunch");
       for (let turn = 0; turn < 400; turn++) {
         await Promise.resolve();
       }
 
-      expect(warning).toHaveBeenCalledWith(
-        expect.stringContaining("Background System UI ANR recovery failed"),
-        expect.any(Error),
-      );
-      expect(gates.admissions).toHaveLength(1);
-      expect(gates.admissions[0]?.releaseCalls).toBe(1);
-      expect(bootHandoffs).toBe(0);
+      expect(readinessCalls).toBe(2);
+      expect(replacementProcess.killCalls).toBe(1);
+      expect(await devices.getBootedDevices("android")).toEqual([]);
       expect(await gates.capacity("android")).toEqual({ booted: 0, inFlight: 0 });
-      expect(pool.getDevice(device.deviceId)).toBeNull();
-      expect(sessions.getSession("owner-session")).toBeNull();
-      expect(pool.isReservedForReadiness(device.deviceId)).toBe(false);
-      expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
-      expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(false);
-      expect(lifecycleReleases).toBe(1);
-      expect(shutdownReleases).toBe(1);
-      expect(readinessReleases).toBe(2);
-      expect(routeReleases).toBe(1);
-      expect(releaseOrder).toEqual(["readiness", "shutdown", "readiness", "route", "lifecycle"]);
-    } finally {
-      warning.mockRestore();
-    }
-  });
-
-  test("a call-cold-boot replacement is killed when recovery is cancelled after relaunch", async () => {
-    const heldSessionId = pool.getDevice(device.deviceId)?.sessionId;
-    if (heldSessionId) {
-      await sessions.releaseSession(heldSessionId);
-      await pool.releaseDevice(device.deviceId, heldSessionId);
-    }
-    devices.setBootedDevices("android", []);
-    matcher.setBootedResult(null);
-    const originalProcess = new ExitOnKillProcess();
-    const replacementProcess = new ExitOnKillProcess(() => devices.setBootedDevices("android", []));
-    devices.setMockChildProcess(device.name, originalProcess as ChildProcess);
-    let readinessCalls = 0;
-    const controller = new AbortController();
-    setDeviceToolsDependencies({
-      ensureCtrlProxyReady: async () => {
-        readinessCalls++;
-        if (readinessCalls === 1) {
-          devices.setMockChildProcess(device.name, replacementProcess as ChildProcess);
-          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-        }
-        controller.abort(new Error("caller disconnected after relaunch"));
-      },
-    });
-    const originalKill = devices.killDevice.bind(devices);
-    devices.killDevice = async (target, options) => {
-      await originalKill(target, options);
-      devices.setBootedDevices("android", []);
-      originalProcess.exit();
-    };
-    const start = ToolRegistry.getTool("startDevice")!.handler(
-      { platform: "android", name: device.name },
-      undefined,
-      controller.signal,
-    );
-
-    await expect(start).rejects.toThrow("caller disconnected after relaunch");
-    for (let turn = 0; turn < 400; turn++) {
-      await Promise.resolve();
-    }
-
-    expect(readinessCalls).toBe(2);
-    expect(replacementProcess.killCalls).toBe(1);
-    expect(await devices.getBootedDevices("android")).toEqual([]);
-    expect(await gates.capacity("android")).toEqual({ booted: 0, inFlight: 0 });
-  });
+    },
+  );
 });
 
-class ExitOnKillProcess extends EventEmitter {
+class ExitOnKillProcess extends FakeChildProcess {
   readonly pid = 42001;
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
   killCalls = 0;
 
   constructor(private readonly onExit?: () => void) {
-    super();
+    super(new FakeTimer());
   }
 
-  kill(): boolean {
+  override kill(): boolean {
     this.killCalls++;
     this.exit();
     return true;

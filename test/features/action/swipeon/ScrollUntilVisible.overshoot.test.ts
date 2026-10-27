@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../../observe/flatHierarchyBuilders";
 import { recordObservationRead } from "../../../../src/features/observe/observationReadScope";
 import { loadIosRemindersNoiseObservePair } from "../../../fixtures/observe/observeFixture";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
@@ -36,11 +37,13 @@ const DEVICE: BootedDevice = {
 const SCREEN_SIZE = { width: 400, height: 900 };
 
 const makeObserveResult = (hierarchyId: number = 0): ObserveResult => ({
-  timestamp: 0,
+  updatedAt: 0,
+  observationId: "test-observation",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   screenSize: SCREEN_SIZE,
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   viewHierarchy: {
-    hierarchy: { node: { $: { _id: String(hierarchyId) } } },
+    hierarchy: { node: createFlatNodeForTest({ $: { _id: String(hierarchyId) } }) },
   },
 });
 
@@ -178,13 +181,13 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     try {
       const hierarchy = {
         hierarchy: {
-          node: {
+          node: createFlatNodeForTest({
             bounds: { left: 0, top: 0, right: 100, bottom: 50 },
             class: "android.widget.EditText",
             text: "5551234",
             "hint-text": "Phone",
             focusable: true,
-          },
+          }),
         },
       };
       expect(scroll.resolveElement(hierarchy, { text: "Phone" }, "inspect", true)).toBeNull();
@@ -311,7 +314,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       ...makeObserveResult(),
       viewHierarchy: {
         hierarchy: {
-          node: {
+          node: createFlatNodeForTest({
             bounds: { left: 0, top: 0, right: 400, bottom: 900 },
             "resource-id": "feed",
             scrollable: true,
@@ -322,7 +325,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
                 scrollable: true,
               },
             ],
-          },
+          }),
         },
       },
     };
@@ -345,22 +348,20 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       ...makeObserveResult(),
       viewHierarchy: {
         hierarchy: {
-          node: {
+          node: createFlatNodeForTest({
             bounds: { left: 0, top: 0, right: 400, bottom: 900 },
             "resource-id": "app:id/feed",
             scrollable: true,
-          },
+          }),
         },
         windows: [
           {
             windowLayer: 10,
-            hierarchy: {
-              node: {
-                bounds: { left: 0, top: 700, right: 400, bottom: 900 },
-                "resource-id": "ime:id/suggestions",
-                scrollable: true,
-              },
-            },
+            hierarchy: createFlatNodeForTest({
+              bounds: { left: 0, top: 700, right: 400, bottom: 900 },
+              "resource-id": "ime:id/suggestions",
+              scrollable: true,
+            }),
           },
         ],
       },
@@ -490,7 +491,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     expect(
       observedInteractionOptions.every((options) => options.deferPostActionScreenshot === true),
     ).toBe(true);
-    expect(terminalEvidence).toEqual([result.observation]);
+    expect<unknown>(terminalEvidence).toEqual([result.observation]);
   });
 
   test("switches to opposite direction after forward end-of-list", async () => {
@@ -1117,12 +1118,12 @@ const resolverOnlyScroll = () =>
 describe("ScrollUntilVisible shared resolver identity", () => {
   const hierarchy = (ids: string[]): ViewHierarchyResult => ({
     hierarchy: {
-      node: {
+      node: createFlatNodeForTest({
         node: ids.map((id, index) => ({
           "resource-id": id,
           bounds: { left: 0, top: index * 50, right: 100, bottom: index * 50 + 40 },
         })),
-      },
+      }),
     },
   });
   test("bare lookFor ID rejects substring near misses", async () => {
@@ -1153,12 +1154,12 @@ describe("ScrollUntilVisible shared resolver identity", () => {
       { text: "Target" },
       {
         hierarchy: {
-          node: {
+          node: createFlatNodeForTest({
             "resource-id": "com.app:id/target_row",
             clickable: true,
             bounds: { left: 0, top: 0, right: 100, bottom: 100 },
             node: [label],
-          },
+          }),
         },
       },
     );
@@ -1170,12 +1171,12 @@ describe("ScrollUntilVisible shared resolver identity", () => {
     const label = { text: "Target", bounds: { left: 20, top: 40, right: 80, bottom: 60 } };
     const viewHierarchy: ViewHierarchyResult = {
       hierarchy: {
-        node: {
+        node: createFlatNodeForTest({
           "resource-id": "row",
           clickable: true,
           bounds: { left: 0, top: 0, right: 100, bottom: 100 },
           node: [label],
-        },
+        }),
       },
     };
     expect(
@@ -1202,12 +1203,12 @@ describe("ScrollUntilVisible shared resolver identity", () => {
       { text: "Target" },
       {
         hierarchy: {
-          node: {
+          node: createFlatNodeForTest({
             "content-desc": "Unrelated row label",
             clickable: true,
             bounds: { left: 0, top: 0, right: 100, bottom: 100 },
             node: [target],
-          },
+          }),
         },
       },
     );
@@ -1220,11 +1221,11 @@ describe("ScrollUntilVisible shared resolver identity", () => {
       { text: "It's here" },
       {
         hierarchy: {
-          node: {
+          node: createFlatNodeForTest({
             clickable: true,
             bounds: { left: 0, top: 0, right: 100, bottom: 100 },
             node: [target],
-          },
+          }),
         },
       },
     );
@@ -1252,11 +1253,11 @@ test("lookFor treats a temporarily missing container as a miss and retries withi
     { elementId: "login" },
     {
       hierarchy: {
-        node: {
+        node: createFlatNodeForTest({
           "resource-id": "com.app:id/panel",
           bounds: { left: 0, top: 0, right: 200, bottom: 200 },
           node: [target],
-        },
+        }),
       },
     },
     scope,

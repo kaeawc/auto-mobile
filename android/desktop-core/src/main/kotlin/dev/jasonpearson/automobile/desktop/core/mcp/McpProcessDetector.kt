@@ -1,8 +1,10 @@
 package dev.jasonpearson.automobile.desktop.core.mcp
 
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.BufferedReader
 import java.io.File
+import java.io.IOException
 import java.io.InputStreamReader
 
 /** Data class for MCP process information */
@@ -83,7 +85,12 @@ class SystemProcessRunner : ProcessRunner {
         }
       process.waitFor()
       lines
-    } catch (e: Exception) {
+    } catch (e: IOException) {
+      LoggerFactory.getLogger("SystemProcessRunner").warn("Process failed: $command", e)
+      null
+    } catch (e: InterruptedException) {
+      Thread.currentThread().interrupt()
+      LoggerFactory.getLogger("SystemProcessRunner").warn("Process interrupted: $command", e)
       null
     }
   }
@@ -150,24 +157,7 @@ class RealMcpProcessDetector(
         } else null
 
       val (connectionType, port, resolvedSocketPath) =
-        when {
-          socketPath != null -> {
-            Triple(McpConnectionType.UnixSocket, null, socketPath)
-          }
-          fallbackSocketPath != null &&
-            (cmdLine.contains("--daemon-mode") || cmdLine.contains("auto-mobile")) -> {
-            Triple(McpConnectionType.UnixSocket, null, fallbackSocketPath)
-          }
-          cmdLine.contains("--daemon-mode") -> {
-            Triple(McpConnectionType.StreamableHttp, extractPort(cmdLine) ?: 3000, null)
-          }
-          cmdLine.contains("--port") || cmdLine.contains(":3000") || cmdLine.contains("http") -> {
-            Triple(McpConnectionType.StreamableHttp, extractPort(cmdLine) ?: 3000, null)
-          }
-          else -> {
-            Triple(McpConnectionType.Stdio, null, null)
-          }
-        }
+        resolveConnection(socketPath, fallbackSocketPath, cmdLine)
 
       processes.add(
         McpProcess(
@@ -183,6 +173,17 @@ class RealMcpProcessDetector(
     }
 
     return processes
+  }
+
+  private fun resolveConnection(
+    socketPath: String?,
+    fallbackSocketPath: String?,
+    cmdLine: String,
+  ): Triple<McpConnectionType, Int?, String?> {
+    val useFallback =
+      fallbackSocketPath != null &&
+        (cmdLine.contains("--daemon-mode") || cmdLine.contains("auto-mobile"))
+    return classifyConnection(socketPath ?: fallbackSocketPath.takeIf { useFallback }, cmdLine)
   }
 
   private fun findAutoMobileProcesses(): List<ProcessInfo> {
@@ -218,7 +219,9 @@ class RealMcpProcessDetector(
     return try {
       val format = java.text.SimpleDateFormat("EEE MMM dd HH:mm:ss yyyy", java.util.Locale.US)
       format.parse(dateStr)?.time ?: timeProvider.currentTimeMillis()
-    } catch (e: Exception) {
+    } catch (e: java.text.ParseException) {
+      LoggerFactory.getLogger("RealMcpProcessDetector")
+        .warn("Invalid process start date: $dateStr", e)
       timeProvider.currentTimeMillis()
     }
   }

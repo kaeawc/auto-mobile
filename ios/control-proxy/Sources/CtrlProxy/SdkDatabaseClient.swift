@@ -19,7 +19,7 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
     }
 
     convenience init(port: UInt16 = 8766, endpointResolver: SdkEndpointResolver) {
-        let baseURL = URL(string: "http://127.0.0.1:\(port)")! // swiftlint:disable:this force_unwrapping
+        let baseURL = loopbackBaseURL(port: port)
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = Self.requestTimeout
         config.timeoutIntervalForResource = 5

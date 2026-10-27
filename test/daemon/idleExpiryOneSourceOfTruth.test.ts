@@ -1,3 +1,7 @@
+import {
+  deliverDaemonHeartbeat,
+  deliverDaemonHeartbeatIfKnown,
+} from "../helpers/daemonHeartbeatHandler";
 import { describe, expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
@@ -10,7 +14,7 @@ import { idleReleaseAt } from "../../src/daemon/sessionHoldDiagnostics";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SeededRandom } from "../fakes/SeededRandom";
@@ -44,6 +48,8 @@ interface SessionKind {
   name: string;
   /** Whether an owner process heartbeats for it (a one-shot CLI has none). */
   heartbeats: boolean;
+  /** What its owner's heartbeat frames carry (its liveness owner token, if it claimed one). */
+  heartbeatParams?: Record<string, unknown>;
   setUp(manager: SessionManager): Promise<void>;
 }
 
@@ -69,6 +75,7 @@ const SESSION_KINDS: readonly SessionKind[] = [
   {
     name: "proxy-owned (liveness token)",
     heartbeats: true,
+    heartbeatParams: { livenessOwnerToken: "proxy-token" },
     async setUp(manager) {
       await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
       expect(await manager.claimLivenessOwnership(SESSION, "proxy-token")).toBe("claimed");
@@ -228,9 +235,9 @@ class IdleWorld {
     }
   }
 
-  private heartbeat(): void {
+  private async heartbeat(): Promise<void> {
     if (this.kind.heartbeats && this.held) {
-      this.manager.recordHeartbeat(SESSION);
+      await deliverDaemonHeartbeatIfKnown(this.manager, SESSION, this.kind.heartbeatParams);
     }
   }
 
@@ -283,7 +290,7 @@ class IdleWorld {
         // Time passes with every scan and heartbeat on time.
         for (let elapsed = 0; elapsed < step.ms && this.held; elapsed += SCAN_MS) {
           await this.timer.advanceTimeAsync(SCAN_MS, () => drainMicrotasks(5));
-          this.heartbeat();
+          await this.heartbeat();
           await this.scan();
         }
         return;
@@ -298,7 +305,7 @@ class IdleWorld {
         }
         if (this.held) {
           await this.scan();
-          this.heartbeat();
+          await this.heartbeat();
         }
         return;
       case "sleep":
@@ -310,7 +317,7 @@ class IdleWorld {
         }
         if (this.held) {
           await this.scan();
-          this.heartbeat();
+          await this.heartbeat();
         }
         return;
       case "wallStep":
@@ -318,7 +325,7 @@ class IdleWorld {
         this.wallSteppedMs += step.ms;
         await this.scan();
         // The owner keeps heartbeating across the step; a forward one reads as host sleep.
-        this.heartbeat();
+        await this.heartbeat();
         return;
       case "call":
         await this.call();
@@ -377,7 +384,7 @@ describe("the scan, a late call's admission and idleReleaseAt give one idle dead
           await manager.adoptManagedExecutionLivenessPolicy(SESSION);
           await manager.claimLivenessOwnership(SESSION, "managed-owner");
           timer.setCurrentTime(session.expiresAt + 1);
-          manager.recordHeartbeat(SESSION, "managed-owner");
+          await deliverDaemonHeartbeat(manager, SESSION, { livenessOwnerToken: "managed-owner" });
           const age =
             phase === "live"
               ? 0

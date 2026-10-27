@@ -17,6 +17,7 @@ import type { DeviceRecoveryPolicy, PooledDevice } from "../../src/daemon/device
 import { BoundedAndroidDeviceReboot } from "../../src/devices/androidDeviceReboot";
 import type { IdentityEvidence } from "../../src/devices/deviceIdentityEvidence";
 import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // Admission refusals precede any launch: retry the hint within the recovery window without
@@ -116,19 +117,18 @@ function setup(
   timer.enableAutoAdvance();
   /** How many boots the host refuses for capacity before a slot frees. */
   const host = { refusalsLeft: 0, launches: 0, refusals: 0, refusedAt: [] as number[] };
-  const manager = {
-    startDevice: async (): Promise<ChildProcess | null> => {
-      if (host.refusalsLeft > 0) {
-        host.refusalsLeft--;
-        host.refusals++;
-        host.refusedAt.push(timer.now());
-        throw refusal;
-      }
-      host.launches++;
-      return null;
-    },
-    waitForDeviceReady: async () => relaunched,
-  } as PlatformDeviceManager;
+  const manager = new FakeDeviceManager();
+  manager.startDevice = async (): Promise<ChildProcess | null> => {
+    if (host.refusalsLeft > 0) {
+      host.refusalsLeft--;
+      host.refusals++;
+      host.refusedAt.push(timer.now());
+      throw refusal;
+    }
+    host.launches++;
+    return null;
+  };
+  manager.waitForDeviceReady = async () => relaunched;
   const port = new RecoveryPort(manager, timer);
   const coordinator = new AndroidRebootCoordinator(
     port,

@@ -33,10 +33,12 @@ class AutoMobileContentWatchdogTest {
       val composition = VirtualComposition(this)
       composition.setContent {
         rememberLiveVideoFrame(
-          FakeVideoStreamSource(),
-          "warmup",
-          stallReconnectMs = null,
-          firstFrameTimeoutMs = null,
+          LiveVideoFrameOptions(
+            FakeVideoStreamSource(),
+            "warmup",
+            stallReconnectMs = null,
+            firstFrameTimeoutMs = null,
+          ),
         )
       }
       composition.close()
@@ -86,20 +88,23 @@ class AutoMobileContentWatchdogTest {
 
   @Test
   fun `watchdog restarts when a delayed heartbeat ack arms the iOS stall policy`() = runTest {
-    val source = FakeVideoStreamSource(nowMs = { testScheduler.currentTime })
+    val source =
+      FakeVideoStreamSource(FakeVideoStreamSource.Options(nowMs = { testScheduler.currentTime }))
     val stallPolicy = mutableStateOf<Long?>(null)
     var composedPolicy: Long? = null
     val composition = VirtualComposition(this)
     composition.setContent {
       SideEffect { composedPolicy = stallPolicy.value }
       rememberLiveVideoFrame(
-        source,
-        "ios-simulator",
-        autoReconnect = true,
-        nowMs = { testScheduler.currentTime },
-        stallReconnectMs = stallPolicy.value,
-        firstFrameTimeoutMs = null,
-        stallCheckIntervalMs = 20,
+        LiveVideoFrameOptions(
+          source,
+          "ios-simulator",
+          autoReconnect = true,
+          nowMs = { testScheduler.currentTime },
+          stallReconnectMs = stallPolicy.value,
+          firstFrameTimeoutMs = null,
+          stallCheckIntervalMs = 20,
+        ),
       )
     }
     assertEquals(1, source.connectCalls)
@@ -119,17 +124,22 @@ class AutoMobileContentWatchdogTest {
 
   @Test
   fun `activity reset to zero is not progress and cannot cause early reconnect`() = runTest {
-    val source = FakeVideoStreamSource(nowMs = { 1_000 + testScheduler.currentTime })
+    val source =
+      FakeVideoStreamSource(
+        FakeVideoStreamSource.Options(nowMs = { 1_000 + testScheduler.currentTime }),
+      )
     val composition = VirtualComposition(this)
     composition.setContent {
       rememberLiveVideoFrame(
-        source,
-        "ios-simulator",
-        autoReconnect = true,
-        nowMs = { 1_000 + testScheduler.currentTime },
-        stallReconnectMs = 100,
-        firstFrameTimeoutMs = null,
-        stallCheckIntervalMs = 20,
+        LiveVideoFrameOptions(
+          source,
+          "ios-simulator",
+          autoReconnect = true,
+          nowMs = { 1_000 + testScheduler.currentTime },
+          stallReconnectMs = 100,
+          firstFrameTimeoutMs = null,
+          stallCheckIntervalMs = 20,
+        ),
       )
     }
     source.emitHeartbeat()
@@ -147,22 +157,24 @@ class AutoMobileContentWatchdogTest {
 
   @Test
   fun `frame emission resets backoff even when Streaming state is conflated away`() = runTest {
-    val source = FakeVideoStreamSource(refuseWith = "rejected")
+    val source = FakeVideoStreamSource(FakeVideoStreamSource.Options(refuseWith = "rejected"))
     val delays = mutableListOf<Long>()
     val permits = Channel<Unit>(Channel.UNLIMITED)
     val composition = VirtualComposition(this)
     composition.setContent {
       rememberLiveVideoFrame(
-        source,
-        "emulator-5554",
-        autoReconnect = true,
-        reconnectInitialMs = 10,
-        delayMs = { delay ->
-          delays += delay
-          permits.receive()
-        },
-        stallReconnectMs = null,
-        firstFrameTimeoutMs = null,
+        LiveVideoFrameOptions(
+          source,
+          "emulator-5554",
+          autoReconnect = true,
+          reconnectInitialMs = 10,
+          delayMs = { delay ->
+            delays += delay
+            permits.receive()
+          },
+          stallReconnectMs = null,
+          firstFrameTimeoutMs = null,
+        ),
       )
     }
 
@@ -190,18 +202,20 @@ class AutoMobileContentWatchdogTest {
     val composition = VirtualComposition(this)
     composition.setContent {
       rememberLiveVideoFrame(
-        source,
-        "device",
-        autoReconnect = true,
-        reconnectInitialMs = 10,
-        delayMs = {
-          delays += it
-          permits.receive()
-        },
-        nowMs = { testScheduler.currentTime },
-        stallReconnectMs = 20,
-        firstFrameTimeoutMs = 20,
-        stallCheckIntervalMs = 10,
+        LiveVideoFrameOptions(
+          source,
+          "device",
+          autoReconnect = true,
+          reconnectInitialMs = 10,
+          delayMs = {
+            delays += it
+            permits.receive()
+          },
+          nowMs = { testScheduler.currentTime },
+          stallReconnectMs = 20,
+          firstFrameTimeoutMs = 20,
+          stallCheckIntervalMs = 10,
+        ),
       )
     }
     assertEquals(1, source.connectCalls)
@@ -217,23 +231,25 @@ class AutoMobileContentWatchdogTest {
 
   @Test
   fun `device removed still retries with exponential backoff`() = runTest {
-    val source = FakeVideoStreamSource(refuseWith = "offline")
+    val source = FakeVideoStreamSource(FakeVideoStreamSource.Options(refuseWith = "offline"))
     val delays = mutableListOf<Long>()
     val permits = Channel<Unit>(Channel.UNLIMITED)
     val composition = VirtualComposition(this)
     composition.setContent {
       rememberLiveVideoFrame(
-        source,
-        "device",
-        autoReconnect = true,
-        reconnectInitialMs = 10,
-        delayMs = {
-          delays += it
-          permits.receive()
-        },
-        nowMs = { testScheduler.currentTime },
-        stallReconnectMs = null,
-        firstFrameTimeoutMs = null,
+        LiveVideoFrameOptions(
+          source,
+          "device",
+          autoReconnect = true,
+          reconnectInitialMs = 10,
+          delayMs = {
+            delays += it
+            permits.receive()
+          },
+          nowMs = { testScheduler.currentTime },
+          stallReconnectMs = null,
+          firstFrameTimeoutMs = null,
+        ),
       )
     }
     source.becomeStreaming()

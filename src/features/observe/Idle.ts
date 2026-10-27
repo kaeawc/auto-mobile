@@ -14,6 +14,9 @@ import {
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
+import { QuietTreeStability } from "./androidLauncherPackages";
+import { KNOWN_ANDROID_LAUNCHER_PACKAGES } from "./androidLauncherRegistry";
+import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import { shellQuote } from "../../utils/shellQuote";
 
 /**
@@ -23,9 +26,26 @@ import { shellQuote } from "../../utils/shellQuote";
  */
 export const ROTATION_READ_FLOOR_MS = 1000;
 
+/**
+ * Default time to wait for the window manager to report a requested rotation. A rotation on an
+ * emulator under load (several emulators on one host) routinely takes seconds from the
+ * `user_rotation` write to the display change, so this is a reliability ceiling rather than an
+ * expected duration: polling returns as soon as the display reports the target (#15021).
+ */
+export const ROTATION_WAIT_TIMEOUT_MS = 5000;
+
+/** Frame counters carried between stability checks; null when none were recorded yet. */
+export interface UiStabilityBaseline {
+  missedVsync: number | null;
+  slowUiThread: number | null;
+  frameDeadlineMissed: number | null;
+  totalFrames: number | null;
+}
+
 export class Idle {
   private adb: AdbExecutor;
   private timer: Timer;
+  private quietTree: QuietTreeStability;
 
   /** Typed unit-test view of the launcher classification, which has no public entry point. */
   readonly testHooks = {
@@ -42,9 +62,11 @@ export class Idle {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
+    hierarchyReader?: ViewHierarchyRequestReader,
   ) {
     this.adb = adbFactory.create(device);
     this.timer = timer;
+    this.quietTree = new QuietTreeStability(device, adbFactory, timer, hierarchyReader);
   }
 
   /**
@@ -58,18 +80,8 @@ export class Idle {
       return false;
     }
 
-    const systemPackages = [
-      "com.android.systemui",
-      "com.android.launcher",
-      "com.android.launcher3",
-      "com.google.android.apps.nexuslauncher",
-      "com.samsung.android.app.launcher",
-      "com.miui.home",
-      "com.oneplus.launcher",
-      "com.huawei.android.launcher",
-      "com.sec.android.app.launcher",
-      "com.android.settings",
-    ];
+    // SystemUI plus every known launcher, from the shared registry (#14056).
+    const systemPackages = ["com.android.systemui", ...KNOWN_ANDROID_LAUNCHER_PACKAGES];
 
     // Match by prefix, not substring. Reverse containment
     // (`sysPackage.includes(packageName)`) misclassified short strings like "a"
@@ -82,6 +94,19 @@ export class Idle {
         (sysPackage) => packageName === sysPackage || packageName.startsWith(`${sysPackage}.`),
       )
     );
+  }
+
+  /** Packages without useful gfxinfo use fresh trees within the same stability budget. */
+  async waitForQuietTreeStability(
+    packageName: string,
+    startTime: number,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ) {
+    if (!this.isSystemLauncher(packageName)) {
+      return null;
+    }
+    return this.quietTree.metrics(packageName, startTime, timeoutMs, signal);
   }
 
   /**
@@ -210,10 +235,8 @@ export class Idle {
       // Take immediate measurement with no previous state
       return await this.getUiStability(
         packageName,
-        null, // No previous missed vsync
-        null, // No previous slow UI thread
-        null, // No previous frame deadline missed
-        null, // No previous total frames
+        // No previous frame counters
+        { missedVsync: null, slowUiThread: null, frameDeadlineMissed: null, totalFrames: null },
         false, // Not first log since we just reset
         perf,
       );
@@ -578,29 +601,27 @@ export class Idle {
   /**
    * Check UI stability metrics and return calculation results
    * @param packageName - Package name of the app to monitor
-   * @param prevMissedVsync - Previous missed vsync count
-   * @param prevSlowUiThread - Previous slow UI thread count
-   * @param prevFrameDeadlineMissed - Previous frame deadline missed count
+   * @param baseline - Previous frame counters (null when none recorded)
    * @param firstGfxInfoLog - Whether this is the first gfx info log
    * @param perf - Optional performance tracker
    * @returns Object containing stability check results and updated state
    */
   async getUiStability(
     packageName: string,
-    prevMissedVsync: number | null,
-    prevSlowUiThread: number | null,
-    prevFrameDeadlineMissed: number | null,
-    prevTotalFrames: number | null,
+    baseline: UiStabilityBaseline,
     firstGfxInfoLog: boolean,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<UiStabilityResult> {
+    const {
+      missedVsync: prevMissedVsync,
+      slowUiThread: prevSlowUiThread,
+      frameDeadlineMissed: prevFrameDeadlineMissed,
+      totalFrames: prevTotalFrames,
+    } = baseline;
     try {
-      // For system packages, use a simpler approach
       if (this.isSystemLauncher(packageName)) {
-        logger.info(
-          `[AwaitIdle] ${packageName} is a system package, using simplified stability check`,
-        );
+        await this.quietTree.wait(options.timeoutMs ?? 1000, options.signal);
         return {
           isStable: true,
           shouldUpdateLastNonIdleTime: false,

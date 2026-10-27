@@ -64,12 +64,43 @@ struct PrototypeHttpResponse: Equatable, Sendable {
 struct PrototypeHttpFailure: Error, Equatable, Sendable {
     let error: PrototypeRequestError
     let durationMs: Int
+    /// Internal classification survives public error mapping without matching user-visible text.
+    var localNetworkDenied = false
 }
 
 protocol PrototypeHttpClient: Sendable {
     /// Runs the call. Cancelling the calling task ends it with a `cancelled` failure. Throws
     /// `PrototypeHttpFailure` only.
     func perform(_ request: PrototypeHttpRequest) async throws -> PrototypeHttpResponse
+    /// Wrapper clients must forward `delivery` to their wrapped client so consent is rechecked at delivery.
+    func perform(
+        _ request: PrototypeHttpRequest, delivery: PrototypeDeliveryCheck
+    ) async throws -> PrototypeHttpResponse
+}
+
+extension PrototypeHttpClient {
+    func perform(
+        _ request: PrototypeHttpRequest, delivery _: PrototypeDeliveryCheck
+    )
+        async throws -> PrototypeHttpResponse
+    {
+        try await perform(request)
+    }
+}
+
+/// Carries a client's consent predicate through to synchronous main-actor delivery.
+final class PrototypeDeliveryCheck: @unchecked Sendable {
+    private let lock = NSLock()
+    private var binding: (isCurrent: @Sendable () -> Bool, obsolete: PrototypeHttpFailure)?
+
+    func bind(isCurrent: @escaping @Sendable () -> Bool, obsolete: PrototypeHttpFailure) {
+        lock.withLock { binding = (isCurrent, obsolete) }
+    }
+
+    func obsoleteFailure() -> PrototypeHttpFailure? {
+        guard let binding = lock.withLock({ binding }) else { return nil }
+        return binding.isCurrent() ? nil : binding.obsolete
+    }
 }
 
 enum PrototypeHttpBody {
@@ -117,6 +148,9 @@ enum PrototypeHttpHeaderCheck {
     static func problem(in headers: [String: String]) -> PrototypeRequestError? {
         var seen = Set<String>()
         for name in headers.keys.sorted() {
+            if PrototypeRequestValidator.isForbiddenHeader(name) {
+                return .init(.invalidRequest, "Forbidden request header: \(name)")
+            }
             if !seen.insert(name.lowercased()).inserted {
                 return .init(.invalidRequest, "Header \(name) is given twice (names are case-insensitive)")
             }

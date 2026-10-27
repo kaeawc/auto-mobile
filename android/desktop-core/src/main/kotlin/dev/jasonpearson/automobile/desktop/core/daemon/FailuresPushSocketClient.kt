@@ -17,8 +17,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.locks.ReentrantLock
-import kotlin.concurrent.withLock
 import kotlin.math.min
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -88,7 +86,7 @@ internal constructor(
   private val scope: CoroutineScope,
   private val socketAvailable: (String) -> Boolean,
   private val log: Logger = LoggerFactory.getLogger(FailuresPushSocketClient::class.java),
-  private val options: FailuresPushSocketOptions = FailuresPushSocketOptions(),
+  internal val options: FailuresPushSocketOptions = FailuresPushSocketOptions(),
 ) {
   constructor(
     sessionUuidProvider: (() -> String?)? = null,
@@ -105,7 +103,7 @@ internal constructor(
   private val json = DaemonJson
   private val socket = AtomicReference<FailuresSocket?>()
   private val connectionLock = Any()
-  private val writeLock = ReentrantLock()
+  private val writer = FailuresSocketWriter(log)
   private var connectionGeneration = 0L
   private var connectionJob: Job? = null
 
@@ -119,8 +117,6 @@ internal constructor(
     get() = _state.value.shouldReconnect
 
   // Retry configuration
-  private val initialRetryDelayMs = 1000L
-  private val maxRetryDelayMs = 30000L
 
   // Flow for live failure notifications
   private val _failureNotifications =
@@ -164,44 +160,16 @@ internal constructor(
     while (_shouldReconnect && !sessionRejected) {
       currentCoroutineContext().ensureActive()
       log.info("Connecting to failures push at $socketPath (attempt ${attempt + 1})")
-      var currentSocket: FailuresSocket? = null
       try {
-        if (!socketAvailable(socketPath)) {
-          throw SocketNotFoundError("Socket not found at $socketPath")
-        }
-        val openedSocket = openSocket(socketPath)
-        currentSocket = openedSocket
-        currentCoroutineContext().ensureActive()
-        synchronized(connectionLock) {
-          // A disconnected or superseded attempt must never publish its late socket.
-          if (generation != connectionGeneration) return
-          socket.set(openedSocket)
-          _state.value = ConnectionState.Connected(subscribed = false)
-        }
-        subscribe(type, severity, openedSocket)
-        synchronized(connectionLock) {
-          if (generation != connectionGeneration) return
-          _state.update { current ->
-            if (current is ConnectionState.Connected) {
-              current.copy(subscribed = true)
-            } else {
-              current
-            }
-          }
-          log.info(
-            "Subscribed to failures push (type: ${type ?: "all"}, severity: ${severity ?: "all"})",
-          )
-        }
-        readMessages(openedSocket, generation) {
-          // Accepting a socket is not healthy: reset only after a message is received.
-          attempt = 0
-        }
+        connectAndRead(type, severity, generation, socketPath) { attempt = 0 }
       } catch (e: CancellationException) {
         throw e
-      } catch (e: Exception) {
+      } catch (e: java.io.IOException) {
         log.warn("Failures push connection failed: ${e.message}", e)
-      } finally {
-        cleanupConnection(currentSocket)
+      } catch (e: SocketNotFoundError) {
+        log.warn("Failures push connection failed: ${e.message}", e)
+      } catch (e: IllegalStateException) {
+        log.warn("Failures push connection failed: ${e.message}", e)
       }
 
       currentCoroutineContext().ensureActive()
@@ -209,20 +177,56 @@ internal constructor(
       synchronized(connectionLock) {
         if (generation != connectionGeneration || sessionRejected || !_shouldReconnect) return
         attempt++
-        delayMs = calculateBackoff(attempt)
+        delayMs = calculateFailuresBackoff(attempt, options.jitter)
         _state.value = ConnectionState.Reconnecting(attempt, delayMs)
       }
       retryDelay.wait(delayMs)
     }
   }
 
-  private fun calculateBackoff(attempt: Int): Long {
-    // Exponential backoff with jitter
-    val exponentialDelay = initialRetryDelayMs * (1L shl min(attempt - 1, 10))
-    val cappedDelay = min(exponentialDelay, maxRetryDelayMs)
-    // Add up to 10% jitter
-    val jitter = (cappedDelay * 0.1 * options.jitter()).toLong()
-    return cappedDelay + jitter
+  private suspend fun connectAndRead(
+    type: String?,
+    severity: String?,
+    generation: Long,
+    socketPath: String,
+    onHealthy: () -> Unit,
+  ) {
+    var currentSocket: FailuresSocket? = null
+    try {
+
+      if (!socketAvailable(socketPath)) {
+        throw SocketNotFoundError("Socket not found at $socketPath")
+      }
+      val openedSocket = openSocket(socketPath)
+      currentSocket = openedSocket
+      currentCoroutineContext().ensureActive()
+      synchronized(connectionLock) {
+        // A disconnected or superseded attempt must never publish its late socket.
+        if (generation != connectionGeneration) return
+        socket.set(openedSocket)
+        _state.value = ConnectionState.Connected(subscribed = false)
+      }
+      writer.subscribe(subscribeRequest(type, severity), openedSocket)
+      synchronized(connectionLock) {
+        if (generation != connectionGeneration) return
+        _state.update { current ->
+          if (current is ConnectionState.Connected) {
+            current.copy(subscribed = true)
+          } else {
+            current
+          }
+        }
+        log.info(
+          "Subscribed to failures push (type: ${type ?: "all"}, severity: ${severity ?: "all"})",
+        )
+      }
+      readMessages(openedSocket, generation) {
+        // Accepting a socket is not healthy: reset only after a message is received.
+        onHealthy()
+      }
+    } finally {
+      cleanupConnection(currentSocket)
+    }
   }
 
   private class SocketNotFoundError(message: String) : Exception(message)
@@ -243,7 +247,7 @@ internal constructor(
       if (previousState is ConnectionState.Connected && previousState.subscribed) {
         val request =
           FailuresPushRequest(id = UUID.randomUUID().toString(), command = "unsubscribe")
-        sendRequestIfIdle(request, previousSocket)
+        writer.sendRequestIfIdle(request, previousSocket)
       }
     } finally {
       cleanupConnection(previousSocket)
@@ -259,60 +263,6 @@ internal constructor(
   fun dispose() {
     disconnect()
     scope.coroutineContext[Job]?.cancel()
-  }
-
-  internal fun subscribeRequest(type: String?, severity: String?): FailuresPushRequest =
-    FailuresPushRequest(
-      id = UUID.randomUUID().toString(),
-      command = "subscribe",
-      type = type,
-      severity = severity,
-      sessionUuid = options.sessionUuidProvider?.invoke(),
-    )
-
-  private fun subscribe(type: String?, severity: String?, currentSocket: FailuresSocket) {
-    val request = subscribeRequest(type, severity)
-
-    if (!sendRequest(request, currentSocket)) {
-      throw IllegalStateException("Failed to send failures subscription")
-    }
-  }
-
-  private fun sendRequest(
-    request: FailuresPushRequest,
-    currentSocket: FailuresSocket?,
-  ): Boolean {
-    currentSocket ?: return false
-    return writeLock.withLock { writeRequest(request, currentSocket) }
-  }
-
-  private fun sendRequestIfIdle(
-    request: FailuresPushRequest,
-    currentSocket: FailuresSocket?,
-  ): Boolean {
-    currentSocket ?: return false
-    if (!writeLock.tryLock()) return false
-    return try {
-      // Even a tiny unsubscribe can block if the OS send buffer is full with no active writer.
-      writeRequest(request, currentSocket)
-    } finally {
-      writeLock.unlock()
-    }
-  }
-
-  private fun writeRequest(
-    request: FailuresPushRequest,
-    currentSocket: FailuresSocket,
-  ): Boolean {
-    return try {
-      currentSocket.writeLine(json.encodeToString(serializer<FailuresPushRequest>(), request))
-      true
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      log.warn("Failed to send request: ${e.message}", e)
-      false
-    }
   }
 
   private suspend fun readMessages(
@@ -333,7 +283,7 @@ internal constructor(
             handleMessage(line)
           } catch (e: CancellationException) {
             throw e
-          } catch (e: Exception) {
+          } catch (e: kotlinx.serialization.SerializationException) {
             log.warn("Failed to parse failures push message: ${e.message}", e)
             false
           }
@@ -342,7 +292,7 @@ internal constructor(
         synchronized(connectionLock) {
           if (generation != connectionGeneration) return
         }
-        sendPong(currentSocket)
+        writer.sendPong(currentSocket)
       }
     }
   }
@@ -352,7 +302,7 @@ internal constructor(
       currentSocket?.close()
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: java.io.IOException) {
       log.warn("Failed to close failures push socket: ${e.message}", e)
     } finally {
       socket.compareAndSet(currentSocket, null)
@@ -399,15 +349,6 @@ internal constructor(
       log.warn("Subscription failed: $error")
     }
   }
-
-  private fun sendPong(currentSocket: FailuresSocket) {
-    val request =
-      FailuresPushRequest(
-        id = UUID.randomUUID().toString(),
-        command = "pong",
-      )
-    sendRequest(request, currentSocket)
-  }
 }
 
 @Serializable
@@ -439,3 +380,27 @@ data class FailureNotification(
   val message: String,
   val timestamp: Long,
 )
+
+private const val INITIAL_RETRY_DELAY_MS = 1000L
+private const val MAX_RETRY_DELAY_MS = 30000L
+
+private fun calculateFailuresBackoff(attempt: Int, randomJitter: () -> Double): Long {
+  // Exponential backoff with jitter
+  val exponentialDelay = INITIAL_RETRY_DELAY_MS * (1L shl min(attempt - 1, 10))
+  val cappedDelay = min(exponentialDelay, MAX_RETRY_DELAY_MS)
+  // Add up to 10% jitter
+  val jitter = (cappedDelay * 0.1 * randomJitter()).toLong()
+  return cappedDelay + jitter
+}
+
+internal fun FailuresPushSocketClient.subscribeRequest(
+  type: String?,
+  severity: String?,
+): FailuresPushRequest =
+  FailuresPushRequest(
+    id = UUID.randomUUID().toString(),
+    command = "subscribe",
+    type = type,
+    severity = severity,
+    sessionUuid = options.sessionUuidProvider?.invoke(),
+  )

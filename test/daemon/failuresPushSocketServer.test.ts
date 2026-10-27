@@ -1,13 +1,14 @@
 import { streamSubscribeAuthCases } from "../helpers/streamSubscribeAuthCases";
 import type { StreamSocketAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { describe, it, expect, beforeEach } from "bun:test";
-import { Socket } from "node:net";
 import {
   FailuresPushSocketServer,
   type FailureNotificationPush,
 } from "../../src/daemon/failuresPushSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeSocket } from "../fakes/FakeNetServer";
+import type { FailureSeverity, FailureType } from "../../src/models/failureAnalytics";
+import type { Socket } from "node:net";
+import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 import { failurePushFrameSchema } from "../helpers/wireMessageSchemas";
 
@@ -21,27 +22,26 @@ class TestableFailuresPushSocketServer extends FailuresPushSocketServer {
   }
 
   async startFake(): Promise<void> {
-    (this as any).server = { listening: true };
-    (this as any).onServerStarted();
+    this.server = new FakeListeningNetServer();
+    this.onServerStarted();
   }
 
   async closeFake(): Promise<void> {
-    (this as any).onServerClosing();
-    (this as any).server = null;
+    this.onServerClosing();
+    this.server = null;
   }
 
   simulateSubscription(options: {
-    type?: string;
-    severity?: string;
+    type?: FailureType;
+    severity?: FailureSeverity;
     deviceSessionUuid?: string | null;
   }): { socket: FakeSocket; subscriptionId: string } {
     const socket = new FakeSocket();
-    const subscriptionId = `failurespush-${++(this as any).subscriptionCounter}`;
-    const timer = (this as any).timer as FakeTimer;
+    const subscriptionId = `failurespush-${++this.subscriptionCounter}`;
     this.subscribers.set(subscriptionId, {
-      socket: socket as unknown as Socket,
+      socket: socket,
       subscriptionId,
-      lastActivity: timer.now(),
+      lastActivity: this.timer.now(),
       filter: {
         type: options.type ?? null,
         severity: options.severity ?? null,

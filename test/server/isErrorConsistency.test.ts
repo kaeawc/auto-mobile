@@ -19,6 +19,7 @@ import { createSetAppPermissionsHandler } from "../../src/server/appTools";
 import { createNavigateToHandler } from "../../src/server/navigationTools";
 import { createSetUIStateHandler } from "../../src/server/formTools";
 import type { BootedDevice } from "../../src/models";
+import { readToolResponse } from "../helpers/toolResponse";
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -45,7 +46,7 @@ describe("isError consistency (#6251)", () => {
         platform: "android",
       });
 
-      expect(response.isError).toBe(true);
+      expect(readToolResponse(response).isError).toBe(true);
       const payload = JSON.parse(response.content[0].text);
       expect(payload.success).toBe(false);
     });
@@ -67,7 +68,7 @@ describe("isError consistency (#6251)", () => {
         platform: "android",
       });
 
-      expect(response.isError).toBeUndefined();
+      expect(readToolResponse(response).isError).toBeUndefined();
       const payload = JSON.parse(response.content[0].text);
       expect(payload.success).toBe(true);
     });
@@ -103,7 +104,7 @@ describe("isError consistency (#6251)", () => {
         permissions: ["android.permission.CAMERA"],
       });
 
-      expect(response.isError).toBe(true);
+      expect(readToolResponse(response).isError).toBe(true);
     });
 
     test("genuine partial success (some permissions applied) stays isError: false", async () => {
@@ -142,7 +143,7 @@ describe("isError consistency (#6251)", () => {
         notificationsEnabled: true,
       });
 
-      expect(response.isError).toBeUndefined();
+      expect(readToolResponse(response).isError).toBeUndefined();
       const payload = JSON.parse(response.content[0].text);
       expect(payload.changedCount).toBe(1);
     });
@@ -174,7 +175,7 @@ describe("isError consistency (#6251)", () => {
         permissions: ["android.permission.CAMERA"],
       });
 
-      expect(response.isError).toBeUndefined();
+      expect(readToolResponse(response).isError).toBeUndefined();
     });
   });
 
@@ -197,7 +198,7 @@ describe("isError consistency (#6251)", () => {
         platform: "android",
       });
 
-      expect(response.isError).toBe(true);
+      expect(readToolResponse(response).isError).toBe(true);
       const payload = JSON.parse(response.content[0].text);
       expect(payload.success).toBe(false);
     });
@@ -220,7 +221,7 @@ describe("isError consistency (#6251)", () => {
         platform: "android",
       });
 
-      expect(response.isError).toBeUndefined();
+      expect(readToolResponse(response).isError).toBeUndefined();
     });
   });
 
@@ -257,7 +258,7 @@ describe("isError consistency (#6251)", () => {
         ],
       });
 
-      expect(response.isError).toBe(true);
+      expect(readToolResponse(response).isError).toBe(true);
     });
 
     test("genuine partial success (some fields ok) stays isError: false with per-field status", async () => {
@@ -292,7 +293,7 @@ describe("isError consistency (#6251)", () => {
         ],
       });
 
-      expect(response.isError).toBeUndefined();
+      expect(readToolResponse(response).isError).toBeUndefined();
       const payload = response.structuredContent;
       expect(payload.success).toBe(false);
       expect(payload.fields).toHaveLength(2);
@@ -322,7 +323,7 @@ describe("isError consistency (#6251)", () => {
         fields: [{ selector: { text: "Username" }, value: "alice" }],
       });
 
-      expect(response.isError).toBeUndefined();
+      expect(readToolResponse(response).isError).toBeUndefined();
     });
   });
 });

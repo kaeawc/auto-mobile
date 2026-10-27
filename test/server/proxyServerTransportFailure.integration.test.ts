@@ -1,23 +1,25 @@
+import { warmedTests } from "../helpers/warmedTests";
+import { z } from "zod/v4";
 import { Client } from "@modelcontextprotocol/client";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DAEMON_RESPONSE_GRACE_MS,
   DaemonClient,
-  DaemonShuttingDownError,
   DaemonUnavailableError,
 } from "../../src/daemon/client";
 import {
   DAEMON_SHUTTING_DOWN_ERROR_CODE,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
   DAEMON_VERSION,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   DeviceControlTransportError,
   type DeviceControlTransportFailure,
 } from "../../src/daemon/deviceControlTransportFailure";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
-import { McpOverloadError, McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpOverloadError, McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -27,13 +29,15 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 
 let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
 
-afterEach(() => {
+function resetProxyTest() {
   isAvailableSpy?.mockRestore();
   isAvailableSpy = null;
   serverConfig.setToolResultsNoStructuredContentEnabled(false);
-});
+}
+afterEach(resetProxyTest);
 
 describe("proxy server device-control transport errors", () => {
+  const test = warmedTests(resetProxyTest);
   test("dispatches safe machine-readable transport failure details", async () => {
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const failure: DeviceControlTransportFailure = {
@@ -274,9 +278,15 @@ describe("proxy server daemon-overload errors", () => {
 
 describe("proxy server socket-close diagnostics", () => {
   beforeEach(() => {
-    ToolRegistry.register("observe", "read-only observation", {}, async () => ({ content: [] }), {
-      transportRecovery: "replay",
-    });
+    ToolRegistry.register(
+      "observe",
+      "read-only observation",
+      z.object({}),
+      async () => ({ content: [] }),
+      {
+        transportRecovery: "replay",
+      },
+    );
   });
 
   afterEach(() => {

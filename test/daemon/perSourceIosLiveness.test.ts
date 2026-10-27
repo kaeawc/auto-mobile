@@ -1,5 +1,5 @@
 import { makePool } from "../helpers/makePool";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { evaluateDeviceDisconnects } from "../../src/daemon/disconnectMonitor";
@@ -12,6 +12,8 @@ import type { BootedDevice, Platform } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
+import { IOS_LIVENESS_REDISCOVERY_DELAYS_MS } from "../../src/daemon/devicePoolParts/contracts";
 import { IdleDeviceReaper } from "../../src/daemon/idleDeviceReaper";
 import { DevicectlDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { FakeDiscoveryObservationSequence } from "../fakes/FakeDiscoveryObservationSequence";
@@ -212,16 +214,29 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
   let devicePool: DevicePool;
   let sessionManager: SessionManager;
   let deviceManager: FakeDeviceManager;
+  let timer: FakeTimer;
 
-  beforeEach(() => {
-    const timer = new FakeTimer();
+  function arrangeHarness(): void {
+    timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     deviceManager = new FakeDeviceManager();
     devicePool = makePool(sessionManager, "test-daemon-session-id", {
       timer,
       deviceManager: deviceManager,
     });
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     sessionManager.stopCleanupTimer();
@@ -232,7 +247,24 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     await devicePool.initializeWithDevices(devices);
   };
 
-  test("a confirmed physical iPhone stays assignable when simctl fails", async () => {
+  /**
+   * An exact-device bind whose iOS liveness listing failed re-lists after each backoff delay
+   * (#15289) before refusing. Walk the fake clock through every delay so the refusal settles
+   * without any real waiting, then return the message the bind rejected with.
+   */
+  const rejectionAfterRelists = async (bind: Promise<unknown>): Promise<string> => {
+    const rejection = bind.then(
+      () => "bind resolved",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    for (const delayMs of IOS_LIVENESS_REDISCOVERY_DELAYS_MS) {
+      await drainUntilQuiescent(timer);
+      timer.advanceTime(delayMs);
+    }
+    return await rejection;
+  };
+
+  arranged("a confirmed physical iPhone stays assignable when simctl fails", async () => {
     await pool([PHYSICAL, SIMULATOR]);
     deviceManager.failedSources.add("ios-simulator");
 
@@ -246,7 +278,7 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     expect(devicePool.getDevice(PHYSICAL_UDID)?.sessionId).toBe("session-a");
   });
 
-  test("an idle simulator stays assignable when devicectl fails", async () => {
+  arranged("an idle simulator stays assignable when devicectl fails", async () => {
     await pool([PHYSICAL, SIMULATOR]);
     deviceManager.failedSources.add("ios-physical");
 
@@ -260,126 +292,137 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     expect(devicePool.getDevice(SIMULATOR_UDID)?.sessionId).toBe("session-b");
   });
 
-  test("a failing simctl sweep does not prune the simulator it could not list", async () => {
+  arranged("a failing simctl sweep does not prune the simulator it could not list", async () => {
     await pool([PHYSICAL, SIMULATOR]);
     deviceManager.failedSources.add("ios-simulator");
 
-    await expect(
+    const message = await rejectionAfterRelists(
       devicePool.bindOrReuseDeviceSession({
         sessionId: "session-c",
         deviceId: SIMULATOR_UDID,
         platform: "ios",
       }),
-    ).rejects.toThrow(/Unable to verify iOS simulator/);
+    );
+    expect(message).toMatch(/Unable to verify iOS simulator/);
     // Unverifiable, never proven gone: the pooled entry survives.
     expect(devicePool.getDevice(SIMULATOR_UDID)).toBeDefined();
   });
 
-  test("a skipped unrelated devicectl record keeps a still-present idle iPhone fresh and assignable", async () => {
-    await pool([PHYSICAL, SIMULATOR]);
-    const timer = new FakeTimer();
-    // DERIVED mixed inventory: only reality/udid/platform change on a captured simulator.
-    const listing = loadDerivedDevicectlListing();
-    const phone = derivePhysicalDevicectlRecord(listing.result.devices[0], PHYSICAL_UDID);
-    listing.result.devices.push(phone);
-    const lister = new DevicectlDeviceLister({
-      platform: () => "darwin",
-      timer,
-      observationSequence: new FakeDiscoveryObservationSequence(),
-      execute: async () => createExecResult("", ""),
-      readFile: async () => JSON.stringify(listing),
-      mkdtemp: async () => "/fake/devicectl",
-      rm: async () => {},
-      tmpdir: () => "/fake",
-      logger: { warn: () => {}, debug: () => {} },
-    });
-    const manager = new MultiPlatformDeviceManager(
-      null,
-      new FakeBootedSimctl([SIMULATOR]),
-      bootedEmulator(),
-      undefined,
-      undefined,
-      lister,
-    );
-    expect((await lister.listConnectedDevices()).complete).toBe(true);
-    const originalPlatform = listing.result.devices[0].properties.hardware.platform;
-    // DERIVED unknown platform in a DIFFERENT record; the recognized phone remains present.
-    // The sweep is incomplete (no absence evidence) but the phone it recognized stays fresh.
-    listing.result.devices[0].properties.hardware.platform = "futureOS";
-    timer.advanceTime(3_000);
-    const discovery = await manager.getBootedDevicesDetailed("ios");
-    expect(discovery.devices.map((device) => device.deviceId)).toContain(PHYSICAL_UDID);
-    expect(discovery.succeededSources!.has("ios-physical")).toBe(false);
-    expect(discovery.freshDeviceIds!.has(PHYSICAL_UDID)).toBe(true);
-    expect(discovery.sourceErrors?.["ios-physical"]).toBeDefined();
-    const reaper = new IdleDeviceReaper(
-      {
-        getDevice: (id) => devicePool.getDevice(id),
-        removeDevice: (id, cleanup, expected) => devicePool.removeDevice(id, cleanup, expected),
-        withAssignmentLock: async (operation) => await operation(),
-      },
-      manager,
-    );
-    const device = devicePool.getDevice(PHYSICAL_UDID)!;
-    const snapshot = await reaper.getIosLivenessSnapshot();
-    expect(reaper.getIdleDeviceLivenessStatus(device, snapshot)).toBe("assignable");
-    expect(await reaper.pruneStaleIdleIosDevices([device])).toBe(0);
+  arranged(
+    "a skipped unrelated devicectl record keeps a still-present idle iPhone fresh and assignable",
+    async () => {
+      await pool([PHYSICAL, SIMULATOR]);
+      const timer = new FakeTimer();
+      // DERIVED mixed inventory: only reality/udid/platform change on a captured simulator.
+      const listing = loadDerivedDevicectlListing();
+      const phone = derivePhysicalDevicectlRecord(listing.result.devices[0], PHYSICAL_UDID);
+      listing.result.devices.push(phone);
+      const lister = new DevicectlDeviceLister({
+        platform: () => "darwin",
+        timer,
+        observationSequence: new FakeDiscoveryObservationSequence(),
+        execute: async () => createExecResult("", ""),
+        readFile: async () => JSON.stringify(listing),
+        mkdtemp: async () => "/fake/devicectl",
+        rm: async () => {},
+        tmpdir: () => "/fake",
+        logger: { warn: () => {}, debug: () => {} },
+      });
+      const manager = new MultiPlatformDeviceManager(
+        null,
+        new FakeBootedSimctl([SIMULATOR]),
+        bootedEmulator(),
+        undefined,
+        undefined,
+        lister,
+      );
+      expect((await lister.listConnectedDevices()).complete).toBe(true);
+      const originalPlatform = listing.result.devices[0].properties.hardware.platform;
+      // DERIVED unknown platform in a DIFFERENT record; the recognized phone remains present.
+      // The sweep is incomplete (no absence evidence) but the phone it recognized stays fresh.
+      listing.result.devices[0].properties.hardware.platform = "futureOS";
+      timer.advanceTime(3_000);
+      const discovery = await manager.getBootedDevicesDetailed("ios");
+      expect(discovery.devices.map((device) => device.deviceId)).toContain(PHYSICAL_UDID);
+      expect(discovery.succeededSources!.has("ios-physical")).toBe(false);
+      expect(discovery.freshDeviceIds!.has(PHYSICAL_UDID)).toBe(true);
+      expect(discovery.sourceErrors?.["ios-physical"]).toBeDefined();
+      const reaper = new IdleDeviceReaper(
+        {
+          getDevice: (id) => devicePool.getDevice(id),
+          removeDevice: (id, cleanup, expected) => devicePool.removeDevice(id, cleanup, expected),
+          withAssignmentLock: async (operation) => await operation(),
+        },
+        manager,
+      );
+      const device = devicePool.getDevice(PHYSICAL_UDID)!;
+      const snapshot = await reaper.getIosLivenessSnapshot();
+      expect(reaper.getIdleDeviceLivenessStatus(device, snapshot)).toBe("assignable");
+      expect(await reaper.pruneStaleIdleIosDevices([device])).toBe(0);
 
-    // Feed the complete listing into the pool's existing fake manager.
-    deviceManager.bootedDevices = discovery.devices;
+      // Feed the complete listing into the pool's existing fake manager.
+      deviceManager.bootedDevices = discovery.devices;
 
-    await expect(
-      devicePool.bindOrReuseDeviceSession({
-        sessionId: "session-d",
-        deviceId: PHYSICAL_UDID,
-        platform: "ios",
-      }),
-    ).resolves.toBeDefined();
-    expect(devicePool.getDevice(PHYSICAL_UDID)?.sessionId).toBe("session-d");
+      await expect(
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: "session-d",
+          deviceId: PHYSICAL_UDID,
+          platform: "ios",
+        }),
+      ).resolves.toBeDefined();
+      expect(devicePool.getDevice(PHYSICAL_UDID)?.sessionId).toBe("session-d");
 
-    // A complete listing genuinely missing the phone is still authoritative.
-    listing.result.devices[0].properties.hardware.platform = originalPlatform;
-    listing.result.devices = listing.result.devices.filter((record) => record !== phone);
-    timer.advanceTime(3_000);
-    const absent = await manager.getBootedDevicesDetailed("ios");
-    expect(absent.succeededSources!.has("ios-physical")).toBe(true);
-    expect(absent.freshDeviceIds!.has(PHYSICAL_UDID)).toBe(false);
-    expect(absent.devices.map((record) => record.deviceId)).not.toContain(PHYSICAL_UDID);
-  });
+      // A complete listing genuinely missing the phone is still authoritative.
+      listing.result.devices[0].properties.hardware.platform = originalPlatform;
+      listing.result.devices = listing.result.devices.filter((record) => record !== phone);
+      timer.advanceTime(3_000);
+      const absent = await manager.getBootedDevicesDetailed("ios");
+      expect(absent.succeededSources!.has("ios-physical")).toBe(true);
+      expect(absent.freshDeviceIds!.has(PHYSICAL_UDID)).toBe(false);
+      expect(absent.devices.map((record) => record.deviceId)).not.toContain(PHYSICAL_UDID);
+    },
+  );
 
-  test("a retained-but-unverified iPhone is not assignable when both sources fail", async () => {
-    await pool([PHYSICAL, SIMULATOR]);
-    // devicectl failed but replays its last-good listing, and simctl failed
-    // too. Nothing observed the iPhone this sweep, so presence in the returned
-    // list must not be read as proof it is still plugged in.
-    deviceManager.failedSources.add("ios-physical");
-    deviceManager.retainedSources.add("ios-physical");
-    deviceManager.failedSources.add("ios-simulator");
+  arranged(
+    "a retained-but-unverified iPhone is not assignable when both sources fail",
+    async () => {
+      await pool([PHYSICAL, SIMULATOR]);
+      // devicectl failed but replays its last-good listing, and simctl failed
+      // too. Nothing observed the iPhone this sweep, so presence in the returned
+      // list must not be read as proof it is still plugged in.
+      deviceManager.failedSources.add("ios-physical");
+      deviceManager.retainedSources.add("ios-physical");
+      deviceManager.failedSources.add("ios-simulator");
 
-    await expect(
-      devicePool.bindOrReuseDeviceSession({
-        sessionId: "session-f",
-        deviceId: PHYSICAL_UDID,
-        platform: "ios",
-      }),
-    ).rejects.toThrow(/Unable to verify iOS device/);
-    // Unverifiable, never proven gone: retained, not pruned.
-    expect(devicePool.getDevice(PHYSICAL_UDID)).toBeDefined();
-  });
+      const message = await rejectionAfterRelists(
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: "session-f",
+          deviceId: PHYSICAL_UDID,
+          platform: "ios",
+        }),
+      );
+      expect(message).toMatch(/Unable to verify iOS device/);
+      // Unverifiable, never proven gone: retained, not pruned.
+      expect(devicePool.getDevice(PHYSICAL_UDID)).toBeDefined();
+    },
+  );
 
-  test("a pre-lock bind sweep that no longer lists an iPhone rejects without pruning", async () => {
-    await pool([PHYSICAL, SIMULATOR]);
-    deviceManager.bootedDevices = [SIMULATOR];
+  arranged(
+    "a pre-lock bind sweep that no longer lists an iPhone rejects without pruning",
+    async () => {
+      await pool([PHYSICAL, SIMULATOR]);
+      deviceManager.bootedDevices = [SIMULATOR];
 
-    await expect(
-      devicePool.bindOrReuseDeviceSession({
-        sessionId: "session-e",
-        deviceId: PHYSICAL_UDID,
-        platform: "ios",
-      }),
-    ).rejects.toThrow();
-    expect(devicePool.getDevice(PHYSICAL_UDID)?.status).toBe("idle");
-  });
+      await expect(
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: "session-e",
+          deviceId: PHYSICAL_UDID,
+          platform: "ios",
+        }),
+      ).rejects.toThrow();
+      expect(devicePool.getDevice(PHYSICAL_UDID)?.status).toBe("idle");
+    },
+  );
 });
 
 describe("disconnect monitor ages out only devices whose own source succeeded (#5683)", () => {

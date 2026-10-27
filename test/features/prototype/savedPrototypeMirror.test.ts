@@ -15,7 +15,7 @@ export const entry: MirroredSavedPrototype = {
   icon: "photo",
   spec: {
     id: "panel",
-    window: { placement: { type: "fullscreen" } },
+    window: { placement: { type: "fullscreen" }, opacity: 1 },
     root: { type: "image", asset: "photo" },
   },
   assets: [

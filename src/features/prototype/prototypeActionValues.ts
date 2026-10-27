@@ -1,3 +1,4 @@
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { prototypeJsonSchema } from "./prototypeJson";
@@ -8,14 +9,14 @@ import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
  * literal key, a (possibly repeat-bound) state key, a `/data` pointer and the value-binding forms.
  * They live here so the request schema can be built before the action union without a cycle.
  */
-export const keySchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
+export const keySchema = z.string().regex(prototypeContractPatterns.stateKey);
 // State-key fields also take repeat placeholders such as `liked_{item.id}` (#11051).
 export const stateKeySchema = z.string().regex(BOUND_STATE_KEY_PATTERN);
 export const pointerSchema = z
   .string()
   .min(1)
   .max(contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH)
-  .regex(/^(?:\/(?:[^~\/]|~[01])*)+$/);
+  .regex(prototypeContractPatterns.pointer);
 /** The emit.context binding forms except `page`; `{value: literal}` is the literal form. */
 export const prototypeDataActionValueSchema = z.union([
   z.object({ state: stateKeySchema }).strict(),
@@ -25,3 +26,8 @@ export const prototypeDataActionValueSchema = z.union([
   z.object({ value: prototypeJsonSchema }).strict(),
 ]);
 export type PrototypeDataActionValue = z.infer<typeof prototypeDataActionValueSchema>;
+/**
+ * `{match: "text" | "kind"}` (#14233): the tapped linkify match, valid only inside
+ * `linkify.onTap`, where the runtime replaces it with the match before the actions run.
+ */
+export const prototypeMatchBindingSchema = z.object({ match: z.enum(["text", "kind"]) }).strict();

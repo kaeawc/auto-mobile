@@ -14,6 +14,7 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { MutablePooledDevice } from "./helpers/DaemonDisconnectHarness";
 
 interface Answers {
   availability: ReturnType<DevicePool["genericAvailability"]>;
@@ -113,7 +114,7 @@ describe("device hold current-behavior characterization (#11803)", () => {
   // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each<T>([...table])(
         name,
         async (row: T) => {
           await initializePool();
@@ -135,7 +136,7 @@ describe("device hold current-behavior characterization (#11803)", () => {
     }
   });
 
-  const entry = () => pool.getDevice(booted.deviceId)!;
+  const entry = (): MutablePooledDevice => pool.getDevice(booted.deviceId)!;
   const rehydration = async () => {
     await pool.reserveDevicesForRehydration([
       {

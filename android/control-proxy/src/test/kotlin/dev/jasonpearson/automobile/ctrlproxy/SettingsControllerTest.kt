@@ -7,7 +7,6 @@ import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.SettingsGetResult
 import dev.jasonpearson.automobile.protocol.SettingsListResult
 import dev.jasonpearson.automobile.protocol.SettingsPutResult
-import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -25,15 +24,9 @@ class SettingsControllerTest {
     override fun currentTimeMillis() = 5_000L
   }
 
-  private class FakeSender : SettingsController.ResponseSender {
-    var running = true
-    val frames = mutableListOf<WebSocketResponse>()
-
-    override fun isRunning() = running
-
-    override suspend fun broadcast(response: WebSocketResponse) {
-      frames += response
-    }
+  private class FakeSender : FakeResultTransport() {
+    val frames
+      get() = sentResponses
   }
 
   private val sender = FakeSender()
@@ -45,9 +38,11 @@ class SettingsControllerTest {
       contentResolver = { resolver },
       perfProvider = PerfProvider.createForTesting(timer),
       timeProvider = timer,
-      resultBroadcaster =
-        ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
-      responseSender = sender,
+      resultSender =
+        guardedResultSender(
+          sender,
+          ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
+        ),
     )
 
   @Test

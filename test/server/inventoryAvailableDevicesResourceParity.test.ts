@@ -113,7 +113,7 @@ describe("the booted-devices resource counts the pool as the pool does", () => {
       if (probes === 1) {
         await timer.sleep(BOOTED_DEVICES_RESOURCE_BUDGET_MS * 2);
       }
-      return new Map(ids.map((id) => [id, "offline"]));
+      return new Map(Array.from(ids, (id) => [id, "offline"]));
     };
 
     const bounded = await getBootedDevicesForPlatforms(["android"], timer);

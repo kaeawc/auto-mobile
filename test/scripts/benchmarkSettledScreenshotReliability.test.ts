@@ -95,7 +95,7 @@ function harness(
     stopPrivateDaemon: async ({ serverPath: server, env }) => {
       expect(server).toBe(resolve("/fake/server.js"));
       assertPrivateDaemonNamespace(env, `${runDir}-${dirs}`);
-      expect(env).toBe(envs.at(-1));
+      expect(envs.at(-1)).toBe(env);
       events.push("stop");
     },
     removeRunDir: (dir) => {

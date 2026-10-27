@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { logger } from "../../../../src/utils/logger";
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -22,18 +23,20 @@ describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback",
   beforeEach(function () {
     fakeTimer = new FakeTimer();
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
     // Configure a *successful* screencap so any fallback that fires would visibly
     // succeed — the suppression under test is the only reason it must not.
-    fakeAdb.setCommandResponse("screencap", {
-      stdout: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64"),
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "screencap",
+      createExecResult(
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64"),
+        "",
+      ),
+    );
     fakeAdb.setScreenState(true);
     testDevice = {
       deviceId: "test-device-close-fallback",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
     AndroidCtrlProxyManager.resetInstances();
@@ -107,11 +110,13 @@ describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback",
   });
 
   test("keeps the legacy screencap command when SurfaceFlinger reports one display", async function () {
-    fakeAdb.setCommandResponse("dumpsys SurfaceFlinger --display-id", {
-      stdout:
+    fakeAdb.setCommandResponse(
+      "dumpsys SurfaceFlinger --display-id",
+      createExecResult(
         'Display 4619827259835644672 (HWC display 0): port=0 pnpId=GGL displayName="Built-in Screen"',
-      stderr: "",
-    });
+        "",
+      ),
+    );
 
     const client = createClient();
     client.a11yScreenshotSupported = false;
@@ -131,20 +136,23 @@ describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback",
   });
 
   test("selects the default logical display's physical ID on multi-display devices", async function () {
-    fakeAdb.setCommandResponse("dumpsys SurfaceFlinger --display-id", {
-      stdout: readFileSync(
-        new URL("./fixtures/surfaceflinger-two-displays.txt", import.meta.url),
-        "utf8",
+    fakeAdb.setCommandResponse(
+      "dumpsys SurfaceFlinger --display-id",
+      createExecResult(
+        readFileSync(
+          new URL("./fixtures/surfaceflinger-two-displays.txt", import.meta.url),
+          "utf8",
+        ),
+        "",
       ),
-      stderr: "",
-    });
-    fakeAdb.setCommandResponse("cmd display get-displays", {
-      stdout: readFileSync(
-        new URL("./fixtures/cmd-display-two-displays.txt", import.meta.url),
-        "utf8",
+    );
+    fakeAdb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        readFileSync(new URL("./fixtures/cmd-display-two-displays.txt", import.meta.url), "utf8"),
+        "",
       ),
-      stderr: "",
-    });
+    );
 
     const client = createClient();
     client.a11yScreenshotSupported = false;

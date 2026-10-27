@@ -1,14 +1,12 @@
 import { makePool } from "../helpers/makePool";
-import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
-import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
-import { redriveUnconfirmedCaptureTeardowns } from "../../src/server/recordingTeardownRedrive";
+import { redriveUnconfirmedCaptureTeardowns } from "../../src/daemon/recordingTeardownRedrive";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video/VideoRecorderService";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { logger } from "../../src/utils/logger";
 import { CLOCK_RESTORE_TIMEOUT_MS, SessionManager } from "../../src/daemon/sessionManager";
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
+import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
 import { ActionableError } from "../../src/models/ActionableError";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -142,7 +140,11 @@ function setRestoreState(
   } else if (reason === "network-condition") {
     manager.setNetworkCondition("old", { initialProfile: "none" });
   } else {
-    manager.getSession("old")!.cacheData.clock = { initialAutomaticTime: 1, rootedByUs: false };
+    manager.getSession("old")!.cacheData.clock = {
+      initialAutomaticTime: 1,
+      clockChangedByUs: false,
+      rootedByUs: false,
+    };
   }
 }
 
@@ -383,7 +385,11 @@ test("clock failure marks busy quarantine and successful retry clears it", async
     deviceId: device.deviceId,
     platform: "android",
   });
-  h.manager.getSession("old")!.cacheData.clock = { initialAutomaticTime: 1, rootedByUs: false };
+  h.manager.getSession("old")!.cacheData.clock = {
+    initialAutomaticTime: 1,
+    clockChangedByUs: false,
+    rootedByUs: false,
+  };
   await h.manager.releaseSession("old");
   await h.pool.releaseDevice(device.deviceId, "old");
   expect(h.pool.getDeviceHealthMarker(device.deviceId)).toEqual({ reason: "clock", since: 1000 });
@@ -400,7 +406,7 @@ test("availableDevices surfaces unhealthy only for marked devices", async () => 
   await abandon(h, "network-condition");
   DaemonState.getInstance().initialize(h.manager, h.pool);
   const response = await handleDaemonRequest(
-    { id: "health", method: "daemon/availableDevices" },
+    { id: "health", type: "daemon_request", method: "daemon/availableDevices", params: {} },
     DaemonState.getInstance(),
   );
   expect(response.result?.devices).toEqual([
@@ -444,7 +450,11 @@ test("clock timeout surfaces reason while the original restore remains quarantin
     deviceId: device.deviceId,
     platform: "android",
   });
-  h.manager.getSession("old")!.cacheData.clock = { initialAutomaticTime: 1, rootedByUs: false };
+  h.manager.getSession("old")!.cacheData.clock = {
+    initialAutomaticTime: 1,
+    clockChangedByUs: false,
+    rootedByUs: false,
+  };
   h.pause();
   const release = h.manager.releaseSession("old");
   try {
@@ -1349,14 +1359,16 @@ test("throwing incarnation listener warns and does not break initialization or r
 
 test("pool signals only a newly tracked spawned Android process", async () => {
   const started: string[] = [];
-  const h = await harness(1, undefined, (id) => started.push(id));
-  const pool = poolInternals(h.pool);
-  await pool.trackStartedDeviceProcess(device, undefined);
+  const h = await harness(1, undefined, (id) => {
+    started.push(id);
+  });
+  const pool = h.pool.testHooks;
+  await pool.trackStartedDeviceProcess.call(device, undefined);
   expect(started).toEqual([]);
   const child = new FakeChildProcess();
-  await pool.trackStartedDeviceProcess(device, child as unknown as ChildProcess);
+  await pool.trackStartedDeviceProcess.call(device, child);
   expect(started).toEqual([device.deviceId]);
-  await pool.trackStartedDeviceProcess(device, child as unknown as ChildProcess);
+  await pool.trackStartedDeviceProcess.call(device, child);
   expect(started).toEqual([device.deviceId]);
 });
 
@@ -1421,7 +1433,7 @@ test("removed startup orphan is acquirable on the first bind with a newly starte
       sessionId: "fresh",
       deviceId: device.deviceId,
       platform: "android",
-      childProcess: new FakeChildProcess() as unknown as ChildProcess,
+      childProcess: new FakeChildProcess(),
     }),
   ).toBe("fresh");
   expect(commands).toBe(1);
@@ -1435,13 +1447,11 @@ test("process-start listener deadline releases real pool tracking with quarantin
     commands++;
     await gate.promise;
   });
-  const pool = poolInternals(h.pool);
+  const pool = h.pool.testHooks;
   let settled = false;
-  const tracking = pool
-    .trackStartedDeviceProcess(device, new FakeChildProcess() as unknown as ChildProcess)
-    .then(() => {
-      settled = true;
-    });
+  const tracking = pool.trackStartedDeviceProcess.call(device, new FakeChildProcess()).then(() => {
+    settled = true;
+  });
   await flush();
   expect(commands).toBe(1);
   expect(settled).toBe(false);
@@ -1464,10 +1474,10 @@ test("a rejected process-start listener warns without failing real pool tracking
   const h = await harness(1, undefined, () => {
     throw failure;
   });
-  const pool = poolInternals(h.pool);
-  const child = new FakeChildProcess() as unknown as ChildProcess;
+  const pool = h.pool.testHooks;
+  const child = new FakeChildProcess();
   try {
-    await expect(pool.trackStartedDeviceProcess(device, child)).resolves.toBeUndefined();
+    await expect(pool.trackStartedDeviceProcess.call(device, child)).resolves.toBeUndefined();
     expect(h.pool.hasStartedDeviceProcess(device.deviceId, child)).toBe(true);
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("process-start listener failed"),

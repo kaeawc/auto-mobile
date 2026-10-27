@@ -8,13 +8,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
-import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.isActive
 
 /**
  * Owns a per-device [ObservationStream] with an automatic reconnect lifecycle, shared by the
@@ -39,22 +35,8 @@ import kotlinx.coroutines.isActive
  */
 @Composable
 fun rememberReconnectingObservationStream(
-  deviceId: String,
-  deviceSessionUuid: String? = null,
-  requireDeviceSessionUuid: Boolean = false,
-  streamFactory: () -> ObservationStream,
-  backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
-  socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
-): ObservationStream? =
-  rememberReconnectingObservationState(
-      deviceId,
-      deviceSessionUuid,
-      requireDeviceSessionUuid,
-      streamFactory,
-      backoffDelay,
-      socketAvailable,
-    )
-    .stream
+  options: ReconnectingObservationOptions,
+): ObservationStream? = rememberReconnectingObservationState(options).stream
 
 /** A distinct generation for each actual connect call, starting at 1 for the first mount. */
 data class ReconnectingObservationState(
@@ -64,84 +46,53 @@ data class ReconnectingObservationState(
 
 @Composable
 fun rememberReconnectingObservationState(
-  deviceId: String,
-  deviceSessionUuid: String? = null,
-  requireDeviceSessionUuid: Boolean = false,
-  streamFactory: () -> ObservationStream,
-  backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
-  socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
+  options: ReconnectingObservationOptions,
 ): ReconnectingObservationState {
-  var observationState by
-    remember(deviceId, deviceSessionUuid, requireDeviceSessionUuid) {
-      mutableStateOf(ReconnectingObservationState(null, 0))
-    }
-  DisposableEffect(deviceId, deviceSessionUuid, requireDeviceSessionUuid) {
-    if (requireDeviceSessionUuid && deviceSessionUuid == null) {
-      observationState = observationState.copy(stream = null)
-      onDispose {}
-    } else {
-      val connected =
-        streamFactory().also {
-          it.connect(deviceId = deviceId, deviceSessionUuid = deviceSessionUuid)
-        }
-      observationState =
-        ReconnectingObservationState(connected, observationState.connectionGeneration + 1)
-      onDispose {
-        connected.dispose()
+  return with(options) {
+    var observationState by
+      remember(deviceId, deviceSessionUuid, requireDeviceSessionUuid) {
+        mutableStateOf(ReconnectingObservationState(null, 0))
+      }
+    DisposableEffect(deviceId, deviceSessionUuid, requireDeviceSessionUuid) {
+      if (requireDeviceSessionUuid && deviceSessionUuid == null) {
         observationState = observationState.copy(stream = null)
+        onDispose {}
+      } else {
+        val connected =
+          streamFactory().also {
+            it.connect(deviceId = deviceId, deviceSessionUuid = deviceSessionUuid)
+          }
+        observationState =
+          ReconnectingObservationState(connected, observationState.connectionGeneration + 1)
+        onDispose {
+          connected.dispose()
+          observationState = observationState.copy(stream = null)
+        }
       }
     }
-  }
 
-  val active = observationState.stream
-  val onSuperseded by rememberUpdatedState(LocalDeviceSessionSupersededHandler.current)
-  LaunchedEffect(active, deviceId) {
-    active?.deviceEvents?.collect { event ->
-      if (event is DeviceStreamEvent.DeviceSessionSuperseded && event.deviceId == deviceId) {
-        onSuperseded(event)
-      }
-    }
-  }
-  // Reconnect loop, keyed on the live stream so it restarts for a new device and is cancelled on
-  // dispose (which ends reconnection). Driven by the stream's connection state — the single source
-  // of truth the real client updates on connect success/failure and on EOF ("Stream ended").
-  LaunchedEffect(active, deviceId, deviceSessionUuid) {
-    val s = active ?: return@LaunchedEffect
-    var attempt = 0
-    while (isActive) {
-      when (s.connectionState.value) {
-        is ConnectionState.Connected -> {
-          // Healthy: reset the backoff and idle until the connection actually drops.
-          attempt = 0
-          s.connectionState.first { it !is ConnectionState.Connected }
-        }
-        is ConnectionState.Connecting,
-        is ConnectionState.Reconnecting -> {
-          // A connect is already in flight; wait for it to resolve rather than issuing another.
-          s.connectionState.first {
-            it !is ConnectionState.Connecting && it !is ConnectionState.Reconnecting
-          }
-        }
-        is ConnectionState.Disconnected,
-        is ConnectionState.Error -> {
-          // Dropped or failed to connect: back off, then reconnect the same instance. While the
-          // daemon socket is absent, keep backing off but skip the pointless connect so a
-          // daemon-down window recovers on its own once the socket returns.
-          attempt++
-          backoffDelay(attempt)
-          if (!isActive) break
-          if (socketAvailable()) {
-            s.connect(deviceId = deviceId, deviceSessionUuid = deviceSessionUuid)
-            observationState =
-              observationState.copy(
-                connectionGeneration = observationState.connectionGeneration + 1,
-              )
-          }
+    val active = observationState.stream
+    val onSuperseded by rememberUpdatedState(LocalDeviceSessionSupersededHandler.current)
+    LaunchedEffect(active, deviceId) {
+      active?.deviceEvents?.collect { event ->
+        if (event is DeviceStreamEvent.DeviceSessionSuperseded && event.deviceId == deviceId) {
+          onSuperseded(event)
         }
       }
     }
+    // Reconnect loop, keyed on the live stream so it restarts for a new device and is cancelled on
+    // dispose (which ends reconnection). Driven by the stream's connection state — the single
+    // source
+    // of truth the real client updates on connect success/failure and on EOF ("Stream ended").
+    LaunchedEffect(active, deviceId, deviceSessionUuid) {
+      val s = active ?: return@LaunchedEffect
+      reconnectObservationStream(s, options) {
+        observationState =
+          observationState.copy(connectionGeneration = observationState.connectionGeneration + 1)
+      }
+    }
+    observationState
   }
-  return observationState
 }
 
 /** Initial reconnect backoff; doubles per attempt up to [RECONNECT_MAX_DELAY_MS]. */

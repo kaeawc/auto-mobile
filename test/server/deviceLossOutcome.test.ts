@@ -1,3 +1,4 @@
+import type { DeviceLossOutcome } from "../../src/utils/deviceLossOutcome";
 import { describe, expect, test } from "bun:test";
 import type { EmulatorLossIncident } from "../../src/daemon/emulatorLossIncident";
 import {
@@ -6,8 +7,9 @@ import {
   deviceLostErrorFromCancellationReason,
   deviceLossOutcomeFromError,
   enrichDeviceLossOutcome,
+  enrichDeviceLossOutcomeFromSession,
   remainingDeviceLossIncidentWaitMs,
-} from "../../src/server/deviceLossOutcome";
+} from "../../src/utils/deviceLossOutcome";
 
 describe("device-loss outcome", () => {
   test("makes confirmed device loss distinguishable from an ordinary tool failure", () => {
@@ -121,5 +123,76 @@ describe("device-loss outcome", () => {
     expect(remainingDeviceLossIncidentWaitMs(30_000, 5_000)).toBe(24_000);
     expect(remainingDeviceLossIncidentWaitMs(30_000, 29_500)).toBe(0);
     expect(remainingDeviceLossIncidentWaitMs(undefined, 5_000)).toBeUndefined();
+  });
+});
+
+describe("live session device-loss evidence", () => {
+  const outcome: DeviceLossOutcome = {
+    code: DEVICE_LOSS_OUTCOME_CODE,
+    deviceId: "a",
+    sessionUuid: "s",
+    reason: "confirmed-unavailable" as const,
+  };
+  test("a moved session without an incident is recovered on the same UUID", () => {
+    expect(enrichDeviceLossOutcomeFromSession(outcome, { assignedDevice: "b" })).toMatchObject({
+      replacementDeviceId: "b",
+      sessionState: "active",
+      recovery: { status: "recovered", attempts: 0 },
+      retry: { sameSession: true, requiresNewSession: false },
+    });
+  });
+  test("pending incident keeps its assessment while reporting a moved session", () => {
+    expect(
+      enrichDeviceLossOutcomeFromSession(
+        {
+          ...outcome,
+          recovery: { status: "pending", attempts: 2 },
+          sessionState: "awaiting-device",
+        },
+        { assignedDevice: "b" },
+      ),
+    ).toMatchObject({
+      replacementDeviceId: "b",
+      sessionState: "awaiting-device",
+      recovery: { status: "pending", attempts: 2 },
+      retry: { sameSession: true, requiresNewSession: false },
+    });
+  });
+  test("incident replacement wins over the live serial", () => {
+    expect(
+      enrichDeviceLossOutcomeFromSession(
+        {
+          ...outcome,
+          replacementDeviceId: "incident-serial",
+          recovery: { status: "exhausted", attempts: 2 },
+        },
+        { assignedDevice: "b" },
+      ),
+    ).toMatchObject({
+      replacementDeviceId: "incident-serial",
+      recovery: { status: "exhausted", attempts: 2 },
+    });
+  });
+  test("a session still on the lost serial leaves the outcome untouched", () => {
+    expect(enrichDeviceLossOutcomeFromSession(outcome, { assignedDevice: "a" })).toBe(outcome);
+  });
+  test("an incident that judged the session released is not overridden", () => {
+    const released = { ...outcome, sessionState: "released" as const };
+    expect(enrichDeviceLossOutcomeFromSession(released, { assignedDevice: "b" })).toBe(released);
+  });
+  test("a moved session overrides a recovering incident's retry verdict", () => {
+    const recovering = {
+      ...outcome,
+      sessionState: "recovering" as const,
+      retry: { sameSession: false, requiresNewSession: false },
+    };
+    expect(enrichDeviceLossOutcomeFromSession(recovering, { assignedDevice: "b" })).toMatchObject({
+      sessionState: "active",
+      retry: { sameSession: true, requiresNewSession: false },
+      replacementDeviceId: "b",
+    });
+  });
+  test("gone session preserves the existing outcome", () => {
+    expect(enrichDeviceLossOutcomeFromSession(outcome, null)).toBe(outcome);
   });
 });

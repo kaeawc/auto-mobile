@@ -31,8 +31,9 @@ import {
   OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS,
   OBSERVATION_SCREENSHOT_NOT_READY_RETRY_AFTER_MS,
   OBSERVATION_SCREENSHOT_URI_TEMPLATE,
-} from "./observationResourceUris";
+} from "../daemon/observationResourceUris";
 import { stripInternalObservationFields } from "./observationInternalFields";
+import { markImportedPrototypeContent } from "../features/observe/importedPrototypeContent";
 
 export interface SessionScreenshotResourceDependencies {
   resolveActiveSession(sessionUuid: string): ActiveSessionDevice | undefined;
@@ -230,6 +231,8 @@ async function getLatestObservation(): Promise<ResourceContent> {
     // The cache is shared with tool paths that still need internal observation fields.
     const observation = { ...cachedObservation.result };
     stripInternalObservationFields(observation);
+    // The cached capture bypasses sanitization, so imported UI text needs its notice here.
+    markImportedPrototypeContent(observation, observation);
     return {
       uri: RESOURCE_URIS.LATEST_OBSERVATION,
       mimeType: "application/json",
@@ -727,6 +730,7 @@ async function getSessionObservation(
     // The cache is shared with tool paths that still need internal observation fields.
     const observation = { ...cachedResult };
     stripInternalObservationFields(observation);
+    markImportedPrototypeContent(observation, observation);
 
     return {
       uri,

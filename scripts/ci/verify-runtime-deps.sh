@@ -30,8 +30,10 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   fi
 fi
 prepend_path_if_dir "${HOME}/.bun/bin"
-# shellcheck disable=SC1091
-if [[ -f "${HOME}/.bashrc" ]]; then source "${HOME}/.bashrc" 2>/dev/null || true; fi
+# Never source user shell rc files here: a validation script must not run
+# arbitrary startup code (an rc that exits or fails under strict mode ended this
+# script silently before any check, #13959). The installer's PATH additions are
+# covered by the prepends above.
 hash -r 2>/dev/null || true
 
 missing=()

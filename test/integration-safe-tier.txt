@@ -17,11 +17,15 @@
 # it (test/scripts/integrationSafeTier.test.ts enforces this). Classify by READING
 # the file, never by running it; when in doubt, unsafe.
 # Last derived from origin/main on 2026-10-10.
+test/contracts/avdConfigReader.integration.test.ts | safe | fake versus real FileAvdConfigReader over a private mkdtemp AVD home removed afterwards
 test/contracts/daemonClient.integration.test.ts | safe | fake versus real DaemonClient over a unix socket in a private mkdtemp directory removed afterwards L11
+test/contracts/deviceMutationJournal.integration.test.ts | safe | fake versus real SqliteDeviceMutationJournal over createTestDatabase in-memory with FakeTimer L20
 test/contracts/deviceResourceApplicationStore.integration.test.ts | safe | fake versus real DeviceResourceApplicationRepository over createTestDatabase in-memory L8
 test/contracts/deviceSessionPersistence.integration.test.ts | safe | fake versus real DeviceSessionRepository over createTestDatabase in-memory L8
 test/contracts/deviceSnapshotStore.integration.test.ts | safe | fake versus real store over a private mkdtemp directory removed afterwards L9
+test/contracts/hostBootAdmissionRegistry.integration.test.ts | safe | fake versus real FileHostBootAdmissionRegistry over a private mkdtemp directory removed afterwards, injected liveness and FakeTimer L36
 test/contracts/imageBackend.integration.test.ts | safe | fake versus real JimpBackend and SharpBackend decoding a repo PNG fixture, no writes L9
+test/contracts/lockFileSystem.integration.test.ts | safe | fake versus nodeLockFileSystem over a private mkdtemp directory removed afterwards
 test/contracts/mcpTaskStore.integration.test.ts | safe | fake versus real McpTaskRepository over createTestDatabase in-memory with FakeTimer L12
 test/contracts/nativeHelperRecordStore.integration.test.ts | safe | fake versus real FileNativeHelperRecordStore over a private mkdtemp AUTOMOBILE_DATA_DIR removed afterwards L10
 test/contracts/navigationGraph.integration.test.ts | safe | fake versus real NavigationGraphManager over createTestDatabase in-memory with stubbed telemetry L7
@@ -30,6 +34,7 @@ test/contracts/prototypeAssetFileReader.integration.test.ts | safe | fake versus
 test/contracts/repositoryContracts.integration.test.ts | safe | fake versus real repositories over createTestDatabase in-memory L9
 test/contracts/runAll.integration.test.ts | unsafe | DefaultHostCommandExecutor L53 runs process.execPath; DefaultFileDownloader L45 is real
 test/contracts/securePermissions.integration.test.ts | safe | fake versus real SecurePermissions over a private mkdtemp directory removed afterwards L9
+test/contracts/startupFailureTracker.integration.test.ts | safe | fake versus real DefaultStartupFailureTracker over a private mkdtemp file removed afterwards
 test/contracts/telemetryRepository.integration.test.ts | safe | fake versus real telemetry repositories over createTestDatabase in-memory L27
 test/contracts/terminalReleaseJournalDirectory.integration.test.ts | safe | fake versus real nodeTerminalReleaseJournalFileSystem over a private mkdtemp directory removed afterwards L10
 test/contracts/toolSelectionProfileProvenanceStore.integration.test.ts | safe | fake versus real provenance repository over createTestDatabase in-memory L10
@@ -39,6 +44,7 @@ test/daemon/daemonClientHandshake.integration.test.ts | safe | tmpdir socket L59
 test/daemon/daemonClientStaleSocketRecovery.integration.test.ts | safe | temp pid and socket paths, isProcessRunning stubbed L86-L161
 test/daemon/daemonManagerReadiness.integration.test.ts | unsafe | deletes AUTOMOBILE_DATA_DIR L158 in afterEach, unsetting isolation for later files
 test/daemon/daemonSessionReleaseSignal.integration.test.ts | safe | in-memory DB L52; Daemon never started; FakeDeviceManager L36
+test/daemon/daemonSocketReachability.integration.test.ts | safe | real net server and probes confined to a private mkdtemp directory removed after each test
 test/daemon/daemonStreamWiring.integration.test.ts | safe | Daemon built with fake repo/initializer L392; never started
 test/daemon/daemonTransportError.integration.test.ts | safe | mkdtemp sockets L43, local net servers, DaemonClient only connects
 test/daemon/directModeGuard.integration.test.ts | safe | guard deps injected as fakes L186; fake /home/tester paths are strings only
@@ -50,7 +56,10 @@ test/daemon/integration/startupOptionReconciliation.integration.test.ts | safe |
 test/daemon/integration/versionMismatchRestart.integration.test.ts | unsafe | real DaemonManager L56 with no fake spawner, process table or signaler
 test/daemon/mcpForwardByteParity.integration.test.ts | safe | tmpdir socket L185, loopback ephemeral port L181, hermetic fixture device boundary
 test/daemon/sessionBroker/brokerRestartHandoff.integration.test.ts | safe | :memory: binding registry and createTestDatabase in-memory DB, FakeNativePort and FakeTimer, no processes or host tooling
+test/daemon/sessionBroker/brokerTiming.integration.test.ts | safe | private file-backed registry temp directory, FakeNativePort and FakeTimer, no processes or host tooling
+test/daemon/sessionBroker/exports.integration.test.ts | safe | file-backed registry in tracked harness temp directory with FakeNativePort and FakeTimer
 test/daemon/sessionBroker/provisioning/bindingRegistryAbsence.integration.test.ts | safe | temp-dir SQLite via bindFileBackedDbHarness L18, FakeTimer
+test/daemon/sessionBroker/provisioning/simctlCatalog.integration.test.ts | safe | real resolver and SimCtlClient over injected exec seam and FakeTimer; no host commands
 test/daemon/sessionBroker/registry/bindingJournal.integration.test.ts | unsafe | Bun.spawn of a crash child process L93
 test/daemon/sessionBroker/registry/bindingRegistryBusyBound.integration.test.ts | safe | real SQLite handles on useScratchRoot temp files and a file-backed harness, explicit dbPath, no host tooling
 test/daemon/sessionBroker/registry/sqliteBindingRegistry.integration.test.ts | unsafe | Bun.spawn of a registry child process L134
@@ -184,6 +193,7 @@ test/features/observe/cache/FileSystemObserveCacheStore.integration.test.ts | sa
 test/features/observe/ios/IOSCtrlProxyClient.stream.integration.test.ts | safe | FakeWebSocket/FakeSocket; fake sock path never bound L43
 test/features/observe/ios/ctrlProxyWireParity.integration.test.ts | safe | read-only scan of repo sources L21/L28
 test/features/prototype/PrototypeHttpExecutor.integration.test.ts | safe | Bun.serve on 127.0.0.1 port 0 L4; loopback only
+test/features/prototype/prototypeBundleFuzz.integration.test.ts | safe | seeded pure-function fuzz of the bundle reader over in-memory buffers; no I/O, ports or shared paths
 test/features/screen-stream/ScreenCaptureHelperProvider.integration.test.ts | safe | fake downloader/checksum/timer; cache in tmpdir L36/L49
 test/features/shared/GenericThresholdManager.integration.test.ts | safe | createTestDatabase; static threshold calculation only L220
 test/features/video/FfmpegVideoProcessingBackend.integration.test.ts | unsafe | node:child_process spawn/spawnSync of ffmpeg and ffprobe L15/L60
@@ -192,6 +202,7 @@ test/features/webrtc/WebRtcPublisher.loopback.integration.test.ts | unsafe | env
 test/fixtures/integrationRunnerProbe.integration.test.ts | safe | returns at once unless STALL_PID_FILE is set L8
 test/helpers/navigationTestHarness.integration.test.ts | safe | in-memory nav manager harness over createTestDatabase
 test/integration/androidH264SourceDevice.integration.test.ts | unsafe | real DefaultHostCommandExecutor driving adb L37
+test/integration/brokerMultiClientFixes.integration.test.ts | safe | real broker/handlers over :memory: SQLite, fake native port, FakeTimer, no processes or host tooling
 test/integration/foldablePostureRoundTrip.integration.test.ts | unsafe | execFile of dist/src CLI and ffprobe L23/L57
 test/integration/iosVideoRecordingStartStop.integration.test.ts | unsafe | execFile of dist CLI, xcrun simctl and ffprobe, real DaemonClient L130/L156/L372
 test/integration/logger-init-pidfile-crash.integration.test.ts | unsafe | Bun.spawn of a child bun process L42
@@ -205,6 +216,7 @@ test/integration/webrtcDeviceCaptureLoad.integration.test.ts | unsafe | execFile
 test/lint/avdManagerExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; spawn text is string fixtures L52
 test/lint/devicectlExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; devicectl calls are string literals L132
 test/lint/hostDefaultsExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; spawn text is string literals L63
+test/lint/macOsOnlyTestClassification.integration.test.ts | safe | parses test and src files via readFileSync and the TypeScript API; spawns nothing L15
 test/lint/oxlintConfigScoping.integration.test.ts | unsafe | Bun.spawnSync runs oxlint L55
 test/lint/sdkManagerExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; sdkmanager calls are string literals L174
 test/lint/turboTestInputsCoverNativeSources.integration.test.ts | safe | reads turbo.json and repo sources via readFileSync L90
@@ -218,13 +230,14 @@ test/server/configManagerDefaultRepositories.integration.test.ts | safe | getDat
 test/server/daemonShutdownOutcomeWire.integration.test.ts | safe | hermetic fixture and McpTestFixture in-memory L14
 test/server/deviceLabelSessionReleaseOrdering.integration.test.ts | safe | in-memory DB; new Daemon never started, pool release mocked L33
 test/server/deviceLossOutcomeWire.integration.test.ts | safe | FakeDeviceManager installed; in-memory McpTestFixture L29
-test/server/downloadsFixtureOwnership.integration.test.ts | safe | fake DownloadsFixtureService; FakeDeviceUtils pool L46/L56
-test/server/explicitSessionUuidBinding.daemon.integration.test.ts | safe | Registry device session manager replaced with FakeDeviceSessionManager L67; UnixSocketServer never started, fake pool and :memory: DB
+test/server/explicitSessionUuidBinding.daemon.integration.test.ts | safe | Registry device session manager replaced with FakeDeviceReadiness L67; UnixSocketServer never started, fake pool and :memory: DB
 test/server/finalizeToolResponse.outputSchema.integration.test.ts | safe | FakeDeviceManager and FakeArtifactWriter L19/L142
 test/server/internalToolPayloads.integration.test.ts | safe | read-only scan of src files L8
 test/server/liveAcceptanceDestructiveToolSelection.integration.test.ts | safe | hermetic fixture; tools are in-test stubs L1
 test/server/mcpSessionAutolockRouting.integration.test.ts | safe | FakeDeviceUtils pool, FakeDeviceSessionPersistence L170/L186
 test/server/observeAppResource.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture L129
+test/server/observeAppShellMinified.integration.test.ts | safe | Bun.build of one source file and a fake window, written under os.tmpdir()
+test/server/outputSchema.sdk.integration.test.ts | safe | hermetic server fixture; in-memory McpTestFixture; in-test stub tool L7
 test/server/performanceResources.integration.test.ts | safe | createTestDatabase in-memory L53
 test/server/plainReadToolSessionActivity.integration.test.ts | safe | hermetic fixture; FakeDeviceUtils pool L36
 test/server/planExecutionOrchestrator.integration.test.ts | unsafe | DevicePool built without deviceManager (default real one) L298
@@ -233,8 +246,8 @@ test/server/planTools.executePlanThrow.integration.test.ts | safe | executePlan 
 test/server/proxyServerListChanged.integration.test.ts | safe | FakeDaemonClient/FakeDaemonManager; isAvailable mocked L20/L25/L44
 test/server/proxyServerTransportFailure.integration.test.ts | safe | fake client/manager; DaemonClient("/unused") never connects L288
 test/server/resources/read.integration.test.ts | unsafe | unlinks files in hardcoded /tmp/auto-mobile/observe_results L68/L72
-test/server/sessionPlatformRouting.daemon.integration.test.ts | safe | Registry device session manager replaced with FakeDeviceSessionManager L68; UnixSocketServer never started, fake pool and :memory: DB
-test/server/sessionPlatformRouting.integration.test.ts | safe | FakeDeviceUtils, FakeDeviceSessionManager, no booted devices L38/L54
+test/server/sessionPlatformRouting.daemon.integration.test.ts | safe | Registry device session manager replaced with FakeDeviceReadiness L68; UnixSocketServer never started, fake pool and :memory: DB
+test/server/sessionPlatformRouting.integration.test.ts | safe | FakeDeviceUtils, FakeDeviceReadiness, no booted devices L38/L54
 test/server/sessionResourceBinding.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture L28
 test/server/sessionToolBindingFailedCall.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture L41
 test/server/sessionToolSelection.integration.test.ts | safe | hermetic fixture; FakeDeviceUtils pool L1451/L1454

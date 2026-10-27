@@ -1,5 +1,5 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,6 +13,7 @@ import {
 import { CLI_OUTPUT_INLINE_MAX_BYTES } from "../../src/cli/toolOutput";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { DaemonClient } from "../../src/daemon/client";
+import { ActionableError } from "../../src/models/ActionableError";
 
 import type { DoctorReport } from "../../src/doctor/types";
 
@@ -37,6 +38,115 @@ describe("runDoctorCommand", () => {
   beforeAll(() => {
     parseCliArgs(["doctor"]);
   });
+
+  test.each([true, "yes"])("prints help without diagnosis or exit for help=%s", async (help) => {
+    const runDoctor = mock(async () => report());
+    const writeOutput = mock((_text: string) => {});
+    const exit = mock((_code: number) => {});
+
+    const result = await runDoctorCommand({ help }, { runDoctor, writeOutput, exit });
+
+    expect(runDoctor).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+    expect(result).toBeUndefined();
+    const output = writeOutput.mock.calls.map(([text]) => text).join("\n");
+    expect(output).toContain("--android");
+    expect(output).toContain("--ios");
+    expect(output).toContain("--json");
+    expect(output).toContain("status-only");
+    expect(output).toContain("read-only");
+  });
+
+  test.each([false, true])("rejects unknown flags before diagnosis with help=%s", async (help) => {
+    const runDoctor = mock(async () => report());
+    const writeOutput = mock((_text: string) => {});
+    const exit = mock((_code: number) => {});
+    const params = parseCliArgs(["doctor", "--bogus", "--unknown-flag"]).params;
+    const result = runDoctorCommand({ ...params, help }, { runDoctor, writeOutput, exit });
+
+    await expect(result).rejects.toBeInstanceOf(ActionableError);
+    await expect(result).rejects.toThrow("--bogus, --unknown-flag");
+    await expect(result).rejects.toThrow("Supported flags: --android, --ios, --json, --help");
+    expect(runDoctor).not.toHaveBeenCalled();
+    expect(writeOutput).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  test.each(["--__proto__", "--constructor", "--prototype"])(
+    "rejects the %s flag before diagnosis",
+    async (flag) => {
+      const runDoctor = mock(async () => report());
+      const { params } = parseCliArgs(["doctor", flag]);
+
+      expect(Object.keys(params)).toEqual([flag.slice(2)]);
+      await expect(runDoctorCommand(params, { runDoctor })).rejects.toThrow(
+        `Unknown doctor flags: ${flag}.`,
+      );
+      expect(runDoctor).not.toHaveBeenCalled();
+    },
+  );
+
+  test("records a --__proto__ value as a flag instead of replacing the prototype", () => {
+    const { params } = parseCliArgs(["doctor", "--__proto__", '{"help":true}']);
+
+    expect(Object.getPrototypeOf(params)).toBe(Object.prototype);
+    expect(Object.hasOwn(params, "__proto__")).toBe(true);
+    expect(Object.hasOwn(params, "help")).toBe(false);
+    expect("help" in params).toBe(false);
+  });
+
+  test.each([
+    { args: ["doctor"], expected: { android: undefined, ios: undefined } },
+    { args: ["doctor", "--android"], expected: { android: true, ios: undefined } },
+    { args: ["doctor", "--ios"], expected: { android: undefined, ios: true } },
+    { args: ["doctor", "--json"], expected: { android: undefined, ios: undefined } },
+    { args: ["doctor", "--help=false"], expected: { android: undefined, ios: undefined } },
+    {
+      args: ["doctor", "--android", "--ios", "--session-uuid", "session-abc"],
+      expected: { android: true, ios: true },
+    },
+    {
+      args: ["--session-uuid", "session-abc", "doctor", "--android"],
+      expected: { android: true, ios: undefined },
+    },
+  ])("forwards valid doctor options for $args", async ({ args, expected }) => {
+    const argv: string[] = [...args];
+    const parsed = parseCliArgs(argv);
+    const params = { ...parsed.params };
+    // Mirror runCliCommand's forwarding of the leading universal session option.
+    if (parsed.sessionUuid) {
+      params.sessionUuid = parsed.sessionUuid;
+    }
+    if (!argv.includes("--session-uuid")) {
+      expect(params).not.toHaveProperty("sessionUuid");
+    }
+    const runDoctor = mock(async () => report());
+    const exit = mock((_code: number) => {});
+    setCliOutputSinksForTesting({ stdout: { write: () => {} }, stderr: { write: () => {} } });
+    try {
+      await runDoctorCommand(params, {
+        runDoctor,
+        writeOutput: () => {},
+        exit,
+      });
+      expect(runDoctor).toHaveBeenCalledTimes(1);
+      expect(runDoctor).toHaveBeenCalledWith(expected);
+      expect(exit).not.toHaveBeenCalled();
+    } finally {
+      resetCliOutputSinksForTesting();
+    }
+  });
+
+  test.each(["repair", "timeoutMs"])(
+    "preserves the removed %s error before help or unknown flags",
+    async (flag) => {
+      const runDoctor = mock(async () => report());
+      await expect(
+        runDoctorCommand({ [flag]: false, help: true, bogus: true }, { runDoctor }),
+      ).rejects.toThrow("doctor is status-only; --repair and --timeout-ms were removed");
+      expect(runDoctor).not.toHaveBeenCalled();
+    },
+  );
 
   test("rejects removed doctor flags before diagnosis with supported daemon remedies", async () => {
     const diagnosis = spyOn(DaemonClient.prototype, "callTool");

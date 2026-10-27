@@ -1,7 +1,14 @@
 import Foundation
 
-/// Why a prototype went away; the `reason` in the terminal `dismissed` event's payload.
-enum PrototypeDismissReason: String {
+/// Why an embedded prototype went away.
+/// This enum may gain cases; include a default branch when switching over it.
+public enum PrototypeDismissReason: String, Sendable {
+    /// The host dismiss control or a spec `dismiss` action.
+    case user
+}
+
+/// Internal lifecycle reasons retain the injected agent's wire protocol.
+enum PrototypeSessionDismissReason: String, Sendable {
     /// The host dismiss control or a spec `dismiss` action.
     case user
     /// A `dismiss_prototype` request.
@@ -13,12 +20,16 @@ enum PrototypeDismissReason: String {
     case ttl
 }
 
-/// One `prototype_event` push, before the wall-clock timestamp is attached.
-struct PrototypeEvent: Equatable {
-    let id: String
-    let sequence: Int
-    let kind: String
-    let name: String?
+/// A prototype event with a semantic category and JSON snapshots for app-owned Codable payloads.
+/// The session creates it before the model attaches the wire timestamp.
+public struct PrototypeEvent: Equatable, Sendable {
+    /// The prototype that emitted this event.
+    public let id: String
+    /// Monotonic event sequence for this prototype.
+    public let sequence: Int
+    let wireKind: String
+    /// The authored event name, state key, or data path.
+    public let name: String?
     let payload: JSONValue
     let state: [String: JSONValue]
     let pages: [String: Int]
@@ -26,6 +37,9 @@ struct PrototypeEvent: Equatable {
     var resolvedContext: PrototypeResolvedEmitContext?
     var keys: [String]?
     var validity: [String: Bool]?
+    var embeddedWire: Data? = nil
+    var wireTimestamp = 0
+    var isStateChange = false
 
     var context: [String: JSONValue]? { resolvedContext?.context }
     var contextTruncated: Bool? { resolvedContext?.contextTruncated }
@@ -37,7 +51,7 @@ struct PrototypeEvent: Equatable {
             "timestamp": timestamp,
             "id": id,
             "sequence": sequence,
-            "kind": kind,
+            "kind": wireKind,
             "name": name as Any? ?? NSNull(),
             "payload": payload.foundationObject,
             "state": JSONValue.object(state).foundationObject,
@@ -83,6 +97,10 @@ struct PrototypeSession {
     private(set) var structureRevision = 0
     private(set) var pages: [String: Int] = [:]
     private(set) var stacks: [String: PrototypeStackSnapshot] = [:]
+    private(set) var stackChanges: [String: PrototypeStackChange] = [:]
+    private(set) var stackEntries: [String: [PrototypeStackEntry]] = [:]
+    private var stackRevision = 0
+    private var nextStackEntry = 0
     private var stackNodes: [String: PrototypeNode] = [:]
     private(set) var pageCounts: [String: Int] = [:]
     /// Keys whose errors have been revealed by change, blur or a failed guard.
@@ -97,6 +115,14 @@ struct PrototypeSession {
     /// `request` actions in flight (#12529) and the commands for the driver that runs them; see
     /// `takeRequestCommands`.
     private(set) var requests = PrototypeRequestLedger()
+    private var platformEventData: JSONValue?
+    private var timerCommands: [PrototypeTimerCommand] = []
+
+    mutating func takeTimerCommands() -> [PrototypeTimerCommand] {
+        defer { timerCommands = [] }
+        return timerCommands
+    }
+
     /// The shown prototype's `appearance` from its show request.
     /// The shown spec's size outside its `state`, for the spec byte cap (#11562); see
     /// `PrototypeStateValidator.stateBytes`.
@@ -143,6 +169,7 @@ struct PrototypeSession {
         specBytes: Int? = nil,
         restoredState: [String: JSONValue]? = nil
     ) {
+        timerCommands.append(.cancelAll)
         appearanceOverride = appearance
         // The agent keeps no raw spec, so the request's own size (when the caller has it) less the
         // state it carried is what the cap adds every later state to; without it only state counts.
@@ -179,12 +206,36 @@ struct PrototypeSession {
         keepingPages previous: [String: Int],
         keepingStacks previousStacks: [String: PrototypeStackSnapshot]
     ) {
+        let previousNodes = stackNodes
+        let previousEntries = stackEntries
+        let previousChanges = stackChanges
         stackNodes = [:]
         root.collectStacks(into: &stackNodes)
         stacks = stackNodes.mapValues { node in
             let path = (node.id.flatMap { previousStacks[$0]?.path } ?? [])
                 .filter { node.screens?[$0] != nil }.prefix(PrototypeLimits.maxStackDepth)
             return PrototypeStackSnapshot(path: path.isEmpty ? [node.start ?? ""] : Array(path))
+        }
+        stackChanges = [:]
+        stackEntries = [:]
+        for (id, snapshot) in stacks {
+            let before = previousStacks[id]?.path ?? []
+            let retained = zip(before, snapshot.path).prefix(while: { $0.0 == $0.1 }).count
+            var entries = Array((previousEntries[id] ?? []).prefix(retained))
+            for screen in snapshot.path.dropFirst(entries.count) {
+                nextStackEntry += 1
+                entries.append(PrototypeStackEntry(id: nextStackEntry, screen: screen))
+            }
+            stackEntries[id] = entries
+            if before == snapshot.path,
+               previousNodes[id]?.screenDefinitions == stackNodes[id]?.screenDefinitions,
+               let change = previousChanges[id]
+            {
+                stackChanges[id] = change
+            } else {
+                stackRevision += 1
+                stackChanges[id] = PrototypeStackChange(direction: .reset, transition: .none, revision: stackRevision)
+            }
         }
         pageCounts = root.pagerCounts()
         pages = pageCounts.reduce(into: [:]) { result, entry in
@@ -244,6 +295,32 @@ struct PrototypeSession {
     }
 
     // MARK: Interactions
+
+    mutating func setPlatformState(_ snapshot: [String: JSONValue]) throws {
+        guard let spec, spec.platformState != snapshot else { return }
+        let limit = PrototypeContractValidator.limit("MAX_PROTOTYPE_PLATFORM_STATE_BYTES")
+        guard try JSONEncoder().encode(snapshot).count <= limit else {
+            throw PrototypeLimits.violation("platform", "Platform state exceeds limit")
+        }
+        let rebuilt = try spec.replacingPlatform(snapshot)
+        self.spec = rebuilt
+        structureRevision += 1
+        rebuildNavigation(for: rebuilt.root, keepingPages: pages, keepingStacks: stacks)
+    }
+
+    mutating func deliverPlatformEvent(_ name: String, data: JSONValue) throws -> [PrototypeEvent] {
+        guard let spec else { return [] }
+        let payload = JSONValue.object(["event": .string(name), "data": data])
+        guard try JSONEncoder().encode(payload).count <= PrototypeLimits.maxEmitPayloadBytes else {
+            throw PrototypeLimits.violation("platform", "Platform event payload exceeds limit")
+        }
+        let actions = spec.platformHandlers[name] ?? .array([])
+        let decoded = try JSONDecoder().decode([PrototypeAction].self, from: JSONEncoder().encode(actions))
+        let delivered = emit(kind: "emit", name: "prototype_platform_event", payload: payload)
+        platformEventData = data
+        defer { platformEventData = nil }
+        return delivered + run(decoded)
+    }
 
     /// A tap's actions in order; a `dismiss` ends the prototype and drops the remaining actions.
     /// Android's `PrototypeRuntime.tap` (#10622): if any `setState`/`toggle`/`increment`/`decrement`
@@ -321,6 +398,28 @@ struct PrototypeSession {
         return PrototypeStateValidator.rejection(root: spec.root, state: state, nonStateBytes: nonStateBytes) == nil
     }
 
+    private mutating func applyPlannedWrite(_ write: PlannedWrite?, touched: inout [String]) {
+        guard let write else { return }
+        // The plan was validated against the data before this list ran; an earlier data
+        // action may have added a control (a repeat row) that refuses this value now.
+        var next = state
+        next[write.key] = write.value
+        guard accepts(next) else { return }
+        state[write.key] = write.value
+        if !touched.contains(write.key) { touched.append(write.key) }
+    }
+
+    private mutating func runEmit(_ action: PrototypeAction) -> [PrototypeEvent] {
+        let context = action.context?.resolve(EmitContextInputs(
+            state: state,
+            pages: pages,
+            dataModel: data,
+            platformModel: spec?.platformState,
+            eventData: platformEventData
+        ))
+        return emit(kind: "emit", name: action.name, payload: action.payload ?? .null, context: context)
+    }
+
     /// Runs `actions` in order, applying the writes planned for them.
     private mutating func execute(_ actions: [PrototypeAction], _ writes: [Int: PlannedWrite]) -> [PrototypeEvent] {
         let baseline = state
@@ -330,28 +429,23 @@ struct PrototypeSession {
             guard isShown else { break }
             switch action.type {
             case "emit":
-                let context = action.context?.resolve(EmitContextInputs(state: state, pages: pages, dataModel: data))
-                events += emit(kind: "emit", name: action.name, payload: action.payload ?? .null, context: context)
+                events += runEmit(action)
             case "push", "pop", "popToRoot", "replace":
                 events += runStack(action)
             case "setPage":
                 events += runSetPage(action)
             case "setData", "appendData", "removeData":
                 events += runDataWrite(action)
+            case "startTimer":
+                timerCommands.append(.start(action))
+            case "cancelTimer":
+                if let id = action.id { timerCommands.append(.cancel(id)) }
             case "request":
                 events += runRequest(action)
             case "dismiss":
                 events += dismiss(reason: .user)
             default:
-                if let write = writes[index] {
-                    // The plan was validated against the data before this list ran; an earlier data
-                    // action may have added a control (a repeat row) that refuses this value now.
-                    var next = state
-                    next[write.key] = write.value
-                    guard accepts(next) else { continue }
-                    state[write.key] = write.value
-                    if !touched.contains(write.key) { touched.append(write.key) }
-                }
+                applyPlannedWrite(writes[index], touched: &touched)
             }
         }
         guard isShown else { return events }
@@ -365,30 +459,38 @@ struct PrototypeSession {
     /// `PrototypeDataWriteCode`, or a tree the changed data cannot rebuild within the show's limits)
     /// changes and emits nothing, and the rest of the action list still runs.
     private mutating func runDataWrite(_ action: PrototypeAction) -> [PrototypeEvent] {
-        guard let spec, let op = PrototypeDataWrite.Op(actionType: action.type), let path = action.path else {
+        guard let spec, let operation = PrototypeDataWrite.Operation(actionType: action.type),
+              let path = action.path
+        else {
             return []
         }
-        let inputs = EmitContextInputs(state: state, pages: pages, dataModel: spec.data)
+        let inputs = EmitContextInputs(
+            state: state,
+            pages: pages,
+            dataModel: spec.data,
+            platformModel: spec.platformState,
+            eventData: platformEventData
+        )
         var value: JSONValue?
-        if op != .remove {
+        if operation != .remove {
             guard case let .success(resolved) = PrototypeDataWrite.resolveValue(action.value, inputs: inputs) else {
                 return []
             }
             value = resolved
         }
-        return (try? commitDataWrite(op, path: path, value: value).get()) ?? []
+        return (try? commitDataWrite(operation, path: path, value: value).get()) ?? []
     }
 
     /// Applies one data write to the shown spec: the data change, the rebuilt drawn tree, the
     /// bumped revision and the `change` event. A refused write changes nothing.
     private mutating func commitDataWrite(
-        _ op: PrototypeDataWrite.Op, path: String, value: JSONValue?
+        _ operation: PrototypeDataWrite.Operation, path: String, value: JSONValue?
     )
         -> Result<[PrototypeEvent], PrototypeDataWriteFailure>
     {
         guard let spec else { return .failure(.init(code: .notFound, message: "No prototype is shown")) }
         let data: [String: JSONValue]
-        switch PrototypeDataWrite.apply(spec.data, op: op, path: path, value: value) {
+        switch PrototypeDataWrite.apply(spec.data, op: operation, path: path, value: value) {
         case let .success(written): data = written
         case let .failure(failure): return .failure(failure)
         }
@@ -406,7 +508,7 @@ struct PrototypeSession {
         rebuildNavigation(for: rebuilt.root, keepingPages: pages, keepingStacks: stacks)
         let revision = dataRevision + 1
         revisions[rebuilt.id] = revision
-        var payload: [String: JSONValue] = ["op": .string(op.rawValue), "revision": .number(Double(revision))]
+        var payload: [String: JSONValue] = ["op": .string(operation.rawValue), "revision": .number(Double(revision))]
         // The value is left out when the event would not fit the emit payload limit, so the host,
         // which cannot mirror a write it was not shown, stops tracking the spec (as on Android).
         if let value, PrototypeEmitContext.fits(.object(payload.merging(["value": value]) { $1 })) {
@@ -486,8 +588,8 @@ struct PrototypeSession {
         let next: JSONValue? = switch action.type {
         case "setState": action.value
         case "toggle": state[key]?.boolValue.map { .bool(!$0) }
-        case "increment": stepped(state[key], by: action.by ?? 1)
-        case "decrement": stepped(state[key], by: -(action.by ?? 1))
+        case "increment": stepped(state[key], by: action.incrementAmount ?? 1)
+        case "decrement": stepped(state[key], by: -(action.incrementAmount ?? 1))
         default: nil
         }
         return next.map { (key, $0) }
@@ -511,7 +613,11 @@ struct PrototypeSession {
                 "values": .object(Dictionary(uniqueKeysWithValues: keys.map { ($0, state[$0] ?? .null) })),
             ])
         }
-        return emit(kind: "emit", name: "change", payload: payload)
+        return emit(kind: "emit", name: "change", payload: payload).map {
+            var event = $0
+            event.isStateChange = true
+            return event
+        }
     }
 
     /// Several keys written together, reported by one `change` event (see `emitStateChange`). They are
@@ -554,14 +660,25 @@ struct PrototypeSession {
         return PrototypeStacks.popTarget(root: spec.root, state: state, pages: pages, stacks: stacks)
     }
 
+    func stackTransition(_ id: String) -> PrototypeStackTransition {
+        PrototypeStackTransition(rawValue: stackNodes[id]?.transition ?? "") ?? .platform
+    }
+
     mutating func popTopmostStack() -> [PrototypeEvent] {
+        if let drawer = spec?.root.openModals(state: state, pages: pages, stacks: stacks)
+            .last(where: { $0.type == "drawer" }) { return closeModal(drawer) }
         guard let id = stackPopTarget else { return [] }
-        return changeStack(id) { _, path in Array(path.dropLast()) }
+        return changeStack(id, direction: .pop) { _, path in Array(path.dropLast()) }
     }
 
     private mutating func runStack(_ action: PrototypeAction) -> [PrototypeEvent] {
         guard let id = action.stack else { return [] }
-        return changeStack(id) { node, path in
+        let direction: PrototypeStackChange.Direction = switch action.type {
+        case "push": .push
+        case "replace": .replace
+        default: .pop
+        }
+        return changeStack(id, direction: direction, override: action.transition) { node, path in
             switch action.type {
             case "push":
                 guard path.count < PrototypeLimits.maxStackDepth, let screen = action.screen,
@@ -581,7 +698,8 @@ struct PrototypeSession {
     }
 
     private mutating func changeStack(
-        _ id: String, transform: (PrototypeNode, [String]) -> [String]
+        _ id: String, direction: PrototypeStackChange.Direction, override: PrototypeStackTransition? = nil,
+        transform: (PrototypeNode, [String]) -> [String]
     )
         -> [PrototypeEvent]
     {
@@ -590,6 +708,19 @@ struct PrototypeSession {
         guard path != before.path, let screen = path.last else { return [] }
         let next = PrototypeStackSnapshot(path: path)
         stacks[id] = next
+        stackRevision += 1
+        stackChanges[id] = PrototypeStackChange(
+            direction: direction,
+            transition: override ?? PrototypeStackTransition(rawValue: node.transition ?? "") ?? .platform,
+            revision: stackRevision
+        )
+        let retained = zip(before.path, path).prefix(while: { $0.0 == $0.1 }).count
+        var entries = Array((stackEntries[id] ?? []).prefix(retained))
+        for screen in path.dropFirst(entries.count) {
+            nextStackEntry += 1
+            entries.append(PrototypeStackEntry(id: nextStackEntry, screen: screen))
+        }
+        stackEntries[id] = entries
         // popToRoot can change a depth-one replacement back to start; repeated pushes of the
         // same screen change depth. Both are real changes, just as on Android.
         guard before.path.last != screen || before.depth != next.depth else { return [] }
@@ -633,10 +764,11 @@ struct PrototypeSession {
     }
 
     /// The terminal event: every dismissal emits exactly one `dismissed`, carrying its reason.
-    mutating func dismiss(reason: PrototypeDismissReason) -> [PrototypeEvent] {
+    mutating func dismiss(reason: PrototypeSessionDismissReason) -> [PrototypeEvent] {
         guard isShown else { return [] }
         let events = emit(kind: "dismissed", name: nil, payload: .object(["reason": .string(reason.rawValue)]))
         requests.cancelAll()
+        timerCommands.append(.cancelAll)
         spec = nil
         return events
     }
@@ -652,7 +784,7 @@ struct PrototypeSession {
         return [PrototypeEvent(
             id: id,
             sequence: sequence,
-            kind: kind,
+            wireKind: kind,
             name: name,
             payload: payload,
             state: state,
@@ -760,7 +892,8 @@ enum PrototypeTestHooks {
     /// Capabilities to advertise in `hello_result`: the test hooks are listed only when enabled,
     /// because the host client refuses to send a request type the agent does not advertise.
     static func capabilities(enabled: Bool) -> [String] {
-        enabled ? PrototypeAgentProtocol.capabilities + gatedRequestTypes.sorted() : PrototypeAgentProtocol.capabilities
+        let advertised = PrototypeAgentProtocol.advertisedCapabilities()
+        return enabled ? advertised + gatedRequestTypes.sorted() : advertised
     }
 
     /// The error to reply with when `requestType` is a test hook and hooks are off; nil otherwise.
@@ -786,7 +919,13 @@ extension PrototypeSession {
     /// the older (the latest wins).
     private mutating func runRequest(_ action: PrototypeAction) -> [PrototypeEvent] {
         guard let spec else { return [] }
-        let inputs = EmitContextInputs(state: state, pages: pages, dataModel: spec.data)
+        let inputs = EmitContextInputs(
+            state: state,
+            pages: pages,
+            dataModel: spec.data,
+            platformModel: spec.platformState,
+            eventData: platformEventData
+        )
         var events: [PrototypeEvent] = []
         let into = action.into
         if let into, let older = requests.inFlight(into: into) {
@@ -956,6 +1095,13 @@ private struct EmitContextInputs: PrototypeEmitContextInputs {
     let state: [String: JSONValue]
     let pages: [String: Int]
     let dataModel: [String: JSONValue]?
+    var platformModel: [String: JSONValue]?
+    var eventData: JSONValue?
+
+    func platform(_ pointer: String) -> JSONValue? { PrototypeDataPointer.resolve(platformModel, pointer: pointer) }
+    func event(_ pointer: String) -> JSONValue? {
+        eventData.flatMap { PrototypeDataPointer.resolve($0, tokens: PrototypeDataPointer.tokens(pointer)[...]) }
+    }
 
     func state(_ key: String) -> JSONValue? { state[key] }
     func page(_ id: String) -> Int? { pages[id] }

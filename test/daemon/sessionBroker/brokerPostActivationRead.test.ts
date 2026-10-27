@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
 import {
   openSqliteBindingRegistry,
@@ -8,6 +8,10 @@ import type { SessionConfig } from "../../../src/devices/sessionConfig";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 import { FAKE_BROKER_OWNER, FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
+
+afterEach(() => {
+  mock.restore();
+});
 
 function config(requestId: string): SessionConfig {
   return {
@@ -64,26 +68,19 @@ describe("receipt read failure after session activation", () => {
     await registry.close();
   });
 
-  /** Lets activation commit for real, then runs `afterCommit` before the broker sees the result. */
-  function afterActivation(afterCommit: () => void | Promise<void>) {
+  test("an aborted caller whose receipt reread fails keeps the grant for a replay", async () => {
+    const controller = new AbortController();
+    const getRequest = spyOn(options.store, "getRequest");
     const activate = options.store.activate.bind(options.store);
+    const afterCommit = () => {
+      controller.abort(new Error("client connection closed"));
+      getRequest.mockRejectedValueOnce(new Error("database is locked"));
+    };
     spyOn(options.store, "activate").mockImplementationOnce(async (...args) => {
       const request = await activate(...args);
       expect(request.state).toBe("active");
       await afterCommit();
       return request;
-    });
-  }
-
-  function failNextRead(method: "getRequest" | "listResources") {
-    spyOn(options.store, method).mockRejectedValueOnce(new Error("database is locked"));
-  }
-
-  test("an aborted caller whose receipt reread fails keeps the grant for a replay", async () => {
-    const controller = new AbortController();
-    afterActivation(() => {
-      controller.abort(new Error("client connection closed"));
-      failNextRead("getRequest");
     });
 
     await expect(
@@ -100,7 +97,15 @@ describe("receipt read failure after session activation", () => {
   });
 
   test("a failed result assembly after activation keeps the grant for a replay", async () => {
-    afterActivation(() => failNextRead("listResources"));
+    const listResources = spyOn(options.store, "listResources");
+    const activate = options.store.activate.bind(options.store);
+    const afterCommit = () => listResources.mockRejectedValueOnce(new Error("database is locked"));
+    spyOn(options.store, "activate").mockImplementationOnce(async (...args) => {
+      const request = await activate(...args);
+      expect(request.state).toBe("active");
+      await afterCommit();
+      return request;
+    });
 
     await expect(broker.prepare(config("assembly-fails"), "owner-token")).rejects.toThrow(
       /committed/,
@@ -116,9 +121,16 @@ describe("receipt read failure after session activation", () => {
 
   test("a durable abandonment after activation wins over stale ready evidence", async () => {
     const controller = new AbortController();
-    afterActivation(async () => {
+    const activate = options.store.activate.bind(options.store);
+    const afterCommit = async () => {
       await options.store.abandon("abandoned", FAKE_BROKER_OWNER, "owner-token");
       controller.abort(new Error("client connection closed"));
+    };
+    spyOn(options.store, "activate").mockImplementationOnce(async (...args) => {
+      const request = await activate(...args);
+      expect(request.state).toBe("active");
+      await afterCommit();
+      return request;
     });
 
     const result = await broker.prepare(config("abandoned"), "owner-token", controller.signal);

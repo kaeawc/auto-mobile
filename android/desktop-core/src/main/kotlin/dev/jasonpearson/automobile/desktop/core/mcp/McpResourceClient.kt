@@ -7,7 +7,10 @@ import dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClient
 import dev.jasonpearson.automobile.desktop.core.logging.Logger
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.File
+import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
@@ -212,7 +215,9 @@ class FakeMcpResourceClient : McpResourceClient {
       ResourceInfo("automobile:failures", "Failures", "Failure groups", "application/json"),
     )
 
-  override fun close() {}
+  override fun close() {
+    // The fake owns no transport or other resources.
+  }
 }
 
 /**
@@ -242,6 +247,8 @@ class DaemonMcpResourceClient(
         logger.warn("[DaemonMcpResourceClient] Error: Resource response missing content")
         ResourceReadResult.Error("Resource response missing content")
       }
+    } catch (cancellation: CancellationException) {
+      throw cancellation
     } catch (e: Exception) {
       val errorMsg = "${e.javaClass.simpleName}: ${e.message}"
       logger.warn("[DaemonMcpResourceClient] Exception: $errorMsg", e)
@@ -264,6 +271,8 @@ class DaemonMcpResourceClient(
           mimeType = resource.mimeType,
         )
       }
+    } catch (cancellation: CancellationException) {
+      throw cancellation
     } catch (e: Exception) {
       logger.warn("[DaemonMcpResourceClient] Exception listing resources: ${e.message}", e)
       emptyList()
@@ -325,7 +334,11 @@ object McpResourceClientFactory {
         val port = process.port ?: readDaemonPort() ?: 3000
         val endpoint = "http://localhost:$port/auto-mobile/streamable"
         logger.debug("[McpResourceClientFactory] Creating McpHttpClient with endpoint: $endpoint")
-        DaemonMcpResourceClient(McpHttpClient(endpoint))
+        DaemonMcpResourceClient(
+          McpHttpClient(
+            dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(endpoint),
+          ),
+        )
       }
       McpConnectionType.Stdio -> {
         // STDIO requires process management, not supported for external connection
@@ -356,7 +369,10 @@ object McpResourceClientFactory {
       val pidData = json.decodeFromString<PidFileData>(content)
       logger.debug("[McpResourceClientFactory] Daemon port from PID file: ${pidData.port}")
       pidData.port
-    } catch (e: Exception) {
+    } catch (e: IOException) {
+      logger.warn("[McpResourceClientFactory] Error reading PID file: ${e.message}", e)
+      null
+    } catch (e: SerializationException) {
       logger.warn("[McpResourceClientFactory] Error reading PID file: ${e.message}", e)
       null
     }

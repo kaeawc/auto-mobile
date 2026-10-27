@@ -63,14 +63,16 @@ class NavigationEventAccumulator {
 
   /** Manually add a navigation event from external sources (e.g., broadcasts). */
   fun addEvent(
-    destination: String,
-    source: String,
-    arguments: Map<String, String>,
-    metadata: Map<String, String>,
-    applicationId: String? = null,
-    timestamp: Long = System.currentTimeMillis(),
+    event: NavigationEventInput,
     publishLatestEvent: Boolean = true,
   ): TimestampedNavigationEvent {
+    val destination = event.destination
+    val source = event.source
+    val arguments = event.arguments
+    val metadata = event.metadata
+    val applicationId = event.applicationId
+    val timestamp = event.timestamp
+
     val sequence = sequenceNumber.getAndIncrement()
 
     val timestampedEvent =
@@ -96,12 +98,14 @@ class NavigationEventAccumulator {
    */
   fun addSdkNavigationEvent(event: SdkNavigationEvent): TimestampedNavigationEvent =
     addEvent(
-      destination = event.destination,
-      source = event.source.name,
-      arguments = event.arguments ?: emptyMap(),
-      metadata = event.metadata ?: emptyMap(),
-      applicationId = event.applicationId,
-      timestamp = event.timestamp,
+      NavigationEventInput(
+        destination = event.destination,
+        source = event.source.name,
+        arguments = event.arguments ?: emptyMap(),
+        metadata = event.metadata ?: emptyMap(),
+        applicationId = event.applicationId,
+        timestamp = event.timestamp,
+      ),
       publishLatestEvent = false,
     )
 

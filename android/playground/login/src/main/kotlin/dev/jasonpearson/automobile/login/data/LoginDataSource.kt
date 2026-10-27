@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.login.data
 
 import dev.jasonpearson.automobile.login.data.model.LoggedInUser
 import java.io.IOException
+import java.security.ProviderException
 
 /** Class that handles authentication w/ login credentials and retrieves user information. */
 class LoginDataSource {
@@ -11,7 +12,7 @@ class LoginDataSource {
       // TODO: handle loggedInUser authentication
       val fakeUser = LoggedInUser(java.util.UUID.randomUUID().toString(), "Jane Doe")
       return Result.Success(fakeUser)
-    } catch (e: Throwable) {
+    } catch (e: ProviderException) {
       return Result.Error(IOException("Error logging in", e))
     }
   }

@@ -11,7 +11,7 @@ import {
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   DAEMON_VERSION,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -39,6 +39,7 @@ describe("proxy --initial-session-uuid startup claim", () => {
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),

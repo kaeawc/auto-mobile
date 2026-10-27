@@ -1,7 +1,10 @@
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   dispatchIosCoordinateTap,
   dispatchIosDoubleTap,
+  indeterminateTapError,
+  tapFailureNeedsSearchDebugContext,
   type IosCoordinateTapClient,
 } from "../../../src/features/action/coordinateTapDispatch";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
@@ -13,6 +16,7 @@ import { displayTransitions } from "../../../src/features/observe/DisplayTransit
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { BootedDevice } from "../../../src/models";
+import { logger } from "../../../src/utils/logger";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -58,7 +62,9 @@ function scriptedClient(options: {
       }
       return options.reply ?? { success: true };
     },
-    requestTapCoordinates: async (_x, _y, _d, _t, _p, _frame, signal, onDispatch) => {
+    requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+      const { signal, onDispatch } = request;
+
       signals.push(signal);
       if (options.dispatch) {
         onDispatch?.();
@@ -72,6 +78,28 @@ function scriptedClient(options: {
 }
 
 describe("dispatchIosCoordinateTap (#9971)", () => {
+  test("an unconfirmed tap logs the point, budget and that the runner may stay busy (#15296)", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const client = scriptedClient({
+        dispatch: true,
+        reply: { success: false, error: "Tap timed out after 5000ms", dispatched: true },
+      });
+      await expect(dispatchIosCoordinateTap(client, 202, 816, 50)).rejects.toThrow(INDETERMINATE);
+      const logged = warn.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logged).toContain("tap at (202, 816) unconfirmed after");
+      expect(logged).toContain("may stay busy");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("only an indeterminate tap skips the element-search debug context", () => {
+    expect(tapFailureNeedsSearchDebugContext(indeterminateTapError("timed out"))).toBe(false);
+    expect(tapFailureNeedsSearchDebugContext(new ActionableError("Element not found"))).toBe(true);
+    expect(tapFailureNeedsSearchDebugContext(new Error("boom"))).toBe(true);
+  });
+
   test("a dispatched tap that timed out is indeterminate, not a plain failure", async () => {
     const client = scriptedClient({
       dispatch: true,
@@ -179,10 +207,11 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
 
   test("forwards the signal, frame context and an explicit timeout", async () => {
     const controller = new AbortController();
-    const seen: unknown[][] = [];
+    const seen: TapCoordinatesRequest[] = [];
     const client: IosCoordinateTapClient = {
+      requestDoubleTapCoordinates: async () => ({ success: true }),
       requestTapCoordinates: async (...args) => {
-        seen.push(args);
+        seen.push(args[0]);
         return { success: true };
       },
     };
@@ -190,10 +219,10 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
       signal: controller.signal,
       timeoutMs: 7777,
     });
-    expect(seen[0]?.slice(0, 4)).toEqual([3, 4, 50, 7777]);
-    expect(seen[0]?.[5]).toBe("epoch:1");
-    expect(seen[0]?.[6]).toBe(controller.signal);
-    expect(typeof seen[0]?.[7]).toBe("function");
+    expect(seen[0]).toMatchObject({ x: 3, y: 4, duration: 50, timeoutMs: 7777 });
+    expect(seen[0]?.frameContext).toBe("epoch:1");
+    expect(seen[0]?.signal).toBe(controller.signal);
+    expect(typeof seen[0]?.onDispatch).toBe("function");
   });
 
   test("an unanswered atomic double tap does not claim a partial count", async () => {
@@ -225,16 +254,14 @@ describe.each([false, true])("iOS CtrlProxy tap transport (doubleTap=%s)", (doub
           signal,
           onDispatch,
         )
-      : new CtrlProxyGestures(h.context).requestTapCoordinates(
-          1,
-          2,
-          50,
-          50,
-          undefined,
-          undefined,
+      : new CtrlProxyGestures(h.context).requestTapCoordinates({
+          x: 1,
+          y: 2,
+          duration: 50,
+          timeoutMs: 50,
           signal,
           onDispatch,
-        );
+        });
 
   test("a timeout after the write is dispatched and unacknowledged", async () => {
     const h = createIosDelegateHarness();
@@ -311,8 +338,25 @@ describe.each([false, true])("iOS CtrlProxy tap transport (doubleTap=%s)", (doub
     const signal = new AbortController().signal;
     const onDispatch = () => {};
     try {
-      await client.requestTapCoordinates(1, 2, 50, 60, undefined, "frame", signal, onDispatch);
-      expect(forward).toHaveBeenCalledWith(1, 2, 50, 60, undefined, "frame", signal, onDispatch);
+      await client.requestTapCoordinates({
+        x: 1,
+        y: 2,
+        duration: 50,
+        timeoutMs: 60,
+        frameContext: "frame",
+        signal,
+        onDispatch,
+      });
+      expect(forward).toHaveBeenCalledWith({
+        x: 1,
+        y: 2,
+        duration: 50,
+        timeoutMs: 60,
+        perf: undefined,
+        frameContext: "frame",
+        signal: signal,
+        onDispatch: onDispatch,
+      });
     } finally {
       forward.mockRestore();
     }
@@ -386,7 +430,7 @@ describe("tapAt on iOS (#9971)", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult({
       ...observation(100, 200, "epoch:1"),
-      display: { key: "0", role: "unknown", generation: 0 },
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
     });
     const unusedAndroid = { requestTapCoordinates: async () => ({ success: true }) };
     const tapAt = new TapAtCoordinate(IOS_DEVICE, new FakeAdbExecutor(), {
@@ -550,7 +594,7 @@ describe("tapOn on iOS (#9971)", () => {
     const instance = spyOnIosClientInstance(client);
     const tapOn = new TapOnElement(IOS_DEVICE, new FakeAdbClient(), {
       timer,
-      tapStrategy: new FakeTapStrategy(),
+      tapStrategy: FakeTapStrategy.ios(),
       visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     });
@@ -570,7 +614,7 @@ describe("tapOn on iOS (#9971)", () => {
       await tapOn["executeiOSTapWithCoordinates"]("tap", point.x, point.y, 1000, {
         signal: controller.signal,
       });
-      expect(tap.mock.calls[0]?.[6]).toBe(controller.signal);
+      expect(tap.mock.calls[0]?.[0]?.signal).toBe(controller.signal);
     } finally {
       instance.mockRestore();
     }

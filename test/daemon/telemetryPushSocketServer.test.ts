@@ -1,5 +1,8 @@
 import { Socket } from "node:net";
-import { TelemetryPushSocketServer } from "../../src/daemon/telemetryPushSocketServer";
+import {
+  TelemetryPushSocketServer,
+  type TelemetryFilter,
+} from "../../src/daemon/telemetryPushSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 import { streamSubscribeAuthCases } from "../helpers/streamSubscribeAuthCases";
@@ -46,13 +49,13 @@ streamSubscribeAuthCases(
   (timer, authenticator) => new AuthTelemetryServer(timer, authenticator),
 );
 
-type BackfillFilter = ReturnType<BackfillTelemetryServer["filter"]>;
+type BackfillFilter = TelemetryFilter;
 
 class BackfillTelemetryServer extends TelemetryPushSocketServer {
   override waitForDrain(socket: Socket): Promise<boolean> {
     return super.waitForDrain(socket);
   }
-  filter(category: string | null = null, sessionId: string | null = null) {
+  filter(category: string | null = null, sessionId: string | null = null): TelemetryFilter {
     return { category, deviceSessionUuid: null, deviceId: null, sessionId };
   }
   subscribe(socket: Socket, filter: BackfillFilter): void {
@@ -221,6 +224,24 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
     expect(queryOrder).toEqual([]);
     expect(messages()).toEqual([]);
     expect(infoSpy).not.toHaveBeenCalled();
+  });
+
+  test("a backfilling subscriber is performance demand and receives the push-only event after backfill (#14461)", async () => {
+    const filter = server.filter("performance");
+    server.subscribe(socket, filter);
+    // The sampler's demand check lands while the initial backfill is in flight.
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(true);
+    server.pushTelemetryEvent({
+      category: "performance",
+      timestamp: 1,
+      deviceId: "device",
+      sessionId: "session",
+      data: { timestamp: 1, packageName: "com.example", fps: 12, health: "warning" },
+    });
+    expect(messages()).toEqual([]);
+    await server.backfill(socket, filter);
+    await server.finish();
+    expect(messages().map(({ data }) => data.category)).toEqual(["performance"]);
   });
 
   test("queues distinct prototype sequences during backfill and deduplicates repeated sequence", async () => {
@@ -490,10 +511,13 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
   });
 
   test("session mismatch and duplicate continue without writes or incrementing yield count", async () => {
+    // The row dedupe key rides on a wire field the typed row does not declare.
+    const duplicateA = { ...row(1, "session"), id: "duplicate" };
+    const duplicateB = { ...row(2, "session"), id: "duplicate" };
     navigationSpy.mockResolvedValue([
       row(0, "other"),
-      { ...row(1, "session"), id: "duplicate" },
-      { ...row(2, "session"), id: "duplicate" },
+      duplicateA,
+      duplicateB,
       ...Array.from({ length: 49 }, (_, i) => row(i + 3, "session")),
     ]);
     const filter = server.filter("navigation", "session");
@@ -523,6 +547,9 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
       });
       const drain = spyOn(server, "waitForDrain").mockImplementation(async () => {
         order.push("drain");
+        if (drained) {
+          socket.emit("drain");
+        }
         return drained;
       });
       restores.push(() => drain.mockRestore());
@@ -780,6 +807,25 @@ class FilterTelemetryServer extends TelemetryPushSocketServer {
   constructor(timer: FakeTimer) {
     super("/fake/telemetry-filter.sock", timer);
   }
+  addSubscriber(filter: Partial<TelemetryFilter> = {}, backfilling = false): FakeSocket {
+    const socket = new FakeSocket();
+    const subscriptionId = `telemetry-${++this.subscriptionCounter}`;
+    this.subscribers.set(subscriptionId, {
+      socket,
+      subscriptionId,
+      lastActivity: 0,
+      filter: {
+        category: null,
+        deviceSessionUuid: null,
+        deviceId: null,
+        sessionId: null,
+        ...filter,
+      },
+      backfilling,
+      drainPending: false,
+    });
+    return socket;
+  }
   parse(request: Record<string, unknown>) {
     return this.parseSubscriptionFilter(request);
   }
@@ -831,5 +877,103 @@ describe("TelemetryPushSocketServer serial-scoped subscribe (#10143)", () => {
     expect(() => server.parse({ deviceId: "emulator-9999" })).toThrow(/does not identify a live/);
     expect(() => server.parse({ deviceId: "  " })).toThrow(/non-blank/);
     expect(() => server.parse({ deviceId: 5 })).toThrow(/non-blank/);
+  });
+});
+
+describe("TelemetryPushSocketServer performance demand", () => {
+  let server: FilterTelemetryServer;
+  let resolver: FakeDeviceSessionResolver;
+  beforeEach(() => {
+    resolver = new FakeDeviceSessionResolver().bind("device", "uuid");
+    server = new FilterTelemetryServer(new FakeTimer());
+    server.setDeviceSessionResolver(resolver);
+  });
+
+  test("no subscribers means no demand", () => {
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(false);
+  });
+
+  for (const category of [null, "performance", "network"]) {
+    for (const deviceSessionUuid of [null, "uuid", "other"]) {
+      test(`category=${category}, uuid=${deviceSessionUuid}`, () => {
+        server.addSubscriber({ category, deviceSessionUuid, sessionId: "unknown-at-demand-time" });
+        expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(
+          category !== "network" && deviceSessionUuid !== "other",
+        );
+      });
+    }
+  }
+
+  test("ignores destroyed sockets while finding a live match", () => {
+    server.addSubscriber().destroy();
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(false);
+    server.addSubscriber({ category: "performance" });
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(true);
+  });
+
+  test("a backfilling subscriber counts as demand when its filter matches (#14461)", () => {
+    server.addSubscriber({ category: "network" }, true);
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(false);
+    server.addSubscriber({ category: "performance" }, true);
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(true);
+  });
+
+  test("resolves the current epoch and keeps null uuid subscriptions global", () => {
+    server.addSubscriber({ deviceSessionUuid: "uuid", deviceId: "irrelevant-backfill-serial" });
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(true);
+    resolver.bind("device", "new-uuid");
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(false);
+    expect(server.hasSubscriberForPerformanceTelemetry("unresolved")).toBe(false);
+    server.addSubscriber();
+    expect(server.hasSubscriberForPerformanceTelemetry("unresolved")).toBe(true);
+  });
+});
+
+describe("TelemetryPushSocketServer log demand", () => {
+  let server: FilterTelemetryServer;
+  let resolver: FakeDeviceSessionResolver;
+  beforeEach(() => {
+    resolver = new FakeDeviceSessionResolver().bind("device", "uuid");
+    server = new FilterTelemetryServer(new FakeTimer());
+    server.setDeviceSessionResolver(resolver);
+  });
+
+  test("no subscribers means no demand", () => {
+    expect(server.hasSubscriberForLogTelemetry("device")).toBe(false);
+  });
+
+  for (const category of [null, "log", "network"]) {
+    for (const deviceSessionUuid of [null, "uuid", "other"]) {
+      test(`category=${category}, uuid=${deviceSessionUuid}`, () => {
+        server.addSubscriber({ category, deviceSessionUuid, sessionId: "unknown-at-demand-time" });
+        expect(server.hasSubscriberForLogTelemetry("device")).toBe(
+          category !== "network" && deviceSessionUuid !== "other",
+        );
+      });
+    }
+  }
+
+  test("ignores destroyed sockets while finding a live match", () => {
+    server.addSubscriber().destroy();
+    expect(server.hasSubscriberForLogTelemetry("device")).toBe(false);
+    server.addSubscriber({ category: "log" });
+    expect(server.hasSubscriberForLogTelemetry("device")).toBe(true);
+  });
+
+  test("a backfilling subscriber counts as demand when its filter matches", () => {
+    server.addSubscriber({ category: "network" }, true);
+    expect(server.hasSubscriberForLogTelemetry("device")).toBe(false);
+    server.addSubscriber({ category: "log" }, true);
+    expect(server.hasSubscriberForLogTelemetry("device")).toBe(true);
+  });
+
+  test("resolves the current epoch and keeps null uuid subscriptions global", () => {
+    server.addSubscriber({ deviceSessionUuid: "uuid", deviceId: "irrelevant-backfill-serial" });
+    expect(server.hasSubscriberForLogTelemetry("device")).toBe(true);
+    resolver.bind("device", "new-uuid");
+    expect(server.hasSubscriberForLogTelemetry("device")).toBe(false);
+    expect(server.hasSubscriberForLogTelemetry("unresolved")).toBe(false);
+    server.addSubscriber();
+    expect(server.hasSubscriberForLogTelemetry("unresolved")).toBe(true);
   });
 });

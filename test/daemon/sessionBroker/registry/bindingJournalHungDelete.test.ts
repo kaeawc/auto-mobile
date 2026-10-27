@@ -30,7 +30,7 @@ async function flush() {
     await Promise.resolve();
   }
 }
-async function immediately<T>(operation: Promise<T>): Promise<T> {
+async function immediately(operation: Promise<unknown>): Promise<unknown> {
   let returned = false;
   const result = operation.then((value) => {
     returned = true;
@@ -82,7 +82,14 @@ async function harness(mode: "created" | "deleting" = "created") {
       },
     );
   }
-  inventory.devices.push({ platform: "ios", deviceId: "device", name: "amslot-device", ...SPEC });
+  inventory.devices.push({
+    platform: "ios",
+    deviceId: "device",
+    name: "amslot-device",
+    isRunning: false,
+    isRunningStateKnown: false,
+    ...SPEC,
+  });
   const assignment = (await registry.getAssignment(key))!;
   const opened = await registry.openBindingJournal(key, {
     kind: mode === "created" ? "create" : "replace",
@@ -106,18 +113,17 @@ async function harness(mode: "created" | "deleting" = "created") {
   if (opened.kind !== "opened") {
     throw new Error(opened.kind);
   }
-  return { ...deps, journal, key, entry: opened.entry, row: undefined };
+  return { ...deps, journal, key, entry: opened.entry };
 }
 async function timeout(h: Awaited<ReturnType<typeof harness>>) {
-  const drive = h.row
-    ? h.journal.driveFreeDeviceDeletion(h.row, { deadlineMs: h.timer.now() + 10 })
-    : h.entry!.phase === "created"
-      ? h.journal.settleCreation(h.entry!, { adopt: false, deadlineMs: h.timer.now() + 10 })
-      : h.journal.driveDeletion((await h.registry.getBindingJournal(h.entry!.id))!, {
+  const drive =
+    h.entry.phase === "created"
+      ? h.journal.settleCreation(h.entry, { adopt: false, deadlineMs: h.timer.now() + 10 })
+      : h.journal.driveDeletion((await h.registry.getBindingJournal(h.entry.id))!, {
           deadlineMs: h.timer.now() + 10,
         });
   await flush();
-  h.timer.advanceTime(h.row ? 10 : 15);
+  h.timer.advanceTime(15);
   await flush();
   await drive;
 }
@@ -229,15 +235,13 @@ describe("bounded abandoned journal deletes", () => {
       h.deleter.beforeDelete = () => new Promise<void>(() => {});
       await timeout(h);
       h.timer.advanceTime(1);
-      expect(await h.journal.runPass()).toMatchObject(
-        mode === "free" ? {} : { blocked: [{ reason: "cleanup_pending" }] },
-      );
+      expect(await h.journal.runPass()).toMatchObject({
+        blocked: [{ reason: "cleanup_pending" }],
+      });
       expect(h.deleter.calls).toHaveLength(1);
       h.timer.advanceTime(BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS);
       h.deleter.beforeDelete = undefined;
-      expect(await h.journal.runPass()).toMatchObject(
-        mode === "free" ? {} : { settled: [{ phase: "committed" }] },
-      );
+      expect(await h.journal.runPass()).toMatchObject({ settled: [{ phase: "committed" }] });
       expect(h.deleter.calls).toHaveLength(2);
       expect((await h.registry.getAssignment(h.key))?.stableDeviceId ?? null).toBeNull();
     });

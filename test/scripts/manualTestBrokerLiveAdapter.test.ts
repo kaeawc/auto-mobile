@@ -122,6 +122,19 @@ test("private batch validation refuses resident paths, ports, excessive caps and
   host.reuseCleanDevices = true;
   f.files.set(join(f.batchDir, "broker/host-config.json"), JSON.stringify(host));
   expect(() => assertPrivateBrokerBatch(f.batchDir, f.deps.daemon)).toThrow("reuseCleanDevices");
+  host.reuseCleanDevices = false;
+  host.reuseAndroidCleanDevices = true;
+  f.files.set(join(f.batchDir, "broker/host-config.json"), JSON.stringify(host));
+  expect(() => assertPrivateBrokerBatch(f.batchDir, f.deps.daemon)).toThrow(
+    "reuseAndroidCleanDevices false",
+  );
+  host.reuseAndroidCleanDevices = false;
+  for (const mode of ["erase", "keep-booted"]) {
+    host.reuseCleanDevices = false;
+    host.reuse = { ios: { mode } };
+    f.files.set(join(f.batchDir, "broker/host-config.json"), JSON.stringify(host));
+    expect(() => assertPrivateBrokerBatch(f.batchDir, f.deps.daemon)).toThrow("reuseCleanDevices");
+  }
   expect(f.calls).toEqual([]);
   expect(f.launches).toEqual([]);
 });
@@ -147,9 +160,9 @@ test("adapter preserves actual request/token, holds boot permit, observes explic
   const c = "a-phone";
   const initial = renderClientRequest({ name: c, platform: "android" }, `batch-${c}-2`);
   const grant = {
-    contractVersion: 1,
+    contractVersion: 1 as const,
     requestId: initial.requestId,
-    outcome: "ready",
+    outcome: "ready" as const,
     sessionUuid: "session-1",
     profile: null,
     cleanupPending: false,
@@ -405,6 +418,7 @@ test.each([false, true])(
     const path = join(f.batchDir, "batch.json");
     const manifest = JSON.parse(f.files.get(path)!);
     manifest.options.protectedDevices = protectedDevice ? ["native"] : [];
+    manifest.specs = derivePrivateDaemonBatch(manifest.options);
     f.files.set(path, JSON.stringify(manifest));
     f.client.infoResults = [
       { nativeDevice: { name: "ordinary-phone", deviceId: "native", platform: "android" } },

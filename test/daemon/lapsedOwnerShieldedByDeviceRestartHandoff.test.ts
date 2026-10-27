@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
@@ -5,7 +6,7 @@ import {
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
 import {
   isRecoverableDaemonReleaseReason,
   isTerminalReleaseReason,
@@ -16,7 +17,7 @@ import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
   SUSPECT_GRACE_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -79,7 +80,7 @@ describe("a device restart under a session whose owner already lost its heartbea
       });
     }
     expect(await manager.claimLivenessOwnership(SESSION, OWNER)).toBe("claimed");
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION);
     monitor.start();
   }
 
@@ -122,6 +123,7 @@ describe("a device restart under a session whose owner already lost its heartbea
       getSessionManager: () => manager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 1, idle: 1, assigned: 0, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),

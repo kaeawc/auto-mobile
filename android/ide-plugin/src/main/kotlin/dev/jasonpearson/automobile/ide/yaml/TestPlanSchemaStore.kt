@@ -2,9 +2,7 @@ package dev.jasonpearson.automobile.ide.yaml
 
 import dev.jasonpearson.automobile.validation.ValidTools
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 
 object TestPlanSchemaStore {
@@ -53,25 +51,33 @@ object TestPlanSchemaStore {
 
   private fun loadSchemaData() {
     val schema = loadSchema()
-    val rootPropertySchemas = schema.objectValue("properties")
+    val rootPropertySchemas = schema.schemaObjectValue("properties")
     val rootRequired =
-      schema.arrayValue("required")?.mapNotNull { it.stringValue() }?.toSet().orEmpty()
+      schema.schemaArrayValue("required")?.mapNotNull { it.schemaStringValue() }?.toSet().orEmpty()
     rootProperties = buildPropertyMap(rootPropertySchemas, rootRequired)
 
-    val defs = schema.objectValue("\$defs") ?: schema.objectValue("definitions")
-    val planStep = defs?.objectValue("planStep")
-    val stepPropertySchemas = planStep?.objectValue("properties")
+    val defs = schema.schemaObjectValue("\$defs") ?: schema.schemaObjectValue("definitions")
+    val planStep = defs?.schemaObjectValue("planStep")
+    val stepPropertySchemas = planStep?.schemaObjectValue("properties")
     val stepRequired =
-      planStep?.arrayValue("required")?.mapNotNull { it.stringValue() }?.toSet().orEmpty()
+      planStep
+        ?.schemaArrayValue("required")
+        ?.mapNotNull { it.schemaStringValue() }
+        ?.toSet()
+        .orEmpty()
     stepProperties = buildPropertyMap(stepPropertySchemas, stepRequired)
 
-    metadataSchema = rootPropertySchemas?.objectValue("metadata")
-    val metadataPropertySchemas = metadataSchema?.objectValue("properties")
+    metadataSchema = rootPropertySchemas?.schemaObjectValue("metadata")
+    val metadataPropertySchemas = metadataSchema?.schemaObjectValue("properties")
     val metadataRequired =
-      metadataSchema?.arrayValue("required")?.mapNotNull { it.stringValue() }?.toSet().orEmpty()
+      metadataSchema
+        ?.schemaArrayValue("required")
+        ?.mapNotNull { it.schemaStringValue() }
+        ?.toSet()
+        .orEmpty()
     metadataProperties = buildPropertyMap(metadataPropertySchemas, metadataRequired)
 
-    expectationSchema = defs?.objectValue("expectation")
+    expectationSchema = defs?.schemaObjectValue("expectation")
   }
 
   private fun buildPropertyMap(
@@ -84,10 +90,11 @@ object TestPlanSchemaStore {
 
     return properties
       .mapNotNull { (name, schemaElement) ->
-        val schemaObject = schemaElement.asObjectOrNull() ?: return@mapNotNull null
-        val description = schemaObject.stringValue("description")
+        val schemaObject = schemaElement.schemaAsObjectOrNull() ?: return@mapNotNull null
+        val description = schemaObject.schemaStringValue("description")
         val deprecated =
-          schemaObject.booleanValue("deprecated") == true ||
+          schemaObject.schemaStringValue("deprecated")?.lowercase()?.toBooleanStrictOrNull() ==
+            true ||
             description?.startsWith("DEPRECATED") == true ||
             name in ValidTools.DEPRECATED_FIELDS
         SchemaPropertyInfo(
@@ -102,20 +109,18 @@ object TestPlanSchemaStore {
   }
 
   private fun loadSchema(): JsonObject {
-    if (rootSchema != null) {
-      return rootSchema!!
+    rootSchema?.let {
+      return it
     }
 
     val schemaStream = getResourceStream("test-plan.schema.json", "schemas/test-plan.schema.json")
     if (schemaStream == null) {
-      rootSchema = JsonObject(emptyMap())
-      return rootSchema!!
+      return JsonObject(emptyMap()).also { rootSchema = it }
     }
 
     val schemaJson = schemaStream.bufferedReader().use { it.readText() }
     val schemaElement = json.parseToJsonElement(schemaJson)
-    rootSchema = schemaElement.jsonObject
-    return rootSchema!!
+    return schemaElement.jsonObject.also { rootSchema = it }
   }
 
   private fun getResourceStream(vararg paths: String): java.io.InputStream? {
@@ -128,29 +133,4 @@ object TestPlanSchemaStore {
     }
     return null
   }
-
-  private fun JsonObject.objectValue(key: String): JsonObject? = this[key]?.asObjectOrNull()
-
-  private fun JsonObject.arrayValue(key: String): List<JsonElement>? = this[key]?.asArrayOrNull()
-
-  private fun JsonObject.stringValue(key: String): String? = this[key]?.stringValue()
-
-  private fun JsonObject.booleanValue(key: String): Boolean? {
-    return (this[key] as? JsonPrimitive)?.booleanValueOrNull()
-  }
-
-  private fun JsonElement.stringValue(): String? = (this as? JsonPrimitive)?.content
-
-  private fun JsonPrimitive.booleanValueOrNull(): Boolean? {
-    return when (content.lowercase()) {
-      "true" -> true
-      "false" -> false
-      else -> null
-    }
-  }
-
-  private fun JsonElement.asObjectOrNull(): JsonObject? = this as? JsonObject
-
-  private fun JsonElement.asArrayOrNull(): kotlinx.serialization.json.JsonArray? =
-    this as? kotlinx.serialization.json.JsonArray
 }

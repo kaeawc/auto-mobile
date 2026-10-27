@@ -12,8 +12,17 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../../src/utils/io.ts" "$repo_dir/src/utils/"
   ln -s "$BATS_TEST_DIRNAME/../../node_modules" "$repo_dir/node_modules"
   git -C "$repo_dir" init -q
+  # Newer Git runs auto-maintenance detached after commit/fetch; a background
+  # writer in .git races teardown's rm -rf ("Directory not empty", #14019).
+  git -C "$repo_dir" config maintenance.auto false
+  git -C "$repo_dir" config gc.auto 0
   git -C "$repo_dir" config user.email test@example.com
   git -C "$repo_dir" config user.name test
+  # `git commit` may spawn a detached `git maintenance`/`gc --auto` that keeps
+  # writing under .git after the test ends, racing teardown's rm -rf (#14019).
+  git -C "$repo_dir" config gc.auto 0
+  git -C "$repo_dir" config gc.autoDetach false
+  git -C "$repo_dir" config maintenance.auto false
   touch "$repo_dir/src/existing.ts"
   git -C "$repo_dir" add .
   git -C "$repo_dir" commit -qm baseline
@@ -21,7 +30,18 @@ setup() {
 }
 
 teardown() {
+  # Bounded retry: a straggling child can still be flushing into .git.
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    rm -rf "$repo_dir" 2>/dev/null && return 0
+    sleep 0.2
+  done
   rm -rf "$repo_dir"
+}
+
+@test "fixture repo disables detached background git maintenance" {
+  [ "$(git -C "$repo_dir" config --get maintenance.auto)" = "false" ]
+  [ "$(git -C "$repo_dir" config --get gc.auto)" = "0" ]
 }
 
 @test "rejects a new argv-form security execution" {

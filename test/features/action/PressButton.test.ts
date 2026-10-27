@@ -8,10 +8,17 @@ import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { describe, expect, spyOn, test } from "bun:test";
-import { PressButton } from "../../../src/features/action/PressButton";
+import { createExecResult } from "../../../src/utils/execResult";
+import {
+  PressButton,
+  acceptIosHomeAlreadyOnSpringboard,
+  isIosHomePressOnSpringboard,
+  isIosSpringboardFallbackPress,
+} from "../../../src/features/action/PressButton";
+import type { ObserveResult } from "../../../src/models";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { BootedDevice } from "../../../src/models";
+import { BootedDevice, ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -58,17 +65,32 @@ describe("PressButton", () => {
       hierarchy: { className: "XCUIApplication" },
     });
     const getInstanceSpy = spyOnIosClientInstance(client);
+    const invalidated: string[] = [];
     const launches: string[][] = [];
     try {
-      const pressButton = new PressButton(iosSimulator, null, timer, {
-        executeCommandArgs: async (args) => {
-          launches.push(args);
-          return { stdout: "", stderr: "" };
+      const pressButton = new PressButton(
+        iosSimulator,
+        null,
+        timer,
+        {
+          executeCommandArgs: async (args) => {
+            launches.push(args);
+            return createExecResult("", "");
+          },
         },
-      });
+        undefined,
+        {
+          iosLockStateInvalidator: {
+            invalidate: (id) => {
+              invalidated.push(id);
+            },
+          },
+        },
+      );
 
       const result = await pressButton.press("home");
       expect(result.success).toBe(true);
+      expect(invalidated).toEqual([iosSimulator.deviceId]);
       expect(launches).toEqual([["launch", iosSimulator.deviceId, "com.apple.springboard"]]);
       expect(client.getPressHomeRequestCount()).toBe(0);
     } finally {
@@ -93,7 +115,7 @@ describe("PressButton", () => {
       {
         executeCommandArgs: async () => {
           launches++;
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         },
       },
       (signal, timeoutMs, send, onDispatch) =>
@@ -155,7 +177,7 @@ describe("PressButton", () => {
       const timer = new FakeTimer();
       const controller = new AbortController();
       const client = new FakeIOSCtrlProxy(timer);
-      const launch = Promise.withResolvers<{ stdout: string; stderr: string }>();
+      const launch = Promise.withResolvers<ExecResult>();
       const instance = spyOnIosClientInstance(client);
       const reads = spyOn(client, "requestHierarchySync");
       let sent = false;
@@ -200,14 +222,14 @@ describe("PressButton", () => {
           expect(answered).toBe(false);
           timer.advanceTime(1);
         } else {
-          launch.resolve({ stdout: "", stderr: "" });
+          launch.resolve(createExecResult("", ""));
         }
         await expect(pending).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
         expect(reads).not.toHaveBeenCalled();
         expect(marks).toBe(1);
       } finally {
         controller.abort();
-        launch.resolve({ stdout: "", stderr: "" });
+        launch.resolve(createExecResult("", ""));
         await pending.catch(() => {});
         reads.mockRestore();
         instance.mockRestore();
@@ -235,7 +257,7 @@ describe("PressButton", () => {
             await timer.sleep(timeoutMs);
             throw new SimctlCommandTimeoutError("busy host launch timed out");
           }
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         },
       });
       expect((await action.press("home")).success).toBe(true);
@@ -264,7 +286,7 @@ describe("PressButton", () => {
       executeCommandArgs: async () => {
         expect(marks).toBe(1);
         launches++;
-        return { stdout: "", stderr: "" };
+        return createExecResult("", "");
       },
     });
     try {
@@ -489,32 +511,30 @@ describe("PressButton", () => {
 
     // Fails the accessibility path (forcing the ADB fallback) after consuming
     // part of the shared deadline.
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+    const globalActionClient = {
       requestGlobalAction: async (action: string, timeoutMs: number) => {
         globalActionTimeouts.push(timeoutMs);
         fakeTimer.advanceTime(300);
         return { success: false, action, totalTimeMs: 300, error: "WebSocket not connected" };
       },
-    });
+    };
 
     const fakeAdb = new FakeAdbExecutor();
 
-    try {
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+    const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      globalActionClient,
+    });
 
-      // "back" is a global-action button, so this exercises the two-call path.
-      const result = await pressButton.press("back", 500);
+    // "back" is a global-action button, so this exercises the two-call path.
+    const result = await pressButton.press("back", 500);
 
-      expect(result.success).toBe(true);
-      // Global action capped at min(3000, 500).
-      expect(globalActionTimeouts).toEqual([500]);
-      // ADB fallback receives the REMAINING budget after 300ms was consumed,
-      // proving total time is bounded by the caller's budget, not the sum of
-      // per-transport defaults.
-      expect(fakeAdb.getCommandCalls().map((call) => call.timeoutMs)).toEqual([200]);
-    } finally {
-      getInstanceSpy.mockRestore();
-    }
+    expect(result.success).toBe(true);
+    // Global action capped at min(3000, 500).
+    expect(globalActionTimeouts).toEqual([500]);
+    // ADB fallback receives the REMAINING budget after 300ms was consumed,
+    // proving total time is bounded by the caller's budget, not the sum of
+    // per-transport defaults.
+    expect(fakeAdb.getCommandCalls().map((call) => call.timeoutMs)).toEqual([200]);
   });
 
   test("android reports an indeterminate press when a dispatched global action exhausts the deadline", async () => {
@@ -526,7 +546,7 @@ describe("PressButton", () => {
 
     const fakeTimer = new FakeTimer();
 
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+    const globalActionClient = {
       requestGlobalAction: async (
         ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
       ) => {
@@ -542,23 +562,21 @@ describe("PressButton", () => {
           acknowledged: false,
         };
       },
-    });
+    };
 
     const fakeAdb = new FakeAdbExecutor();
 
-    try {
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+    const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      globalActionClient,
+    });
 
-      const result = await pressButton.press("back", 500);
+    const result = await pressButton.press("back", 500);
 
-      // A lost reply after dispatch is indeterminate even when the deadline is exhausted.
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("may have been applied");
-      expect(result.error).toContain("timeout");
-      expect(fakeAdb.getCommandCalls()).toEqual([]);
-    } finally {
-      getInstanceSpy.mockRestore();
-    }
+    // A lost reply after dispatch is indeterminate even when the deadline is exhausted.
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("may have been applied");
+    expect(result.error).toContain("timeout");
+    expect(fakeAdb.getCommandCalls()).toEqual([]);
   });
 
   test("ios menu remains unsupported", async () => {
@@ -575,12 +593,64 @@ describe("PressButton", () => {
     expect(result).toMatchObject({ code: "unsupported_button", retryable: false });
   });
 
+  // Issue #14100: XCUIDevice.Button.action / .camera, gated by hasHardwareButton.
+  test.each(["action", "camera"])(
+    "ios %s forwards to the CtrlProxy pressButton",
+    async (button) => {
+      const pressButtonCalls: string[] = [];
+      const getInstanceSpy = spyOnIosClientInstance({
+        requestPressButton: async (requested: string) => {
+          pressButtonCalls.push(requested);
+          return { success: true, totalTimeMs: 5 };
+        },
+      });
+      try {
+        const result = await dispatch(new PressButton(iosDevice), button.toUpperCase());
+        expect(result).toEqual({ success: true, button: button.toUpperCase(), keyCode: -1 });
+        expect(pressButtonCalls).toEqual([button]);
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    },
+  );
+
+  test.each([
+    ["action", "Feature not supported: action button requires hardware with an Action button"],
+    ["camera", "Feature not supported: Button: camera"],
+  ])(
+    "ios %s on hardware without the button is a typed, non-retryable unsupported error",
+    async (button, runnerError) => {
+      const client = new FakeIOSCtrlProxy();
+      client.setPressButtonResult({
+        success: false,
+        dispatched: true,
+        acknowledged: true,
+        totalTimeMs: 0,
+        error: runnerError,
+      });
+      const getInstanceSpy = spyOnIosClientInstance(client);
+      try {
+        const result = await new PressButton(iosDevice).press(button);
+        expect(result).toMatchObject({
+          success: false,
+          code: "unsupported_button",
+          retryable: false,
+        });
+        expect(result.error).toContain(runnerError);
+        expect(result.error).toContain("Xcode 16.3");
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    },
+  );
+
   test("iOS dispatched without acknowledgement is typed indeterminate", async () => {
     const client = new FakeIOSCtrlProxy();
     client.setPressButtonResult({
       success: false,
       dispatched: true,
       acknowledged: false,
+      totalTimeMs: 0,
       error: "reply lost",
     });
     const getInstanceSpy = spyOnIosClientInstance(client);
@@ -598,6 +668,7 @@ describe("PressButton", () => {
       success: false,
       dispatched: true,
       acknowledged: true,
+      totalTimeMs: 0,
       error: "runner failed",
     });
     const getInstanceSpy = spyOnIosClientInstance(client);
@@ -788,25 +859,6 @@ describe("PressButton", () => {
 });
 
 // Validate the actual fake-backed branch results before and after finalization.
-const executeForOutputSchema = PressButton.prototype.execute;
-let executeOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
-beforeOutputSchema(() => {
-  executeOutputSchemaSpy = spyOnOutputSchema(PressButton.prototype, "execute").mockImplementation(
-    async function (this: PressButton, ...args: Parameters<PressButton["execute"]>) {
-      const result = await executeForOutputSchema.apply(this, args);
-      const payload = { message: "Result", ...result };
-      expect(pressButtonResultSchema.parse(payload)).toBeDefined();
-      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
-        name: "pressButton",
-        outputSchema: pressButtonResultSchema,
-        artifactWriter: new FakeArtifactWriter(),
-      });
-      expect(pressButtonResultSchema.parse(finalized.structuredContent)).toBeDefined();
-      return result;
-    },
-  );
-});
-afterOutputSchema(() => executeOutputSchemaSpy.mockRestore());
 // Validate the actual fake-backed branch results before and after finalization.
 const pressForOutputSchema = PressButton.prototype.press;
 let pressOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
@@ -836,4 +888,96 @@ async function dispatch(
   const result = await pressButton.testHooks.executeiOSButtonPress(...args);
   expect(pressButtonResultSchema.parse({ message: "Result", ...result })).toBeDefined();
   return result;
+}
+
+describe("isIosHomePressOnSpringboard (#14954)", () => {
+  const observation = (packageName: string, fallbackToSpringboard?: boolean): ObserveResult =>
+    ({
+      viewHierarchy: {
+        packageName,
+        ...(fallbackToSpringboard === undefined ? {} : { fallbackToSpringboard }),
+        hierarchy: {},
+      },
+    }) as ObserveResult;
+
+  test("is true for a Home press that starts on a real SpringBoard", () => {
+    expect(isIosHomePressOnSpringboard("ios", "home", observation("com.apple.springboard"))).toBe(
+      true,
+    );
+  });
+
+  test.each([
+    ["android", "home", observation("com.apple.springboard")],
+    ["ios", "back", observation("com.apple.springboard")],
+    ["ios", "home", observation("com.apple.Maps")],
+    ["ios", "home", observation("com.apple.springboard", true)],
+    ["ios", "home", undefined],
+  ] as const)("is false for %s %s %#", (platform, button, previous) => {
+    expect(isIosHomePressOnSpringboard(platform, button, previous)).toBe(false);
+  });
+});
+
+describe("iOS Home press on the real home screen (#14954, runner reports fallbackToSpringboard)", () => {
+  // Shape captured from the runner on SpringBoard: ios-c/item2-fallback-flag.txt.
+  const capturedHomeScreen = (error?: unknown): ObserveResult =>
+    ({
+      viewHierarchy: {
+        packageName: "com.apple.springboard",
+        fallbackToSpringboard: true,
+        hierarchy: error ? { error } : {},
+      },
+    }) as ObserveResult;
+  const noChange = (observation: ObserveResult) => ({
+    success: false,
+    error: "No visual change observed",
+    observation,
+  });
+
+  test("recognizes the captured fallback flag on SpringBoard", () => {
+    expect(isIosSpringboardFallbackPress("ios", "home", capturedHomeScreen())).toBe(true);
+    expect(isIosSpringboardFallbackPress("ios", "back", capturedHomeScreen())).toBe(false);
+    expect(isIosSpringboardFallbackPress("ios", "home", capturedHomeScreen("boom"))).toBe(false);
+  });
+
+  test("no visual change on a healthy SpringBoard becomes success", () => {
+    const result = noChange(capturedHomeScreen());
+    acceptIosHomeAlreadyOnSpringboard(result, true);
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+  });
+
+  test("still fails when the press did not start on SpringBoard or ended elsewhere", () => {
+    const fresh = noChange(capturedHomeScreen());
+    acceptIosHomeAlreadyOnSpringboard(fresh, false);
+    expect(fresh.success).toBe(false);
+    const elsewhere = noChange({
+      viewHierarchy: { packageName: "com.apple.Maps", hierarchy: {} },
+    } as ObserveResult);
+    acceptIosHomeAlreadyOnSpringboard(elsewhere, true);
+    expect(elsewhere.success).toBe(false);
+  });
+});
+
+for (const platform of ["ios", "android"] as const) {
+  test(`${platform} press invalidates iOS lock state only for iOS, including failures`, async () => {
+    const invalidated: string[] = [];
+    const device: BootedDevice = { platform, deviceId: "fake-device", name: "fake" };
+    const press = new PressButton(
+      device,
+      new FakeAdbExecutor(),
+      new FakeTimer(),
+      undefined,
+      undefined,
+      {
+        iosLockStateInvalidator: {
+          invalidate: (id) => {
+            invalidated.push(id);
+          },
+        },
+      },
+    );
+    // Unsupported input completes without touching a transport on either platform.
+    await press.press("unsupported");
+    expect(invalidated).toEqual(platform === "ios" ? [device.deviceId] : []);
+  });
 }

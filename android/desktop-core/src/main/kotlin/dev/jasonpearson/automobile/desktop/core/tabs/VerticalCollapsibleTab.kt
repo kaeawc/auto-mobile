@@ -33,17 +33,29 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
  * A vertical collapsible panel that can show custom content when collapsed (e.g., badges, metrics).
  * When expanded, it shows a resizable panel with the main content.
  */
+data class VerticalTabOptions(
+  val title: String,
+  val isCollapsed: Boolean,
+  val onToggle: () -> Unit,
+  val widthPx: Float,
+  val onWidthChange: (Float) -> Unit,
+  val resizeHandleOnLeft: Boolean = true,
+  val collapsedContent: (@Composable () -> Unit)? = null,
+)
+
 @Composable
 fun VerticalCollapsibleTab(
-  title: String,
-  isCollapsed: Boolean,
-  onToggle: () -> Unit,
-  widthPx: Float,
-  onWidthChange: (Float) -> Unit,
-  resizeHandleOnLeft: Boolean = true,
-  collapsedContent: (@Composable () -> Unit)? = null,
+  options: VerticalTabOptions,
   content: @Composable () -> Unit,
 ) {
+  val title = options.title
+  val isCollapsed = options.isCollapsed
+  val onToggle = options.onToggle
+  val widthPx = options.widthPx
+  val onWidthChange = options.onWidthChange
+  val resizeHandleOnLeft = options.resizeHandleOnLeft
+  val collapsedContent = options.collapsedContent
+
   val colors = SharedTheme.globalColors
   val density = LocalDensity.current
 
@@ -69,51 +81,7 @@ fun VerticalCollapsibleTab(
             .background(colors.text.normal.copy(alpha = 0.03f))
             .padding(start = 4.dp),
       ) {
-        Column(
-          modifier = Modifier.fillMaxHeight(),
-          horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-          // Rotated title text positioned at top
-          // Use layout modifier to swap width/height for proper measurement of rotated text
-          Text(
-            title,
-            fontSize = 11.sp,
-            color = colors.text.normal.copy(alpha = 0.6f),
-            modifier =
-              Modifier.padding(top = 12.dp)
-                .layout { measurable, constraints ->
-                  // Measure with swapped constraints (width becomes height limit)
-                  val placeable =
-                    measurable.measure(
-                      constraints.copy(
-                        minWidth = 0,
-                        maxWidth = constraints.maxHeight,
-                        minHeight = 0,
-                        maxHeight = constraints.maxWidth,
-                      ),
-                    )
-                  // Layout with swapped dimensions
-                  layout(placeable.height, placeable.width) {
-                    // Place rotated: offset to account for rotation pivot
-                    placeable.place(
-                      x = -(placeable.width - placeable.height) / 2,
-                      y = (placeable.width - placeable.height) / 2,
-                    )
-                  }
-                }
-                .rotate(-90f),
-          )
-
-          // Custom collapsed content (badges, metrics, etc.)
-          if (collapsedContent != null) {
-            Box(
-              modifier = Modifier.padding(top = 8.dp),
-              contentAlignment = Alignment.TopCenter,
-            ) {
-              collapsedContent()
-            }
-          }
-        }
+        CollapsedTabLabel(title, collapsedContent)
       }
     }
   } else {
@@ -195,4 +163,60 @@ fun PanelHeader(
       )
     }
   }
+}
+
+@Composable
+private fun CollapsedTabLabel(title: String, collapsedContent: (@Composable () -> Unit)?) {
+  val colors = SharedTheme.globalColors
+  Column(
+    modifier = Modifier.fillMaxHeight(),
+    horizontalAlignment = Alignment.CenterHorizontally,
+  ) {
+    // Rotated title text positioned at top
+    // Use layout modifier to swap width/height for proper measurement of rotated text
+    RotatedTabTitle(title)
+
+    // Custom collapsed content (badges, metrics, etc.)
+    if (collapsedContent != null) {
+      Box(
+        modifier = Modifier.padding(top = 8.dp),
+        contentAlignment = Alignment.TopCenter,
+      ) {
+        collapsedContent()
+      }
+    }
+  }
+}
+
+@Composable
+private fun RotatedTabTitle(title: String) {
+  val colors = SharedTheme.globalColors
+  Text(
+    title,
+    fontSize = 11.sp,
+    color = colors.text.normal.copy(alpha = 0.6f),
+    modifier =
+      Modifier.padding(top = 12.dp)
+        .layout { measurable, constraints ->
+          // Measure with swapped constraints (width becomes height limit)
+          val placeable =
+            measurable.measure(
+              constraints.copy(
+                minWidth = 0,
+                maxWidth = constraints.maxHeight,
+                minHeight = 0,
+                maxHeight = constraints.maxWidth,
+              ),
+            )
+          // Layout with swapped dimensions
+          layout(placeable.height, placeable.width) {
+            // Place rotated: offset to account for rotation pivot
+            placeable.place(
+              x = -(placeable.width - placeable.height) / 2,
+              y = (placeable.width - placeable.height) / 2,
+            )
+          }
+        }
+        .rotate(-90f),
+  )
 }

@@ -162,16 +162,6 @@
       "reason": "Daemon capability matcher is consumed through runtime registration; static export analysis misses the dynamic lookup."
     },
     {
-      "file": "src/daemon/sessionManager.ts",
-      "name": "MAX_CLI_SESSION_IDLE_TIMEOUT_MS",
-      "reason": "Session manager constant is used by internal consumers; static export analysis misses the module linkage."
-    },
-    {
-      "file": "src/daemon/sessionManager.ts",
-      "name": "sanitizeCliSessionIdleTimeoutMs",
-      "reason": "Session manager sanitizer is used by internal consumers; static export analysis misses the module linkage."
-    },
-    {
       "file": "src/daemon/socketServer/index.ts",
       "name": "DEFAULT_KEEPALIVE_CONFIG",
       "reason": "Socket server configuration is consumed by the runtime composition; static export analysis misses the linkage."

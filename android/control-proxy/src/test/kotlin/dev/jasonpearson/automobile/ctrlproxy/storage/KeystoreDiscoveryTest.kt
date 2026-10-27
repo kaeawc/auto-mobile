@@ -67,4 +67,12 @@ class KeystoreDiscoveryTest {
       SecurityException("DISABLED unknown authority")
     assertEquals("BRIDGE_UNAVAILABLE", discoverKeystore(context, "com.example").reason)
   }
+
+  @Test
+  fun `provider null pointer failure is bridge unavailable`() {
+    every { manager.resolveContentProvider(any(), 0) } returns ProviderInfo()
+    every { resolver.call(any<Uri>(), eq("discover"), null, null) } throws
+      NullPointerException("provider failed through Binder")
+    assertEquals("BRIDGE_UNAVAILABLE", discoverKeystore(context, "com.example").reason)
+  }
 }

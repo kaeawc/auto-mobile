@@ -1,3 +1,4 @@
+import { DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { BootedDevice } from "../models";
 import type { SimCtl } from "../utils/ios-cmdline-tools/SimCtlClient";
 
@@ -14,7 +15,7 @@ export class SimctlIosSimulatorMediaClient implements IosSimulatorMediaClient {
   async importMedia(device: BootedDevice, paths: string[], signal?: AbortSignal): Promise<void> {
     await this.simctlFactory(device).executeCommandArgs(
       ["addmedia", device.deviceId, ...paths],
-      undefined,
+      DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
       signal,
     );
   }

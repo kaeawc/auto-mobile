@@ -14,6 +14,7 @@ const thresholds = {
 function metrics(overrides: Partial<MemoryMetrics> = {}): MemoryMetrics {
   const snapshot = { javaHeapMb: 20, nativeHeapMb: 20, totalPssMb: 40, timestamp: 0, raw: "" };
   return {
+    unreachableObjects: null,
     preSnapshot: snapshot,
     postSnapshot: snapshot,
     javaHeapGrowthMb: 0,

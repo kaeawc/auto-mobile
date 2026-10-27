@@ -158,7 +158,7 @@ public final class AutoMobileWebViewPolicy: Sendable {
         )
         lock.withLock { latestSnapshots in
             latestSnapshots[bounded.snapshotId] = bounded
-            if latestSnapshots.count > 4, let first = latestSnapshots.keys.sorted().first {
+            if latestSnapshots.count > 4, let first = latestSnapshots.keys.min() {
                 latestSnapshots.removeValue(forKey: first)
             }
         }
@@ -240,21 +240,14 @@ public final class AutoMobileWebViewPolicy: Sendable {
             webView = nil
         }
 
-        public func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage) {
-            if let bodyData = try? JSONSerialization.data(withJSONObject: message.body),
-               bodyData.count > configuration.maxMessageBytes
-            {
-                return
-            }
-            guard let body = message.body as? [String: Any],
-                  let name = body["name"] as? String else { return }
-            let url = webView?.url
-            guard policy.allows(url: url, frameId: body["frameId"] as? String) else { return }
-            var metadata = body.compactMapValues { value -> String? in
-                guard !(value is [Any]), !(value is [String: Any]) else { return nil }
-                return String(describing: value)
-            }
-            metadata.removeValue(forKey: "name")
+        private func trackRequest(
+            name: String,
+            body: [String: Any],
+            url: URL?,
+            metadata: inout [String: String]
+        )
+            -> String?
+        {
             let scriptRequestId = body["requestId"] as? String
             var requestId = scriptRequestId
             if name == "request_started", let scriptRequestId,
@@ -306,6 +299,25 @@ public final class AutoMobileWebViewPolicy: Sendable {
             } else if name == "request_failed", let requestId {
                 recorder?.recordFailure(requestId: requestId, error: (body["error"] as? String) ?? "Web request failed")
             }
+            return requestId
+        }
+
+        public func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage) {
+            if let bodyData = try? JSONSerialization.data(withJSONObject: message.body),
+               bodyData.count > configuration.maxMessageBytes
+            {
+                return
+            }
+            guard let body = message.body as? [String: Any],
+                  let name = body["name"] as? String else { return }
+            let url = webView?.url
+            guard policy.allows(url: url, frameId: body["frameId"] as? String) else { return }
+            var metadata = body.compactMapValues { value -> String? in
+                guard !(value is [Any]), !(value is [String: Any]) else { return nil }
+                return String(describing: value)
+            }
+            metadata.removeValue(forKey: "name")
+            let requestId = trackRequest(name: name, body: body, url: url, metadata: &metadata)
             if name == "snapshot", let elements = body["elements"] as? [[String: Any]] {
                 let decoded = elements.prefix(configuration.maxElements)
                     .compactMap { element -> AutoMobileWebElement? in

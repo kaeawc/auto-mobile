@@ -4,7 +4,7 @@ import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { computeBuildIdentity } from "../../src/daemon/buildIdentity";
+import { computeBuildIdentity } from "../../src/daemon/wire/buildIdentity";
 import { DaemonClient } from "../../src/daemon/client";
 import {
   CLI_SESSION_LIVENESS_POLICY,
@@ -12,7 +12,7 @@ import {
   DAEMON_VERSION,
   DAEMON_HEARTBEAT_METHOD,
   getCliSessionIdleTimeoutMs,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   IOS_RECORDING_FILE_READY_TIMEOUT_MS,
   IOS_RECORDING_STOP_TIMEOUT_MS,
@@ -125,7 +125,7 @@ async function runLocalCliOutput(
 ): Promise<string> {
   // The workflow warms CtrlProxy in the daemon process before this test runs.
   // Calling the local CLI keeps start and stop in that same process; importing
-  // the tool handler here would create a second cold DeviceSessionManager and
+  // the tool handler here would create a second cold DeviceReadiness and
   // reintroduce the runner-readiness timeout this test is meant to exercise.
   const { stdout } = await execFileAsync(
     process.execPath,

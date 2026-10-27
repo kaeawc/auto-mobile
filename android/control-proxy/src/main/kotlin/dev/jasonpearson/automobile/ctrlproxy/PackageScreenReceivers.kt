@@ -53,13 +53,7 @@ internal class PackageEventReceiver(
     val removedForAllUsers =
       intent.getBooleanExtra("android.intent.extra.REMOVED_FOR_ALL_USERS", false)
 
-    val eventAction =
-      when (action) {
-        Intent.ACTION_PACKAGE_ADDED -> if (isReplacing) "replaced" else "added"
-        Intent.ACTION_PACKAGE_REMOVED -> if (isReplacing) null else "removed"
-        Intent.ACTION_PACKAGE_REPLACED -> "replaced"
-        else -> null
-      } ?: return
+    val eventAction = packageEventAction(action, isReplacing) ?: return
 
     val isSystem = if (eventAction == "removed") null else host.isSystemApp(packageName)
 
@@ -107,3 +101,11 @@ internal class ScreenStateReceiver(private val host: ScreenStateHost) : Broadcas
     }
   }
 }
+
+private fun packageEventAction(action: String, isReplacing: Boolean): String? =
+  when (action) {
+    Intent.ACTION_PACKAGE_ADDED -> if (isReplacing) "replaced" else "added"
+    Intent.ACTION_PACKAGE_REMOVED -> if (isReplacing) null else "removed"
+    Intent.ACTION_PACKAGE_REPLACED -> "replaced"
+    else -> null
+  }

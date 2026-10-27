@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../../helpers/observedInteractionStub";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
@@ -77,7 +78,7 @@ function harness(
       sdkRouteSource,
     },
   );
-  action.observedInteraction = async (run) => ({ ...(await run(before)), observation: after });
+  action.observedInteraction = runBlockWithEnvelope(before, { observation: after });
   return action;
 }
 

@@ -52,6 +52,13 @@ interface RecompositionDeviceState {
   latestSummaryByPackage: Map<string, RecompositionSummary>;
 }
 
+function readLabels(recomposition: RecompositionNodeInfo, props: Record<string, any> | undefined) {
+  return {
+    likelyCause: recomposition.likelyCause ?? "unknown",
+    resourceId: recomposition.resourceId ?? props?.["resource-id"] ?? null,
+    testTag: recomposition.testTag ?? props?.["test-tag"] ?? null,
+  };
+}
 export class RecompositionTracker {
   private static instance: RecompositionTracker;
   private readonly stateByDevice = new Map<string, RecompositionDeviceState>();
@@ -158,45 +165,57 @@ export class RecompositionTracker {
 
     for (const root of nodesToTraverse) {
       this.parser.traverseNode(root, (node: any) => {
-        const props = this.parser.extractNodeProperties(node);
-        const recomposition = (props?.recomposition ?? node?.recomposition) as
-          | RecompositionNodeInfo
-          | undefined;
-        if (!recomposition || !recomposition.id) {
-          return;
+        const entry = this.entryFromNode(node);
+        if (entry) {
+          entries.push(entry);
         }
-
-        const total = this.coerceNumber(recomposition.total);
-        if (total === null) {
-          return;
-        }
-
-        const skipCount = this.coerceNumber(recomposition.skipCount) ?? 0;
-        const rolling1sAverage = this.coerceNumber(recomposition.rolling1sAverage) ?? 0;
-        const durationMs = this.coerceNumber(recomposition.durationMs) ?? undefined;
-        const likelyCause = recomposition.likelyCause ?? "unknown";
-        const resourceId = recomposition.resourceId ?? props?.["resource-id"] ?? null;
-        const testTag = recomposition.testTag ?? props?.["test-tag"] ?? null;
-
-        entries.push({
-          id: recomposition.id,
-          composableName: recomposition.composableName,
-          resourceId,
-          testTag,
-          total,
-          skipCount,
-          rolling1sAverage,
-          durationMs,
-          likelyCause,
-          parentChain: recomposition.parentChain,
-          stableAnnotated: recomposition.stableAnnotated,
-          rememberedCount: recomposition.rememberedCount,
-          nodeRef: node,
-        });
       });
     }
 
     return entries;
+  }
+
+  /** The recomposition entry a hierarchy node carries, or null when it has none usable. */
+  private entryFromNode(node: any): RecompositionEntryInput | null {
+    const props = this.parser.extractNodeProperties(node);
+    const recomposition = (props?.recomposition ?? node?.recomposition) as
+      | RecompositionNodeInfo
+      | undefined;
+    if (!recomposition || !recomposition.id) {
+      return null;
+    }
+
+    const total = this.coerceNumber(recomposition.total);
+    if (total === null) {
+      return null;
+    }
+
+    const { skipCount, rolling1sAverage, durationMs } = this.readCounters(recomposition);
+    const { likelyCause, resourceId, testTag } = readLabels(recomposition, props);
+
+    return {
+      id: recomposition.id,
+      composableName: recomposition.composableName,
+      resourceId,
+      testTag,
+      total,
+      skipCount,
+      rolling1sAverage,
+      durationMs,
+      likelyCause,
+      parentChain: recomposition.parentChain,
+      stableAnnotated: recomposition.stableAnnotated,
+      rememberedCount: recomposition.rememberedCount,
+      nodeRef: node,
+    };
+  }
+
+  private readCounters(recomposition: RecompositionNodeInfo) {
+    return {
+      skipCount: this.coerceNumber(recomposition.skipCount) ?? 0,
+      rolling1sAverage: this.coerceNumber(recomposition.rolling1sAverage) ?? 0,
+      durationMs: this.coerceNumber(recomposition.durationMs) ?? undefined,
+    };
   }
 
   private computeMetrics(

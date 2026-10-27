@@ -345,17 +345,15 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
   test("undo crossing the hard deadline during bind-back keeps restored override records absent", async () => {
     const entered = Promise.withResolvers<void>();
     const bindBack = Promise.withResolvers<number>();
-    const pool = await androidPool({
-      cancelDeviceSessionExecutions: {
-        cancelDeviceExecutions: async (deviceId) => {
-          if (deviceId === AVD_B) {
-            entered.resolve();
-            return await bindBack.promise;
-          }
-          return 0;
-        },
-      },
-    });
+    const cancelSessionExecutions = async (): Promise<number> => 0;
+    cancelSessionExecutions.cancelDeviceExecutions = async (deviceId: string): Promise<number> => {
+      if (deviceId === AVD_B) {
+        entered.resolve();
+        return await bindBack.promise;
+      }
+      return 0;
+    };
+    const pool = await androidPool({ cancelDeviceSessionExecutions: cancelSessionExecutions });
     const routingCache = {
       displayPin: "main",
       deviceReadiness: "automationReady",
@@ -619,7 +617,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
       expect(sessions.hasDeviceCleanupInProgress(from)).toBe(true);
       expect(pool.getDevice(from)).toMatchObject({ sessionId: "held", status: "busy" });
       expect(restoredSettings).toEqual([]);
-      reservation!.release();
+      void reservation!.release();
       await expect(
         pool.bindOrReuseDeviceSession({ sessionId: "other", deviceId: from, platform }),
       ).rejects.toThrow();

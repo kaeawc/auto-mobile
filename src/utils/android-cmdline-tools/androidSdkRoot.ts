@@ -2,6 +2,8 @@ export interface AndroidSdkEnvironment {
   ANDROID_HOME?: string;
   ANDROID_SDK_ROOT?: string;
   ANDROID_SDK_HOME?: string;
+  // Lets a full `process.env` satisfy this narrow view (Bun's ProcessEnv has no props in common otherwise).
+  [name: string]: string | undefined;
 }
 
 type AndroidSdkRootCheck = (path: string) => boolean;

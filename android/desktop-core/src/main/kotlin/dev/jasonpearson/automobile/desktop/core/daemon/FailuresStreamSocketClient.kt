@@ -176,14 +176,7 @@ data class FailureGroupDto(
   fun toModel(): FailureGroup =
     FailureGroup(
       id = id,
-      type =
-        when (type) {
-          "crash" -> FailureType.Crash
-          "anr" -> FailureType.ANR
-          "tool_failure" -> FailureType.ToolCallFailure
-          "nonfatal" -> FailureType.NonFatal
-          else -> FailureType.Crash
-        },
+      type = modelType(),
       signature = signature,
       title = title,
       message = message,
@@ -191,14 +184,7 @@ data class FailureGroupDto(
       lastOccurrence = lastOccurrence,
       totalCount = totalCount,
       uniqueSessions = uniqueSessions,
-      severity =
-        when (severity) {
-          "critical" -> FailureSeverity.Critical
-          "high" -> FailureSeverity.High
-          "medium" -> FailureSeverity.Medium
-          "low" -> FailureSeverity.Low
-          else -> FailureSeverity.Medium
-        },
+      severity = modelSeverity(),
       deviceBreakdown =
         deviceBreakdown.map {
           DeviceBreakdown(it.deviceModel, it.os, it.count, it.percentage)
@@ -212,63 +198,11 @@ data class FailureGroupDto(
           ScreenBreakdown(it.screenName, it.visitCount, it.failureCount, it.visitPercentage)
         },
       failureScreens = failureScreens,
-      stackTraceElements =
-        stackTraceElements.map {
-          StackTraceElement(
-            it.className,
-            it.methodName,
-            it.fileName,
-            it.lineNumber,
-            it.isAppCode,
-          )
-        },
-      toolCallInfo =
-        toolCallInfo?.let {
-          AggregatedToolCallInfo(
-            toolName = it.toolName,
-            errorCodes = it.errorCodes,
-            parameterVariants = it.parameterVariants,
-            durationStats =
-              it.durationStats?.let { stats ->
-                DurationStats(
-                  stats.minMs,
-                  stats.maxMs,
-                  stats.avgMs,
-                  stats.medianMs,
-                  stats.p95Ms,
-                )
-              },
-          )
-        },
+      stackTraceElements = modelStackTraceElements(),
+      toolCallInfo = modelToolCallInfo(),
       affectedTests = affectedTests,
-      recentCaptures =
-        recentCaptures.map {
-          FailureCapture(
-            it.id,
-            if (it.type == "video") CaptureType.Video else CaptureType.Screenshot,
-            it.path,
-            it.timestamp,
-            it.deviceModel,
-          )
-        },
-      sampleOccurrences =
-        sampleOccurrences.map {
-          FailureOccurrence(
-            it.id,
-            it.timestamp,
-            it.deviceModel,
-            it.os,
-            it.appVersion,
-            it.sessionId,
-            it.screenAtFailure,
-            it.screensVisited,
-            it.testName,
-            it.capturePath,
-            it.captureType?.let { type ->
-              if (type == "video") CaptureType.Video else CaptureType.Screenshot
-            },
-          )
-        },
+      recentCaptures = modelRecentCaptures(),
+      sampleOccurrences = modelSampleOccurrences(),
     )
 }
 
@@ -444,3 +378,79 @@ internal constructor(
 object FailuresStreamSocketPaths {
   fun socketPath(): String = AutoMobileSocketPaths.socketPath("failures-stream.sock")
 }
+
+private fun FailureGroupDto.modelType(): FailureType =
+  when (type) {
+    "crash" -> FailureType.Crash
+    "anr" -> FailureType.ANR
+    "tool_failure" -> FailureType.ToolCallFailure
+    "nonfatal" -> FailureType.NonFatal
+    else -> FailureType.Crash
+  }
+
+private fun FailureGroupDto.modelSeverity(): FailureSeverity =
+  when (severity) {
+    "critical" -> FailureSeverity.Critical
+    "high" -> FailureSeverity.High
+    "medium" -> FailureSeverity.Medium
+    "low" -> FailureSeverity.Low
+    else -> FailureSeverity.Medium
+  }
+
+private fun FailureGroupDto.modelStackTraceElements(): List<StackTraceElement> =
+  stackTraceElements.map {
+    StackTraceElement(
+      it.className,
+      it.methodName,
+      it.fileName,
+      it.lineNumber,
+      it.isAppCode,
+    )
+  }
+
+private fun FailureGroupDto.modelToolCallInfo(): AggregatedToolCallInfo? = toolCallInfo?.let {
+  AggregatedToolCallInfo(
+    toolName = it.toolName,
+    errorCodes = it.errorCodes,
+    parameterVariants = it.parameterVariants,
+    durationStats =
+      it.durationStats?.let { stats ->
+        DurationStats(
+          stats.minMs,
+          stats.maxMs,
+          stats.avgMs,
+          stats.medianMs,
+          stats.p95Ms,
+        )
+      },
+  )
+}
+
+private fun FailureGroupDto.modelRecentCaptures(): List<FailureCapture> = recentCaptures.map {
+  FailureCapture(
+    it.id,
+    if (it.type == "video") CaptureType.Video else CaptureType.Screenshot,
+    it.path,
+    it.timestamp,
+    it.deviceModel,
+  )
+}
+
+private fun FailureGroupDto.modelSampleOccurrences(): List<FailureOccurrence> =
+  sampleOccurrences.map {
+    FailureOccurrence(
+      it.id,
+      it.timestamp,
+      it.deviceModel,
+      it.os,
+      it.appVersion,
+      it.sessionId,
+      it.screenAtFailure,
+      it.screensVisited,
+      it.testName,
+      it.capturePath,
+      it.captureType?.let { type ->
+        if (type == "video") CaptureType.Video else CaptureType.Screenshot
+      },
+    )
+  }

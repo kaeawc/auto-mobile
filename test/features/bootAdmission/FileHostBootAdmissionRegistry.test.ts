@@ -25,6 +25,24 @@ import { logger } from "../../../src/utils/logger";
 import { useScratchRoot } from "../../helpers/scratchRoot";
 
 const scratch = useScratchRoot("boot-admission-test-");
+
+test("clearing a replacement serial survives identity-less handoff and later updates", () => {
+  const owner = registry();
+  const peer = registry(200);
+  const published = owner.publish({ deviceId: "emulator-5554", replacement: true });
+  published.clearDeviceId?.();
+  published.clearDeviceId?.();
+  published.update({ deviceId: undefined, replacement: false, handedOffUntilMs: 60_000 });
+  expect(peer.readPeerAdmissions()).toMatchObject([
+    { replacement: false, handedOffUntilMs: 60_000 },
+  ]);
+  expect(peer.readPeerAdmissions()[0].deviceId).toBeUndefined();
+  published.update({ deviceId: "emulator-5556" });
+  expect(peer.readPeerAdmissions()[0].deviceId).toBe("emulator-5556");
+  published.remove();
+  published.clearDeviceId?.();
+  expect(peer.readPeerAdmissions()).toEqual([]);
+});
 let directory: string;
 let timer: FakeTimer;
 let live: Set<number>;

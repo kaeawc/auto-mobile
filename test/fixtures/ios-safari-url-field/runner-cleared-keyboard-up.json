@@ -1,0 +1,2751 @@
+{
+  "data": {
+    "hierarchy": {
+      "bounds": {
+        "bottom": 874,
+        "left": 0,
+        "right": 402,
+        "top": 0
+      },
+      "className": "XCUIApplication",
+      "node": [
+        {
+          "bounds": {
+            "bottom": 874,
+            "left": 0,
+            "right": 402,
+            "top": 0
+          },
+          "className": "UIView",
+          "extras": {
+            "automobile:iosWindowLayer": "2"
+          },
+          "node": [
+            {
+              "bounds": {
+                "bottom": 874,
+                "left": 0,
+                "right": 402,
+                "top": 0
+              },
+              "className": "UIScrollView",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 874,
+                    "left": 0,
+                    "right": 402,
+                    "top": 0
+                  },
+                  "className": "UIView",
+                  "node": [
+                    {
+                      "bounds": {
+                        "bottom": 874,
+                        "left": 0,
+                        "right": 402,
+                        "top": 0
+                      },
+                      "className": "WKWebView",
+                      "node": [
+                        {
+                          "bounds": {
+                            "bottom": 874,
+                            "left": 0,
+                            "right": 402,
+                            "top": 0
+                          },
+                          "className": "WKWebView",
+                          "node": [
+                            {
+                              "bounds": {
+                                "bottom": 874,
+                                "left": 0,
+                                "right": 402,
+                                "top": 0
+                              },
+                              "className": "WKWebView",
+                              "node": [
+                                {
+                                  "bounds": {
+                                    "bottom": 936,
+                                    "left": 0,
+                                    "right": 402,
+                                    "top": 62
+                                  },
+                                  "className": "UIView",
+                                  "hint-text": "",
+                                  "node": [
+                                    {
+                                      "bounds": {
+                                        "bottom": 4618,
+                                        "left": 0,
+                                        "right": 402,
+                                        "top": 62
+                                      },
+                                      "className": "UIView",
+                                      "focused": "true",
+                                      "hint-text": "",
+                                      "node": [
+                                        {
+                                          "bounds": {
+                                            "bottom": 173,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 62
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "node": [
+                                            {
+                                              "bounds": {
+                                                "bottom": 132,
+                                                "left": 155,
+                                                "right": 247,
+                                                "top": 62
+                                              },
+                                              "className": "UILink",
+                                              "clickable": "true",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "role": "link",
+                                              "semantic-links": [
+                                                {
+                                                  "occurrence": 0,
+                                                  "text": "Go to Google Home"
+                                                }
+                                              ],
+                                              "text": "Go to Google Home",
+                                              "view-id": "e9c26042-007c-cbfc-f1d2-648476605f6b"
+                                            },
+                                            {
+                                              "bounds": {
+                                                "bottom": 100,
+                                                "left": 332,
+                                                "right": 375,
+                                                "top": 82
+                                              },
+                                              "className": "UILink",
+                                              "clickable": "true",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "node": [
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 100,
+                                                    "left": 332,
+                                                    "right": 375,
+                                                    "top": 82
+                                                  },
+                                                  "className": "UILabel",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "role": "text",
+                                                  "text": "Sign in",
+                                                  "view-id": "bc635b4c-4150-7ce4-cea0-49940923a343"
+                                                }
+                                              ],
+                                              "role": "link",
+                                              "semantic-links": [
+                                                {
+                                                  "occurrence": 0,
+                                                  "text": "Sign in"
+                                                }
+                                              ],
+                                              "text": "Sign in",
+                                              "view-id": "c93b25e2-c8c4-0c18-49bf-85cbe5dc8d72"
+                                            },
+                                            {
+                                              "bounds": {
+                                                "bottom": 126,
+                                                "left": 0,
+                                                "right": 60,
+                                                "top": 62
+                                              },
+                                              "className": "UIView",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "node": [
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 126,
+                                                    "left": 0,
+                                                    "right": 60,
+                                                    "top": 62
+                                                  },
+                                                  "className": "UIView",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "text": "Main menu",
+                                                  "view-id": "ae6dc5db-4638-1f01-2653-1f0c7541de33"
+                                                }
+                                              ],
+                                              "text": "Search settings",
+                                              "view-id": "61ddde1e-2057-4a1c-f5b1-06307590c875"
+                                            },
+                                            {
+                                              "bounds": {
+                                                "bottom": 173,
+                                                "left": 16,
+                                                "right": 386,
+                                                "top": 125
+                                              },
+                                              "className": "UIView",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "node": [
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 169,
+                                                    "left": 16,
+                                                    "right": 64,
+                                                    "top": 125
+                                                  },
+                                                  "className": "UIButton",
+                                                  "clickable": "true",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "role": "button",
+                                                  "text": "Google Search",
+                                                  "view-id": "da91ee2d-8790-0c85-d972-9c31ab914cb4"
+                                                },
+                                                {
+                                                  "actions": ["set_text", "clear_text"],
+                                                  "bounds": {
+                                                    "bottom": 159,
+                                                    "left": 64,
+                                                    "right": 284,
+                                                    "top": 135
+                                                  },
+                                                  "className": "UITextField",
+                                                  "clickable": "true",
+                                                  "focused": "true",
+                                                  "hint-text": "Ask Google",
+                                                  "node": [
+                                                    {
+                                                      "bounds": {
+                                                        "bottom": 159,
+                                                        "left": 64,
+                                                        "right": 284,
+                                                        "top": 135
+                                                      },
+                                                      "className": "UIView",
+                                                      "focused": "true",
+                                                      "hint-text": "",
+                                                      "node": [
+                                                        {
+                                                          "bounds": {
+                                                            "bottom": 158,
+                                                            "left": 64,
+                                                            "right": 126,
+                                                            "top": 136
+                                                          },
+                                                          "className": "UILabel",
+                                                          "focused": "true",
+                                                          "hint-text": "",
+                                                          "role": "text",
+                                                          "text": "example",
+                                                          "view-id": "e95b4610-33c5-8b49-b0b9-f48e43c8067a"
+                                                        }
+                                                      ],
+                                                      "view-id": "6e97c5be-05b0-7452-31b5-71447244f304"
+                                                    },
+                                                    {
+                                                      "bounds": {
+                                                        "bottom": 158,
+                                                        "left": 64,
+                                                        "right": 126,
+                                                        "top": 136
+                                                      },
+                                                      "className": "UILabel",
+                                                      "focused": "true",
+                                                      "hint-text": "",
+                                                      "role": "text",
+                                                      "text": "example",
+                                                      "view-id": "0ead422a-91b3-be75-315e-20d06f1ad05a"
+                                                    }
+                                                  ],
+                                                  "role": "textfield",
+                                                  "text": "Google Search",
+                                                  "value": "example",
+                                                  "view-id": "a3b260c3-d21c-5f15-da0f-83326534e8d8"
+                                                },
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 169,
+                                                    "left": 284,
+                                                    "right": 332,
+                                                    "top": 125
+                                                  },
+                                                  "className": "UIButton",
+                                                  "clickable": "true",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "role": "button",
+                                                  "text": "Search by voice",
+                                                  "view-id": "c7a1bb84-a146-19b5-a775-91cb5b090bac"
+                                                },
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 169,
+                                                    "left": 332,
+                                                    "right": 380,
+                                                    "top": 125
+                                                  },
+                                                  "className": "UIButton",
+                                                  "clickable": "true",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "role": "button",
+                                                  "text": "Search using your camera or photos",
+                                                  "view-id": "5a729273-66c9-fb5c-021c-8bcf5780df40"
+                                                }
+                                              ],
+                                              "text": "search",
+                                              "view-id": "18764546-e897-17c4-d453-269efc088b0c"
+                                            }
+                                          ],
+                                          "text": "banner",
+                                          "view-id": "9501cf65-8343-15cf-da4f-76396a6f8c51"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 218,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 169
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "node": [
+                                            {
+                                              "bounds": {
+                                                "bottom": 217,
+                                                "left": 4,
+                                                "right": 910,
+                                                "top": 169
+                                              },
+                                              "className": "UIView",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "node": [
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 217,
+                                                    "left": 4,
+                                                    "right": 82,
+                                                    "top": 169
+                                                  },
+                                                  "className": "UIView",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "node": [
+                                                    {
+                                                      "bounds": {
+                                                        "bottom": 203,
+                                                        "left": 16,
+                                                        "right": 71,
+                                                        "top": 183
+                                                      },
+                                                      "className": "UILink",
+                                                      "clickable": "true",
+                                                      "focused": "true",
+                                                      "hint-text": "",
+                                                      "node": [
+                                                        {
+                                                          "bounds": {
+                                                            "bottom": 203,
+                                                            "left": 16,
+                                                            "right": 71,
+                                                            "top": 183
+                                                          },
+                                                          "className": "UILabel",
+                                                          "focused": "true",
+                                                          "hint-text": "",
+                                                          "role": "text",
+                                                          "text": "AI Mode",
+                                                          "view-id": "e624b6ed-a972-5c1c-5a67-d0542b4d8c4c"
+                                                        }
+                                                      ],
+                                                      "role": "link",
+                                                      "semantic-links": [
+                                                        {
+                                                          "occurrence": 0,
+                                                          "text": "AI Mode"
+                                                        }
+                                                      ],
+                                                      "text": "AI Mode",
+                                                      "view-id": "c8e99fdc-5d5b-8305-e6a2-bc87c6be4158"
+                                                    }
+                                                  ],
+                                                  "view-id": "5abca711-d52f-bb00-7114-c2a95b1fb724"
+                                                },
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 217,
+                                                    "left": 82,
+                                                    "right": 123,
+                                                    "top": 169
+                                                  },
+                                                  "className": "UIView",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "node": [
+                                                    {
+                                                      "bounds": {
+                                                        "bottom": 203,
+                                                        "left": 94,
+                                                        "right": 111,
+                                                        "top": 183
+                                                      },
+                                                      "className": "UILink",
+                                                      "focused": "true",
+                                                      "hint-text": "",
+                                                      "node": [
+                                                        {
+                                                          "bounds": {
+                                                            "bottom": 203,
+                                                            "left": 94,
+                                                            "right": 111,
+                                                            "top": 183
+                                                          },
+                                                          "className": "UILink",
+                                                          "focused": "true",
+                                                          "hint-text": "",
+                                                          "node": [
+                                                            {
+                                                              "bounds": {
+                                                                "bottom": 203,
+                                                                "left": 94,
+                                                                "right": 111,
+                                                                "top": 183
+                                                              },
+                                                              "className": "UILabel",
+                                                              "focused": "true",
+                                                              "hint-text": "",
+                                                              "role": "text",
+                                                              "text": "All",
+                                                              "view-id": "8ce105e7-7648-1e7c-06a7-91470dcd8a06"
+                                                            }
+                                                          ],
+                                                          "role": "link",
+                                                          "semantic-links": [
+                                                            {
+                                                              "occurrence": 0,
+                                                              "text": "All"
+                                                            }
+                                                          ],
+                                                          "text": "All",
+                                                          "view-id": "74a67feb-7ca7-cb70-922a-46577f8e6c80"
+                                                        }
+                                                      ],
+                                                      "role": "link",
+                                                      "semantic-links": [
+                                                        {
+                                                          "occurrence": 0,
+                                                          "text": "All"
+                                                        }
+                                                      ],
+                                                      "text": "All",
+                                                      "view-id": "67c2fc50-6dad-cec4-42b9-ee492ddc533c"
+                                                    }
+                                                  ],
+                                                  "view-id": "81421154-e4c5-3292-7d3b-f30b4efb1487"
+                                                },
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 217,
+                                                    "left": 122,
+                                                    "right": 195,
+                                                    "top": 169
+                                                  },
+                                                  "className": "UIView",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "node": [
+                                                    {
+                                                      "bounds": {
+                                                        "bottom": 203,
+                                                        "left": 134,
+                                                        "right": 183,
+                                                        "top": 183
+                                                      },
+                                                      "className": "UILink",
+                                                      "clickable": "true",
+                                                      "focused": "true",
+                                                      "hint-text": "",
+                                                      "node": [
+                                                        {
+                                                          "bounds": {
+                                                            "bottom": 203,
+                                                            "left": 134,
+                                                            "right": 183,
+                                                            "top": 183
+                                                          },
+                                                          "className": "UILabel",
+                                                          "focused": "true",
+                                                          "hint-text": "",
+                                                          "role": "text",
+                                                          "text": "Images",
+                                                          "view-id": "3b29ab7f-2e16-ebbb-6a8c-22180723e16f"
+                                                        }
+                                                      ],
+                                                      "role": "link",
+                                                      "semantic-links": [
+                                                        {
+                                                          "occurrence": 0,
+                                                          "text": "Images"
+                                                        }
+                                                      ],
+                                                      "text": "Images",
+                                                      "view-id": "1d94133d-6b7e-620c-ed9d-42a05358dec1"
+                                                    }
+                                                  ],
+                                                  "view-id": "09d164e4-644c-caa0-380e-cf55ce4fdd7b"
+                                                },
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 217,
+                                                    "left": 194,
+                                                    "right": 263,
+                                                    "top": 169
+                                                  },
+                                                  "className": "UIView",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "node": [
+                                                    {
+                                                      "bounds": {
+                                                        "bottom": 203,
+                                                        "left": 206,
+                                                        "right": 251,
+                                                        "top": 183
+                                                      },
+                                                      "className": "UILink",
+                                                      "clickable": "true",
+                                                      "focused": "true",
+                                                      "hint-text": "",
+                                                      "node": [
+                                                        {
+                                                          "bounds": {
+                                                            "bottom": 203,
+                                                            "left": 206,
+                                                            "right": 251,
+                                                            "top": 183
+                                                          },
+                                                          "className": "UILabel",
+                                                          "focused": "true",
+                                                          "hint-text": "",
+                                                          "role": "text",
+                                                          "text": "Videos",
+                                                          "view-id": "6f9521d7-4ec3-1743-4291-37e222c9d67d"
+                                                        }
+                                                      ],
+                                                      "role": "link",
+                                                      "semantic-links": [
+                                                        {
+                                                          "occurrence": 0,
+                                                          "text": "Videos"
+                                                        }
+                                                      ],
+                                                      "text": "Videos",
+                                                      "view-id": "72ff29fc-4de1-f4c9-1265-1531c99c7d02"
+                                                    }
+                                                  ],
+                                                  "view-id": "d40e45a2-810c-7cc6-a50e-52a8f1c36b76"
+                                                },
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 217,
+                                                    "left": 262,
+                                                    "right": 350,
+                                                    "top": 169
+                                                  },
+                                                  "className": "UIView",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "node": [
+                                                    {
+                                                      "bounds": {
+                                                        "bottom": 203,
+                                                        "left": 274,
+                                                        "right": 338,
+                                                        "top": 183
+                                                      },
+                                                      "className": "UILink",
+                                                      "clickable": "true",
+                                                      "focused": "true",
+                                                      "hint-text": "",
+                                                      "node": [
+                                                        {
+                                                          "bounds": {
+                                                            "bottom": 203,
+                                                            "left": 274,
+                                                            "right": 338,
+                                                            "top": 183
+                                                          },
+                                                          "className": "UILabel",
+                                                          "focused": "true",
+                                                          "hint-text": "",
+                                                          "role": "text",
+                                                          "text": "Shopping",
+                                                          "view-id": "6111f205-2698-5439-6e19-eab501a74e95"
+                                                        }
+                                                      ],
+                                                      "role": "link",
+                                                      "semantic-links": [
+                                                        {
+                                                          "occurrence": 0,
+                                                          "text": "Shopping"
+                                                        }
+                                                      ],
+                                                      "text": "Shopping",
+                                                      "view-id": "3b018c94-cf9c-d1af-6dc2-ed418322fe86"
+                                                    }
+                                                  ],
+                                                  "view-id": "801f5469-d8a0-35e2-0158-ebfccae61244"
+                                                },
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 217,
+                                                    "left": 349,
+                                                    "right": 457,
+                                                    "top": 169
+                                                  },
+                                                  "className": "UIView",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "node": [
+                                                    {
+                                                      "bounds": {
+                                                        "bottom": 203,
+                                                        "left": 361,
+                                                        "right": 445,
+                                                        "top": 183
+                                                      },
+                                                      "className": "UILink",
+                                                      "clickable": "true",
+                                                      "focused": "true",
+                                                      "hint-text": "",
+                                                      "node": [
+                                                        {
+                                                          "bounds": {
+                                                            "bottom": 203,
+                                                            "left": 361,
+                                                            "right": 445,
+                                                            "top": 183
+                                                          },
+                                                          "className": "UILabel",
+                                                          "focused": "true",
+                                                          "hint-text": "",
+                                                          "role": "text",
+                                                          "text": "Short videos",
+                                                          "view-id": "f325315e-e990-7ae4-4aac-0400f742a5d2"
+                                                        }
+                                                      ],
+                                                      "role": "link",
+                                                      "semantic-links": [
+                                                        {
+                                                          "occurrence": 0,
+                                                          "text": "Short videos"
+                                                        }
+                                                      ],
+                                                      "text": "Short videos",
+                                                      "view-id": "140737fb-3ef6-4db5-9f02-ad921996a44b"
+                                                    }
+                                                  ],
+                                                  "view-id": "737f4b8a-11c3-611b-fa56-b3225ca97d1d"
+                                                }
+                                              ],
+                                              "view-id": "aa927ae8-8aa7-5c9c-7e00-5c30725abc5d"
+                                            },
+                                            {
+                                              "bounds": {
+                                                "bottom": 237,
+                                                "left": 0,
+                                                "right": 402,
+                                                "top": 217
+                                              },
+                                              "className": "UIView",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "view-id": "0e37c318-28c3-db44-682c-004b90fd113c"
+                                            }
+                                          ],
+                                          "text": "navigation",
+                                          "view-id": "9dd2a3fe-1fd9-2e3c-46f8-6f8013738dbf"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 179,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 169
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "ab697806-a2b8-0daf-4c69-fcdb44a36f15"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 1,
+                                            "top": 226
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "node": [
+                                            {
+                                              "bounds": {
+                                                "bottom": 244,
+                                                "left": 0,
+                                                "right": 94,
+                                                "top": 227
+                                              },
+                                              "className": "UILabel",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "role": "text",
+                                              "text": "Search Results",
+                                              "view-id": "e441df58-a927-05ab-31e9-bb8f8c25ed2d"
+                                            }
+                                          ],
+                                          "text": "Search Results",
+                                          "view-id": "f193af0c-c6f4-cfb1-a609-2c565f62ff2d"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "ed0923b0-30a1-0e4b-2ac1-ec010081a6dd"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "node": [
+                                            {
+                                              "bounds": {
+                                                "bottom": 228,
+                                                "left": 0,
+                                                "right": 402,
+                                                "top": 218
+                                              },
+                                              "className": "UIView",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "view-id": "66a648c8-bc75-6e60-46f7-2ca4ad6352b1"
+                                            }
+                                          ],
+                                          "view-id": "61eeb7f9-da03-1f8a-e059-19ded50af981"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "e57ba93a-6c05-7f59-af4e-890a1ff27f83"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "f659d8ff-1a4e-19fd-fd1e-572915b1c926"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 406,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "6c479b90-85a1-048e-ed9e-1ca8c33d5a94"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 256,
+                                            "left": 34,
+                                            "right": 113,
+                                            "top": 234
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "node": [
+                                            {
+                                              "bounds": {
+                                                "bottom": 255,
+                                                "left": 34,
+                                                "right": 114,
+                                                "top": 235
+                                              },
+                                              "className": "UILabel",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "role": "text",
+                                              "text": "AI Overview",
+                                              "view-id": "f8faa84b-722c-cf26-3616-4ef9ec7249c8"
+                                            }
+                                          ],
+                                          "text": "AI Overview",
+                                          "view-id": "6beecc56-ce32-31e4-11c5-2ba42ec77ea3"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 244,
+                                            "left": 16,
+                                            "right": 386,
+                                            "top": 234
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "9e0baf07-5cca-f288-e254-3194f18ee878"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 282,
+                                            "left": 0,
+                                            "right": 406,
+                                            "top": 272
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "c0faf204-0aa7-6a6a-a551-f621813f2814"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 316,
+                                            "left": 16,
+                                            "right": 386,
+                                            "top": 272
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "node": [
+                                            {
+                                              "bounds": {
+                                                "bottom": 312,
+                                                "left": 16,
+                                                "right": 52,
+                                                "top": 276
+                                              },
+                                              "className": "UIView",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "node": [
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 312,
+                                                    "left": 16,
+                                                    "right": 52,
+                                                    "top": 276
+                                                  },
+                                                  "className": "UIButton",
+                                                  "clickable": "true",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "role": "button",
+                                                  "text": "Listen",
+                                                  "view-id": "e0cf26ec-f451-fd68-3768-f8344ee7e407"
+                                                }
+                                              ],
+                                              "view-id": "85c1462d-d23c-6df2-cdf6-638278fd7a11"
+                                            },
+                                            {
+                                              "bounds": {
+                                                "bottom": 300,
+                                                "left": 64,
+                                                "right": 144,
+                                                "top": 272
+                                              },
+                                              "className": "UIView",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "node": [
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 299,
+                                                    "left": 64,
+                                                    "right": 144,
+                                                    "top": 273
+                                                  },
+                                                  "className": "UILabel",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "role": "text",
+                                                  "text": "example",
+                                                  "view-id": "5beab4c5-bddd-40b9-fff2-b21c471c33e1"
+                                                }
+                                              ],
+                                              "view-id": "423ebc1a-86c8-999e-4bc9-48229a403d23"
+                                            },
+                                            {
+                                              "bounds": {
+                                                "bottom": 316,
+                                                "left": 64,
+                                                "right": 122,
+                                                "top": 300
+                                              },
+                                              "className": "UIView",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "node": [
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 316,
+                                                    "left": 64,
+                                                    "right": 122,
+                                                    "top": 300
+                                                  },
+                                                  "className": "UILabel",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "role": "text",
+                                                  "text": "/iɡˈzampəl/",
+                                                  "view-id": "0b52d8d6-c3d0-979d-2802-87e5709177ac"
+                                                }
+                                              ],
+                                              "view-id": "0fde02ef-fbfd-7856-5e18-eac477c6ce78"
+                                            }
+                                          ],
+                                          "view-id": "a3c237dd-1b27-e690-c928-3f5303878506"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 400,
+                                            "left": 16,
+                                            "right": 386,
+                                            "top": 328
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "node": [
+                                            {
+                                              "bounds": {
+                                                "bottom": 399,
+                                                "left": 16,
+                                                "right": 383,
+                                                "top": 329
+                                              },
+                                              "className": "UILabel",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "role": "text",
+                                              "text": "An example is a specific case, instance, or person used to illustrate a general rule, represent a group, or act as a model of behavior.",
+                                              "view-id": "1347485d-fed3-833b-c180-39d520477bdc"
+                                            },
+                                            {
+                                              "bounds": {
+                                                "bottom": 400,
+                                                "left": 234,
+                                                "right": 371,
+                                                "top": 379
+                                              },
+                                              "className": "UIButton",
+                                              "clickable": "true",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "role": "button",
+                                              "text": "Merriam-Webster (+1) - Related results",
+                                              "view-id": "b34e4fd0-238b-9379-c47e-fdb868402c47"
+                                            }
+                                          ],
+                                          "view-id": "62b48998-80fc-771b-3210-651907b78a39"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 452,
+                                            "left": 16,
+                                            "right": 386,
+                                            "top": 424
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "node": [
+                                            {
+                                              "bounds": {
+                                                "bottom": 451,
+                                                "left": 16,
+                                                "right": 148,
+                                                "top": 425
+                                              },
+                                              "className": "UILabel",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "role": "text",
+                                              "text": "Key Meanings",
+                                              "view-id": "c49aaa05-fb7f-73d6-238b-91f5d3d7a91a"
+                                            }
+                                          ],
+                                          "text": "Key Meanings",
+                                          "view-id": "26d63781-fd4f-46ed-d749-f3987e9be0e9"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 728,
+                                            "left": 16,
+                                            "right": 386,
+                                            "top": 464
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "node": [
+                                            {
+                                              "bounds": {
+                                                "bottom": 560,
+                                                "left": 34,
+                                                "right": 386,
+                                                "top": 464
+                                              },
+                                              "className": "UIView",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "node": [
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 487,
+                                                    "left": 16,
+                                                    "right": 23,
+                                                    "top": 465
+                                                  },
+                                                  "className": "UIView",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "text": "•",
+                                                  "view-id": "2e60d284-63bd-ca1e-6b3a-a0c20d9490d6"
+                                                },
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 559,
+                                                    "left": 38,
+                                                    "right": 378,
+                                                    "top": 465
+                                                  },
+                                                  "className": "UILabel",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "role": "text",
+                                                  "text": "Representative Item: A single specimen or case that shows the common qualities of a larger group or category (e.g., a sample from a data set).",
+                                                  "view-id": "1d4612af-95a5-1993-94b9-13ba752aec56"
+                                                }
+                                              ],
+                                              "text": "Representative Item: A single specimen or case that shows the common qualities of a larger group or category (e.g., a sample from a data set).",
+                                              "view-id": "32d29812-f7d6-a4a7-ee67-72b9db1a0235"
+                                            },
+                                            {
+                                              "bounds": {
+                                                "bottom": 474,
+                                                "left": 16,
+                                                "right": 386,
+                                                "top": 464
+                                              },
+                                              "className": "UIView",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "view-id": "ccd5ffce-339f-67fb-d428-873b776b52db"
+                                            }
+                                          ],
+                                          "view-id": "59b7a217-bf6c-e9e5-31f2-54cf08ebd517"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 282,
+                                            "left": 0,
+                                            "right": 406,
+                                            "top": 272
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "35c32e02-f937-9b0c-a93a-4cd484a2f22b"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 406,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "6118a2c8-3b3e-7842-1403-f33afd3a56ab"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "cb1600c7-e8dd-09f6-e16e-4df8eba3bb18"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "b61094e9-b928-63f6-8634-a2279cbe1ffe"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 598,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 548
+                                          },
+                                          "className": "UIButton",
+                                          "clickable": "true",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "role": "button",
+                                          "text": "Show more AI Overview",
+                                          "view-id": "d1162261-664d-e6db-86c7-eca51f5f7f07"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "c80f95ff-1e66-afbb-cb48-bcd190c1556a"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "30a2a980-7d49-0769-6252-c296b42f8191"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 647,
+                                            "left": 0,
+                                            "right": 1,
+                                            "top": 645
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "node": [
+                                            {
+                                              "bounds": {
+                                                "bottom": 677,
+                                                "left": 0,
+                                                "right": 134,
+                                                "top": 646
+                                              },
+                                              "className": "UILabel",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "role": "text",
+                                              "text": "Web results",
+                                              "view-id": "bff570c2-539e-ad4a-3e43-0c21c2ec5181"
+                                            }
+                                          ],
+                                          "text": "Web results",
+                                          "view-id": "57e0798c-9c9d-47b7-61ed-e5185ac37db4"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 721,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 626
+                                          },
+                                          "className": "UILink",
+                                          "clickable": "true",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "node": [
+                                            {
+                                              "bounds": {
+                                                "bottom": 673,
+                                                "left": 16,
+                                                "right": 56,
+                                                "top": 645
+                                              },
+                                              "className": "UILink",
+                                              "clickable": "true",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "role": "link",
+                                              "view-id": "b93fae53-8d48-8e6e-5dce-72b8f7579767"
+                                            },
+                                            {
+                                              "bounds": {
+                                                "bottom": 661,
+                                                "left": 56,
+                                                "right": 167,
+                                                "top": 643
+                                              },
+                                              "className": "UILink",
+                                              "clickable": "true",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "node": [
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 661,
+                                                    "left": 56,
+                                                    "right": 167,
+                                                    "top": 643
+                                                  },
+                                                  "className": "UILabel",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "role": "text",
+                                                  "text": "Merriam-Webster",
+                                                  "view-id": "dee81f03-d750-6bac-5e92-0398bfdd6b07"
+                                                }
+                                              ],
+                                              "role": "link",
+                                              "view-id": "a070c6fd-d6cc-cf6e-79ad-88fc810bd777"
+                                            },
+                                            {
+                                              "bounds": {
+                                                "bottom": 676,
+                                                "left": 56,
+                                                "right": 346,
+                                                "top": 660
+                                              },
+                                              "className": "UILabel",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "role": "text",
+                                              "text": "https://www.merriam-webster.com",
+                                              "view-id": "a0590d34-65e0-a86c-3b5a-a2ddf780e4ea"
+                                            },
+                                            {
+                                              "bounds": {
+                                                "bottom": 652,
+                                                "left": 16,
+                                                "right": 386,
+                                                "top": 642
+                                              },
+                                              "className": "UILink",
+                                              "clickable": "true",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "role": "link",
+                                              "view-id": "731bda73-bd3f-bc16-d23e-2e07f41ce6bd"
+                                            },
+                                            {
+                                              "bounds": {
+                                                "bottom": 717,
+                                                "left": 16,
+                                                "right": 321,
+                                                "top": 687
+                                              },
+                                              "className": "UILink",
+                                              "clickable": "true",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "node": [
+                                                {
+                                                  "bounds": {
+                                                    "bottom": 717,
+                                                    "left": 16,
+                                                    "right": 321,
+                                                    "top": 687
+                                                  },
+                                                  "className": "UILink",
+                                                  "clickable": "true",
+                                                  "focused": "true",
+                                                  "hint-text": "",
+                                                  "node": [
+                                                    {
+                                                      "bounds": {
+                                                        "bottom": 717,
+                                                        "left": 16,
+                                                        "right": 321,
+                                                        "top": 687
+                                                      },
+                                                      "className": "UILabel",
+                                                      "focused": "true",
+                                                      "hint-text": "",
+                                                      "role": "text",
+                                                      "text": "EXAMPLE Definition & Meaning",
+                                                      "view-id": "ec865519-5de8-78ad-4d8c-49e6376584fe"
+                                                    }
+                                                  ],
+                                                  "role": "link",
+                                                  "semantic-links": [
+                                                    {
+                                                      "occurrence": 0,
+                                                      "text": "EXAMPLE Definition & Meaning"
+                                                    }
+                                                  ],
+                                                  "text": "EXAMPLE Definition & Meaning",
+                                                  "view-id": "8b0bb1ac-eb96-4cce-49db-ec20c2fc7886"
+                                                }
+                                              ],
+                                              "role": "link",
+                                              "semantic-links": [
+                                                {
+                                                  "occurrence": 0,
+                                                  "text": "EXAMPLE Definition & Meaning"
+                                                }
+                                              ],
+                                              "text": "EXAMPLE Definition & Meaning",
+                                              "view-id": "955655a8-b3b1-f74a-a553-49c9822467c6"
+                                            },
+                                            {
+                                              "bounds": {
+                                                "bottom": 652,
+                                                "left": 16,
+                                                "right": 386,
+                                                "top": 642
+                                              },
+                                              "className": "UILink",
+                                              "clickable": "true",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "role": "link",
+                                              "view-id": "65c5fb04-3981-aa0d-e329-1b1ffdc48f5b"
+                                            }
+                                          ],
+                                          "role": "link",
+                                          "semantic-links": [
+                                            {
+                                              "occurrence": 0,
+                                              "text": "Merriam-Webster https://www.merriam-webster.com EXAMPLE Definition & Meaning"
+                                            }
+                                          ],
+                                          "text": "Merriam-Webster https://www.merriam-webster.com EXAMPLE Definition & Meaning",
+                                          "view-id": "c14c8e3e-fdcd-a5f9-eeb5-3797eddb57ca"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 644,
+                                            "left": 354,
+                                            "right": 402,
+                                            "top": 634
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "node": [
+                                            {
+                                              "bounds": {
+                                                "bottom": 682,
+                                                "left": 353,
+                                                "right": 401,
+                                                "top": 634
+                                              },
+                                              "className": "UIButton",
+                                              "clickable": "true",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "role": "button",
+                                              "text": "About this result",
+                                              "view-id": "4602c000-b432-969c-e88c-e750d14dd4f2"
+                                            }
+                                          ],
+                                          "view-id": "3ead0b72-61de-6ea1-99f6-d3c2823731a2"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 743,
+                                            "left": 16,
+                                            "right": 85,
+                                            "top": 725
+                                          },
+                                          "className": "UILabel",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "role": "text",
+                                          "text": "5 days ago",
+                                          "view-id": "005ae164-704f-14d1-7175-fc26cb3df285"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 743,
+                                            "left": 84,
+                                            "right": 107,
+                                            "top": 725
+                                          },
+                                          "className": "UILabel",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "role": "text",
+                                          "text": "—",
+                                          "view-id": "77166700-d666-d1c8-32c5-a3bba5a0c03f"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 743,
+                                            "left": 106,
+                                            "right": 290,
+                                            "top": 725
+                                          },
+                                          "className": "UILabel",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "role": "text",
+                                          "text": "The meaning of EXAMPLE is",
+                                          "view-id": "10e80f66-f1f9-d095-8d21-b9a4a713df76"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 764,
+                                            "left": 16,
+                                            "right": 372,
+                                            "top": 725
+                                          },
+                                          "className": "UILabel",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "role": "text",
+                                          "text": "a person or way of behaving that serves as a pattern to be imitated",
+                                          "view-id": "04b0b301-279a-6b64-c517-615b17a33ae7"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 784,
+                                            "left": 16,
+                                            "right": 321,
+                                            "top": 766
+                                          },
+                                          "className": "UILabel",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "role": "text",
+                                          "text": "or not to be imitated. How to use example in a ...",
+                                          "view-id": "87a155e2-72e2-6cf3-41fa-a17f53eefd80"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 636,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 626
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "6eaa2b33-3f9b-0b74-4f32-af6404ebe132"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 636,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 626
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "b265b97f-9cf0-20a7-f213-2347e4f7bf6b"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 636,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 626
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "ace05e28-eda5-cf51-944b-199a875440f0"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 636,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 626
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "efe85b3a-7c0c-cf4d-a441-5dcd84650310"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "b554b3eb-e2ac-f308-ec0b-1038b1ab5c22"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 1094,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 803
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "c70bcd5c-63b8-9715-52d8-1e7a39d7207d"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 846,
+                                            "left": 16,
+                                            "right": 374,
+                                            "top": 820
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "node": [
+                                            {
+                                              "bounds": {
+                                                "bottom": 845,
+                                                "left": 16,
+                                                "right": 143,
+                                                "top": 821
+                                              },
+                                              "className": "UILabel",
+                                              "focused": "true",
+                                              "hint-text": "",
+                                              "role": "text",
+                                              "text": "People also ask",
+                                              "view-id": "eda4d011-a511-e029-e0ab-f7dbb622e676"
+                                            }
+                                          ],
+                                          "text": "People also ask",
+                                          "view-id": "3eb7f275-f90a-6fd6-39f3-542cc54d0c21"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 910,
+                                            "left": 16,
+                                            "right": 386,
+                                            "top": 850
+                                          },
+                                          "className": "UIButton",
+                                          "clickable": "true",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "role": "button",
+                                          "text": "What is the meaning of example?",
+                                          "view-id": "524aabbc-f804-f6c1-81d9-40327a0c8f87"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 911,
+                                            "left": 16,
+                                            "right": 386,
+                                            "top": 910
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "3b5ecdf7-c74d-595c-f302-5ca604c73426"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 971,
+                                            "left": 16,
+                                            "right": 386,
+                                            "top": 911
+                                          },
+                                          "className": "UIButton",
+                                          "clickable": "true",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "role": "button",
+                                          "text": "What is another word for example?",
+                                          "view-id": "e0b12d20-1edd-e440-9686-52c78e1ec229"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 860,
+                                            "left": 16,
+                                            "right": 386,
+                                            "top": 850
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "12f670bc-f604-7130-a761-a5efca72bb95"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "ccb24063-b1c9-58cd-25b2-c486691bdf23"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "5c3af1a6-e204-ddd8-71d0-cb1a8b2456ba"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "531573ec-397e-9114-546e-bf72a78a7b04"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "98c4c5d2-0000-5340-3cef-ddb3296f6d56"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "5cbae583-1b01-12ee-bf6b-d01463ac113b"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "268a3b14-70b8-4055-122d-af39e7a125ce"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "cc123716-0466-5b5d-4613-4103267d0a54"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "3c71faca-3ee3-73ff-e00c-fb7ec4a1189a"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "945e9895-147c-1d10-e6f4-51df2ae042b6"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "bed127fd-b058-83a9-f9a1-1b9d95599151"
+                                        },
+                                        {
+                                          "bounds": {
+                                            "bottom": 228,
+                                            "left": 0,
+                                            "right": 402,
+                                            "top": 218
+                                          },
+                                          "className": "UIView",
+                                          "focused": "true",
+                                          "hint-text": "",
+                                          "view-id": "e1785058-2d35-90de-40cd-4cc5a8970b9e"
+                                        }
+                                      ],
+                                      "text": "example - Google Search",
+                                      "view-id": "201c5533-117d-d2f0-e345-fd8d6f60e57b"
+                                    }
+                                  ],
+                                  "view-id": "5191f825-9798-f974-f8f3-7db0af26eb2c"
+                                }
+                              ],
+                              "scrollable": "true",
+                              "view-id": "3ef2bdf6-3e18-75a1-99be-417168261c47"
+                            },
+                            {
+                              "bounds": {
+                                "bottom": 505,
+                                "left": 369,
+                                "right": 399,
+                                "top": 62
+                              },
+                              "className": "UIView",
+                              "text": "Vertical scroll bar, 7 pages",
+                              "view-id": "866e5886-95bb-dec0-905b-ed2664106591"
+                            },
+                            {
+                              "bounds": {
+                                "bottom": 502,
+                                "left": 62,
+                                "right": 340,
+                                "top": 472
+                              },
+                              "className": "UIView",
+                              "text": "Horizontal scroll bar, 1 page",
+                              "view-id": "23e18a84-36cf-8c92-694d-7d3e9251db3c"
+                            }
+                          ],
+                          "scrollable": "true",
+                          "view-id": "f58ce201-e8f2-4c89-f64e-2776615ec2d6"
+                        }
+                      ],
+                      "resource-id": "WebView",
+                      "scrollable": "true",
+                      "view-id": "WebView"
+                    }
+                  ],
+                  "resource-id": "TabDocument?IsLoadedUsingDesktopUserAgent=false&InReaderMode=false&UUID=3262B662-E0B8-4033-9569-870AFF2C5B5E&IsPrivate=false&IsPageLoaded=true&WebViewProcessID=11960",
+                  "view-id": "TabDocument?IsLoadedUsingDesktopUserAgent=false&InReaderMode=false&UUID=3262B662-E0B8-4033-9569-870AFF2C5B5E&IsPrivate=false&IsPageLoaded=true&WebViewProcessID=11960"
+                },
+                {
+                  "bounds": {
+                    "bottom": 871,
+                    "left": 62,
+                    "right": 340,
+                    "top": 841
+                  },
+                  "className": "UIView",
+                  "text": "Horizontal scroll bar, 1 page",
+                  "view-id": "9a98848c-6d46-7015-c764-69b4982f9ce9"
+                }
+              ],
+              "scrollable": "true",
+              "view-id": "d26d9982-5953-2f7f-eb63-226d3e7e570a"
+            },
+            {
+              "bounds": {
+                "bottom": 106,
+                "left": 16,
+                "right": 386,
+                "top": 62
+              },
+              "className": "UISegmentedControl",
+              "clickable": "true",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 106,
+                    "left": 16,
+                    "right": 108,
+                    "top": 62
+                  },
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "node": [
+                    {
+                      "bounds": {
+                        "bottom": 93,
+                        "left": 51,
+                        "right": 72,
+                        "top": 74
+                      },
+                      "className": "UIImageView",
+                      "clickable": "true",
+                      "resource-id": "magnifyingglass",
+                      "role": "image",
+                      "text": "Search",
+                      "view-id": "magnifyingglass"
+                    }
+                  ],
+                  "resource-id": "completions",
+                  "role": "button",
+                  "selected": "true",
+                  "text": "Search Suggestions",
+                  "view-id": "completions"
+                },
+                {
+                  "bounds": {
+                    "bottom": 106,
+                    "left": 108,
+                    "right": 201,
+                    "top": 62
+                  },
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "node": [
+                    {
+                      "bounds": {
+                        "bottom": 93,
+                        "left": 143,
+                        "right": 166,
+                        "top": 74
+                      },
+                      "className": "UIImageView",
+                      "clickable": "true",
+                      "resource-id": "book",
+                      "role": "image",
+                      "text": "bookmark",
+                      "view-id": "book"
+                    }
+                  ],
+                  "resource-id": "bookmarks",
+                  "role": "button",
+                  "text": "Bookmarks",
+                  "view-id": "bookmarks"
+                },
+                {
+                  "bounds": {
+                    "bottom": 106,
+                    "left": 201,
+                    "right": 293,
+                    "top": 62
+                  },
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "node": [
+                    {
+                      "bounds": {
+                        "bottom": 91,
+                        "left": 231,
+                        "right": 262,
+                        "top": 77
+                      },
+                      "className": "UIImageView",
+                      "clickable": "true",
+                      "resource-id": "eyeglasses",
+                      "role": "image",
+                      "text": "reading list",
+                      "view-id": "eyeglasses"
+                    }
+                  ],
+                  "resource-id": "reading-list",
+                  "role": "button",
+                  "text": "Reading List",
+                  "view-id": "reading-list"
+                },
+                {
+                  "bounds": {
+                    "bottom": 106,
+                    "left": 293,
+                    "right": 386,
+                    "top": 62
+                  },
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "node": [
+                    {
+                      "bounds": {
+                        "bottom": 94,
+                        "left": 329,
+                        "right": 349,
+                        "top": 74
+                      },
+                      "className": "UIImageView",
+                      "clickable": "true",
+                      "resource-id": "clock",
+                      "role": "image",
+                      "text": "clock",
+                      "view-id": "clock"
+                    }
+                  ],
+                  "resource-id": "history",
+                  "role": "button",
+                  "text": "History",
+                  "view-id": "history"
+                }
+              ],
+              "view-id": "eb14edc3-4823-6f36-db53-e5d31726af5e"
+            },
+            {
+              "bounds": {
+                "bottom": 874,
+                "left": 0,
+                "right": 402,
+                "top": 0
+              },
+              "className": "UITableView",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 170,
+                    "left": 0,
+                    "right": 402,
+                    "top": 126
+                  },
+                  "className": "UIView",
+                  "node": [
+                    {
+                      "bounds": {
+                        "bottom": 166,
+                        "left": 32,
+                        "right": 152,
+                        "top": 148
+                      },
+                      "className": "UILabel",
+                      "role": "text",
+                      "text": "Recent Searches",
+                      "view-id": "700630ca-be5e-9bfa-558b-03caa3bcd732"
+                    },
+                    {
+                      "bounds": {
+                        "bottom": 166,
+                        "left": 313,
+                        "right": 370,
+                        "top": 148
+                      },
+                      "className": "UIButton",
+                      "clickable": "true",
+                      "resource-id": "ClearAllButton",
+                      "role": "button",
+                      "text": "Clear All",
+                      "view-id": "ClearAllButton"
+                    }
+                  ],
+                  "resource-id": "Recent Searches",
+                  "view-id": "Recent Searches"
+                },
+                {
+                  "bounds": {
+                    "bottom": 222,
+                    "left": 16,
+                    "right": 386,
+                    "top": 170
+                  },
+                  "className": "UITableViewCell",
+                  "clickable": "true",
+                  "node": [
+                    {
+                      "bounds": {
+                        "bottom": 205,
+                        "left": 34,
+                        "right": 54,
+                        "top": 186
+                      },
+                      "className": "UIImageView",
+                      "clickable": "true",
+                      "resource-id": "magnifyingglass",
+                      "role": "image",
+                      "text": "Search",
+                      "view-id": "magnifyingglass"
+                    },
+                    {
+                      "bounds": {
+                        "bottom": 206,
+                        "left": 346,
+                        "right": 366,
+                        "top": 186
+                      },
+                      "className": "UIButton",
+                      "clickable": "true",
+                      "resource-id": "SearchSuggestionCompletionArrowView",
+                      "role": "button",
+                      "text": "Complete search",
+                      "view-id": "SearchSuggestionCompletionArrowView"
+                    }
+                  ],
+                  "resource-id": "SearchSuggestion?destination=Search",
+                  "role": "listitem",
+                  "text": "example",
+                  "view-id": "SearchSuggestion?destination=Search"
+                },
+                {
+                  "bounds": {
+                    "bottom": 505,
+                    "left": 369,
+                    "right": 399,
+                    "top": 126
+                  },
+                  "className": "UIView",
+                  "text": "Vertical scroll bar, 1 page",
+                  "view-id": "2e641ac7-8863-1459-f0d3-e88f058154e9"
+                },
+                {
+                  "bounds": {
+                    "bottom": 773,
+                    "left": 62,
+                    "right": 340,
+                    "top": 743
+                  },
+                  "className": "UIView",
+                  "text": "Horizontal scroll bar, 1 page",
+                  "view-id": "c3ccd091-72a7-218f-de75-f41b7a1a102c"
+                },
+                {
+                  "bounds": {
+                    "bottom": 166,
+                    "left": 32,
+                    "right": 152,
+                    "top": 148
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "Recent Searches",
+                  "view-id": "8f13381f-4eb0-1b39-9147-aa40e262ab9d"
+                },
+                {
+                  "bounds": {
+                    "bottom": 166,
+                    "left": 313,
+                    "right": 370,
+                    "top": 148
+                  },
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "resource-id": "ClearAllButton",
+                  "role": "button",
+                  "text": "Clear All",
+                  "view-id": "ClearAllButton"
+                }
+              ],
+              "resource-id": "CompletionListTableView",
+              "role": "list",
+              "scrollable": "true",
+              "view-id": "CompletionListTableView"
+            },
+            {
+              "bounds": {
+                "bottom": 874,
+                "left": 0,
+                "right": 402,
+                "top": 0
+              },
+              "className": "UIView",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 565,
+                    "left": 8,
+                    "right": 338,
+                    "top": 517
+                  },
+                  "className": "UIView",
+                  "node": [
+                    {
+                      "actions": ["set_text", "clear_text"],
+                      "bounds": {
+                        "bottom": 565,
+                        "left": 20,
+                        "right": 294,
+                        "top": 517
+                      },
+                      "className": "UITextField",
+                      "clickable": "true",
+                      "hint-text": "Search or enter website name",
+                      "resource-id": "URL",
+                      "role": "textfield",
+                      "text": "Address",
+                      "view-id": "URL"
+                    },
+                    {
+                      "bounds": {
+                        "bottom": 565,
+                        "left": 294,
+                        "right": 338,
+                        "top": 517
+                      },
+                      "className": "UIButton",
+                      "resource-id": "ClearTextButton",
+                      "role": "button",
+                      "text": "Clear text",
+                      "view-id": "ClearTextButton"
+                    },
+                    {
+                      "bounds": {
+                        "bottom": 565,
+                        "left": 294,
+                        "right": 338,
+                        "top": 517
+                      },
+                      "className": "UIButton",
+                      "clickable": "true",
+                      "resource-id": "VoiceSearchButton",
+                      "role": "button",
+                      "text": "Voice Search",
+                      "view-id": "VoiceSearchButton"
+                    }
+                  ],
+                  "resource-id": "CapsuleNavigationBar?isSelected=true",
+                  "view-id": "CapsuleNavigationBar?isSelected=true"
+                },
+                {
+                  "bounds": {
+                    "bottom": 565,
+                    "left": 346,
+                    "right": 394,
+                    "top": 517
+                  },
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "resource-id": "CancelBarItemButton",
+                  "role": "button",
+                  "text": "Close",
+                  "view-id": "CancelBarItemButton"
+                }
+              ],
+              "resource-id": "CapsuleViewController",
+              "view-id": "CapsuleViewController"
+            }
+          ],
+          "resource-id": "SafariWindow?View=Narrow&BarsKeptMinimized=false&UUID=3AC6AEB8-C00F-46FF-AC82-7F461439CDBB&UsingLoweredBar=true&IsSecure=true&IsTabBarAvailable=false",
+          "view-id": "SafariWindow?View=Narrow&BarsKeptMinimized=false&UUID=3AC6AEB8-C00F-46FF-AC82-7F461439CDBB&UsingLoweredBar=true&IsSecure=true&IsTabBarAvailable=false"
+        },
+        {
+          "bounds": {
+            "bottom": 874,
+            "left": 0,
+            "right": 402,
+            "top": 573
+          },
+          "className": "UIView",
+          "extras": {
+            "automobile:iosWindowLayer": "1"
+          },
+          "resource-id": "inputView",
+          "view-id": "inputView"
+        },
+        {
+          "bounds": {
+            "bottom": 816,
+            "left": 0,
+            "right": 402,
+            "top": 590
+          },
+          "className": "UIKeyboard",
+          "extras": {
+            "automobile:iosWindowLayer": "0"
+          },
+          "node": [
+            {
+              "bounds": {
+                "bottom": 816,
+                "left": 0,
+                "right": 402,
+                "top": 590
+              },
+              "className": "UIView",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 4,
+                    "right": 43,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "q",
+                  "view-id": "91349e62-4151-f24d-1fc7-1391c419feff"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 44,
+                    "right": 83,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "w",
+                  "view-id": "a3befe45-8b28-8e1b-d4ea-d7571918cc63"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 83,
+                    "right": 123,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "e",
+                  "view-id": "9498cb58-41fd-96f2-38ac-11dd436fdb3c"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 122,
+                    "right": 162,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "r",
+                  "view-id": "902f00a7-43d1-7466-5989-ed0e075193ed"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 162,
+                    "right": 202,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "t",
+                  "view-id": "b5a727d7-4271-8852-61b0-14477fe842e1"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 202,
+                    "right": 241,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "y",
+                  "view-id": "77a19d8c-24a7-3a49-d1cc-a8f8561d217f"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 241,
+                    "right": 281,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "u",
+                  "view-id": "ea33ae6d-6511-6cf9-1a1e-3343c88721b3"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 281,
+                    "right": 320,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "i",
+                  "view-id": "9a2c0bac-158a-0113-166f-2e6667a5cf8c"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 320,
+                    "right": 359,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "o",
+                  "view-id": "65e4377e-48a1-bdaa-3f1b-08c522546421"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 360,
+                    "right": 399,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "p",
+                  "view-id": "2e7dd231-a075-f570-312d-86319105d653"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 24,
+                    "right": 63,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "a",
+                  "view-id": "80394e46-5e34-dabd-943e-d02ecc53dfd0"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 63,
+                    "right": 103,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "s",
+                  "view-id": "d8048df7-3800-14e2-0b6d-cf9a91d7977e"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 103,
+                    "right": 142,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "d",
+                  "view-id": "2fe39dbb-2146-9858-41e6-1eafd9efd3a5"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 142,
+                    "right": 182,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "f",
+                  "view-id": "a494b778-500c-6794-eea7-5ea1dfef5f79"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 182,
+                    "right": 221,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "g",
+                  "view-id": "549b76e7-c374-fe25-65a9-70cdd9a0ef70"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 221,
+                    "right": 261,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "h",
+                  "view-id": "dd3b49b2-9bdf-d165-0153-bcee16417d09"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 261,
+                    "right": 300,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "j",
+                  "view-id": "f4d94419-86e0-f1c9-a126-18075e24338b"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 300,
+                    "right": 340,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "k",
+                  "view-id": "5e01565a-a8da-1656-56fa-d0e01fc27677"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 340,
+                    "right": 379,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "l",
+                  "view-id": "8dedd50b-99f6-77d8-dac1-18bc1606c937"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 4,
+                    "right": 55,
+                    "top": 705
+                  },
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "resource-id": "shift",
+                  "role": "button",
+                  "text": "shift",
+                  "view-id": "shift"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 63,
+                    "right": 103,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "z",
+                  "view-id": "d985667d-4d52-c257-3f6c-1f6c80833e37"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 103,
+                    "right": 142,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "x",
+                  "view-id": "9bf13655-7168-85c4-ec57-7d0d11e6b925"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 142,
+                    "right": 182,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "c",
+                  "view-id": "5adc3240-0c99-2a41-dba9-b26017c5a4e5"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 182,
+                    "right": 221,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "v",
+                  "view-id": "e909c507-c442-b285-2d77-b8920323e3b7"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 221,
+                    "right": 261,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "b",
+                  "view-id": "da536688-615a-fdba-f862-1eb4d077cbec"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 261,
+                    "right": 300,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "n",
+                  "view-id": "ea0ad0f0-7eec-f7a9-022e-f4972f9b5fcc"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 300,
+                    "right": 340,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "m",
+                  "view-id": "75a21899-8a55-1e95-6e34-0468fd1052c7"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 348,
+                    "right": 399,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "resource-id": "delete",
+                  "text": "delete",
+                  "view-id": "delete"
+                },
+                {
+                  "bounds": {
+                    "bottom": 813,
+                    "left": 4,
+                    "right": 103,
+                    "top": 759
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "resource-id": "more",
+                  "text": "numbers",
+                  "view-id": "more"
+                },
+                {
+                  "bounds": {
+                    "bottom": 813,
+                    "left": 103,
+                    "right": 291,
+                    "top": 759
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "resource-id": "space",
+                  "text": "space",
+                  "view-id": "space"
+                },
+                {
+                  "bounds": {
+                    "bottom": 813,
+                    "left": 291,
+                    "right": 330,
+                    "top": 759
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": ".",
+                  "view-id": "51baae66-3f95-797b-65d8-c82f3a21b14f"
+                },
+                {
+                  "bounds": {
+                    "bottom": 813,
+                    "left": 330,
+                    "right": 399,
+                    "top": 759
+                  },
+                  "className": "UIButton",
+                  "resource-id": "Go",
+                  "role": "button",
+                  "text": "go",
+                  "view-id": "Go"
+                }
+              ],
+              "resource-id": "UIKeyboardLayoutStar Preview",
+              "view-id": "UIKeyboardLayoutStar Preview"
+            }
+          ],
+          "view-id": "1a60aac5-509c-0a2e-c126-21d6964eb98c"
+        },
+        {
+          "bounds": {
+            "bottom": 874,
+            "left": 8,
+            "right": 76,
+            "top": 805
+          },
+          "className": "UIButton",
+          "clickable": "true",
+          "extras": {
+            "automobile:iosWindowLayer": "0"
+          },
+          "role": "button",
+          "text": "Emoji",
+          "view-id": "22efe23b-6df4-5b1b-2b4a-e989b70e49c0"
+        },
+        {
+          "bounds": {
+            "bottom": 874,
+            "left": 325,
+            "right": 393,
+            "top": 805
+          },
+          "className": "UIButton",
+          "clickable": "true",
+          "extras": {
+            "automobile:iosWindowLayer": "0"
+          },
+          "resource-id": "dictation",
+          "role": "button",
+          "text": "Dictate",
+          "view-id": "dictation"
+        }
+      ],
+      "text": "Safari",
+      "view-id": "5feceb66-ffc8-6f38-d952-786c6d696c79"
+    },
+    "insets": {
+      "available": false,
+      "displayCutoutInfo": {
+        "classification": "unknown"
+      },
+      "source": "unavailable",
+      "units": "unknown"
+    },
+    "nativeScale": 3,
+    "packageName": "com.apple.mobilesafari",
+    "pixelHeight": 2622,
+    "pixelWidth": 1206,
+    "screenHeight": 874,
+    "screenScale": 3,
+    "screenWidth": 402,
+    "updatedAt": 1792794868088,
+    "windowInfo": {
+      "bounds": {
+        "bottom": 874,
+        "left": 0,
+        "right": 402,
+        "top": 0
+      },
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    },
+    "windows": [
+      {
+        "bounds": {
+          "bottom": 874,
+          "left": 0,
+          "right": 402,
+          "top": 0
+        },
+        "id": 0,
+        "isActive": true,
+        "isFocused": true,
+        "type": 1
+      }
+    ]
+  },
+  "frameContext": "046CCF5D-9BC0-4990-B198-8AFC3953FD00:1:b758b73c3b5b835a",
+  "perfTiming": {
+    "children": [
+      {
+        "children": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "durationMs": 0,
+                    "name": "checkState"
+                  }
+                ],
+                "durationMs": 0,
+                "name": "ensureForegroundApp"
+              },
+              {
+                "durationMs": 247,
+                "name": "snapshot"
+              },
+              {
+                "durationMs": 6,
+                "name": "buildHierarchy"
+              },
+              {
+                "durationMs": 2,
+                "name": "mergeTypedTextInputs"
+              },
+              {
+                "durationMs": 1,
+                "name": "optimize"
+              },
+              {
+                "durationMs": 44,
+                "name": "systemAlerts"
+              }
+            ],
+            "durationMs": 303,
+            "name": "getViewHierarchy"
+          }
+        ],
+        "durationMs": 303,
+        "name": "extraction"
+      }
+    ],
+    "durationMs": 303,
+    "name": "handleRequestHierarchy"
+  },
+  "requestId": "cap-1",
+  "servedFromCache": false,
+  "timestamp": 1792794868090,
+  "type": "hierarchy_update"
+}

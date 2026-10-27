@@ -1,3 +1,4 @@
+import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerPrototypeTools, prototypeOutputSchema } from "../../src/server/prototypeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -51,9 +52,9 @@ describe("iOS reset show on an agent without prototype_show_in_place_v1", () => 
     unsubscribe();
     restore();
   });
-  async function call(input: unknown) {
+  async function call(input: Record<string, unknown>) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(simulator, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(readToolResponse(response).structuredContent);
   }
 
   test("is refused before assets are uploaded", async () => {
@@ -75,7 +76,7 @@ describe("iOS reset show on an agent without prototype_show_in_place_v1", () => 
 
   test("a reset show that fails while staging assets keeps the shown prototype's events", async () => {
     await call({ action: "show", spec });
-    agent.emit(event(1, "panel", "emit", "save"));
+    agent.emit({ ...event(1, "panel", "emit", "save"), type: "prototype_event" });
 
     const failed = await call({
       action: "show",
@@ -91,7 +92,7 @@ describe("iOS reset show on an agent without prototype_show_in_place_v1", () => 
 
   test("keeps the still-shown prototype's buffered events", async () => {
     await call({ action: "show", spec });
-    agent.emit(event(1, "panel", "emit", "save"));
+    agent.emit({ ...event(1, "panel", "emit", "save"), type: "prototype_event" });
 
     const refused = await call({ action: "show", spec, reset: true });
 

@@ -5,7 +5,7 @@ import type { AcquisitionReceipt } from "../../src/daemon/acquisitionReceipt";
 import {
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   DeviceOwnedByOtherDaemonError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   IOS_SIMULATOR_CLAIM_SCOPE,

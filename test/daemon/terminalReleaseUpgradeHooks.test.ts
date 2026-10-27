@@ -1,17 +1,17 @@
+import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import {
   LocationRouteRegistry,
   registerLocationRouteSessionCleanup,
 } from "../../src/features/utility/LocationRoutePlayer";
 import type { MockLocationClears } from "../../src/features/utility/MockLocationClear";
-import { registerPerformanceMonitorSessionCleanup } from "../../src/server/performanceMonitorSessionCleanup";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { registerPerformanceMonitorSessionCleanup } from "../../src/daemon/performanceMonitorSessionCleanup";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -85,11 +85,18 @@ describe("a terminal upgrade of an already-finalized release (#10825)", () => {
     return sessionA;
   }
 
-  for (const lateReason of ["device-killed", "explicit-release", "heartbeat-timeout"]) {
+  const lateReasons: SessionReleaseReason[] = [
+    "device-killed",
+    "explicit-release",
+    "heartbeat-timeout",
+  ];
+  for (const lateReason of lateReasons) {
     test(`a late ${lateReason} leaves B's route and sampling running`, async () => {
       const sessionA = await handOverToB();
 
-      await manager.releaseSessionIfOwned("A", sessionA, DEVICE, lateReason);
+      await manager.releaseSession("A", lateReason, {
+        expectedOwner: { session: sessionA, deviceId: DEVICE },
+      });
 
       expect(manager.getSessionForDevice(DEVICE)).toBe("B");
       expect(routes.isActive(DEVICE)).toBe(true);
@@ -100,7 +107,9 @@ describe("a terminal upgrade of an already-finalized release (#10825)", () => {
   test("the terminal reason is still persisted and announced, flagged as an upgrade", async () => {
     const sessionA = await handOverToB();
 
-    await manager.releaseSessionIfOwned("A", sessionA, DEVICE, "device-killed");
+    await manager.releaseSession("A", "device-killed", {
+      expectedOwner: { session: sessionA, deviceId: DEVICE },
+    });
 
     expect(notifications).toEqual(["A:cleanup-expired", "A:device-killed:upgrade"]);
     expect(manager.getTerminalReleaseSnapshot("A")).toMatchObject({
@@ -155,7 +164,7 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
-    DeviceSessionManager.getInstance().clearExplicitDevicePin(DEVICE);
+    daemon.getDeviceReadiness().clearExplicitDevicePin(DEVICE);
     NavigationGraphManager.resetInstance();
     SessionReleaseBroadcaster.clearForTesting();
   });
@@ -172,22 +181,24 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
     const sessionA = await sessions.createSession("A", DEVICE, "android");
     await sessions.releaseSession("A", "cleanup-expired");
     await sessions.createSession("B", DEVICE, "android");
-    DeviceSessionManager.getInstance().setExplicitDevicePin({
+    daemon.getDeviceReadiness().setExplicitDevicePin({
       deviceId: DEVICE,
       name: DEVICE,
       platform: "android",
     });
 
-    await sessions.releaseSessionIfOwned("A", sessionA, DEVICE, "device-killed");
+    await sessions.releaseSession("A", "device-killed", {
+      expectedOwner: { session: sessionA, deviceId: DEVICE },
+    });
 
-    expect(DeviceSessionManager.getInstance().getExplicitDevicePin()?.deviceId).toBe(DEVICE);
+    expect(daemon.getDeviceReadiness().getExplicitDevicePin()?.deviceId).toBe(DEVICE);
     expect(daemon.bridge.listenerManagers.has(globalNavigation)).toBe(true);
     // Device-keyed broadcast listeners (prototype agents and events) skip the marked upgrade (#11206).
     expect(broadcasts).toEqual(["A:cleanup-expired", "A:device-killed:upgrade"]);
 
     // B's own release is a real one: it clears B's pin.
     await sessions.releaseSession("B", "explicit-release");
-    expect(DeviceSessionManager.getInstance().getExplicitDevicePin()).toBeUndefined();
+    expect(daemon.getDeviceReadiness().getExplicitDevicePin()).toBeUndefined();
     expect(daemon.bridge.listenerManagers.has(globalNavigation)).toBe(true);
   });
 });

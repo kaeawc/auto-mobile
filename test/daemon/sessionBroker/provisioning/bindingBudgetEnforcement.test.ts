@@ -266,7 +266,7 @@ describe("binding total-resource enforcement on SQLite", () => {
   );
 
   test.each(["orphan"] as const)(
-    "compatible %s adoption is charge-neutral at the limit",
+    "compatible %s reclamation is charge-neutral at the limit",
     async (source) => {
       const req = await request();
 
@@ -274,12 +274,13 @@ describe("binding total-resource enforcement on SQLite", () => {
         platform: "android",
         deviceId: "orphan",
         name: bindingDeviceName(req.key, 1, "abcd"),
+        isRunning: true,
         ...SPEC,
       });
       const result = await make().reconcile(req);
-      expect(result).toMatchObject({ outcome: "ready", disposition: "adopted" });
-      expect(provisioner.calls.map((call) => call.mode)).toEqual(["adopt"]);
-      expect(deleter.calls).toEqual([]);
+      expect(result).toMatchObject({ outcome: "ready", disposition: "replaced" });
+      expect(provisioner.calls.map((call) => call.mode)).toEqual(["create"]);
+      expect(deleter.stableIds()).toEqual([bindingDeviceName(req.key, 1, "abcd")]);
       expect((await usage()).total).toBe(1);
     },
   );
@@ -289,6 +290,7 @@ describe("binding total-resource enforcement on SQLite", () => {
       platform: "android",
       deviceId: "ambroker-other",
       name: "ambroker-other",
+      isRunning: true,
     });
     const result = await make().reconcile(await request());
     expect(result).toMatchObject({
@@ -324,6 +326,8 @@ describe("binding total-resource enforcement on SQLite", () => {
       platform: "android",
       deviceId: "amslot-old",
       name: "amslot-old",
+      isRunning: false,
+      isRunningStateKnown: false,
       runtime: "old",
       deviceType: SPEC.deviceType,
     });

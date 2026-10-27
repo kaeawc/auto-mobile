@@ -1,12 +1,12 @@
 import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { DaemonBoundSessionExpiredError, DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_OWNED_SESSIONS_PARAM, DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_OWNED_SESSIONS_PARAM, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import {
   withForeignOwnedSessionMeta,
   withRoutedSessionMeta,
-} from "../../src/server/routedSessionMeta";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+} from "../../src/daemon/routedSessionMeta";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

@@ -25,115 +25,66 @@ import androidx.compose.ui.unit.sp
  */
 @Composable
 fun PerformanceSummary(
-  currentFps: Float?,
-  currentFrameTimeMs: Float?,
-  currentJankFrames: Int?,
-  currentMemoryMb: Float?,
-  currentTouchLatencyMs: Float?,
-  currentRecompositionRate: Float? = null,
-  updateCounter: Int = 0,
   modifier: Modifier = Modifier,
+  options: PerformanceMetrics,
 ) {
-  val hasAnyMetric =
-    currentFps != null ||
-      currentFrameTimeMs != null ||
-      currentJankFrames != null ||
-      currentMemoryMb != null ||
-      currentTouchLatencyMs != null ||
-      currentRecompositionRate != null
+  return with(options) {
+    val hasAnyMetric =
+      listOf(
+          currentFps,
+          currentFrameTimeMs,
+          currentJankFrames,
+          currentMemoryMb,
+          currentTouchLatencyMs,
+          currentRecompositionRate,
+        )
+        .any { it != null }
 
-  // Flashing indicator color alternates between green and blue on each update
-  val indicatorColor =
-    if (updateCounter % 2 == 0) {
-      Color(0xFF4CAF50) // Green
-    } else {
-      Color(0xFF2196F3) // Blue
-    }
+    // Flashing indicator color alternates between green and blue on each update
+    val indicatorColor =
+      if (updateCounter % 2 == 0) {
+        Color(0xFF4CAF50) // Green
+      } else {
+        Color(0xFF2196F3) // Blue
+      }
 
-  Column(
-    modifier =
-      modifier.fillMaxHeight().padding(vertical = 8.dp).verticalScroll(rememberScrollState()),
-    horizontalAlignment = Alignment.CenterHorizontally,
-    verticalArrangement = Arrangement.spacedBy(12.dp),
-  ) {
-    // Update indicator - flashes green/blue on data updates
-    if (hasAnyMetric) {
-      Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(indicatorColor))
-    }
+    Column(
+      modifier =
+        modifier.fillMaxHeight().padding(vertical = 8.dp).verticalScroll(rememberScrollState()),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      // Update indicator - flashes green/blue on data updates
+      if (hasAnyMetric) {
+        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(indicatorColor))
+      }
 
-    // FPS indicator
-    if (currentFps != null) {
-      val fpsColor =
-        when {
-          currentFps >= 55 -> Color(0xFF4CAF50) // Green
-          currentFps >= 30 -> Color(0xFFFF9800) // Orange
-          else -> Color(0xFFE53935) // Red
-        }
-      MetricItem(value = "${currentFps.toInt()}", unit = "fps", color = fpsColor)
-    }
+      // FPS indicator
+      FpsMetric(currentFps)
 
-    // Frame Time indicator
-    if (currentFrameTimeMs != null) {
-      val frameTimeColor =
-        when {
-          currentFrameTimeMs <= 16.7f -> Color(0xFF4CAF50) // Green (60fps target)
-          currentFrameTimeMs <= 33.3f -> Color(0xFFFF9800) // Orange (30fps)
-          else -> Color(0xFFE53935) // Red
-        }
-      MetricItem(value = "${currentFrameTimeMs.toInt()}", unit = "ms", color = frameTimeColor)
-    }
+      // Frame Time indicator
+      FrameTimeMetric(currentFrameTimeMs)
 
-    // Jank indicator
-    if (currentJankFrames != null) {
-      val jankColor =
-        when {
-          currentJankFrames == 0 -> Color(0xFF4CAF50) // Green
-          currentJankFrames <= 5 -> Color(0xFFFF9800) // Orange
-          else -> Color(0xFFE53935) // Red
-        }
-      MetricItem(value = "$currentJankFrames", unit = "jank", color = jankColor)
-    }
+      // Jank indicator
+      JankMetric(currentJankFrames)
 
-    // Memory indicator
-    if (currentMemoryMb != null) {
-      val memColor =
-        when {
-          currentMemoryMb < 256 -> Color(0xFF4CAF50)
-          currentMemoryMb < 512 -> Color(0xFFFF9800)
-          else -> Color(0xFFE53935)
-        }
-      MetricItem(value = "${currentMemoryMb.toInt()}", unit = "MB", color = memColor)
-    }
+      // Memory indicator
+      MemoryMetric(currentMemoryMb)
 
-    // Touch Latency indicator
-    if (currentTouchLatencyMs != null) {
-      val latencyColor =
-        when {
-          currentTouchLatencyMs <= 50 -> Color(0xFF4CAF50) // Green
-          currentTouchLatencyMs <= 100 -> Color(0xFFFF9800) // Orange
-          else -> Color(0xFFE53935) // Red
-        }
-      MetricItem(value = "${currentTouchLatencyMs.toInt()}", unit = "lat", color = latencyColor)
-    }
+      // Touch Latency indicator
+      TouchLatencyMetric(currentTouchLatencyMs)
 
-    // Recomposition rate indicator
-    if (currentRecompositionRate != null) {
-      val recompColor =
-        when {
-          currentRecompositionRate <= 10f -> Color(0xFF4CAF50) // Green
-          currentRecompositionRate <= 50f -> Color(0xFFFF9800) // Orange
-          else -> Color(0xFFE53935) // Red
-        }
-      MetricItem(value = "${currentRecompositionRate.toInt()}", unit = "r/s", color = recompColor)
-    }
+      // Recomposition rate indicator
+      RecompositionMetric(currentRecompositionRate)
 
-    // Fallback when no metrics
-    if (!hasAnyMetric) {
-      Text(
-        text = "—",
-        fontSize = 12.sp,
-        color = Color.Gray.copy(alpha = 0.5f),
-      )
+      // Fallback when no metrics
+      if (!hasAnyMetric) {
+        Text(
+          text = "—",
+          fontSize = 12.sp,
+          color = Color.Gray.copy(alpha = 0.5f),
+        )
+      }
     }
   }
 }
@@ -157,5 +108,105 @@ private fun MetricItem(
       color = color.copy(alpha = 0.7f),
       maxLines = 1,
     )
+  }
+}
+
+data class PerformanceMetrics(
+  val currentFps: Float?,
+  val currentFrameTimeMs: Float?,
+  val currentJankFrames: Int?,
+  val currentMemoryMb: Float?,
+  val currentTouchLatencyMs: Float?,
+  val currentRecompositionRate: Float? = null,
+  val updateCounter: Int = 0,
+) {
+  constructor(
+    options: PerformancePanelOptions,
+  ) : this(
+    options.currentFps,
+    options.currentFrameTimeMs,
+    options.currentJankFrames,
+    options.currentMemoryMb,
+    options.currentTouchLatencyMs,
+    options.currentRecompositionRate,
+    options.updateCounter,
+  )
+}
+
+@Composable
+private fun FpsMetric(currentFps: Float?) {
+  if (currentFps != null) {
+    val fpsColor =
+      when {
+        currentFps >= 55 -> Color(0xFF4CAF50) // Green
+        currentFps >= 30 -> Color(0xFFFF9800) // Orange
+        else -> Color(0xFFE53935) // Red
+      }
+    MetricItem(value = "${currentFps.toInt()}", unit = "fps", color = fpsColor)
+  }
+}
+
+@Composable
+private fun FrameTimeMetric(currentFrameTimeMs: Float?) {
+  if (currentFrameTimeMs != null) {
+    val frameTimeColor =
+      when {
+        currentFrameTimeMs <= 16.7f -> Color(0xFF4CAF50) // Green (60fps target)
+        currentFrameTimeMs <= 33.3f -> Color(0xFFFF9800) // Orange (30fps)
+        else -> Color(0xFFE53935) // Red
+      }
+    MetricItem(value = "${currentFrameTimeMs.toInt()}", unit = "ms", color = frameTimeColor)
+  }
+}
+
+@Composable
+private fun JankMetric(currentJankFrames: Int?) {
+  if (currentJankFrames != null) {
+    val jankColor =
+      when {
+        currentJankFrames == 0 -> Color(0xFF4CAF50) // Green
+        currentJankFrames <= 5 -> Color(0xFFFF9800) // Orange
+        else -> Color(0xFFE53935) // Red
+      }
+    MetricItem(value = "$currentJankFrames", unit = "jank", color = jankColor)
+  }
+}
+
+@Composable
+private fun MemoryMetric(currentMemoryMb: Float?) {
+  if (currentMemoryMb != null) {
+    val memColor =
+      when {
+        currentMemoryMb < 256 -> Color(0xFF4CAF50)
+        currentMemoryMb < 512 -> Color(0xFFFF9800)
+        else -> Color(0xFFE53935)
+      }
+    MetricItem(value = "${currentMemoryMb.toInt()}", unit = "MB", color = memColor)
+  }
+}
+
+@Composable
+private fun TouchLatencyMetric(currentTouchLatencyMs: Float?) {
+  if (currentTouchLatencyMs != null) {
+    val latencyColor =
+      when {
+        currentTouchLatencyMs <= 50 -> Color(0xFF4CAF50) // Green
+        currentTouchLatencyMs <= 100 -> Color(0xFFFF9800) // Orange
+        else -> Color(0xFFE53935) // Red
+      }
+    MetricItem(value = "${currentTouchLatencyMs.toInt()}", unit = "lat", color = latencyColor)
+  }
+}
+
+@Composable
+private fun RecompositionMetric(currentRecompositionRate: Float?) {
+  if (currentRecompositionRate != null) {
+    val recompColor =
+      when {
+        currentRecompositionRate <= 10f -> Color(0xFF4CAF50) // Green
+        currentRecompositionRate <= 50f -> Color(0xFFFF9800) // Orange
+        else -> Color(0xFFE53935) // Red
+      }
+    MetricItem(value = "${currentRecompositionRate.toInt()}", unit = "r/s", color = recompColor)
   }
 }

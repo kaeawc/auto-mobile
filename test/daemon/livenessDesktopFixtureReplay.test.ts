@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { LivenessScenario } from "../helpers/livenessScenarioHarness";
 import { PIXEL, PIXEL_FOLD, type WireFixture } from "./helpers/desktopWireHarness";
 
@@ -69,13 +69,16 @@ async function start(missingPixel = false): Promise<LivenessScenario> {
 // The first scenario pays for module-level one-time costs (database template, Daemon module graph).
 // beforeAll is outside the per-test budget: replay a throwaway register -> bind -> tap -> release
 // cycle so the first use of session setup, input dispatch and release also stays outside each row.
+const WARM_ROWS = ["close-pane-releases-device", "no-click-start", "input-keeps-session"];
 beforeAll(async () => {
   const warm = await LivenessScenario.start({
     devices: [PIXEL.deviceId, PIXEL_FOLD.deviceId],
     deviceNames: { [PIXEL.deviceId]: PIXEL.name, [PIXEL_FOLD.deviceId]: PIXEL_FOLD.name },
   });
   try {
-    await warm.replayDesktopFixture(fixture("close-pane-releases-device"));
+    for (const name of WARM_ROWS) {
+      await warm.replayDesktopFixture(fixture(name));
+    }
   } finally {
     await warm.stop();
   }

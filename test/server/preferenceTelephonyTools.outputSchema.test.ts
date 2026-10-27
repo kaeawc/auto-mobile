@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { readToolResponse } from "../helpers/toolResponse";
 import { registerPreferenceTools } from "../../src/server/preferenceTools";
 import {
   getPreferenceResultSchema,
@@ -78,11 +79,13 @@ describe("preference and telephony output schemas (#11830)", () => {
       const tool = ToolRegistry.getAllTools({ includeUnavailable: true }).find(
         (candidate) => candidate.name === name,
       );
-      const response = await tool!.deviceAwareHandler!(device, {
-        ...preferenceResult,
-        value: "v",
-        type: "string",
-      });
+      const response = readToolResponse(
+        await tool!.deviceAwareHandler!(device, {
+          ...preferenceResult,
+          value: "v",
+          type: "string",
+        }),
+      );
       expect(JSON.parse(textOf(response))).toEqual(preferenceResult);
       expect(getPreferenceResultSchema.safeParse(response.structuredContent).success).toBe(true);
     },

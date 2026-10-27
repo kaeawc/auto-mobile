@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.sdk.adapters
 
+import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -68,12 +69,14 @@ object Navigation3Adapter : NavigationFrameworkAdapter {
         try {
           extractArguments(destination)
         } catch (e: Exception) {
+          Log.w("Navigation3Adapter", "Could not extract navigation arguments", e)
           emptyMap()
         }
       val metadata =
         try {
           extractMetadata(destination)
         } catch (e: Exception) {
+          Log.w("Navigation3Adapter", "Could not extract navigation metadata", e)
           emptyMap()
         }
 

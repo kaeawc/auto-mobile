@@ -793,6 +793,15 @@
                 "required": ["cameraPoster"]
               },
               {
+                "required": ["screenLock"]
+              },
+              {
+                "required": ["power"]
+              },
+              {
+                "required": ["deviceCondition"]
+              },
+              {
                 "required": ["params"]
               }
             ],
@@ -1668,6 +1677,105 @@
           },
           "additionalProperties": false
         },
+        "screenLock": {
+          "description": "Android only. Set a lock-screen PIN, password, or pattern (digits 1-9) with locksettings, or clear one with type none and currentCredential. A recorded plan has the credential replaced by <redacted>: set it by hand before a replay.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "pin" },
+                "credential": { "type": "string", "pattern": "^\\d{4,16}$" }
+              },
+              "required": ["type", "credential"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "password" },
+                "credential": {
+                  "type": "string",
+                  "pattern": "^(?!-)[\\x20-\\x26\\x28-\\x7e]{4,16}$"
+                }
+              },
+              "required": ["type", "credential"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "pattern" },
+                "credential": { "type": "string", "pattern": "^[1-9]{4,9}$" }
+              },
+              "required": ["type", "credential"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "none" },
+                "currentCredential": {
+                  "type": "string",
+                  "pattern": "^(?!-)[\\x20-\\x26\\x28-\\x7e]{4,16}$"
+                }
+              },
+              "required": ["type", "currentCredential"],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "power": {
+          "description": "Android only. Fake battery (level, charging ac|usb|wireless|none, reset), battery saver, Doze (off|light|deep; light/deep unplug the battery and turn the screen off first), an app's standby bucket and inactive state, Data Saver and thermal status (0-6 or reset). Battery, Doze and thermal faking is refused on physical devices. A session restores every changed field on release.",
+          "type": "object",
+          "properties": {
+            "battery": {
+              "type": "object",
+              "properties": {
+                "level": { "type": "integer", "minimum": 0, "maximum": 100 },
+                "charging": { "type": "string", "enum": ["ac", "usb", "wireless", "none"] },
+                "reset": { "type": "boolean" }
+              },
+              "additionalProperties": false
+            },
+            "batterySaver": { "type": "boolean" },
+            "doze": { "type": "string", "enum": ["off", "light", "deep"] },
+            "standbyBucket": {
+              "type": "object",
+              "properties": {
+                "appId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                },
+                "bucket": {
+                  "type": "string",
+                  "enum": ["active", "working_set", "frequent", "rare", "restricted"]
+                }
+              },
+              "required": ["appId", "bucket"],
+              "additionalProperties": false
+            },
+            "appInactive": {
+              "type": "object",
+              "properties": {
+                "appId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                },
+                "inactive": { "type": "boolean" }
+              },
+              "required": ["appId", "inactive"],
+              "additionalProperties": false
+            },
+            "dataSaver": { "type": "boolean" },
+            "thermalStatus": {
+              "anyOf": [
+                { "type": "integer", "minimum": 0, "maximum": 6 },
+                { "type": "string", "const": "reset" }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
         "location": {
           "description": "Set a static fix, start a timed route, or stop route playback on an Android emulator or iOS Simulator.",
           "anyOf": [
@@ -1799,6 +1907,145 @@
               "additionalProperties": false
             }
           ]
+        },
+        "deviceCondition": {
+          "description": "Session-scoped root/integrity/fault test fixtures (behind the 'device-condition' feature flag). Sent in its own setDeviceState call.",
+          "type": "object",
+          "properties": {
+            "version": { "type": "number", "const": 1 },
+            "rootState": { "type": "string", "enum": ["rooted-detectable", "unset"] },
+            "integrityState": { "type": "string", "const": "unset" },
+            "faults": {
+              "type": "object",
+              "properties": {
+                "battery": { "type": "string", "enum": ["unplug", "low", "full", "unset"] },
+                "lowPower": { "type": "string", "enum": ["on", "unset"] },
+                "doze": { "type": "string", "enum": ["on", "unset"] },
+                "thermal": { "type": "string", "enum": ["throttling", "critical", "unset"] },
+                "storage": { "type": "string", "enum": ["low", "full", "unset"] },
+                "dontKeepActivities": { "type": "string", "enum": ["on", "unset"] },
+                "revokePermission": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        },
+                        "permission": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.]*$" }
+                      },
+                      "required": ["package", "permission"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "disablePackage": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        }
+                      },
+                      "required": ["package"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "corruptAppFile": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        },
+                        "path": {
+                          "type": "string",
+                          "pattern": "^(?!\\.{1,2}(?:/|$))[A-Za-z0-9_.-]+(?:/(?!\\.{1,2}(?:/|$))[A-Za-z0-9_.-]+)*$"
+                        },
+                        "mode": { "type": "string", "enum": ["overwrite", "truncate"] }
+                      },
+                      "required": ["package", "path", "mode"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "killApp": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        },
+                        "mode": { "type": "string", "enum": ["background", "forceStop"] }
+                      },
+                      "required": ["package", "mode"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "trimMemory": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        },
+                        "level": {
+                          "type": "string",
+                          "enum": [
+                            "HIDDEN",
+                            "RUNNING_MODERATE",
+                            "BACKGROUND",
+                            "RUNNING_LOW",
+                            "MODERATE",
+                            "RUNNING_CRITICAL",
+                            "COMPLETE"
+                          ]
+                        }
+                      },
+                      "required": ["package", "level"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "clearPackageData": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        }
+                      },
+                      "required": ["package"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "expiresInSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+            "reset": { "type": "boolean", "const": true }
+          },
+          "additionalProperties": false
         }
       },
       "anyOf": [
@@ -1822,6 +2069,15 @@
         },
         {
           "required": ["cameraPoster"]
+        },
+        {
+          "required": ["screenLock"]
+        },
+        {
+          "required": ["power"]
+        },
+        {
+          "required": ["deviceCondition"]
         }
       ],
       "description": "Parameters for setDeviceState"

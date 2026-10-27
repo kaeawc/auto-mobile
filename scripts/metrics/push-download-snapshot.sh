@@ -9,7 +9,7 @@
 #   shared docs/metrics/data/downloads.jsonl and left the tree with unmerged
 #   files. The next iteration then failed with "Pulling is not possible because
 #   you have unmerged files" — the failure cascaded instead of retrying cleanly
-#   (issue #3590, same class as scripts/push-readme-badges.sh).
+#   (issue #3590, same class as the retired README badge push).
 #
 #   This script is conflict-free by construction: each attempt hard-resets to the
 #   latest origin/main and regenerates the snapshot from scratch, so there is

@@ -1,9 +1,9 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
 import { sortedReaddirEntriesSync } from "../../src/utils/io";
-import { Visitor } from "oxc-parser";
-import { parseGuardSource, unwrapCallee } from "./astGuard";
+
+import { parseGuardSource, unwrapCallee, readGuardFile, GuardVisitor as Visitor } from "./astGuard";
 
 // Issue #10689: raw directory listings come back in filesystem order (hash order on ext4,
 // roughly alphabetical on APFS/NTFS), so code and tests that observe them behave differently per
@@ -63,6 +63,7 @@ export function findRawListings(source: string, file = "fixture.ts"): number[] {
         (callee.type === "MemberExpression" &&
           callee.object.type === "Identifier" &&
           callee.object.name === "Bun" &&
+          callee.property.type === "Identifier" &&
           callee.property.name === "Glob")
       ) {
         lines.add(lineOf(node.start));
@@ -95,9 +96,7 @@ describe("sorted listing boundary (issue #10689)", () => {
       if (relative === HELPER_FILE || relative in ALLOW_LIST) {
         return [];
       }
-      return findRawListings(readFileSync(file, "utf8"), file).map(
-        (line) => `src/${relative}:${line}`,
-      );
+      return findRawListings(readGuardFile(file), file).map((line) => `src/${relative}:${line}`);
     });
   }, 30_000);
 

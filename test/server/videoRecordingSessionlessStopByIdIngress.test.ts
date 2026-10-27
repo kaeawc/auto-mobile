@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "b
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -15,7 +15,7 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";

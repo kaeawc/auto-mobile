@@ -137,7 +137,8 @@ fun CommandPalette(
 ) {
   var query by remember { mutableStateOf("") }
   val results = filterCommands(commands, query)
-  var selectedIndex by remember { mutableStateOf(0) }
+  val selectedIndexState = remember { mutableStateOf(0) }
+  var selectedIndex by selectedIndexState
   // A narrowing filter can leave the selection past the end of the shorter list; clamp it back into
   // range (or to 0 when empty) so Enter and the highlight never read out of bounds.
   val safeIndex = selectedIndex.coerceIn(0, (results.size - 1).coerceAtLeast(0))
@@ -157,31 +158,7 @@ fun CommandPalette(
         .fillMaxSize()
         .background(Color.Black.copy(alpha = 0.5f))
         .onPreviewKeyEvent { event ->
-          if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-          when (event.key) {
-            Key.DirectionDown -> {
-              if (results.isNotEmpty()) selectedIndex = (safeIndex + 1) % results.size
-              true
-            }
-            Key.DirectionUp -> {
-              if (results.isNotEmpty())
-                selectedIndex = (safeIndex - 1 + results.size) % results.size
-              true
-            }
-            Key.Enter,
-            Key.NumPadEnter -> {
-              results.getOrNull(safeIndex)?.let {
-                it.run()
-                onDismiss()
-              }
-              true
-            }
-            Key.Escape -> {
-              onDismiss()
-              true
-            }
-            else -> false
-          }
+          handlePaletteKey(event, results, selectedIndexState, onDismiss, safeIndex)
         }
         .clickable(
           interactionSource = remember { MutableInteractionSource() },
@@ -215,26 +192,71 @@ fun CommandPalette(
           },
       )
       Spacer(Modifier.height(8.dp))
-      LazyColumn(state = listState, modifier = Modifier.heightIn(max = 360.dp)) {
-        itemsIndexed(results, key = { _, command -> command.id }) { index, command ->
-          val isSelected = index == safeIndex
-          val highlight =
-            if (isSelected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent
-          Text(
-            command.label,
-            modifier =
-              Modifier.fillMaxWidth()
-                .background(highlight)
-                .clickable {
-                  command.run()
-                  onDismiss()
-                }
-                // Announce the keyboard highlight to assistive tech, not just visually.
-                .semantics { selected = isSelected }
-                .padding(vertical = 8.dp, horizontal = 4.dp),
-          )
-        }
+      PaletteResults(results, safeIndex, listState, onDismiss)
+    }
+  }
+}
+
+private fun handlePaletteKey(
+  event: androidx.compose.ui.input.key.KeyEvent,
+  results: List<PaletteCommand>,
+  selectedIndexState: androidx.compose.runtime.MutableState<Int>,
+  onDismiss: () -> Unit,
+  safeIndex: Int,
+): Boolean = run {
+  var selectedIndex by selectedIndexState
+
+  if (event.type != KeyEventType.KeyDown) return@run false
+  when (event.key) {
+    Key.DirectionDown -> {
+      if (results.isNotEmpty()) selectedIndex = (safeIndex + 1) % results.size
+      true
+    }
+    Key.DirectionUp -> {
+      if (results.isNotEmpty()) selectedIndex = (safeIndex - 1 + results.size) % results.size
+      true
+    }
+    Key.Enter,
+    Key.NumPadEnter -> {
+      results.getOrNull(safeIndex)?.let {
+        it.run()
+        onDismiss()
       }
+      true
+    }
+    Key.Escape -> {
+      onDismiss()
+      true
+    }
+    else -> false
+  }
+}
+
+@Composable
+private fun PaletteResults(
+  results: List<PaletteCommand>,
+  safeIndex: Int,
+  listState: androidx.compose.foundation.lazy.LazyListState,
+  onDismiss: () -> Unit,
+) {
+  LazyColumn(state = listState, modifier = Modifier.heightIn(max = 360.dp)) {
+    itemsIndexed(results, key = { _, command -> command.id }) { index, command ->
+      val isSelected = index == safeIndex
+      val highlight =
+        if (isSelected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent
+      Text(
+        command.label,
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(highlight)
+            .clickable {
+              command.run()
+              onDismiss()
+            }
+            // Announce the keyboard highlight to assistive tech, not just visually.
+            .semantics { selected = isSelected }
+            .padding(vertical = 8.dp, horizontal = 4.dp),
+      )
     }
   }
 }

@@ -5,13 +5,21 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { resolveDeviceGestureRecordingDevice } from "../../src/daemon/deviceGestureRecordingSocketServer";
+import {
+  createDeviceGestureRecordingDeviceResolution,
+  resolveDeviceGestureRecordingDevice,
+} from "../../src/daemon/deviceGestureRecordingSocketServer";
+import {
+  clearDirectSessionDevices,
+  registerDirectSessionDevice,
+} from "../../src/utils/directSessionDeviceRegistry";
 import type { BootedDevice, SomePlatform } from "../../src/models";
 
 /**
  * FUNNEL 1 for the device-gesture-recording resolver (#6923). It used to discover through
- * `DeviceSessionManager.detectConnectedPlatforms` and never fold the observation
+ * `DeviceReadiness.detectConnectedPlatforms` and never fold the observation
  * into the pool, so the admission gate in `handleRequest` re-read pool state
  * from BEFORE that discovery — the same gap the video-stream and WebRTC
  * resolvers closed in #6888. Selection here is discovery + reconcile + match
@@ -22,6 +30,7 @@ describe("resolveDeviceGestureRecordingDevice folds its discovery into the pool 
 
   afterEach(() => {
     DaemonState.getInstance().reset();
+    clearDirectSessionDevices();
   });
 
   async function livePool(): Promise<DevicePool> {
@@ -116,7 +125,7 @@ describe("resolveDeviceGestureRecordingDevice folds its discovery into the pool 
     );
   });
 
-  test("with no serial named, several connected devices resolve to the current one", async () => {
+  test("with no serial named, several connected devices resolve to the session's device", async () => {
     const first: BootedDevice = { deviceId: SERIAL, name: "Pixel_8_API_35", platform: "android" };
     const second: BootedDevice = {
       deviceId: "emulator-5556",
@@ -129,7 +138,7 @@ describe("resolveDeviceGestureRecordingDevice folds its discovery into the pool 
         discovering([first, second]),
         undefined,
         undefined,
-        () => second,
+        () => second.deviceId,
       ),
     ).resolves.toEqual(second);
     await expect(
@@ -140,6 +149,84 @@ describe("resolveDeviceGestureRecordingDevice folds its discovery into the pool 
         () => undefined,
       ),
     ).rejects.toThrow(/Multiple connected devices; specify deviceId/);
+  });
+
+  function resolution() {
+    const first: BootedDevice = { deviceId: SERIAL, name: "Pixel", platform: "android" };
+    const second: BootedDevice = { deviceId: "emulator-5556", name: "Other", platform: "android" };
+    const sessions = {
+      getPlatformDeviceManager: () => new FakeDeviceUtils(),
+      getExplicitDevicePin: () => first,
+      ensureDeviceReady: async () => first,
+    };
+    const utils = sessions.getPlatformDeviceManager();
+    utils.setBootedDevices("android", [first, second]);
+    sessions.getPlatformDeviceManager = () => utils;
+    return { first, second, sessions };
+  }
+
+  test("the injected requester lookup beats the old current device and explicit deviceId wins", async () => {
+    const { first, second, sessions } = resolution();
+    const requesters: Array<string | undefined> = [];
+    const resolver = createDeviceGestureRecordingDeviceResolution(
+      () => sessions,
+      (sessionUuid) => {
+        requesters.push(sessionUuid);
+        return sessionUuid === "requester" ? second.deviceId : undefined;
+      },
+    );
+    expect(await resolver.selectDevice(undefined, "android", "requester")).toEqual(second);
+    expect(requesters).toEqual(["requester"]);
+    expect(await resolver.selectDevice(first.deviceId, "android", "requester")).toEqual(first);
+  });
+
+  test("trims only outer whitespace before resolving the requester session device", async () => {
+    const { second, sessions } = resolution();
+    const requesters: Array<string | undefined> = [];
+    const resolver = createDeviceGestureRecordingDeviceResolution(
+      () => sessions,
+      (sessionUuid) => {
+        requesters.push(sessionUuid);
+        return sessionUuid === "requester:phone" ? second.deviceId : undefined;
+      },
+    );
+    expect(await resolver.selectDevice(undefined, "android", " requester:phone ")).toEqual(second);
+    expect(requesters).toEqual(["requester:phone"]);
+  });
+
+  test("a session with no candidate device keeps the ambiguous-device refusal", async () => {
+    const { sessions } = resolution();
+    const resolver = createDeviceGestureRecordingDeviceResolution(
+      () => sessions,
+      () => "absent",
+    );
+    await expect(resolver.selectDevice(undefined, "android", "requester")).rejects.toThrow(
+      "Multiple connected android devices; specify deviceId",
+    );
+  });
+
+  test("the production lookup uses the requester's direct registration", async () => {
+    const { second, sessions } = resolution();
+    registerDirectSessionDevice("requester", second);
+    const resolver = createDeviceGestureRecordingDeviceResolution(() => sessions);
+    expect(await resolver.selectDevice(undefined, "android", "requester")).toEqual(second);
+    await expect(resolver.selectDevice(undefined, "android")).rejects.toThrow(
+      "Multiple connected android devices; specify deviceId",
+    );
+  });
+
+  test("the production lookup uses a derived daemon session's assignment", async () => {
+    await livePool();
+    const { first, second, sessions } = resolution();
+    const manager = DaemonState.getInstance().getSessionManager();
+    await manager.createSession("base", first.deviceId, "android");
+    await asPlanAllocation(manager, "base", ["base:phone"], () =>
+      manager.createSession("base:phone", second.deviceId, "android"),
+    );
+    manager.setDeviceLabels("base", { primary: "base", phone: "base:phone" });
+    registerDirectSessionDevice("base:phone", first);
+    const resolver = createDeviceGestureRecordingDeviceResolution(() => sessions);
+    expect(await resolver.selectDevice(undefined, "android", "base:phone")).toEqual(second);
   });
 
   test("with no serial named and nothing connected, refuses", async () => {

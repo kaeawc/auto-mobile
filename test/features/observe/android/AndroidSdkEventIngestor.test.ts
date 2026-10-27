@@ -5,7 +5,7 @@ import {
   type AndroidHandledExceptionEvent,
 } from "../../../../src/features/observe/android/AndroidSdkEventIngestor";
 import type { FailureRecorderService } from "../../../../src/features/failures/interfaces/FailureRecorderService";
-import type { StackTraceElement } from "../../../../src/server/failuresResources";
+import type { StackTraceElement } from "../../../../src/models/failureAnalytics";
 import type {
   SdkAnrPayload,
   SdkCrashPayload,
@@ -23,12 +23,14 @@ class FakeTelemetryRecorder implements AndroidTelemetryRecorder {
   setContext(deviceId: string, sessionId: string | null): void {
     this.contexts.push({ deviceId, sessionId });
   }
-  async recordNetworkEvent(input: any): Promise<number> {
+  async recordNetworkEvent(
+    input: Parameters<AndroidTelemetryRecorder["recordNetworkEvent"]>[0],
+  ): ReturnType<AndroidTelemetryRecorder["recordNetworkEvent"]> {
     if (this.throwOn === "network") {
       throw new Error("boom");
     }
     this.network.push(input);
-    return 1;
+    return;
   }
   async recordLogEvent(input: any): Promise<void> {
     this.logs.push(input);

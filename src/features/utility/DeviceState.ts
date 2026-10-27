@@ -1,3 +1,8 @@
+import type { IosRunnerLocationClient } from "./device-state/LocationOperations";
+import {
+  defaultDeviceTraits,
+  type DeviceTraits,
+} from "../../utils/android-cmdline-tools/deviceTraits";
 import {
   LocationOperations,
   type DeviceLocationState,
@@ -18,6 +23,8 @@ import type { DoNotDisturbState } from "./device-state/DoNotDisturbState";
 import { BiometricOperations } from "./device-state/BiometricOperations";
 import type { BiometricEnrollment, BiometricEnrollmentState } from "./device-state/BiometricState";
 import { ClockOperations } from "./device-state/ClockOperations";
+import { createScreenLockOperations } from "./screenLock/ScreenLockOperations";
+import { createPowerOperations } from "./power/PowerOperations";
 import {
   DEFAULT_DEVICE_STATE_FIELDS,
   EMPTY_STATE_SELECTION_ERROR,
@@ -45,7 +52,10 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../models";
+import { getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
+import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { writeDeviceCameraPoster } from "./DeviceCameraPoster";
+import { AdbEmulatorSensorConsole, readEmulatorSensors } from "./EmulatorSensors";
 import type { QrPosterWriter } from "../../utils/qr/QrPosterWriter";
 import { ActionableError } from "../../models/ActionableError";
 import { defaultLocationRouteRegistry, LocationRouteRegistry } from "./LocationRoutePlayer";
@@ -117,8 +127,10 @@ export class DeviceState {
   private timer: Timer;
   private consoleFactory: EmulatorConsoleClientFactory;
   private routeRegistry: LocationRouteRegistry;
+  private deviceTraits: DeviceTraits;
   private readonly canWriteLocation: () => boolean;
   private readonly onLocationApplied?: () => void;
+  private readonly iosRunnerLocation?: IosRunnerLocationClient;
   private readonly cameraPosterQrWriter?: QrPosterWriter;
   private readonly cameraPosterFileExists?: (path: string) => boolean;
   private injectedNetworkFilterBridge?: NetworkFilterBridge;
@@ -138,8 +150,10 @@ export class DeviceState {
     simctl: () => this.simctl,
     routeRegistry: () => this.routeRegistry,
     consoleFactory: () => this.consoleFactory,
+    deviceTraits: () => this.deviceTraits,
     canWriteLocation: () => this.canWriteLocation(),
     onLocationApplied: () => this.onLocationApplied,
+    runnerLocation: () => this.iosRunnerLocation,
   });
 
   private readonly connectivity = new ConnectivityOperations({
@@ -159,8 +173,24 @@ export class DeviceState {
     simctl: () => this.simctl,
   });
 
+  private readonly screenLock: ReturnType<typeof createScreenLockOperations>;
+
+  private readonly power: ReturnType<typeof createPowerOperations>;
+
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
+    this.screenLock = createScreenLockOperations(
+      () => this.device,
+      () => this.adbFactory,
+      dependencies.screenLock,
+    );
+    this.power = createPowerOperations(
+      () => this.device,
+      () => this.adbFactory,
+      () => this.deviceTraits,
+      () => this.timer,
+      dependencies.power,
+    );
     this.clock = new ClockOperations(
       {
         device: () => this.device,
@@ -179,8 +209,10 @@ export class DeviceState {
     this.simctl = dependencies.simctl ?? null;
     this.consoleFactory = dependencies.consoleFactory ?? defaultEmulatorConsoleClientFactory;
     this.routeRegistry = dependencies.routeRegistry ?? defaultLocationRouteRegistry;
+    this.deviceTraits = dependencies.deviceTraits ?? defaultDeviceTraits;
     this.canWriteLocation = dependencies.canWriteLocation ?? (() => true);
     this.onLocationApplied = dependencies.onLocationApplied;
+    this.iosRunnerLocation = dependencies.iosRunnerLocation;
     this.injectedNetworkFilterBridge = dependencies.networkFilterBridge;
     this.iosAppNetworkRule = dependencies.iosAppNetworkRule;
   }
@@ -193,7 +225,15 @@ export class DeviceState {
 
   async getState(
     include: readonly DeviceStateField[] = DEFAULT_DEVICE_STATE_FIELDS,
+    signal: AbortSignal | undefined = getAbortSignal(),
   ): Promise<DeviceStateResult> {
+    signal?.throwIfAborted();
+    return runWithAbortSignal(signal, () =>
+      awaitWhileRequestIsLive(this.readState(include), signal),
+    );
+  }
+
+  private async readState(include: readonly DeviceStateField[]): Promise<DeviceStateResult> {
     // An empty selection would otherwise read nothing and report success.
     if (include.length === 0) {
       return {
@@ -243,6 +283,16 @@ export class DeviceState {
       ...(include.includes("networkCondition")
         ? { networkCondition: await this.readNetworkCondition() }
         : {}),
+      ...(include.includes("sensors")
+        ? {
+            sensors: await readEmulatorSensors(
+              this.device,
+              () => new AdbEmulatorSensorConsole(this.adbFactory.create(this.device)),
+            ),
+          }
+        : {}),
+      ...(include.includes("screenLock") ? { screenLock: await this.screenLock.read() } : {}),
+      ...(include.includes("power") ? { power: await this.power.read() } : {}),
     };
   }
 
@@ -332,6 +382,8 @@ export class DeviceState {
             }),
           }
         : {}),
+      ...(input.screenLock ? { screenLock: await this.screenLock.write(input.screenLock) } : {}),
+      ...(input.power ? { power: await this.power.write(input.power) } : {}),
     };
   }
 
@@ -347,8 +399,13 @@ export class DeviceState {
     return this.location.writeLocation(input);
   }
 
-  getBiometricEnrollmentState(): Promise<BiometricEnrollmentState> {
-    return this.biometric.getBiometricEnrollmentState();
+  getBiometricEnrollmentState(
+    signal: AbortSignal | undefined = getAbortSignal(),
+  ): Promise<BiometricEnrollmentState> {
+    signal?.throwIfAborted();
+    return runWithAbortSignal(signal, () =>
+      awaitWhileRequestIsLive(this.biometric.getBiometricEnrollmentState(), signal),
+    );
   }
 
   setBiometricEnrollmentState(enrollment: BiometricEnrollment): Promise<BiometricEnrollmentState> {

@@ -2,13 +2,18 @@ import { lazySessionReleasePool } from "./releaseSessionAndDevice";
 import { logger } from "../utils/logger";
 import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
 import { registerLocationRouteSessionCleanup } from "../features/utility/LocationRoutePlayer";
+import { registerStatusBarSessionCleanup } from "./statusBarSessionCleanup";
+import { registerKillProfileSessionCleanup } from "./killProfileSessionCleanup";
+import { registerEmulatorSensorSessionCleanup } from "./emulatorSensorSessionCleanup";
+import { registerDisplayProfileSessionCleanup } from "./displayProfileSessionCleanup";
+import { registerKeyboardProfileSessionCleanup } from "./keyboardProfileSessionCleanup";
+import { registerDeviceConditionSessionCleanup } from "./deviceConditionSessionCleanup";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
-import { executionTracker } from "../server/executionTracker";
+import { executionTracker } from "./executionTracker";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { announceSessionRelease } from "./announceSessionRelease";
-import { clearSessionAppearanceConfig } from "../server/appearanceManager";
-import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
+import { clearSessionAppearanceConfig } from "./appearanceManager";
 import {
   DefaultDeviceSettingsAccess,
   DeviceSettingDefaults,
@@ -20,21 +25,29 @@ import { DeviceSettingDefaultsRepository } from "../db/deviceSettingDefaultsRepo
 import {
   createOwnerlessNetworkStateAcquisitionCleanup,
   registerNetworkStateSessionCleanup,
-} from "../server/networkStateSessionCleanup";
-import { registerPerformanceMonitorSessionCleanup } from "../server/performanceMonitorSessionCleanup";
+} from "./networkStateSessionCleanup";
+import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSessionCleanup";
+import { registerAppLinksSessionCleanup } from "./appLinksSessionCleanup";
+import { registerScreenLockSessionCleanup } from "./screenLockSessionCleanup";
+import { registerPowerSessionCleanup } from "./powerSessionCleanup";
+import { registerProfilingSessionCleanup } from "./profilingSessionCleanup";
+import { registerSystemAlertSessionCleanup } from "./systemAlertSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   createRecorderTeardownRecoveryMarker,
   defaultRecordingSessionCleanupDeps,
   takeRecordingIdsFinalizedByRelease,
   registerRecordingSessionCleanup,
-} from "../server/recordingSessionCleanup";
+} from "./recordingSessionCleanup";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
-import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
+import {
+  NavigationGraphManager,
+  type NavigationGraphService,
+} from "../features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
-import { syncAppearanceForDevice } from "./AppearanceSyncScheduler";
+import type { DeviceReadiness } from "./readiness/DeviceReadiness";
+import { registerAppearanceClaimSync } from "./appearanceClaimSync";
 import type { Timer } from "../utils/SystemTimer";
 import type { SessionManager } from "./sessionManager";
 import type { DevicePool } from "./devicePool";
@@ -48,6 +61,8 @@ import type { ActiveSessionExecutionQuery } from "./sessionManager";
  * construction (servers, per-shutdown sets) are accessors so each callback sees the current value.
  */
 export interface DaemonSessionLifecycleHost {
+  markMutationUnrecorded(sessionUuid: string, reason: string): void;
+  deviceReadiness(): Pick<DeviceReadiness, "clearExplicitDevicePin">;
   deviceDataStreamServer(): {
     invalidateDeviceFrames(deviceId: string): void;
     invalidateInitialDeviceFrames(deviceId: string): void;
@@ -59,10 +74,10 @@ export interface DaemonSessionLifecycleHost {
   managedExecutionReowner(): Pick<ManagedExecutionReowner, "noteRecovering"> | undefined;
   devicePool(): Pick<DevicePool, "getDevice" | "getAllDevices" | "releaseDevice">;
   passiveWorkPolicy(): Pick<PassiveWorkPolicy, "allows">;
-  navigationGraphListenerManagers: WeakSet<NavigationGraphManager>;
+  navigationGraphListenerManagers: WeakSet<NavigationGraphService>;
   shutdownReleaseNotifications(): Set<string> | null;
   shutdownFallbackReleaseNotifications(): Set<string> | null;
-  setupNavigationGraphUpdateListener(manager: NavigationGraphManager): void;
+  setupNavigationGraphUpdateListener(manager: NavigationGraphService): void;
   reownRehydratedManagedExecutions(rehydrated: readonly string[]): Promise<void>;
   hasActiveSessionExecution(sessionId: string, query?: ActiveSessionExecutionQuery): boolean;
   latestSessionExecutionDeadlineMs(
@@ -77,6 +92,26 @@ export interface DaemonSessionLifecycleHost {
   ): void;
 }
 
+// Capture aliases before release removes the session and derived-label relationships.
+function captureNetworkGapMarker(
+  sessionManager: SessionManager,
+  host: Pick<DaemonSessionLifecycleHost, "markMutationUnrecorded">,
+  sessionId: string,
+): (reason: string) => void {
+  const ids = new Set(
+    [
+      sessionId,
+      sessionManager.ownershipSessionUuid(sessionId),
+      sessionManager.getBaseSessionOfDerivedLabel(sessionId),
+    ].filter((id) => id !== undefined),
+  );
+  return (reason) => {
+    for (const id of ids) {
+      host.markMutationUnrecorded(id, reason);
+    }
+  };
+}
+
 /**
  * Registers every SessionManager listener/setter the daemon needs for session-scoped cleanup,
  * in the order the daemon has always registered them (release listeners fire in that order).
@@ -87,8 +122,22 @@ export function wireSessionLifecycle(
   host: DaemonSessionLifecycleHost,
 ): void {
   registerLocationRouteSessionCleanup(sessionManager);
-  registerNetworkStateSessionCleanup(sessionManager);
+  registerNetworkStateSessionCleanup(sessionManager, {
+    timer,
+    gapMarkerFor: (sessionId) => captureNetworkGapMarker(sessionManager, host, sessionId),
+  });
+  registerStatusBarSessionCleanup(sessionManager);
+  registerAppLinksSessionCleanup(sessionManager);
+  registerKillProfileSessionCleanup(sessionManager);
+  registerEmulatorSensorSessionCleanup(sessionManager);
+  registerDisplayProfileSessionCleanup(sessionManager);
+  registerKeyboardProfileSessionCleanup(sessionManager);
+  registerDeviceConditionSessionCleanup(sessionManager);
   registerPerformanceMonitorSessionCleanup(sessionManager);
+  registerScreenLockSessionCleanup(sessionManager);
+  registerPowerSessionCleanup(sessionManager);
+  registerProfilingSessionCleanup(sessionManager);
+  registerSystemAlertSessionCleanup(sessionManager);
   registerRecordingSessionCleanup(sessionManager, {
     ...defaultRecordingSessionCleanupDeps,
     markDeviceNeedsRecorderRecovery: createRecorderTeardownRecoveryMarker(sessionManager),
@@ -158,19 +207,9 @@ export function wireSessionLifecycle(
     host.setupNavigationGraphUpdateListener(
       NavigationGraphManager.getInstanceForSession(session.sessionId),
     );
-    if (host.passiveWorkPolicy().allows("android", "appearance-sync", session.assignedDevice)) {
-      const device = host.devicePool().getDevice(session.assignedDevice);
-      if (device?.platform === "android") {
-        void syncAppearanceForDevice({
-          deviceId: device.id,
-          name: device.id,
-          platform: "android",
-          incarnation: device.incarnation,
-          sessionKey: resolveAppearanceSessionKey(session.sessionId),
-        });
-      }
-    }
   });
+  // The device a session is created on or rebound to takes that session's appearance (#11363).
+  registerAppearanceClaimSync(sessionManager, host);
   // Register centralized cleanup for session-scoped state
   sessionManager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, options) => {
     // A terminal upgrade of an already-cleaned-up release must not touch the device's next
@@ -178,7 +217,7 @@ export function wireSessionLifecycle(
     if (options?.upgradeOnly) {
       return;
     }
-    DeviceReadiness.getInstance().clearExplicitDevicePin(deviceId);
+    host.deviceReadiness().clearExplicitDevicePin(deviceId);
     // Only this session's own manager: the lookup with fallback returns the global manager for
     // an already-released session, and dropping it would silence its listeners (#10825).
     const navigationManager = NavigationGraphManager.findInstanceForSession(sessionId);
@@ -207,7 +246,7 @@ export function wireSessionLifecycle(
   // the old device and must not follow it to the new one.
   sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => {
     host.socketServer()?.liftStrokesHeldByOn(sessionId, deviceId);
-    DeviceReadiness.getInstance().clearExplicitDevicePin(deviceId);
+    host.deviceReadiness().clearExplicitDevicePin(deviceId);
     const previousNavigationManager = NavigationGraphManager.getInstanceForSession(sessionId);
     NavigationGraphManager.resetSession(sessionId);
     host.navigationGraphListenerManagers.delete(previousNavigationManager);

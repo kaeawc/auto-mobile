@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
-import { Daemon } from "../../src/daemon/daemon";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/wire/constants";
+import { DaemonLifecycleHarness } from "./helpers/DaemonLifecycleHarness";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {
   OWNER_DISCONNECT_GRACE_MS,
@@ -11,7 +11,7 @@ import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import type { BootedDevice } from "../../src/models";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
@@ -29,17 +29,11 @@ const DERIVED = `${BASE}:B`;
 const OWNER = "last-call-owner";
 const TOOL = "__base_and_label_last_control__";
 
-/** Reach the daemon's own end subscription without starting sockets or device discovery. */
-interface DaemonToolCallEndWiring {
-  subscribeToolCallEndActivity(): void;
-  stopSessionTimers(): void;
-}
-
 describe("base call ends retry deferred release and all orders finish with nothing waiting (#11381)", () => {
   let restoreHermeticServer: () => void;
   let fixture: McpTestFixture;
   let timer: FakeTimer;
-  let daemon: Daemon;
+  let daemon: DaemonLifecycleHarness;
   let releases: Array<{ sessionId: string; reason: string }>;
   let ends: Array<{ uuids: readonly string[]; admitted: boolean }>;
   let unsubscribeEnds: () => void;
@@ -62,7 +56,7 @@ describe("base call ends retry deferred release and all orders finish with nothi
     resetDbWriteBarrier();
     restoreHermeticServer = installHermeticServerFixture();
     timer = new FakeTimer();
-    daemon = new Daemon(
+    daemon = new DaemonLifecycleHarness(
       {},
       {
         installedAppsRepository: new FakeInstalledAppsRepository(),
@@ -76,7 +70,7 @@ describe("base call ends retry deferred release and all orders finish with nothi
     manager.onSessionRelease((sessionId, _deviceId, reason) => {
       releases.push({ sessionId, reason });
     });
-    (daemon as unknown as DaemonToolCallEndWiring).subscribeToolCallEndActivity();
+    daemon.subscribeToolCallEnd();
     ends = [];
     unsubscribeEnds = executionTracker.onSessionExecutionEnded((uuids, { admitted }) =>
       ends.push({ uuids, admitted }),
@@ -84,7 +78,7 @@ describe("base call ends retry deferred release and all orders finish with nothi
     const pool = daemon.getDevicePool();
     const deviceManager = new FakeDeviceManager();
     deviceManager.bootedDevices = [PRIMARY, LABELLED];
-    Object.assign(pool, { deviceManager });
+    pool.testHooks.deviceManager = deviceManager;
     await pool.initializeWithDevices([PRIMARY, LABELLED]);
     await pool.bindOrReuseDeviceSession({
       sessionId: BASE,
@@ -120,7 +114,7 @@ describe("base call ends retry deferred release and all orders finish with nothi
     await fixture.teardown();
     ToolRegistry.unregister(TOOL);
     unsubscribeEnds();
-    (daemon as unknown as DaemonToolCallEndWiring).stopSessionTimers();
+    daemon.stopTimers();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }

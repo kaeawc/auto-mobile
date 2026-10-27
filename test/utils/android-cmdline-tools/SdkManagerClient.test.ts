@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import { join } from "node:path";
 import {
   readSdkManagerVersion,
@@ -70,7 +69,7 @@ function createClient(overrides: Partial<ConstructorParameters<typeof SdkManager
   const client = new SdkManagerClient({
     spawn: (command, args, options) => {
       spawns.push({ command, args, options });
-      return child as unknown as ChildProcess;
+      return child;
     },
     existsSync: () => true,
     logger: { info: () => {}, warn: () => {}, error: () => {} },

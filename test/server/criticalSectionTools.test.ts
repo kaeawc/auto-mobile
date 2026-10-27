@@ -1,5 +1,6 @@
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
-import { createStructuredToolResponse, getStructuredPayload } from "../../src/utils/toolUtils";
+import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { toolJson, toolPayload } from "../helpers/toolResponse";
 import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { isolateToolRegistry, preserveToolRegistry } from "../helpers/withTemporaryTool";
@@ -8,11 +9,8 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { ActionableError, type BootedDevice } from "../../src/models";
-import {
-  DeviceLostError,
-  isDeviceLostError,
-  rememberDeviceLossAbort,
-} from "../../src/models/DeviceLostError";
+import { DeviceLostError, isDeviceLostError } from "../../src/models/DeviceLostError";
+import { rememberDeviceLossAbort } from "../../src/utils/deviceLossAbortRegistry";
 import { z } from "zod/v4";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { logger } from "../../src/utils/logger";
@@ -414,7 +412,7 @@ describe("criticalSection tool", () => {
         { lock: "envelope-verdict", deviceCount: 1, steps },
       );
       if (fixture.success) {
-        expect(getStructuredPayload(await execution)?.success).toBe(true);
+        expect(toolPayload(await execution)?.success).toBe(true);
       } else {
         await expect(execution).rejects.toThrow(fixture.error);
       }
@@ -504,7 +502,7 @@ describe("criticalSection tool", () => {
         ToolRegistry.register(tool, "wait timeout", z.object({}).passthrough(), async () =>
           createStructuredToolResponse({ success: true, awaitTimeout: true, awaitDuration: 5000 }),
         );
-        const result = getStructuredPayload(await runSteps(tool, true, true));
+        const result = toolPayload(await runSteps(tool, true, true));
         expect(result).toMatchObject({
           success: true,
           executedSteps: 2,
@@ -528,7 +526,7 @@ describe("criticalSection tool", () => {
               timedOut: false,
             }),
           );
-          const result = getStructuredPayload(await runSteps(tool, false, true));
+          const result = toolPayload(await runSteps(tool, false, true));
           expect(result).toMatchObject({ success: true, executedSteps: 2 });
           expect(result?.warnings).toBeUndefined();
           expect(nextStep).toHaveBeenCalledTimes(1);
@@ -565,7 +563,7 @@ describe("criticalSection tool", () => {
     const parsed = tool!.schema.parse(validParams);
     expect(parsed.lock).toBe("test-lock");
     expect(parsed.deviceCount).toBe(2);
-    expect(parsed.steps.length).toBe(1);
+    expect(parsed.steps).toHaveLength(1);
   });
 
   test("rejects invalid schema - missing required fields", () => {
@@ -739,9 +737,7 @@ describe("criticalSection tool", () => {
     const response = await tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined);
 
     // Parse the JSON tool response
-    expect(response.content).toBeDefined();
-    expect(response.content[0].type).toBe("text");
-    const result = JSON.parse(response.content[0].text);
+    const result = toolJson(response);
 
     expect(result.success).toBe(true);
     expect(result.executedSteps).toBe(3);
@@ -751,7 +747,9 @@ describe("criticalSection tool", () => {
   test("does not apply public tool selection to a nested critical-section step", async () => {
     const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
-    const nestedHandler = mock(async () => ({ success: true }));
+    const nestedHandler = mock(async (_args: { device: string; sessionUuid?: string }) => ({
+      success: true,
+    }));
     ToolRegistry.register(
       "clipboard",
       "clipboard",
@@ -797,7 +795,9 @@ describe("criticalSection tool", () => {
     // the derived session (previously it collapsed to the base and was denied).
     const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
-    const nestedHandler = mock(async () => ({ success: true }));
+    const nestedHandler = mock(async (_args: { device: string; sessionUuid?: string }) => ({
+      success: true,
+    }));
     ToolRegistry.register(
       "clipboard",
       "clipboard",
@@ -848,8 +848,7 @@ describe("criticalSection tool", () => {
       );
 
       expect(nestedHandler).toHaveBeenCalledTimes(1);
-      const nestedArgs = nestedHandler.mock.calls[0][0] as { sessionUuid?: string };
-      expect(nestedArgs.sessionUuid).toBe("base-session:B");
+      expect(nestedHandler.mock.calls[0]?.[0].sessionUuid).toBe("base-session:B");
     } finally {
       restorePipelineOverrides();
     }
@@ -860,7 +859,9 @@ describe("criticalSection tool", () => {
     // capability (issue #4611 Gap B, the "both narrow" direction).
     const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
-    const nestedHandler = mock(async () => ({ success: true }));
+    const nestedHandler = mock(async (_args: { device: string; sessionUuid?: string }) => ({
+      success: true,
+    }));
     ToolRegistry.register(
       "clipboard",
       "clipboard",
@@ -961,8 +962,7 @@ describe("criticalSection tool", () => {
 
     const response = await tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined);
 
-    expect(response.content).toBeDefined();
-    const result = JSON.parse(response.content[0].text);
+    const result = toolJson(response);
     expect(result.success).toBe(true);
     expect(result.executedSteps).toBe(1);
     expect(executionLog).toEqual(["A:filled"]);
@@ -1054,7 +1054,7 @@ describe("criticalSection tool", () => {
 
     const response = await tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined);
 
-    const result = JSON.parse(response.content[0].text);
+    const result = toolJson(response);
     expect(result.success).toBe(true);
     expect(result.executedSteps).toBe(1);
     expect(executionLog).toEqual(["A:synced"]);
@@ -1322,7 +1322,7 @@ describe("criticalSection tool", () => {
         const cleanupSpy = spyOn(coordinator, "forceCleanup");
         try {
           const response = await runSteps(true);
-          expect(JSON.parse(response.content[0].text)).toEqual({
+          expect(toolJson(response)).toEqual({
             success: true,
             lock: "optional-lock",
             deviceId: "optional-device",
@@ -1585,7 +1585,7 @@ describe("criticalSection tool", () => {
           ],
         }),
       );
-      expect(getStructuredPayload<Record<string, unknown>>(result)?.warnings).toEqual([
+      expect(toolPayload(result)?.warnings).toEqual([
         "step 1 (answeredFailure): note",
         "step 1 (answeredFailure): optional step failed; skipped: optional failure",
       ]);
@@ -1638,7 +1638,7 @@ describe("criticalSection tool", () => {
       };
 
       const response = await tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined);
-      const result = JSON.parse(response.content[0].text);
+      const result = toolJson(response);
 
       expect(result.success).toBe(true);
       expect(result.executedSteps).toBe(2);
@@ -1669,7 +1669,7 @@ describe("criticalSection tool", () => {
       undefined,
       undefined,
     );
-    const result = JSON.parse(response.content[0].text);
+    const result = toolJson(response);
 
     expect(result.success).toBe(true);
     expect(result.warnings).toBeUndefined();

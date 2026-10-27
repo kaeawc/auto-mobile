@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { beforeAll, describe, expect, test } from "bun:test";
 import beforeFocusTap from "../../fixtures/ios/nested-selection/cart-a-item-42-before-focus-tap.json";
 import focusedAfterShift from "../../fixtures/ios/nested-selection/cart-a-item-42-focused-keyboard-shift.json";
@@ -98,6 +99,10 @@ async function focusOnIos(
     settlesPostTapChange: false,
     verifiesRefreshedDisplay: false,
     promotesClickableAncestor: false,
+    settlesFocusChangeAfterTap: true,
+    rethrowsKeyboardOcclusion: false,
+    applyRefreshedObservationRotation: (...args) =>
+      iosClip.applyRefreshedObservationRotation(...args),
     longPressDurationMs: 1000,
   };
   const device: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "sim" };
@@ -125,8 +130,22 @@ async function focusOnIos(
       taps.push([x, y]);
     },
     observedInteraction: async (action: (observation: ObserveResult) => Promise<object>) => ({
-      ...(await action(recordObservationRead({ viewHierarchy: preTap, screenSize }))),
-      observation: { viewHierarchy: firstPostTapRead, screenSize },
+      ...(await action(
+        recordObservationRead(
+          buildObserveResult({
+            viewHierarchy: preTap,
+            screenSize,
+            updatedAt: 0,
+            systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+          }),
+        ),
+      )),
+      observation: buildObserveResult({
+        viewHierarchy: firstPostTapRead,
+        screenSize,
+        updatedAt: 0,
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      }),
     }),
     prepareSelectionCapture: async () => null,
     deriveTapEffectAfterPostTapObservation: async (_previous: unknown, current: ObserveResult) => ({

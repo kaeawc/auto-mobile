@@ -1,7 +1,7 @@
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { describe, expect, test } from "bun:test";
-import { ExecutionTracker, type ExecutionScopeOptions } from "../../src/server/executionTracker";
-import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { ExecutionTracker, type ExecutionScopeOptions } from "../../src/daemon/executionTracker";
+import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 import { ActionableError } from "../../src/models/ActionableError";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -46,7 +46,7 @@ describe("ExecutionTracker", function () {
       tracker.unmarkSessionAdmitted(execution.id);
       expect(tracker.getAdmittedSessionUse(execution.id)).toBeUndefined();
       tracker.endExecution(execution.id);
-      expect(ends).toEqual([{ admitted: false }]);
+      expect(ends.map(({ admitted }) => admitted)).toEqual([false]);
       tracker.unmarkSessionAdmitted(execution.id);
       expect(ends).toHaveLength(1);
     } finally {

@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   getObserveCacheStore,
@@ -41,11 +42,14 @@ describe("ObserveCacheRegistry", function () {
   test("swapped store is observable via the registry getter", async function () {
     const fake = new FakeObserveCacheStore();
     setObserveCacheStore(fake);
-    await getObserveCacheStore().put("device-x", {
-      updatedAt: "now",
-      screenSize: { width: 1, height: 2 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    });
+    await getObserveCacheStore().put(
+      "device-x",
+      buildObserveResult({
+        updatedAt: "now",
+        screenSize: { width: 1, height: 2 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      }),
+    );
     expect(fake.getEntryCount()).toBe(1);
     expect(getObserveCacheStore().getRecentInMemoryForDevice("device-x")).toBeDefined();
   });

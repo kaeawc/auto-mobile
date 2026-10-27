@@ -1,13 +1,13 @@
 import { makePool } from "../helpers/makePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { afterEach, describe, expect, test } from "bun:test";
-import { DEVICE_OWNED_BY_OTHER_DAEMON_CODE } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DEVICE_OWNED_BY_OTHER_DAEMON_CODE } from "../../src/models/deviceAcquisitionRefusals";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import type { DeviceSession } from "../../src/db/types";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -62,12 +62,21 @@ function persistedRow(): DeviceSession {
     daemon_session_id: "daemon-a-before-restart",
     created_at_ms: 1,
     last_used_at_ms: 20,
+    activity_seq: 20,
     expires_at_ms: 30,
     released_at_ms: 25,
     release_reason: "daemon-restart",
     session_timeout_ms: 10,
     heartbeat_timeout_ms: 5,
+    heartbeat_timeout_source: null,
     has_received_heartbeat: 1,
+    liveness_policy: null,
+    pre_cli_heartbeat_timeout_ms: null,
+    pre_cli_heartbeat_timeout_source: null,
+    pre_cli_session_timeout_ms: null,
+    liveness_owner_token: null,
+    liveness_contract_generation: 0,
+    stable_identity_generation: 0,
     created_at: "2026-10-09T00:00:00.000Z",
     updated_at: "2026-10-09T00:00:00.000Z",
   };
@@ -96,7 +105,7 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
           return persisted;
         },
         async upsertActiveSession(session) {
-          upserts.push(session.session_uuid);
+          upserts.push(session.sessionUuid);
         },
         async recordActivity() {},
         async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {

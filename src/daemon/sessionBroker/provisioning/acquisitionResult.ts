@@ -55,8 +55,8 @@ export interface BindingBudgetEvidence {
     uncounted?: true;
     /** Inventory name of the device (orphans), when it differs from `stableDeviceId`. */
     name?: string;
-    /** Why an `orphaned` device is charged: it is running, or its power state is unknown. */
-    orphanState?: "running" | "power_unknown";
+    /** Why an `orphaned` device is charged: it is running, or (iOS) booting or shutting down. */
+    orphanState?: "running" | "transitioning";
   }>;
   /** Charged devices beyond the bounded `charged` list; `usage.total` is always the full count. */
   chargedOmitted?: number;
@@ -73,12 +73,21 @@ export interface BindingBudgetEvidence {
 }
 
 export interface BindingsFailure {
+  /** Internal evidence for prepare-path readiness retry; never included in broker receipts. */
+  retainedDevice?: { platform: "android" | "ios"; stableId: string; name: string };
+  provision?: { code: string; retryable: boolean };
   code: string;
   retryable: boolean;
   message: string;
   nextAction: string;
   /** Boot-capacity details of a `capacity_exhausted` binding failure (#11390). */
-  capacity?: { limit: number; booted: number; retryAfterMs: number; externalDevices?: string[] };
+  capacity?: {
+    limit: number;
+    booted: number;
+    retryAfterMs: number;
+    externalDevices?: string[];
+    heldDevices?: string[];
+  };
   /** Total-resource refusal evidence; retryable, without a bounded retry delay. */
   budget?: BindingBudgetEvidence;
 }

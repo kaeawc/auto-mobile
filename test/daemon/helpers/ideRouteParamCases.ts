@@ -187,16 +187,16 @@ export async function runIdeParamCase(testCase: IdeParamCase): Promise<string> {
     "/fake/ide-params.sock",
     createFakeDaemonState(),
     new FakeTimer(),
-  );
+  ).testHooks.ide;
   const past = (...seen: unknown[]): never => {
     throw new Error(`PAST_CHECK ${JSON.stringify(seen)}`);
   };
-  server["requireFeatureFlagService"] = () => ({}) as never;
-  server["assertBrokerConnectionHostMutation"] = (_session, action) => past(action);
-  server["assertBrokerConnectionControl"] = (_session, action, options) => past(action, options);
-  server["resolveIdeActionDevices"] = (async (platform: unknown, deviceId: unknown) =>
+  server.requireFeatureFlagService = () => ({}) as never;
+  server.assertBrokerConnectionHostMutation = (_session, action) => past(action);
+  server.assertBrokerConnectionControl = (_session, action, options) => past(action, options);
+  server.resolveIdeActionDevices = (async (platform: unknown, deviceId: unknown) =>
     past(platform, deviceId)) as never;
-  server["assertSocketToolEnabled"] = async (deviceId, toolName) => past(deviceId, toolName);
+  server.assertSocketToolEnabled = async (deviceId, toolName) => past(deviceId, toolName);
   // The unit-test registry is empty; one tool name stands in for "user configurable".
   const configurable = spyOn(ToolRegistry, "isUserConfigurableTool").mockImplementation(
     (name: string) => name === "tapOn",
@@ -208,7 +208,7 @@ export async function runIdeParamCase(testCase: IdeParamCase): Promise<string> {
     params: testCase.params,
   };
   try {
-    await server["handleIdeSocketRequest"](request, "socket-session");
+    await server.handleIdeSocketRequest(request, "socket-session");
     return "RESOLVED";
   } catch (error) {
     return (error as Error).message;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { runAsBindingReconciler } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { computeBindingScopeKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";

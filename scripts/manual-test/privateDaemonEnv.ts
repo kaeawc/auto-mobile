@@ -8,7 +8,7 @@ export { STATE_PATH_VARIABLES } from "./productPathEnv";
 import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { DEFAULT_DAEMON_PORT, resolveDaemonStatePath } from "../../src/daemon/constants";
+import { DEFAULT_DAEMON_PORT, resolveDaemonStatePath } from "../../src/daemon/wire/constants";
 import { isDaemonNamespaceIsolated } from "../../src/daemon/sharedNamespaceGuard";
 import { resolveAuxSocketDir } from "../../src/daemon/socketServer/SocketServerTypes";
 import { resolveDatabasePathFromEnvironment } from "../../src/db/database";
@@ -16,6 +16,7 @@ import { SESSION_BROKER_HOST_CONFIG_ENV } from "../../src/daemon/sessionBroker/h
 import { SESSION_CONFIG_ENV } from "../../src/devices/sessionConfig";
 import { shellQuote } from "../../src/utils/shellQuote";
 import { errorMessage } from "../../src/utils/describeUnknownError";
+import { consolePortFromSerial } from "../../src/utils/android-cmdline-tools/EmulatorConsoleClient";
 import {
   getAdbServerScopedAutoMobileDir,
   getSharedAutoMobileDir,
@@ -67,6 +68,7 @@ export const DERIVED_PATH_VARIABLES: readonly string[] = [
   "AUTOMOBILE_DAEMON_SOCKET_PATH",
   "AUTOMOBILE_DAEMON_PID_FILE_PATH",
   "AUTOMOBILE_DAEMON_LOCK_FILE_PATH",
+  "AUTOMOBILE_DAEMON_TOKEN_FILE_PATH",
   "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH",
 ];
 const INHERITED_PATH_OVERRIDES = ["AUTOMOBILE_DB_PATH", "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH"];
@@ -227,6 +229,23 @@ function perDaemonOptionsRefusal(options: PrivateDaemonBatchOptions): string | u
   }
   return daemonArgsRefusal(options.daemonArgs ?? []);
 }
+function protectedEmulatorPortEnv(
+  protectedDevices: readonly string[] = [],
+): Record<string, string> {
+  if (protectedDevices.length === 0) {
+    return {};
+  }
+  const ports = new Set([5554]);
+  for (const selector of protectedDevices) {
+    const port = consolePortFromSerial(selector);
+    if (port !== null) {
+      ports.add(port);
+    }
+  }
+  return {
+    AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS: [...ports].sort((a, b) => a - b).join(","),
+  };
+}
 export function derivePrivateDaemonBatch(options: PrivateDaemonBatchOptions): PrivateDaemonSpec[] {
   // Invalid counts must be refusals, never an unbounded allocation.
   if (!Number.isInteger(options.count) || options.count < 1 || options.count > 8) {
@@ -245,6 +264,7 @@ export function derivePrivateDaemonBatch(options: PrivateDaemonBatchOptions): Pr
           (row) => [row.name, join(dir, row.subpath!)],
         ),
       ),
+      ...protectedEmulatorPortEnv(options.protectedDevices),
       ...options.extraEnv,
       ...options.daemonEnv?.[String(index)],
       AUTOMOBILE_DATA_DIR: join(dir, "data"),
@@ -259,6 +279,7 @@ export function derivePrivateDaemonBatch(options: PrivateDaemonBatchOptions): Pr
       AUTOMOBILE_DAEMON_SOCKET_PATH: join(auxSocketDir, "d.sock"),
       AUTOMOBILE_DAEMON_PID_FILE_PATH: join(dir, "daemon.pid"),
       AUTOMOBILE_DAEMON_LOCK_FILE_PATH: join(dir, "daemon.lock"),
+      AUTOMOBILE_DAEMON_TOKEN_FILE_PATH: join(dir, "daemon.token"),
       AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH: join(dir, "launch.log"),
       AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: String(options.orphanIdleMs ?? 0),
       AUTOMOBILE_APPEARANCE_SYNC: "off",

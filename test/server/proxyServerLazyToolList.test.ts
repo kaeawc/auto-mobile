@@ -9,8 +9,9 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { registerMcpTools } from "../../src/server";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createToolCatalogResourceHandler } from "../../src/server/toolCatalogResource";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { TOOL_ANNOTATIONS } from "../../src/server/toolAnnotations";
 
 isolateToolRegistry();
 
@@ -22,6 +23,9 @@ isolateToolRegistry();
 let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
 
 beforeAll(async () => {
+  // Issue #14016: JUnit excludes beforeAll. Warm registration and discovery here,
+  // then clear the registry so each test still registers its own tool surface.
+  registerMcpTools(false);
   const availabilitySpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
   const daemonManager = new FakeDaemonManager();
   daemonManager.statusResult = {
@@ -41,12 +45,16 @@ beforeAll(async () => {
   try {
     await server.connect(serverTransport);
     await client.connect(clientTransport);
+    await client.listTools();
+    getStaticToolDefinitions();
+    ToolRegistry.getAllTools({ includeUnavailable: true });
     await proxy.callTool("observe", {});
   } finally {
     await client.close();
     await server.close();
     await proxy.close();
     availabilitySpy.mockRestore();
+    ToolRegistry.clearTools();
   }
 });
 
@@ -93,6 +101,9 @@ describe("proxy server lazy tools/list", () => {
         .map((tool) => tool.name)
         .sort();
       expect(result.tools.map((tool) => tool.name).sort()).toEqual(staticNames);
+      for (const tool of result.tools) {
+        expect(tool).toMatchObject(TOOL_ANNOTATIONS[tool.name]);
+      }
       expect(proxy.isConnected()).toBe(false);
       expect(fakeClient.isConnected()).toBe(false);
       expect(isAvailableProbe).not.toHaveBeenCalled();

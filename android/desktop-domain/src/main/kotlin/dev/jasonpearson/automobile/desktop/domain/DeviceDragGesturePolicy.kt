@@ -99,20 +99,16 @@ public object DeviceDragGesturePolicy {
   /**
    * Decide whether a drag should become a swipe.
    *
-   * [coordinateSpace] and [nativeScale] must come from the snapshot used to map both endpoints.
-   * Missing canonical-pixel scale metadata fails closed. [gestureDurationMs] is how long the host
-   * pointer was down for this gesture; when supplied it sets the swipe's velocity (see
-   * [swipeDurationMs]), otherwise a fixed [SWIPE_DURATION_MS] is used.
+   * [DeviceDragGesture.coordinateSpace] and [DeviceDragGesture.nativeScale] must come from the
+   * snapshot used to map both endpoints. Missing canonical-pixel scale metadata fails closed.
+   * [DeviceDragGesture.gestureDurationMs] is how long the host pointer was down for this gesture;
+   * when supplied it sets the swipe's velocity (see [swipeDurationMs]), otherwise a fixed
+   * [SWIPE_DURATION_MS] is used.
    */
-  public fun evaluate(
-    start: DevicePoint,
-    end: DevicePoint,
-    deviceWidth: Int,
-    deviceHeight: Int,
-    coordinateSpace: CoordinateSpace? = null,
-    nativeScale: Double? = null,
-    gestureDurationMs: Int? = null,
-  ): DeviceDragDecision {
+  public fun evaluate(spec: DeviceDragGesture): DeviceDragDecision {
+    val (start, end, deviceWidth, deviceHeight, coordinateSpace, nativeScale, gestureDurationMs) =
+      spec
+
     if (deviceWidth <= 0 || deviceHeight <= 0) {
       return DeviceDragDecision.Ignored(DeviceDragRejection.NoAddressableScreen)
     }
@@ -131,3 +127,14 @@ public object DeviceDragGesturePolicy {
     )
   }
 }
+
+/** Inputs for [DeviceDragGesturePolicy.evaluate]. */
+public data class DeviceDragGesture(
+  val start: DevicePoint,
+  val end: DevicePoint,
+  val deviceWidth: Int,
+  val deviceHeight: Int,
+  val coordinateSpace: CoordinateSpace? = null,
+  val nativeScale: Double? = null,
+  val gestureDurationMs: Int? = null,
+)

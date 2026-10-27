@@ -11,8 +11,11 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonPrimitive
 
-const val MAX_PROTOTYPE_CHECK_VALUE_LENGTH = 4096
+val MAX_PROTOTYPE_CHECK_VALUE_LENGTH =
+  PrototypeSpecContract.limits.getValue("MAX_PROTOTYPE_CHECK_VALUE_LENGTH").jsonPrimitive.int
 
 data class PrototypeCheckEvaluation(val valid: Boolean, val firstFailingMessage: String? = null)
 
@@ -20,10 +23,6 @@ data class PrototypeCheckEvaluation(val valid: Boolean, val firstFailingMessage:
 object PrototypeChecks {
   // ECMAScript whitespace for required and formats; portable pattern s is ASCII instead.
   // Keep these as literals so the source-level ICU guard can inspect each complete pattern.
-  private val blank =
-    Pattern.compile(
-      "[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*",
-    )
   private val formats =
     mapOf(
       PrototypeCheckFormat.EMAIL to
@@ -70,18 +69,20 @@ object PrototypeChecks {
       "switch" -> value?.isString == false && value.booleanOrNull == true
       "slider",
       "timePicker" -> value?.isString == false && value.doubleOrNull?.isFinite() == true
-      else -> value?.isString == true && !blank.matcher(value.content).matches()
+      else ->
+        value?.isString == true && !PrototypeSpecContract.blankTextPattern.matches(value.content)
     }
+
+  private fun isAbsent(value: JsonElement?, primitive: JsonPrimitive?): Boolean =
+    value == null || value == JsonNull || isEmptyText(primitive)
+
+  private fun isEmptyText(value: JsonPrimitive?): Boolean =
+    value?.isString == true && value.content.isEmpty()
 
   private fun passes(value: JsonElement?, check: PrototypeCheck, nodeType: String): Boolean {
     val primitive = value as? JsonPrimitive
     if (check is PrototypeCheck.Required) return required(primitive, nodeType)
-    if (
-      value == null ||
-        value == JsonNull ||
-        (primitive?.isString == true && primitive.content.isEmpty())
-    )
-      return true
+    if (value == null || isAbsent(value, primitive)) return true
     val text = primitive?.takeIf { it.isString }?.content.orEmpty()
     return when (check) {
       is PrototypeCheck.Required -> required(primitive, nodeType)
@@ -98,27 +99,34 @@ object PrototypeChecks {
 
   private fun numeric(value: JsonElement, nodeType: String): Double? {
     val primitive = value as? JsonPrimitive ?: return null
-    if (nodeType == "datePicker" && primitive.isString) {
-      return try {
-        // Date.parse normalizes overflow days in a valid month; reproduce that JS behavior.
-        val parts = primitive.content.split('-')
-        if (parts.size != 3 || parts[0].length != 4 || parts[1].length != 2 || parts[2].length != 2)
-          return null
-        if (parts.any { part -> part.any { it !in '0'..'9' } }) return null
-        val year = parts[0].toIntOrNull() ?: return null
-        val month = parts[1].toIntOrNull() ?: return null
-        val day = parts[2].toIntOrNull() ?: return null
-        if (month !in 1..12 || day !in 1..31) return null
-        LocalDate.of(year, month, 1)
-          .plusDays((day - 1).toLong())
-          .atStartOfDay()
-          .toInstant(ZoneOffset.UTC)
-          .toEpochMilli()
-          .toDouble()
-      } catch (_: DateTimeException) {
-        null
-      }
-    }
+    if (nodeType == "datePicker" && primitive.isString)
+      return PrototypeCheckDate.numeric(primitive.content)
     return primitive.takeIf { !it.isString }?.doubleOrNull?.takeIf { it.isFinite() }
   }
+}
+
+private object PrototypeCheckDate {
+  fun numeric(text: String): Double? {
+    return try {
+      // Date.parse normalizes overflow days in a valid month; reproduce that JS behavior.
+      val parts = text.split('-')
+      if (!hasDateParts(parts)) return null
+      if (parts.any { part -> part.any { it !in '0'..'9' } }) return null
+      val year = parts[0].toIntOrNull() ?: return null
+      val month = parts[1].toIntOrNull() ?: return null
+      val day = parts[2].toIntOrNull() ?: return null
+      if (month !in 1..12 || day !in 1..31) return null
+      LocalDate.of(year, month, 1)
+        .plusDays((day - 1).toLong())
+        .atStartOfDay()
+        .toInstant(ZoneOffset.UTC)
+        .toEpochMilli()
+        .toDouble()
+    } catch (_: DateTimeException) {
+      null
+    }
+  }
+
+  private fun hasDateParts(parts: List<String>): Boolean =
+    parts.map { it.length } == listOf(4, 2, 2)
 }

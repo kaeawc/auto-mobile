@@ -51,6 +51,32 @@ Manual overrides (optional):
 - `AUTOMOBILE_IOS_SKIP_XCTESTSERVICE_APP_HASH` (skip installed-app hash verification)
 - `AUTOMOBILE_XCTESTSERVICE_APP_HASH` or `AUTOMOBILE_XCTESTSERVICE_APP_HASH_DEVICE` (expected app bundle hash override)
 
+### Embedded prototype view
+
+`AutoMobilePrototypeView` in `prototype-agent` presents a spec inside an app without an AutoMobile server.
+Storage defaults to `.none`, matching Android: values last only for that presentation, even when the spec
+has a `storage` block. Pass `.fileBacked` or `.directory(url)` explicitly to persist the spec's listed keys.
+Changes to spec, asset content, or storage replace the presentation. Updating callbacks or the network
+configuration preserves its state; subsequent requests use the updated clients, while requests already
+started keep their original client. Callbacks run on the main actor; `PrototypeEvent` is `Sendable` and
+exposes its semantic category as `kind`. An authored emit named `change` remains `.emitted`.
+
+The `public` surface is pinned by `ios/prototype-agent/api/AutoMobilePrototype.api`, checked by
+`PrototypePublicAPITests` in `swift test`; an intended change regenerates it with
+`UPDATE_PROTOTYPE_API=1 swift test --filter PrototypePublicAPITests` (run from `ios/prototype-agent`).
+
+### iOS ProtoViewer
+
+The global network switch defaults off, cancels in-flight requests on revocation, and drops stale
+responses across off/on cycles. Local-network permission denial turns it off and explains how to
+allow ProtoViewer in Settings before re-enabling it.
+
+`ios/prototype-agent/ProtoViewer/` contains the imported-prototype library app. Build its dev-signed
+simulator app with `bash scripts/ios/protoviewer-build.sh scratch/protoviewer`. The global "Allow network
+for imported prototypes" switch defaults off; enabling it uses the pinned Network.framework transport.
+The dev build permits cleartext through `PROTOVIEWER_ALLOW_CLEARTEXT`; release builds must omit the flag.
+Its Info.plist has no ATS exception.
+
 ### XCTestRunner
 
 **Path**: `ios/XCTestRunner/`

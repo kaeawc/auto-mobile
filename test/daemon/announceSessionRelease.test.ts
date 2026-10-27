@@ -4,7 +4,7 @@ import {
   type SessionReleaseAnnouncer,
 } from "../../src/daemon/announceSessionRelease";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
-import type { SessionReleaseExtras } from "../../src/server/sessionReleaseBroadcast";
+import type { SessionReleaseExtras } from "../../src/daemon/sessionReleaseBroadcast";
 
 const snapshot = (sessionId: string): SessionReleaseSnapshot => ({
   sessionId,

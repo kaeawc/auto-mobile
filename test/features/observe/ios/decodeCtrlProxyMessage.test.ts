@@ -1,3 +1,9 @@
+function decodeRawMessage(raw: unknown) {
+  if (typeof raw !== "object" || raw === null || !("type" in raw) || typeof raw.type !== "string") {
+    throw new Error("Expected raw CtrlProxy message");
+  }
+  return decodeCtrlProxyMessage({ ...raw, type: raw.type });
+}
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -10,7 +16,7 @@ import type { WebSocketMessage } from "../../../../src/features/observe/ios/type
 const REQ = "req-1";
 
 /** Helper to build a WebSocketMessage with a requestId. */
-const msg = (partial: Partial<WebSocketMessage> & { type: string }): WebSocketMessage => ({
+const msg = <T extends { type: string }>(partial: T) => ({
   requestId: REQ,
   ...partial,
 });
@@ -551,7 +557,7 @@ describe("decodeCtrlProxyMessage", () => {
       valueType: "STRING",
       redacted: true,
     } as const;
-    expect(decodeCtrlProxyMessage(msg(response))?.result).toMatchObject({
+    expect(decodeRawMessage(msg(response))?.result).toMatchObject({
       entry: { key: "token", value: "hunter2", type: "STRING", redacted: true },
     });
   });
@@ -856,11 +862,14 @@ function isExplicitlyDecoded(rawValue: string): boolean {
 // this branch added set_network_mock_rules_result (#10101). Pin the set as well
 // as its size so a dropped decoder cannot be hidden by another addition.
 const EXPECTED_RESHAPED_RESPONSE_TYPES = [
+  "accessibility_audit_result",
   "action_result",
+  "appearance_result",
   "append_text_result",
   "clear_preferences_result",
   "clear_text_result",
   "clipboard_result",
+  "delete_keychain_item_result",
   "drag_result",
   "execute_sql_result",
   "get_preference_result",
@@ -872,6 +881,7 @@ const EXPECTED_RESHAPED_RESPONSE_TYPES = [
   "launch_app_result",
   "list_databases_result",
   "list_tables_result",
+  "location_result",
   "magic_tap_result",
   "multi_finger_swipe_result",
   "path_gesture_result",
@@ -929,8 +939,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "connected",
   ];
 
-  test("Swift ResponseType declares exactly 51 rawValues", () => {
-    expect(rawValues.length).toBe(51);
+  test("Swift ResponseType declares exactly 55 rawValues", () => {
+    expect(rawValues.length).toBe(55);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -943,9 +953,9 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly the 46 expected response types", () => {
+  test("the decoder explicitly reshapes exactly the 50 expected response types", () => {
     const reshaped = rawValues.filter(isExplicitlyDecoded).sort();
-    expect(reshaped.length).toBe(46);
+    expect(reshaped.length).toBe(50);
     expect(reshaped).toEqual(EXPECTED_RESHAPED_RESPONSE_TYPES);
   });
 
@@ -1092,9 +1102,12 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "keyboard_result", expected: true },
     { type: "rotate_result", expected: true },
     { type: "hinge_angle_result", expected: false },
+    { type: "appearance_result", expected: false },
+    { type: "location_result", expected: false },
     { type: "ime_action_result", expected: true },
     { type: "action_result", expected: true },
     { type: "magic_tap_result", expected: false },
+    { type: "accessibility_audit_result", expected: false },
     { type: "voiceover_state_result", expected: true },
     { type: "voiceover_set_result", expected: false },
     { type: "multi_finger_swipe_result", expected: true },
@@ -1107,6 +1120,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "set_preference_result", expected: false },
     { type: "remove_preference_result", expected: false },
     { type: "clear_preferences_result", expected: false },
+    { type: "delete_keychain_item_result", expected: false },
     { type: "set_network_mock_rules_result", expected: false },
     { type: "set_network_fault_rules_result", expected: false },
     { type: "set_network_error_simulation_result", expected: false },
@@ -1170,7 +1184,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     expect(decoded?.result).toMatchObject({ success: false, error: "key failed", verified: false });
   });
 
-  test("the default table covers all 46 explicitly-decoded types", () => {
+  test("the default table covers all 50 explicitly-decoded types", () => {
     expect(DEFAULT_WHEN_ABSENT.map((row) => row.type).sort()).toEqual(
       EXPECTED_RESHAPED_RESPONSE_TYPES,
     );
@@ -1211,8 +1225,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 45 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(45);
+  test("the passthrough set is the 49 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(49);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {
@@ -1291,7 +1305,7 @@ describe("preference store resolution decoding", () => {
       `${type} preserves boolean effectiveValueDiffers: %s`,
       (effectiveValueDiffers) => {
         expect(
-          decodeCtrlProxyMessage({
+          decodeRawMessage({
             ...msg({ type, success: true }),
             resolvedStore: "standard",
             effectiveValueDiffers,
@@ -1303,7 +1317,7 @@ describe("preference store resolution decoding", () => {
       `${type} ignores non-boolean effectiveValueDiffers: %s`,
       (effectiveValueDiffers) => {
         expect(
-          decodeCtrlProxyMessage({
+          decodeRawMessage({
             ...msg({ type, success: true }),
             effectiveValueDiffers,
           })?.result,
@@ -1312,8 +1326,7 @@ describe("preference store resolution decoding", () => {
     );
     test(`${type} forwards only string resolvedStore values`, () => {
       expect(
-        decodeCtrlProxyMessage({ ...msg({ type, success: true }), resolvedStore: "standard" })
-          ?.result,
+        decodeRawMessage({ ...msg({ type, success: true }), resolvedStore: "standard" })?.result,
       ).toMatchObject({ resolvedStore: "standard" });
       for (const payload of [
         msg({ type, success: true }),
@@ -1391,4 +1404,25 @@ describe("decodeCtrlProxyMessage swipe route report (#13145)", () => {
     expect("swipeRoute" in result).toBe(false);
     expect("effectiveDurationMs" in result).toBe(false);
   });
+});
+
+test("preserves structured keychain denial and deletion scope", () => {
+  const selector = { itemClass: "genericPassword", service: "s", account: "a", accessGroup: "g" };
+  for (const outcome of ["deleted", "scope_not_authorized"]) {
+    expect(
+      decodeCtrlProxyMessage({
+        type: "delete_keychain_item_result",
+        requestId: "keychain",
+        success: outcome === "deleted",
+        outcome,
+        deletedScope: outcome === "deleted" ? selector : null,
+        totalTimeMs: 1,
+      })?.result,
+    ).toEqual({
+      success: outcome === "deleted",
+      outcome,
+      deletedScope: outcome === "deleted" ? selector : null,
+      totalTimeMs: 1,
+    });
+  }
 });

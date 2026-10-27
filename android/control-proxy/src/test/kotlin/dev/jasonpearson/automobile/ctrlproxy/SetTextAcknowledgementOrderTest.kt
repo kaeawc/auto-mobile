@@ -21,8 +21,16 @@ class SetTextAcknowledgementOrderTest {
   @Test
   fun `performSetText acknowledges a successful action before hierarchy postprocessing`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readTextInputSource())
-    val body = functionBody(source, "suspend fun performSetText(")
-    val action = body.indexOf("targetNode.performAction(")
+    val entry = functionBody(source, "suspend fun performSetText(")
+    assertTrue(
+      entry.contains("SetTextOperation(requestId, text, resourceId, dismissKeyboard).run()"),
+    )
+    val operation = functionBody(source, "private inner class SetTextOperation(")
+    assertTrue(functionBody(operation, "suspend fun run()").contains("perform()"))
+    val body = functionBody(operation, "private suspend fun perform()")
+    val mutation = functionBody(source, "private fun applySetText(")
+    assertTrue(mutation.contains("targetNode.performAction("))
+    val action = body.indexOf("applySetText(targetNode, text)")
     val acknowledgement = body.indexOf("broadcastSetTextResult(", startIndex = action)
     val refresh = body.indexOf("refreshHierarchyAfterTextInput()", startIndex = action)
 
@@ -53,49 +61,73 @@ class SetTextAcknowledgementOrderTest {
 
     val broadcaster = functionBody(source, "suspend fun broadcastSetTextResult(")
     assertTrue(
-      "set_text_result must use synchronous delivery instead of the backpressured event flow",
-      "responseSender.broadcastWithPerfSync" in broadcaster,
+      "set_text_result must go through the shared result sender",
+      "resultSender.sendFrame" in broadcaster,
     )
-    assertTrue(
-      "the sync sender must reach the WebSocket server's synchronous broadcast",
-      "webSocketServer.broadcastWithPerfSync" in
-        functionBody(serviceSource, "override suspend fun broadcastWithPerfSync("),
-    )
+    assertResultSenderEnqueuesDirectly(serviceSource)
   }
 
   @Test
   fun `performInsertText validates password and actions before mutating text`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readTextInputSource())
-    val body = functionBody(source, "suspend fun performInsertText(")
-    val passwordGuard = body.indexOf("if (targetNode.isPassword)")
-    val selectionPlan = body.indexOf("planInsertText(")
-    val refresh = body.indexOf("var snapshot = readFreshSnapshot()")
-    val unsupportedAction = body.indexOf("val unsupportedAction")
-    val setText = body.indexOf("targetNode.performAction(", startIndex = unsupportedAction)
+    val entry = functionBody(source, "suspend fun performInsertText(")
+    assertTrue(
+      "performInsertText must run its request operation",
+      "InsertOperation(" in entry && ".run()" in entry,
+    )
+    val operation = functionBody(source, "private inner class InsertOperation(")
+    val run = functionBody(operation, "suspend fun run()")
+    val initialize = run.indexOf("if (!initializeNode()) return")
+    val prepare = run.indexOf("prepareInsert()")
+    val apply = run.indexOf("applyInsert(")
+    assertTrue(
+      "password validation must precede preparation and mutation",
+      initialize >= 0 && prepare > initialize && apply > prepare,
+    )
 
+    val initialization = functionBody(operation, "private suspend fun initializeNode()")
+    val passwordGuard = initialization.indexOf("if (targetNode.isPassword)")
     assertTrue("performInsertText must reject password fields", passwordGuard >= 0)
     assertTrue(
-      "performInsertText must reject password fields before reading masked text",
-      selectionPlan > passwordGuard,
+      "password fields must return before preparation",
+      initialization.indexOf("return false", passwordGuard) > passwordGuard,
     )
+    val preparation = functionBody(operation, "private inner class InsertPreparation")
+    val refresh = preparation.indexOf("private var snapshot = readFreshSnapshot()")
+    val selectionPlan = preparation.indexOf("planInsertText(")
     assertTrue(
       "performInsertText must refresh every node before planning",
       refresh >= 0 && selectionPlan > refresh,
     )
+
+    val application = functionBody(operation, "private inner class InsertApplication(")
+    val applicationBody = functionBody(application, "suspend fun apply()")
+    val validation = applicationBody.indexOf("if (!supportsActions()) return")
     assertTrue(
-      "performInsertText must validate the required accessibility actions",
-      unsupportedAction > selectionPlan,
+      "required actions must be checked before mutation",
+      validation >= 0 && applicationBody.indexOf("mutate()") > validation,
     )
+    val validationBody = functionBody(application, "private suspend fun supportsActions()")
     assertTrue(
-      "performInsertText must validate selection and actions before ACTION_SET_TEXT",
-      setText > unsupportedAction,
+      "performInsertText must validate required accessibility actions",
+      "val unsupportedAction" in validationBody,
+    )
+    val mutation = functionBody(application, "private suspend fun mutate()")
+    assertTrue(
+      "validated mutation must call ACTION_SET_TEXT",
+      "targetNode.performAction(" in mutation && "ACTION_SET_TEXT," in mutation,
     )
   }
 
   @Test
   fun `refresh replacements are validated before reading text and remembered state has hooks`() {
+    assertFreshSnapshotValidation()
+    assertCaretResetHooks()
+  }
+
+  private fun assertFreshSnapshotValidation() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readTextInputSource())
-    val body = functionBody(source, "suspend fun performInsertText(")
+    val body = functionBody(source, "private inner class InsertOperation(")
     val refresh = functionBody(body, "fun readFreshSnapshot()")
     val guard =
       refresh.indexOf(
@@ -117,6 +149,9 @@ class SetTextAcknowledgementOrderTest {
         functionBody(source, signature).contains("rememberedInsert = null"),
       )
     }
+  }
+
+  private fun assertCaretResetHooks() {
     val forget = "textInputController.forgetRememberedInsert()"
     val serviceSource = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     for (signature in
@@ -165,7 +200,7 @@ class SetTextAcknowledgementOrderTest {
   @Test
   fun `performInsertText waits for mutation before reading selection actions`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readTextInputSource())
-    val body = functionBody(source, "suspend fun performInsertText(")
+    val body = functionBody(source, "private suspend fun mutate()")
     val mutation = body.indexOf("textMutated = setTextSucceeded")
     val poll = body.indexOf("awaitInsertTextMutation(", startIndex = mutation)
     val selection = body.indexOf("val selectionAttempted", startIndex = mutation)
@@ -177,13 +212,13 @@ class SetTextAcknowledgementOrderTest {
     assertTrue("selection support must be re-read after polling", actionList > selection)
     assertTrue(
       "poll must refresh the original mutation node",
-      body.contains("readSnapshot = ::readMutationSnapshot"),
+      body.contains("readSnapshot = { readMutationSnapshot(mutationNodeKey) }"),
     )
     assertTrue(
       "poll must only run after successful SET_TEXT",
       body.contains("if (setTextSucceeded)"),
     )
-    val refresh = functionBody(body, "fun readMutationSnapshot()")
+    val refresh = functionBody(source, "private fun readMutationSnapshot(")
     assertTrue(refresh.contains("!targetNode.refresh()"))
     assertTrue(refresh.contains("nodeKey() != mutationNodeKey"))
     assertTrue(refresh.contains("targetNode.isPassword"))
@@ -196,27 +231,48 @@ class SetTextAcknowledgementOrderTest {
   @Test
   fun `performInsertText reports caret warnings after attempting selection`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readTextInputSource())
-    val body = functionBody(source, "suspend fun performInsertText(")
-    val selection = body.indexOf("val selectionReturned")
-    val selectionAction = body.indexOf("targetNode.performAction(", startIndex = selection)
-    val selectionDecision = body.indexOf("val selectionSucceeded", startIndex = selectionAction)
+    val body = functionBody(source, "suspend fun apply()")
+    val mutation = functionBody(source, "private suspend fun mutate()")
+    val selection = mutation.indexOf("val selectionReturned")
+    val selectionAction =
+      mutation.indexOf("placeInsertCaret(targetNode, plan.caret)", startIndex = selection)
+    val caret = functionBody(source, "private fun placeInsertCaret(")
+    assertTrue(
+      "caret placement must perform the selection action",
+      "targetNode.performAction(" in caret && "ACTION_SET_SELECTION," in caret,
+    )
+    val mutationCall = body.indexOf("mutate()")
+    val selectionDecision = body.indexOf("val selectionSucceeded")
     val outcome = body.indexOf("insertTextOutcome(")
     val broadcast = body.indexOf("broadcastInsertTextResult(", startIndex = outcome)
     assertTrue(
-      "outcome must follow the selection attempt",
-      selection >= 0 &&
-        selectionAction > selection &&
-        selectionDecision > selectionAction &&
-        outcome > selectionDecision,
+      "mutation must attempt selection before returning",
+      selection >= 0 && selectionAction > selection,
+    )
+    assertTrue(
+      "outcome must follow the completed selection attempt",
+      mutationCall >= 0 && selectionDecision > mutationCall && outcome > selectionDecision,
     )
     assertTrue("acknowledgement must include the computed outcome", broadcast > outcome)
     // The wire encoding (omitted optionals, partialApplication only when true) is pinned
     // byte-for-byte against the old hand-built frame in ResultFramesGoldenTest.
-    val broadcaster = functionBody(source, "private suspend fun broadcastInsertTextResult(")
+    // The broadcaster now forwards the result object; its fields are read by the frame builder.
+    val frames =
+      KotlinSourceScan.maskLiteralsAndComments(locateSource("ResultFrames.kt").readText())
+    val broadcaster =
+      functionBody(source, "private suspend fun broadcastInsertTextResult(") +
+        frames.substring(
+          frames.indexOf("internal fun insertTextResultFrame("),
+          frames.indexOf("internal fun insertTextStateResultFrame("),
+        )
     assertTrue(
-      "insert acknowledgements must be synchronous",
-      "responseSender.broadcastWithPerfSync" in broadcaster,
+      "insert acknowledgements must go through the shared result sender",
+      "resultSender.sendFrame" in broadcaster,
     )
+    assertResultSenderEnqueuesDirectly(
+      KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource()),
+    )
+    assertTrue("must route through the typed frame", "insertTextResultFrame(" in broadcaster)
     for (field in
       listOf(
         "success",
@@ -227,28 +283,47 @@ class SetTextAcknowledgementOrderTest {
         "resultingTextLength",
         "partialApplication",
       )) {
-      assertTrue("$field must reach the typed body", "$field = $field" in broadcaster)
+      assertTrue("$field must reach the typed frame", Regex("\\b$field\\b") in broadcaster)
     }
   }
 
   @Test
   fun `performInsertText acknowledges before asynchronously refreshing successful text mutations`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readTextInputSource())
-    val body = functionBody(source, "suspend fun performInsertText(")
-    val setText = body.indexOf("targetNode.performAction(")
-    val acknowledgement = body.indexOf("broadcastInsertTextResult(", startIndex = setText)
+    val body = functionBody(source, "suspend fun apply()")
+    val mutation = functionBody(source, "private suspend fun mutate()")
+    val setText = mutation.indexOf("targetNode.performAction(")
+    val mutationCall = body.indexOf("mutate()")
+    val acknowledgement = body.indexOf("broadcastInsertTextResult(", startIndex = mutationCall)
     val refresh = body.indexOf("refreshHierarchyAfterTextInput()", startIndex = acknowledgement)
     val successfulMutationRefresh =
       body.indexOf("if (setTextSucceeded) refreshHierarchyAfterTextInput()")
-
-    assertTrue("performInsertText must call ACTION_SET_TEXT", setText >= 0)
+    assertTrue("performInsertText must call ACTION_SET_TEXT", setText >= 0 && mutationCall >= 0)
     assertTrue(
       "insert_text_result must acknowledge the text mutation before hierarchy postprocessing",
-      acknowledgement > setText && refresh > acknowledgement,
+      acknowledgement > mutationCall && refresh > acknowledgement,
     )
     assertTrue(
       "insert text must refresh changed text when caret restoration is only partially applied",
       successfulMutationRefresh > acknowledgement,
+    )
+  }
+
+  /**
+   * Acknowledgements must not wait on the backpressured event flow: the service's result transport
+   * hands the frame to [WebSocketServer.broadcast], which enqueues it on each client directly.
+   */
+  private fun assertResultSenderEnqueuesDirectly(serviceSource: String) {
+    assertTrue(
+      "the result transport must reach the WebSocket server's direct broadcast",
+      "webSocketServer.broadcast(frame)" in serviceSource,
+    )
+    val server =
+      KotlinSourceScan.maskLiteralsAndComments(locateSource("WebSocketServer.kt").readText())
+    assertTrue(
+      "WebSocketServer.broadcast(message) must enqueue on each client directly",
+      "broadcastToClients(message)" in
+        functionBody(server, "suspend fun broadcast(message: String)"),
     )
   }
 

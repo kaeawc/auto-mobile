@@ -13,7 +13,7 @@ const violations: string[] = [];
 
 beforeAll(() => {
   const sourceRoot = new URL("../../src/", import.meta.url);
-  for (const file of readdirSync(sourceRoot, { recursive: true })) {
+  for (const file of readdirSync(sourceRoot, { recursive: true, encoding: "utf8" })) {
     if (!file.endsWith(".ts")) {
       continue;
     }

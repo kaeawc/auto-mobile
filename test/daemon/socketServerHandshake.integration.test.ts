@@ -4,22 +4,29 @@ import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { sendRawSocketRequest } from "./helpers/socketRequest";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonResponse } from "../../src/daemon/types";
-import type { DaemonSelfIdentity } from "../../src/daemon/daemonHandshake";
+import type { DaemonSelfIdentity } from "../../src/daemon/wire/daemonHandshake";
 import { DaemonClient } from "../../src/daemon/client";
 
-function createFakeDaemonState() {
+function createFakeDaemonState(): DaemonStateAccess {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      hasSession: () => false,
+      getSession: () => null,
+      getDeviceLabels: () => undefined,
+      releaseSession: async () => null,
+    }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       releaseDevice: async () => {},
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
 }
 

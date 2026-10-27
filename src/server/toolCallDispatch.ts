@@ -1,6 +1,6 @@
 import type { CallToolResult, McpServer, ServerContext } from "@modelcontextprotocol/server";
 import { ActionableError } from "../models";
-import type { CreateTaskResult } from "./tasks/mcpTasksExtension";
+import type { CreateTaskResult } from "../daemon/tasks/mcpTasksExtension";
 import { logger } from "../utils/logger";
 
 /**

@@ -1,19 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Intentional conditional calls propagate failures explicitly at their callers.
-# shellcheck disable=SC2310
+# Expected failures are captured explicitly and propagated at their callers.
 IFS=$'\n\t'
 
 # Handle Ctrl-C (SIGINT) - exit immediately
 trap 'echo ""; echo "Uninstall cancelled."; exit 130' INT
-
-# Handle piped execution (SCRIPT_DIR used for potential future expansion)
-# shellcheck disable=SC2034
-if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-else
-    SCRIPT_DIR="$(pwd)"
-fi
 
 # Detect the Git project root for project-level configs. This matches the
 # installer's project scope, including when either script runs from a nested
@@ -79,6 +70,20 @@ local run_rc=0
 RUN_STATUS="${run_rc}"
 }
 
+# Like run_capture_status, for a function whose stdout is wanted: run it in a
+# subshell (as `$(...)` would) and record its output in CAPTURED_OUTPUT and its
+# exit status in RUN_STATUS.
+CAPTURED_OUTPUT=""
+run_capture_output() {
+    local capture_file
+    capture_file=$(mktemp)
+    RUN_STATUS=0
+    ("$@") >"${capture_file}" || RUN_STATUS=$?
+    CAPTURED_OUTPUT=$(<"${capture_file}")
+    rm -f "${capture_file}"
+}
+
+
 # Capture optional command availability without invoking a function in a
 # conditional context, where Bash would suppress its internal errexit behavior.
 command_exists_check() {
@@ -99,9 +104,9 @@ desktop_app_bundle_identifier() {
 }
 
 # Every privileged command status is returned to an explicit caller check.
-# shellcheck disable=SC2310
 run_desktop_app_privileged() {
-    if desktop_app_is_root; then
+    run_capture_status desktop_app_is_root
+    if (( RUN_STATUS == 0 )); then
         "$@"
     elif [[ "${1:-}" == "kill" || "${1:-}" == "ps" ]] && "$@" 2>/dev/null; then
         # Prefer the unprivileged operation for same-user processes; fall back
@@ -279,7 +284,6 @@ detect_mcp_configs() {
 }
 
 # Package-tool absence is an expected detection miss.
-# shellcheck disable=SC2310
 detect_desktop_app() {
     DESKTOP_APP_INSTALLED=false
     DESKTOP_APP_PATHS=()
@@ -289,10 +293,12 @@ detect_desktop_app() {
     local os
     os=$(detect_os)
     if [[ "${os}" == "macos" ]]; then
-        local app_path
+        local app_path bundle_identifier
         for app_path in "/Applications/AutoMobile.app" "${HOME}/Applications/AutoMobile.app"; do
-            if [[ -d "${app_path}" && -f "${app_path}/Contents/Info.plist" ]] \
-                && [[ "$(desktop_app_bundle_identifier "${app_path}")" == "${DESKTOP_APP_BUNDLE_IDENTIFIER}" ]]; then
+            [[ -d "${app_path}" && -f "${app_path}/Contents/Info.plist" ]] || continue
+            run_capture_output desktop_app_bundle_identifier "${app_path}"
+            bundle_identifier="${CAPTURED_OUTPUT}"
+            if [[ "${bundle_identifier}" == "${DESKTOP_APP_BUNDLE_IDENTIFIER}" ]]; then
                 DESKTOP_APP_PATHS+=("${app_path}")
                 DESKTOP_APP_EXECUTABLES+=("${app_path}/Contents/MacOS/AutoMobile")
                 DESKTOP_APP_INSTALLED=true
@@ -302,7 +308,6 @@ detect_desktop_app() {
     fi
 
     # This is a capability predicate; absence means there is no package to inspect.
-    # shellcheck disable=SC2310
     if [[ "${os}" == "linux" ]] && command -v dpkg-query >/dev/null 2>&1; then
         local package status
         for package in automobile auto-mobile; do
@@ -330,10 +335,11 @@ desktop_app_process_table() {
 # from the installed app bundle/package. This avoids broad pkill patterns that
 # could terminate unrelated commands containing the AutoMobile name.
 # The process-table failure is handled explicitly below.
-# shellcheck disable=SC2310
 desktop_app_process_pids() {
     local pid command_line executable process_table
-    if ! process_table=$(desktop_app_process_table); then
+    run_capture_output desktop_app_process_table
+    process_table="${CAPTURED_OUTPUT}"
+    if (( RUN_STATUS != 0 )); then
         return 1
     fi
     while IFS=' ' read -r pid command_line; do
@@ -352,14 +358,15 @@ desktop_app_termination_wait() {
 }
 
 # Probe failures are represented by the documented return states.
-# shellcheck disable=SC2310
 desktop_app_pid_command() {
-    if run_desktop_app_privileged ps -p "$1" -o command= 2>/dev/null; then
+    run_capture_status run_desktop_app_privileged ps -p "$1" -o command= 2>/dev/null
+    if (( RUN_STATUS == 0 )); then
         return 0
     fi
     # A live PID whose command cannot be inspected is not safe to remove. A
     # failed liveness probe confirms that the process exited instead.
-    if run_desktop_app_privileged kill -0 "$1" 2>/dev/null; then
+    run_capture_status run_desktop_app_privileged kill -0 "$1" 2>/dev/null
+    if (( RUN_STATUS == 0 )); then
         return 2
     fi
     return 1
@@ -368,14 +375,11 @@ desktop_app_pid_command() {
 # Return 0 while the PID is alive, 1 when it has exited, and 2 when its state
 # cannot be verified (for example, because the privileged check was denied).
 # Probe failures are represented by the documented return states.
-# shellcheck disable=SC2310
 desktop_app_pid_alive() {
     local pid="$1" executable recheck_executable process_listing command_status liveness_status recheck_listing recheck_status
-    if process_listing=$(desktop_app_pid_command "${pid}"); then
-        command_status=0
-    else
-        command_status=$?
-    fi
+    run_capture_output desktop_app_pid_command "${pid}"
+    process_listing="${CAPTURED_OUTPUT}"
+    command_status="${RUN_STATUS}"
     if [[ "${command_status}" -eq 2 ]]; then
         return 2
     elif [[ "${command_status}" -ne 0 ]]; then
@@ -384,21 +388,16 @@ desktop_app_pid_alive() {
     fi
     for executable in ${DESKTOP_APP_EXECUTABLES[@]+"${DESKTOP_APP_EXECUTABLES[@]}"}; do
         if [[ "${process_listing}" == "${executable}" || "${process_listing}" == "${executable} "* ]]; then
-            if run_desktop_app_privileged kill -0 "${pid}" 2>/dev/null; then
-                liveness_status=0
-            else
-                liveness_status=$?
-            fi
+            run_capture_status run_desktop_app_privileged kill -0 "${pid}" 2>/dev/null
+            liveness_status="${RUN_STATUS}"
             if [[ "${liveness_status}" -eq 0 ]]; then
                 return 0
             fi
             # The PID can exit or be reused after its command was read. Re-read
             # the identity before treating a failed liveness probe as unsafe.
-            if recheck_listing=$(desktop_app_pid_command "${pid}"); then
-                recheck_status=0
-            else
-                recheck_status=$?
-            fi
+            run_capture_output desktop_app_pid_command "${pid}"
+            recheck_listing="${CAPTURED_OUTPUT}"
+            recheck_status="${RUN_STATUS}"
             if [[ "${recheck_status}" -eq 1 ]]; then
                 return 1
             elif [[ "${recheck_status}" -eq 2 ]]; then
@@ -418,15 +417,11 @@ desktop_app_pid_alive() {
 # Return 0 when every PID has stopped, 1 while one is still running, and 2
 # when a PID cannot be verified safely.
 # Probe failures are represented by the documented return states.
-# shellcheck disable=SC2310
 desktop_app_processes_stopped() {
     local pid pid_state
     for pid in "$@"; do
-        if desktop_app_pid_alive "${pid}"; then
-            pid_state=0
-        else
-            pid_state=$?
-        fi
+        run_capture_status desktop_app_pid_alive "${pid}"
+        pid_state="${RUN_STATUS}"
         if [[ "${pid_state}" -eq 0 ]]; then
             return 1
         elif [[ "${pid_state}" -eq 2 ]]; then
@@ -439,14 +434,14 @@ desktop_app_processes_stopped() {
 # Return 0 when all PIDs exit, 1 after the bounded wait, and 2 when a PID can
 # no longer be verified.
 # Probe failures are returned explicitly to the caller.
-# shellcheck disable=SC2310
 wait_for_desktop_app_processes_to_stop() {
     local attempt=0 stopped_status
     while (( attempt < 20 )); do
-        if desktop_app_processes_stopped "$@"; then
+        run_capture_status desktop_app_processes_stopped "$@"
+        if (( RUN_STATUS == 0 )); then
             return 0
         else
-            stopped_status=$?
+            stopped_status="${RUN_STATUS}"
         fi
         [[ "${stopped_status}" -eq 2 ]] && return 2
         desktop_app_termination_wait
@@ -456,11 +451,12 @@ wait_for_desktop_app_processes_to_stop() {
 }
 
 # Every failed probe and signal is returned explicitly to the caller.
-# shellcheck disable=SC2310
 stop_desktop_app_processes() {
     local pids=()
     local pid pid_state wait_status process_pids
-    if ! process_pids=$(desktop_app_process_pids); then
+    run_capture_output desktop_app_process_pids
+    process_pids="${CAPTURED_OUTPUT}"
+    if (( RUN_STATUS != 0 )); then
         log_error "Could not enumerate desktop app processes; refusing to remove the app."
         return 1
     fi
@@ -477,27 +473,26 @@ stop_desktop_app_processes() {
 
     log_info "Stopping AutoMobile desktop app..."
     for pid in ${pids[@]+"${pids[@]}"}; do
-        if desktop_app_pid_alive "${pid}"; then
-            pid_state=0
-        else
-            pid_state=$?
-        fi
+        run_capture_status desktop_app_pid_alive "${pid}"
+        pid_state="${RUN_STATUS}"
         if [[ "${pid_state}" -eq 1 ]]; then
             continue
         elif [[ "${pid_state}" -eq 2 ]]; then
             log_error "Could not verify desktop app process ${pid}; refusing to remove the app."
             return 1
         fi
-        if ! run_desktop_app_privileged kill -TERM "${pid}" 2>/dev/null; then
+        run_capture_status run_desktop_app_privileged kill -TERM "${pid}" 2>/dev/null
+        if (( RUN_STATUS != 0 )); then
             log_error "Could not signal desktop app process ${pid}; refusing to remove the app."
             return 1
         fi
     done
 
-    if wait_for_desktop_app_processes_to_stop ${pids[@]+"${pids[@]}"}; then
+    run_capture_status wait_for_desktop_app_processes_to_stop ${pids[@]+"${pids[@]}"}
+    if (( RUN_STATUS == 0 )); then
         return 0
     else
-        wait_status=$?
+        wait_status="${RUN_STATUS}"
     fi
     if [[ "${wait_status}" -eq 2 ]]; then
         log_error "Could not verify a desktop app process; refusing to remove the app."
@@ -505,11 +500,8 @@ stop_desktop_app_processes() {
     fi
 
     for pid in ${pids[@]+"${pids[@]}"}; do
-        if desktop_app_pid_alive "${pid}"; then
-            pid_state=0
-        else
-            pid_state=$?
-        fi
+        run_capture_status desktop_app_pid_alive "${pid}"
+        pid_state="${RUN_STATUS}"
         if [[ "${pid_state}" -eq 1 ]]; then
             continue
         elif [[ "${pid_state}" -eq 2 ]]; then
@@ -517,16 +509,17 @@ stop_desktop_app_processes() {
             return 1
         fi
         # The explicit failure branch below intentionally handles this signal.
-        # shellcheck disable=SC2310
-        if ! run_desktop_app_privileged kill -KILL "${pid}" 2>/dev/null; then
+        run_capture_status run_desktop_app_privileged kill -KILL "${pid}" 2>/dev/null
+        if (( RUN_STATUS != 0 )); then
             log_error "Could not terminate desktop app process ${pid}; refusing to remove the app."
             return 1
         fi
     done
-    if wait_for_desktop_app_processes_to_stop ${pids[@]+"${pids[@]}"}; then
+    run_capture_status wait_for_desktop_app_processes_to_stop ${pids[@]+"${pids[@]}"}
+    if (( RUN_STATUS == 0 )); then
         return 0
     else
-        wait_status=$?
+        wait_status="${RUN_STATUS}"
     fi
     if [[ "${wait_status}" -eq 2 ]]; then
         log_error "Could not verify a desktop app process after SIGKILL; refusing to remove the app."
@@ -1181,7 +1174,6 @@ remove_data_dir() {
 }
 
 # Package-manager availability explicitly selects the removal command.
-# shellcheck disable=SC2310
 remove_desktop_app() {
     if [[ "${DESKTOP_APP_INSTALLED}" != "true" ]]; then
         log_info "AutoMobile desktop app not installed"
@@ -1207,7 +1199,8 @@ remove_desktop_app() {
         for app_path in ${DESKTOP_APP_PATHS[@]+"${DESKTOP_APP_PATHS[@]}"}; do
             log_info "Removing AutoMobile desktop app from ${app_path}..."
             if [[ "${app_path}" == "/Applications/"* ]]; then
-                if ! run_desktop_app_privileged rm -rf -- "${app_path}"; then
+                run_capture_status run_desktop_app_privileged rm -rf -- "${app_path}"
+                if (( RUN_STATUS != 0 )); then
                     return 1
                 fi
             else
@@ -1219,9 +1212,11 @@ remove_desktop_app() {
     elif [[ "${os}" == "linux" ]]; then
         log_info "Removing AutoMobile desktop package: ${DESKTOP_APP_PACKAGE}..."
         if command -v apt-get >/dev/null 2>&1; then
-            run_desktop_app_privileged apt-get remove -y "${DESKTOP_APP_PACKAGE}" || return 1
+            run_capture_status run_desktop_app_privileged apt-get remove -y "${DESKTOP_APP_PACKAGE}"
+            if (( RUN_STATUS != 0 )); then return 1; fi
         elif command -v dpkg >/dev/null 2>&1; then
-            run_desktop_app_privileged dpkg --remove "${DESKTOP_APP_PACKAGE}" || return 1
+            run_capture_status run_desktop_app_privileged dpkg --remove "${DESKTOP_APP_PACKAGE}"
+            if (( RUN_STATUS != 0 )); then return 1; fi
         else
             log_error "apt-get or dpkg is required to remove the AutoMobile desktop app package."
             return 1

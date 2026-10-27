@@ -2,7 +2,7 @@ import {
   devicePreparedForOtherRequestError,
   InputDeviceOwnedError,
 } from "../../src/daemon/inputDeviceOwnership";
-import { SessionNoLongerOwnsDeviceError } from "../../src/daemon/sessionNoLongerOwnsDevice";
+import { SessionNoLongerOwnsDeviceError } from "../../src/models/sessionNoLongerOwnsDevice";
 import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";

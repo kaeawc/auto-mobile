@@ -65,7 +65,7 @@ describe("ProxySessionState", () => {
       "plainRestartSessionLosses",
     ] as const;
 
-    test.each(recordNames)("%s starts empty and is not shared between instances", (name) => {
+    test.each([...recordNames])("%s starts empty and is not shared between instances", (name) => {
       const first = new ProxySessionState();
       const second = new ProxySessionState();
       expect(first[name].size).toBe(0);

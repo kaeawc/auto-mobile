@@ -1,6 +1,7 @@
+import { readGuardFile } from "./astGuard";
 import ts from "typescript";
-import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+
 import { join } from "node:path";
 import {
   findViolationsInSource,
@@ -9,6 +10,7 @@ import {
 
 const ROOT = join(import.meta.dir, "..", "..");
 const MANAGER = "src/ctrlProxy/IOSCtrlProxyManager.ts";
+const LAUNCH = "src/ctrlProxy/ios/IosCtrlProxyLaunch.ts";
 const OWNER = "src/ctrlProxy/ios/IosCtrlProxyProcessClient.ts";
 const CHECK = "scripts/lib/iosCtrlProxyProcessBoundary.ts";
 
@@ -46,13 +48,17 @@ function stripComments(source: string): string {
 // primed in beforeAll — which the JUnit reporter excludes from per-test time.
 const commentFreeCache = new Map<string, string>();
 const parsedCache = new Map<string, ts.SourceFile>();
+afterAll(() => {
+  parsedCache.clear();
+  commentFreeCache.clear();
+});
 
 function commentFreeSource(relativePath: string): string {
   const cached = commentFreeCache.get(relativePath);
   if (cached !== undefined) {
     return cached;
   }
-  const stripped = stripComments(readFileSync(join(ROOT, relativePath), "utf8"));
+  const stripped = stripComments(readGuardFile(join(ROOT, relativePath)));
   commentFreeCache.set(relativePath, stripped);
   return stripped;
 }
@@ -64,7 +70,7 @@ function parsedSource(relativePath: string): ts.SourceFile {
   }
   const source = ts.createSourceFile(
     relativePath,
-    readFileSync(join(ROOT, relativePath), "utf8"),
+    readGuardFile(join(ROOT, relativePath)),
     ts.ScriptTarget.Latest,
     /* setParentNodes */ true,
   );
@@ -72,7 +78,7 @@ function parsedSource(relativePath: string): ts.SourceFile {
   return source;
 }
 
-/** `this.xcodebuild.startStreaming(...)` call sites, matched structurally. */
+/** `this.state.xcodebuild.startStreaming(...)` call sites, matched structurally. */
 function startStreamingCalls(source: ts.SourceFile): ts.CallExpression[] {
   const calls: ts.CallExpression[] = [];
   const visit = (node: ts.Node): void => {
@@ -96,7 +102,9 @@ function isThisXcodebuildStartStreaming(expression: ts.Expression): boolean {
   return (
     ts.isPropertyAccessExpression(target) &&
     target.name.text === "xcodebuild" &&
-    target.expression.kind === ts.SyntaxKind.ThisKeyword
+    ts.isPropertyAccessExpression(target.expression) &&
+    target.expression.name.text === "state" &&
+    target.expression.expression.kind === ts.SyntaxKind.ThisKeyword
   );
 }
 
@@ -359,7 +367,7 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
   beforeAll(() => {
     commentFreeSource(MANAGER);
     commentFreeSource(OWNER);
-    parsedSource(MANAGER);
+    parsedSource(LAUNCH);
   });
 
   test("keeps ps, pgrep, and kill ownership in the lifecycle client", () => {
@@ -389,19 +397,19 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
   });
 
   test("has a production check with documented exceptions", () => {
-    const source = readFileSync(join(ROOT, CHECK), "utf8");
+    const source = readGuardFile(join(ROOT, CHECK));
     expect(source).toContain("const EXCEPTIONS = new Map<string, string>([");
     expect(source).toContain("IosCtrlProxyProcessClient.ts");
-    expect(readFileSync(join(ROOT, "package.json"), "utf8")).toContain(
+    expect(readGuardFile(join(ROOT, "package.json"))).toContain(
       "check:ios-ctrl-proxy-process-boundary",
     );
-    expect(readFileSync(join(ROOT, "scripts/all_fast_validate_checks.sh"), "utf8")).toContain(
+    expect(readGuardFile(join(ROOT, "scripts/all_fast_validate_checks.sh"))).toContain(
       "ios-ctrl-proxy-process-boundary",
     );
-    expect(readFileSync(join(ROOT, "turbo.json"), "utf8")).toContain(
+    expect(readGuardFile(join(ROOT, "turbo.json"))).toContain(
       '"check:ios-ctrl-proxy-process-boundary"',
     );
-    expect(readFileSync(join(ROOT, ".github/workflows/pull_request.yml"), "utf8")).toContain(
+    expect(readGuardFile(join(ROOT, ".github/workflows/pull_request.yml"))).toContain(
       "Check iOS CtrlProxy process execution boundary",
     );
   });
@@ -421,7 +429,7 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
     // lifecycle-abort wiring at all. A regression here (dropping the `signal:`
     // line from either call) must fail loudly instead of just changing runtime
     // behavior silently.
-    const source = parsedSource(MANAGER);
+    const source = parsedSource(LAUNCH);
     const calls = startStreamingCalls(source);
     expect(calls).toHaveLength(2);
     for (const call of calls) {
@@ -437,7 +445,7 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
           property.name.text === "signal",
       );
       expect(signal && ts.isPropertyAssignment(signal) && signal.initializer.getText(source)).toBe(
-        "this.runnerAbortController.signal",
+        "this.state.runnerAbortController.signal",
       );
     }
   });

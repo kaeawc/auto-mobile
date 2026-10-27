@@ -17,6 +17,7 @@ import {
   setToolEnabledSchema,
 } from "../../src/server/toolSelectionTools";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { setToolEnabledResultSchema } from "../../src/server/toolSelectionToolOutputSchemas";
 
 isolateToolRegistry();
 
@@ -385,5 +386,19 @@ describe("setToolEnabled batch enable (#6869)", () => {
         "toolNames",
       ]);
     });
+  });
+  test("declares its outputSchema, and every result validates and matches its text (#11830)", async () => {
+    expect(ToolRegistry.getTool(SET_TOOL_ENABLED_TOOL_NAME)?.outputSchema).toBe(
+      setToolEnabledResultSchema,
+    );
+    for (const args of [
+      { toolName: "sendKeys" },
+      { toolNames: ["clipboard", "observe"] },
+      { toolName: "openLink", enabled: false },
+    ]) {
+      const result = await callSetToolEnabled(args);
+      expect(payloadOf(result)).toEqual(JSON.parse(JSON.stringify(result.structuredContent)));
+      expect(setToolEnabledResultSchema.safeParse(result.structuredContent).success).toBe(true);
+    }
   });
 });

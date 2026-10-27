@@ -10,6 +10,8 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { ActionableError } from "../../src/models";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 
 const AUTOLOCK_ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
@@ -69,6 +71,25 @@ describe("DevicePool autolock", () => {
   afterEach(() => {
     clearAutolockEnv();
   });
+
+  arranged(
+    "autolockDevice forwards the ambient request signal into session creation (#11817)",
+    async () => {
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+      await initializeLiveAndroidDevice();
+      const controller = new AbortController();
+      const create = sessionManager.createSession.bind(sessionManager);
+      let forwarded: AbortSignal | undefined;
+      sessionManager.createSession = (...args: Parameters<SessionManager["createSession"]>) => {
+        forwarded = args[3]?.signal;
+        return create(...args);
+      };
+      await runWithAbortSignal(controller.signal, () =>
+        pool.autolockDevice(androidDevice.deviceId, "android", "mcp-1"),
+      );
+      expect(forwarded).toBe(controller.signal);
+    },
+  );
 
   arranged("autolockDevice returns undefined when autolock is disabled", async () => {
     // Autolock env not set -> disabled
@@ -914,8 +935,7 @@ describe("DevicePool autolock", () => {
       // session's release callback fires.
       const device = pool.getDevice("emulator-5554")!;
       device.autolockSessionId = "new-session";
-      device.sessionId = "new-session";
-      device.status = "busy";
+      patchDeviceBinding(device, { sessionId: "new-session", status: "busy" });
 
       // Expire the original session.
       timer.advanceTime(61 * 1000);

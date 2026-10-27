@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
 import { sendIOSPressCommand, type IOSDispatchResult } from "./CtrlProxyDispatch";
 /**
  * CtrlProxyGestures - iOS gesture delegate.
@@ -16,12 +17,12 @@ import type { CtrlProxyTapResult, DelegateContext } from "./types";
 import type { GestureTimingResult } from "../shared/types";
 import type { SendCommandOptions } from "../DeviceServiceUtils";
 import type { MultiFingerSwipeRequest } from "../../../utils/interfaces/MultiFingerSwipeRequest";
-import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger, LogLevel } from "../../../utils/logger";
 import {
   DefaultSystemDetection,
   type SystemDetection,
 } from "../../../utils/system/SystemDetection";
+import { ENV } from "../../../config/env";
 
 export class CtrlProxyGestures extends SharedGestureDelegate {
   constructor(
@@ -41,7 +42,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     if (logger.getLogLevel() !== LogLevel.DEBUG) {
       return {};
     }
-    const strategy = this.environment.getEnvVar("AUTOMOBILE_IOS_TAP_STRATEGY");
+    const strategy = this.environment.getEnvVar(ENV.IOS_TAP_STRATEGY.name);
     return strategy === "legacy" ||
       strategy === "appRelative" ||
       strategy === "appRelativeObserved" ||
@@ -68,17 +69,21 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
    * A runner reply, including a refusal, stays acknowledged; a tap never sent stays a plain
    * failure. The iOS client has no display routing, so `displayId` and `beforeSend` are unused.
    */
-  // oxlint-disable-next-line max-params -- Keeps the shared delegate's positional tap signature.
+
   override async requestTapCoordinates(
-    x: number,
-    y: number,
-    duration: number = 0,
-    timeoutMs: number = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: TapCoordinatesRequest,
   ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
+    const {
+      x,
+      y,
+      duration = 0,
+      timeoutMs = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+      perf,
+      frameContext,
+      signal,
+      onDispatch,
+    } = request;
+
     return sendIOSPressCommand(
       this.context,
       this.tapCommandOptions({

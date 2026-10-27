@@ -3,11 +3,13 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import dev.jasonpearson.automobile.desktop.core.control.DeviceGestureStreamHandle
 import dev.jasonpearson.automobile.desktop.core.control.GestureStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
-import dev.jasonpearson.automobile.desktop.core.daemon.GestureInputStream
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
-import dev.jasonpearson.automobile.desktop.core.daemon.isDeviceOwnedRefusal
+import dev.jasonpearson.automobile.desktop.core.daemon.SwipeInput
+import dev.jasonpearson.automobile.desktop.core.daemon.TapInput
+import dev.jasonpearson.automobile.desktop.core.daemon.TextInput
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragDecision
+import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesture
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesturePolicy
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyStroke
@@ -16,12 +18,10 @@ import dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardInputPolicy
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import java.util.UUID
 import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
@@ -76,23 +76,25 @@ private val LOG = LoggerFactory.getLogger("VideoInputDispatcher")
  *   because another session holds [deviceId] (#10743), so the host can show the pane's
  *   held-elsewhere notice instead of the refusal only reaching the log.
  */
+data class VideoInputOptions(
+  val ioDispatcher: CoroutineDispatcher? = null,
+  val streamingEnabled: Boolean = false,
+  val onDeviceHeldElsewhere: () -> Unit = {},
+)
+
 class VideoInputDispatcher(
   private val scope: CoroutineScope,
   private val clientProvider: () -> AutoMobileClient?,
   private val platform: () -> String,
-  private val deviceId: String,
-  private val tracer: InteractionLatencyTracer,
-  ioDispatcher: CoroutineDispatcher? = null,
-  /**
-   * Feature flag for streaming (real-time) drag input on the video pane (issue: streaming gesture
-   * input). Off by default: [beginGestureStream] returns null and a drag stays an atomic [swipe] on
-   * release. When on, a drag streams live and — if the daemon/runner cannot stream — falls back to
-   * the same atomic swipe, so the pane behaves identically either way.
-   */
-  private val streamingEnabled: Boolean = false,
-  private val onDeviceHeldElsewhere: () -> Unit = {},
+  internal val deviceId: String,
+  internal val tracer: InteractionLatencyTracer,
+  options: VideoInputOptions = VideoInputOptions(),
 ) {
-  private val injectedDispatcher: CoroutineDispatcher? = ioDispatcher
+  private val ioDispatcher = options.ioDispatcher
+  private val streamingEnabled = options.streamingEnabled
+  internal val onDeviceHeldElsewhere = options.onDeviceHeldElsewhere
+
+  internal val injectedDispatcher: CoroutineDispatcher? = ioDispatcher
 
   // Per-dispatcher-instance namespace for streamed gesture ids. The runner's gesture registry is
   // device-global and keyed only by the id string, so a bare per-dispatcher counter would have two
@@ -110,34 +112,11 @@ class VideoInputDispatcher(
   // gated off) therefore holds NO dispatch thread at all. [reset] retires it again when the pane
   // deactivates, and pane disposal (scope completion) retires it for good. All access is on the
   // Compose main thread (dispatch + reset), so the plain read-then-create needs no extra lock.
-  @Volatile private var ownedExecutor: ExecutorService? = null
-  @Volatile private var ownedDispatcher: CoroutineDispatcher? = null
+  @Volatile internal var ownedExecutor: ExecutorService? = null
+  @Volatile internal var ownedDispatcher: CoroutineDispatcher? = null
 
   init {
     scope.coroutineContext.job.invokeOnCompletion { retireExecutor() }
-  }
-
-  private fun dispatchDispatcher(): CoroutineDispatcher {
-    injectedDispatcher?.let {
-      return it
-    }
-    ownedDispatcher?.let {
-      return it
-    }
-    val executor = Executors.newSingleThreadExecutor { runnable ->
-      Thread(runnable, "video-input-dispatch-$deviceId").apply { isDaemon = true }
-    }
-    val dispatcher = executor.asCoroutineDispatcher()
-    ownedExecutor = executor
-    ownedDispatcher = dispatcher
-    return dispatcher
-  }
-
-  private fun retireExecutor() {
-    // shutdown() (not shutdownNow) lets any queued coroutine drain — generation-stale ones drop.
-    ownedExecutor?.shutdown()
-    ownedExecutor = null
-    ownedDispatcher = null
   }
 
   // Fair mutex: suspended waiters acquire in suspension order, so serialized taps stay FIFO.
@@ -174,11 +153,14 @@ class VideoInputDispatcher(
     // success touch pulse for an input that never left (issue #3352 feedback contract).
     return dispatch { client, platformName ->
       client.inputTap(
-        x = point.x.toDouble(),
-        y = point.y.toDouble(),
-        platform = platformName,
-        deviceId = deviceId,
-        frameContext = null,
+        input =
+          TapInput(
+            x = point.x.toDouble(),
+            y = point.y.toDouble(),
+            platform = platformName,
+            deviceId = deviceId,
+            frameContext = null,
+          ),
       )
     }
   }
@@ -198,26 +180,31 @@ class VideoInputDispatcher(
   ) {
     val decision =
       DeviceDragGesturePolicy.evaluate(
-        start = start,
-        end = end,
-        deviceWidth = snapshot.deviceWidth,
-        deviceHeight = snapshot.deviceHeight,
-        coordinateSpace = snapshot.coordinateSpace,
-        nativeScale = snapshot.nativeScale,
-        gestureDurationMs = gestureDurationMs,
+        DeviceDragGesture(
+          start = start,
+          end = end,
+          deviceWidth = snapshot.deviceWidth,
+          deviceHeight = snapshot.deviceHeight,
+          coordinateSpace = snapshot.coordinateSpace,
+          nativeScale = snapshot.nativeScale,
+          gestureDurationMs = gestureDurationMs,
+        ),
       )
     if (decision !is DeviceDragDecision.Swipe) return
     flushPendingText()
     dispatch { client, platformName ->
       client.inputSwipe(
-        startX = decision.start.x.toDouble(),
-        startY = decision.start.y.toDouble(),
-        endX = decision.end.x.toDouble(),
-        endY = decision.end.y.toDouble(),
-        platform = platformName,
-        deviceId = deviceId,
-        durationMs = decision.durationMs,
-        frameContext = null,
+        input =
+          SwipeInput(
+            startX = decision.start.x.toDouble(),
+            startY = decision.start.y.toDouble(),
+            endX = decision.end.x.toDouble(),
+            endY = decision.end.y.toDouble(),
+            platform = platformName,
+            deviceId = deviceId,
+            durationMs = decision.durationMs,
+            frameContext = null,
+          ),
       )
     }
   }
@@ -262,156 +249,18 @@ class VideoInputDispatcher(
             drainGestureEvents(events)
             return@withLock
           }
-          streamOrFallback(client, platformName, snapshot, gestureId, start, events)
+          streamOrFallback(
+            client,
+            platformName,
+            GestureStreamStart(snapshot, gestureId, start),
+            events,
+          )
         }
       } finally {
         pendingDispatches.decrementAndGet()
       }
     }
     return DeviceGestureStreamHandle(events)
-  }
-
-  private suspend fun streamOrFallback(
-    client: AutoMobileClient,
-    platformName: String,
-    snapshot: DeviceFrameSnapshot,
-    gestureId: String,
-    start: DevicePoint,
-    events: Channel<GestureStreamEvent>,
-  ) {
-    val stream = client.openGestureStream(platformName, deviceId)
-    if (stream == null) {
-      fallbackAtomicSwipe(client, platformName, snapshot, start, events)
-      return
-    }
-    tracer.dispatching(deviceId)
-    // A rejected start means the runner can't stream this gesture — an older control-proxy artifact
-    // that doesn't decode request_gesture_start, or API 24-25. Treat it as unsupported and fall
-    // back to one atomic swipe on release so the drag still lands, exactly as when the client
-    // cannot stream at all (issue: streaming gesture input). The GestureInputStream contract makes
-    // a failed ack terminal: stop, do not keep sending frames, and do not report the gesture acked.
-    var startRejected = false
-    var refused = false
-    var acked = false
-    try {
-      val started = stream.start(gestureId, start.x.toDouble(), start.y.toDouble())
-      if (started.isDeviceOwnedRefusal) {
-        // Another session holds the device: an atomic swipe would be refused the same way.
-        reportRejected(started)
-        refused = true
-      } else if (!started.success) {
-        LOG.warn(
-          "gesture stream start rejected for $deviceId: ${started.error ?: started.action}; " +
-            "falling back to atomic swipe",
-        )
-        startRejected = true
-      } else {
-        acked = consumeStreamedGesture(stream, gestureId, events)
-      }
-    } finally {
-      stream.close()
-    }
-    if (refused) {
-      drainGestureEvents(events)
-      return
-    }
-    if (startRejected) {
-      // The stream is closed; drain the remaining moves/release from the same events channel into
-      // one atomic swipe, so the pane emits the same start/move/end regardless of runner support.
-      fallbackAtomicSwipe(client, platformName, snapshot, start, events)
-      return
-    }
-    if (acked) tracer.acked(deviceId)
-  }
-
-  /**
-   * Relay the drag's moves and release over an already-started [stream], honoring each frame's ack.
-   * Returns true only when the whole gesture (through its terminal End) was acknowledged. A failed
-   * ack is terminal per the [dev.jasonpearson.automobile.desktop.core.daemon.GestureInputStream]
-   * contract: stop sending, and let the caller close the stream (which cancels the partial
-   * on-device gesture) rather than continue as if the drag succeeded.
-   */
-  private suspend fun consumeStreamedGesture(
-    stream: GestureInputStream,
-    gestureId: String,
-    events: Channel<GestureStreamEvent>,
-  ): Boolean {
-    for (event in events) {
-      when (event) {
-        is GestureStreamEvent.Move -> {
-          val result = stream.move(gestureId, event.point.x.toDouble(), event.point.y.toDouble())
-          if (!result.success) {
-            LOG.warn("gesture stream move rejected for $deviceId: ${result.error ?: result.action}")
-            reportRejected(result)
-            return false
-          }
-        }
-        is GestureStreamEvent.End -> {
-          val result =
-            stream.end(gestureId, event.point.x.toDouble(), event.point.y.toDouble(), event.cancel)
-          if (!result.success) {
-            LOG.warn("gesture stream end rejected for $deviceId: ${result.error ?: result.action}")
-            reportRejected(result)
-            return false
-          }
-          return true
-        }
-      }
-    }
-    // The channel closed without an End (deactivated mid-drag): not a clean acknowledgement.
-    return false
-  }
-
-  private suspend fun fallbackAtomicSwipe(
-    client: AutoMobileClient,
-    platformName: String,
-    snapshot: DeviceFrameSnapshot,
-    start: DevicePoint,
-    events: Channel<GestureStreamEvent>,
-  ) {
-    for (event in events) {
-      if (event is GestureStreamEvent.End) {
-        if (event.cancel) return
-        val decision =
-          DeviceDragGesturePolicy.evaluate(
-            start = start,
-            end = event.point,
-            deviceWidth = snapshot.deviceWidth,
-            deviceHeight = snapshot.deviceHeight,
-            coordinateSpace = snapshot.coordinateSpace,
-            nativeScale = snapshot.nativeScale,
-          )
-        if (decision is DeviceDragDecision.Swipe) {
-          val result =
-            client.inputSwipe(
-              startX = decision.start.x.toDouble(),
-              startY = decision.start.y.toDouble(),
-              endX = decision.end.x.toDouble(),
-              endY = decision.end.y.toDouble(),
-              platform = platformName,
-              deviceId = deviceId,
-              durationMs = decision.durationMs,
-              frameContext = null,
-            )
-          if (!result.success) {
-            LOG.warn("video swipe rejected for $deviceId: ${result.error ?: result.action}")
-            reportRejected(result)
-          }
-        }
-        return
-      }
-    }
-  }
-
-  /** A held-device refusal goes to the host (#10743); any other rejection is only logged. */
-  private fun reportRejected(result: InputActionResult) {
-    if (result.isDeviceOwnedRefusal) onDeviceHeldElsewhere()
-  }
-
-  private suspend fun drainGestureEvents(events: Channel<GestureStreamEvent>) {
-    for (event in events) {
-      if (event is GestureStreamEvent.End) break
-    }
   }
 
   /**
@@ -483,16 +332,22 @@ class VideoInputDispatcher(
       }
     dispatch { client, platformName ->
       client.inputTypeText(
-        text = batch,
-        platform = platformName,
-        deviceId = deviceId,
-        // Always request append (real key events) rather than the daemon's default ACTION_SET_TEXT,
-        // which REPLACES the field — mirroring one keystroke at a time under SET_TEXT would leave
-        // only the last character and wipe existing text. This matches DeviceControlInputForwarder;
-        // the keyboard policy is the gate that refuses TypeText for a platform lacking append
-        // (issue #3351), so this call only fires where append is valid.
-        append = true,
-        frameContext = null,
+        input =
+          TextInput(
+            text = batch,
+            platform = platformName,
+            deviceId = deviceId,
+            // Always request append (real key events) rather than the daemon's default
+            // ACTION_SET_TEXT,
+            // which REPLACES the field — mirroring one keystroke at a time under SET_TEXT would
+            // leave
+            // only the last character and wipe existing text. This matches
+            // DeviceControlInputForwarder;
+            // the keyboard policy is the gate that refuses TypeText for a platform lacking append
+            // (issue #3351), so this call only fires where append is valid.
+            append = true,
+            frameContext = null,
+          ),
       )
     }
   }
@@ -577,7 +432,11 @@ class VideoInputDispatcher(
               LOG.warn("video input rejected for $deviceId: ${result.error ?: result.action}")
               reportRejected(result)
             }
-          } catch (error: Exception) {
+          } catch (error: dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException) {
+            // Best-effort input: a failed tap must never crash the pane. Log and drop — the video
+            // keeps streaming and the next tap is independent.
+            LOG.warn("video input dispatch failed for $deviceId", error)
+          } catch (error: java.io.IOException) {
             // Best-effort input: a failed tap must never crash the pane. Log and drop — the video
             // keeps streaming and the next tap is independent.
             LOG.warn("video input dispatch failed for $deviceId", error)

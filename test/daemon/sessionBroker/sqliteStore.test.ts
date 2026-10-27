@@ -11,6 +11,12 @@ import {
   type BrokerAdmissionInput,
   type BrokerResourceRecord,
 } from "../../../src/daemon/sessionBroker/store";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { SessionBrokerInvariantError } from "../../../src/daemon/sessionBroker/SessionBrokerInvariantError";
+import {
+  SessionRequestOwnerMismatchError,
+  SESSION_BROKER_RETRY_AFTER_MS,
+} from "../../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
 import { sessionRequestFingerprint } from "../../../src/daemon/sessionBroker/requestIdentity";
 
 const OWNER: BindingProcessIdentity = {
@@ -294,6 +300,52 @@ describe("session broker durable admission", () => {
     expect(outcome.kind).toBe("reuse");
   });
 
+  for (const restartHandoff of [true, false]) {
+    for (const operation of ["release", "abandon"] as const) {
+      test(`${operation} refuses a previous generation (restartHandoff=${restartHandoff}) without mutation`, async () => {
+        const requestId = "generation-refusal";
+        const parameters = { device: "phone" };
+        const active = await prepare(requestId, {
+          parameters,
+          fingerprint: sessionRequestFingerprint(parameters, CONSUMER_TOKEN),
+        });
+        if (restartHandoff) {
+          await store.relinquishForRestart(requestId, OWNER);
+        }
+        const receipt = await store.getRequest(requestId);
+        const resources = await store.listResources();
+        const binding = await registry.getAssignment(key(active.resource));
+        // Repeated refusals must neither adopt nor release/abandon the durable request.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const failure = await (
+            operation === "release"
+              ? store.beginRelease(active.sessionId, SUCCESSOR)
+              : store.abandon(requestId, SUCCESSOR, CONSUMER_TOKEN)
+          ).catch((error: unknown) => error);
+          expect(failure).toBeInstanceOf(ActionableError);
+          expect(failure).toBeInstanceOf(SessionRequestOwnerMismatchError);
+          expect(failure).toMatchObject({
+            code: restartHandoff ? "session_restart_handoff_pending" : "session_owner_mismatch",
+            retryable: restartHandoff,
+          });
+          expect(
+            failure instanceof SessionRequestOwnerMismatchError ? failure.retryAfterMs : null,
+          ).toBe(restartHandoff ? SESSION_BROKER_RETRY_AFTER_MS : undefined);
+          expect(await store.getRequest(requestId)).toEqual(receipt);
+          expect(await store.listResources()).toEqual(resources);
+          expect(await registry.getAssignment(key(active.resource))).toEqual(binding);
+        }
+      });
+    }
+  }
+
+  test("a committed abandonment replays for a successor generation", async () => {
+    const abandoned = await store.abandon("abandoned-before-restart", OWNER, CONSUMER_TOKEN);
+    expect(await store.abandon("abandoned-before-restart", SUCCESSOR, CONSUMER_TOKEN)).toEqual(
+      abandoned,
+    );
+  });
+
   test("a committed release replays after daemon restart without touching a successor session", async () => {
     const first = await prepare("first");
     await returnClean("first", first.resource);
@@ -430,13 +482,36 @@ describe("session broker durable admission", () => {
   test("release cannot return a device while its old session still owns physical execution", async () => {
     const first = await prepare("first");
     await store.beginRelease(first.sessionId, OWNER);
-    await expect(store.completeCleanRelease("first", OWNER, {})).rejects.toThrow(
-      "execution or journal work",
+    await expect(store.completeCleanRelease("first", OWNER, {})).rejects.toBeInstanceOf(
+      SessionBrokerInvariantError,
     );
     expect((await store.listResources())[0]?.state).toBe("resetting");
     await registry.releaseExecution(key(first.resource), first.sessionId);
     await store.completeCleanRelease("first", OWNER, {});
     expect((await store.listResources())[0]?.state).toBe("idle");
+  });
+
+  test("clean release reports permanent invalid state and lost reservation", async () => {
+    const first = await prepare("first");
+    await expect(store.completeCleanRelease("first", OWNER, {})).rejects.toBeInstanceOf(
+      SessionBrokerInvariantError,
+    );
+    await returnClean("first", first.resource);
+    await prepare("second");
+    // The first receipt still names the resource now owned by second; stale activation is fenced.
+    await expect(store.activate("first", OWNER, first.sessionId)).rejects.toBeInstanceOf(
+      SessionBrokerInvariantError,
+    );
+  });
+
+  test("clean release reports a permanent missing stable binding", async () => {
+    const first = await prepare("first");
+    await store.beginRelease(first.sessionId, OWNER);
+    await registry.releaseExecution(key(first.resource), first.sessionId);
+    await clearPhysicalBinding(first.resource);
+    await expect(store.completeCleanRelease("first", OWNER, {})).rejects.toBeInstanceOf(
+      SessionBrokerInvariantError,
+    );
   });
 
   test("zero-pool release retains cleanup ownership until confirmed destruction", async () => {
@@ -464,6 +539,57 @@ describe("session broker durable admission", () => {
     expect((await store.listResources())[0]?.state).toBe("destroying");
     expect(await store.confirmDestroyed(tickets[0])).toBe(false);
   });
+
+  test("destruction finalizes only the current request reset and fences stale timing writes", async () => {
+    const first = await prepare("first");
+    await returnClean("first", first.resource);
+    const pendingReset = {
+      mode: "erase" as const,
+      outcome: "pending" as const,
+      startedAtMs: 10,
+      totalMs: 5,
+      reuseCount: 0,
+      phases: {},
+    };
+    await store.recordTiming("first", { reset: pendingReset });
+
+    const second = await prepare("second");
+    await store.recordTiming("second", { reset: pendingReset });
+    await store.beginRelease("session-second", OWNER);
+    await registry.releaseExecution(key(second.resource), "session-second");
+    const tickets = await store.completeCleanRelease("second", OWNER, { idlePoolCap: 0 });
+    await clearPhysicalBinding(second.resource);
+    expect(await store.confirmDestroyed(tickets[0])).toBe(true);
+
+    expect((await store.getRequest("first"))?.timing?.reset?.outcome).toBe("pending");
+    expect((await store.getRequest("second"))?.timing?.reset?.outcome).toBe("destroyed");
+    await store.recordTiming("second", { reset: pendingReset });
+    expect((await store.getRequest("second"))?.timing?.reset?.outcome).toBe("destroyed");
+  });
+
+  test.each([false, true])(
+    "recovery preserves a relinquished release and its destruction ticket (destroying=%s)",
+    async (destroying) => {
+      const first = await prepare("first");
+      await store.beginRelease(first.sessionId, OWNER);
+      const previous = destroying ? await store.releaseByDestruction("first", OWNER) : undefined;
+      livePids.delete(OWNER.pid);
+      const ticket = await store.recoverRequest("first", SUCCESSOR);
+      expect(await store.getRequest("first")).toMatchObject({
+        state: "releasing",
+        owner: SUCCESSOR,
+        error: null,
+        errorCode: null,
+      });
+      expect(await store.getResource(first.resource.resourceId)).toMatchObject({
+        state: "destroying",
+      });
+      expect(ticket).toBeDefined();
+      if (destroying) {
+        expect(ticket).toEqual(previous);
+      }
+    },
+  );
 
   test("recovery retains uncertain live owners, then fences dead owners without freeing capacity", async () => {
     await store.admit(input("crashed", { limits: { totalDeviceCap: 1 } }));

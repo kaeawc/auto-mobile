@@ -1,5 +1,5 @@
 import * as fileLock from "../../src/utils/fileLock";
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock, beforeEach } from "bun:test";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -18,6 +18,8 @@ import { FakeLockFileSystem } from "../fakes/FakeLockFileSystem";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import { Racer } from "./fileLockRaceHarness";
+
+afterEach(() => mock.restore());
 
 const LOCK = "/locks/resource.lock";
 const PID = 101;
@@ -471,7 +473,7 @@ describe("real filesystem modes and own tmp cleanup", () => {
       if (route === "supersession") {
         const { ino, mtimeMs } = nodeLockFileSystem.stat(lock);
         const hash = createHash("sha256").update("99\nstale").digest("hex").slice(0, 32);
-        writeFileSync(`${lock}.reclaim.${ino}.${mtimeMs}.${hash}.0`, "98\ndead");
+        writeFileSync(`${lock}.reclaim.${Number(ino)}.${mtimeMs}.${hash}.0`, "98\ndead");
       }
       const racer = new Racer(
         acquireExclusiveLockSteps(lock, {
@@ -508,6 +510,11 @@ describe("real filesystem modes and own tmp cleanup", () => {
     },
   );
 
+  let linkSpy: ReturnType<typeof spyOn<typeof nodeLockFileSystem, "link">>;
+  beforeEach(() => {
+    linkSpy = spyOn(nodeLockFileSystem, "link");
+  });
+
   test.skipIf(process.platform === "win32").each([false, true])(
     "legacy wx fallback creates a 0600 lock and guard (reclaim=%j)",
     (reclaim) => {
@@ -515,7 +522,7 @@ describe("real filesystem modes and own tmp cleanup", () => {
       if (reclaim) {
         writeFileSync(lock, "99\nstale");
       }
-      const link = spyOn(nodeLockFileSystem, "link").mockImplementation(() => {
+      const link = linkSpy.mockImplementation(() => {
         throw Object.assign(new Error("unsupported"), { code: "ENOTSUP" });
       });
       try {

@@ -4,12 +4,21 @@ import {
   capLayoutWarnings,
   MAX_LAYOUT_WARNINGS,
 } from "../../../../src/features/observe/audits/SafeAreaAuditor";
+import {
+  BASELINE_ACCESSIBILITY_ACTIONS,
+  hasInteractionAction,
+} from "../../../../src/features/observe/audits/accessibilityActions";
 import type { LayoutWarning, ObserveResult } from "../../../../src/models";
 import {
+  capturedFlatNodeForTest,
   createFlatHierarchyForTest,
   createObserveResultForTest,
   type FlatHierarchyNode,
 } from "../flatHierarchyBuilders";
+import { readFileSync } from "node:fs";
+import { observeResultFromFixture } from "../../../helpers/observeFixture";
+import { isTruthy } from "../../../../src/models/Element";
+import { parseBounds } from "../../../../src/utils/bounds";
 
 /** Real captures hang the screen's nodes under a single root node. */
 function setRootNodes(result: ObserveResult, nodes: FlatHierarchyNode[]): void {
@@ -60,6 +69,158 @@ function observation(): ObserveResult {
 }
 
 describe("SafeAreaAuditor", () => {
+  describe("Android baseline accessibility actions", () => {
+    function gestureObservation(attributes: FlatHierarchyNode): ObserveResult {
+      const result = observation();
+      result.insets!.systemBars!.visible = { top: 0, right: 0, bottom: 0, left: 0 };
+      result.insets!.systemGestures = { top: 0, right: 0, bottom: 20, left: 0 };
+      setRootNodes(result, [
+        {
+          text: "Bottom label",
+          "view-id": "bottom-label",
+          bounds: { left: 10, top: 180, right: 90, bottom: 200 },
+          ...attributes,
+        },
+      ]);
+      return result;
+    }
+
+    test.each([
+      ["accessibility_focus"],
+      ["clear_accessibility_focus"],
+      ["select", "clear_selection"],
+      [...BASELINE_ACCESSIBILITY_ACTIONS],
+    ])("does not treat baseline signature %p as interaction", (...actions) => {
+      expect(new SafeAreaAuditor().inspect(gestureObservation({ actions }))).toEqual([]);
+    });
+
+    test.each(["select", "clear_selection"])(
+      "warns on a node whose only interaction is standalone %s (#14435)",
+      (action) => {
+        for (const actions of [
+          [action],
+          [action, "accessibility_focus", "clear_accessibility_focus"],
+        ]) {
+          expect(new SafeAreaAuditor().inspect(gestureObservation({ actions }))).toMatchObject([
+            { type: "interaction-in-system-gesture-region", categories: ["interaction"] },
+          ]);
+        }
+      },
+    );
+
+    test("keeps baseline-only text warnings as text under visible bars", () => {
+      const result = gestureObservation({ actions: [...BASELINE_ACCESSIBILITY_ACTIONS] });
+      expect(new SafeAreaAuditor().inspect(result)).toEqual([]);
+      result.insets!.systemBars!.visible.bottom = 20;
+      expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
+        { type: "important-content-under-inset", categories: ["text"] },
+      ]);
+    });
+
+    test("does not warn on a baseline-only container under visible bars", () => {
+      const result = gestureObservation({ text: "", actions: [...BASELINE_ACCESSIBILITY_ACTIONS] });
+      result.insets!.systemBars!.visible.bottom = 20;
+      expect(new SafeAreaAuditor().inspect(result)).toEqual([]);
+    });
+
+    test.each([
+      "click",
+      "long_click",
+      "set_text",
+      "scroll_forward",
+      "scroll_backward",
+      "expand",
+      "collapse",
+      "dismiss",
+      "copy",
+      "paste",
+      "cut",
+      "set_selection",
+      "focus",
+      "custom_vendor_action",
+    ])("keeps real action %s interactive, alone or with baseline actions", (action) => {
+      for (const actions of [[action], [...BASELINE_ACCESSIBILITY_ACTIONS, action]]) {
+        expect(new SafeAreaAuditor().inspect(gestureObservation({ actions }))).toMatchObject([
+          { type: "interaction-in-system-gesture-region", categories: ["interaction"] },
+        ]);
+      }
+    });
+
+    test.each(["clickable", "long-clickable", "checkable"])(
+      "keeps %s interactive with baseline actions",
+      (attribute) => {
+        for (const value of [true, "true"]) {
+          const result = gestureObservation({
+            [attribute]: value,
+            actions: [...BASELINE_ACCESSIBILITY_ACTIONS],
+          });
+          expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
+            { type: "interaction-in-system-gesture-region", categories: ["interaction"] },
+          ]);
+        }
+      },
+    );
+
+    test("keeps SDK custom actions interactive without platform actions", () => {
+      const result = gestureObservation({
+        extras: { "sdk.accessibilityCustomActions": "Archive" },
+      });
+      expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
+        { type: "interaction-in-system-gesture-region", categories: ["interaction"] },
+      ]);
+    });
+
+    const captures = [
+      "android-overlay-window/app-layer-overlay-over-playground.raw.json",
+      "android-overlay-window/floating-overlay-over-button-elevated.raw.json",
+      "android-enabled/playground-disabled-control-api36.json",
+      "android-launcher/launcher-home-emulator-5600.json",
+    ].map((file) => {
+      const result = observeResultFromFixture(
+        JSON.parse(readFileSync(`${import.meta.dir}/../../../fixtures/${file}`, "utf8")),
+        file,
+      );
+      const root = capturedFlatNodeForTest(result.viewHierarchy!.hierarchy.node!);
+      result.viewHierarchy!.hierarchy.node = root;
+      return { file, result, root };
+    });
+
+    test.each(captures)("only flags real interactions in captured $file", ({ result, root }) => {
+      const nodes: FlatHierarchyNode[] = [];
+      function index(node: FlatHierarchyNode): void {
+        nodes.push(node);
+        node.node?.forEach(index);
+      }
+      index(root);
+      const warnings = new SafeAreaAuditor().inspect(result);
+      const interactions = warnings.filter((warning) => warning.categories.includes("interaction"));
+      expect(interactions.length).toBeGreaterThan(0);
+      for (const warning of [...interactions, ...result.layoutWarnings!.warnings]) {
+        if (!warning.categories.includes("interaction")) {
+          continue;
+        }
+        const bounds = parseBounds(warning.element.bounds);
+        const node = nodes.find(
+          (candidate) =>
+            (warning.element.viewId !== undefined
+              ? candidate["view-id"] === warning.element.viewId ||
+                candidate["resource-id"] === warning.element.viewId
+              : candidate["resource-id"] === warning.element.resourceId) &&
+            candidate.bounds?.left === bounds?.left &&
+            candidate.bounds?.top === bounds?.top &&
+            candidate.bounds?.right === bounds?.right &&
+            candidate.bounds?.bottom === bounds?.bottom,
+        );
+        expect(node).toBeDefined();
+        const hasFlag = [node?.clickable, node?.["long-clickable"], node?.checkable].some(
+          (value) => (typeof value === "boolean" || typeof value === "string") && isTruthy(value),
+        );
+        const hasAction = Array.isArray(node?.actions) && hasInteractionAction(node.actions);
+        expect(hasFlag || hasAction).toBe(true);
+      }
+    });
+  });
+
   test("reports text and interactive content under visible bars, excluding system UI", () => {
     const warnings = new SafeAreaAuditor().inspect(observation());
 

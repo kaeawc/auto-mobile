@@ -1,11 +1,10 @@
 import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, spyOn } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import {
   DeviceShuttingDownError,
   DeviceTransportOfflineError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { ActionableError, type BootedDevice } from "../../src/models";
@@ -132,7 +131,7 @@ describe("exact Android binding during transitional adb presence", () => {
       });
       expect(pending.settled()).toBe(false);
       expect(discovery).toHaveBeenCalledTimes(1);
-      expect((await discovery.mock.results[0]!.value).devices).toEqual([]);
+      expect(await discovery.mock.results[0]!.value).toHaveProperty("devices", []);
       h.unchanged();
       h.manager.bootedDevices = [device];
       h.manager.androidListedDeviceStates.set(device.deviceId, "device");
@@ -140,10 +139,10 @@ describe("exact Android binding during transitional adb presence", () => {
       const sessionId = await pending.result;
       expect(sessionId).toEqual(expect.any(String));
       expect(discovery).toHaveBeenCalledTimes(2);
-      expect((await discovery.mock.results[1]!.value).devices).toEqual([device]);
+      expect(await discovery.mock.results[1]!.value).toHaveProperty("devices", [device]);
       expect(h.timer.now()).toBe(100);
       expect(h.pool.getDevice(device.deviceId)).toBe(h.entry);
-      expect(h.entry?.sessionId).toBe(sessionId);
+      expect(sessionId).toBe(h.entry?.sessionId);
       h.noLossSideEffects();
     } finally {
       discovery.mockRestore();
@@ -186,7 +185,7 @@ describe("exact Android binding during transitional adb presence", () => {
     test(`${autolock ? "autolock" : "explicit bind"}: live first-boot process holds offline then absent transport until the same serial returns`, async () => {
       const h = await setup(true);
       const child = new FakeChildProcess(h.timer);
-      const process = child as unknown as ChildProcess;
+      const process = child;
       h.manager.bootedDevices = [device];
       h.manager.androidListedDeviceStates.set(device.deviceId, "device");
       expect(await h.manager.getBootedDevices("android")).toEqual([device]);
@@ -238,7 +237,7 @@ describe("exact Android binding during transitional adb presence", () => {
             deviceId: device.deviceId,
             platform: "android",
             sourceImage: image,
-            childProcess: live ? (child as unknown as ChildProcess) : undefined,
+            childProcess: live ? child : undefined,
           }),
         );
         await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
@@ -288,7 +287,7 @@ describe("exact Android binding during transitional adb presence", () => {
             deviceId: device.deviceId,
             platform: "android",
             sourceImage: image,
-            childProcess: child as unknown as ChildProcess,
+            childProcess: child,
           }),
         );
         await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
@@ -393,7 +392,7 @@ describe("exact Android binding during transitional adb presence", () => {
       device.name,
       image.name,
     );
-    const entryBefore = { ...h.entry };
+    const entryBefore = { ...h.entry! };
     try {
       const error = await settleByFakeEvents(
         h.timer,
@@ -557,7 +556,7 @@ describe("exact Android binding during transitional adb presence", () => {
     await h.bind();
     h.manager.bootedDevices = [];
     h.manager.androidListedDeviceStates.set(device.deviceId, "offline");
-    const entryBefore = { ...h.entry };
+    const entryBefore = { ...h.entry! };
     const probe = spyOn(h.manager, "getAndroidListedDeviceStates");
     try {
       const pending = track(
@@ -640,7 +639,7 @@ describe("exact Android binding during transitional adb presence", () => {
         expect(sessionId).toEqual(autolock ? expect.any(String) : "owner");
         expect(h.timer.now()).toBe(100);
         expect(h.pool.getDevice(device.deviceId)).toBe(h.entry);
-        expect(h.entry?.sessionId).toBe(sessionId);
+        expect(sessionId).toBe(h.entry?.sessionId);
         h.noLossSideEffects();
       } finally {
         probe.mockRestore();
@@ -700,7 +699,7 @@ describe("exact Android binding during transitional adb presence", () => {
     const recovery = h.pool.recoverSessionBoundAndroidDeviceAfterLoss(
       device.deviceId,
       undefined,
-      h.entry,
+      h.entry ?? undefined,
     );
     const probe = spyOn(h.manager, "getAndroidListedDeviceStates");
     try {

@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DeviceCleanupInProgressError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -177,7 +177,7 @@ test("a bind during a capped pending cleanup is refused with the cleanup's remai
     manager.onSessionRelease((_sessionId, deviceId) => {
       manager.registerPendingDeviceCleanup(deviceId, cleanup.promise, 12_000);
     });
-    await manager.releaseSession("test-1", "released", { allowExpired: true });
+    await manager.releaseSession("test-1", "superseded", { allowExpired: true });
     await pool.releaseDevice(device.deviceId, "test-1");
     timer.advanceTime(2_000);
 
@@ -233,13 +233,13 @@ test("a deferred release never frees a same-id replacement entry after late tear
     manager.onSessionRelease((_sessionId, deviceId) => {
       manager.registerPendingDeviceCleanup(deviceId, cleanup.promise, 12_000);
     });
-    await manager.releaseSession("test-1", "released", { allowExpired: true });
+    await manager.releaseSession("test-1", "superseded", { allowExpired: true });
     await pool.releaseDevice(device.deviceId, "test-1");
 
     const original = pool.getDevice(device.deviceId)!;
     expect(original.sessionId).toBe("test-1");
     const replacement = { ...original, incarnation: original.incarnation + 1 };
-    pool["devices"].set(device.deviceId, replacement);
+    pool.testHooks.devices.set(device.deviceId, replacement);
 
     cleanup.resolve();
     await manager.getPendingDeviceCleanup(device.deviceId);
@@ -249,7 +249,7 @@ test("a deferred release never frees a same-id replacement entry after late tear
     expect(replacement.sessionId).toBe("test-1");
     expect(original.sessionId).toBe("test-1");
     // The stale deferred entry is cleared, so it cannot keep reporting a hold on the replacement.
-    expect(pool["deferredDeviceReleases"].has(device.deviceId)).toBe(false);
+    expect(pool.testHooks.deferredDeviceReleases.has(device.deviceId)).toBe(false);
   } finally {
     cleanup.resolve();
     manager.stopCleanupTimer();

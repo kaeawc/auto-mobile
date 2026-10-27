@@ -39,7 +39,7 @@ describe("AdbClient remote server configuration", () => {
       return createExecResult("Android Debug Bridge version 1.0.41\n");
     };
 
-    const client = new AdbClient(null, execAsync, null, undefined, new FakeTimer());
+    const client = new AdbClient(null, execAsync, { timer: new FakeTimer() });
 
     const command = await client.getBaseCommandParts();
     expect(command.baseArgs).toEqual([]);

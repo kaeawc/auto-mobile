@@ -1,3 +1,4 @@
+import { visitPrototypeHandlerFields } from "./prototypeTemplate";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import {
   MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
@@ -33,9 +34,15 @@ export interface ResolvedEmitContext {
   context: Record<string, PrototypeJson>;
   contextTruncated?: true;
 }
-type RuntimeBinding = Exclude<PrototypeEmitContextBinding, { item: string } | { index: true }>;
+type RuntimeBinding = Exclude<
+  PrototypeEmitContextBinding,
+  { item: string } | { index: true } | { match: string }
+>;
 
-/** Executable reference for device runtimes. Repeat bindings must first be expanded. */
+/**
+ * Executable reference for device runtimes. Repeat bindings must first be expanded, and a
+ * linkify `{match}` bound to its match (`bindPrototypeLinkifyActions`).
+ */
 export function resolveEmitContext(
   bindings: Readonly<Record<string, RuntimeBinding>>,
   inputs: PrototypeEmitContextInputs,
@@ -100,6 +107,12 @@ export function prototypeFieldsOfKind(spec: unknown, kind: FieldKind): string[] 
     });
   };
   walkPrototypeNodes(expansion.spec, scan);
+  visitPrototypeHandlerFields(expansion.spec, (entry, at, fieldKind) => {
+    if (fieldKind === kind) {
+      fields.push(at);
+    }
+    return entry;
+  });
   const located = fields.map(expansion.locate);
   fields.length = 0;
   if (expansion.expanded) {

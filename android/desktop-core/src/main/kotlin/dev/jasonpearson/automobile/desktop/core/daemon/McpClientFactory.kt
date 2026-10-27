@@ -13,7 +13,11 @@ object McpClientFactory {
     return when (process.connectionType) {
       McpConnectionType.StreamableHttp -> {
         val port = process.port ?: 3000
-        McpHttpClient(normalizeHttpUrl("http://localhost:$port"))
+        McpHttpClient(
+          dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+            normalizeHttpUrl("http://localhost:$port"),
+          ),
+        )
       }
       McpConnectionType.UnixSocket -> {
         val socketPath = process.socketPath ?: DaemonSocketPaths.socketPath()
@@ -53,7 +57,11 @@ object McpClientFactory {
   fun createConfiguredHttp(): McpHttpClient? {
     val httpUrl = readSetting("AUTOMOBILE_MCP_HTTP_URL", "automobile.mcp.httpUrl")
     if (!httpUrl.isNullOrBlank()) {
-      return McpHttpClient(normalizeHttpUrl(httpUrl))
+      return McpHttpClient(
+        dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+          normalizeHttpUrl(httpUrl),
+        ),
+      )
     }
     return null
   }

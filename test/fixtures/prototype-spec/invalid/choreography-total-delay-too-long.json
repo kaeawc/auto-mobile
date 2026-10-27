@@ -1,0 +1,87 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "show": true
+    },
+    "root": {
+      "type": "column",
+      "stagger": {
+        "ms": 100
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "Row 0",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Row 1",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Row 2",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Row 3",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Row 4",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Row 5",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Row 6",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Row 7",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.stagger",
+  "expectedMessage": "Stagger and transition delays add up to more than 600 ms"
+}

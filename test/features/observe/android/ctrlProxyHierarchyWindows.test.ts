@@ -1,3 +1,4 @@
+import { createAndroidHierarchyConverter } from "../../../helpers/androidHierarchyConverter";
 import capture from "../../../fixtures/android-enabled/playground-disabled-control-api36.json";
 import { androidControlObservation } from "../../../helpers/androidDisabledControlCapture";
 import { sanitizeObserveResult } from "../../../../src/features/observe/output/ObserveResultOutput";
@@ -8,19 +9,13 @@ import { DefaultObserveElementCollector } from "../../../../src/features/observe
 import { getElementProvenance } from "../../../../src/features/observe/output/elementProvenance";
 import { projectSkeleton } from "../../../../src/features/observe/output/SkeletonProjection";
 import { expect, test } from "bun:test";
-import { CtrlProxyHierarchy } from "../../../../src/features/observe/android/CtrlProxyHierarchy";
-import type {
-  AccessibilityHierarchy,
-  HierarchyDelegateContext,
-} from "../../../../src/features/observe/android/types";
+import type { AccessibilityHierarchy } from "../../../../src/features/observe/android/types";
 import { projectActionableHierarchy } from "../../../../src/features/observe/HierarchyNormalization";
 import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../../src/features/utility/SearchableNode";
-import { FakeTimer } from "../../../fakes/FakeTimer";
 
 // Conversion is pure apart from timing; no connection or device access is needed.
-const converter = () =>
-  new CtrlProxyHierarchy({ timer: new FakeTimer() } as HierarchyDelegateContext);
+const converter = () => createAndroidHierarchyConverter();
 const button = (id: string, right: number) => ({
   text: "Open",
   "resource-id": id,
@@ -164,7 +159,7 @@ test("linked activity/dialog duplicate skeleton indexes replay the resolver's to
   const defaultPick = selector.selectByResourceId(hierarchy, "app:id/ok", {
     intentAction: "inspect",
   });
-  expect(rows.find((row) => row.index === 0)?.bounds).toEqual([
+  expect<unknown>(rows.find((row) => row.index === 0)?.bounds).toEqual([
     0,
     0,
     defaultPick.element?.bounds.right,
@@ -261,6 +256,7 @@ test.each([
   }
   expect(converter().convertToViewHierarchyResult(wire).ctrlProxyIncompleteReason).toBe(reason);
   // Both the readable and rootless conversion branches retain the wire metadata.
-  delete wire.hierarchy;
+  const rootless: Partial<AccessibilityHierarchy> = wire;
+  delete rootless.hierarchy;
   expect(converter().convertToViewHierarchyResult(wire).ctrlProxyIncompleteReason).toBe(reason);
 });

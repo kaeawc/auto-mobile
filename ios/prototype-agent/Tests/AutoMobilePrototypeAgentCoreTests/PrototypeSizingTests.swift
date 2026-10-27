@@ -229,11 +229,11 @@ extension PrototypeSizingTests {
     func testContentCentresOnlyOnWrappedAxes() throws {
         func anchor(_ json: String, weighted: PrototypeAxis? = nil) throws -> [Double] {
             let style = try JSONDecoder().decode(Style.self, from: Data(json.utf8))
-            let a = PrototypeSizing.contentAnchor(
+            let fitting = PrototypeSizing.contentAnchor(
                 PrototypeSizeRules(style: style, weightedAxis: weighted),
                 alignment: (0, 1)
             )
-            return [a.x, a.y]
+            return [fitting.x, fitting.y]
         }
         XCTAssertEqual(try anchor(#"{"minWidth": 200}"#), [0.5, 0.5])
         XCTAssertEqual(try anchor(#"{"width": "wrap"}"#), [0.5, 0.5])

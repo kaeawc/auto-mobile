@@ -6,6 +6,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
 import kotlinx.serialization.Serializable
@@ -27,6 +28,7 @@ class GitHubReleaseSource(
   private val repo: String = "kaeawc/auto-mobile",
   private val httpClient: HttpClient =
     HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build(),
+  private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ReleaseSource {
 
   override suspend fun fetchLatestRelease(): ReleaseInfo {
@@ -45,7 +47,7 @@ class GitHubReleaseSource(
       try {
         // runInterruptible converts coroutine cancellation into a thread interrupt, so a cancelled
         // check aborts the blocking send at once instead of holding the mutex until the timeout.
-        runInterruptible(Dispatchers.IO) {
+        runInterruptible(ioDispatcher) {
           httpClient.send(request, HttpResponse.BodyHandlers.ofString())
         }
       } catch (error: IOException) {

@@ -80,6 +80,15 @@ const TTI_STABILITY_CHECK_INTERVAL_MS = 100;
 const TTI_STABILITY_THRESHOLD_MS = 500;
 const TTI_MAX_WAIT_MS = 5000;
 
+/** Optional inputs for {@link PerformanceAudit.runAudit}. */
+export interface PerformanceAuditRunOptions {
+  screenSize?: ScreenSize;
+  perf?: PerformanceTracker;
+  windowBounds?: ElementBounds;
+  touchPoint?: { x: number; y: number };
+  skipTouchLatency?: boolean;
+}
+
 /**
  * Performance audit class for collecting and validating performance metrics
  */
@@ -849,12 +858,15 @@ export class PerformanceAudit {
       cpuUsageThresholdPercent: number;
       touchLatencyThresholdMs: number;
     },
-    screenSize?: ScreenSize,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    windowBounds?: ElementBounds,
-    touchPoint?: { x: number; y: number },
-    skipTouchLatency?: boolean,
+    options: PerformanceAuditRunOptions = {},
   ): Promise<PerformanceAuditResult> {
+    const {
+      screenSize,
+      perf = new NoOpPerformanceTracker(),
+      windowBounds,
+      touchPoint,
+      skipTouchLatency,
+    } = options;
     logger.info(`[PerformanceAudit] Running audit for ${packageName}`);
 
     // Get device capabilities

@@ -7,8 +7,6 @@ import dev.jasonpearson.automobile.desktop.core.logging.Logger
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryPushRequest
-import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryPushResponse
-import dev.jasonpearson.automobile.desktop.core.telemetry.parseTelemetryEvent
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.InputStreamReader
@@ -38,7 +36,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
-import kotlinx.serialization.serializer
 
 internal interface TelemetrySocket : AutoCloseable {
   fun readLine(): String?
@@ -77,6 +74,7 @@ private class ChannelTelemetrySocket(path: String) : TelemetrySocket {
 internal data class TelemetryPushSocketOptions(
   val beforeSocketPublish: () -> Unit = {},
   val sessionUuidProvider: (() -> String?)? = null,
+  val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
 )
 
 class TelemetryPushSocketClient
@@ -90,12 +88,17 @@ internal constructor(
 ) : TelemetryPushClient {
   constructor(
     sessionUuidProvider: (() -> String?)? = null,
+    ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
   ) : this(
     ::ChannelTelemetrySocket,
     TelemetryRetryDelay { delay(it) },
-    CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    CoroutineScope(SupervisorJob() + ioDispatcher),
     { Files.exists(Path.of(it)) },
-    options = TelemetryPushSocketOptions(sessionUuidProvider = sessionUuidProvider),
+    options =
+      TelemetryPushSocketOptions(
+        sessionUuidProvider = sessionUuidProvider,
+        ioDispatcher = ioDispatcher,
+      ),
   )
 
   companion object {
@@ -108,23 +111,13 @@ internal constructor(
     fun socketExists(): Boolean = Files.exists(Path.of(getSocketPath()))
   }
 
-  @Volatile private var sessionRejected = false
+  private val sessionRejected: Boolean
+    get() = messages.sessionRejected
 
-  private val json = DaemonJson
   private val socket = AtomicReference<TelemetrySocket?>()
   private val connectionLock = Any()
   private var connectionGeneration = 0L
   private var connectionJob: Job? = null
-  private val loggedFieldMismatches = mutableSetOf<String>()
-
-  private fun warnFieldMismatch(category: String, field: String) {
-    val key = "$category:$field"
-    synchronized(loggedFieldMismatches) {
-      if (loggedFieldMismatches.add(key)) {
-        log.warn("Recovered telemetry field shape mismatch: category=$category field=$field")
-      }
-    }
-  }
 
   private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected(null))
   override val connectionState: SharedFlow<ConnectionState> = _state.asStateFlow()
@@ -149,11 +142,29 @@ internal constructor(
     )
   override val telemetryEvents: SharedFlow<TelemetryDisplayEvent> = _telemetryEvents.asSharedFlow()
 
-  private var subscribedDeviceId: String? = null
-  private var subscribedDeviceSessionUuid: String? = null
+  private var subscribedDeviceId: String?
+    get() = writer.subscribedDeviceId
+    set(value) {
+      writer.subscribedDeviceId = value
+    }
+
+  private var subscribedDeviceSessionUuid: String?
+    get() = writer.subscribedDeviceSessionUuid
+    set(value) {
+      writer.subscribedDeviceSessionUuid = value
+    }
 
   /** Set when the daemon refuses a subscribe because the named device has no live session yet. */
-  @Volatile private var deviceNotLive = false
+  private var deviceNotLive: Boolean
+    get() = messages.deviceNotLive
+    set(value) {
+      messages.deviceNotLive = value
+    }
+
+  private val writer = TelemetrySocketWriter(log, options) { socket.get() }
+  private val messages = TelemetryMessageHandler(log, _state, _telemetryEvents, writer::sendPong)
+
+  internal fun subscribeRequest(): TelemetryPushRequest = writer.subscribeRequest()
 
   /** Reconnect with the device arguments of the last [connect] instead of widening to all. */
   override fun reconnect() = connect(subscribedDeviceId, subscribedDeviceSessionUuid)
@@ -207,13 +218,15 @@ internal constructor(
         }
 
         // Subscribe to all events (filter client-side)
-        subscribe(currentSocket)
+        writer.subscribe(currentSocket)
 
         // Read messages (blocks until disconnected)
         readMessages(currentSocket) { attempt = 0 }
       } catch (e: CancellationException) {
         throw e
-      } catch (e: Exception) {
+      } catch (e: java.io.IOException) {
+        log.warn("Telemetry push connection failed: ${e.message}")
+      } catch (e: IllegalStateException) {
         log.warn("Telemetry push connection failed: ${e.message}")
       } finally {
         cleanupConnection(currentSocket)
@@ -229,7 +242,7 @@ internal constructor(
           )
         return
       }
-      val delayMs = calculateBackoff(attempt)
+      val delayMs = calculateTelemetryBackoff(attempt, initialRetryDelayMs, maxRetryDelayMs)
       _state.value = ConnectionState.Reconnecting(attempt, delayMs)
       retryDelay.wait(delayMs)
     }
@@ -237,14 +250,7 @@ internal constructor(
     _state.update { ConnectionState.Disconnected("Stopped") }
   }
 
-  private fun calculateBackoff(attempt: Int): Long {
-    val exponentialDelay = initialRetryDelayMs * (1L shl min(attempt - 1, 10))
-    val cappedDelay = min(exponentialDelay, maxRetryDelayMs)
-    val jitter = (cappedDelay * 0.1 * Math.random()).toLong()
-    return cappedDelay + jitter
-  }
-
-  private class SocketNotFoundError(message: String) : Exception(message)
+  private class SocketNotFoundError(message: String) : java.io.IOException(message)
 
   override fun disconnect() {
     val previousState: ConnectionState
@@ -265,12 +271,17 @@ internal constructor(
             id = UUID.randomUUID().toString(),
             command = "unsubscribe",
           )
-        sendRequest(request, previousSocket)
+        writer.sendRequest(request, previousSocket)
       }
-    } catch (e: Exception) {
+    } catch (cancellation: CancellationException) {
+      throw cancellation
+    } catch (e: java.io.IOException) {
       log.warn("Error disconnecting from telemetry push: ${e.message}")
+    } catch (e: IllegalStateException) {
+      log.warn("Error disconnecting from telemetry push: ${e.message}")
+    } finally {
+      cleanupConnection(previousSocket)
     }
-    cleanupConnection(previousSocket)
   }
 
   override fun isConnected(): Boolean = _isConnected
@@ -284,46 +295,12 @@ internal constructor(
     scope.coroutineContext[Job]?.cancel()
   }
 
-  internal fun subscribeRequest(): TelemetryPushRequest =
-    TelemetryPushRequest(
-      id = UUID.randomUUID().toString(),
-      command = "subscribe",
-      sessionUuid = options.sessionUuidProvider?.invoke(),
-      category = null, // subscribe to all categories, filter client-side
-      deviceId = subscribedDeviceId,
-      deviceSessionUuid = subscribedDeviceSessionUuid,
-    )
-
-  private fun subscribe(currentSocket: TelemetrySocket) {
-    val request = subscribeRequest()
-
-    if (!sendRequest(request, currentSocket)) {
-      throw IllegalStateException("Failed to send telemetry subscription")
-    }
-  }
-
-  private fun sendRequest(
-    request: TelemetryPushRequest,
-    currentSocket: TelemetrySocket? = socket.get(),
-  ): Boolean {
-    currentSocket ?: return false
-
-    return try {
-      val message = json.encodeToString(serializer<TelemetryPushRequest>(), request)
-      currentSocket.writeLine(message)
-      true
-    } catch (e: Exception) {
-      log.warn("Failed to send telemetry push request: ${e.message}")
-      false
-    }
-  }
-
   private suspend fun readMessages(currentSocket: TelemetrySocket, onHealthy: () -> Unit) {
     try {
       log.info("Starting telemetry push message read loop")
 
       while (_shouldReconnect) {
-        val line = runInterruptible(Dispatchers.IO) { currentSocket.readLine() } ?: break
+        val line = runInterruptible(options.ioDispatcher) { currentSocket.readLine() } ?: break
         currentCoroutineContext().ensureActive()
         if (line.isBlank()) continue
 
@@ -338,7 +315,9 @@ internal constructor(
       }
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: java.io.IOException) {
+      log.warn("Error reading from telemetry push: ${e.message}", e)
+    } catch (e: IllegalStateException) {
       log.warn("Error reading from telemetry push: ${e.message}", e)
     }
 
@@ -348,97 +327,33 @@ internal constructor(
   private fun cleanupConnection(currentSocket: TelemetrySocket?) {
     try {
       currentSocket?.close()
-    } catch (_: Exception) {}
+    } catch (error: java.io.IOException) {
+      log.debug("Could not close telemetry socket: ${error.message}")
+    }
     socket.compareAndSet(currentSocket, null)
   }
 
-  internal suspend fun processMessage(message: String): Boolean =
+  internal fun processMessage(message: String): Boolean =
     try {
-      handleMessage(message)
+      messages.handleMessage(message)
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      log.warn("Malformed telemetry push message; skipped: ${e.message}", e)
+      false
+    } catch (e: IllegalStateException) {
       log.warn("Malformed telemetry push message; skipped: ${e.message}", e)
       false
     }
+}
 
-  private suspend fun handleMessage(message: String): Boolean {
-    val response = json.decodeFromString(serializer<TelemetryPushResponse>(), message)
-
-    return when (response.type) {
-      "subscription_response" -> {
-        log.info("Telemetry push subscription response: success=${response.success}")
-        if (response.success != true) {
-          noteDeviceNotLive(response.error)
-          rejectSession(response.error)
-          if (!sessionRejected && !deviceNotLive) {
-            log.warn("Telemetry subscription failed: ${response.error}")
-          }
-        }
-        response.success == true
-      }
-      "telemetry_push" -> {
-        val envelope = response.data
-        if (envelope != null && envelope.category.isNotBlank()) {
-          try {
-            val event =
-              parseTelemetryEvent(envelope) { field ->
-                warnFieldMismatch(envelope.category, field)
-              }
-            if (event != null) {
-              _telemetryEvents.tryEmit(event)
-            }
-            event != null
-          } catch (e: Exception) {
-            log.warn("Malformed telemetry push event; skipped: ${e.message}")
-            false
-          }
-        } else {
-          log.warn("Malformed telemetry push event; missing data or category; skipped")
-          false
-        }
-      }
-      "ping" -> {
-        log.debug("Received telemetry ping, sending pong")
-        sendPong()
-        false
-      }
-      "error" -> {
-        noteDeviceNotLive(response.error)
-        rejectSession(response.error)
-        if (!sessionRejected && !deviceNotLive) {
-          log.warn("Telemetry push error: ${response.error}")
-        }
-        false
-      }
-      else -> {
-        log.warn("Unknown telemetry push message type: ${response.type}")
-        false
-      }
-    }
-  }
-
-  private fun noteDeviceNotLive(error: String?) {
-    if (error?.contains(DEVICE_NOT_LIVE_MARKER) == true) {
-      deviceNotLive = true
-      log.info("Telemetry device not live yet; will retry: $error")
-    }
-  }
-
-  private fun rejectSession(error: String?) {
-    if (!sessionRejected && isStreamSessionRejection(error)) {
-      sessionRejected = true
-      _state.value = ConnectionState.Error(error ?: "Session registration required")
-      log.warn("Subscription failed: $error")
-    }
-  }
-
-  private fun sendPong() {
-    val request =
-      TelemetryPushRequest(
-        id = UUID.randomUUID().toString(),
-        command = "pong",
-      )
-    sendRequest(request)
-  }
+private fun calculateTelemetryBackoff(
+  attempt: Int,
+  initialRetryDelayMs: Long,
+  maxRetryDelayMs: Long,
+): Long {
+  val exponentialDelay = initialRetryDelayMs * (1L shl min(attempt - 1, 10))
+  val cappedDelay = min(exponentialDelay, maxRetryDelayMs)
+  val jitter = (cappedDelay * 0.1 * Math.random()).toLong()
+  return cappedDelay + jitter
 }

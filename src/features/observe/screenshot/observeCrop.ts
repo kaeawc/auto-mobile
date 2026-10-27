@@ -11,7 +11,7 @@ import { z } from "zod/v4";
 import type { ObserveResult } from "../../../models/ObserveResult";
 import type { ElementBounds } from "../../../models/ElementBounds";
 import { ActionableError } from "../../../models/ActionableError";
-import { tapOnSelectorSchema } from "../../../server/elementSelectorSchemas";
+import { tapOnSelectorSchema } from "../../../models/elementSelectorSchemas";
 import { hasUsableHierarchy } from "../ObserveScreen";
 import { ElementResolver } from "../../utility/ElementResolver";
 import { SearchableHierarchy } from "../../utility/SearchableNode";

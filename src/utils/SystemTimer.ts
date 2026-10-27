@@ -1,4 +1,9 @@
 import { setTimeout as sleep } from "node:timers/promises";
+export {
+  SteadyWallClock,
+  STEADY_WALL_CLOCK_STEP_TOLERANCE_MS,
+  WALL_REPORT_ANCHOR_TOLERANCE_MS,
+} from "./SteadyWallClock";
 
 /**
  * Hard ceiling on any delay handed to `setTimeout` (Node/Bun and the browser
@@ -77,21 +82,22 @@ export interface Timer {
 /**
  * Whether `performance.now()` keeps running across a host suspend on `platform` (#10699 follow-up).
  *
- * Bun 1.3.x (the pinned runtime) reads every monotonic clock (`performance.now()`,
- * `process.hrtime`, `Bun.nanoseconds()`) from one Zig `std.time.Timer`, whose `Instant` uses:
+ * Bun 1.4.x (the pinned runtime) reads `performance.now()` from the VM's origin timer, a Rust
+ * `std::time::Instant` (`origin_timer` in `src/jsc/VirtualMachine.rs`), whose clock is:
  *
  * - darwin: `CLOCK_UPTIME_RAW`, which does not advance while the Mac sleeps;
+ * - linux: `CLOCK_MONOTONIC`, which does not advance during suspend either (Bun 1.3 used
+ *   `CLOCK_BOOTTIME` here, which does, so this entry flipped with the 1.4 pin, #14979);
  * - win32: `QueryPerformanceCounter`, which Microsoft documents as including standby, hibernate
- *   and connected standby;
- * - linux: `CLOCK_BOOTTIME`, which includes suspend (unlike `CLOCK_MONOTONIC`).
+ *   and connected standby.
  *
- * No runtime API exposes a suspend-excluding clock on Windows or Linux without native code
- * (`QueryUnbiasedInterruptTime` / `CLOCK_MONOTONIC`): `os.uptime()` and `process.uptime()` include
- * sleep too. So only darwin is trusted to measure sleep; everywhere else the heartbeat monitor
+ * No runtime API exposes a suspend-excluding clock on Windows without native code
+ * (`QueryUnbiasedInterruptTime`): `os.uptime()` and `process.uptime()` include sleep too. Other
+ * platforms are not verified and stay conservative. Where this returns true the heartbeat monitor
  * falls back to a length ceiling (see `SessionHeartbeatMonitorConfig.maxCredibleStallMs`).
  */
 export function monotonicClockIncludesHostSleep(platform: NodeJS.Platform): boolean {
-  return platform !== "darwin";
+  return platform !== "darwin" && platform !== "linux";
 }
 
 /**
@@ -100,7 +106,7 @@ export function monotonicClockIncludesHostSleep(platform: NodeJS.Platform): bool
  * inverting the sleep/stall judgement; `test/utils/SystemTimer.monotonicSleep.test.ts` fails when
  * the running or pinned Bun leaves this line, so a runtime upgrade re-verifies the table.
  */
-export const MONOTONIC_CLOCK_SEMANTICS_VERIFIED_BUN = "1.3";
+export const MONOTONIC_CLOCK_SEMANTICS_VERIFIED_BUN = "1.4";
 
 /**
  * A warning when the running Bun is not the release line the clock-semantics table was verified
@@ -119,89 +125,6 @@ export function monotonicClockSemanticsDrift(bunVersion: string | undefined): st
     "monotonic clock semantics were verified; whether performance.now() runs through host sleep " +
     "may have changed, so host sleep and daemon stalls may be judged wrongly (#10962)"
   );
-}
-
-/**
- * How far the wall clock may fall behind its high-water lead over the monotonic clock before
- * {@link SteadyWallClock} treats it as a backward step and re-baselines, rather than as reading
- * jitter between the two clocks.
- */
-export const STEADY_WALL_CLOCK_STEP_TOLERANCE_MS = 1_000;
-
-/**
- * How far the wall clock may move relative to the session clock before {@link
- * SteadyWallClock.toWall} re-anchors its reported frame. Reading jitter between the integer wall
- * clock and the fractional monotonic clock is a few ms (#11368); a wall step or sleep is far more.
- */
-export const WALL_REPORT_ANCHOR_TOLERANCE_MS = 50;
-
-/**
- * A wall-anchored clock for session lease and idle deltas (#11080): it starts at the wall clock's
- * reading and then advances only with the monotonic clock, plus measured host sleep where the
- * monotonic clock pauses for it (darwin), because host sleep counts toward idle (owner rule).
- *
- * Wall-clock steps therefore do not move it: a backward NTP step neither extends a dead owner's
- * hold nor shrinks an idle window, and where the monotonic clock already includes sleep (Windows,
- * Linux) a forward step is ignored too. On darwin a forward step is indistinguishable from host
- * sleep and is counted as sleep: it moves idle accounting the way sleep does, and the heartbeat
- * monitor excuses it from the lease the way it excuses sleep.
- *
- * Sleep is the growth of the wall clock's lead over the monotonic clock past its high-water mark,
- * so reading jitter between the two clocks never accumulates; a lead that falls more than
- * {@link STEADY_WALL_CLOCK_STEP_TOLERANCE_MS} below the mark is a backward step and resets the mark
- * without moving the clock. Readings are whole milliseconds and never decrease while the timer's monotonic clock does not.
- * A timer without a monotonic clock is read as-is.
- */
-export class SteadyWallClock {
-  /** Steady reading minus the monotonic reading. */
-  private offsetMs: number | undefined;
-  /** The highest wall-minus-monotonic lead seen since the last backward step. */
-  private leadHighWaterMs = 0;
-  /** Wall minus session clock, captured when {@link toWall} last (re)anchored. */
-  private wallReportOffsetMs: number | undefined;
-
-  constructor(private readonly timer: Timer) {}
-
-  now(): number {
-    const wall = this.timer.now();
-    const monotonic = this.timer.monotonicNow?.();
-    if (monotonic === undefined) {
-      return wall;
-    }
-    const lead = wall - monotonic;
-    if (this.offsetMs === undefined) {
-      this.offsetMs = lead;
-      this.leadHighWaterMs = lead;
-    } else if (lead > this.leadHighWaterMs) {
-      if (this.timer.monotonicIncludesHostSleep !== true) {
-        this.offsetMs += lead - this.leadHighWaterMs;
-      }
-      this.leadHighWaterMs = lead;
-    } else if (lead < this.leadHighWaterMs - STEADY_WALL_CLOCK_STEP_TOLERANCE_MS) {
-      this.leadHighWaterMs = lead;
-    }
-    // Whole milliseconds, like the wall clock the session timestamps were stamped with before.
-    return Math.round(monotonic + this.offsetMs);
-  }
-
-  /**
-   * An instant on this clock as wall-clock epoch ms, for reporting (#11368). The wall-minus-
-   * session offset is captured once and reused while it stays within
-   * {@link WALL_REPORT_ANCHOR_TOLERANCE_MS}, so one fixed instant reads back the same value on
-   * every query instead of picking up the jitter between the two clocks' readings. A wall step or
-   * host sleep moves the offset past the tolerance and re-anchors once, so the value then follows
-   * the wall clock. Reporting only: no judgement reads this.
-   */
-  toWall(sessionMs: number): number {
-    const offset = this.timer.now() - this.now();
-    if (
-      this.wallReportOffsetMs === undefined ||
-      Math.abs(offset - this.wallReportOffsetMs) > WALL_REPORT_ANCHOR_TOLERANCE_MS
-    ) {
-      this.wallReportOffsetMs = offset;
-    }
-    return sessionMs + this.wallReportOffsetMs;
-  }
 }
 
 /**

@@ -5,7 +5,7 @@ set -euo pipefail
 
 # Source shared functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck disable=SC1091
+# shellcheck source=demo/scripts/claude-code-simulation.sh
 source "$SCRIPT_DIR/../claude-code-simulation.sh"
 
 # Show header

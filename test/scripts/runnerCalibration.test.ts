@@ -126,7 +126,7 @@ describe("calibration samples", () => {
     expect(Object.fromEntries(slowdowns)).toEqual({
       "shard-0": 2,
       "shard-1": 1,
-      "changed-shard-2": 3,
+      "shard-2": 3,
     });
   });
 

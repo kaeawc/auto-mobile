@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../flatHierarchyBuilders";
 import { convertIosHierarchy } from "../../../helpers/iosHierarchyConverter";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -8,7 +9,7 @@ import type {
   IosRunnerWireHierarchy,
   IosRunnerWireNode,
 } from "../../../../src/features/observe/ios/types";
-import { decodeRunnerWireHierarchy } from "../../../../src/features/observe/ios/decodeRunnerWireHierarchy";
+import { decodeRunnerWireHierarchy } from "../../../helpers/decodeRunnerWireHierarchy";
 import { normalizeIosHierarchy } from "../../../../src/features/observe/HierarchyNormalization";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { DefaultElementParser } from "../../../../src/features/utility/ElementParser";
@@ -62,6 +63,20 @@ function formsRow(root: CaptureNode): CaptureNode {
 
 function runnerHierarchy(root: CaptureNode): IosRunnerWireHierarchy {
   return { packageName: "test.app", updatedAt: 0, hierarchy: structuredClone(root) };
+}
+
+// Keep raw window attributes while expressing runner tuples and children in the
+// normalized node shape required by the window model.
+function windowNodeFromRunner(source: IosRunnerWireNode): ViewHierarchyNode {
+  const { bounds, node, ...attributes } = source;
+  const children = node ? (Array.isArray(node) ? node : [node]) : [];
+  return createFlatNodeForTest({
+    ...attributes,
+    ...(bounds
+      ? { bounds: { left: bounds[0], top: bounds[1], right: bounds[2], bottom: bounds[3] } }
+      : {}),
+    node: children.map(windowNodeFromRunner),
+  });
 }
 
 function normalizedFormsId(result: ViewHierarchyResult): string {
@@ -137,14 +152,14 @@ describe("iOS SDK-injected stable identity (real batch-13 captures, #9260)", () 
       const result = normalizeIosHierarchy(
         convertIosHierarchy({
           ...source,
-          windows: [{ windowLayer: 2, hierarchy: structuredClone(source.hierarchy) }],
+          windows: [{ windowLayer: 2, hierarchy: windowNodeFromRunner(source.hierarchy) }],
         }),
       );
       const window = result.windows?.[0];
       if (!window?.hierarchy) {
         throw new Error("Normalized capture has no window hierarchy");
       }
-      return normalizedFormsId({ hierarchy: window.hierarchy });
+      return normalizedFormsId({ hierarchy: { node: window.hierarchy } });
     });
     expect(ids).toEqual(["s2-792852e3b847bb51", "s2-792852e3b847bb51"]);
   });

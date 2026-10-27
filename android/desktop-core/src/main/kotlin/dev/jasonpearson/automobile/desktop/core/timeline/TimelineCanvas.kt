@@ -94,31 +94,7 @@ fun TimelineCanvas(
             state.selectedTimestampMs = clickedTimestamp
 
             val nearest =
-              spans
-                .filter { span ->
-                  val startFrac = state.timestampToFraction(span.startMs)
-                  val endFrac = state.timestampToFraction(span.endMs)
-                  val startX = startFrac * size.width
-                  val rawEndX = endFrac * size.width
-                  val endX =
-                    if (rawEndX - startX < MIN_SPAN_WIDTH_PX) startX + MIN_SPAN_WIDTH_PX
-                    else rawEndX
-                  offset.x in startX..endX
-                }
-                .minByOrNull { abs(it.startMs - clickedTimestamp) }
-                ?: spans
-                  .minByOrNull {
-                    minOf(
-                      abs(it.startMs - clickedTimestamp),
-                      abs(it.endMs - clickedTimestamp),
-                    )
-                  }
-                  ?.takeIf {
-                    minOf(
-                      abs(it.startMs - clickedTimestamp),
-                      abs(it.endMs - clickedTimestamp),
-                    ) <= CLICK_TOLERANCE_MS
-                  }
+              nearestTimelineSpan(spans, state, clickedTimestamp, offset.x, size.width.toFloat())
 
             if (nearest != null) {
               onEventClicked(nearest.event)
@@ -127,81 +103,12 @@ fun TimelineCanvas(
         },
   ) {
     Canvas(modifier = Modifier.fillMaxSize()) {
-      val canvasWidth = size.width
-      val canvasHeight = size.height
-      val drawableHeight = canvasHeight - TIME_AXIS_HEIGHT
-      val laneCount = activeLanes.size.coerceAtLeast(1)
-      val laneHeight = drawableHeight / laneCount
-
-      // Lane backgrounds
-      activeLanes.forEachIndexed { index, _ ->
-        val y = index * laneHeight
-        val alpha = if (index % 2 == 0) 0.03f else 0.06f
-        drawRect(
-          color = panelBg,
-          topLeft = Offset(0f, y),
-          size = Size(canvasWidth, laneHeight),
-          alpha = alpha,
-        )
-      }
-
-      // Lane labels
-      val labelStyle = TextStyle(fontSize = 9.sp, color = textColor.copy(alpha = 0.4f))
-      activeLanes.forEachIndexed { index, laneIndex ->
-        val y = index * laneHeight
-        val label = laneLabels[laneIndex] ?: ""
-        val measured = textMeasurer.measure(label, labelStyle)
-        drawText(
-          textLayoutResult = measured,
-          topLeft = Offset(LABEL_PADDING, y + (laneHeight - measured.size.height) / 2f),
-        )
-      }
-
-      val laneToRow = activeLanes.withIndex().associate { (row, lane) -> lane to row }
-
-      for (span in spans) {
-        val row = laneToRow[span.category.laneIndex] ?: continue
-        val startFrac = state.timestampToFraction(span.startMs)
-        val endFrac = state.timestampToFraction(span.endMs)
-        val x1 = startFrac * canvasWidth
-        val x2Raw = endFrac * canvasWidth
-        val x2 = if (x2Raw - x1 < MIN_SPAN_WIDTH_PX) x1 + MIN_SPAN_WIDTH_PX else x2Raw
-
-        val rowY = row * laneHeight
-        val spanH = laneHeight * SPAN_HEIGHT_FRACTION
-        val spanY = rowY + (laneHeight - spanH) / 2f
-        val alpha = if (span.isFiltered) 0.2f else 1.0f
-
-        drawRoundRect(
-          color = span.category.color,
-          topLeft = Offset(x1, spanY),
-          size = Size(x2 - x1, spanH),
-          cornerRadius = CornerRadius(CORNER_RADIUS, CORNER_RADIUS),
-          alpha = alpha,
-        )
-      }
-
-      // Time axis
-      drawTimeAxis(
-        canvasWidth = canvasWidth,
-        canvasHeight = canvasHeight,
-        state = state,
-        textMeasurer = textMeasurer,
-        textColor = textColor,
+      drawTimeline(
+        spans,
+        activeLanes,
+        state,
+        TimelineCanvasStyle(textColor, panelBg, infoColor, textMeasurer),
       )
-
-      // Playhead
-      val selectedMs = state.selectedTimestampMs
-      if (selectedMs != null) {
-        val frac = state.timestampToFraction(selectedMs)
-        val x = frac * canvasWidth
-        drawLine(
-          color = infoColor.copy(alpha = 0.8f),
-          start = Offset(x, 0f),
-          end = Offset(x, canvasHeight),
-          strokeWidth = PLAYHEAD_WIDTH,
-        )
-      }
     }
   }
 }
@@ -274,4 +181,137 @@ private fun snapToNiceInterval(rawMs: Double): Long {
       86_400_000,
     )
   return nice.firstOrNull { it >= rawMs } ?: nice.last()
+}
+
+private fun nearestTimelineSpan(
+  spans: List<TimelineSpan>,
+  state: TimelineState,
+  clickedTimestamp: Long,
+  offsetX: Float,
+  canvasWidth: Float,
+): TimelineSpan? =
+  spans
+    .filter { span ->
+      val startFrac = state.timestampToFraction(span.startMs)
+      val endFrac = state.timestampToFraction(span.endMs)
+      val startX = startFrac * canvasWidth
+      val rawEndX = endFrac * canvasWidth
+      val endX = if (rawEndX - startX < MIN_SPAN_WIDTH_PX) startX + MIN_SPAN_WIDTH_PX else rawEndX
+      offsetX in startX..endX
+    }
+    .minByOrNull { abs(it.startMs - clickedTimestamp) }
+    ?: spans
+      .minByOrNull {
+        minOf(
+          abs(it.startMs - clickedTimestamp),
+          abs(it.endMs - clickedTimestamp),
+        )
+      }
+      ?.takeIf {
+        minOf(
+          abs(it.startMs - clickedTimestamp),
+          abs(it.endMs - clickedTimestamp),
+        ) <= CLICK_TOLERANCE_MS
+      }
+
+private data class TimelineCanvasStyle(
+  val textColor: Color,
+  val panelBg: Color,
+  val infoColor: Color,
+  val textMeasurer: TextMeasurer,
+)
+
+private fun DrawScope.drawTimeline(
+  spans: List<TimelineSpan>,
+  activeLanes: List<Int>,
+  state: TimelineState,
+  style: TimelineCanvasStyle,
+) {
+  with(style) {
+    val canvasWidth = size.width
+    val canvasHeight = size.height
+    val drawableHeight = canvasHeight - TIME_AXIS_HEIGHT
+    val laneCount = activeLanes.size.coerceAtLeast(1)
+    val laneHeight = drawableHeight / laneCount
+
+    drawTimelineLanes(activeLanes, laneHeight, canvasWidth, style)
+    val laneToRow = activeLanes.withIndex().associate { (row, lane) -> lane to row }
+
+    for (span in spans) {
+      val row = laneToRow[span.category.laneIndex] ?: continue
+      val startFrac = state.timestampToFraction(span.startMs)
+      val endFrac = state.timestampToFraction(span.endMs)
+      val x1 = startFrac * canvasWidth
+      val x2Raw = endFrac * canvasWidth
+      val x2 = if (x2Raw - x1 < MIN_SPAN_WIDTH_PX) x1 + MIN_SPAN_WIDTH_PX else x2Raw
+
+      val rowY = row * laneHeight
+      val spanH = laneHeight * SPAN_HEIGHT_FRACTION
+      val spanY = rowY + (laneHeight - spanH) / 2f
+      val alpha = if (span.isFiltered) 0.2f else 1.0f
+
+      drawRoundRect(
+        color = span.category.color,
+        topLeft = Offset(x1, spanY),
+        size = Size(x2 - x1, spanH),
+        cornerRadius = CornerRadius(CORNER_RADIUS, CORNER_RADIUS),
+        alpha = alpha,
+      )
+    }
+
+    // Time axis
+    drawTimeAxis(
+      canvasWidth = canvasWidth,
+      canvasHeight = canvasHeight,
+      state = state,
+      textMeasurer = textMeasurer,
+      textColor = textColor,
+    )
+
+    // Playhead
+    val selectedMs = state.selectedTimestampMs
+    if (selectedMs != null) {
+      val frac = state.timestampToFraction(selectedMs)
+      val x = frac * canvasWidth
+      drawLine(
+        color = infoColor.copy(alpha = 0.8f),
+        start = Offset(x, 0f),
+        end = Offset(x, canvasHeight),
+        strokeWidth = PLAYHEAD_WIDTH,
+      )
+    }
+  }
+}
+
+private fun DrawScope.drawTimelineLanes(
+  activeLanes: List<Int>,
+  laneHeight: Float,
+  canvasWidth: Float,
+  style: TimelineCanvasStyle,
+) {
+  with(style) {
+    // Lane backgrounds
+    activeLanes.forEachIndexed { index, _ ->
+      val y = index * laneHeight
+      val alpha = if (index % 2 == 0) 0.03f else 0.06f
+      drawRect(
+        color = panelBg,
+        topLeft = Offset(0f, y),
+        size = Size(canvasWidth, laneHeight),
+        alpha = alpha,
+      )
+    }
+
+    // Lane labels
+    val labelStyle = TextStyle(fontSize = 9.sp, color = textColor.copy(alpha = 0.4f))
+    activeLanes.forEachIndexed { index, laneIndex ->
+      val y = index * laneHeight
+      val label = laneLabels[laneIndex] ?: ""
+      val measured = textMeasurer.measure(label, labelStyle)
+      drawText(
+        textLayoutResult = measured,
+        topLeft = Offset(LABEL_PADDING, y + (laneHeight - measured.size.height) / 2f),
+      )
+    }
+  }
 }

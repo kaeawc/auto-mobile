@@ -53,7 +53,10 @@ describe("AdbClient.getAndroidApiLevel timeout caching", () => {
     };
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const client = new AdbClient(DEVICE, exec, null, new DefaultRetryExecutor(timer), timer);
+    const client = new AdbClient(DEVICE, exec, {
+      retryExecutor: new DefaultRetryExecutor(timer),
+      timer,
+    });
 
     expect(await client.getAndroidApiLevel()).toBe(31);
 
@@ -82,7 +85,10 @@ describe("AdbClient.getAndroidApiLevel timeout caching", () => {
     };
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const client = new AdbClient(DEVICE, exec, null, new DefaultRetryExecutor(timer), timer);
+    const client = new AdbClient(DEVICE, exec, {
+      retryExecutor: new DefaultRetryExecutor(timer),
+      timer,
+    });
 
     // Budget expired: null for THIS call, but the failure is not a device verdict.
     expect(await client.getAndroidApiLevel(5)).toBeNull();
@@ -109,11 +115,14 @@ describe("AdbClient.getAndroidApiLevel timeout caching", () => {
     };
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const client = new AdbClient(DEVICE, exec, null, new DefaultRetryExecutor(timer), timer);
+    const client = new AdbClient(DEVICE, exec, {
+      retryExecutor: new DefaultRetryExecutor(timer),
+      timer,
+    });
 
     expect(await client.getAndroidApiLevel(5000)).toBeNull();
     expect(await client.getAndroidApiLevel(5000)).toBeNull();
-    // API-level reads explicitly use noRetry and cache the first device failure.
-    expect(calls).toBe(1);
+    // noRetry still waits for refused transport commands before caching the failure.
+    expect(calls).toBe(5);
   });
 });

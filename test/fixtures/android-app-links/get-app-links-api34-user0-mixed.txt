@@ -1,0 +1,24 @@
+Domain verification status:
+  com.example.shop:
+    ID: 3f6c2b1e-8d4a-4c7e-9b1f-2a5d6e7f8a9b
+    Signature: [B4:61:0E:2C:7D:94:3A:58:C1:0F:6B:22:9E:84:D7:13:5A:C8:FE:01:93:4B:7E:26:D0:8C:55:A1:39:F2:6E:10]
+    Domain verification state:
+      shop.example.com: approved
+      www.shop.example.com: legacy_failure
+      checkout.example.com: 1026
+      blocked.example.com: denied
+    User 0:
+      Verification link handling allowed: true
+      Selection state:
+        Enabled:
+          promo.example.net
+        Disabled:
+          shop.example.com
+          www.shop.example.com
+          checkout.example.com
+          blocked.example.com
+  com.example.shop.debug:
+    ID: 9a0b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d
+    Signature: [01:02:03:04:05:06:07:08:09:0A:0B:0C:0D:0E:0F:10:11:12:13:14:15:16:17:18:19:1A:1B:1C:1D:1E:1F:20]
+    Domain verification state:
+      shop.example.com: none

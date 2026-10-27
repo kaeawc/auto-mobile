@@ -2,7 +2,7 @@ import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { isRecoverableDaemonReleaseReason } from "../../src/db/deviceSessionRepository";
-import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo, SomePlatform } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -44,18 +44,6 @@ class DiscoveryCountingDeviceManager extends FakeDeviceManager {
   }
 }
 
-interface DevicePoolRecoveryInternals {
-  evictMissingPooledDevice(
-    device: PooledDevice,
-    reason: string,
-    options?: { attemptDeviceLossRecovery?: boolean },
-  ): Promise<void>;
-  getSessionPreservingRecoveryTarget(
-    deviceId: string,
-    expectedDevice: PooledDevice | undefined,
-  ): { device: PooledDevice; session: Session } | undefined;
-}
-
 function createPool(
   sessions: SessionManager,
   timer: FakeTimer,
@@ -95,7 +83,7 @@ async function setupOwnedIOS(
 }
 
 async function evictAsMissing(pool: DevicePool, device: PooledDevice): Promise<void> {
-  await (pool as unknown as DevicePoolRecoveryInternals).evictMissingPooledDevice(
+  await pool.testHooks.evictMissingPooledDevice.call(
     device,
     "not present in iOS simulator discovery",
     { attemptDeviceLossRecovery: true },
@@ -323,7 +311,7 @@ test("Android emulators and iOS simulators resolve through the shared continuity
   if (!android || !ios) {
     throw new Error("expected both virtual devices to be pooled");
   }
-  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const internals = pool.testHooks;
 
   try {
     expect(

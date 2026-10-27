@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
-import { z } from "zod/v4";
 import { pinchOnSchema } from "../../src/server/interactionTools";
 import {
   nestedElementContainerSchema,
   resolverSelectorSchema,
   validateElementIdTextSelector,
-} from "../../src/server/elementSelectorSchemas";
+  type SelectorIssueSink,
+} from "../../src/models/elementSelectorSchemas";
 
 test("recursive container schema accepts indexed scopes and rejects malformed levels", () => {
   const valid = {
@@ -63,11 +63,11 @@ const selectorValue = fc.record({ elementId: optionalString, text: optionalStrin
 // `ParsePayload` — is all `validateElementIdTextSelector` actually touches.
 const makeCtx = () => {
   const issues: Array<{ message: string }> = [];
-  const ctx = {
-    addIssue: (issue: { message: string }) => {
+  const ctx: SelectorIssueSink = {
+    addIssue: (issue) => {
       issues.push(issue);
     },
-  } as unknown as z.RefinementCtx;
+  };
   return { ctx, issues };
 };
 

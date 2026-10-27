@@ -16,7 +16,7 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
     }
 
     convenience init(port: UInt16 = 8766, endpointResolver: SdkEndpointResolver) {
-        let baseURL = URL(string: "http://127.0.0.1:\(port)")! // swiftlint:disable:this force_unwrapping
+        let baseURL = loopbackBaseURL(port: port)
 
         let dataConfig = URLSessionConfiguration.default
         dataConfig.timeoutIntervalForRequest = 2
@@ -46,6 +46,14 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         self.endpointResolver = endpointResolver
         self.transport = transport
         self.healthTransport = healthTransport
+    }
+
+    public func foregroundBundleDidChange(_ bundleId: String?) async {
+        await endpointResolver?.noteForegroundBundle(bundleId)
+    }
+
+    public func appLifecycleDidChange() async {
+        await endpointResolver?.noteAppLifecycleEvent()
     }
 
     /// Fetch the latest cached hierarchy from the SDK (fast, no main-thread work in the target app).
@@ -275,6 +283,7 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
     }
 
     private static func logEndpointError(_ error: SdkEndpointError) {
+        if case .unavailableCached = error { return }
         Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyClient")
             .warning("\(error.localizedDescription, privacy: .public)")
     }

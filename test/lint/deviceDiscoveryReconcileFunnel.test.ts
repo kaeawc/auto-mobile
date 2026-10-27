@@ -1,5 +1,6 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import { join, relative, sep } from "node:path";
 import { blankComments } from "./blankComments";
 
@@ -56,12 +57,17 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
    */
   const ALLOWLIST: Readonly<Record<string, Allowed>> = {
     // --- The funnel itself, and its producers -------------------------------
-    "src/daemon/devicePool.ts": {
-      calls: 2,
+    "src/daemon/devicePoolParts/assignment.ts": {
+      calls: 1,
       reason:
         "The pool routes discovery through the identity collaborator before reading pooled identity. " +
         "The second (readLiveInventoryDeviceIds, #11568) only collects the listed device ids for the " +
         "stats surfaces' live set; it reads cached discovery and never consults pooled identity.",
+    },
+    "src/daemon/devicePoolParts/emulatorLifecycle.ts": {
+      calls: 1,
+      reason:
+        "Recovery discovery moved from DevicePool; the identity collaborator reconciles before pooled identity is read.",
     },
     "src/daemon/deviceAutoStart.ts": {
       calls: 2,
@@ -91,10 +97,15 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason:
         "Bounded stale-disconnect rediscovery reads the injected pool port and preserves captured incarnation checks.",
     },
-    "src/devices/deviceUtils.ts": {
-      calls: 9,
+    "src/devices/deviceDiscoveryContracts.ts": {
+      calls: 2,
       reason:
-        "PlatformDeviceManager — declares and implements the discovery API. The ninth call is " +
+        "Discovery API declarations extracted from deviceUtils; these define the producer contract below the pool.",
+    },
+    "src/devices/deviceUtils.ts": {
+      calls: 7,
+      reason:
+        "PlatformDeviceManager implements the discovery API. The checked call is " +
         "the checked Android liveness guard before startDevice launches an AVD; it reads no pooled identity.",
     },
     "src/utils/android-cmdline-tools/EmulatorPortReservations.ts": {
@@ -108,8 +119,9 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "The booted-device inventory scan (moved verbatim out of AndroidEmulatorClient); an Android discovery producer that runs below the pool.",
     },
     "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts": {
-      calls: 7,
-      reason: "Android emulator discovery producer; runs below the pool.",
+      calls: 8,
+      reason:
+        "Android emulator discovery producer; runs below the pool. Includes the startup-validation serial-listed probe (#13970), a local launch decision never joined to pooled identity.",
     },
     "src/utils/android-cmdline-tools/EmulatorLaunchCoordinator.ts": {
       calls: 2,
@@ -122,8 +134,13 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "The host-interface declaration plus the kill-time serial rediscovery (moved verbatim out of AndroidEmulatorClient.discoverEmulatorsForKill); never joined to pooled identity.",
     },
     "src/utils/android-cmdline-tools/AdbClient.ts": {
+      calls: 2,
+      reason:
+        "Public adb discovery declaration and delegate to AdbDeviceDiscovery; both run below the pool.",
+    },
+    "src/utils/android-cmdline-tools/AdbDeviceDiscovery.ts": {
       calls: 1,
-      reason: "adb discovery producer; runs below the pool.",
+      reason: "adb discovery producer moved verbatim from AdbClient; runs below the pool.",
     },
     "src/utils/android-cmdline-tools/interfaces/AdbExecutor.ts": {
       calls: 1,
@@ -142,21 +159,29 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason:
         "Disconnect monitor joins the observation to getAllDevices() by serial; reconciles first.",
     },
-    "src/daemon/socketServer.ts": {
-      calls: 2,
-      reason:
-        "Input-target discovery and the ide/* device-addressed routes; each reconciles first.",
+    "src/daemon/socketServer/inputDeviceGating.ts": {
+      calls: 1,
+      reason: "Input-target discovery reconciles first.",
+    },
+    "src/daemon/socketServer/ideDeviceRoutes.ts": {
+      calls: 1,
+      reason: "The ide/* device-addressed routes reconcile first, moved from socketServer.ts.",
     },
     "src/server/bootedDeviceResources.ts": {
       calls: 2,
       reason: "Publishes pool epoch/label per serial; reconciles before resolvePoolDeviceContext.",
     },
-    "src/features/deviceLifecycle/deviceLifecycleCore.ts": {
-      calls: 4,
-      reason:
-        "Teardown precondition, pre-boot serial validation, start lifecycle target, and the " +
-        "shutdown preflight (moved here from deviceTools.ts and deviceToolsShutdown.ts, #11827) " +
-        "route their discoveries through the funnel.",
+    "src/features/deviceLifecycle/boot/bootIdentity.ts": {
+      calls: 2,
+      reason: "Pre-boot serial validation and start lifecycle target reconcile their discoveries.",
+    },
+    "src/features/deviceLifecycle/teardown/shutdownDiscovery.ts": {
+      calls: 1,
+      reason: "Shutdown preflight routes its discovery through the funnel.",
+    },
+    "src/features/deviceLifecycle/teardown/teardownDiscovery.ts": {
+      calls: 1,
+      reason: "Teardown precondition routes its discovery through the funnel.",
     },
     "src/server/deviceToolsStartupLease.ts": {
       calls: 1,
@@ -166,7 +191,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       calls: 1,
       reason: "listDevices reconciles discovery before publishing pool-derived labels and epochs.",
     },
-    "src/server/deviceToolsProvisioning.ts": {
+    "src/server/provisioning/provisioningBoot.ts": {
       calls: 2,
       reason:
         "provisionDevice exact-boot reconciles fresh Android or per-platform discovery into the " +
@@ -206,27 +231,36 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     },
 
     // --- Consult no pooled identity -----------------------------------------
-    "src/devices/DeviceReadiness.ts": {
-      calls: 4,
+    "src/daemon/readiness/DeviceReadiness.ts": {
+      calls: 1,
       reason:
-        "Tracks adb-level connection state; owns no pooled identity and runs below the pool. The " +
-        "fourth call (resolveAndroidReadinessIdentity) re-reads the AVD-name-aware listing for one " +
-        "serial so the provided/current readiness paths key the Window cache on the runtime (#7031).",
+        "Android readiness verifies the adb-level connection state below the pool and owns no pooled identity.",
     },
-    "src/devices/deviceBootService.ts": {
+    "src/daemon/readiness/ReadinessSelection.ts": {
       calls: 3,
       reason:
-        "Boot-progress polling and fresh exact-name Android identity checks for a device being " +
-        "created, plus the cache-bypassing iOS simulator re-check once its UDID lifecycle lease " +
-        "settles (#9902); there is no pooled entry yet, and the caller (deviceTools) reconciles " +
-        "its own post-boot discovery.",
+        "Readiness discovery and selection moved from DeviceReadiness; tracks connection state " +
+        "below the pool. resolveAndroidReadinessIdentity re-reads the AVD-name-aware listing so " +
+        "provided/current readiness paths key the Window cache on the runtime (#7031).",
+    },
+    "src/devices/deviceBootRevalidation.ts": {
+      calls: 1,
+      reason:
+        "Cache-bypassing iOS simulator re-check once its UDID lifecycle lease settles (#9902); " +
+        "there is no pooled entry yet, and the caller reconciles its post-boot discovery.",
+    },
+    "src/devices/DeviceBootExecution.ts": {
+      calls: 2,
+      reason:
+        "Boot-progress polling and fresh exact-name Android identity discovery moved from " +
+        "deviceBootService; the caller reconciles its post-boot discovery before reading pooled identity.",
     },
     "src/utils/android-cmdline-tools/AvdSnapshotService.ts": {
       calls: 1,
       reason:
         "findLiveEmulatorSerial remains a full scan and reads no pool state; the pre-delete identity check now uses the bounded serial-targeted resolveAvdNameForSerial probe, a read-only confirmation rather than discovery.",
     },
-    "src/features/observe/ios/IOSCtrlProxyClient.ts": {
+    "src/features/observe/ios/IosCtrlProxyClientContracts.ts": {
       calls: 1,
       reason: "iOS only — simulator UDIDs are never reused, so there is no identity to reconcile.",
     },
@@ -238,6 +272,10 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     "src/doctor/checks/android.ts": {
       calls: 1,
       reason: "Diagnostics; reports what adb sees and reads no pool state.",
+    },
+    "src/doctor/checks/androidIntegrity.ts": {
+      calls: 1,
+      reason: "Diagnostics; lists booted devices to probe their signals and reads no pool state.",
     },
     "src/doctor/checks/automobile.ts": {
       calls: 2,
@@ -271,7 +309,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   function walk(dir: string, files: string[] = []): string[] {
     // withFileTypes, not a statSync per entry: one syscall for the whole
     // directory instead of one per file across ~1000 files in src/.
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    for (const entry of guardDirectoryEntries(dir)) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(full, files);
@@ -297,7 +335,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     if (cached !== undefined) {
       return cached;
     }
-    const source = blankComments(readFileSync(join(ROOT, file), "utf8"));
+    const source = blankComments(readGuardFile(join(ROOT, file)));
     strippedSources.set(file, source);
     return source;
   }
@@ -314,12 +352,16 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     discoveryCallCounts();
     const routed = [
       "src/daemon/deviceLossDiscovery.ts",
-      "src/daemon/socketServer.ts",
+      "src/daemon/socketServerParts/SocketIdeRoutes.ts",
+      "src/daemon/socketServer/ideDeviceRoutes.ts",
+      "src/daemon/socketServer/inputDeviceGating.ts",
       "src/server/bootedDeviceResources.ts",
-      "src/features/deviceLifecycle/deviceLifecycleCore.ts",
+      "src/features/deviceLifecycle/boot/bootIdentity.ts",
+      "src/features/deviceLifecycle/teardown/shutdownDiscovery.ts",
+      "src/features/deviceLifecycle/teardown/teardownDiscovery.ts",
       "src/server/deviceToolsStartupLease.ts",
       "src/server/deviceToolsListing.ts",
-      "src/server/deviceToolsProvisioning.ts",
+      "src/server/provisioning/provisioningBoot.ts",
       "src/server/utilityTools.ts",
       "src/daemon/streamDeviceResolver.ts",
       "src/daemon/deviceGestureRecordingSocketServer.ts",
@@ -336,7 +378,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     }
     const counts = new Map<string, number>();
     for (const file of walk(SRC)) {
-      const source = readFileSync(file, "utf8");
+      const source = readGuardFile(file);
       if (!source.includes(DISCOVERY_PREFIX)) {
         continue;
       }
@@ -359,9 +401,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   });
 
   test("System UI ANR reboot uses its bounded image lookup without booted discovery", () => {
-    const source = blankComments(
-      readFileSync(join(ROOT, "src/server/deviceToolsSystemUiAnr.ts"), "utf8"),
-    );
+    const source = blankComments(readGuardFile(join(ROOT, "src/server/deviceToolsSystemUiAnr.ts")));
     expect(source, "src/server/deviceToolsSystemUiAnr.ts").not.toMatch(DISCOVERY_CALL);
   });
 

@@ -322,6 +322,9 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
+    if (!result) {
+      throw new Error("Expected cleaned hierarchy");
+    }
     const nodes = collectNodes(result.hierarchy);
     expect(nodes.filter((node) => node.text === "Vertical scroll bar, 1 page")).toHaveLength(1);
     expect(
@@ -330,7 +333,7 @@ describe("cleanupIosXCTestHierarchy", () => {
         return (
           node.className === "UIView" &&
           children.length > 0 &&
-          children.every((child) => child.text === "Vertical scroll bar, 1 page")
+          children.every((child: { text?: string }) => child.text === "Vertical scroll bar, 1 page")
         );
       }),
     ).toBe(false);
@@ -360,6 +363,9 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
+    if (!result) {
+      throw new Error("Expected cleaned hierarchy");
+    }
     const nodes = collectNodes(result.hierarchy);
     expect(nodes.filter((node) => node.text === "Vertical scroll bar, 1 page")).toHaveLength(1);
     expect(
@@ -373,6 +379,9 @@ describe("cleanupIosXCTestHierarchy", () => {
   test("drops Reminders fixture scroll bar wrappers in raw TS cleanup", () => {
     const { before } = loadIosRemindersNoiseObservePair();
     const result = cleanupIosXCTestHierarchy(before.viewHierarchy);
+    if (!result) {
+      throw new Error("Expected cleaned hierarchy");
+    }
     const nodes = collectNodes(result.hierarchy);
 
     expect(
@@ -382,7 +391,7 @@ describe("cleanupIosXCTestHierarchy", () => {
           node.class === "UIView" &&
           children.length > 0 &&
           children.every(
-            (child) =>
+            (child: { text?: string }) =>
               typeof child.text === "string" && child.text.toLowerCase().includes("scroll bar"),
           )
         );
@@ -513,6 +522,9 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
+    if (!result) {
+      throw new Error("Expected cleaned hierarchy");
+    }
     const nodes = collectNodes(result.hierarchy);
     expect(nodes.filter((node) => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
     expect(nodes.filter((node) => node.className === "WKWebView")).toHaveLength(0);
@@ -553,6 +565,9 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
+    if (!result) {
+      throw new Error("Expected cleaned hierarchy");
+    }
     const nodes = collectNodes(result.hierarchy);
     expect(nodes.filter((node) => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
     expect(
@@ -597,6 +612,9 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
+    if (!result) {
+      throw new Error("Expected cleaned hierarchy");
+    }
     const nodes = collectNodes(result.hierarchy);
     expect(nodes.filter((node) => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
     expect(nodes.filter((node) => node.className === "WKWebView")).toHaveLength(0);
@@ -619,6 +637,9 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
+    if (!result) {
+      throw new Error("Expected cleaned hierarchy");
+    }
     const nodes = collectNodes(result.hierarchy);
     expect(nodes.filter((node) => node.text === "Vertical scroll bar, 1 page")).toHaveLength(1);
     expect(nodes.filter((node) => node.className === "WKWebView")).toHaveLength(0);
@@ -645,6 +666,9 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
+    if (!result) {
+      throw new Error("Expected cleaned hierarchy");
+    }
     const nodes = collectNodes(result.hierarchy);
     expect(nodes.filter((node) => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
     expect(
@@ -718,6 +742,9 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
+    if (!result) {
+      throw new Error("Expected cleaned hierarchy");
+    }
     const nodes = collectNodes(result.hierarchy);
     expect(nodes.filter((node) => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
     expect(nodes.filter((node) => node.className === "WKWebView")).toHaveLength(0);

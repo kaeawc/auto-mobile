@@ -13,8 +13,8 @@ enum Geometry {
     )
         -> (scale: Double, velocity: Double)
     {
-        let p = PinchFallback.parameters(distanceStart: start, distanceEnd: end, duration: duration)
-        return (Double(p.scale), Double(p.velocity))
+        let parameters = PinchFallback.parameters(distanceStart: start, distanceEnd: end, duration: duration)
+        return (Double(parameters.scale), Double(parameters.velocity))
     }
 
     static func multiFingerFailure(symbolsUnavailable: Bool, underlying: String) -> String {

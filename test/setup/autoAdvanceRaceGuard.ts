@@ -95,8 +95,8 @@ function installGuard(): void {
     return copy;
   }
   function installModule(name: string, wrapped: Record<PropertyKey, unknown>): void {
-    mock.module(`node:${name}`, () => wrapped);
-    mock.module(name, () => wrapped);
+    void mock.module(`node:${name}`, () => wrapped);
+    void mock.module(name, () => wrapped);
   }
 
   const promises = copyModule(realFsPromises);

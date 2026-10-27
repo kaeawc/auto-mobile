@@ -14,24 +14,24 @@ enum SdkDatabase {
         try sortedEncoder().encode(JSONDecoder().decode(type, from: data))
     }
 
-    static func diagnostic(_ d: Data) throws -> Data { try reencode(SdkStorageDiagnostic.self, d) }
-    static func databaseInfo(_ d: Data) throws -> Data { try reencode(SdkDatabaseInfo.self, d) }
-    static func columnInfo(_ d: Data) throws -> Data { try reencode(SdkColumnInfo.self, d) }
-    static func storageCapabilities(_ d: Data) throws -> Data { try reencode(SdkStorageCapabilities.self, d) }
-    static func executeSqlResult(_ d: Data) throws -> Data { try reencode(SdkExecuteSqlResult.self, d) }
-    static func tableDataResult(_ d: Data) throws -> Data { try reencode(SdkTableDataResult.self, d) }
-    static func tableStructureResult(_ d: Data) throws -> Data { try reencode(SdkTableStructureResult.self, d) }
+    static func diagnostic(_ data: Data) throws -> Data { try reencode(SdkStorageDiagnostic.self, data) }
+    static func databaseInfo(_ data: Data) throws -> Data { try reencode(SdkDatabaseInfo.self, data) }
+    static func columnInfo(_ data: Data) throws -> Data { try reencode(SdkColumnInfo.self, data) }
+    static func storageCapabilities(_ data: Data) throws -> Data { try reencode(SdkStorageCapabilities.self, data) }
+    static func executeSqlResult(_ data: Data) throws -> Data { try reencode(SdkExecuteSqlResult.self, data) }
+    static func tableDataResult(_ data: Data) throws -> Data { try reencode(SdkTableDataResult.self, data) }
+    static func tableStructureResult(_ data: Data) throws -> Data { try reencode(SdkTableStructureResult.self, data) }
 
-    static func serverInfo(_ d: Data) throws -> (String, String?, [String]) {
-        let info = try JSONDecoder().decode(SdkHierarchyServerInfo.self, from: d)
+    static func serverInfo(_ data: Data) throws -> (String, String?, [String]) {
+        let info = try JSONDecoder().decode(SdkHierarchyServerInfo.self, from: data)
         return (info.status, info.bundleId, info.capabilities.sorted())
     }
 
-    static func executeSqlResponse(_ d: Data) throws -> Data { try reencode(ExecuteSqlResponse.self, d) }
-    static func listDatabasesResponse(_ d: Data) throws -> Data { try reencode(ListDatabasesResponse.self, d) }
-    static func storageCapabilitiesResponse(_ d: Data) throws
-        -> Data { try reencode(StorageCapabilitiesResponse.self, d) }
-    static func listTablesResponse(_ d: Data) throws -> Data { try reencode(ListTablesResponse.self, d) }
-    static func tableDataResponse(_ d: Data) throws -> Data { try reencode(TableDataResponse.self, d) }
-    static func tableStructureResponse(_ d: Data) throws -> Data { try reencode(TableStructureResponse.self, d) }
+    static func executeSqlResponse(_ data: Data) throws -> Data { try reencode(ExecuteSqlResponse.self, data) }
+    static func listDatabasesResponse(_ data: Data) throws -> Data { try reencode(ListDatabasesResponse.self, data) }
+    static func storageCapabilitiesResponse(_ data: Data) throws
+        -> Data { try reencode(StorageCapabilitiesResponse.self, data) }
+    static func listTablesResponse(_ data: Data) throws -> Data { try reencode(ListTablesResponse.self, data) }
+    static func tableDataResponse(_ data: Data) throws -> Data { try reencode(TableDataResponse.self, data) }
+    static func tableStructureResponse(_ data: Data) throws -> Data { try reencode(TableStructureResponse.self, data) }
 }

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AppLifecycle } from "../../../src/features/action/AppLifecycle";
 import type { BootedDevice, ExecResult } from "../../../src/models";
-import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { AdbDeviceReadings } from "../../../src/utils/android-cmdline-tools/AdbDeviceReadings";
 import type { ForegroundAppReadResult } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -32,7 +32,15 @@ const unreadable: ForegroundAppReadResult = { state: "unreadable", error: "devic
 
 class ParsingFakeAdbExecutor extends FakeAdbExecutor {
   // Use the production checked reader over the fake's recorded command responses.
-  override getForegroundAppChecked = AdbClient.prototype.getForegroundAppChecked;
+  private readonly readings = new AdbDeviceReadings({
+    executeCommand: (...args) => this.executeCommand(...args),
+    timer: new FakeTimer(),
+  });
+  override getForegroundAppChecked(
+    ...args: Parameters<AdbDeviceReadings["getForegroundAppChecked"]>
+  ) {
+    return this.readings.getForegroundAppChecked(...args);
+  }
 }
 
 function harness(reads: ForegroundAppReadResult[], adb = new FakeAdbExecutor()) {
@@ -52,6 +60,7 @@ function harness(reads: ForegroundAppReadResult[], adb = new FakeAdbExecutor()) 
       },
     },
     cacheInvalidator: {
+      retireAppProcess: () => {},
       invalidate: () => {
         invalidations++;
       },

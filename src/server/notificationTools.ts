@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
@@ -13,7 +14,7 @@ import {
   platformSchema,
   withAppIdAliases,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 import {
   ANDROID_PACKAGE_NAME_PATTERN,
   PostNotification,
@@ -39,9 +40,31 @@ const postNotificationCommonShape = {
     .enum(["normal", "bigPicture"])
     .optional()
     .describe("Notification image type (default: normal)"),
-  imagePath: z.string().optional().describe("Host image path for bigPicture"),
-  actions: z.array(actionSchema).optional().describe("Android action buttons"),
-  channelId: z.string().optional().describe("Android channel ID / iOS APNs category"),
+  imagePath: z
+    .string()
+    .optional()
+    .describe(
+      "Android: host image path for bigPicture. iOS: host path or URL sent as automobile-image-url with mutable-content for the app's service extension",
+    ),
+  actions: z
+    .array(actionSchema)
+    .optional()
+    .describe("Android action buttons; iOS buttons come from the registered category"),
+  channelId: z
+    .string()
+    .optional()
+    .describe("Android channel ID; iOS APNs category when category is omitted"),
+  category: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("iOS: aps.category naming a UNNotificationCategory the app registered"),
+  payload: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe(
+      "iOS: raw APNs JSON merged over the generated payload (aps fields override); 4096-byte limit",
+    ),
 };
 
 const postNotificationAppIdDescription =
@@ -163,6 +186,8 @@ export function createPostNotificationHandler({
         imagePath: args.imagePath,
         actions: args.actions,
         channelId: args.channelId,
+        category: args.category,
+        payload: args.payload,
         appId: args.appId,
       });
 
@@ -239,7 +264,7 @@ export function registerNotificationTools(deps: NotificationToolDependencies = {
     "Post notification via Android SDK hooks or iOS Simulator simctl push.",
     postNotificationSchema,
     createPostNotificationHandler(deps),
-    { defaultEnabled: false, outputSchema: postNotificationResultSchema },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: postNotificationResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -260,6 +285,6 @@ export function registerNotificationTools(deps: NotificationToolDependencies = {
     "Set app notification/DND policy state",
     setNotificationPolicySchema,
     setNotificationPolicyHandler,
-    { defaultEnabled: false, outputSchema: setNotificationPolicyResultSchema },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setNotificationPolicyResultSchema },
   );
 }

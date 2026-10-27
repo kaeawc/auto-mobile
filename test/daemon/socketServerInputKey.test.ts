@@ -1,21 +1,23 @@
+import { createExecResult } from "../../src/utils/execResult";
 import { expect, spyOn, test } from "bun:test";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { socketServerInputHooks } from "../helpers/socketServerInputHooks";
+import type { SocketServerInputTestHooks } from "../../src/daemon/socketServer/socketServerInputTestHooks";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { InputKey } from "../../src/features/action/InputKey";
 import { ActionableError, type BootedDevice, type ExecResult } from "../../src/models";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import type { Timer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 
 const device: BootedDevice = { platform: "android", deviceId: "fake-key", name: "Fake" };
 
-function createHandler(controller: AbortController, timer = new FakeTimer()): InputKeyHandler {
-  // No constructor, listener, connection, daemon, or session lifecycle is started.
-  const handler = Object.create(UnixSocketServer.prototype) as InputKeyHandler;
-  handler.timer = timer;
+function createHandler(
+  controller: AbortController,
+  timer = new FakeTimer(),
+): SocketServerInputTestHooks {
+  const handler = socketServerInputHooks(timer);
   handler.resolveInputTargetDevice = async () => device;
   handler.requireCurrentFrameContext = () => {};
   handler.runTrackedKeyedDeviceInput = async (method, target, operation) => {
@@ -34,18 +36,6 @@ function keyRequest(frameContext?: string): DaemonRequest {
     timeoutMs: 1234,
     params: { platform: "android", deviceId: device.deviceId, key: "enter", frameContext },
   };
-}
-
-interface InputKeyHandler {
-  timer: Timer;
-  handleInputKey(request: DaemonRequest): Promise<unknown>;
-  resolveInputTargetDevice(): Promise<BootedDevice>;
-  requireCurrentFrameContext(): void;
-  runTrackedKeyedDeviceInput<T>(
-    method: string,
-    device: BootedDevice,
-    operation: (signal?: AbortSignal) => Promise<T>,
-  ): Promise<T>;
 }
 
 test.each([undefined, "frame-1"])(
@@ -96,6 +86,7 @@ test.each([undefined, "frame-1"])(
       "validateFrameContext",
     ).mockResolvedValue({
       success: true,
+      totalTimeMs: 0,
     });
     try {
       const result = handler.handleInputKey(keyRequest(frameContext));
@@ -171,13 +162,13 @@ test.each([false, true])(
       timer.advanceTime(1234);
       // Settle the in-flight command after the deadline: the real timeout helper
       // retains the device queue until it settles, without starting a real socket.
-      finish({ stdout: "", stderr: "" });
+      finish(createExecResult("", ""));
       await expect(result).rejects.toBeInstanceOf(dispatched ? ActionableError : McpTimeoutError);
       await expect(result).rejects.toThrow(
         dispatched ? "Key outcome is indeterminate" : "operation exceeded remaining budget",
       );
     } finally {
-      finish({ stdout: "", stderr: "" });
+      finish(createExecResult("", ""));
       factory.mockRestore();
     }
   },

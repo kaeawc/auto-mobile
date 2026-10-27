@@ -47,10 +47,18 @@ function fail(message: string): never {
 // bundler transpiles without checking types, so this is the only type gate for
 // the docs assets; a failure here means the source, not the emitted output.
 function typecheck(): void {
-  const result = spawnSync("bunx", ["tsgo", "--noEmit", "-p", TSCONFIG], {
-    cwd: ROOT,
-    stdio: "inherit",
-  });
+  // Through the host slot pool like the other tsgo gates (#13910), so a docs rebuild cannot add
+  // an uncapped checker to a host that is already saturated.
+  const result = spawnSync(
+    "bash",
+    [
+      "-c",
+      'source scripts/lib/host-heavy-run.sh && host_heavy_run host_heavy_tsgo "$1"',
+      "bash",
+      TSCONFIG,
+    ],
+    { cwd: ROOT, stdio: "inherit" },
+  );
   if (result.status !== 0) {
     fail("docs-assets TypeScript failed type-checking (see tsgo output above)");
   }

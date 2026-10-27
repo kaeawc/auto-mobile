@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
@@ -22,10 +23,11 @@ import {
 function harness(hierarchies: ViewHierarchyResult[], platform: "ios" | "android" = "ios") {
   let swipes = 0;
   const observations: ObserveResult[] = hierarchies.map((viewHierarchy) => ({
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     observationId: "synthetic-navigation",
     updatedAt: 1,
     screenSize: navigationScreen,
-    systemInsets: viewHierarchy.systemInsets,
+    systemInsets: viewHierarchy.systemInsets ?? { top: 0, right: 0, bottom: 0, left: 0 },
     viewHierarchy,
   }));
   const current = () => observations[Math.min(swipes, observations.length - 1)];
@@ -62,7 +64,16 @@ function harness(hierarchies: ViewHierarchyResult[], platform: "ios" | "android"
         observe: async () => current(),
         swipe: async ({ x1, y1, x2, y2, duration }) => {
           swipes++;
-          return { success: true, x1, y1, x2, y2, duration, observation: current() };
+          return {
+            success: true,
+            targetType: "element",
+            x1,
+            y1,
+            x2,
+            y2,
+            duration,
+            observation: current(),
+          };
         },
       },
     });
@@ -83,10 +94,28 @@ describe("scroll-until-visible synthetic iOS navigation occlusion (#9096)", () =
     expect(h.swipeCount()).toBe(0);
 
     for (const observation of [
-      { viewHierarchy: noChrome, screenSize: navigationScreen },
-      {},
-      { screenSize: navigationScreen },
-      { viewHierarchy: { hierarchy: {} } },
+      buildObserveResult({
+        updatedAt: 0,
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: noChrome,
+        screenSize: navigationScreen,
+      }),
+      buildObserveResult({
+        updatedAt: 0,
+        screenSize: { width: 0, height: 0 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      }),
+      buildObserveResult({
+        updatedAt: 0,
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        screenSize: navigationScreen,
+      }),
+      buildObserveResult({
+        updatedAt: 0,
+        screenSize: { width: 0, height: 0 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: { hierarchy: {} },
+      }),
     ] satisfies ObserveResult[]) {
       expect(
         h.scroll["isElementWithinContainer"]({ bounds: row }, navigationViewport, observation),

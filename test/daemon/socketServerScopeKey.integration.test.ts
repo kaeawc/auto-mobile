@@ -7,6 +7,7 @@ import {
   type UnixSocketServerHarness,
 } from "./helpers/UnixSocketServerHarness";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { buildSession } from "./helpers/cliDaemonState";
 import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
 
 function createFakeSession(
@@ -14,20 +15,12 @@ function createFakeSession(
   assignedDevice: string,
   deviceLabels?: DeviceLabelMap,
 ): Session {
-  return {
+  return buildSession({
     sessionId,
     assignedDevice,
-    platform: "android",
-    createdAt: 0,
-    lastUsedAt: 0,
     expiresAt: 60_000,
     cacheData: { deviceLabels },
-    lastHeartbeat: 0,
-    sessionTimeoutMs: 60_000,
-    heartbeatTimeoutMs: 10_000,
-    heartbeatTimeoutSource: "default",
-    hasReceivedHeartbeat: false,
-  };
+  });
 }
 
 function createFakeDaemonState(
@@ -38,6 +31,7 @@ function createFakeDaemonState(
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: (sessionId: string) => sessionDevices.has(sessionId),
       getSession: (sessionId: string) => {
         const assignedDevice = sessionDevices.get(sessionId);
         return assignedDevice

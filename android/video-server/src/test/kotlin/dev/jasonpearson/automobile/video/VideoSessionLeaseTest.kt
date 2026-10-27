@@ -118,7 +118,7 @@ class VideoSessionLeaseTest {
   fun heartbeatSurvivesAChmodFailure() {
     val leaseDirectory = File(temporaryFolder.root, "leases")
     val lease =
-      leaseWith(leaseDirectory, chmod = { _, _ -> throw RuntimeException("chmod denied") })
+      leaseWith(leaseDirectory, chmod = { _, _ -> throw IllegalStateException("chmod denied") })
 
     lease.start()
 

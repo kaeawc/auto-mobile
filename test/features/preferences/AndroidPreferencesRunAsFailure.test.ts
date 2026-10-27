@@ -145,12 +145,8 @@ describe("key-value direct edits share the missing-user classification (#10085)"
     const result = setAndroidKeyValueDirect(
       missingUserAdb(),
       "emulator-5600",
-      APP_ID,
-      "mt38prefs",
-      "k3",
-      "v3",
-      "STRING",
-      10,
+      { appId: APP_ID, fileName: "mt38prefs", userId: 10 },
+      { key: "k3", value: "v3", type: "STRING" },
     );
 
     await expect(result).rejects.toThrow(/user 10 does not exist/);
@@ -189,12 +185,8 @@ describe("key-value direct edits share the missing-user classification (#10085)"
     const result = setAndroidKeyValueDirect(
       adb,
       "emulator-5600",
-      APP_ID,
-      "mt38prefs",
-      "k3",
-      "v3",
-      "STRING",
-      10,
+      { appId: APP_ID, fileName: "mt38prefs", userId: 10 },
+      { key: "k3", value: "v3", type: "STRING" },
     );
 
     await expect(result).rejects.toThrow(/user 10 does not exist/);

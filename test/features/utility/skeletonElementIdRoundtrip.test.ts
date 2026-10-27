@@ -14,6 +14,7 @@ import {
 } from "../../../src/features/observe/android/StableNodeIdentity";
 import { toSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
 import type { ViewHierarchyResult } from "../../../src/models";
+import type { ViewHierarchyNode } from "../../../src/models/ViewHierarchyResult";
 import type { Element } from "../../../src/models/Element";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 
@@ -82,10 +83,10 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
 
     // Ingest-time rewrite: generated path UUIDs -> content-derived `s-<hash>` ids.
     assignStableViewIds(rawRoot);
-    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: { node: rawRoot } };
 
     const rawNodes = rawRoot.node;
-    const elements = rawNodes.map((node) => parser.parseNodeBounds(node as never) as Element);
+    const elements = rawNodes.map((node) => parser.parseNodeBounds(node) as Element);
 
     // Every synthetic id is stable-shaped and unique.
     const stableIds = elements.map((el) => el["view-id"]);
@@ -121,27 +122,31 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
       bounds: { left: 0, top: 0, right: 40, bottom: 40 },
       clickable: "true",
       "view-id": generatedViewId("dup-a"),
-      node: {
-        class: "android.widget.TextView",
-        text: "Dark theme",
-        "view-id": generatedViewId("dark-theme"),
-      },
+      node: [
+        {
+          class: "android.widget.TextView",
+          text: "Dark theme",
+          "view-id": generatedViewId("dark-theme"),
+        },
+      ],
     };
     const nodeB = {
       class: "android.view.View",
       bounds: { left: 0, top: 50, right: 40, bottom: 90 },
       clickable: "true",
       "view-id": generatedViewId("dup-b"),
-      node: {
-        class: "android.widget.TextView",
-        text: "Bedtime mode",
-        "view-id": generatedViewId("bedtime-mode"),
-      },
+      node: [
+        {
+          class: "android.widget.TextView",
+          text: "Bedtime mode",
+          "view-id": generatedViewId("bedtime-mode"),
+        },
+      ],
     };
     const rawRoot = { node: [nodeA, nodeB] };
 
     assignStableViewIds(rawRoot);
-    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: { node: rawRoot } };
 
     const idA = (nodeA as Record<string, unknown>)["view-id"] as string;
     const idB = (nodeB as Record<string, unknown>)["view-id"] as string;
@@ -224,7 +229,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
       clickable: "true",
       bounds: { left: 0, top: 0, right: 40, bottom: 40 },
       "view-id": generatedViewId(seed),
-      node: { class: "android.widget.TextView", text: label },
+      node: [{ class: "android.widget.TextView", text: label }],
     });
     const before = { node: [row("Alice", "alice"), row("Bob", "bob")] };
     assignStableViewIds(before);
@@ -234,7 +239,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     const after = { node: [row("Bob", "bob")] };
     assignStableViewIds(after);
     expect(after.node[0]["view-id"]).toMatch(/^s2-[0-9a-f]{16}$/);
-    const result = selector.selectByResourceId({ hierarchy: after }, staleAliceId);
+    const result = selector.selectByResourceId({ hierarchy: { node: after } }, staleAliceId);
     expect(result.element).toBeNull();
     expect(result.totalMatches).toBe(0);
   });
@@ -254,7 +259,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
       ],
     };
     assignStableViewIds(rawRoot);
-    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: { node: rawRoot } };
     const id = (rawRoot.node[0] as Record<string, unknown>)["view-id"] as string;
     expect(id).toMatch(/^s2-[0-9a-f]{16}$/);
 
@@ -285,7 +290,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
         },
       ],
     };
-    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: { node: rawRoot } };
 
     const result = selector.selectByResourceId(viewHierarchy, `${STABLE_VIEW_ID_PREFIX}a-2`);
     expect(result.element).not.toBeNull();
@@ -358,7 +363,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     expect(reorderedIds[1]).toBe(originalIdB);
     expect(reorderedIds[2]).toBe(`${reorderedBase}-3`);
 
-    const reorderedViewHierarchy: ViewHierarchyResult = { hierarchy: reordered };
+    const reorderedViewHierarchy: ViewHierarchyResult = { hierarchy: { node: reordered } };
 
     // The current capture assigns this exact ordinal to A. Without
     // capture-origin provenance, a selector resolves the current exact id;
@@ -400,7 +405,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     };
     const rawRoot = { node: [container1, container2] };
     assignStableViewIds(rawRoot);
-    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: { node: rawRoot } };
 
     const idInContainer1 = (container1.node[0] as Record<string, unknown>)["view-id"] as string;
     const idInContainer2 = (container2.node[0] as Record<string, unknown>)["view-id"] as string;
@@ -435,7 +440,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
       clickable: "true",
       "view-id": generatedViewId(tag),
     });
-    const makeHierarchy = (rows1: unknown[], rows2: unknown[]) => {
+    const makeHierarchy = (rows1: ViewHierarchyNode[], rows2: ViewHierarchyNode[]) => {
       const c1 = {
         class: "android.view.ViewGroup",
         "resource-id": "com.app:id/c1",
@@ -466,7 +471,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // The surviving in-c1 peer inherits the exact string the caller observed.
     expect(survivorIdInC1).toBe(observedIdForA);
 
-    const viewHierarchy: ViewHierarchyResult = { hierarchy: capture2 };
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: { node: capture2 } };
 
     // The complete ordinal exists exactly once in this capture, so it is a
     // usable selector for the currently assigned row (the capture-local
@@ -521,7 +526,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // scope.
     (decoy as Record<string, unknown>)["resource-id"] = idInContainer1;
 
-    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: { node: rawRoot } };
 
     // Container-scoped to c1: the real id in c2 remains outside scope, while
     // c1's exact ordinal is uniquely assigned in the current capture.
@@ -568,7 +573,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // between an `observe` and a subsequent `tapOn`.
     const skeleton = toSkeleton(
       makeElements({
-        clickable: [parser.parseNodeBounds(firstCapture.node[0] as never) as Element],
+        clickable: [parser.parseNodeBounds(firstCapture.node[0]) as Element],
       }),
     );
     const result = selector.selectByResourceId(
@@ -591,7 +596,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
         },
       ],
     };
-    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: { node: rawRoot } };
     const result = selector.selectByResourceId(viewHierarchy, "com.app:id/submit");
     expect(result.element).not.toBeNull();
     expect(result.element!.text).toBe("Submit");
@@ -627,7 +632,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
           },
         ],
       };
-      const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+      const viewHierarchy: ViewHierarchyResult = { hierarchy: { node: rawRoot } };
 
       const result = selector.selectByResourceId(viewHierarchy, collidingId);
       expect(result.element).not.toBeNull();
@@ -648,7 +653,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
         ],
       };
       const viewHierarchy: ViewHierarchyResult = {
-        hierarchy: rawRoot,
+        hierarchy: { node: rawRoot },
         windows: [
           {
             windowLayer: 1,
@@ -700,7 +705,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
           },
         ],
       };
-      const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+      const viewHierarchy: ViewHierarchyResult = { hierarchy: { node: rawRoot } };
 
       const sibling = selector.selectClickableSiblingOfResourceId(viewHierarchy, collidingId);
       expect(sibling.totalMatches).toBe(1);
@@ -722,7 +727,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
           },
         ],
       };
-      const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+      const viewHierarchy: ViewHierarchyResult = { hierarchy: { node: rawRoot } };
 
       const container = selector.resolveContainer(viewHierarchy, { elementId: collidingId });
       expect(container?.bounds).toEqual({ left: 100, top: 100, right: 300, bottom: 300 });
@@ -754,7 +759,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
         },
       ],
     };
-    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
+    const viewHierarchy: ViewHierarchyResult = { hierarchy: { node: rawRoot } };
 
     const result = selector.selectByResourceId(viewHierarchy, `${STABLE_VIEW_ID_PREFIX}a`);
     expect(result.element).not.toBeNull();
@@ -947,7 +952,7 @@ test.each(["native id", "node key", "label"])(
       peer.bounds = { ...b, top: b.top + index * 50, bottom: b.bottom + index * 50 };
       return peer;
     });
-    observation.viewHierarchy!.hierarchy.node = peers;
+    observation.viewHierarchy!.hierarchy.node = { node: peers };
     const elements = new DefaultObserveElementCollector().collect(
       observation.viewHierarchy!,
       "ios",

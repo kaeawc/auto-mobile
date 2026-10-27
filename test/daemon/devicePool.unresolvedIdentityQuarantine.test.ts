@@ -1,10 +1,6 @@
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
-import {
-  DevicePool,
-  type DiscoveryReconcileOptions,
-  type PooledDevice,
-} from "../../src/daemon/devicePool";
+import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -71,6 +67,19 @@ describe("DevicePool", () => {
       await devicePool.refreshDevices();
     };
 
+    test("refresh ignores foreign placeholders and resolved names without changing identity", async () => {
+      const device = poolDevice("emulator-5610", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      const pooled = requirePooledDevice(devicePool, device.deviceId);
+      const before = { ...pooled };
+      await refreshWith([{ ...unresolved(device.deviceId), foreignOwned: true, observedAt: 20 }]);
+      expect(pooled).toEqual(before);
+      pooled.identityUnresolved = true;
+      await refreshWith([{ ...device, foreignOwned: true, observedAt: 21 }]);
+      expect(pooled.identityUnresolved).toBe(true);
+      expect(pooled.identityObservedAt).toBe(before.identityObservedAt);
+    });
+
     test("immediately quarantines a live entry without a confirmed AVD identity", async () => {
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       await initializeLiveDevices([device]);
@@ -104,16 +113,16 @@ describe("DevicePool", () => {
       const getBootedDevicesDetailed =
         fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
       let retryCalls = 0;
-      fakeDeviceManager.getBootedDevicesDetailed = async (platform, options) => {
+      fakeDeviceManager.getBootedDevicesDetailed = async (platform) => {
         retryCalls++;
         if (retryCalls === 1) {
           fakeDeviceManager.bootedDevices = [secondOmission];
-          return await getBootedDevicesDetailed(platform, options);
+          return await getBootedDevicesDetailed(platform);
         }
         finalRetryStarted.resolve();
         await releaseFinalRetry.promise;
         fakeDeviceManager.bootedDevices = [recovered];
-        return await getBootedDevicesDetailed(platform, options);
+        return await getBootedDevicesDetailed(platform);
       };
 
       const reconciliation = devicePool.reconcileDiscoveryObservation(
@@ -161,9 +170,9 @@ describe("DevicePool", () => {
       const getBootedDevicesDetailed =
         fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
       let retryCalls = 0;
-      fakeDeviceManager.getBootedDevicesDetailed = async (platform, options) => {
+      fakeDeviceManager.getBootedDevicesDetailed = async (platform) => {
         retryCalls++;
-        return await getBootedDevicesDetailed(platform, options);
+        return await getBootedDevicesDetailed(platform);
       };
 
       await devicePool.reconcileDiscoveryObservation(
@@ -195,7 +204,7 @@ describe("DevicePool", () => {
       const releaseB = Promise.withResolvers<void>();
       const discover = fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
       let calls = 0;
-      fakeDeviceManager.getBootedDevicesDetailed = async (platform, options) => {
+      fakeDeviceManager.getBootedDevicesDetailed = async (platform) => {
         const call = ++calls;
         if (call === 1) {
           enteredA.resolve();
@@ -206,7 +215,7 @@ describe("DevicePool", () => {
           await releaseB.promise;
         }
         fakeDeviceManager.bootedDevices = [unresolved(device.deviceId)];
-        return discover(platform, options);
+        return discover(platform);
       };
       const cycleA = devicePool.reconcileDiscoveryObservation(
         [unresolved(device.deviceId)],
@@ -275,9 +284,9 @@ describe("DevicePool", () => {
       const getBootedDevicesDetailed =
         fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
       let retryCalls = 0;
-      fakeDeviceManager.getBootedDevicesDetailed = async (platform, options) => {
+      fakeDeviceManager.getBootedDevicesDetailed = async (platform) => {
         retryCalls++;
-        return await getBootedDevicesDetailed(platform, options);
+        return await getBootedDevicesDetailed(platform);
       };
 
       await devicePool.reconcileDiscoveryObservation(
@@ -536,18 +545,7 @@ describe("DevicePool", () => {
       const second = poolDevice("emulator-5556", "Pixel_7_API_34");
       await initializeLiveDevices([first, second]);
       const controller = new AbortController();
-      type ReconcileObservedPooledIdentity = (
-        pooled: PooledDevice,
-        device: Pick<
-          BootedDevice,
-          "deviceId" | "name" | "platform" | "observedAt" | "consoleBusyDuringProbe"
-        >,
-        options?: DiscoveryReconcileOptions,
-      ) => Promise<void>;
-      const poolWithReconciler = devicePool as unknown as {
-        runtimeIdentity: { reconcileObservedPooledIdentity: ReconcileObservedPooledIdentity };
-      };
-      const runtimeIdentity = poolWithReconciler.runtimeIdentity;
+      const runtimeIdentity = devicePool.testHooks.runtimeIdentity;
       const reconcileObservedPooledIdentity =
         runtimeIdentity.reconcileObservedPooledIdentity.bind(runtimeIdentity);
       let processedDevices = 0;
@@ -615,6 +613,91 @@ describe("DevicePool", () => {
       expect(cancellations).toEqual([]);
       expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(false);
       expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("owner-session");
+    });
+
+    test("keeps an unconfirmed live entry and its session when the AVD-name probe timed out", async () => {
+      const cancellations: string[] = [];
+      devicePool = makePool({
+        cancelDeviceSessionExecutions: async (sessionId) => {
+          cancellations.push(sessionId);
+          return 1;
+        },
+      });
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
+      const pooled = requirePooledDevice(devicePool, device.deviceId);
+      expect(pooled.avdName).toBeUndefined();
+
+      await devicePool.reconcileDiscoveryObservation(
+        [{ ...unresolved(device.deviceId), nameProbeTimedOut: true }],
+        "test:timed-out-probe",
+      );
+
+      expect(devicePool.getDevice(device.deviceId)).toBe(pooled);
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(false);
+      expect(cancellations).toEqual([]);
+      expect(pooled.sessionId).toBe("owner-session");
+      expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).not.toThrow();
+    });
+
+    test("retains a confirmed identity when rediscovery probes time out during bounded retries", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: androidImage,
+      });
+      fakeDeviceManager.bootedDevices = [
+        { ...unresolved(device.deviceId), nameProbeTimedOut: true },
+      ];
+      const getBootedDevicesDetailed =
+        fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
+      let retryCalls = 0;
+      fakeDeviceManager.getBootedDevicesDetailed = async (platform) => {
+        retryCalls++;
+        return await getBootedDevicesDetailed(platform);
+      };
+
+      await devicePool.reconcileDiscoveryObservation(
+        [unresolved(device.deviceId)],
+        "test:retry-probe-timed-out",
+      );
+
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(false);
+      expect(retryCalls).toBe(1);
+      expect(devicePool.getDevice(device.deviceId)?.identityReconcileAttempts).toBeUndefined();
+      expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).not.toThrow();
+
+      await devicePool.reconcileDiscoveryObservation(
+        fakeDeviceManager.bootedDevices,
+        "test:initial-probe-timed-out",
+      );
+      expect(retryCalls).toBe(1);
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(false);
+    });
+
+    test("retains an existing quarantine when a later AVD-name probe timed out", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation(
+        [unresolved(device.deviceId)],
+        "test:fast-failed-probe",
+      );
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(true);
+
+      await devicePool.reconcileDiscoveryObservation(
+        [{ ...unresolved(device.deviceId), nameProbeTimedOut: true }],
+        "test:timed-out-probe",
+      );
+
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(true);
     });
 
     test("quarantines a failed AVD-name probe that recorded the console idle", async () => {
@@ -844,23 +927,7 @@ describe("DevicePool", () => {
       await devicePool.reconcileDiscoveryObservation([stamped(device, 1)], "test:initial");
       const pooled = requirePooledDevice(devicePool, "emulator-5554");
 
-      type DevicePoolInternals = {
-        assignmentMutex: {
-          runExclusive<T>(callback: () => Promise<T>): Promise<T>;
-        };
-        missingDeviceLiveness: {
-          reconcileDiscoveredPooledDevice(
-            pooledDevice: PooledDevice,
-            bootedDevice: BootedDevice,
-            assignmentLockHeld: boolean,
-          ): Promise<boolean>;
-        };
-        replacePooledDeviceForRuntimeIdentity(
-          pooledDevice: PooledDevice,
-          bootedDevice: BootedDevice,
-        ): Promise<boolean>;
-      };
-      const internals = devicePool as unknown as DevicePoolInternals;
+      const internals = devicePool.testHooks;
       const mutexEntered = Promise.withResolvers<void>();
       const releaseMutex = Promise.withResolvers<void>();
       const mutexOwner = internals.assignmentMutex.runExclusive(async () => {
@@ -870,12 +937,13 @@ describe("DevicePool", () => {
       await mutexEntered.promise;
 
       let replacements = 0;
-      const replacePooledDeviceForRuntimeIdentity =
-        internals.replacePooledDeviceForRuntimeIdentity.bind(devicePool);
-      internals.replacePooledDeviceForRuntimeIdentity = async (pooledDevice, bootedDevice) => {
-        replacements++;
-        return await replacePooledDeviceForRuntimeIdentity(pooledDevice, bootedDevice);
-      };
+      const restore_replacePooledDeviceForRuntimeIdentity =
+        internals.replacePooledDeviceForRuntimeIdentity.intercept(
+          (replacePooledDeviceForRuntimeIdentity) => async (pooledDevice, bootedDevice) => {
+            replacements++;
+            return await replacePooledDeviceForRuntimeIdentity(pooledDevice, bootedDevice);
+          },
+        );
       try {
         // The early liveness check accepts stamp 2, then blocks on the mutex.
         const liveness = internals.missingDeviceLiveness.reconcileDiscoveredPooledDevice(
@@ -894,7 +962,7 @@ describe("DevicePool", () => {
         expect(devicePool.getDevice("emulator-5554")).toBe(pooled);
         expect(replacements).toBe(0);
       } finally {
-        internals.replacePooledDeviceForRuntimeIdentity = replacePooledDeviceForRuntimeIdentity;
+        restore_replacePooledDeviceForRuntimeIdentity();
         releaseMutex.resolve();
         await mutexOwner;
       }
@@ -907,30 +975,13 @@ describe("DevicePool", () => {
       await devicePool.reconcileDiscoveryObservation([stamped(device, 1)], "test:initial");
       const pooled = requirePooledDevice(devicePool, "emulator-5554");
 
-      type DevicePoolInternals = {
-        addDevice(device: BootedDevice): Promise<void>;
-        missingDeviceLiveness: {
-          reconcileDiscoveredPooledDevice(
-            pooledDevice: PooledDevice,
-            bootedDevice: BootedDevice,
-            assignmentLockHeld: boolean,
-          ): Promise<boolean>;
-          resolveMissingDeviceIncident(
-            pooledDevice: PooledDevice,
-            recoverAndroidEmulator: boolean,
-            incidentId: string | undefined,
-            incidentCaptureComplete: boolean,
-          ): Promise<string | undefined>;
-        };
-      };
-      const internals = devicePool as unknown as DevicePoolInternals;
+      const internals = devicePool.testHooks;
       const evictionEntered = Promise.withResolvers<void>();
       const releaseEviction = Promise.withResolvers<void>();
       const resolveMissingDeviceIncident =
         internals.missingDeviceLiveness.resolveMissingDeviceIncident.bind(
           internals.missingDeviceLiveness,
         );
-      const addDevice = internals.addDevice.bind(devicePool);
       let adds = 0;
       internals.missingDeviceLiveness.resolveMissingDeviceIncident = async (...args) => {
         // This awaits within eviction before either destructive removal branch,
@@ -939,10 +990,10 @@ describe("DevicePool", () => {
         await releaseEviction.promise;
         return await resolveMissingDeviceIncident(...args);
       };
-      internals.addDevice = async (...args) => {
+      const restore_addDevice = internals.addDevice.intercept((addDevice) => async (...args) => {
         adds++;
         return await addDevice(...args);
-      };
+      });
       try {
         // Stamp 2 passes the liveness replacement's initial stale-observation check.
         const liveness = internals.missingDeviceLiveness.reconcileDiscoveredPooledDevice(
@@ -963,7 +1014,7 @@ describe("DevicePool", () => {
         expect(adds).toBe(0);
       } finally {
         internals.missingDeviceLiveness.resolveMissingDeviceIncident = resolveMissingDeviceIncident;
-        internals.addDevice = addDevice;
+        restore_addDevice();
         releaseEviction.resolve();
       }
     });
@@ -980,34 +1031,26 @@ describe("DevicePool", () => {
       });
       const pooled = requirePooledDevice(devicePool, device.deviceId);
 
-      type DevicePoolInternals = {
-        evictMissingPooledDevice(
-          pooledDevice: PooledDevice,
-          reason: string,
-          options?: { identityObservation?: Pick<BootedDevice, "name" | "observedAt"> },
-        ): Promise<void>;
-        releaseSessionForDisconnectedDevice(
-          sessionId: string,
-          deviceId: string,
-          releaseReason: string,
-        ): Promise<void>;
-      };
-      const internals = devicePool as unknown as DevicePoolInternals;
+      const internals = devicePool.testHooks;
       const evictionQueued = Promise.withResolvers<void>();
       const releaseEviction = Promise.withResolvers<void>();
-      const evictMissingPooledDevice = internals.evictMissingPooledDevice.bind(devicePool);
-      const releaseSessionForDisconnectedDevice =
-        internals.releaseSessionForDisconnectedDevice.bind(devicePool);
       const sessionReleases: string[] = [];
-      internals.evictMissingPooledDevice = async (...args) => {
-        evictionQueued.resolve();
-        await releaseEviction.promise;
-        await evictMissingPooledDevice(...args);
-      };
-      internals.releaseSessionForDisconnectedDevice = async (sessionId, ...args) => {
-        sessionReleases.push(sessionId);
-        await releaseSessionForDisconnectedDevice(sessionId, ...args);
-      };
+      const restore_evictMissingPooledDevice = internals.evictMissingPooledDevice.intercept(
+        (evictMissingPooledDevice) =>
+          async (...args) => {
+            evictionQueued.resolve();
+            await releaseEviction.promise;
+            await evictMissingPooledDevice(...args);
+          },
+      );
+      const restore_releaseSessionForDisconnectedDevice =
+        internals.releaseSessionForDisconnectedDevice.intercept(
+          (releaseSessionForDisconnectedDevice) =>
+            async (sessionId, ...args) => {
+              sessionReleases.push(sessionId);
+              await releaseSessionForDisconnectedDevice(sessionId, ...args);
+            },
+        );
       try {
         fakeDeviceManager.bootedDevices = [replacement];
         const refresh = devicePool.refreshDevices();
@@ -1023,8 +1066,8 @@ describe("DevicePool", () => {
         expect(devicePool.getDevice(device.deviceId)).toBe(pooled);
         expect(pooled.sessionId).toBe("owner-session");
       } finally {
-        internals.evictMissingPooledDevice = evictMissingPooledDevice;
-        internals.releaseSessionForDisconnectedDevice = releaseSessionForDisconnectedDevice;
+        restore_evictMissingPooledDevice();
+        restore_releaseSessionForDisconnectedDevice();
         releaseEviction.resolve();
       }
     });
@@ -1137,24 +1180,18 @@ describe("DevicePool", () => {
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
       const pooled = requirePooledDevice(devicePool, device.deviceId);
 
-      type DevicePoolInternals = {
-        replacePooledDeviceForRuntimeIdentity(
-          pooledDevice: PooledDevice,
-          bootedDevice: BootedDevice,
-        ): Promise<boolean>;
-        clearDeviceSessionCache(deviceId: string): Promise<void>;
-      };
-      const internals = devicePool as unknown as DevicePoolInternals;
+      const internals = devicePool.testHooks;
       const cacheCleanupStarted = Promise.withResolvers<void>();
       const finishCacheCleanup = Promise.withResolvers<void>();
-      const clearDeviceSessionCache = internals.clearDeviceSessionCache.bind(devicePool);
-      internals.clearDeviceSessionCache = async (deviceId) => {
-        cacheCleanupStarted.resolve();
-        await finishCacheCleanup.promise;
-        await clearDeviceSessionCache(deviceId);
-      };
+      const restore_clearDeviceSessionCache = internals.clearDeviceSessionCache.intercept(
+        (clearDeviceSessionCache) => async (deviceId) => {
+          cacheCleanupStarted.resolve();
+          await finishCacheCleanup.promise;
+          await clearDeviceSessionCache(deviceId);
+        },
+      );
       try {
-        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity(
+        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity.call(
           pooled,
           replacement,
         );
@@ -1167,19 +1204,12 @@ describe("DevicePool", () => {
 
         expect(devicePool.getDevice(device.deviceId)?.name).toBe("Pixel_6_API_33");
       } finally {
-        internals.clearDeviceSessionCache = clearDeviceSessionCache;
+        restore_clearDeviceSessionCache();
         finishCacheCleanup.resolve();
       }
     });
 
     test("ignores raw serial observations but retains failed probes during replacement cleanup", async () => {
-      type DevicePoolInternals = {
-        replacePooledDeviceForRuntimeIdentity(
-          pooledDevice: PooledDevice,
-          bootedDevice: BootedDevice,
-        ): Promise<boolean>;
-        clearDeviceSessionCache(deviceId: string): Promise<void>;
-      };
       const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
       const installAfterPendingObservation = async (observation: BootedDevice): Promise<void> => {
         const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
@@ -1187,17 +1217,18 @@ describe("DevicePool", () => {
         await initializeLiveDevices([device]);
         await devicePool.reconcileDiscoveryObservation([device], "test:initial");
         const pooled = requirePooledDevice(devicePool, device.deviceId);
-        const internals = devicePool as unknown as DevicePoolInternals;
+        const internals = devicePool.testHooks;
         const cacheCleanupStarted = Promise.withResolvers<void>();
         const finishCacheCleanup = Promise.withResolvers<void>();
-        const clearDeviceSessionCache = internals.clearDeviceSessionCache.bind(devicePool);
-        internals.clearDeviceSessionCache = async (deviceId) => {
-          cacheCleanupStarted.resolve();
-          await finishCacheCleanup.promise;
-          await clearDeviceSessionCache(deviceId);
-        };
+        const restore_clearDeviceSessionCache = internals.clearDeviceSessionCache.intercept(
+          (clearDeviceSessionCache) => async (deviceId) => {
+            cacheCleanupStarted.resolve();
+            await finishCacheCleanup.promise;
+            await clearDeviceSessionCache(deviceId);
+          },
+        );
         try {
-          const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity(
+          const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity.call(
             pooled,
             replacement,
           );
@@ -1206,7 +1237,7 @@ describe("DevicePool", () => {
           finishCacheCleanup.resolve();
           await replacementPromise;
         } finally {
-          internals.clearDeviceSessionCache = clearDeviceSessionCache;
+          restore_clearDeviceSessionCache();
           finishCacheCleanup.resolve();
         }
       };
@@ -1239,27 +1270,18 @@ describe("DevicePool", () => {
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
       const pooled = requirePooledDevice(devicePool, device.deviceId);
 
-      type DevicePoolInternals = {
-        replacePooledDeviceForRuntimeIdentity(
-          pooledDevice: PooledDevice,
-          bootedDevice: BootedDevice,
-        ): Promise<boolean>;
-        clearDeviceSessionCache(deviceId: string): Promise<void>;
-        runtimeIdentity: {
-          getPendingUnresolvedEvidence(deviceId: string): { observedAt?: number } | undefined;
-        };
-      };
-      const internals = devicePool as unknown as DevicePoolInternals;
+      const internals = devicePool.testHooks;
       const cacheCleanupStarted = Promise.withResolvers<void>();
       const finishCacheCleanup = Promise.withResolvers<void>();
-      const clearDeviceSessionCache = internals.clearDeviceSessionCache.bind(devicePool);
-      internals.clearDeviceSessionCache = async (deviceId) => {
-        cacheCleanupStarted.resolve();
-        await finishCacheCleanup.promise;
-        await clearDeviceSessionCache(deviceId);
-      };
+      const restore_clearDeviceSessionCache = internals.clearDeviceSessionCache.intercept(
+        (clearDeviceSessionCache) => async (deviceId) => {
+          cacheCleanupStarted.resolve();
+          await finishCacheCleanup.promise;
+          await clearDeviceSessionCache(deviceId);
+        },
+      );
       try {
-        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity(
+        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity.call(
           pooled,
           replacement,
         );
@@ -1283,7 +1305,50 @@ describe("DevicePool", () => {
         expect(installed?.identityObservedAt).toBe(4);
         expect(installed?.identityUnresolved).toBeTrue();
       } finally {
-        internals.clearDeviceSessionCache = clearDeviceSessionCache;
+        restore_clearDeviceSessionCache();
+        finishCacheCleanup.resolve();
+      }
+    });
+
+    test("a timed-out probe during a pending replacement leaves it resolved (#14377)", async () => {
+      const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
+      const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
+      const timedOut = { ...stamped(unresolved("emulator-5554"), 4), nameProbeTimedOut: true };
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation([device], "test:initial");
+      const pooled = requirePooledDevice(devicePool, device.deviceId);
+
+      const internals = devicePool.testHooks;
+      const cacheCleanupStarted = Promise.withResolvers<void>();
+      const finishCacheCleanup = Promise.withResolvers<void>();
+      const restore_clearDeviceSessionCache = internals.clearDeviceSessionCache.intercept(
+        (clearDeviceSessionCache) => async (deviceId) => {
+          cacheCleanupStarted.resolve();
+          await finishCacheCleanup.promise;
+          await clearDeviceSessionCache(deviceId);
+        },
+      );
+      try {
+        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity.call(
+          pooled,
+          replacement,
+        );
+        await cacheCleanupStarted.promise;
+
+        // Host load timed the AVD-name probe out: no identity evidence either way.
+        await devicePool.reconcileDiscoveryObservation([timedOut], "test:timed-out");
+        expect(
+          internals.runtimeIdentity.getPendingUnresolvedEvidence(device.deviceId),
+        ).toBeUndefined();
+
+        finishCacheCleanup.resolve();
+        await replacementPromise;
+
+        const installed = devicePool.getDevice(device.deviceId);
+        expect(installed?.name).toBe("Pixel_7_API_34");
+        expect(installed?.identityUnresolved).not.toBeTrue();
+      } finally {
+        restore_clearDeviceSessionCache();
         finishCacheCleanup.resolve();
       }
     });
@@ -1297,24 +1362,18 @@ describe("DevicePool", () => {
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
       const pooled = requirePooledDevice(devicePool, device.deviceId);
 
-      type DevicePoolInternals = {
-        replacePooledDeviceForRuntimeIdentity(
-          pooledDevice: PooledDevice,
-          bootedDevice: BootedDevice,
-        ): Promise<boolean>;
-        clearDeviceSessionCache(deviceId: string): Promise<void>;
-      };
-      const internals = devicePool as unknown as DevicePoolInternals;
+      const internals = devicePool.testHooks;
       const cacheCleanupStarted = Promise.withResolvers<void>();
       const finishCacheCleanup = Promise.withResolvers<void>();
-      const clearDeviceSessionCache = internals.clearDeviceSessionCache.bind(devicePool);
-      internals.clearDeviceSessionCache = async (deviceId) => {
-        cacheCleanupStarted.resolve();
-        await finishCacheCleanup.promise;
-        await clearDeviceSessionCache(deviceId);
-      };
+      const restore_clearDeviceSessionCache = internals.clearDeviceSessionCache.intercept(
+        (clearDeviceSessionCache) => async (deviceId) => {
+          cacheCleanupStarted.resolve();
+          await finishCacheCleanup.promise;
+          await clearDeviceSessionCache(deviceId);
+        },
+      );
       try {
-        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity(
+        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity.call(
           pooled,
           replacement,
         );
@@ -1336,7 +1395,7 @@ describe("DevicePool", () => {
         });
         expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(false);
       } finally {
-        internals.clearDeviceSessionCache = clearDeviceSessionCache;
+        restore_clearDeviceSessionCache();
         finishCacheCleanup.resolve();
       }
     });
@@ -1349,24 +1408,18 @@ describe("DevicePool", () => {
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
       const pooled = requirePooledDevice(devicePool, device.deviceId);
 
-      type DevicePoolInternals = {
-        replacePooledDeviceForRuntimeIdentity(
-          pooledDevice: PooledDevice,
-          bootedDevice: BootedDevice,
-        ): Promise<boolean>;
-        clearDeviceSessionCache(deviceId: string): Promise<void>;
-      };
-      const internals = devicePool as unknown as DevicePoolInternals;
+      const internals = devicePool.testHooks;
       const cacheCleanupStarted = Promise.withResolvers<void>();
       const finishCacheCleanup = Promise.withResolvers<void>();
-      const clearDeviceSessionCache = internals.clearDeviceSessionCache.bind(devicePool);
-      internals.clearDeviceSessionCache = async (deviceId) => {
-        cacheCleanupStarted.resolve();
-        await finishCacheCleanup.promise;
-        await clearDeviceSessionCache(deviceId);
-      };
+      const restore_clearDeviceSessionCache = internals.clearDeviceSessionCache.intercept(
+        (clearDeviceSessionCache) => async (deviceId) => {
+          cacheCleanupStarted.resolve();
+          await finishCacheCleanup.promise;
+          await clearDeviceSessionCache(deviceId);
+        },
+      );
       try {
-        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity(
+        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity.call(
           pooled,
           replacement,
         );
@@ -1384,7 +1437,7 @@ describe("DevicePool", () => {
         expect(installed?.identityObservedAt).toBe(4);
         expect(installed?.identityUnresolved).toBeTrue();
       } finally {
-        internals.clearDeviceSessionCache = clearDeviceSessionCache;
+        restore_clearDeviceSessionCache();
         finishCacheCleanup.resolve();
       }
     });
@@ -1396,15 +1449,9 @@ describe("DevicePool", () => {
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
       const pooled = requirePooledDevice(devicePool, device.deviceId);
 
-      type DevicePoolInternals = {
-        replacePooledDeviceForRuntimeIdentity(
-          pooledDevice: PooledDevice,
-          bootedDevice: BootedDevice,
-        ): Promise<boolean>;
-      };
-      const internals = devicePool as unknown as DevicePoolInternals;
+      const internals = devicePool.testHooks;
 
-      await internals.replacePooledDeviceForRuntimeIdentity(pooled, unresolvedReplacement);
+      await internals.replacePooledDeviceForRuntimeIdentity.call(pooled, unresolvedReplacement);
 
       expect(devicePool.getDevice(device.deviceId)).toMatchObject({
         name: "Unknown (emulator-5554)",
@@ -1421,37 +1468,31 @@ describe("DevicePool", () => {
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
       const pooled = requirePooledDevice(devicePool, device.deviceId);
 
-      type DevicePoolInternals = {
-        replacePooledDeviceForRuntimeIdentity(
-          pooledDevice: PooledDevice,
-          bootedDevice: BootedDevice,
-        ): Promise<boolean>;
-        clearDeviceSessionCache(deviceId: string): Promise<void>;
-        setDeviceSessionTracking(deviceId: string, sessionStart: number): Promise<void>;
-      };
-      const internals = devicePool as unknown as DevicePoolInternals;
+      const internals = devicePool.testHooks;
       const cacheCleanupStarted = Promise.withResolvers<void>();
       const finishCacheCleanup = Promise.withResolvers<void>();
       const sessionTrackingStarted = Promise.withResolvers<void>();
       const finishSessionTracking = Promise.withResolvers<void>();
-      const clearDeviceSessionCache = internals.clearDeviceSessionCache.bind(devicePool);
-      const setDeviceSessionTracking = internals.setDeviceSessionTracking.bind(devicePool);
       let pauseSessionTracking = true;
-      internals.clearDeviceSessionCache = async (deviceId) => {
-        cacheCleanupStarted.resolve();
-        await finishCacheCleanup.promise;
-        await clearDeviceSessionCache(deviceId);
-      };
-      internals.setDeviceSessionTracking = async (deviceId, sessionStart) => {
-        if (pauseSessionTracking) {
-          pauseSessionTracking = false;
-          sessionTrackingStarted.resolve();
-          await finishSessionTracking.promise;
-        }
-        await setDeviceSessionTracking(deviceId, sessionStart);
-      };
+      const restore_clearDeviceSessionCache = internals.clearDeviceSessionCache.intercept(
+        (clearDeviceSessionCache) => async (deviceId) => {
+          cacheCleanupStarted.resolve();
+          await finishCacheCleanup.promise;
+          await clearDeviceSessionCache(deviceId);
+        },
+      );
+      const restore_setDeviceSessionTracking = internals.setDeviceSessionTracking.intercept(
+        (setDeviceSessionTracking) => async (deviceId, sessionStart) => {
+          if (pauseSessionTracking) {
+            pauseSessionTracking = false;
+            sessionTrackingStarted.resolve();
+            await finishSessionTracking.promise;
+          }
+          await setDeviceSessionTracking(deviceId, sessionStart);
+        },
+      );
       try {
-        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity(
+        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity.call(
           pooled,
           replacement,
         );
@@ -1473,8 +1514,8 @@ describe("DevicePool", () => {
         expect(installed?.identityObservedAt).toBe(5);
         expect(installed?.identityUnresolved).toBeUndefined();
       } finally {
-        internals.clearDeviceSessionCache = clearDeviceSessionCache;
-        internals.setDeviceSessionTracking = setDeviceSessionTracking;
+        restore_clearDeviceSessionCache();
+        restore_setDeviceSessionTracking();
         finishCacheCleanup.resolve();
         finishSessionTracking.resolve();
       }

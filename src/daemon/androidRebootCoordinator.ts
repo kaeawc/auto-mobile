@@ -1,4 +1,5 @@
-import { ActionableError, type BootedDevice, type DeviceInfo } from "../models";
+import { UnconfirmedRecoveryShutdownError } from "./UnconfirmedRecoveryShutdownError";
+import { type BootedDevice, type DeviceInfo } from "../models";
 import { isEmulatorLaunchCancelledError } from "../utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import type { ChildProcess, PlatformDeviceManager } from "../devices/deviceUtils";
 import { waitForDeviceReadyOrCancel } from "../devices/deviceUtils";
@@ -32,15 +33,6 @@ function trackLateShutdowns(retainLeaseUntil: (settlement: Promise<unknown>) => 
     settledWhen: (retained: boolean): Promise<unknown> | undefined =>
       retained ? Promise.allSettled(settlements) : undefined,
   };
-}
-
-export class UnconfirmedRecoveryShutdownError extends ActionableError {
-  constructor(avdName: string, cause: unknown) {
-    super(
-      `Shutdown of Android emulator '${avdName}' is unconfirmed; recovery ownership remains quarantined`,
-      { cause },
-    );
-  }
 }
 
 export interface AndroidEmulatorRecoveryOptions {
@@ -356,15 +348,11 @@ export class AndroidRebootCoordinator {
       try {
         childProcess = await this.pool.getDeviceManager().startDevice(target);
         ready = this.criteriaMatcher.withDeviceImageMetadata(
-          await waitForDeviceReadyOrCancel(
-            this.pool.getDeviceManager(),
-            target,
-            childProcess,
-            undefined,
+          await waitForDeviceReadyOrCancel(this.pool.getDeviceManager(), target, childProcess, {
             signal,
-            this.pool.getTimer(),
-            settleOwnedBoot,
-          ),
+            timer: this.pool.getTimer(),
+            cancelOwnedBoot: settleOwnedBoot,
+          }),
           recoveryImage,
         );
         readinessCompleted = true;

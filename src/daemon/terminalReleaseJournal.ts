@@ -102,22 +102,6 @@ export function terminalReleaseJournalPath(dataDir: string, daemonSessionId: str
   );
 }
 
-/**
- * Deliberate default outside the daemon: only Daemon.startOn attaches a file journal.
- * Non-daemon use and unit tests therefore have no crash safety.
- */
-export class NoopTerminalReleaseJournal implements TerminalReleaseJournal {
-  loadUnconfirmed(): TerminalReleaseIntent[] {
-    return [];
-  }
-
-  record(): TerminalReleaseDurability {
-    return "volatile";
-  }
-
-  resolve(): void {}
-}
-
 /** A durable "fence lifted" marker: load drops the session's earlier intent (#11077). */
 interface LiftedMarker {
   sessionId: string;

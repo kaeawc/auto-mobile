@@ -2,11 +2,11 @@
 
 # Pinned ktfmt version -- single source of truth shared with validate_ktfmt.sh.
 # Bump the version in scripts/ktfmt/ktfmt_version.sh (one line) to change it.
-# shellcheck source=scripts/ktfmt/ktfmt_version.sh disable=SC1091
+# shellcheck source=scripts/ktfmt/ktfmt_version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
 
 # Shared colors + command_exists + detect_os/detect_arch (issue #2822).
-# shellcheck source=scripts/lib/tool-install.sh disable=SC1091
+# shellcheck source=scripts/lib/tool-install.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
 
 # Note: installed_ktfmt_version() is provided by the sourced ktfmt_version.sh.

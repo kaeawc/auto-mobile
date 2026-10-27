@@ -90,7 +90,7 @@ gh pr view <N> --json mergedAt,mergeable,mergeStateStatus,baseRefOid,headRefOid,
   git log "$BASE"..origin/main --name-only --format= -- \
     .github/workflows scripts/all_fast_validate_checks.sh \
     android/build.gradle.kts android/gradle/libs.versions.toml \
-    eslint.config.* scripts/typecheck-baseline.txt eslint-suppressions.json | sort -u
+    eslint.config.* eslint-suppressions.json | sort -u
   ```
 
   Any hit means rebase-and-re-run, not approval. [#4016](https://github.com/kaeawc/auto-mobile/pull/4016) went green at 05:44, [#4005](https://github.com/kaeawc/auto-mobile/pull/4005) turned on the
@@ -296,7 +296,7 @@ routinely ships nothing.
   referenced solely by nightly/prepare-release/release, so APK/IPA signing, jar reproducibility,
   and sha256 computation are **never** exercised pre-merge. Merge-only jobs with no PR
   counterpart: `publish-android-libraries-snapshot`, `deploy-docs`, the coverage jobs,
-  `benchmark-context-thresholds`, `update-readme-badges`; ktfmt and detekt run full-tree on merge
+  `benchmark-context-thresholds`; ktfmt and detekt run full-tree on merge
   but scoped or path-gated on PRs. When the diff touches `.github/**` or
   `scripts/(ci|android|ios)/**`, reason statically and confirm the destination leg is green
   (`gh run list --workflow=nightly.yml -L 5`) — landing on an already-red leg hides the
@@ -306,7 +306,7 @@ routinely ships nothing.
   it gates nothing. For each new exported symbol under `src/`:
   `grep -rn '\bN\b' src/ test/ --include='*.ts' | grep -v '<defining file>'`. Zero hits widens
   that gap invisibly.
-- **Baselines are one-way ratchets.** A grown `scripts/typecheck-baseline.txt` or
+- **Baselines are one-way ratchets.** A grown
   `eslint-suppressions.json`, or a rule folded into a shared selector where its budget can be
   traded for a different violation, defeats the gate.
 - **Tests must prove behavior, not implementation.** Flag a fix lacking the test the issue asked
@@ -315,7 +315,10 @@ routinely ships nothing.
   interface + fake + `FakeTimer`, no real device or network, under 100ms, never resolving the
   real file-backed `getDatabase()`.
 - **Docs are part of the change.** Capability added or removed ⇒ the docs advertising it move
-  too. Stale claims in `docs/` were a recurring accepted finding.
+  too. Stale claims in `docs/` were a recurring accepted finding. Edit the existing statement in
+  place; flag docs added or grown with progress logs, status checklists, dated history, per-PR
+  narration, or internals leaking into `docs/using/` (end users only; internals go in
+  `docs/design-docs/`).
 
 ## Step 6 — The generated lens
 

@@ -10,6 +10,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import type { Platform } from "../../src/models";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 
 for (const criteria of [false, true]) {
   describe(`${criteria ? "criteria" : "platform"} multi-device scheduling`, () => {
@@ -251,7 +252,7 @@ for (const criteria of [false, true]) {
       discovery.bootedDevices = discovery.bootedDevices.filter((device) => device.deviceId === "a");
       // A busy pool entry can outlive its session during disconnect handling.
       const device = pool.getDevice("a")!;
-      device.status = "busy";
+      patchDeviceBinding(device, { status: "busy" });
       const head = allocate(["h:a"], "android", 300_000);
       await drainUntilQuiescent(timer);
       expect(head.settled()).toBe(false);

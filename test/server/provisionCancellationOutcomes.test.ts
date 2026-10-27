@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   EARLY_OUTCOME_RETENTION_MS,
   ProvisionCancellationOutcomes,
-} from "../../src/server/provisionCancellationOutcomes";
+} from "../../src/daemon/provisionCancellationOutcomes";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // #11092: a fast rollback can publish before the socket reply registers its waiter.

@@ -26,12 +26,12 @@ describe("prototype appearance helpers", () => {
 
   test("parses every source the device contract names and nothing else", () => {
     // The order android/protocol WebSocketResponseTest pins.
-    expect([...PROTOTYPE_APPEARANCE_SOURCES].sort()).toEqual(
+    expect<unknown>([...PROTOTYPE_APPEARANCE_SOURCES].sort()).toEqual(
       ["explicit", "override", "roleLuminance", "authoredBackground", "system"].sort(),
     );
     for (const source of PROTOTYPE_APPEARANCE_SOURCES) {
       const value = { mode: "light", source, deviceDark: true };
-      expect(parsePrototypeAppearance(value)).toEqual(value);
+      expect<unknown>(parsePrototypeAppearance(value)).toEqual(value);
     }
     expect(parsePrototypeAppearance({ ...dark, extra: 1 })).toEqual(dark);
     for (const bad of [

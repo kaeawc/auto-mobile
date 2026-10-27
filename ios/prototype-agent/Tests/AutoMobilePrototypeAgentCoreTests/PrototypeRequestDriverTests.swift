@@ -172,12 +172,45 @@ final class RequestHarness {
 
 @MainActor
 final class PrototypeRequestDriverTests: XCTestCase {
+    func testDeliveryBoundaryChecksSuccessAndFailureAndKeepsCurrentResponse() async throws {
+        for revoked in [false, true] {
+            for fails in [false, true] {
+                let harness = RequestHarness()
+                let client = DeliveryCheckingClient(fails: fails)
+                PrototypeNetworkConfiguration(device: client).apply(to: harness.driver)
+                try harness.show(request(via: "device"))
+                harness.tap()
+                client.setCurrent(!revoked)
+                await harness.driver.settled()
+                if revoked {
+                    XCTAssertNil(harness.data("/feed"))
+                    XCTAssertEqual(harness.data("/feed__meta/error/code"), .string("blocked_destination"))
+                    XCTAssertEqual(
+                        harness.data("/feed__meta/error/message"),
+                        .string("Network is disabled for imported prototypes.")
+                    )
+                    XCTAssertEqual(harness.data("/feed__meta/durationMs"), .number(0))
+                } else if fails {
+                    XCTAssertEqual(
+                        harness.data("/feed__meta/error/message"), .string(PrototypeLocalNetworkDenied.message)
+                    )
+                } else {
+                    XCTAssertEqual(harness.data("/feed"), .string("ok"))
+                    XCTAssertEqual(harness.data("/feed__meta/status"), .number(200))
+                }
+            }
+        }
+    }
+
     private func request(
         via: String = "host", extra: String = "", into: String = "/data/feed"
     )
         -> String
     {
-        #"[{"type":"request","url":"http://localhost:8080/feed","into":"\#(into)","statusKey":"status","via":"\#(via)"\#(extra)}]"#
+        #"""
+        [{"type":"request","url":"http://localhost:8080/feed","into":"\#(into)",
+          "statusKey":"status","via":"\#(via)"\#(extra)}]
+        """#
     }
 
     private func hostResponse(
@@ -430,6 +463,18 @@ final class PrototypeRequestDriverTests: XCTestCase {
         XCTAssertEqual(harness.session.state["status"], .string("error"))
     }
 
+    func testBlockedDestinationReachesDeviceMetadataAndEvent() async throws {
+        let harness = RequestHarness()
+        try harness.show(request(via: "device"))
+        harness.tap()
+        await harness.waitForDeviceCalls(1)
+        harness.client.fail(0, .blockedDestination)
+        await harness.driver.settled()
+        XCTAssertEqual(harness.data("/feed__meta/error/code"), .string("blocked_destination"))
+        XCTAssertEqual(harness.requestEvents.first?["error"]?.objectValue?["code"], .string("blocked_destination"))
+        XCTAssertNil(harness.data("/feed"))
+    }
+
     func testANon2xxDeviceResponseIsAnHttpError() async throws {
         let harness = RequestHarness()
         try harness.show(request(via: "device"))
@@ -458,16 +503,26 @@ final class PrototypeRequestDriverTests: XCTestCase {
         XCTAssertEqual(harness.requestEvents.map { $0["requestId"]?.stringValue ?? "" }, ["r-1", "r-2"])
     }
 
-    func testDismissCancelsRunningDeviceTasks() async throws {
-        let harness = RequestHarness()
-        try harness.show(request(via: "device"))
-        harness.tap()
-        await harness.waitForDeviceCalls(1)
-        harness.dismiss()
-        await harness.driver.settled()
-        XCTAssertEqual(harness.client.cancelled, [0])
-        XCTAssertEqual(harness.driver.runningCount, 0)
-        XCTAssertFalse(harness.session.isShown)
+    func testEmbeddedStopDismissalCancelsRunningTasksOnBothRoutes() async throws {
+        for via in ["device", "host"] {
+            let harness = RequestHarness()
+            PrototypeNetworkConfiguration(device: harness.client).apply(to: harness.driver)
+            try harness.show(request(via: via))
+            harness.tap()
+            await harness.waitForDeviceCalls(1)
+            XCTAssertEqual(harness.client.requests.count, 1)
+            XCTAssertEqual(harness.driver.runningCount, 1)
+
+            // PrototypeEmbeddedController.stop() dismisses the session before its final storage flush.
+            harness.dismiss()
+            XCTAssertEqual(harness.driver.runningCount, 0)
+            let events = harness.events
+            await harness.yield()
+            XCTAssertEqual(harness.client.cancelled, [0])
+            XCTAssertEqual(harness.events, events, "the cancelled task's answer must not reach the stopped session")
+            XCTAssertNil(harness.data("/feed"))
+            XCTAssertFalse(harness.session.isShown)
+        }
     }
 
     func testAnAgentWithoutAClientFailsDeviceRequestsWithAHint() async throws {
@@ -482,7 +537,10 @@ final class PrototypeRequestDriverTests: XCTestCase {
     func testHostAndDeviceRequestsShareTheInFlightLimit() async throws {
         let harness = RequestHarness()
         let list = (0 ..< 5).map {
-            #"{"type":"request","url":"http://h/\#($0)","into":"/data/o\#($0)","via":"\#($0 % 2 == 0 ? "host" : "device")"}"#
+            #"""
+            {"type":"request","url":"http://h/\#($0)","into":"/data/o\#($0)",
+             "via":"\#($0 % 2 == 0 ? "host" : "device")"}
+            """#
         }.joined(separator: ",")
         try harness.show("[\(list)]")
         harness.tap()
@@ -555,5 +613,33 @@ extension JSONValue {
     fileprivate var objectValue: [String: JSONValue]? {
         if case let .object(fields) = self { return fields }
         return nil
+    }
+}
+
+private final class DeliveryCheckingClient: PrototypeHttpClient, @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = true
+    private let fails: Bool
+
+    init(fails: Bool) { self.fails = fails }
+    func setCurrent(_ value: Bool) { lock.withLock { current = value } }
+    private func isCurrent() -> Bool { lock.withLock { current } }
+
+    func perform(_: PrototypeHttpRequest) async throws -> PrototypeHttpResponse {
+        if fails {
+            throw PrototypeHttpFailure(
+                error: .init(.network, PrototypeLocalNetworkDenied.message), durationMs: 7, localNetworkDenied: true
+            )
+        }
+        return PrototypeHttpResponse(status: 200, headers: [:], body: Data("ok".utf8), durationMs: 7)
+    }
+
+    func perform(
+        _ request: PrototypeHttpRequest, delivery: PrototypeDeliveryCheck
+    )
+        async throws -> PrototypeHttpResponse
+    {
+        delivery.bind(isCurrent: { self.isCurrent() }, obsolete: PrototypeLibraryGatedClient.disabled)
+        return try await perform(request)
     }
 }

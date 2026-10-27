@@ -24,7 +24,7 @@ class DeviceControlInputDispatcherTest {
   private fun command(
     token: Long = 0L,
     client: AutoMobileClient? = null,
-    snapshot: DeviceFrameSnapshot = testSnapshot(),
+    snapshot: DeviceFrameSnapshot = testSnapshot(TestSnapshotSpec()),
   ) =
     DeviceControlInputCommand.Tap(
       point = DevicePoint(x = 0, y = 0, inBounds = true),
@@ -133,8 +133,8 @@ class DeviceControlInputDispatcherTest {
       DeviceControlInputDispatcher(scope) { cmd ->
         if (cmd.token == 0L) stall.await() else forwarded += cmd.token
       }
-    val staleSnapshot = testSnapshot(sequence = 7L)
-    val freshSnapshot = testSnapshot(sequence = 8L)
+    val staleSnapshot = testSnapshot(TestSnapshotSpec(sequence = 7L))
+    val freshSnapshot = testSnapshot(TestSnapshotSpec(sequence = 8L))
     val staleClient = FakeAutoMobileClient()
     val freshClient = FakeAutoMobileClient()
 
@@ -182,7 +182,7 @@ class DeviceControlInputDispatcherTest {
         durationMs = 300,
         client = null,
         platform = "android",
-        snapshot = testSnapshot(),
+        snapshot = testSnapshot(TestSnapshotSpec()),
         token = 1L,
       ),
     )
@@ -191,7 +191,7 @@ class DeviceControlInputDispatcherTest {
         text = "a",
         client = null,
         platform = "android",
-        snapshot = testSnapshot(),
+        snapshot = testSnapshot(TestSnapshotSpec()),
         token = 2L,
       ),
     )
@@ -200,7 +200,7 @@ class DeviceControlInputDispatcherTest {
         key = "enter",
         client = null,
         platform = "android",
-        snapshot = testSnapshot(),
+        snapshot = testSnapshot(TestSnapshotSpec()),
         token = 3L,
       ),
     )
@@ -209,7 +209,7 @@ class DeviceControlInputDispatcherTest {
         button = "back",
         client = null,
         platform = "android",
-        snapshot = testSnapshot(),
+        snapshot = testSnapshot(TestSnapshotSpec()),
         token = 4L,
       ),
     )

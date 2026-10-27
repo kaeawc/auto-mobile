@@ -1,3 +1,4 @@
+import type { SimulatorContainerOwnershipOptions } from "./simulatorOwnContainer";
 import type { DeviceUrlLauncher } from "./DeviceAppManager";
 import { logger } from "../logger";
 import { combineWithAmbientAbort } from "../AbortContext";
@@ -10,13 +11,41 @@ import {
   indeterminateSimulatorUninstallError,
   SIMULATOR_UNINSTALL_TIMEOUT_MS,
 } from "./simulatorUninstallBound";
-import { getIosInstalledAppBundleId, type IosInstalledAppRecord } from "./iosInstalledApp";
+import { type IosInstalledAppRecord } from "./iosInstalledApp";
 import type { IosAppMetadataSource } from "../../models/IosAppMetadataSource";
 import { promises as fs } from "fs";
-import * as path from "path";
-import { AppNotInstalledError, type ClearAppDataResult } from "../../models";
-import { errorMessage } from "../describeUnknownError";
-import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS } from "./iosAppContainerData";
+import { type ClearAppDataResult } from "../../models";
+import { PhysicalIosDeviceBackend } from "./PhysicalIosDeviceBackend";
+import { SimulatorIosLaunchBackend } from "./SimulatorIosLaunchBackend";
+import { PhysicalIosLaunchBackend } from "./PhysicalIosLaunchBackend";
+import { SimulatorIosTerminateBackend } from "./SimulatorIosTerminateBackend";
+import { PhysicalIosTerminateBackend } from "./PhysicalIosTerminateBackend";
+import { SimulatorIosAppListBackend } from "./SimulatorIosAppListBackend";
+import { PhysicalIosAppListBackend } from "./PhysicalIosAppListBackend";
+import { SimulatorIosAppInfoBackend } from "./SimulatorIosAppInfoBackend";
+import { PhysicalIosAppInfoBackend } from "./PhysicalIosAppInfoBackend";
+import { PhysicalIosClearDataBackend } from "./PhysicalIosClearDataBackend";
+import { SimulatorIosInstallBackend } from "./SimulatorIosInstallBackend";
+import { PhysicalIosInstallBackend } from "./PhysicalIosInstallBackend";
+import { SimulatorIosOpenUrlBackend } from "./SimulatorIosOpenUrlBackend";
+import { PhysicalIosOpenUrlBackend } from "./PhysicalIosOpenUrlBackend";
+import { SimulatorIosClearDataBackend } from "./SimulatorIosClearDataBackend";
+export {
+  SimulatorIosClearDataBackend,
+  resolveIosLenientTerminateBackend,
+} from "./SimulatorIosClearDataBackend";
+export { PhysicalIosDeviceBackend } from "./PhysicalIosDeviceBackend";
+export { SimulatorIosTerminateBackend } from "./SimulatorIosTerminateBackend";
+export { PhysicalIosTerminateBackend } from "./PhysicalIosTerminateBackend";
+export { SimulatorIosAppListBackend } from "./SimulatorIosAppListBackend";
+export { PhysicalIosAppListBackend } from "./PhysicalIosAppListBackend";
+export { SimulatorIosAppInfoBackend } from "./SimulatorIosAppInfoBackend";
+export { PhysicalIosAppInfoBackend } from "./PhysicalIosAppInfoBackend";
+export { PhysicalIosClearDataBackend } from "./PhysicalIosClearDataBackend";
+export { SimulatorIosInstallBackend } from "./SimulatorIosInstallBackend";
+export { PhysicalIosInstallBackend } from "./PhysicalIosInstallBackend";
+export { SimulatorIosOpenUrlBackend } from "./SimulatorIosOpenUrlBackend";
+export { PhysicalIosOpenUrlBackend } from "./PhysicalIosOpenUrlBackend";
 
 /** The iOS operation currently shared by simulator and physical-device actions. */
 export interface IosDeviceBackend {
@@ -92,23 +121,6 @@ export class SimulatorIosDeviceBackend implements IosDeviceBackend {
   }
 }
 
-export class PhysicalIosDeviceBackend implements IosDeviceBackend {
-  readonly kind = "physical";
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly deps: Pick<IosDeviceBackendDeps, "deviceAppUninstaller">,
-  ) {}
-
-  uninstallApp(
-    bundleId: string,
-    _signal?: AbortSignal,
-    _options?: { terminateFirst?: boolean },
-  ): Promise<void> {
-    return this.deps.deviceAppUninstaller.uninstallApp(this.deviceId, bundleId, false);
-  }
-}
-
 export function resolveIosDeviceBackend(
   deviceId: string,
   deps: IosDeviceBackendDeps,
@@ -118,8 +130,8 @@ export function resolveIosDeviceBackend(
     : new PhysicalIosDeviceBackend(deviceId, deps);
 }
 
-type LaunchResult = { success: boolean; pid?: number; error?: string };
-type LaunchOptions = Parameters<SimCtlClient["launchApp"]>[1];
+export type LaunchResult = { success: boolean; pid?: number; error?: string };
+export type LaunchOptions = Parameters<SimCtlClient["launchApp"]>[1];
 
 export interface DeviceAppLauncher {
   launchApp(
@@ -137,37 +149,6 @@ export interface IosLaunchBackend {
 export interface IosLaunchBackendDeps {
   simctl: Pick<SimCtlClient, "launchApp">;
   deviceAppLauncher: DeviceAppLauncher;
-}
-
-export class SimulatorIosLaunchBackend implements IosLaunchBackend {
-  readonly kind = "simulator";
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly simctl: Pick<SimCtlClient, "launchApp">,
-  ) {}
-
-  launchApp(bundleId: string, options?: LaunchOptions): Promise<LaunchResult> {
-    return this.simctl.launchApp(bundleId, options, this.deviceId);
-  }
-}
-
-export class PhysicalIosLaunchBackend implements IosLaunchBackend {
-  readonly kind = "physical";
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly deviceAppLauncher: DeviceAppLauncher,
-  ) {}
-
-  launchApp(bundleId: string, options?: LaunchOptions): Promise<LaunchResult> {
-    return this.deviceAppLauncher.launchApp(this.deviceId, bundleId, {
-      terminateExisting: true,
-      ...(options?.launchArguments === undefined
-        ? {}
-        : { launchArguments: options.launchArguments }),
-    });
-  }
 }
 
 export function resolveIosLaunchBackend(
@@ -192,7 +173,7 @@ export interface DeviceAppTerminator {
   ): Promise<{ wasInstalled: boolean; wasRunning: boolean }>;
 }
 
-type TerminateResult = { wasInstalled: boolean; wasRunning: boolean };
+export type TerminateResult = { wasInstalled: boolean; wasRunning: boolean };
 
 export interface IosTerminateBackend {
   readonly kind: "simulator" | "physical";
@@ -204,37 +185,6 @@ export interface IosTerminateBackend {
 export interface IosTerminateBackendDeps {
   simctl: Pick<SimCtlClient, "terminateApp">;
   deviceAppTerminator: DeviceAppTerminator;
-}
-
-export class SimulatorIosTerminateBackend implements IosTerminateBackend {
-  readonly kind = "simulator";
-
-  readonly requiresInstalledAppCheck = true;
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly simctl: Pick<SimCtlClient, "terminateApp">,
-  ) {}
-
-  async terminateApp(bundleId: string): Promise<TerminateResult> {
-    await this.simctl.terminateApp(bundleId, this.deviceId);
-    return { wasInstalled: true, wasRunning: true };
-  }
-}
-
-export class PhysicalIosTerminateBackend implements IosTerminateBackend {
-  readonly kind = "physical";
-
-  readonly requiresInstalledAppCheck = false;
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly deviceAppTerminator: DeviceAppTerminator,
-  ) {}
-
-  terminateApp(bundleId: string): Promise<TerminateResult> {
-    return this.deviceAppTerminator.terminateApp(this.deviceId, bundleId);
-  }
 }
 
 export function resolveIosTerminateBackend(
@@ -256,32 +206,6 @@ export interface IosAppListBackendDeps {
   getPhysicalAppLister: () => {
     listInstalledApps(deviceId: string): Promise<IosInstalledAppRecord[]>;
   };
-}
-
-export class SimulatorIosAppListBackend implements IosAppListBackend {
-  readonly kind = "simulator";
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly simctl: IosAppListBackendDeps["simctl"],
-  ) {}
-
-  listApps(): Promise<IosInstalledAppRecord[]> {
-    return this.simctl.listAppsOrThrow(this.deviceId);
-  }
-}
-
-export class PhysicalIosAppListBackend implements IosAppListBackend {
-  readonly kind = "physical";
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly getPhysicalAppLister: IosAppListBackendDeps["getPhysicalAppLister"],
-  ) {}
-
-  listApps(): Promise<IosInstalledAppRecord[]> {
-    return this.getPhysicalAppLister().listInstalledApps(this.deviceId);
-  }
 }
 
 export function resolveIosAppListBackend(
@@ -308,44 +232,6 @@ export interface IosAppInfoBackendDeps {
   ) => Record<string, unknown> | null;
 }
 
-export class SimulatorIosAppInfoBackend implements IosAppInfoBackend {
-  readonly kind = "simulator";
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly deps: IosAppInfoBackendDeps,
-  ) {}
-
-  async getAppInfo(bundleId: string): Promise<Record<string, unknown> | null> {
-    let apps: Record<string, unknown>[];
-    try {
-      apps = await this.deps.iosSource.listApps(this.deviceId);
-    } catch (error) {
-      logger.warn(`[GetAppMetadata] Failed to list iOS apps: ${error}`);
-      return null;
-    }
-    return this.deps.findAppByBundleId(apps, bundleId);
-  }
-}
-
-export class PhysicalIosAppInfoBackend implements IosAppInfoBackend {
-  readonly kind = "physical";
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly iosSource: Pick<IosAppMetadataSource, "getPhysicalDeviceAppInfo">,
-  ) {}
-
-  async getAppInfo(bundleId: string): Promise<Record<string, unknown> | null> {
-    try {
-      return await this.iosSource.getPhysicalDeviceAppInfo(this.deviceId, bundleId);
-    } catch (error) {
-      logger.warn(`[GetAppMetadata] Failed to get physical device app info: ${error}`);
-      return null;
-    }
-  }
-}
-
 export function resolveIosAppInfoBackend(
   deviceId: string,
   deps: IosAppInfoBackendDeps,
@@ -366,95 +252,10 @@ export interface IosClearDataReinstaller {
 }
 
 export interface IosClearDataBackendDeps {
+  containerOwnership?: SimulatorContainerOwnershipOptions;
   simctl: Pick<SimCtlClient, "terminateApp" | "executeCommandArgs" | "listAppsOrThrow">;
   createReinstaller: () => IosClearDataReinstaller;
   rm?: typeof fs.rm;
-}
-
-export class SimulatorIosClearDataBackend implements IosClearDataBackend {
-  readonly kind = "simulator";
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly deps: Pick<IosClearDataBackendDeps, "simctl" | "rm">,
-  ) {}
-
-  async clearAppData(bundleId: string): Promise<ClearAppDataResult> {
-    logger.info(`[iOS] Clearing app data for ${bundleId} on simulator ${this.deviceId}`);
-
-    // The container can't be safely wiped while the app holds open file handles.
-    await resolveIosLenientTerminateBackend(this.deviceId, this.deps).terminateApp(bundleId);
-
-    const containerPath = await getAppDataContainerPath(this.deps.simctl, this.deviceId, bundleId);
-    if (!containerPath) {
-      // Only a successful listing that lacks the bundle proves "not installed"; any other
-      // container miss (or an unreadable listing) stays a retryable failure.
-      if (await this.isConfirmedNotInstalled(bundleId)) {
-        throw new AppNotInstalledError(
-          `App ${bundleId} is not installed on iOS simulator ${this.deviceId}; install the app first`,
-        );
-      }
-      return {
-        success: false,
-        packageName: bundleId,
-        error: `Could not resolve data container for ${bundleId} (is it installed?)`,
-      };
-    }
-
-    try {
-      // Folders are independent — wipe them concurrently. force:true so a missing
-      // folder (e.g. an app that never wrote Documents) is a no-op, not an error.
-      await Promise.all(
-        IOS_APP_DATA_FOLDERS.map((folder) =>
-          (this.deps.rm ?? fs.rm)(path.join(containerPath, folder), {
-            recursive: true,
-            force: true,
-          }),
-        ),
-      );
-      logger.info(`[iOS] Cleared app data for ${bundleId}`);
-      return { success: true, packageName: bundleId };
-    } catch (error) {
-      logger.warn(`[iOS] Failed to clear app data for ${bundleId}: ${errorMessage(error)}`);
-      return { success: false, packageName: bundleId, error: errorMessage(error) };
-    }
-  }
-
-  private async isConfirmedNotInstalled(bundleId: string): Promise<boolean> {
-    try {
-      const apps = await this.deps.simctl.listAppsOrThrow(this.deviceId);
-      return !apps.some((app) => getIosInstalledAppBundleId(app) === bundleId);
-    } catch (error) {
-      logger.warn(`[iOS] Could not list installed apps to classify ${bundleId}: ${error}`);
-      return false;
-    }
-  }
-}
-
-export class PhysicalIosClearDataBackend implements IosClearDataBackend {
-  readonly kind = "physical";
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly createReinstaller: () => IosClearDataReinstaller,
-  ) {}
-
-  async clearAppData(bundleId: string): Promise<ClearAppDataResult> {
-    logger.info(
-      `[iOS] Clearing app data for ${bundleId} via devicectl uninstall+reinstall on ${this.deviceId}`,
-    );
-    const reinstaller = this.createReinstaller();
-    try {
-      await reinstaller.clearAppDataViaReinstall(this.deviceId, bundleId);
-      logger.info(`[iOS] Cleared app data for ${bundleId} (reinstalled)`);
-      return { success: true, packageName: bundleId };
-    } catch (error) {
-      logger.warn(
-        `[iOS] Failed to clear app data for ${bundleId} via reinstall: ${errorMessage(error)}`,
-      );
-      return { success: false, packageName: bundleId, error: errorMessage(error) };
-    }
-  }
 }
 
 export function resolveIosClearDataBackend(
@@ -559,7 +360,10 @@ export function resolveIosSnapshotAppListBackend(
 export interface IosInstallBackend {
   readonly kind: "simulator" | "physical";
   /** `timeoutMs` bounds a simulator install at the transport (it kills the child); physical ignores it. */
-  installApp(artifactPath: string, options?: { timeoutMs?: number }): Promise<void>;
+  installApp(
+    artifactPath: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void>;
   listApps(): Promise<Record<string, unknown>[]>;
 }
 
@@ -571,44 +375,6 @@ export interface IosInstallBackendDeps {
   physicalAppLister: {
     listInstalledApps(deviceUdid: string): Promise<Record<string, unknown>[]>;
   };
-}
-
-export class SimulatorIosInstallBackend implements IosInstallBackend {
-  readonly kind = "simulator";
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly simctl: IosInstallBackendDeps["simctl"],
-  ) {}
-
-  installApp(artifactPath: string, options?: { timeoutMs?: number }): Promise<void> {
-    return this.simctl.installApp(
-      artifactPath,
-      this.deviceId,
-      options?.timeoutMs === undefined ? undefined : { timeoutMs: options.timeoutMs },
-    );
-  }
-
-  listApps(): Promise<Record<string, unknown>[]> {
-    return this.simctl.listAppsOrThrow(this.deviceId);
-  }
-}
-
-export class PhysicalIosInstallBackend implements IosInstallBackend {
-  readonly kind = "physical";
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly deps: Pick<IosInstallBackendDeps, "deviceAppInstaller" | "physicalAppLister">,
-  ) {}
-
-  installApp(artifactPath: string): Promise<void> {
-    return this.deps.deviceAppInstaller.installApp(this.deviceId, artifactPath);
-  }
-
-  listApps(): Promise<Record<string, unknown>[]> {
-    return this.deps.physicalAppLister.listInstalledApps(this.deviceId);
-  }
 }
 
 export function resolveIosInstallBackend(
@@ -630,51 +396,6 @@ export interface IosOpenUrlBackend {
 export interface IosOpenUrlBackendDeps {
   createSimctl: () => Pick<SimCtlClient, "executeCommandArgs">;
   createDeviceUrlLauncher: () => DeviceUrlLauncher;
-}
-
-export class SimulatorIosOpenUrlBackend implements IosOpenUrlBackend {
-  readonly kind = "simulator";
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly createSimctl: IosOpenUrlBackendDeps["createSimctl"],
-  ) {}
-
-  async isUrlLaunchAvailable(): Promise<boolean> {
-    return true;
-  }
-
-  async openUrl(url: string): Promise<void> {
-    // Preserve argv forwarding: simctl's string command path re-splits URL bytes.
-    await this.createSimctl().executeCommandArgs(["openurl", this.deviceId, url]);
-  }
-}
-
-export class PhysicalIosOpenUrlBackend implements IosOpenUrlBackend {
-  readonly kind = "physical";
-  private launcher?: DeviceUrlLauncher;
-
-  constructor(
-    private readonly deviceId: string,
-    private readonly createDeviceUrlLauncher: IosOpenUrlBackendDeps["createDeviceUrlLauncher"],
-  ) {}
-
-  private get deviceUrlLauncher(): DeviceUrlLauncher {
-    return (this.launcher ??= this.createDeviceUrlLauncher());
-  }
-
-  isUrlLaunchAvailable(): Promise<boolean> {
-    return this.deviceUrlLauncher.isUrlLaunchAvailable();
-  }
-
-  openUrl(url: string, options: { bundleId: string; signal?: AbortSignal }): Promise<void> {
-    return this.deviceUrlLauncher.launchWithPayloadUrl(
-      this.deviceId,
-      options.bundleId,
-      url,
-      options.signal,
-    );
-  }
 }
 
 export function resolveIosOpenUrlBackend(
@@ -711,24 +432,6 @@ export function resolveIosLenientAppListBackend(
 export interface IosLenientTerminateBackend {
   readonly kind: "simulator";
   terminateApp(bundleId: string): Promise<void>;
-}
-
-export function resolveIosLenientTerminateBackend(
-  deviceId: string,
-  deps: Pick<IosTerminateBackendDeps, "simctl">,
-): IosLenientTerminateBackend {
-  const backend = new SimulatorIosTerminateBackend(deviceId, deps.simctl);
-  return {
-    kind: "simulator",
-    async terminateApp(bundleId) {
-      try {
-        await backend.terminateApp(bundleId);
-      } catch (error) {
-        // A not-running app is expected here; preserve the legacy warn-and-continue contract.
-        logger.warn(`[iOS] Failed to terminate ${bundleId}: ${error}`);
-      }
-    },
-  };
 }
 
 export interface IosMetadataBackendDeps extends IosLenientAppListBackendDeps {

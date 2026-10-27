@@ -39,6 +39,7 @@ jobs:
       desktop_app_changed: ${{ steps.filter-desktop-app.outputs.desktop_app }}
       android_changed: ${{ steps.filter-android.outputs.android }}
       kotlin_changed: ${{ steps.filter-kotlin.outputs.kotlin }}
+      android_lint_changed: ${{ steps.filter-android-lint.outputs.lint }}
       installer_changed: ${{ steps.filter-installer.outputs.installer }}
       ios_changed: ${{ steps.filter-ios.outputs.ios }}
       ts_changed: ${{ steps.filter-ts.outputs.ts }}
@@ -287,6 +288,12 @@ jobs:
               - 'test/fixtures/refusal-wire/**'
               - 'scripts/generate-refusal-wire-fixtures.ts'
               - 'test/daemon/refusalWireContract.test.ts'
+              # Replayed by desktop-core's DaemonHttpTokenProviderTest (#14418); the
+              # android and ios filters already carry it for the JUnit and XCTest replays.
+              - 'test/fixtures/daemon-http-endpoints.json'
+              # Shared job bodies live in composite actions; editing one must run
+              # the jobs that consume it.
+              - '.github/actions/ci-build-desktop-core/**'
 
       - name: "Check for IDE Plugin changes"
         id: filter-ide-plugin
@@ -295,6 +302,8 @@ jobs:
           filters: |
             ide_plugin:
               - 'android/ide-plugin/**'
+              - '.github/actions/ci-build-ide-plugin/**'
+              - '.github/actions/ci-ide-plugin-unit-tests/**'
 
       - name: "Check for Desktop App changes"
         id: filter-desktop-app
@@ -304,6 +313,7 @@ jobs:
             desktop_app:
               - 'android/desktop-app/**'
               - 'android/desktop-core/**'
+              - '.github/actions/ci-desktop-app-unit-tests/**'
 
       # Native (Kotlin/Swift) build+test jobs gate on the native source trees ONLY.
       # src/** is intentionally NOT here: a pure-TypeScript change cannot break the
@@ -328,6 +338,18 @@ jobs:
               - 'test/fixtures/desktop-wire/**'
               # Replayed by the protocol serializer descriptor contract test.
               - 'test/fixtures/android-contract/**'
+              # Read by AutoMobilePrototypeCapabilitiesTest.
+              - 'test/fixtures/prototype-capabilities/**'
+              - 'test/fixtures/prototype-embedded-routing/**'
+              # Shared fixtures read by renderer, protocol, runner, and CtrlProxy tests.
+              - 'test/fixtures/prototype-spec/**'
+              - 'test/fixtures/prototype/**'
+              - 'test/fixtures/refusal-wire/**'
+              - 'test/fixtures/refusal-wire-hints/**'
+              - 'test/fixtures/daemon-http-endpoints.json'
+              - 'test/fixtures/daemon-isolation-paths.json'
+              - 'test/fixtures/ime-commit-contract.json'
+              - 'test/fixtures/plan-schedule-feasibility/**'
               # The emulator jobs are exactly what this composite action drives,
               # so an edit to it must exercise them rather than skip them. #4199
               # rewired this action and only ran the emulator jobs incidentally,
@@ -366,6 +388,21 @@ jobs:
               - 'android/config/detekt/**'
               - '.github/actions/gradle-task-run/**'
 
+      # Lint reads resources and manifests as well as Kotlin sources. Changes to
+      # its enforcement must exercise the same cached Android analysis job.
+      - name: "Check for Android lint inputs"
+        id: filter-android-lint
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            lint:
+              - 'android/**'
+              - 'scripts/android/**'
+              - 'scripts/prepush-android.sh'
+              - '.github/actions/gradle-task-run/**'
+              - '.github/workflows/pull_request.yml'
+              - '.github/workflows/merge.yml'
+
       - name: "Check for iOS-related changes"
         id: filter-ios
         uses: dorny/paths-filter@v3
@@ -376,8 +413,26 @@ jobs:
               - 'scripts/ios/**'
               - 'test/fixtures/ios-contract/**'
               - 'test/fixtures/ios-ctrlproxy-request-snapshots.json'
+              # Shared fixtures read by prototype, runner, wire, and capture tests.
+              - 'test/fixtures/prototype-capabilities/**'
+              - 'test/fixtures/prototype-embedded-routing/**'
+              - 'test/fixtures/prototype-spec/**'
+              - 'test/fixtures/prototype/**'
+              - 'test/fixtures/prototype-saved-layout/**'
+              - 'test/fixtures/desktop-wire/**'
+              - 'test/fixtures/refusal-wire/**'
+              - 'test/fixtures/refusal-wire-hints/**'
+              - 'test/fixtures/daemon-http-endpoints.json'
+              - 'test/fixtures/daemon-isolation-paths.json'
+              - 'test/fixtures/ios/**'
+              - 'test/fixtures/observe-output/ios-prototype-sheet/**'
+              - 'test/fixtures/network-filter-controller/**'
+              - 'test/fixtures/h264-level42-scale-golden-vectors.json'
+              - 'test/fixtures/encoded-h264-golden-vectors.json'
               - '.swiftformat'
               - '.swiftlint.yml'
+              # The root SwiftPM manifest defines the published AutoMobilePrototype product (#14457).
+              - 'Package.swift'
 
       # TypeScript-only concerns (memory-leak harness, benchmarks). CodeQL runs
       # from codeql.yml on push to main and weekly (#10888), not per PR.
@@ -570,7 +625,7 @@ jobs:
             webrtc:
               - 'src/features/webrtc/**'
               - 'src/features/screen-stream/**'
-              - 'src/server/webrtcStreamManager.ts'
+              - 'src/daemon/webrtcStreamManager.ts'
               - 'src/daemon/webrtc*'
               - 'src/daemon/videoStreamSocket*'
               - 'src/daemon/videoStreamFraming.ts'
@@ -644,12 +699,8 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-build-desktop-core
         with:
-          gradle-tasks: ":desktop-core:build -x test"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
   desktop-core-unit-tests:
@@ -709,32 +760,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-build-ide-plugin
         with:
-          gradle-tasks: "build -x test"
-          gradle-project-directory: "android/ide-plugin"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Build Plugin ZIP"
-        shell: bash
-        working-directory: android/ide-plugin
-        run: |
-          ./gradlew buildPlugin --stacktrace --continue
-
-      - name: "Verify Plugin"
-        shell: bash
-        working-directory: android/ide-plugin
-        run: |
-          ./gradlew verifyPlugin --stacktrace --continue
-
-      - name: "Upload IDE Plugin ZIP"
-        uses: actions/upload-artifact@v6
-        if: success()
-        with:
-          name: ide-plugin-zip
-          path: android/ide-plugin/build/distributions/*.zip
 
   ide-plugin-unit-tests:
     timeout-minutes: 20
@@ -751,20 +779,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-ide-plugin-unit-tests
         with:
-          gradle-tasks: "test"
-          gradle-project-directory: "android/ide-plugin"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Upload Test Results"
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: ide-plugin-test-results
-          path: android/ide-plugin/build/reports/tests/test/
 
   build-desktop-app:
     timeout-minutes: 20
@@ -848,6 +865,12 @@ jobs:
               echo '::warning::Failed to stop the isolated Gradle daemon before removing its home.' >&2
             fi
           fi
+          # `gradlew --stop` can return while the daemon still flushes into its home, so rm
+          # races it with "Directory not empty". Retry briefly; the last attempt still fails.
+          for attempt in 1 2 3 4; do
+            rm -rf -- "$RUNNER_TEMP/desktop-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" 2>/dev/null && exit 0
+            sleep "$attempt"
+          done
           rm -rf -- "$RUNNER_TEMP/desktop-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   desktop-app-unit-tests:
@@ -865,20 +888,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-desktop-app-unit-tests
         with:
-          gradle-tasks: ":desktop-app:test"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Upload Test Results"
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: desktop-app-test-results
-          path: android/desktop-app/build/reports/tests/test/
 
   fast-validation:
     timeout-minutes: 20
@@ -995,7 +1007,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,test-as-any-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
+            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,prototype-spec-models,protoviewer-notices,privacy-manifests,store-listing,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
             --max-parallel 4
 
       - name: "Run offline lychee link check"
@@ -1068,7 +1080,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       # The selector adds `docs-github-markdown` when docs/ changes, and that
       # check exits 2 without uv ("uv is required"), failing every docs PR.
@@ -1104,16 +1116,15 @@ jobs:
     name: "Detekt"
     runs-on: ubuntu-latest
     needs: detect-changes
-    # detekt analyzes Kotlin only, so a PR touching none of the inputs in the
-    # `kotlin` filter cannot change what it reports. This gates whether the job
-    # runs at all; when it does run it analyzes the whole tree, so it is not a
-    # narrowing of what gets checked. merge.yml re-runs it unconditionally.
-    if: needs.detect-changes.outputs.kotlin_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
+    # Both analyzers run over the whole tree. Lint also needs resource-only
+    # changes; merge.yml re-runs both unconditionally.
+    if: (needs.detect-changes.outputs.kotlin_changed == 'true' || needs.detect-changes.outputs.android_lint_changed == 'true') && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          fetch-depth: 0
 
       # Deliberately the FULL task list, not a per-module subset. An earlier
       # revision scoped this to the modules a PR changed; that is unsafe with
@@ -1123,9 +1134,34 @@ jobs:
       # finding in a consumer, so scoping would land it on main and redden the
       # next unrelated PR. The Gradle build cache, not a shorter task list, is
       # what makes this fast.
+      # Lint checks each module independently (checkDependencies = false), so
+      # include changed modules and transitive consumers of their API contracts.
+      # Build-logic/Gradle/lint-gate/workflow changes select every module. The
+      # selection is shared with scripts/prepush-android.sh; merge.yml still
+      # lints every module on each push to main.
+      - name: "Select Android lint modules"
+        id: lint-select
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if selection="$(git diff --no-renames --name-only "${BASE_SHA}...HEAD" | bash scripts/android/select-lint-modules.sh)"; then
+            :
+          else
+            echo "Could not select lint modules; linting all."
+            selection=all
+          fi
+          if [[ "$selection" == all ]]; then
+            tasks=lintDebug
+          else
+            tasks="$(printf '%s' "$selection" | tr '\n' ' ' | sed 's/ *$//')"
+          fi
+          echo "Android lint tasks: ${tasks:-none}"
+          echo "tasks=${tasks}" >> "$GITHUB_OUTPUT"
+
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: "detektMain detektTest :build-logic:test"
+          gradle-tasks: "detektMain detektTest :build-logic:test ${{ steps.lint-select.outputs.tasks }}"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           # Configuration-cache reuse is deliberately OFF here (#5332). A restored
@@ -1141,6 +1177,26 @@ jobs:
           # in test/bats/detekt-config-cache-disabled.bats pins it.
           reuse-configuration-cache: false
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Check Android lint baselines only shrink"
+        if: success() || failure()
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # Fetch the actual target explicitly, including for stacked PRs.
+          git fetch origin "${BASE_REF}" "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          bash scripts/android/check-lint-baseline-shrink.sh --base-ref "origin/${BASE_REF}"
+
+      - name: "Upload Android Lint Reports"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-lint-reports
+          path: |
+            android/**/build/reports/lint-results-*.html
+            android/**/build/reports/lint-results-*.sarif
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: "Upload Detekt Reports"
         if: failure()
@@ -1222,7 +1278,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       # Stays in the foreground: it appends node_modules/.bin to $GITHUB_PATH.
       - name: "Install Bun dependencies"
@@ -1970,7 +2026,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: "Install Bun dependencies"
         shell: bash
@@ -2169,12 +2225,10 @@ jobs:
   # =============================================================================
 
   # Reports the required "Node TypeScript Build and Test (ubuntu-latest)" check.
-  # It is the one Linux unit-suite execution per PR (#10893): it used to run the
-  # suite under coverage while a separate Node Unit Tests (ubuntu-latest) leg ran
-  # it again for the 100ms timing budget. The plain unit lane and the timing
-  # budget now run here, so a unit failure still blocks merge through this
-  # required check; coverage and the README badge come from merge.yml's
-  # ts-code-coverage job on every push to main.
+  # It is the one Linux unit-suite execution per PR (#10893), with the 100ms
+  # budget in this required check. On Merge's ts-code-coverage job is the Ubuntu
+  # unit gate and produces the README badge on every push to main (#13569);
+  # its coverage samples select uninstrumented isolated timing rechecks.
   ts-build-and-test:
     name: "Node TypeScript Build and Test (ubuntu-latest)"
     # Job-level permissions replace the workflow's. This job only checks out,
@@ -2241,13 +2295,19 @@ jobs:
       # gate is infeasible (~550 pre-existing errors), so this compares against a
       # committed baseline and fails only on NEW type errors. Runs on this single
       # ubuntu job with the pinned tsc so the baseline is reproducible.
-      # Gated on ts_changed: the baseline only references src/, so a diff that
+      # Gated on ts_changed: the gate only references src/, so a diff that
       # touches no TypeScript cannot introduce a local error -- skipping it avoids
       # blocking native-only PRs on base-branch drift. See
       # scripts/typecheck-baseline.sh.
       - name: "Run Typecheck Gate"
         if: needs.detect-changes.outputs.ts_changed == 'true'
         run: bun run typecheck
+
+      # Second pass over every test/**/*.ts (issue #11787) against its own
+      # count baseline; same one-way ratchet as the gate above.
+      - name: "Run Test Typecheck Gate"
+        if: needs.detect-changes.outputs.ts_changed == 'true'
+        run: bun run typecheck:test
 
       - name: "Run Build"
         shell: bash
@@ -2360,7 +2420,7 @@ jobs:
       # tested here.
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test :video-server:d8Dex"
+          gradle-tasks: ":control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :protoviewer:testDebugUnitTest :protoviewer:createDebugUnitTestCoverageReport :protoviewer:verifyProtoViewerDependencies :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test :video-server:d8Dex"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
@@ -3005,6 +3065,9 @@ jobs:
           swift build -c release 2>&1
           echo "build took ${SECONDS}s"
 
+      - name: "Build AutoMobilePrototype library and embed consumer"
+        run: bash scripts/ios/prototype-library-build.sh
+
       # #11580: removing the isolated home removes only the cache symlink;
       # $RUNNER_TEMP/automobile-swiftpm-cache survives for the cache post-step save.
       - name: "Remove isolated root SPM home"
@@ -3074,7 +3137,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: "Install Bun dependencies"
         shell: bash
@@ -3346,7 +3409,8 @@ jobs:
         with:
           # Moved from Build CtrlProxy APK (#11578); the release variant from
           # #5228 still gates every Android PR through this required check.
-          gradle-tasks: ":junitRunner:assemble :control-proxy:assembleRelease"
+          # ProtoViewer's release variant is built here too (#15064).
+          gradle-tasks: ":junitRunner:assemble :control-proxy:assembleRelease :protoviewer:assembleRelease"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}"
           reuse-configuration-cache: true
@@ -3355,6 +3419,15 @@ jobs:
           release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
+
+      # Artifact policy (#14154): judge the built release APK, not the source manifest, so a
+      # library manifest merge cannot carry CtrlProxy's posture into ProtoViewer. PR builds keep
+      # the development -SNAPSHOT versionName; the release workflow runs without --allow-snapshot.
+      - name: "Check the ProtoViewer release APK against the artifact policy"
+        working-directory: .
+        run: >-
+          bun scripts/release/check-protoviewer-artifact-policy.ts android
+          android/protoviewer/build/outputs/apk/release/protoviewer-release.apk --allow-snapshot
 
       - name: "Store AAR"
         uses: actions/upload-artifact@v6
@@ -3384,6 +3457,35 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: .
         run: bash scripts/android/validate-sdk-debug-inspector-consumer.sh --skip-publish
+
+      # Prototype renderer publication (#13727): publish the renderer and the
+      # protocol it depends on, and check the renderer's stable API.
+      # Update the baseline with: cd android && ./gradlew :prototype-compose:apiDump
+      - name: "Publish prototype renderer and check its public API"
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":protocol:publishToMavenLocal :prototype-compose:publishToMavenLocal :prototype-compose:apiCheck"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      # Asserts the AAR, sources jar and POM, then builds a minified release app
+      # that resolves the renderer from the local Maven repo.
+      - name: "Verify the published prototype renderer from a minified consumer"
+        if: ${{ !cancelled() }}
+        working-directory: .
+        run: bash scripts/android/validate-prototype-compose-consumer.sh --skip-publish
+
+      - name: "Upload prototype consumer logs"
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: prototype-compose-consumer-logs
+          path: scratch/prototype-compose-consumer/logs/
+          if-no-files-found: ignore
 
       # JUnit Runner Kotlin Consumer Compatibility (folded in by #10894).
       - name: "Install JDK"
@@ -3481,7 +3583,7 @@ jobs:
           # :playground:app:compileDebugUnitTestKotlin keeps the app's unit-test
           # sources compiling as its own PR signal alongside the emulator lane (#10890; it
           # moved here from the removed Android Emulator Compile Smoke).
-          gradle-tasks: ":playground:app:assembleDebug :playground:app:compileDebugUnitTestKotlin :playground:design:system:testDebugUnitTest :playground:discover:testDebugUnitTest"
+          gradle-tasks: ":playground:app:assembleDebug :playground:app:compileDebugUnitTestKotlin :playground:design:system:testDebugUnitTest :playground:discover:testDebugUnitTest :playground:demos:testDebugUnitTest"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}"
           reuse-configuration-cache: true
@@ -3535,7 +3637,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       # Stays in the foreground: it appends node_modules/.bin to $GITHUB_PATH.
       - name: "Install Bun dependencies"
@@ -3650,7 +3752,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
@@ -3739,12 +3841,11 @@ jobs:
           source ./scripts/ios/run_with_timeout.sh
 
           reap_before_retry() {
-            pkill -f "index.js --daemon-mode" 2>/dev/null || true
-            pkill -x mediamtx 2>/dev/null || true
-            pkill -f "remote-debugging-port=9222" 2>/dev/null || true
-            sleep 2
-            pkill -KILL -x mediamtx 2>/dev/null || true
-            pkill -KILL -f "index.js --daemon-mode" 2>/dev/null || true
+            # Scoped to this job's own daemon (pid files under its data dirs),
+            # mediamtx and Chrome (cwd in the workspace). Never kill by process name:
+            # the self-hosted host also runs other AutoMobile daemons (#14826).
+            bash scripts/ci/reap-job-processes.sh "${GITHUB_WORKSPACE}" \
+              "${GITHUB_WORKSPACE}/scratch/webrtc-device-integration" >/dev/null
             if [ -n "${AUTOMOBILE_IOS_SIMULATOR_UDID:-}" ]; then
               if ! run_with_timeout 10 xcrun simctl bootstatus "${AUTOMOBILE_IOS_SIMULATOR_UDID}" -b >/dev/null 2>&1; then
                 echo "Simulator did not report booted within 10s after cleanup; skipping reboot (best-effort re-verify only, #7605)." >&2

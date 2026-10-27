@@ -1,19 +1,22 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+
 import path from "node:path";
-import { Visitor } from "oxc-parser";
-import { parseGuardSource, relativePosix, typeScriptFiles } from "./astGuard";
+
+import {
+  parseGuardSource,
+  relativePosix,
+  typeScriptFiles,
+  readGuardFile,
+  GuardVisitor as Visitor,
+} from "./astGuard";
 
 /**
  * #11853: src/models is a types-and-pure-functions leaf. It may import only other
  * models, src/constants, and packages. Every other relative import is an edge from
- * the leaf up into services, listed in models-leaf-baseline.txt as
- * `<file>\t<target>`; the list may only shrink. After removing an edge, regenerate with
- * `UPDATE_MODELS_LEAF_BASELINE=1 bun test test/lint/modelsLeaf.test.ts` (refuses growth).
+ * the leaf up into services and fails the guard; there is no baseline.
  */
 const ROOT = path.resolve(import.meta.dir, "../..");
 const MODELS = path.join(ROOT, "src/models");
-const BASELINE = path.join(import.meta.dir, "models-leaf-baseline.txt");
 const ALLOWED_TOP_LEVEL = new Set(["models", "constants"]);
 
 /** Every module specifier a file imports, re-exports or dynamically imports. */
@@ -65,12 +68,6 @@ function escapes(files: Map<string, string>): string[] {
     .sort();
 }
 
-function readBaseline(): string[] {
-  return readFileSync(BASELINE, "utf8")
-    .split("\n")
-    .filter((line) => line.length > 0);
-}
-
 describe("src/models is a leaf", () => {
   let found: string[];
   // The AST scan runs in the hook so the per-test 100 ms budget is not spent on it.
@@ -79,38 +76,18 @@ describe("src/models is a leaf", () => {
       ...new Set(
         escapes(
           new Map(
-            typeScriptFiles(MODELS).map((file) => [
-              relativePosix(ROOT, file),
-              readFileSync(file, "utf8"),
-            ]),
+            typeScriptFiles(MODELS).map((file) => [relativePosix(ROOT, file), readGuardFile(file)]),
           ),
         ),
       ),
     ];
   }, 60_000);
 
-  test("models import only models, constants and packages, apart from the shrink-only baseline", () => {
-    const baseline = new Set(readBaseline());
-    if (process.env.UPDATE_MODELS_LEAF_BASELINE) {
-      if (process.env.UPDATE_MODELS_LEAF_BASELINE !== "grow") {
-        expect(found.filter((entry) => !baseline.has(entry))).toEqual([]);
-      }
-      writeFileSync(BASELINE, `${found.join("\n")}\n`);
-      return;
-    }
+  test("models import only models, constants and packages", () => {
     expect(
-      found.filter((entry) => !baseline.has(entry)),
+      found,
       "src/models may not import services: move the code to its owning directory, or move the shared type into src/models.",
     ).toEqual([]);
-    expect(
-      [...baseline].filter((entry) => !found.includes(entry)),
-      "Stale baseline entries: rerun with UPDATE_MODELS_LEAF_BASELINE=1 to shrink it.",
-    ).toEqual([]);
-  });
-
-  test("baseline is sorted and has no duplicates", () => {
-    const baseline = readBaseline();
-    expect(baseline).toEqual([...new Set(baseline)].sort());
   });
 
   test("classifies specifiers", () => {

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -63,7 +64,7 @@ function harness(capture: Capture, pinnedKey: string) {
     displays: { panels, postures: [] },
   };
   const h = createSendKeysHarness(device);
-  h.adb.setCommandResponse("cmd display get-displays", { stdout: capture.displays, stderr: "" });
+  h.adb.setCommandResponse("cmd display get-displays", createExecResult(capture.displays, ""));
   const transitions = new FakeDisplayTransitionReader();
   const pinned = panels.find((panel) => panel.key === pinnedKey)!;
   const observation: ObserveResult = {
@@ -188,14 +189,14 @@ function concurrentHarness(
     displays: { panels: concurrentPanels, postures: [] },
   };
   const h = createSendKeysHarness(device);
-  h.adb.setCommandResponse("cmd display get-displays", {
-    stdout: concurrent[focus].displays,
-    stderr: "",
-  });
-  h.adb.setCommandResponse("mTopFocusedDisplayId", {
-    stdout: fixture(`fold-overlay-focus-${focus}-window-focus.txt`),
-    stderr: "",
-  });
+  h.adb.setCommandResponse(
+    "cmd display get-displays",
+    createExecResult(concurrent[focus].displays, ""),
+  );
+  h.adb.setCommandResponse(
+    "mTopFocusedDisplayId",
+    createExecResult(fixture(`fold-overlay-focus-${focus}-window-focus.txt`), ""),
+  );
   const transitions = new FakeDisplayTransitionReader();
   const capture = concurrent[focus].byLogicalId[pinned.logicalId];
   const observation: ObserveResult = {
@@ -294,7 +295,7 @@ describe("sendKeys pinned-panel focus check over captured concurrent displays (#
 
   test("refusal falls back to unknown when the top focused display cannot be read", async () => {
     const h = concurrentHarness("inner", overlayPanel);
-    h.adb.setCommandResponse("mTopFocusedDisplayId", { stdout: "", stderr: "" });
+    h.adb.setCommandResponse("mTopFocusedDisplayId", createExecResult("", ""));
     const result = await h.action.execute(
       commands,
       undefined,

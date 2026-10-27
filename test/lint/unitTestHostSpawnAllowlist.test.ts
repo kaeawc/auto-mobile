@@ -1,11 +1,12 @@
+import { readGuardFile } from "./astGuard";
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseHostSpawnAllowList } from "../setup/realDeviceToolSpawnGuard";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const text = readFileSync(resolve(root, "scripts/unit-test-host-spawn-allowlist.txt"), "utf8");
+const text = readGuardFile(resolve(root, "scripts/unit-test-host-spawn-allowlist.txt"));
 const lines = text.split(/\r?\n/);
 const entryLines = lines.filter((line) => line && !line.startsWith("#"));
 const { allowList, errors } = parseHostSpawnAllowList(text);

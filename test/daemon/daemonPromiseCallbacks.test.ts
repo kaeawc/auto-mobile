@@ -2,17 +2,26 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
-import type { StatelessMcpHttpEndpoint } from "../../src/daemon/statelessMcpHttpEndpoint";
-import { executionTracker } from "../../src/server/executionTracker";
+import type {
+  HttpBodyRequest,
+  McpIngressRequest,
+  McpIngressTransport,
+} from "../../src/daemon/daemonHttpIngress";
+import type { McpHttpResponseLike } from "../../src/daemon/statelessMcpHttpEndpoint";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-class FakeMcpRequest {
+class FakeMcpRequest extends EventEmitter implements McpIngressRequest, HttpBodyRequest {
   readonly method = "POST";
   readonly headers = {};
+
+  destroy(): this {
+    return this;
+  }
 }
 
-class FakeResponse extends EventEmitter {
+class FakeResponse extends EventEmitter implements McpHttpResponseLike {
   headersSent = false;
   writableEnded = false;
   destroyed = false;
@@ -30,12 +39,16 @@ class FakeResponse extends EventEmitter {
 }
 
 /** One request's transport: its response stays open until the response closes. */
-class FakeTransport {
+class FakeTransport implements McpIngressTransport {
   closed = 0;
   private markStarted!: () => void;
   readonly started = new Promise<void>((resolve) => {
     this.markStarted = resolve;
   });
+
+  async start(): Promise<void> {}
+
+  async send(): Promise<void> {}
 
   async handleRequest(): Promise<void> {
     this.markStarted();
@@ -46,17 +59,9 @@ class FakeTransport {
   }
 }
 
-interface CallbackInternals {
-  httpIngress: {
-    mcpHttpEndpoint: StatelessMcpHttpEndpoint<FakeMcpRequest, FakeResponse, FakeTransport>;
-    mcpHttpTransportFactory: () => FakeTransport;
-    mcpRequestServerFactory: () => { connect(): Promise<void>; close(): Promise<void> };
-  };
-}
-
 describe("daemon stateless MCP request close rejection ownership", () => {
   let timer: FakeTimer;
-  let internals: CallbackInternals;
+  let internals: Daemon["testHooks"];
   let transport: FakeTransport;
   let warnings: ReturnType<typeof spyOn<typeof logger, "warn">>;
   const unhandled: unknown[] = [];
@@ -67,13 +72,13 @@ describe("daemon stateless MCP request close rejection ownership", () => {
   beforeEach(() => {
     timer = new FakeTimer();
     // Construct only: no daemon startup, sockets, devices, or real timers.
-    internals = new Daemon({}, { timer }) as unknown as CallbackInternals;
+    internals = new Daemon({}, { timer }).testHooks;
     transport = new FakeTransport();
-    internals.httpIngress.mcpHttpTransportFactory = () => transport;
-    internals.httpIngress.mcpRequestServerFactory = () => ({
+    internals.httpIngress.setMcpTransportFactory(() => transport);
+    internals.httpIngress.setMcpRequestServerFactory(() => ({
       connect: async () => {},
       close: async () => {},
-    });
+    }));
     warnings = spyOn(logger, "warn").mockImplementation(() => {});
     unhandled.length = 0;
     process.on("unhandledRejection", onUnhandled);

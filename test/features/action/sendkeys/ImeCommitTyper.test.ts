@@ -1,3 +1,4 @@
+import { observation } from "./EventTyperTestHarness";
 import { TypingSession } from "../../../../src/features/action/sendkeys/TypingSession";
 import { android, createSendKeysHarness } from "../SendKeysTestHarness";
 import { clearAndroidImeQuarantine } from "../../../../src/features/action/androidImeLock";
@@ -38,7 +39,7 @@ function harness() {
     observer: {
       execute: async (options) => {
         calls.push({ observe: options });
-        return { timestamp: timer.now() };
+        return { ...observation(), updatedAt: timer.now() };
       },
     },
     imeTraceContext: { getStore: () => undefined },

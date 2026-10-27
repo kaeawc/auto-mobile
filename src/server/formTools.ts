@@ -1,12 +1,16 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { SetUIState, type LiveDeadlineSubscriber } from "../features/action/SetUIState";
 import { BootedDevice } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
-import { elementIdTextFieldsSchema, validateElementIdTextSelector } from "./elementSelectorSchemas";
-import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../daemon/constants";
+import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
+import {
+  elementIdTextFieldsSchema,
+  validateElementIdTextSelector,
+} from "../models/elementSelectorSchemas";
+import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../daemon/wire/constants";
 import { resolveTransportDeadlineMs } from "./transportDeadline";
 import { getLiveDeadlineMs, subscribeLiveDeadline } from "../daemon/liveDeadlineRegistry";
 
@@ -199,6 +203,7 @@ export function registerFormTools(deps: FormToolDependencies = {}): void {
     addDeviceTargetingToSchema(setUIStateSchema),
     createSetUIStateHandler(deps),
     {
+      ...PLAN_RELEVANT,
       defaultEnabled: true,
       supportsProgress: true,
       debugOnly: true,

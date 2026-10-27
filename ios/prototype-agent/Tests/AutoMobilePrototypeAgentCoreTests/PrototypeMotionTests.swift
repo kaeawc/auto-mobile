@@ -57,6 +57,19 @@ final class PrototypeMotionTests: XCTestCase {
         XCTAssertEqual(motion.visibility(transition: "slide"), .slide)
     }
 
+    func testStackTransitionOnlyControlsNavigation() {
+        let motion = PrototypeMotion(specMotion: nil, reduceMotion: false)
+        for transition in PrototypeStackTransition.allCases {
+            XCTAssertEqual(motion.visibility(transition: transition.rawValue, nodeType: "stack"), .standard)
+        }
+        XCTAssertEqual(motion.visibility(transition: "slide", nodeType: "column"), .slide)
+        XCTAssertEqual(
+            PrototypeMotion(specMotion: "none", reduceMotion: false)
+                .visibility(transition: "slide", nodeType: "stack"),
+            .instant
+        )
+    }
+
     func testDisabledMotionIsInstantWhateverTheTransition() {
         let off = PrototypeMotion(specMotion: "none", reduceMotion: false)
         XCTAssertEqual(
@@ -74,6 +87,28 @@ final class PrototypeMotionTests: XCTestCase {
         XCTAssertEqual(decoded.motion, "none")
         XCTAssertEqual(decoded.root.durationMs, 3000)
         XCTAssertEqual(decoded.root.transition, "slide")
+    }
+
+    func testTransitionDecodesFromEitherForm() throws {
+        func transition(_ authored: String) throws -> String? {
+            try spec("""
+            {"id":"a","window":{"placement":{"type":"fullscreen"}},
+             "root":{"type":"text","text":"x","transition":\(authored)}}
+            """).root.transition
+        }
+        XCTAssertEqual(try transition(#""fade""#), "fade")
+        XCTAssertEqual(try transition(#"{"type":"blurReplace","delayMs":90}"#), "blurReplace")
+        XCTAssertEqual(try transition(#"{"type":"scale"}"#), "scale")
+    }
+
+    func testStaggerRanksFollowTheOrder() {
+        func ranks(_ order: String?, _ count: Int) -> [Int] {
+            (0 ..< count).map { PrototypeStrictSemantics.staggerRank($0, of: count, order: order) }
+        }
+        XCTAssertEqual(ranks(nil, 4), [0, 1, 2, 3])
+        XCTAssertEqual(ranks("reverse", 4), [3, 2, 1, 0])
+        XCTAssertEqual(ranks("center", 4), [1, 0, 0, 1])
+        XCTAssertEqual(ranks("center", 5), [2, 1, 0, 1, 2])
     }
 
     // MARK: Snackbar timeout

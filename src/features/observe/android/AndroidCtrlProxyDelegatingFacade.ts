@@ -1,39 +1,81 @@
+import type WebSocket from "ws";
+import type { SendCommandOptions } from "../DeviceServiceUtils";
+import type {
+  AndroidActionDispatcher,
+  AndroidActivateAccessibilityLinkRequest,
+  AndroidAccessibilityActionRequest,
+} from "./AndroidActionDispatcher";
+import type { AndroidHierarchyUpdateHandler } from "./AndroidHierarchyUpdateHandler";
+import type { AndroidInboundMessageRouter } from "./AndroidInboundMessageRouter";
+import type { AndroidScreenshotRequester } from "./AndroidScreenshotRequester";
+import type { AndroidServiceReadinessVerifier } from "./AndroidServiceReadinessVerifier";
+import { type CertificateFileSystem } from "./CtrlProxyCertificates";
+import { CtrlProxyPackages } from "./CtrlProxyPackages";
+import type { CertificatesDelegateContext, HierarchyDelegateContext } from "./types";
+
+import { ViewHierarchyResult } from "../../../models";
+import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
+import { AndroidClientRequests } from "./AndroidClientRequests";
+// Import delegates
+import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
+import { type PackageInfoOptions } from "./CtrlProxyPackages";
+// Import types
+import type { PinchRequest, TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
+import type { GestureStartRequest } from "./CtrlProxyGestures";
+import type {
+  A11yActionResult,
+  A11yInstalledPackagesResult,
+  A11yLaunchIntentResult,
+  A11yPackageInfoResult,
+  AccessibilityHierarchy,
+  AccessibilityHierarchyResponse,
+  AccessibilityNodeSelector,
+  AndroidPerfTiming,
+  HierarchySyncDiagnostics,
+  ScreenshotResult,
+  TwoFingerSwipeRequest,
+} from "./types";
 /**
- * The thin, positional-signature delegating facades of `AndroidCtrlProxyClient` (gestures, text,
+ * The delegating facade of `AndroidCtrlProxyClient` (gestures, text,
  * certificates, storage, focus, prototypes, highlights), extracted from the client (#11846). Every
  * method forwards to the matching delegate, which stays the single source of truth for defaults.
- * The client supplies the delegates through the abstract accessors below.
+ * Lazy delegates live here; Android services supplies their contexts through the abstract accessors.
  */
-import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
 import {
-  type PrototypePatchRequest,
-  type PrototypePatchReply,
-} from "../../prototype/prototypePatchWire";
-import type { InsertTextState } from "./ctrlProxyProtocol";
-import {
-  ImeAction,
   CurrentFocusResult,
-  TraversalOrderResult,
   HighlightOperationResult,
   HighlightShape,
+  ImeAction,
+  TraversalOrderResult,
 } from "../../../models";
 import { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
+import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
+import type { PrototypeAssetUpload } from "../../prototype/prototypeAssets";
+import {
+  type PrototypePatchReply,
+  type PrototypePatchRequest,
+} from "../../prototype/prototypePatchWire";
+import type { PrototypeRequestHost } from "../../prototype/prototypeRequestHandler";
+import type { PrototypeSpec } from "../../prototype/prototypeSpec";
 import type {
-  PreferenceFile,
   KeyValueEntry,
   KeyValueType,
+  PreferenceFile,
   StorageChangedEvent,
 } from "../../storage/storageTypes";
 import type { SetTextOptions } from "../DeviceService";
+import { DeviceServiceClient } from "../DeviceServiceClient";
+import type { DragRequest, SwipeRequest } from "../shared/types";
+import { CtrlProxyCertificates } from "./CtrlProxyCertificates";
+import { CtrlProxyFocus, type FocusActionOutcome } from "./CtrlProxyFocus";
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
-import { type ImeCommitActionResult } from "./CtrlProxyText";
-import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
-import { type FocusActionOutcome } from "./CtrlProxyFocus";
-import { type PrototypeAssetRequestOptions } from "./CtrlProxyPrototypes";
-import type { PrototypeSpec } from "../../prototype/prototypeSpec";
-import type { PrototypeRequestHost } from "../../prototype/prototypeRequestHandler";
-import type { PrototypeAssetUpload } from "../../prototype/prototypeAssets";
+import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
+import { CtrlProxyPrototypes, type PrototypeAssetRequestOptions } from "./CtrlProxyPrototypes";
+import { CtrlProxyStorage } from "./CtrlProxyStorage";
+import { CtrlProxyText, type ImeCommitActionResult } from "./CtrlProxyText";
 import type {
+  InsertTextState,
   PrototypeAppearanceOverride,
   PrototypeAssetResult,
   PrototypeDismiss,
@@ -41,35 +83,19 @@ import type {
   PrototypeResult,
 } from "./ctrlProxyProtocol";
 import type {
-  A11ySwipeResult,
-  A11yTapCoordinatesResult,
-  A11yDragResult,
-  A11yPinchResult,
-  A11ySetTextResult,
-  A11yImeActionResult,
-  A11ySelectAllResult,
   A11yCaCertResult,
   A11yDeviceOwnerStatusResult,
+  A11yDragResult,
+  A11yImeActionResult,
   A11yPermissionResult,
+  A11yPinchResult,
+  A11ySelectAllResult,
+  A11ySetTextResult,
+  A11ySwipeResult,
+  A11yTapCoordinatesResult,
 } from "./types";
-import { DeviceServiceClient } from "../DeviceServiceClient";
-import type { CtrlProxyText } from "./CtrlProxyText";
-import type { CtrlProxyCertificates } from "./CtrlProxyCertificates";
-import type { CtrlProxyStorage } from "./CtrlProxyStorage";
-import type { CtrlProxyFocus } from "./CtrlProxyFocus";
-import type { CtrlProxyPrototypes } from "./CtrlProxyPrototypes";
-import type { DragRequest, SwipeRequest } from "../shared/types";
-import type { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 
 export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClient {
-  protected abstract get gestures(): CtrlProxyGestures;
-  protected abstract get text(): CtrlProxyText;
-  protected abstract get certificates(): CtrlProxyCertificates;
-  protected abstract get storage(): CtrlProxyStorage;
-  protected abstract get focus(): CtrlProxyFocus;
-  protected abstract get prototypes(): CtrlProxyPrototypes;
-  protected abstract get highlights(): CtrlProxyHighlights;
-
   // ===========================================================================
   // Delegated Public Methods - Gestures
   // ===========================================================================
@@ -82,22 +108,21 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     return this.gestures.requestSwipe(request);
   }
 
-  async requestTapCoordinates(
-    x: number,
-    y: number,
-    // Deliberate Android-specific override: taps default to a 10ms press, not the
-    // delegate's cross-platform 0ms default. This is the one intentional divergence,
-    // not restated drift — see issue #3505.
-    duration: number = 10,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yTapCoordinatesResult> {
-    return this.gestures.requestTapCoordinates(
+  async requestTapCoordinates(request: TapCoordinatesRequest): Promise<A11yTapCoordinatesResult> {
+    const {
+      x,
+      y,
+      duration = 10,
+      timeoutMs,
+      perf,
+      frameContext,
+      onDispatch,
+      signal,
+      displayId,
+      beforeSend,
+    } = request;
+
+    return this.gestures.requestTapCoordinates({
       x,
       y,
       duration,
@@ -108,7 +133,7 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
       onDispatch,
       displayId,
       beforeSend,
-    );
+    });
   }
 
   /** Double tap (TalkBack activation, tapOn/tapAny/tapAt) with device-side double-tap timing. */
@@ -126,30 +151,8 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     return this.gestures.requestDoubleTapCoordinates(x, y, onDispatch, options);
   }
 
-  async requestTwoFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration?: number,
-    offset?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
-    return this.gestures.requestTwoFingerSwipe(
-      x1,
-      y1,
-      x2,
-      y2,
-      duration,
-      offset,
-      timeoutMs,
-      perf,
-      displayId,
-      beforeSend,
-    );
+  async requestTwoFingerSwipe(request: TwoFingerSwipeRequest): Promise<A11ySwipeResult> {
+    return this.gestures.requestTwoFingerSwipe(request);
   }
 
   async requestMultiFingerSwipe(
@@ -162,47 +165,17 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     return this.gestures.requestDrag(request);
   }
 
-  async requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yPinchResult> {
-    return this.gestures.requestPinch(
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      duration,
-      timeoutMs,
-      perf,
-      signal,
-      displayId,
-      beforeSend,
-    );
+  async requestPinch(request: PinchRequest): Promise<A11yPinchResult> {
+    return this.gestures.requestPinch(request);
   }
 
   // Streaming gesture input (Android-only): one live drag = start + moves + end sharing a gestureId,
   // chained into a single continued AccessibilityService gesture by the runner.
-  // oxlint-disable-next-line max-params -- Append the dispatch fence to the existing positional Android API.
-  async requestGestureStart(
-    gestureId: string,
-    x: number,
-    y: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
-    return this.gestures.requestGestureStart(
+
+  async requestGestureStart(request: GestureStartRequest): Promise<A11ySwipeResult> {
+    const { gestureId, x, y, timeoutMs, perf, displayId, beforeSend } = request;
+
+    return this.gestures.requestGestureStart({
       gestureId,
       x,
       y,
@@ -210,7 +183,7 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
       perf,
       displayId,
       beforeSend,
-    );
+    });
   }
 
   async requestGestureMove(
@@ -540,6 +513,14 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   ): Promise<PrototypeResult> {
     return this.prototypes.requestDeleteSavedPrototype(id, timeoutMs, perf);
   }
+  requestAdvancePrototypeClock(
+    id: string,
+    advanceTimeMs: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    return this.prototypes.requestAdvancePrototypeClock(id, advanceTimeMs, timeoutMs, perf);
+  }
   requestClearPrototypeStorage(
     id: string,
     timeoutMs?: number,
@@ -581,4 +562,387 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   ): Promise<HighlightOperationResult> {
     return this.highlights.requestAddHighlight(id, shape, timeoutMs, perf);
   }
+
+  async requestInstalledPackages(
+    includeSystem: boolean = true,
+    userId?: number,
+    timeoutMs: number = 5000,
+  ): Promise<A11yInstalledPackagesResult> {
+    return this.packages.requestInstalledPackages(includeSystem, userId, timeoutMs);
+  }
+
+  async requestPackageInfo(
+    packageName: string,
+    options: PackageInfoOptions = {},
+    timeoutMs: number = 5000,
+  ): Promise<A11yPackageInfoResult> {
+    return this.packages.requestPackageInfo(packageName, options, timeoutMs);
+  }
+
+  async requestLaunchIntent(
+    packageName: string,
+    timeoutMs: number = 5000,
+  ): Promise<A11yLaunchIntentResult> {
+    return this.packages.requestLaunchIntent(packageName, timeoutMs);
+  }
+
+  // ===========================================================================
+  // Delegated Public Methods - Hierarchy
+  // ===========================================================================
+
+  // Thin pass-throughs: like the gesture/text/etc. delegates below, these do NOT
+  // restate the delegate's default parameter values. Omitted args forward as
+  // `undefined`, so CtrlProxyHierarchy (the single source of truth) applies its own
+  // defaults — keeping the two-copies drift class from issue #3505 unrepresentable.
+  async getAccessibilityHierarchy(
+    ...args: Parameters<CtrlProxyHierarchy["getAccessibilityHierarchy"]>
+  ): Promise<ViewHierarchyResult | null> {
+    return this.hierarchy.getAccessibilityHierarchy(...args);
+  }
+
+  async setRecompositionTrackingEnabled(
+    enabled: boolean,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return this.hierarchy.setRecompositionTrackingEnabled(enabled, perf, signal);
+  }
+
+  async getLatestHierarchy(
+    ...args: Parameters<CtrlProxyHierarchy["getLatestHierarchy"]>
+  ): Promise<AccessibilityHierarchyResponse> {
+    return this.hierarchy.getLatestHierarchy(...args);
+  }
+
+  async requestHierarchySync(
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+    diagnostics?: HierarchySyncDiagnostics,
+    displayId?: number,
+  ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
+    return this.hierarchy.requestHierarchySync(
+      perf,
+      disableAllFiltering,
+      signal,
+      timeoutMs,
+      diagnostics,
+      displayId,
+    );
+  }
+
+  hasCachedHierarchy(): boolean {
+    return this.hierarchy.hasCachedHierarchy();
+  }
+
+  invalidateCache(): void {
+    return this.hierarchy.invalidateCache();
+  }
+
+  async requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }> {
+    // Older APKs do not know this optional command; absence retains legacy suffix settling.
+    if (!(await this.supportsCommand("request_insert_text_state"))) {
+      return { success: true };
+    }
+    return this.text.requestInsertTextState();
+  }
+
+  // ===========================================================================
+  // Non-delegated Public Methods
+  // ===========================================================================
+
+  async requestAction(
+    action: string,
+    resourceId?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    selector?: AccessibilityNodeSelector,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    return this.getActionDispatcher().requestAction(
+      action,
+      resourceId,
+      timeoutMs,
+      perf,
+      selector,
+      signal,
+    );
+  }
+
+  async requestClickFocusedInput(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    return this.getActionDispatcher().requestClickFocusedInput(timeoutMs, perf, signal);
+  }
+
+  async requestNodeAction(
+    action: string,
+    selector: AccessibilityNodeSelector,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    return this.getActionDispatcher().requestNodeAction(action, selector, timeoutMs, perf, signal);
+  }
+
+  async supportsNodeActionSelectors(
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    return this.getActionDispatcher().supportsNodeActionSelectors(perf, signal);
+  }
+
+  public async supportsCommand(name: string): Promise<boolean> {
+    return (await this.getSupportedCommands())?.includes(name) === true;
+  }
+
+  /** Perform a semantic or custom accessibility action on a node (#14077). */
+  async requestAccessibilityAction(
+    request: AndroidAccessibilityActionRequest,
+  ): Promise<A11yActionResult> {
+    return this.getActionDispatcher().requestAccessibilityAction(request);
+  }
+
+  async supportsAccessibilityLinkActivation(perf?: PerformanceTracker): Promise<boolean> {
+    return this.getActionDispatcher().supportsAccessibilityLinkActivation(perf);
+  }
+
+  async requestActivateAccessibilityLink(
+    request: AndroidActivateAccessibilityLinkRequest,
+  ): Promise<A11yActionResult> {
+    const { text, occurrence, selector, timeoutMs, perf, signal, onDispatch } = request;
+
+    return this.getActionDispatcher().requestActivateAccessibilityLink({
+      text,
+      occurrence,
+      selector,
+      timeoutMs,
+      perf,
+      signal,
+      onDispatch,
+    });
+  }
+
+  requestClipboard(
+    ...args: Parameters<AndroidClientRequests["requestClipboard"]>
+  ): ReturnType<AndroidClientRequests["requestClipboard"]> {
+    return this.getClientRequests().requestClipboard(...args);
+  }
+
+  requestSettingsGet(
+    ...args: Parameters<AndroidClientRequests["requestSettingsGet"]>
+  ): ReturnType<AndroidClientRequests["requestSettingsGet"]> {
+    return this.getClientRequests().requestSettingsGet(...args);
+  }
+
+  requestSettingsPut(
+    ...args: Parameters<AndroidClientRequests["requestSettingsPut"]>
+  ): ReturnType<AndroidClientRequests["requestSettingsPut"]> {
+    return this.getClientRequests().requestSettingsPut(...args);
+  }
+
+  requestSettingsList(
+    ...args: Parameters<AndroidClientRequests["requestSettingsList"]>
+  ): ReturnType<AndroidClientRequests["requestSettingsList"]> {
+    return this.getClientRequests().requestSettingsList(...args);
+  }
+
+  requestGlobalAction(
+    ...args: Parameters<AndroidClientRequests["requestGlobalAction"]>
+  ): ReturnType<AndroidClientRequests["requestGlobalAction"]> {
+    return this.getClientRequests().requestGlobalAction(...args);
+  }
+
+  validateFrameContext(
+    ...args: Parameters<AndroidClientRequests["validateFrameContext"]>
+  ): ReturnType<AndroidClientRequests["validateFrameContext"]> {
+    return this.getClientRequests().validateFrameContext(...args);
+  }
+
+  requestDeviceInfo(
+    ...args: Parameters<AndroidClientRequests["requestDeviceInfo"]>
+  ): ReturnType<AndroidClientRequests["requestDeviceInfo"]> {
+    return this.getClientRequests().requestDeviceInfo(...args);
+  }
+
+  /**
+   * `hidePrototypes` asks the device to hide its prototype for this capture (#9305); it is sent only
+   * to a CtrlProxy advertising `screenshot_hide_prototype_v1`, and the result's `prototypesHidden`
+   * reports the outcome.
+   */
+  async requestScreenshot(
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    suppressObservationStreamPush: boolean = false,
+    signal?: AbortSignal,
+    displayId?: number,
+    hidePrototypes: boolean = false,
+  ): Promise<ScreenshotResult> {
+    return this.getScreenshotRequester().requestScreenshot(
+      timeoutMs,
+      perf,
+      suppressObservationStreamPush,
+      signal,
+      displayId,
+      hidePrototypes,
+    );
+  }
+
+  async requestScreenshotWithoutObservationStreamPush(
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+  ): Promise<ScreenshotResult> {
+    return this.requestScreenshot(timeoutMs, perf, true);
+  }
+
+  async verifyServiceReady(
+    maxAttempts: number = 5,
+    delayMs: number = 500,
+    timeoutMs: number = 3000,
+  ): Promise<boolean> {
+    return this.getServiceReadinessVerifier().verifyServiceReady(maxAttempts, delayMs, timeoutMs);
+  }
+  protected abstract getActionDispatcher(): Pick<
+    AndroidActionDispatcher,
+    | "requestAction"
+    | "requestClickFocusedInput"
+    | "requestNodeAction"
+    | "supportsNodeActionSelectors"
+    | "supportsAccessibilityLinkActivation"
+    | "requestActivateAccessibilityLink"
+    | "requestAccessibilityAction"
+    | "sendClientCommand"
+  >;
+  protected abstract getClientRequests(): AndroidClientRequests;
+  protected abstract getScreenshotRequester(): Pick<
+    AndroidScreenshotRequester,
+    "requestScreenshot"
+  >;
+  protected abstract getServiceReadinessVerifier(): Pick<
+    AndroidServiceReadinessVerifier,
+    "verifyServiceReady"
+  >;
+
+  // Delegate instances (lazy initialized)
+  protected _gestures: CtrlProxyGestures | null = null;
+
+  protected _text: CtrlProxyText | null = null;
+
+  protected _hierarchy: CtrlProxyHierarchy | null = null;
+
+  protected _storage: CtrlProxyStorage | null = null;
+
+  protected _certificates: CtrlProxyCertificates | null = null;
+
+  protected _focus: CtrlProxyFocus | null = null;
+
+  protected _prototypes: CtrlProxyPrototypes | null = null;
+
+  protected _highlights: CtrlProxyHighlights | null = null;
+
+  protected _packages: CtrlProxyPackages | null = null;
+
+  // ===========================================================================
+  // Delegate Getters (lazy initialization)
+  // ===========================================================================
+
+  protected get gestures(): CtrlProxyGestures {
+    return (this._gestures ??= new CtrlProxyGestures(this.createDelegateContext()));
+  }
+
+  protected get text(): CtrlProxyText {
+    return (this._text ??= new CtrlProxyText(this.createDelegateContext()));
+  }
+
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  get hierarchy(): CtrlProxyHierarchy {
+    return (this._hierarchy ??= new CtrlProxyHierarchy(this.createHierarchyDelegateContext()));
+  }
+
+  protected get storage(): CtrlProxyStorage {
+    return (this._storage ??= new CtrlProxyStorage(this.createDelegateContext()));
+  }
+
+  protected get certificates(): CtrlProxyCertificates {
+    return (this._certificates ??= new CtrlProxyCertificates(
+      this.createCertificatesDelegateContext(),
+      this.certificateFileSystem,
+    ));
+  }
+
+  protected get focus(): CtrlProxyFocus {
+    return (this._focus ??= new CtrlProxyFocus(this.createDelegateContext()));
+  }
+
+  protected get prototypes(): CtrlProxyPrototypes {
+    return (this._prototypes ??= new CtrlProxyPrototypes(this.createDelegateContext()));
+  }
+
+  protected get highlights(): CtrlProxyHighlights {
+    return (this._highlights ??= new CtrlProxyHighlights(this.createDelegateContext()));
+  }
+
+  protected get packages(): CtrlProxyPackages {
+    return (this._packages ??= new CtrlProxyPackages(this.createDelegateContext()));
+  }
+
+  protected awaitCancellableRequest<
+    T extends { success: boolean; totalTimeMs: number; error?: string },
+  >(
+    requestId: string,
+    promise: Promise<T>,
+    signal: AbortSignal | undefined,
+    startTime: number,
+  ): Promise<T> {
+    return this.getClientRequests().awaitCancellableRequest(requestId, promise, signal, startTime);
+  }
+
+  /** These legacy client requests bypass the generic capability/deadline gate. */
+  protected sendClientCommand<T extends { success: boolean; totalTimeMs: number; error?: string }>(
+    requestId: string,
+    serializeRequest: (requestId: string) => string,
+    options: Pick<
+      SendCommandOptions<T>,
+      "responseType" | "messageType" | "timeoutMs" | "responseError" | "beforeSend" | "onDispatch"
+    > & { timeoutError: (timeoutMs: number) => T },
+    cancellation?: { signal: AbortSignal | undefined; startTime: number },
+    perf?: PerformanceTracker,
+  ): Promise<T> {
+    return this.getActionDispatcher().sendClientCommand<T>(
+      requestId,
+      serializeRequest,
+      options,
+      cancellation,
+      perf,
+    );
+  }
+  protected abstract createHierarchyDelegateContext(): HierarchyDelegateContext;
+  protected abstract createCertificatesDelegateContext(): CertificatesDelegateContext;
+  protected abstract readonly certificateFileSystem: CertificateFileSystem | undefined;
+
+  protected get webSocketMessageHandlers() {
+    return this.getInboundMessageRouter().webSocketMessageHandlers;
+  }
+
+  protected handleWebSocketMessage(data: WebSocket.Data): Promise<void> {
+    return this.getInboundMessageRouter().handleWebSocketMessage(data);
+  }
+
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  handleHierarchyUpdate(
+    data: AccessibilityHierarchy,
+    perfTiming?: AndroidPerfTiming[],
+    frameContext?: string,
+    requestId?: string | null,
+  ): void {
+    this.getHierarchyUpdateHandler().handle(data, perfTiming, frameContext, requestId);
+  }
+  protected abstract getInboundMessageRouter(): Pick<
+    AndroidInboundMessageRouter,
+    "handleWebSocketMessage" | "webSocketMessageHandlers"
+  >;
+  protected abstract getHierarchyUpdateHandler(): Pick<AndroidHierarchyUpdateHandler, "handle">;
 }

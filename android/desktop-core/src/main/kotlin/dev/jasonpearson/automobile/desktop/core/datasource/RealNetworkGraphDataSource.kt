@@ -5,7 +5,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.decodeToolResponse
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.File
-import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -45,6 +45,7 @@ class RealNetworkGraphDataSource(
   private val sinceSeconds: Int? = null,
   private val minRequests: Int? = null,
   private val readArtifactFile: (String) -> String = { path -> File(path).readText() },
+  private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : NetworkGraphDataSource {
   private val json = Json { ignoreUnknownKeys = true }
   // The reified serializer<T>() rather than the compiler-plugin-generated companion
@@ -61,7 +62,7 @@ class RealNetworkGraphDataSource(
     val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
 
     return try {
-      withContext(Dispatchers.IO) {
+      withContext(ioDispatcher) {
         val client = provider()
         val arguments = buildJsonObject {
           put("deviceId", device)
@@ -75,10 +76,14 @@ class RealNetworkGraphDataSource(
     } catch (e: McpConnectionException) {
       LOG.warn("getNetworkGraph: MCP connection error: ${e.message}", e)
       Result.Error(e, "MCP server not available: ${e.message}")
-    } catch (e: Exception) {
+    } catch (e: java.io.IOException) {
       // Let coroutine cancellation propagate so this suspend call stays cancellable
       // (matches McpHttpClient's catch guard).
-      if (e is CancellationException) throw e
+      LOG.warn("getNetworkGraph: Exception: ${e.message}", e)
+      Result.Error(e, "Failed to load network graph: ${e.message}")
+    } catch (e: IllegalArgumentException) {
+      // Let coroutine cancellation propagate so this suspend call stays cancellable
+      // (matches McpHttpClient's catch guard).
       LOG.warn("getNetworkGraph: Exception: ${e.message}", e)
       Result.Error(e, "Failed to load network graph: ${e.message}")
     }

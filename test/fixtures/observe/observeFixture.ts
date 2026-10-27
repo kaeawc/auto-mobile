@@ -167,7 +167,7 @@ export interface ObserveBreakdown {
   viewHierarchy: FieldMeasurement[];
 }
 
-function breakdownOf(obj: Record<string, unknown> | undefined): FieldMeasurement[] {
+function breakdownOf(obj: object | undefined): FieldMeasurement[] {
   if (!obj || typeof obj !== "object") {
     return [];
   }
@@ -183,11 +183,11 @@ function breakdownOf(obj: Record<string, unknown> | undefined): FieldMeasurement
  */
 export function measureObserveBreakdown(observe: ObserveResult): ObserveBreakdown {
   const total = measureValue(observe);
-  const viewHierarchy = (observe as { viewHierarchy?: Record<string, unknown> }).viewHierarchy;
+  const viewHierarchy = observe.viewHierarchy;
   return {
     totalBytes: total.bytes,
     totalTokens: total.tokens,
-    fields: breakdownOf(observe as unknown as Record<string, unknown>),
+    fields: breakdownOf(observe),
     viewHierarchy: breakdownOf(viewHierarchy),
   };
 }

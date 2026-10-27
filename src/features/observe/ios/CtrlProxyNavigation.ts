@@ -17,6 +17,9 @@ import type {
   CtrlProxyLaunchAppResult,
   CtrlProxyRotateResult,
   CtrlProxyHingeAngleResult,
+  CtrlProxyLocationRequest,
+  CtrlProxyLocationResult,
+  CtrlProxyAppearanceResult,
 } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
@@ -202,6 +205,68 @@ export class CtrlProxyNavigation {
         success: false,
         totalTimeMs: timeout,
         error: `Set hinge angle timed out after ${timeout}ms`,
+      }),
+    });
+  }
+
+  /**
+   * Set or clear the device's simulated location through `XCUIDevice.location` (#14091).
+   * Works on physical devices, where simctl has no location verb.
+   */
+  async requestLocation(
+    request: CtrlProxyLocationRequest,
+    timeoutMs: number = 5000,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyLocationResult> {
+    return sendCommand<CtrlProxyLocationResult>(this.context, {
+      idPrefix: "location",
+      responseType: "location",
+      messageType: "request_location",
+      params: { ...request },
+      timeoutMs,
+      abortSignal: signal,
+      cancelScreenshotBackoff: false,
+      notConnectedError: () => ({ success: false, totalTimeMs: 0, error: "Not connected" }),
+      unsupportedCommandError: (_messageType, error) => ({
+        success: false,
+        unsupported: true,
+        totalTimeMs: 0,
+        error,
+      }),
+      timeoutError: (timeout) => ({
+        success: false,
+        totalTimeMs: timeout,
+        error: `Location request timed out after ${timeout}ms`,
+      }),
+    });
+  }
+
+  /**
+   * Read the system light/dark appearance through `XCUIDevice.appearance`, setting it
+   * first when `appearance` is given (#14092). Works on physical devices, where simctl
+   * has no appearance verb. A runner that predates the command returns a typed failure.
+   */
+  async requestAppearance(
+    appearance?: "light" | "dark",
+    timeoutMs: number = 5000,
+  ): Promise<CtrlProxyAppearanceResult> {
+    return sendCommand<CtrlProxyAppearanceResult>(this.context, {
+      idPrefix: "appearance",
+      responseType: "appearance",
+      messageType: "request_appearance",
+      params: appearance === undefined ? {} : { appearance },
+      timeoutMs,
+      cancelScreenshotBackoff: false,
+      notConnectedError: () => ({ success: false, totalTimeMs: 0, error: "Not connected" }),
+      unsupportedCommandError: (_messageType, error) => ({
+        success: false,
+        totalTimeMs: 0,
+        error,
+      }),
+      timeoutError: (timeout) => ({
+        success: false,
+        totalTimeMs: timeout,
+        error: `Appearance request timed out after ${timeout}ms`,
       }),
     });
   }

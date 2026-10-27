@@ -1,18 +1,18 @@
-import XCTest
 @testable import ScreenCaptureCore
+import XCTest
 
 /// Pure tests for the avcC -> Annex-B conversion and SPS/PPS-on-IDR assembly
 /// (issue #4788), including a byte-for-byte pin against #4787's shared encoded
 /// record golden vectors: an avcC-wrapped golden NAL converts to the golden
 /// Annex-B payload, and the assembled record equals the golden record bytes.
 final class AnnexBConverterTests: XCTestCase {
-    private func hex(_ string: String) -> Data {
+    private func hex(_ string: String) throws -> Data {
         var data = Data(capacity: string.count / 2)
         var index = string.startIndex
         while index < string.endIndex {
             let next = string.index(index, offsetBy: 2)
             // Test fixtures are trusted; a bad byte should fail the test loudly.
-            data.append(UInt8(string[index..<next], radix: 16)!)  // swiftlint:disable:this force_unwrapping
+            try data.append(XCTUnwrap(UInt8(string[index ..< next], radix: 16)))
             index = next
         }
         return data
@@ -27,15 +27,15 @@ final class AnnexBConverterTests: XCTestCase {
     }
 
     func testSingleNalConversion() throws {
-        let nal = hex("6742001fabcdef")
+        let nal = try hex("6742001fabcdef")
         let converted = try AnnexBConverter.annexB(fromAvcc: avcc4(nal), nalUnitHeaderLength: 4)
         XCTAssertEqual(converted, AnnexBConverter.startCode + nal)
     }
 
     func testMultiNalConversion() throws {
-        let first = hex("6742001f")
-        let second = hex("68ce3c80")
-        let third = hex("419a0102")
+        let first = try hex("6742001f")
+        let second = try hex("68ce3c80")
+        let third = try hex("419a0102")
         let sample = avcc4(first) + avcc4(second) + avcc4(third)
         let converted = try AnnexBConverter.annexB(fromAvcc: sample, nalUnitHeaderLength: 4)
         XCTAssertEqual(
@@ -47,8 +47,8 @@ final class AnnexBConverterTests: XCTestCase {
     }
 
     func testHonorsTwoByteNalHeaderLength() throws {
-        let nal = hex("419a0102030405")
-        var sample = Data([0x00, UInt8(nal.count)])  // 2-byte big-endian length
+        let nal = try hex("419a0102030405")
+        var sample = Data([0x00, UInt8(nal.count)]) // 2-byte big-endian length
         sample.append(nal)
         let converted = try AnnexBConverter.annexB(fromAvcc: sample, nalUnitHeaderLength: 2)
         XCTAssertEqual(converted, AnnexBConverter.startCode + nal)
@@ -56,7 +56,7 @@ final class AnnexBConverterTests: XCTestCase {
 
     func testConversionOnSliceWithNonZeroStartIndex() throws {
         // A `Data` slice whose indices do not start at 0 must convert correctly.
-        let nal = hex("6742001f")
+        let nal = try hex("6742001f")
         let padded = Data([0xAA, 0xBB]) + avcc4(nal)
         let slice = padded[padded.index(padded.startIndex, offsetBy: 2)...]
         let converted = try AnnexBConverter.annexB(fromAvcc: slice, nalUnitHeaderLength: 4)
@@ -81,9 +81,9 @@ final class AnnexBConverterTests: XCTestCase {
     }
 
     func testParameterSetsPrependedOnKeyframeOnly() throws {
-        let sps = hex("6742001f")
-        let pps = hex("68ce3c80")
-        let idr = hex("65010203")
+        let sps = try hex("6742001f")
+        let pps = try hex("68ce3c80")
+        let idr = try hex("65010203")
         let sample = avcc4(idr)
 
         let keyframe = try AnnexBConverter.assembleAccessUnit(
@@ -118,11 +118,13 @@ final class AnnexBConverterTests: XCTestCase {
 
     private func loadGolden() throws -> Golden {
         var root = URL(fileURLWithPath: #filePath)
-        for _ in 0..<5 { root.deleteLastPathComponent() }
+        for _ in 0 ..< 5 {
+            root.deleteLastPathComponent()
+        }
         let fixture = root
             .appendingPathComponent("test").appendingPathComponent("fixtures")
             .appendingPathComponent("encoded-h264-golden-vectors.json")
-        return try JSONDecoder().decode(Golden.self, from: try Data(contentsOf: fixture))
+        return try JSONDecoder().decode(Golden.self, from: Data(contentsOf: fixture))
     }
 
     /// Each golden payload is Annex-B `00000001` + a single NAL. Wrapping that
@@ -131,7 +133,7 @@ final class AnnexBConverterTests: XCTestCase {
     func testGoldenRecordsRebuiltFromAvcc() throws {
         let golden = try loadGolden()
         for record in golden.records {
-            let annexBPayload = hex(record.payloadHex)
+            let annexBPayload = try hex(record.payloadHex)
             let nal = annexBPayload.dropFirst(AnnexBConverter.startCode.count)
             let sample = avcc4(Data(nal))
 
@@ -145,7 +147,7 @@ final class AnnexBConverterTests: XCTestCase {
                 isKeyframe: record.keyframe,
                 presentationTimestampMs: record.presentationTimestampMs
             )
-            XCTAssertEqual(header + converted, hex(record.recordHex), "record bytes diverged for \(record.name)")
+            XCTAssertEqual(header + converted, try hex(record.recordHex), "record bytes diverged for \(record.name)")
         }
     }
 }

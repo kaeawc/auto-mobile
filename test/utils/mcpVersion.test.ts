@@ -1,10 +1,13 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import {
   formatMcpServerVersion,
+  createMcpVersionResolver,
   getMcpServerVersion,
   readGitVersion,
   releaseVersion,
   resolveMcpServerVersion,
+  withoutDirtyStamp,
+  probeCheckoutMcpServerVersion,
   type GitVersionInfo,
   type McpVersionDeps,
 } from "../../src/utils/mcpVersion";
@@ -12,23 +15,74 @@ import {
   DefaultGitMetadataClient,
   defaultGitMetadataClient,
 } from "../../src/utils/GitMetadataClient";
-import { compareVersions } from "../../src/server/deviceMatcher";
+import type { GitDirtyState, GitMetadataClient } from "../../src/utils/GitMetadataClient";
+import { compareVersions } from "../../src/utils/deviceMatcher";
 import { testOverrides } from "../../src/utils/testOverrides";
 import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
+import { FakeGitMetadataReader } from "../fakes/FakeFileSystem";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { logger } from "../../src/utils/logger";
+import { defaultTimer } from "../../src/utils/SystemTimer";
+import * as env from "../../src/config/env";
 
 const versionModulePath = "../../src/utils/mcpVersion.ts";
 
+test("checkout probes resolve fresh inputs rather than reusing a cached stamp", async () => {
+  const read = spyOn(env, "readEnvRaw").mockReturnValue("0.0.87+gabc");
+  try {
+    expect(await probeCheckoutMcpServerVersion()).toBe("0.0.87+gabc");
+    read.mockReturnValue("0.0.87+gabc.dirty.47e2");
+    expect(await probeCheckoutMcpServerVersion()).toBe("0.0.87+gabc.dirty.47e2");
+  } finally {
+    read.mockRestore();
+  }
+});
+
+describe("withoutDirtyStamp", () => {
+  test.each([
+    ["0.0.87+gabc.dirty.47e2", "0.0.87+gabc"],
+    ["0.0.87+gabc.dirty", "0.0.87+gabc"],
+    ["0.0.87+gabc", "0.0.87+gabc"],
+    ["0.0.87", "0.0.87"],
+    ["0.0.87-dirty", "0.0.87-dirty"],
+    ["0.0.87.dirty", "0.0.87.dirty"],
+    ["0.0.87+other.dirty.47e2", "0.0.87+other.dirty.47e2"],
+    ["0.0.87+gabc.dirty.nothex", "0.0.87+gabc.dirty.nothex"],
+    ["0.0.87+gabc.dirty.47e2.more", "0.0.87+gabc.dirty.47e2.more"],
+  ])("%s -> %s", (version, expected) => {
+    expect(withoutDirtyStamp(version)).toBe(expected);
+  });
+});
+
 describe("getMcpServerVersion laziness", () => {
-  test("import is lazy and the first getter call probes one command group then caches", async () => {
+  test("import and the first getter never spawn status/diff, then cache the stamp", async () => {
     const original = testOverrides.gitMetadataClient;
     const commands: string[][] = [];
-    testOverrides.gitMetadataClient = new DefaultGitMetadataClient((_command, args) => {
-      commands.push([...args]);
-      if (args[1] === "--show-toplevel") {
-        return fileURLToPath(new URL("../../", import.meta.url));
-      }
-      return args[1] === "--short=12" ? "abcdef123456" : "";
+    const timer = new FakeTimer();
+    const handles: NodeJS.Timeout[] = [];
+    const schedule = spyOn(defaultTimer, "setTimeout").mockImplementation((callback, ms) => {
+      const handle = timer.setTimeout(callback, ms);
+      handles.push(handle);
+      return handle;
     });
+    const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+    const fs = new FakeGitMetadataReader({
+      [join(root, ".git")]: null,
+      [join(root, ".git/HEAD")]: "abcdef1234567890123456789012345678901234",
+    });
+    testOverrides.gitMetadataClient = new DefaultGitMetadataClient(
+      (_command, args) => {
+        commands.push([...args]);
+        return "";
+      },
+      fs,
+      async (_command, args) => {
+        commands.push([...args]);
+        return null;
+      },
+      {},
+    );
     try {
       const version: typeof import("../../src/utils/mcpVersion") = await import(
         `${versionModulePath}?lazy-cache`
@@ -36,15 +90,21 @@ describe("getMcpServerVersion laziness", () => {
       expect(commands).toEqual([]);
       const first = version.getMcpServerVersion();
       expect(first).toMatch(/^\d+\.\d+\.\d+\+gabcdef123456$/);
-      expect(commands).toEqual([
-        ["rev-parse", "--show-toplevel"],
-        ["rev-parse", "--short=12", "HEAD"],
-        ["status", "--porcelain", "--untracked-files=no"],
-      ]);
+      expect(commands).toEqual([]);
       expect(version.getMcpServerVersion()).toBe(first);
-      expect(commands).toHaveLength(3);
+      expect(commands).toHaveLength(0);
+      expect(timer.getPendingTimeouts()).toEqual([0]);
+      expect(handles).toHaveLength(1);
+      expect(handles[0].hasRef()).toBe(false);
+      timer.advanceTime(0);
+      for (let i = 0; i < 5; i++) {
+        await Promise.resolve();
+      }
+      expect(commands).toEqual([["status", "--porcelain", "--untracked-files=no"]]);
+      expect(version.getMcpServerVersion()).toBe(first);
     } finally {
       testOverrides.gitMetadataClient = original;
+      schedule.mockRestore();
     }
   });
 
@@ -68,6 +128,231 @@ const git = (shortSha: string, dirty = false, dirtyHash: string | null = null): 
   shortSha,
   dirty,
   dirtyHash,
+});
+
+describe("createMcpVersionResolver", () => {
+  const plain = "0.0.39+g1a2b3c4d5e6f";
+  const fixture = (
+    readDirtyState: () => Promise<GitDirtyState | null> = async () => ({
+      dirty: true,
+      dirtyHash: "abc123def456",
+    }),
+    overrides: Partial<McpVersionDeps> = {},
+  ) => {
+    const timer = new FakeTimer();
+    let dirtyReads = 0;
+    let versionReads = 0;
+    let packageReads = 0;
+    const client: GitMetadataClient = {
+      readVersion: () => {
+        versionReads++;
+        return git("1a2b3c4d5e6f");
+      },
+      readDirtyState: async () => {
+        dirtyReads++;
+        return readDirtyState();
+      },
+    };
+    const resolver = createMcpVersionResolver({
+      env: {},
+      readPackageVersion: () => {
+        packageReads++;
+        return "0.0.39";
+      },
+      readGitVersion: () => client.readVersion("/src/auto-mobile", () => "@kaeawc/auto-mobile"),
+      timer,
+      readDirtyState: () => client.readDirtyState("/src/auto-mobile"),
+      ...overrides,
+    });
+    return { resolver, timer, counts: () => ({ dirtyReads, versionReads, packageReads }) };
+  };
+
+  test("settlement starts refinement without waiting for an unref timer and shares the result", async () => {
+    const pending = Promise.withResolvers<GitDirtyState | null>();
+    const { resolver, timer, counts } = fixture(() => pending.promise);
+    expect(resolver.current()).toBe(plain);
+    const first = resolver.resolveSettled();
+    const second = resolver.resolveSettled();
+    expect(counts().dirtyReads).toBe(1);
+    expect(resolver.current()).toBe(plain);
+    timer.advanceTime(0);
+    expect(counts().dirtyReads).toBe(1);
+    pending.resolve({ dirty: true, dirtyHash: "abc123def456" });
+    expect(await first).toBe(`${plain}.dirty.abc123def456`);
+    expect(await second).toBe(await first);
+    expect(await resolver.resolveSettled()).toBe(resolver.current());
+    expect(counts()).toEqual({ dirtyReads: 1, versionReads: 1, packageReads: 1 });
+  });
+
+  test("isSettled stays false until the due refinement finishes, even when it fails", async () => {
+    for (const outcome of ["dirty", "error"] as const) {
+      const pending = Promise.withResolvers<GitDirtyState | null>();
+      const { resolver } = fixture(() => pending.promise);
+      expect(resolver.isSettled()).toBe(false);
+      const settled = resolver.resolveSettled();
+      expect(resolver.isSettled()).toBe(false);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      if (outcome === "dirty") {
+        pending.resolve({ dirty: true, dirtyHash: "abc123def456" });
+      } else {
+        pending.reject(new Error("git timed out"));
+      }
+      await settled;
+      warn.mockRestore();
+      expect(resolver.isSettled()).toBe(true);
+    }
+  });
+
+  test("isSettled is immediately true when no refinement is due", () => {
+    const { resolver } = fixture(undefined, { env: { MCP_SERVER_VERSION: "9.9.9" } });
+    expect(resolver.isSettled()).toBe(true);
+  });
+
+  test("settlement can be the first read, as in the version-only entrypoint", async () => {
+    const { resolver, timer, counts } = fixture();
+    expect(await resolver.resolveSettled()).toBe(`${plain}.dirty.abc123def456`);
+    expect(counts()).toEqual({ dirtyReads: 1, versionReads: 1, packageReads: 1 });
+    timer.advanceTime(0);
+    expect(counts().dirtyReads).toBe(1);
+  });
+
+  test("settlement joins background refinement already in flight", async () => {
+    const pending = Promise.withResolvers<GitDirtyState | null>();
+    const { resolver, timer, counts } = fixture(() => pending.promise);
+    resolver.current();
+    timer.advanceTime(0);
+    const settled = resolver.resolveSettled();
+    pending.resolve({ dirty: true, dirtyHash: "abc123def456" });
+    expect(await settled).toBe(`${plain}.dirty.abc123def456`);
+    expect(counts().dirtyReads).toBe(1);
+  });
+
+  test("settled identities distinguish different tracked edits at the same HEAD", async () => {
+    const first = fixture(async () => ({ dirty: true, dirtyHash: "aaaaaaaaaaaa" }));
+    const second = fixture(async () => ({ dirty: true, dirtyHash: "bbbbbbbbbbbb" }));
+    expect(first.resolver.current()).toBe(second.resolver.current());
+    expect(await first.resolver.resolveSettled()).toBe(`${plain}.dirty.aaaaaaaaaaaa`);
+    expect(await second.resolver.resolveSettled()).toBe(`${plain}.dirty.bbbbbbbbbbbb`);
+  });
+
+  test.each([
+    { env: { MCP_SERVER_VERSION: "9.9.9" } },
+    { readGitVersion: () => null },
+    { readPackageVersion: () => null },
+  ])("settlement needs no timer or dirty read for unstamped versions", async (overrides) => {
+    const { resolver, timer, counts } = fixture(undefined, overrides);
+    expect(await resolver.resolveSettled()).toBe(resolver.current());
+    expect(counts().dirtyReads).toBe(0);
+    expect(timer.getPendingTimeouts()).toEqual([]);
+  });
+
+  test("first current is plain, then refines after the zero-delay timer and microtasks", async () => {
+    const { resolver, timer, counts } = fixture();
+    expect(timer.getPendingTimeouts()).toEqual([]);
+    expect(resolver.current()).toBe(plain);
+    expect(counts()).toEqual({ dirtyReads: 0, versionReads: 1, packageReads: 1 });
+    expect(timer.getPendingTimeouts()).toEqual([0]);
+    timer.advanceTime(0);
+    expect(resolver.current()).toBe(plain);
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve();
+    }
+    expect(resolver.current()).toBe(`${plain}.dirty.abc123def456`);
+    expect(counts().dirtyReads).toBe(1);
+  });
+
+  test.each([{ dirty: false, dirtyHash: null }, null, { dirty: true, dirtyHash: null }])(
+    "background result %j preserves or refines the stamp",
+    async (state) => {
+      const { resolver, timer } = fixture(async () => state);
+      expect(resolver.current()).toBe(plain);
+      timer.advanceTime(0);
+      for (let i = 0; i < 5; i++) {
+        await Promise.resolve();
+      }
+      expect(resolver.current()).toBe(state?.dirty ? `${plain}.dirty` : plain);
+      expect(await resolver.resolveSettled()).toBe(resolver.current());
+    },
+  );
+
+  test("a rejected dirty read keeps the plain stamp", async () => {
+    const error = new Error("git unavailable");
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const { resolver, timer } = fixture(async () => {
+      throw error;
+    });
+    try {
+      expect(resolver.current()).toBe(plain);
+      timer.advanceTime(0);
+      for (let i = 0; i < 5; i++) {
+        await Promise.resolve();
+      }
+      expect(resolver.current()).toBe(plain);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+      expect(warning).toHaveBeenCalledWith("Background git dirty-state resolution failed", error);
+      expect(await resolver.resolveSettled()).toBe(plain);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("explicit version override performs no reads or scheduling", () => {
+    const { resolver, timer, counts } = fixture(undefined, {
+      env: { MCP_SERVER_VERSION: "9.9.9" },
+    });
+    expect(resolver.current()).toBe("9.9.9");
+    expect(resolver.current()).toBe("9.9.9");
+    expect(timer.getPendingTimeouts()).toEqual([]);
+    expect(counts()).toEqual({ dirtyReads: 0, versionReads: 0, packageReads: 0 });
+  });
+
+  test("release install schedules nothing", () => {
+    const { resolver, timer, counts } = fixture(undefined, { readGitVersion: () => null });
+    expect(resolver.current()).toBe("0.0.39");
+    expect(timer.getPendingTimeouts()).toEqual([]);
+    expect(counts().dirtyReads).toBe(0);
+  });
+
+  test("unknown version schedules nothing", () => {
+    const { resolver, timer, counts } = fixture(undefined, { readPackageVersion: () => null });
+    expect(resolver.current()).toBe("unknown");
+    expect(timer.getPendingTimeouts()).toEqual([]);
+    expect(counts().versionReads).toBe(0);
+  });
+
+  test("many calls schedule only one refinement and resolve sync inputs once", async () => {
+    const { resolver, timer, counts } = fixture();
+    for (let i = 0; i < 10; i++) {
+      expect(resolver.current()).toBe(plain);
+    }
+    expect(timer.getPendingTimeouts()).toEqual([0]);
+    timer.advanceTime(0);
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve();
+    }
+    for (let i = 0; i < 10; i++) {
+      expect(resolver.current()).toBe(`${plain}.dirty.abc123def456`);
+    }
+    expect(timer.getPendingTimeouts()).toEqual([]);
+    expect(counts()).toEqual({ dirtyReads: 1, versionReads: 1, packageReads: 1 });
+  });
+
+  test("calls during a pending dirty read stay plain without scheduling another read", async () => {
+    const pending = Promise.withResolvers<GitDirtyState | null>();
+    const { resolver, timer, counts } = fixture(() => pending.promise);
+    expect(resolver.current()).toBe(plain);
+    timer.advanceTime(0);
+    for (let i = 0; i < 10; i++) {
+      expect(resolver.current()).toBe(plain);
+    }
+    expect(counts().dirtyReads).toBe(1);
+    expect(timer.getPendingTimeouts()).toEqual([]);
+    pending.resolve({ dirty: true, dirtyHash: "abc123def456" });
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve();
+    }
+    expect(resolver.current()).toBe(`${plain}.dirty.abc123def456`);
+  });
 });
 
 describe("releaseVersion", () => {
@@ -164,18 +449,14 @@ describe("formatMcpServerVersion + the daemon version gate", () => {
 });
 
 describe("readGitVersion", () => {
-  // Fake git runner: maps each git invocation (keyed by first arg) to canned
-  // stdout. Keeps these tests pure — no spawn, no real repo. `readName` is
-  // injected too so the ownership check needs no filesystem.
+  // Fake git runner and metadata reader keep these tests free of real fs/git.
+  // `readName` also makes the ownership check independent of the filesystem.
   const OWN = "@kaeawc/auto-mobile";
   const fakeRun =
     (responses: Record<string, string | null>) =>
     (_cwd: string, args: string[]): string | null => {
-      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") {
-        return responses.toplevel ?? null;
-      }
-      if (args[0] === "rev-parse" && args[1] === "--short=12") {
-        return responses.sha ?? null;
+      if (args[0] === "rev-parse") {
+        return responses.sha?.padEnd(40, "0") ?? null;
       }
       if (args[0] === "status") {
         return responses.status ?? null;
@@ -187,7 +468,21 @@ describe("readGitVersion", () => {
     };
   const fakeClient = (responses: Record<string, string | null>) => {
     const run = fakeRun(responses);
-    return new DefaultGitMetadataClient((_command, args, { cwd }) => run(cwd, [...args]));
+    const fs = new FakeGitMetadataReader(
+      responses.toplevel
+        ? {
+            [join(responses.toplevel, ".git")]: null,
+            [join(responses.toplevel, ".git/HEAD")]:
+              responses.sha?.padEnd(40, "0") ?? "unresolvable",
+          }
+        : {},
+    );
+    return new DefaultGitMetadataClient(
+      (_command, args, { cwd }) => run(cwd, [...args]),
+      fs,
+      undefined,
+      {},
+    );
   };
   const ownsRepo = () => OWN;
 
@@ -196,7 +491,7 @@ describe("readGitVersion", () => {
     const client = new DefaultGitMetadataClient(() => {
       called = true;
       return null;
-    });
+    }, new FakeGitMetadataReader());
     expect(
       readGitVersion("/host/node_modules/@kaeawc/auto-mobile/dist", client, ownsRepo),
     ).toBeNull();
@@ -208,7 +503,7 @@ describe("readGitVersion", () => {
   });
 
   test("returns null when the enclosing repo is a different project (vendored release install)", () => {
-    // git rev-parse walks upward; a copy nested in a host repo must not be
+    // Repository discovery walks upward; a copy nested in a host repo must not be
     // stamped with the host's commit.
     const client = fakeClient({ toplevel: "/host/repo", sha: "deadbeefcafe" });
     expect(
@@ -230,7 +525,7 @@ describe("readGitVersion", () => {
     });
   });
 
-  test("marks the checkout dirty and hashes the tracked diff", () => {
+  test("returns the plain SHA even when the checkout has tracked edits", () => {
     const client = fakeClient({
       toplevel: "/src/auto-mobile",
       sha: "1a2b3c4d5e6f",
@@ -239,18 +534,18 @@ describe("readGitVersion", () => {
     });
     const result = readGitVersion("/src/auto-mobile", client, ownsRepo);
     expect(result?.shortSha).toBe("1a2b3c4d5e6f");
-    expect(result?.dirty).toBe(true);
-    expect(result?.dirtyHash).toMatch(/^[0-9a-f]{12}$/);
+    expect(result?.dirty).toBe(false);
+    expect(result?.dirtyHash).toBeNull();
   });
 
-  test("two different dirty diffs produce different dirty hashes", () => {
+  test("different dirty diffs do not affect synchronous metadata", () => {
     const base = { toplevel: "/src/auto-mobile", sha: "1a2b3c4d5e6f", status: " M src/index.ts" };
     const a = readGitVersion("/src/auto-mobile", fakeClient({ ...base, diff: "edit A" }), ownsRepo);
     const b = readGitVersion("/src/auto-mobile", fakeClient({ ...base, diff: "edit B" }), ownsRepo);
-    expect(a?.dirtyHash).not.toBe(b?.dirtyHash);
+    expect(a).toEqual(b);
   });
 
-  test("falls back to a bare dirty marker when the diff is unavailable", () => {
+  test("does not inspect an unavailable diff synchronously", () => {
     const client = fakeClient({
       toplevel: "/src/auto-mobile",
       sha: "1a2b3c4d5e6f",
@@ -259,7 +554,7 @@ describe("readGitVersion", () => {
     });
     expect(readGitVersion("/src/auto-mobile", client, ownsRepo)).toEqual({
       shortSha: "1a2b3c4d5e6f",
-      dirty: true,
+      dirty: false,
       dirtyHash: null,
     });
   });

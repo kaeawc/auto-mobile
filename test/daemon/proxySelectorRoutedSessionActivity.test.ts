@@ -9,9 +9,9 @@ import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_VERSION,
-} from "../../src/daemon/constants";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+} from "../../src/daemon/wire/constants";
+import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";

@@ -1,7 +1,10 @@
 import { PrototypeAgentSuspendedError } from "../../../../src/features/prototype/ios/prototypeAgentSuspended";
 import { PrototypeAgentRequestTimeoutError } from "../../../../src/features/prototype/ios/prototypeAgentClient";
 import { ActionableError, toActionableError } from "../../../../src/models/ActionableError";
-import { PROTOTYPE_PATCH_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_PATCH_CAPABILITY,
+  PROTOTYPE_STORAGE_CAPABILITY,
+} from "../../../../src/features/observe/android/ctrlProxyProtocol";
 import { prototypePatchUnsupportedMessage } from "../../../../src/features/prototype/prototypePatchWire";
 import type { PrototypePatchOp } from "../../../../src/features/prototype/prototypePatch";
 import { FakePrototypeAgentClient } from "../../../fakes/FakePrototypeAgentClient";
@@ -181,7 +184,7 @@ describe("IosPrototypeTransport.captureWithPrototypeHidden", () => {
   describe("show reset", () => {
     const spec = {
       id: "panel",
-      window: { placement: { type: "fullscreen" as const } },
+      window: { placement: { type: "fullscreen" as const }, opacity: 1 },
       root: { type: "text" as const, text: "hi" },
     };
     function recording(capabilities: string[]) {
@@ -227,7 +230,9 @@ describe("IosPrototypeTransport.captureWithPrototypeHidden", () => {
         return request(type, body);
       };
       const transport = new IosPrototypeTransport(agent);
-      expect((await transport.show(spec, { appearance: "dark" })).appearance).toEqual(reported);
+      expect<unknown>((await transport.show(spec, { appearance: "dark" })).appearance).toEqual(
+        reported,
+      );
       // A reply that is not {mode, source, deviceDark} is dropped, not passed on.
       expect(await transport.show(spec)).not.toHaveProperty("appearance");
       expect(bodies).toEqual([{ spec, appearance: "dark" }, { spec }]);
@@ -251,7 +256,11 @@ describe("iOS status suspension deadline", () => {
     const transport = new IosPrototypeTransport(agent);
     await transport.status();
     expect(requestCalls[0]).toEqual(["get_prototype_status", undefined, { timeoutMs: 3000 }]);
-    await transport.show({ id: "test", root: { type: "text", text: "Hello" } });
+    await transport.show({
+      id: "test",
+      window: { placement: { type: "fullscreen" }, opacity: 1 },
+      root: { type: "text", text: "Hello" },
+    });
     await transport.dismiss({ all: true });
     expect(requestCalls[1]).toHaveLength(2);
     expect(requestCalls[2]).toHaveLength(2);
@@ -269,12 +278,58 @@ describe("iOS status suspension deadline", () => {
       message:
         "Prototype agent did not answer get_prototype_status within 3000 ms. iOS suspends an app that is not in the foreground, and the prototype agent injected into it, so the prototype's app is most likely in the background. Bring that app back to the foreground with launchApp (the prototype returns with its state), then retry.",
     });
-    expect(toActionableError(error, "Prototype inspect failed")).toBe(error);
+    expect<unknown>(toActionableError(error, "Prototype inspect failed")).toBe(error);
   });
   test("connection errors propagate unchanged", async () => {
     const error = new ActionableError("connection closed");
     const transport = new IosPrototypeTransport(fakeAgent([], [], () => error));
     await expect(transport.status()).rejects.toBe(error);
+  });
+});
+
+describe("iOS per-call timeoutMs (#15116)", () => {
+  const spec = {
+    id: "test",
+    window: { placement: { type: "fullscreen" as const }, opacity: 1 },
+    root: { type: "text" as const, text: "Hello" },
+  };
+  const rig = () => {
+    const requestCalls: Parameters<PrototypeAgentClient["request"]>[] = [];
+    const agent = fakeAgent(
+      [PROTOTYPE_PATCH_CAPABILITY, PROTOTYPE_STORAGE_CAPABILITY],
+      [],
+      undefined,
+      requestCalls,
+    );
+    return { requestCalls, transport: new IosPrototypeTransport(agent) };
+  };
+  const ops: PrototypePatchOp[] = [{ op: "replace", path: "/data/x", value: 1 }];
+
+  test("show, patch, dismiss and clearStorage pass the given deadline to the agent", async () => {
+    const { requestCalls, transport } = rig();
+
+    await transport.show(spec, { timeoutMs: 4_000 });
+    await transport.patch({ id: "test", ops }, 5_000);
+    await transport.dismiss({ id: "test" }, 6_000);
+    await transport.clearStorage("test", 7_000);
+
+    expect(requestCalls.map(([type, , options]) => [type, options])).toEqual([
+      ["show_prototype", { timeoutMs: 4_000 }],
+      ["patch_prototype", { timeoutMs: 5_000 }],
+      ["dismiss_prototype", { timeoutMs: 6_000 }],
+      ["clear_prototype_storage", { timeoutMs: 7_000 }],
+    ]);
+  });
+
+  test("without a deadline they keep the client default and send no options", async () => {
+    const { requestCalls, transport } = rig();
+
+    await transport.show(spec);
+    await transport.patch({ id: "test", ops });
+    await transport.dismiss({ all: true });
+    await transport.clearStorage("test");
+
+    expect(requestCalls.map((call) => call.length)).toEqual([2, 2, 2, 2]);
   });
 });
 

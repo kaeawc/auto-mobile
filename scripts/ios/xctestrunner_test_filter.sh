@@ -6,7 +6,6 @@ SIMULATOR_DEPENDENT_TEST_CLASSES=(
   RemindersAddPlanTests
 )
 
-# shellcheck disable=SC2034 # consumed by callers
 XCTESTRUNNER_TEST_FILTER=""
 
 xctestrunner_build_test_filter() {
@@ -46,9 +45,9 @@ xctestrunner_build_test_filter() {
     return 1
   fi
 
-  # shellcheck disable=SC2034 # consumed by sourcing scripts
   XCTESTRUNNER_TEST_FILTER="XCTestRunnerTests\\.($(
     IFS='|'
     printf '%s' "${test_classes[*]}"
   ))"
+  : "$XCTESTRUNNER_TEST_FILTER"
 }

@@ -93,70 +93,71 @@ class ConfigurableTypingPolicyTest {
     }
   }
 
+  private val composingCases =
+    listOf(
+      "👨‍👩‍👧" to listOf<ImeOp>(ImeOp.CommitText("👨‍👩‍👧")),
+      "👍🏽" to listOf<ImeOp>(ImeOp.CommitText("👍🏽")),
+      "🇯🇵" to listOf<ImeOp>(ImeOp.CommitText("🇯🇵")),
+      "❤️" to listOf<ImeOp>(ImeOp.CommitText("❤️")),
+      "1️⃣" to listOf<ImeOp>(ImeOp.CommitText("1️⃣")),
+      "e\u0301" to listOf<ImeOp>(ImeOp.SetComposingText("e\u0301")),
+      "é" to listOf<ImeOp>(ImeOp.SetComposingText("é")),
+      "日本" to listOf<ImeOp>(ImeOp.SetComposingText("日"), ImeOp.SetComposingText("日本")),
+      "a😀b👍🏽c👨‍👩‍👧d🇯🇵e❤️fé日本" to
+        listOf<ImeOp>(
+          ImeOp.SetComposingText("a"),
+          ImeOp.FinishComposingText,
+          ImeOp.CommitText("😀"),
+          ImeOp.SetComposingText("b"),
+          ImeOp.FinishComposingText,
+          ImeOp.CommitText("👍🏽"),
+          ImeOp.SetComposingText("c"),
+          ImeOp.FinishComposingText,
+          ImeOp.CommitText("👨‍👩‍👧"),
+          ImeOp.SetComposingText("d"),
+          ImeOp.FinishComposingText,
+          ImeOp.CommitText("🇯🇵"),
+          ImeOp.SetComposingText("e"),
+          ImeOp.FinishComposingText,
+          ImeOp.CommitText("❤️"),
+          ImeOp.SetComposingText("f"),
+          ImeOp.SetComposingText("fé"),
+          ImeOp.SetComposingText("fé日"),
+          ImeOp.SetComposingText("fé日本"),
+        ),
+      "🏳️‍🌈" to listOf<ImeOp>(ImeOp.CommitText("🏳️‍🌈")),
+      "👩🏽‍💻" to listOf<ImeOp>(ImeOp.CommitText("👩🏽‍💻")),
+      "ไทย" to
+        listOf<ImeOp>(
+          ImeOp.SetComposingText("ไ"),
+          ImeOp.SetComposingText("ไท"),
+          ImeOp.SetComposingText("ไทย"),
+        ),
+      "हिन्दी" to
+        listOf<ImeOp>(
+          ImeOp.SetComposingText("हि"),
+          ImeOp.SetComposingText("हिन्"),
+          ImeOp.SetComposingText("हिन्दी"),
+        ),
+      "مرحبا" to
+        listOf<ImeOp>(
+          ImeOp.SetComposingText("م"),
+          ImeOp.SetComposingText("مر"),
+          ImeOp.SetComposingText("مرح"),
+          ImeOp.SetComposingText("مرحب"),
+          ImeOp.SetComposingText("مرحبا"),
+        ),
+      "한국어" to
+        listOf<ImeOp>(
+          ImeOp.SetComposingText("한"),
+          ImeOp.SetComposingText("한국"),
+          ImeOp.SetComposingText("한국어"),
+        ),
+    )
+
   @Test
   fun `composing profile composes words and commits whole emoji graphemes`() {
-    val cases =
-      listOf(
-        "👨‍👩‍👧" to listOf<ImeOp>(ImeOp.CommitText("👨‍👩‍👧")),
-        "👍🏽" to listOf<ImeOp>(ImeOp.CommitText("👍🏽")),
-        "🇯🇵" to listOf<ImeOp>(ImeOp.CommitText("🇯🇵")),
-        "❤️" to listOf<ImeOp>(ImeOp.CommitText("❤️")),
-        "1️⃣" to listOf<ImeOp>(ImeOp.CommitText("1️⃣")),
-        "e\u0301" to listOf<ImeOp>(ImeOp.SetComposingText("e\u0301")),
-        "é" to listOf<ImeOp>(ImeOp.SetComposingText("é")),
-        "日本" to listOf<ImeOp>(ImeOp.SetComposingText("日"), ImeOp.SetComposingText("日本")),
-        "a😀b👍🏽c👨‍👩‍👧d🇯🇵e❤️fé日本" to
-          listOf<ImeOp>(
-            ImeOp.SetComposingText("a"),
-            ImeOp.FinishComposingText,
-            ImeOp.CommitText("😀"),
-            ImeOp.SetComposingText("b"),
-            ImeOp.FinishComposingText,
-            ImeOp.CommitText("👍🏽"),
-            ImeOp.SetComposingText("c"),
-            ImeOp.FinishComposingText,
-            ImeOp.CommitText("👨‍👩‍👧"),
-            ImeOp.SetComposingText("d"),
-            ImeOp.FinishComposingText,
-            ImeOp.CommitText("🇯🇵"),
-            ImeOp.SetComposingText("e"),
-            ImeOp.FinishComposingText,
-            ImeOp.CommitText("❤️"),
-            ImeOp.SetComposingText("f"),
-            ImeOp.SetComposingText("fé"),
-            ImeOp.SetComposingText("fé日"),
-            ImeOp.SetComposingText("fé日本"),
-          ),
-        "🏳️‍🌈" to listOf<ImeOp>(ImeOp.CommitText("🏳️‍🌈")),
-        "👩🏽‍💻" to listOf<ImeOp>(ImeOp.CommitText("👩🏽‍💻")),
-        "ไทย" to
-          listOf<ImeOp>(
-            ImeOp.SetComposingText("ไ"),
-            ImeOp.SetComposingText("ไท"),
-            ImeOp.SetComposingText("ไทย"),
-          ),
-        "हिन्दी" to
-          listOf<ImeOp>(
-            ImeOp.SetComposingText("हि"),
-            ImeOp.SetComposingText("हिन्"),
-            ImeOp.SetComposingText("हिन्दी"),
-          ),
-        "مرحبا" to
-          listOf<ImeOp>(
-            ImeOp.SetComposingText("م"),
-            ImeOp.SetComposingText("مر"),
-            ImeOp.SetComposingText("مرح"),
-            ImeOp.SetComposingText("مرحب"),
-            ImeOp.SetComposingText("مرحبا"),
-          ),
-        "한국어" to
-          listOf<ImeOp>(
-            ImeOp.SetComposingText("한"),
-            ImeOp.SetComposingText("한국"),
-            ImeOp.SetComposingText("한국어"),
-          ),
-      )
-    cases.forEach { (input, operations) ->
+    composingCases.forEach { (input, operations) ->
       val editor = FakeEditor()
       val expected =
         if (operations.size >= 2) listOf(ImeOp.BeginBatchEdit) + operations + ImeOp.EndBatchEdit

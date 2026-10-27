@@ -6,7 +6,7 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/lib/session-release.sh disable=SC1091
+# shellcheck source=scripts/lib/session-release.sh
 source "${script_dir}/../lib/session-release.sh"
 
 device_id="${1:?usage: navigation-graph-sdk-event-integration.sh <simulator-udid>}"

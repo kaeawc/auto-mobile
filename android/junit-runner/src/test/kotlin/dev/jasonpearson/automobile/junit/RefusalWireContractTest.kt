@@ -42,7 +42,7 @@ class RefusalWireContractTest {
       val response =
         DaemonResponse(id = code, type = "mcp_response", success = true, result = result)
       assertFields(code, row.getValue("fields").jsonObject, response, result)
-      val actual = AutoMobilePlanExecutor.classifyRefusal(response, json).wire
+      val actual = DaemonToolResultParser.classifyRefusal(response, json).wire
       if (gap == null) {
         assertEquals(code, expected, actual)
       } else {
@@ -71,7 +71,7 @@ class RefusalWireContractTest {
       val response =
         json.decodeFromString(DaemonResponse.serializer(), withId(payload.jsonObject, stem))
       val fields = row.jsonObject.getValue("fields").jsonObject
-      val evidence = AutoMobilePlanExecutor.refusalEvidence(response, json)
+      val evidence = DaemonToolResultParser.refusalEvidence(response, json)
       assertEquals(
         "$stem: recovering",
         (fields["details"] as? JsonObject)?.get("recovering") == JsonPrimitive(true),
@@ -96,7 +96,7 @@ class RefusalWireContractTest {
       assertEquals(
         stem,
         row.jsonObject.getValue("expected").jsonPrimitive.content,
-        AutoMobilePlanExecutor.classifyRefusal(response, json).wire,
+        DaemonToolResultParser.classifyRefusal(response, json).wire,
       )
       checked++
     }
@@ -114,9 +114,9 @@ class RefusalWireContractTest {
     val text =
       result.getValue("content").jsonArray.first().jsonObject.getValue("text").jsonPrimitive.content
     val payload = json.parseToJsonElement(text).jsonObject
-    fun evidence(wire: JsonObject): AutoMobilePlanExecutor.RefusalEvidence {
+    fun evidence(wire: JsonObject): DaemonToolResultParser.RefusalEvidence {
       val content = JsonObject(mapOf("structuredContent" to wire, "isError" to JsonPrimitive(true)))
-      return AutoMobilePlanExecutor.refusalEvidence(
+      return DaemonToolResultParser.refusalEvidence(
         DaemonResponse("strict", "mcp_response", true, result = content),
         json,
       )
@@ -146,12 +146,12 @@ class RefusalWireContractTest {
     for (row in hintRows("usableHints")) {
       val wire = row.getValue("wire")
       val usable = row.getValue("usable").longOrNullOrNull()
-      assertEquals(row.name(), usable, AutoMobilePlanExecutor.retryAfterHintMs(wire))
+      assertEquals(row.name(), usable, DeviceWaitPolicy.retryAfterHintMs(wire))
       val frame = DaemonResponse("hint", "mcp_response", false, retryAfterMs = wire)
       assertEquals(
         row.name(),
         usable,
-        AutoMobilePlanExecutor.refusalEvidence(frame, json).retryAfterMs,
+        DaemonToolResultParser.refusalEvidence(frame, json).retryAfterMs,
       )
     }
   }
@@ -162,7 +162,7 @@ class RefusalWireContractTest {
       assertEquals(
         row.name(),
         row.getValue("delayMs").longOrNullOrNull(),
-        AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(
+        DeviceWaitPolicy.deviceOwnedBackoffDelayMs(
           row.getValue("waits").jsonPrimitive.long.toInt(),
           row.getValue("waitedMs").jsonPrimitive.long,
           row.getValue("retryAfterMs").longOrNullOrNull(),
@@ -177,18 +177,18 @@ class RefusalWireContractTest {
     val finalizeWait = hintsTable().getValue("finalizeWait").jsonObject
     val waitBudgetMs = finalizeWait.getValue("waitBudgetMs").jsonPrimitive.long
     val codes = finalizeWait.getValue("codes").jsonArray.map { it.jsonPrimitive.content }.toSet()
-    assertEquals(waitBudgetMs, AutoMobilePlanExecutor.DEVICE_FINALIZE_WAIT_CAP_MS)
-    assertEquals(codes, AutoMobilePlanExecutor.FINALIZE_WAIT_CODES)
+    assertEquals(waitBudgetMs, DeviceWaitPolicy.DEVICE_FINALIZE_WAIT_CAP_MS)
+    assertEquals(codes, DeviceWaitPolicy.FINALIZE_WAIT_CODES)
     for (code in codes) {
       // A hint far past the cap still stops the wait exactly at the shared budget.
       assertEquals(
         code,
         1L,
-        AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(8, waitBudgetMs - 1, Long.MAX_VALUE, code),
+        DeviceWaitPolicy.deviceOwnedBackoffDelayMs(8, waitBudgetMs - 1, Long.MAX_VALUE, code),
       )
       assertNull(
         code,
-        AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(8, waitBudgetMs, Long.MAX_VALUE, code),
+        DeviceWaitPolicy.deviceOwnedBackoffDelayMs(8, waitBudgetMs, Long.MAX_VALUE, code),
       )
     }
   }
@@ -216,7 +216,7 @@ class RefusalWireContractTest {
     response: DaemonResponse,
     result: JsonElement,
   ) {
-    val evidence = AutoMobilePlanExecutor.refusalEvidence(response, json)
+    val evidence = DaemonToolResultParser.refusalEvidence(response, json)
     assertEquals(
       "$code: recovering",
       fields["recovering"] == JsonPrimitive(true),

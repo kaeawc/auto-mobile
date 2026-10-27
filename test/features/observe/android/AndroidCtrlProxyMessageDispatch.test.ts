@@ -22,7 +22,6 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
   const device: BootedDevice = {
     deviceId: "dispatch-test-device",
     platform: "android",
-    isEmulator: true,
     name: "Dispatch Test Device",
   };
   let timer: FakeTimer;
@@ -167,7 +166,9 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
       );
 
       const result = await pending;
-      expect(result.truncationReasons).toEqual(truncationReasons);
+      expect(result.truncationReasons).toEqual(
+        truncationReasons ? [...truncationReasons] : undefined,
+      );
       expect(result.elements).toEqual([]);
       expect(client.testHooks.requestManager.getPendingCount()).toBe(0);
       expect(timer.getCurrentTime()).toBe(0);
@@ -401,12 +402,15 @@ test("connected greeting records gesture display capability without gating core 
   );
   expect(await proxy.supportsCommand("gesture_display_id_v1")).toBe(false);
   expect(context.isCommandSupported?.("gesture_display_id_v1")).toBe(false);
-  proxy["supportedCommands"] = null;
+  proxy.connectionTestHooks.supportedCommands = null;
   expect(context.isCommandSupported?.("gesture_display_id_v1")).toBe(false);
 });
 
 test("display transition accepts only positive integer native fingerprints", () => {
-  const frame = { change: "changed", displayId: 4 };
+  const frame: NonNullable<ReturnType<typeof displayTransitionFromWire>> = {
+    change: "changed",
+    displayId: 4,
+  };
   const panelFingerprint = { width: 2076, height: 2152 };
   expect(displayTransitionFromWire({ ...frame, panelFingerprint })).toEqual({
     ...frame,

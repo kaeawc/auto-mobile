@@ -407,12 +407,23 @@ test.each(["stat", "readText"] as const)(
   "undecidable retained %s backs out without retrying P",
   (op) => {
     const f = retained();
-    const failure = spyOn(f.fs, op).mockImplementation((path) => {
+    const assertReadable = (path: string): void => {
       if (path === F) {
-        throw Object.assign(new Error("unreadable retained marker"), { code: "EACCES" });
+        const error: NodeJS.ErrnoException = new Error("unreadable retained marker");
+        error.code = "EACCES";
+        throw error;
       }
-      return FakeLockFileSystem.prototype[op].call(f.fs, path);
-    });
+    };
+    const failure =
+      op === "readText"
+        ? spyOn(f.fs, "readText").mockImplementation((path) => {
+            assertReadable(path);
+            return FakeLockFileSystem.prototype.readText.call(f.fs, path);
+          })
+        : spyOn(f.fs, "stat").mockImplementation((path) => {
+            assertReadable(path);
+            return FakeLockFileSystem.prototype.stat.call(f.fs, path);
+          });
     try {
       const acquirer = f.acquire(303);
       expect(acquirer.finish()).toBe(false);
@@ -1512,7 +1523,7 @@ test("S2: an acquire whose publication reuses a pending identity drops that entr
     // The filesystem reuses the doomed inode number within the same mtime for the new publication.
     const stat = spyOn(f.fs, "stat").mockImplementation((path) =>
       path.endsWith(".tmp")
-        ? { ino: doomed.ino, mtimeMs: doomed.mtimeMs }
+        ? { ino: BigInt(doomed.ino), mtimeMs: doomed.mtimeMs }
         : FakeLockFileSystem.prototype.stat.call(f.fs, path),
     );
     try {

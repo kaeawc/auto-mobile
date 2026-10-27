@@ -1,6 +1,3 @@
-// swiftlint:disable force_unwrapping
-// Force-unwrap is idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
-
 import Darwin
 @testable import ScreenCaptureCore
 import XCTest
@@ -143,7 +140,7 @@ final class FrameWriterTests: XCTestCase {
         XCTAssertEqual(writer.metrics().droppedFrames, 1)
     }
 
-    func testWritesHeaderFollowedByPayload() {
+    func testWritesHeaderFollowedByPayload() throws {
         let sink = BufferSink()
         let start = Date(timeIntervalSince1970: 0)
         let writer = FrameWriter(sink: sink, startTime: start)
@@ -154,12 +151,12 @@ final class FrameWriterTests: XCTestCase {
         // 24 bytes of BGRA: 2px × 3 rows × 4 bytes
         let payload = Array(0 ..< UInt8(bytesPerRow * height))
 
-        _ = payload.withUnsafeBufferPointer { ptr in
-            writer.write(
+        _ = try payload.withUnsafeBufferPointer { ptr in
+            try writer.write(
                 width: width,
                 height: height,
                 bytesPerRow: bytesPerRow,
-                baseAddress: UnsafeRawPointer(ptr.baseAddress!),
+                baseAddress: UnsafeRawPointer(XCTUnwrap(ptr.baseAddress)),
                 timestamp: Date(timeIntervalSince1970: 0.5)
             )
         }
@@ -174,19 +171,19 @@ final class FrameWriterTests: XCTestCase {
         XCTAssertEqual(Array(sink.data.dropFirst(FrameProtocol.headerSize)), payload)
     }
 
-    func testTimestampClampedToZeroForPriorStartTime() {
+    func testTimestampClampedToZeroForPriorStartTime() throws {
         let sink = BufferSink()
         let writer = FrameWriter(
             sink: sink,
             startTime: Date(timeIntervalSince1970: 100)
         )
         let payload: [UInt8] = [0, 1, 2, 3]
-        _ = payload.withUnsafeBufferPointer { ptr in
-            writer.write(
+        _ = try payload.withUnsafeBufferPointer { ptr in
+            try writer.write(
                 width: 1,
                 height: 1,
                 bytesPerRow: 4,
-                baseAddress: UnsafeRawPointer(ptr.baseAddress!),
+                baseAddress: UnsafeRawPointer(XCTUnwrap(ptr.baseAddress)),
                 timestamp: Date(timeIntervalSince1970: 0)
             )
         }
@@ -195,7 +192,7 @@ final class FrameWriterTests: XCTestCase {
         XCTAssertEqual(header?.timestampMs, 0)
     }
 
-    func testSlowSinkKeepsOnlyTheNewestPendingFrame() {
+    func testSlowSinkKeepsOnlyTheNewestPendingFrame() throws {
         let sink = BlockingPayloadSink()
         let writer = FrameWriter(
             sink: sink,
@@ -205,15 +202,33 @@ final class FrameWriterTests: XCTestCase {
         let stale: [UInt8] = [0x22, 0x22, 0x22, 0x22]
         let newest: [UInt8] = [0x33, 0x33, 0x33, 0x33]
 
-        first.withUnsafeBufferPointer { ptr in
-            XCTAssertTrue(writer.write(width: 1, height: 1, bytesPerRow: 4, baseAddress: ptr.baseAddress!))
+        try first.withUnsafeBufferPointer { ptr in
+            let baseAddress = try XCTUnwrap(ptr.baseAddress)
+            XCTAssertTrue(writer.write(
+                width: 1,
+                height: 1,
+                bytesPerRow: 4,
+                baseAddress: baseAddress
+            ))
         }
         XCTAssertTrue(sink.waitForFirstPayload())
-        stale.withUnsafeBufferPointer { ptr in
-            XCTAssertTrue(writer.write(width: 1, height: 1, bytesPerRow: 4, baseAddress: ptr.baseAddress!))
+        try stale.withUnsafeBufferPointer { ptr in
+            let baseAddress = try XCTUnwrap(ptr.baseAddress)
+            XCTAssertTrue(writer.write(
+                width: 1,
+                height: 1,
+                bytesPerRow: 4,
+                baseAddress: baseAddress
+            ))
         }
-        newest.withUnsafeBufferPointer { ptr in
-            XCTAssertTrue(writer.write(width: 1, height: 1, bytesPerRow: 4, baseAddress: ptr.baseAddress!))
+        try newest.withUnsafeBufferPointer { ptr in
+            let baseAddress = try XCTUnwrap(ptr.baseAddress)
+            XCTAssertTrue(writer.write(
+                width: 1,
+                height: 1,
+                bytesPerRow: 4,
+                baseAddress: baseAddress
+            ))
         }
 
         let metrics = writer.metrics()
@@ -229,7 +244,7 @@ final class FrameWriterTests: XCTestCase {
         XCTAssertEqual(writer.metrics().frameQueueDepth, 0)
     }
 
-    func testSlowSinkDrainsOrderedAudioBeforeAnotherPendingFrame() {
+    func testSlowSinkDrainsOrderedAudioBeforeAnotherPendingFrame() throws {
         let sink = BlockingPayloadSink()
         let writer = FrameWriter(
             sink: sink,
@@ -240,15 +255,27 @@ final class FrameWriterTests: XCTestCase {
         let firstAudio = Data([0xAA, 0xAA, 0xAA, 0xAA])
         let secondAudio = Data([0xBB, 0xBB, 0xBB, 0xBB])
 
-        first.withUnsafeBufferPointer { ptr in
-            XCTAssertTrue(writer.write(width: 1, height: 1, bytesPerRow: 4, baseAddress: ptr.baseAddress!))
+        try first.withUnsafeBufferPointer { ptr in
+            let baseAddress = try XCTUnwrap(ptr.baseAddress)
+            XCTAssertTrue(writer.write(
+                width: 1,
+                height: 1,
+                bytesPerRow: 4,
+                baseAddress: baseAddress
+            ))
         }
         XCTAssertTrue(sink.waitForFirstPayload())
 
         writer.writeAudio(pcm16le: firstAudio)
         writer.writeAudio(pcm16le: secondAudio)
-        newest.withUnsafeBufferPointer { ptr in
-            XCTAssertTrue(writer.write(width: 1, height: 1, bytesPerRow: 4, baseAddress: ptr.baseAddress!))
+        try newest.withUnsafeBufferPointer { ptr in
+            let baseAddress = try XCTUnwrap(ptr.baseAddress)
+            XCTAssertTrue(writer.write(
+                width: 1,
+                height: 1,
+                bytesPerRow: 4,
+                baseAddress: baseAddress
+            ))
         }
 
         XCTAssertEqual(writer.metrics().bytesQueued, 12)
@@ -262,18 +289,18 @@ final class FrameWriterTests: XCTestCase {
         XCTAssertEqual(writer.metrics().bytesQueued, 0)
     }
 
-    func testDropsFrameWhenPayloadLengthOverflows() {
+    func testDropsFrameWhenPayloadLengthOverflows() throws {
         let sink = BufferSink()
         let writer = FrameWriter(sink: sink, startTime: Date(timeIntervalSince1970: 0))
         let scratch: [UInt8] = [0]
 
-        let accepted = scratch.withUnsafeBufferPointer { ptr in
+        let accepted = try scratch.withUnsafeBufferPointer { ptr in
             // bytesPerRow * height overflows Int; the frame must drop, not trap.
-            writer.write(
+            try writer.write(
                 width: 1,
                 height: 2,
                 bytesPerRow: Int.max,
-                baseAddress: UnsafeRawPointer(ptr.baseAddress!),
+                baseAddress: UnsafeRawPointer(XCTUnwrap(ptr.baseAddress)),
                 timestamp: Date(timeIntervalSince1970: 0.1)
             )
         }
@@ -284,18 +311,18 @@ final class FrameWriterTests: XCTestCase {
         XCTAssertEqual(writer.metrics().droppedFrames, 1)
     }
 
-    func testDropsFrameWhenDimensionExceedsUInt32() {
+    func testDropsFrameWhenDimensionExceedsUInt32() throws {
         let sink = BufferSink()
         let writer = FrameWriter(sink: sink, startTime: Date(timeIntervalSince1970: 0))
         let scratch: [UInt8] = [0, 0, 0, 0]
 
-        let accepted = scratch.withUnsafeBufferPointer { ptr in
+        let accepted = try scratch.withUnsafeBufferPointer { ptr in
             // Small payload passes the cap, but width does not fit UInt32.
-            writer.write(
+            try writer.write(
                 width: Int(UInt32.max) + 1,
                 height: 1,
                 bytesPerRow: 4,
-                baseAddress: UnsafeRawPointer(ptr.baseAddress!),
+                baseAddress: UnsafeRawPointer(XCTUnwrap(ptr.baseAddress)),
                 timestamp: Date(timeIntervalSince1970: 0.1)
             )
         }
@@ -306,7 +333,7 @@ final class FrameWriterTests: XCTestCase {
         XCTAssertEqual(writer.metrics().droppedFrames, 1)
     }
 
-    func testSlowSinkDiscardsEmptyAudioRecords() {
+    func testSlowSinkDiscardsEmptyAudioRecords() throws {
         let sink = BlockingPayloadSink()
         let writer = FrameWriter(
             sink: sink,
@@ -314,8 +341,14 @@ final class FrameWriterTests: XCTestCase {
         )
         let first: [UInt8] = [0x11, 0x11, 0x11, 0x11]
 
-        first.withUnsafeBufferPointer { ptr in
-            XCTAssertTrue(writer.write(width: 1, height: 1, bytesPerRow: 4, baseAddress: ptr.baseAddress!))
+        try first.withUnsafeBufferPointer { ptr in
+            let baseAddress = try XCTUnwrap(ptr.baseAddress)
+            XCTAssertTrue(writer.write(
+                width: 1,
+                height: 1,
+                bytesPerRow: 4,
+                baseAddress: baseAddress
+            ))
         }
         XCTAssertTrue(sink.waitForFirstPayload())
 

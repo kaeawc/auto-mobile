@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
 import {
   directlyExecutesSdkManager,
@@ -171,7 +172,7 @@ describe("sdkmanager execution boundary (issue #4052)", () => {
   });
 
   test("fires on the real SdkManagerClient, a true positive on production code (issue #4341)", () => {
-    const client = readFileSync(join(ROOT, CLIENT), "utf8");
+    const client = readGuardFile(join(ROOT, CLIENT));
     expect(directlyExecutesSdkManager(client)).toBe(true);
   });
 
@@ -228,10 +229,7 @@ describe("sdkmanager execution boundary (issue #4052)", () => {
   });
 
   test("does not allow tool discovery to execute sdkmanager for version probing", () => {
-    const detection = readFileSync(
-      join(ROOT, "src/utils/android-cmdline-tools/detection.ts"),
-      "utf8",
-    );
+    const detection = readGuardFile(join(ROOT, "src/utils/android-cmdline-tools/detection.ts"));
     expect(directlyExecutesSdkManager(detection)).toBe(false);
     // The predicate above duplicates the src-wide scan, so keep one pin the detector cannot
     // give: a version probe routed through a launcher this file does not recognize.

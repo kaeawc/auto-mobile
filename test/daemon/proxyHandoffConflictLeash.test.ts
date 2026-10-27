@@ -7,13 +7,13 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { LIVE_OWNER_HANDOFF_ALLOWANCE_MS } from "../../src/daemon/proxyLivenessRecovery";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
   SUSPECT_GRACE_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -34,6 +34,7 @@ const INTERVAL_MS = PROXY_HEARTBEAT_INTERVAL_MS;
 const PROXY_LEASE_MS = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS;
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
+  releaseDevice: async () => {},
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
 };
 

@@ -78,14 +78,7 @@ private enum SourceInvariantScanner {
                     code.append(character)
                 }
             } else if blockDepth > 0 {
-                if character == "/", next == "*" {
-                    blockDepth += 1
-                    index += 1
-                } else if character == "*", next == "/" {
-                    blockDepth -= 1
-                    index += 1
-                    if blockDepth == 0 { code.append(" ") }
-                }
+                consumeBlockComment(character, next: next, depth: &blockDepth, index: &index, code: &code)
             } else if quoted {
                 code.append(character)
                 if character == "\\", let next {
@@ -107,5 +100,22 @@ private enum SourceInvariantScanner {
             index += 1
         }
         return code
+    }
+
+    private static func consumeBlockComment(
+        _ character: Character,
+        next: Character?,
+        depth: inout Int,
+        index: inout Int,
+        code: inout String
+    ) {
+        if character == "/", next == "*" {
+            depth += 1
+            index += 1
+        } else if character == "*", next == "/" {
+            depth -= 1
+            index += 1
+            if depth == 0 { code.append(" ") }
+        }
     }
 }

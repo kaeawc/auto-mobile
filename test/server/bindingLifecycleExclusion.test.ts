@@ -1,5 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -18,12 +18,12 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
@@ -79,7 +79,7 @@ describe("binding lifecycle and input exclusion", () => {
     ...(force === undefined ? {} : { force }),
   });
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     ToolRegistry.clearTools();
     const timer = new FakeTimer();
     manager = new RecordingKillDeviceManager();
@@ -116,7 +116,19 @@ describe("binding lifecycle and input exclusion", () => {
     DaemonState.getInstance().initialize(sessionManager, pool);
     await sessionManager.createSession("other-session", freeDevice.deviceId, "ios");
     registerDeviceTools();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     ToolRegistry.clearTools();
@@ -126,163 +138,184 @@ describe("binding lifecycle and input exclusion", () => {
     sessionManager.stopCleanupTimer();
   });
 
-  test("killDevice of an idle binding device is refused for sessionless, other-session and forced callers", async () => {
-    expect(sessionManager.getSessionForDevice(slotDevice.deviceId)).toBeNull();
-    for (const [args, routing] of [
-      [{ device: slotDevice }, undefined],
-      [{ device: slotDevice }, "other-session"],
-      [{ device: slotDevice, force: true }, "other-session"],
-      [{ device: slotDevice, force: true }, undefined],
-    ] as const) {
-      const error = await kill(args, routing);
-      expect(error).toBeInstanceOf(DeviceAssignedToBindingError);
-      expect(
-        JSON.parse(
-          shapeToolCallError(error, { toolName: "killDevice", source: "MCP" }).content[0].text,
-        ),
-      ).toMatchObject({
-        success: false,
-        code: DEVICE_ASSIGNED_TO_BINDING_CODE,
-        deviceId: slotDevice.deviceId,
-        scopeKey: binding.scopeKey,
-        declaredBinding: 0,
-        retryable: false,
-      });
-    }
-    expect(manager.killed).toEqual([]);
-  });
-
-  test("the binding's execution session reaches the platform kill; unassigned devices are unaffected", async () => {
-    expect(String(await kill({ device: slotDevice }, exec))).toContain("platform kill reached");
-    await sessionManager.releaseSession("other-session", "explicit-release");
-    expect(String(await kill({ device: freeDevice }))).toContain("platform kill reached");
-
-    expect(manager.killed).toEqual([slotDevice.deviceId, freeDevice.deviceId]);
-  });
-
-  test("deleteDevice of the binding device fails its precondition with binding evidence, force or not", async () => {
-    for (const force of [undefined, true]) {
-      const response = (await tool("deleteDevice")(deleteArgs(force))) as {
-        content: Array<{ text: string }>;
-      };
-      const body = JSON.parse(response.content[0].text) as Record<string, unknown>;
-      expect(body).toMatchObject({
-        success: false,
-        state: "failed",
-        failure: {
+  arranged(
+    "killDevice of an idle binding device is refused for sessionless, other-session and forced callers",
+    async () => {
+      expect(sessionManager.getSessionForDevice(slotDevice.deviceId)).toBeNull();
+      for (const [args, routing] of [
+        [{ device: slotDevice }, undefined],
+        [{ device: slotDevice }, "other-session"],
+        [{ device: slotDevice, force: true }, "other-session"],
+        [{ device: slotDevice, force: true }, undefined],
+      ] as const) {
+        const error = await kill(args, routing);
+        expect(error).toBeInstanceOf(DeviceAssignedToBindingError);
+        expect(
+          JSON.parse(
+            shapeToolCallError(error, { toolName: "killDevice", source: "MCP" }).content[0].text,
+          ),
+        ).toMatchObject({
+          success: false,
           code: DEVICE_ASSIGNED_TO_BINDING_CODE,
-          phase: "precondition",
+          deviceId: slotDevice.deviceId,
           scopeKey: binding.scopeKey,
           declaredBinding: 0,
-          stableId: slotDevice.deviceId,
           retryable: false,
-        },
+        });
+      }
+      expect(manager.killed).toEqual([]);
+    },
+  );
+
+  arranged(
+    "the binding's execution session reaches the platform kill; unassigned devices are unaffected",
+    async () => {
+      expect(String(await kill({ device: slotDevice }, exec))).toContain("platform kill reached");
+      await sessionManager.releaseSession("other-session", "explicit-release");
+      expect(String(await kill({ device: freeDevice }))).toContain("platform kill reached");
+
+      expect(manager.killed).toEqual([slotDevice.deviceId, freeDevice.deviceId]);
+    },
+  );
+
+  arranged(
+    "deleteDevice of the binding device fails its precondition with binding evidence, force or not",
+    async () => {
+      for (const force of [undefined, true]) {
+        const response = (await tool("deleteDevice")(deleteArgs(force))) as {
+          content: Array<{ text: string }>;
+        };
+        const body = JSON.parse(response.content[0].text) as Record<string, unknown>;
+        expect(body).toMatchObject({
+          success: false,
+          state: "failed",
+          failure: {
+            code: DEVICE_ASSIGNED_TO_BINDING_CODE,
+            phase: "precondition",
+            scopeKey: binding.scopeKey,
+            declaredBinding: 0,
+            stableId: slotDevice.deviceId,
+            retryable: false,
+          },
+        });
+      }
+      expect(manager.killed).toEqual([]);
+      expect(manager.wasMethodCalled("destroyDevice")).toBe(false);
+    },
+  );
+
+  arranged(
+    "a refused deleteDevice does not preempt the binding acquisition preparing the device (#11271)",
+    async () => {
+      // The managed acquisition booting the slot device holds its lifecycle lease.
+      const acquisition = await lifecycleCoordinator.reserve(
+        { kind: "stable", platform: "ios", stableId: slotDevice.deviceId },
+        { operation: "start", deadlineMs: 60_000 },
+      );
+
+      const pending = tool("deleteDevice")(deleteArgs()) as Promise<{
+        content: Array<{ text: string }>;
+      }>;
+      let settled = false;
+      void pending.then(() => {
+        settled = true;
       });
-    }
-    expect(manager.killed).toEqual([]);
-    expect(manager.wasMethodCalled("destroyDevice")).toBe(false);
-  });
+      for (let i = 0; i < 20 && !settled; i++) {
+        await Promise.resolve();
+        await new Promise((resolve) => setImmediate(resolve));
+      }
 
-  test("a refused deleteDevice does not preempt the binding acquisition preparing the device (#11271)", async () => {
-    // The managed acquisition booting the slot device holds its lifecycle lease.
-    const acquisition = await lifecycleCoordinator.reserve(
-      { kind: "stable", platform: "ios", stableId: slotDevice.deviceId },
-      { operation: "start", deadlineMs: 60_000 },
-    );
+      // Refused before reserving the teardown lease: the acquisition keeps running.
+      expect(acquisition.signal.aborted).toBe(false);
+      acquisition.release();
+      const body = JSON.parse((await pending).content[0].text) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        success: false,
+        failure: { code: DEVICE_ASSIGNED_TO_BINDING_CODE, phase: "precondition" },
+      });
+      expect(settled).toBe(true);
+    },
+  );
 
-    const pending = tool("deleteDevice")(deleteArgs()) as Promise<{
-      content: Array<{ text: string }>;
-    }>;
-    let settled = false;
-    void pending.then(() => {
-      settled = true;
-    });
-    for (let i = 0; i < 20 && !settled; i++) {
-      await Promise.resolve();
-      await new Promise((resolve) => setImmediate(resolve));
-    }
+  arranged(
+    "a deleteDevice refused for a device another session holds does not preempt the lease holder (#11274)",
+    async () => {
+      // freeDevice is held by "other-session"; a sessionless caller is refused, and must be
+      // refused before it reserves the teardown lease (reserving aborts the current lease holder).
+      const inFlight = await lifecycleCoordinator.reserve(
+        { kind: "stable", platform: "ios", stableId: freeDevice.deviceId },
+        { operation: "start", deadlineMs: 60_000 },
+      );
 
-    // Refused before reserving the teardown lease: the acquisition keeps running.
-    expect(acquisition.signal.aborted).toBe(false);
-    acquisition.release();
-    const body = JSON.parse((await pending).content[0].text) as Record<string, unknown>;
-    expect(body).toMatchObject({
-      success: false,
-      failure: { code: DEVICE_ASSIGNED_TO_BINDING_CODE, phase: "precondition" },
-    });
-    expect(settled).toBe(true);
-  });
+      const pending = tool("deleteDevice")({
+        ...deleteArgs(),
+        target: { platform: "ios", isVirtual: true, stableId: freeDevice.deviceId },
+      }) as Promise<{ content: Array<{ text: string }> }>;
+      let settled = false;
+      void pending.then(() => {
+        settled = true;
+      });
+      for (let i = 0; i < 20 && !settled; i++) {
+        await Promise.resolve();
+        await new Promise((resolve) => setImmediate(resolve));
+      }
 
-  test("a deleteDevice refused for a device another session holds does not preempt the lease holder (#11274)", async () => {
-    // freeDevice is held by "other-session"; a sessionless caller is refused, and must be
-    // refused before it reserves the teardown lease (reserving aborts the current lease holder).
-    const inFlight = await lifecycleCoordinator.reserve(
-      { kind: "stable", platform: "ios", stableId: freeDevice.deviceId },
-      { operation: "start", deadlineMs: 60_000 },
-    );
+      expect(inFlight.signal.aborted).toBe(false);
+      inFlight.release();
+      const body = JSON.parse((await pending).content[0].text) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        success: false,
+        failure: { code: "device_owned_by_other_session", phase: "precondition" },
+      });
+      expect(settled).toBe(true);
+      expect(manager.wasMethodCalled("destroyDevice")).toBe(false);
+    },
+  );
 
-    const pending = tool("deleteDevice")({
-      ...deleteArgs(),
-      target: { platform: "ios", isVirtual: true, stableId: freeDevice.deviceId },
-    }) as Promise<{ content: Array<{ text: string }> }>;
-    let settled = false;
-    void pending.then(() => {
-      settled = true;
-    });
-    for (let i = 0; i < 20 && !settled; i++) {
-      await Promise.resolve();
-      await new Promise((resolve) => setImmediate(resolve));
-    }
+  arranged(
+    "getApple of a stopped binding simulator is refused before any boot or bind",
+    async () => {
+      await assignBindingDevice(registry, "ios", "IOS-STOPPED", "runner-b");
+      manager.setDeviceImages("ios", [
+        { name: "iPhone Stopped", platform: "ios", deviceId: "IOS-STOPPED", isRunning: false },
+      ]);
 
-    expect(inFlight.signal.aborted).toBe(false);
-    inFlight.release();
-    const body = JSON.parse((await pending).content[0].text) as Record<string, unknown>;
-    expect(body).toMatchObject({
-      success: false,
-      failure: { code: "device_owned_by_other_session", phase: "precondition" },
-    });
-    expect(settled).toBe(true);
-    expect(manager.wasMethodCalled("destroyDevice")).toBe(false);
-  });
+      const error = await tool("getApple")({ udid: "IOS-STOPPED" }).catch(
+        (caught: unknown) => caught,
+      );
 
-  test("getApple of a stopped binding simulator is refused before any boot or bind", async () => {
-    await assignBindingDevice(registry, "ios", "IOS-STOPPED", "runner-b");
-    manager.setDeviceImages("ios", [
-      { name: "iPhone Stopped", platform: "ios", deviceId: "IOS-STOPPED", isRunning: false },
-    ]);
+      expect((error as DeviceAssignedToBindingError).code).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
+      expect(manager.wasMethodCalled("startDevice")).toBe(false);
+      expect(sessionManager.getSessionForDevice("IOS-STOPPED")).toBeNull();
+    },
+  );
 
-    const error = await tool("getApple")({ udid: "IOS-STOPPED" }).catch(
-      (caught: unknown) => caught,
-    );
+  arranged(
+    "input frames to an idle binding device are refused except from the binding's execution",
+    async () => {
+      const send = (requesterSessionUuid: string | undefined) =>
+        assertInputNotOnForeignBindingDevice({
+          action: "input/tap",
+          deviceId: slotDevice.deviceId,
+          platform: "ios",
+          requesterSessionUuid,
+          sessionManager,
+          gate: DaemonState.getInstance().getDevicePool(),
+        });
 
-    expect((error as DeviceAssignedToBindingError).code).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
-    expect(manager.wasMethodCalled("startDevice")).toBe(false);
-    expect(sessionManager.getSessionForDevice("IOS-STOPPED")).toBeNull();
-  });
-
-  test("input frames to an idle binding device are refused except from the binding's execution", async () => {
-    const send = (requesterSessionUuid: string | undefined) =>
-      assertInputNotOnForeignBindingDevice({
+      for (const requester of [undefined, "other-session"]) {
+        const error = await send(requester).catch((caught: unknown) => caught);
+        expect((error as DeviceAssignedToBindingError).code).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
+      }
+      await send(exec);
+      await assertInputNotOnForeignBindingDevice({
         action: "input/tap",
-        deviceId: slotDevice.deviceId,
+        deviceId: freeDevice.deviceId,
         platform: "ios",
-        requesterSessionUuid,
+        requesterSessionUuid: undefined,
         sessionManager,
         gate: DaemonState.getInstance().getDevicePool(),
       });
-
-    for (const requester of [undefined, "other-session"]) {
-      const error = await send(requester).catch((caught: unknown) => caught);
-      expect((error as DeviceAssignedToBindingError).code).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
-    }
-    await send(exec);
-    await assertInputNotOnForeignBindingDevice({
-      action: "input/tap",
-      deviceId: freeDevice.deviceId,
-      platform: "ios",
-      requesterSessionUuid: undefined,
-      sessionManager,
-      gate: DaemonState.getInstance().getDevicePool(),
-    });
-  });
+    },
+  );
 });

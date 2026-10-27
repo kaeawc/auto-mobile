@@ -1,5 +1,5 @@
 import { isErrored } from "./deviceBinding";
-import { isProductBrokerDevice } from "./sessionBroker/persistedIdentity";
+import { isExcludedFromAutoStart } from "./deviceAutoStartExclusion";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
@@ -21,7 +21,7 @@ import type { DevicePoolRefreshResult } from "./devicePoolRefresh";
 import type { DeviceRuntimeIdentity } from "./deviceRuntimeIdentity";
 import type { IdentityEvidence } from "../devices/deviceIdentityEvidence";
 import type { ForeignDeviceOwnership } from "./foreignDeviceOwnership";
-import type { ManagedDeviceRef, BindingExclusion } from "./sessionBroker/provisioning/exclusion";
+import type { BindingExclusion } from "./sessionBroker/provisioning/exclusion";
 
 export interface DeviceAutoStartPort {
   readonly criteriaMatcher: Pick<
@@ -78,14 +78,6 @@ export interface DeviceAutoStartPort {
     timer: Pick<Timer, "setTimeout" | "clearTimeout">,
     cancelOwnedBoot: () => Promise<void>,
   ): Promise<BootedDevice>;
-}
-
-/** Managed identity includes the name: iOS creation is excluded before its UDID is recorded. */
-function managedRefForImage(image: DeviceInfo): ManagedDeviceRef {
-  return {
-    platform: image.platform,
-    stableIds: [image.name, image.deviceId],
-  };
 }
 
 export class DeviceAutoStart {
@@ -630,8 +622,7 @@ export class DeviceAutoStart {
   isExcludedFromAutoStart(image: DeviceInfo): boolean {
     return (
       this.isAutoStartSuppressed(image) ||
-      isProductBrokerDevice(image.name) ||
-      this.port.bindingExclusion?.holderOf(managedRefForImage(image)) !== undefined
+      isExcludedFromAutoStart(image, this.port.bindingExclusion)
     );
   }
 

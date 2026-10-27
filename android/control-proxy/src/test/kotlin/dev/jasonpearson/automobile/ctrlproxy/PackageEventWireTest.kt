@@ -1,6 +1,9 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -9,6 +12,36 @@ import org.junit.Test
 
 /** Wire contract for `package_event` (#10067): `userId` is the Android user, not the app uid. */
 class PackageEventWireTest {
+  private data class PackageEventFlags(
+    val uid: Int?,
+    val isSystem: Boolean?,
+    val removedForAllUsers: Boolean,
+  )
+
+  private fun packageEvent(
+    action: String,
+    packageName: String,
+    userId: Int,
+    flags: PackageEventFlags,
+  ): JsonObject {
+    val frame =
+      Json.parseToJsonElement(
+          packageEventFrame(
+            PackageEventResult(
+              timestamp = 1L,
+              action = action,
+              packageName = packageName,
+              userId = userId,
+              uid = flags.uid,
+              isSystem = flags.isSystem,
+              removedForAllUsers = flags.removedForAllUsers,
+            ),
+          ),
+        )
+        .jsonObject
+    assertEquals("package_event", frame.getValue("type").jsonPrimitive.content)
+    return frame.getValue("event").jsonObject
+  }
 
   @Test
   fun `a primary-user app uid maps to user 0`() {
@@ -28,7 +61,13 @@ class PackageEventWireTest {
 
   @Test
   fun `the event carries the user id and the raw uid`() {
-    val event = packageEventJson("added", "com.example.app", 10, 1010234, false, false)
+    val event =
+      packageEvent(
+        "added",
+        "com.example.app",
+        10,
+        flags = PackageEventFlags(uid = 1010234, isSystem = false, removedForAllUsers = false),
+      )
 
     assertEquals(10, event.getValue("userId").jsonPrimitive.int)
     assertEquals(1010234, event.getValue("uid").jsonPrimitive.int)
@@ -38,7 +77,13 @@ class PackageEventWireTest {
 
   @Test
   fun `the uid marker is omitted when the intent had no uid`() {
-    val event = packageEventJson("removed", "com.example.app", 0, null, null, true)
+    val event =
+      packageEvent(
+        "removed",
+        "com.example.app",
+        0,
+        flags = PackageEventFlags(uid = null, isSystem = null, removedForAllUsers = true),
+      )
 
     assertNull(event["uid"])
     assertNull(event["isSystem"])

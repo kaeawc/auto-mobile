@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscription
 import dev.jasonpearson.automobile.protocol.AddHighlight
+import dev.jasonpearson.automobile.protocol.AdvancePrototypeClock
 import dev.jasonpearson.automobile.protocol.ClearPreferences
 import dev.jasonpearson.automobile.protocol.ClearPrototypeStorage
 import dev.jasonpearson.automobile.protocol.DeleteSavedPrototype
@@ -115,200 +116,32 @@ class CtrlProxyMessageHandler(
   private val json = Json { ignoreUnknownKeys = true }
 
   override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
-    // Exhaustive over the sealed hierarchy: adding a new WebSocketRequest subclass without a branch
-    // here is a compile error, which is the whole point of retiring the string-typed `when`.
+    return when (RequestRoute(request).group) {
+      RequestGroup.HIERARCHY -> handleHierarchy(request)
+      RequestGroup.TEXT -> handleText(request)
+      RequestGroup.NODE -> handleNode(request)
+      RequestGroup.DEVICE -> handleDevice(request)
+      RequestGroup.PROTOTYPE -> handlePrototype(request)
+      RequestGroup.STORAGE -> StorageRequests().handleStorage(request)
+      RequestGroup.SYSTEM -> handleSystem(request)
+      RequestGroup.GESTURE -> GestureRequests().handleGesture(request)
+    }
+  }
+
+  private suspend fun handleHierarchy(request: WebSocketRequest): WebSocketResponse? {
     when (request) {
       is RequestHierarchy -> actions.requestHierarchy(request)
       is RequestHierarchyIfStale ->
         actions.requestHierarchyIfStale(request.sinceTimestamp, request.requestId)
       is SetHierarchyInterval -> actions.setHierarchyInterval(request.intervalMs)
       is RequestScreenshot -> actions.requestScreenshot(request)
-      is RequestSwipe -> {
-        if (request.displayId != null) {
-          GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
-            return SwipeResult(
-              timestamp = System.currentTimeMillis(),
-              requestId = request.requestId,
-              success = false,
-              totalTimeMs = 0L,
-              error = error,
-            )
-          }
-        }
-        firstNonFinite(
-            "x1" to request.x1,
-            "y1" to request.y1,
-            "x2" to request.x2,
-            "y2" to request.y2,
-          )
-          ?.let { (field, value) ->
-            return swipeError(request.requestId, field, value)
-          }
-        actions.requestSwipe(request)
-      }
-      is RequestTapCoordinates -> {
-        if (request.displayId != null) {
-          GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
-            return TapCoordinatesResult(
-              timestamp = System.currentTimeMillis(),
-              requestId = request.requestId,
-              success = false,
-              totalTimeMs = 0L,
-              error = error,
-            )
-          }
-        }
-        firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
-          return TapCoordinatesResult(
-            timestamp = System.currentTimeMillis(),
-            requestId = request.requestId,
-            success = false,
-            totalTimeMs = 0L,
-            error = nonFiniteError(field, value),
-          )
-        }
-        if (request.doubleTap) {
-          actions.requestDoubleTapCoordinates(
-            request.requestId,
-            request.x,
-            request.y,
-            request.frameContext,
-            request.displayId,
-          )
-        } else {
-          actions.requestTapCoordinates(request)
-        }
-      }
-      is RequestTwoFingerSwipe -> {
-        if (request.displayId != null) {
-          GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
-            return SwipeResult(
-              timestamp = System.currentTimeMillis(),
-              requestId = request.requestId,
-              success = false,
-              totalTimeMs = 0L,
-              error = error,
-            )
-          }
-        }
-        multiFingerCountError(request.fingerCount)?.let { error ->
-          return SwipeResult(
-            timestamp = System.currentTimeMillis(),
-            requestId = request.requestId,
-            success = false,
-            totalTimeMs = 0L,
-            error = error,
-          )
-        }
-        // Two-finger swipe shares the swipe_result response type. `offset` is an Int (a pixel gap),
-        // so it cannot be non-finite and is not guarded.
-        firstNonFinite(
-            "x1" to request.x1,
-            "y1" to request.y1,
-            "x2" to request.x2,
-            "y2" to request.y2,
-          )
-          ?.let { (field, value) ->
-            return swipeError(request.requestId, field, value)
-          }
-        actions.requestTwoFingerSwipe(request)
-      }
-      is RequestDrag -> {
-        if (request.displayId != null) {
-          GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
-            return DragResult(
-              timestamp = System.currentTimeMillis(),
-              requestId = request.requestId,
-              success = false,
-              totalTimeMs = 0L,
-              error = error,
-            )
-          }
-        }
-        firstNonFinite(
-            "x1" to request.x1,
-            "y1" to request.y1,
-            "x2" to request.x2,
-            "y2" to request.y2,
-          )
-          ?.let { (field, value) ->
-            return DragResult(
-              timestamp = System.currentTimeMillis(),
-              requestId = request.requestId,
-              success = false,
-              totalTimeMs = 0L,
-              error = nonFiniteError(field, value),
-            )
-          }
-        actions.requestDrag(request)
-      }
-      is RequestPinch -> {
-        if (request.displayId != null) {
-          GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
-            return PinchResult(
-              timestamp = System.currentTimeMillis(),
-              requestId = request.requestId,
-              success = false,
-              totalTimeMs = 0L,
-              error = error,
-            )
-          }
-        }
-        // `rotationDegrees` is a Float (not a coordinate) but still flows into the gesture-path
-        // math, so a computed non-finite value is guarded too (AC #4 of #2964).
-        firstNonFinite(
-            "centerX" to request.centerX,
-            "centerY" to request.centerY,
-            "distanceStart" to request.distanceStart,
-            "distanceEnd" to request.distanceEnd,
-            "rotationDegrees" to request.rotationDegrees.toDouble(),
-          )
-          ?.let { (field, value) ->
-            return PinchResult(
-              timestamp = System.currentTimeMillis(),
-              requestId = request.requestId,
-              success = false,
-              totalTimeMs = 0L,
-              error = nonFiniteError(field, value),
-            )
-          }
-        actions.requestPinch(request)
-      }
-      is RequestGestureStart -> {
-        if (request.displayId != null) {
-          GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
-            return SwipeResult(
-              timestamp = System.currentTimeMillis(),
-              requestId = request.requestId,
-              success = false,
-              totalTimeMs = 0L,
-              error = error,
-            )
-          }
-        }
-        firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
-          return swipeError(request.requestId, field, value)
-        }
-        actions.requestGestureStart(request)
-      }
-      is RequestGestureMove -> {
-        firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
-          return swipeError(request.requestId, field, value)
-        }
-        actions.requestGestureMove(request.requestId, request.gestureId, request.x, request.y)
-      }
-      is RequestGestureEnd -> {
-        firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
-          return swipeError(request.requestId, field, value)
-        }
-        actions.requestGestureEnd(
-          request.requestId,
-          request.gestureId,
-          request.x,
-          request.y,
-          request.cancel,
-        )
-      }
+      else -> error("Unexpected hierarchy request")
+    }
+    return null
+  }
+
+  private suspend fun handleText(request: WebSocketRequest): WebSocketResponse? {
+    when (request) {
       is RequestSetText -> actions.requestSetText(request)
       is RequestInsertTextState -> actions.requestInsertTextState(request.requestId)
       is RequestInsertText -> actions.requestInsertText(request)
@@ -322,12 +155,20 @@ class CtrlProxyMessageHandler(
       is RequestImeAction -> actions.requestImeAction(request)
       is RequestSelectAll -> actions.requestSelectAll(request.requestId)
       is RequestClickFocusedInput -> actions.requestClickFocusedInput(request.requestId)
+      else -> error("Unexpected text request")
+    }
+    return null
+  }
+
+  private suspend fun handleNode(request: WebSocketRequest): WebSocketResponse? {
+    when (request) {
       is RequestAction ->
         actions.requestAction(
           request.requestId,
           request.action,
           request.resourceId,
           request.selector,
+          NodeActionArguments(customAction = request.customAction, progress = request.progress),
         )
       is RequestActivateAccessibilityLink ->
         actions.requestActivateAccessibilityLink(
@@ -344,27 +185,24 @@ class CtrlProxyMessageHandler(
         )
       is RequestClipboard ->
         actions.requestClipboard(request.requestId, request.action, request.text)
-      is InstallCaCert ->
-        if (request.certificate.isNotBlank()) {
-          actions.installCaCert(request.requestId, request.certificate)
-        } else {
-          log("install_ca_cert missing certificate; ignoring")
-        }
-      is InstallCaCertFromPath ->
-        if (request.devicePath.isNotBlank()) {
-          actions.installCaCertFromPath(request.requestId, request.devicePath)
-        } else {
-          log("install_ca_cert_from_path missing devicePath; ignoring")
-        }
-      is RemoveCaCert ->
-        if (!request.alias.isNullOrBlank() || !request.certificate.isNullOrBlank()) {
-          actions.removeCaCert(request.requestId, request.alias, request.certificate)
-        } else {
-          log("remove_ca_cert missing alias and certificate; ignoring")
-        }
       is RequestGlobalAction -> actions.requestGlobalAction(request)
       is ValidateFrameContext ->
         actions.validateFrameContext(request.requestId, request.frameContext)
+      is GetCurrentFocus -> actions.getCurrentFocus(request.requestId)
+      is GetTraversalOrder -> actions.getTraversalOrder(request.requestId)
+      is AddHighlight ->
+        actions.addHighlight(request.requestId, request.id, request.shape?.toModel())
+
+      else -> error("Unexpected node request")
+    }
+    return null
+  }
+
+  private suspend fun handleDevice(request: WebSocketRequest): WebSocketResponse? {
+    when (request) {
+      is InstallCaCert,
+      is InstallCaCertFromPath,
+      is RemoveCaCert -> handleCertificate(request)
       is RequestDeviceInfo -> actions.requestDeviceInfo(request.requestId)
       is GetDeviceOwnerStatus -> actions.getDeviceOwnerStatus(request.requestId)
       is GetPermission ->
@@ -390,47 +228,47 @@ class CtrlProxyMessageHandler(
           request.expiresAtEpochMs,
           request.remainingMs,
         )
-      is GetCurrentFocus -> actions.getCurrentFocus(request.requestId)
-      is GetTraversalOrder -> actions.getTraversalOrder(request.requestId)
-      is AddHighlight ->
-        actions.addHighlight(request.requestId, request.id, request.shape?.toModel())
+      else -> error("Unexpected device request")
+    }
+    return null
+  }
 
-      is ShowPrototype -> {
-        // Same display rules as the gestures; the controller then checks the display is connected.
-        GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
-          return PrototypeResult(
-            timestamp = System.currentTimeMillis(),
-            requestId = request.requestId,
-            success = false,
-            error = error,
-          )
+  private suspend fun handleCertificate(request: WebSocketRequest) {
+    when (request) {
+      is InstallCaCert ->
+        if (request.certificate.isNotBlank()) {
+          actions.installCaCert(request.requestId, request.certificate)
+        } else {
+          log("install_ca_cert missing certificate; ignoring")
         }
-        actions.showPrototype(
-          request.requestId,
-          request.spec,
-          request.displayId,
-          request.reset,
-          request.appearance,
-          request.replaceOthers,
-        )
-      }
-      is DismissPrototype -> {
-        if ((request.id == null) == (request.all == null) || request.all == false) {
-          return PrototypeResult(
-            timestamp = System.currentTimeMillis(),
-            requestId = request.requestId,
-            success = false,
-            error = "dismiss_prototype requires exactly one of id or all:true",
-          )
+      is InstallCaCertFromPath ->
+        if (request.devicePath.isNotBlank()) {
+          actions.installCaCertFromPath(request.requestId, request.devicePath)
+        } else {
+          log("install_ca_cert_from_path missing devicePath; ignoring")
         }
-        actions.dismissPrototype(request.requestId, request.id, request.all)
-      }
+      is RemoveCaCert ->
+        if (!request.alias.isNullOrBlank() || !request.certificate.isNullOrBlank()) {
+          actions.removeCaCert(request.requestId, request.alias, request.certificate)
+        } else {
+          log("remove_ca_cert missing alias and certificate; ignoring")
+        }
+      else -> error("Unexpected certificate request")
+    }
+  }
+
+  private suspend fun handlePrototype(request: WebSocketRequest): WebSocketResponse? {
+    when (request) {
+      is ShowPrototype -> return handleShowPrototype(request)
+      is DismissPrototype -> return handleDismissPrototype(request)
       is InspectPrototypes -> actions.inspectPrototypes(request.requestId)
       is SavePrototype ->
         actions.savePrototype(request.requestId, request.spec, request.label, request.icon)
       is PinSavedPrototype -> actions.pinSavedPrototype(request.requestId, request.id, request.icon)
       is ListSavedPrototypes -> actions.listSavedPrototypes(request.requestId)
       is DeleteSavedPrototype -> actions.deleteSavedPrototype(request.requestId, request.id)
+      is AdvancePrototypeClock ->
+        actions.advancePrototypeClock(request.requestId, request.id, request.advanceTimeMs)
       is ClearPrototypeStorage -> actions.clearPrototypeStorage(request.requestId, request.id)
       is PatchPrototype ->
         actions.patchPrototype(request.requestId, request.id, request.baseRevision, request.ops)
@@ -442,72 +280,132 @@ class CtrlProxyMessageHandler(
           request.dataBase64,
         )
       is RemovePrototypeAsset -> actions.removePrototypeAsset(request.requestId, request.id)
-      is ListPreferenceFiles -> actions.listPreferenceFiles(request.requestId, request.packageName)
-      is GetPreferences ->
-        actions.getPreferences(request.requestId, request.packageName, request.fileName)
-      is DiscoverKeystore -> actions.discoverKeystore(request.requestId, request.packageName)
-      is GetSdkCapabilities ->
-        actions.getSdkCapabilities(request.requestId, request.packageName, request.userId)
-      is ListDataStores ->
-        actions.listDataStores(request.requestId, request.packageName, request.adapterName)
-      is GetDataStore ->
-        actions.getDataStore(
-          request.requestId,
-          request.packageName,
-          request.adapterName,
-          request.storeName,
-        )
-      is SubscribeStorage ->
-        actions.subscribeStorage(request.requestId, request.packageName, request.fileName)
-      is UnsubscribeStorage -> {
-        val packageName = request.packageName
-        val fileName = request.fileName
-        val subscriptionId = request.subscriptionId
-        when {
-          packageName != null && fileName != null ->
-            actions.unsubscribeStorage(request.requestId, packageName, fileName)
-          // Real TS traffic sends only `subscriptionId` (formatted "packageName:fileName" by
-          // StorageSubscriptionManager.subscribe()). StorageSubscription.parseId is the single
-          // canonical inverse of that format — see its doc for the first-colon rationale.
-          subscriptionId != null -> {
-            val parts = StorageSubscription.parseId(subscriptionId)
-            if (parts != null) {
-              actions.unsubscribeStorage(request.requestId, parts.first, parts.second)
-            } else {
-              log("unsubscribe_storage received malformed subscriptionId=$subscriptionId; ignoring")
-            }
-          }
-          else ->
-            log(
-              "unsubscribe_storage received without subscriptionId or packageName/fileName; ignoring",
-            )
-        }
+      else -> error("Unexpected prototype request")
+    }
+    return null
+  }
+
+  private suspend fun handleShowPrototype(request: ShowPrototype): WebSocketResponse? {
+
+    // Same display rules as the gestures; the controller then checks the display is connected.
+    GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
+      return PrototypeResult(
+        timestamp = System.currentTimeMillis(),
+        requestId = request.requestId,
+        success = false,
+        error = error,
+      )
+    }
+    actions.showPrototype(
+      request.requestId,
+      request.spec,
+      request.displayId,
+      request.reset,
+      request.appearance,
+      request.replaceOthers,
+    )
+
+    return null
+  }
+
+  private suspend fun handleDismissPrototype(request: DismissPrototype): WebSocketResponse? {
+
+    if ((request.id == null) == (request.all == null) || request.all == false) {
+      return PrototypeResult(
+        timestamp = System.currentTimeMillis(),
+        requestId = request.requestId,
+        success = false,
+        error = "dismiss_prototype requires exactly one of id or all:true",
+      )
+    }
+    actions.dismissPrototype(request.requestId, request.id, request.all)
+
+    return null
+  }
+
+  private inner class StorageRequests {
+    suspend fun handleStorage(request: WebSocketRequest): WebSocketResponse? {
+      when (request) {
+        is ListPreferenceFiles ->
+          actions.listPreferenceFiles(request.requestId, request.packageName)
+        is GetPreferences ->
+          actions.getPreferences(request.requestId, request.packageName, request.fileName)
+        is DiscoverKeystore -> actions.discoverKeystore(request.requestId, request.packageName)
+        is GetSdkCapabilities ->
+          actions.getSdkCapabilities(request.requestId, request.packageName, request.userId)
+        is ListDataStores ->
+          actions.listDataStores(request.requestId, request.packageName, request.adapterName)
+        is GetDataStore ->
+          actions.getDataStore(
+            request.requestId,
+            request.packageName,
+            request.adapterName,
+            request.storeName,
+          )
+        is SubscribeStorage ->
+          actions.subscribeStorage(request.requestId, request.packageName, request.fileName)
+        is UnsubscribeStorage -> unsubscribeStorage(request)
+        is GetPreference,
+        is SetPreference,
+        is RemovePreference,
+        is ClearPreferences -> handlePreference(request)
+        else -> error("Unexpected storage request")
       }
-      is GetPreference ->
-        actions.getPreference(
-          request.requestId,
-          request.packageName,
-          request.fileName,
-          request.key,
-        )
-      is SetPreference ->
-        actions.setPreference(
-          request.requestId,
-          request.packageName,
-          request.fileName,
-          request.key,
-          request.value,
-          request.valueType,
-        )
-      is RemovePreference ->
-        actions.removePreference(
-          request.requestId,
-          request.packageName,
-          request.fileName,
-          request.key,
-        )
-      is ClearPreferences ->
-        actions.clearPreferences(request.requestId, request.packageName, request.fileName)
+      return null
+    }
+
+    private suspend fun handlePreference(request: WebSocketRequest) {
+      when (request) {
+        is GetPreference ->
+          actions.getPreference(
+            request.requestId,
+            request.packageName,
+            request.fileName,
+            request.key,
+          )
+        is SetPreference -> actions.setPreference(request)
+        is RemovePreference ->
+          actions.removePreference(
+            request.requestId,
+            request.packageName,
+            request.fileName,
+            request.key,
+          )
+        is ClearPreferences ->
+          actions.clearPreferences(request.requestId, request.packageName, request.fileName)
+        else -> error("Unexpected preference request")
+      }
+    }
+
+    private suspend fun unsubscribeStorage(request: UnsubscribeStorage) {
+
+      val packageName = request.packageName
+      val fileName = request.fileName
+      val subscriptionId = request.subscriptionId
+      when {
+        packageName != null && fileName != null ->
+          actions.unsubscribeStorage(request.requestId, packageName, fileName)
+        // Real TS traffic sends only `subscriptionId` (formatted "packageName:fileName" by
+        // StorageSubscriptionManager.subscribe()). StorageSubscription.parseId is the single
+        // canonical inverse of that format — see its doc for the first-colon rationale.
+        subscriptionId != null -> {
+          val parts = StorageSubscription.parseId(subscriptionId)
+          if (parts != null) {
+            actions.unsubscribeStorage(request.requestId, parts.first, parts.second)
+          } else {
+            log("unsubscribe_storage received malformed subscriptionId=$subscriptionId; ignoring")
+          }
+        }
+        else ->
+          log(
+            "unsubscribe_storage received without subscriptionId or packageName/fileName; ignoring",
+          )
+      }
+    }
+  }
+
+  private suspend fun handleSystem(request: WebSocketRequest): WebSocketResponse? {
+    when (request) {
       is StartRecording -> actions.startRecording()
       is StopRecording -> actions.stopRecording()
       is RequestSettingsGet ->
@@ -534,44 +432,366 @@ class CtrlProxyMessageHandler(
           request.includePermissions,
         )
       is RequestLaunchIntent -> actions.requestLaunchIntent(request.requestId, request.packageName)
+      else -> error("Unexpected system request")
     }
-
-    // Every non-guarded command above is fire-and-forget: the action broadcasts its own response
-    // asynchronously, so there is no synchronous response to return here.
     return null
   }
 
-  /**
-   * Reject a non-finite gesture coordinate (`NaN` / `±Infinity`) at the handler boundary before it
-   * flows into the accessibility [android.accessibilityservice.GestureDescription] engine — the
-   * Android analog of iOS `CommandHandler.requireFinite` (#2964, mirror of #2928 / PR #2957).
-   *
-   * A non-finite value cannot arrive over the wire: kotlinx.serialization's default config
-   * (`allowSpecialFloatingPointValues = false`, used by [WebSocketServer.protocolJson]) rejects a
-   * JSON overflow literal like `1e309` at decode ("Unexpected special floating-point value
-   * Infinity") rather than coercing it into the widened `Double` field, and standard JSON has no
-   * `NaN`/`Infinity` literal. So this is defense-in-depth for the non-wire construction path — an
-   * in-process caller building a request from a computed `Double` (division, `hypot`, a normalized
-   * offset) that yields a non-finite value — where it prevents a silent no-op / bogus gesture.
-   *
-   * @return the first non-finite `(field name, value)` among [fields], or null when all are finite.
-   */
-  private fun firstNonFinite(vararg fields: Pair<String, Double>): Pair<String, Double>? =
-    fields.firstOrNull {
-      !it.second.isFinite()
+  private inner class GestureRequests {
+    suspend fun handleGesture(request: WebSocketRequest): WebSocketResponse? =
+      when (request) {
+        is RequestSwipe -> handleSwipe(request)
+        is RequestTapCoordinates -> handleTapCoordinates(request)
+        is RequestTwoFingerSwipe -> handleTwoFingerSwipe(request)
+        is RequestDrag -> handleDrag(request)
+        is RequestPinch -> handlePinch(request)
+        is RequestGestureStart -> handleGestureStart(request)
+        is RequestGestureMove -> handleGestureMove(request)
+        is RequestGestureEnd -> handleGestureEnd(request)
+        else -> error("Unexpected gesture request")
+      }
+
+    private suspend fun handleSwipe(request: RequestSwipe): WebSocketResponse? {
+
+      if (request.displayId != null) {
+        GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
+          return SwipeResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = request.requestId,
+            success = false,
+            totalTimeMs = 0L,
+            error = error,
+          )
+        }
+      }
+      firstNonFinite(
+          "x1" to request.x1,
+          "y1" to request.y1,
+          "x2" to request.x2,
+          "y2" to request.y2,
+        )
+        ?.let { (field, value) ->
+          return swipeError(request.requestId, field, value)
+        }
+      actions.requestSwipe(request)
+
+      return null
     }
 
-  /** Actionable message for a rejected non-finite coordinate, naming the offending [field]. */
-  private fun nonFiniteError(field: String, value: Double): String =
-    "Non-finite gesture coordinate: $field=$value. Coordinates must be finite (not NaN or Infinity)."
+    private suspend fun handleTapCoordinates(request: RequestTapCoordinates): WebSocketResponse? {
 
-  /** Build a `swipe_result` failure — shared by [RequestSwipe] and [RequestTwoFingerSwipe]. */
-  private fun swipeError(requestId: String?, field: String, value: Double): SwipeResult =
-    SwipeResult(
-      timestamp = System.currentTimeMillis(),
-      requestId = requestId,
-      success = false,
-      totalTimeMs = 0L,
-      error = nonFiniteError(field, value),
-    )
+      if (request.displayId != null) {
+        GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
+          return TapCoordinatesResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = request.requestId,
+            success = false,
+            totalTimeMs = 0L,
+            error = error,
+          )
+        }
+      }
+      firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
+        return TapCoordinatesResult(
+          timestamp = System.currentTimeMillis(),
+          requestId = request.requestId,
+          success = false,
+          totalTimeMs = 0L,
+          error = nonFiniteError(field, value),
+        )
+      }
+      if (request.doubleTap) {
+        actions.requestDoubleTapCoordinates(
+          request.requestId,
+          request.x,
+          request.y,
+          request.frameContext,
+          request.displayId,
+        )
+      } else {
+        actions.requestTapCoordinates(request)
+      }
+
+      return null
+    }
+
+    private suspend fun handleTwoFingerSwipe(request: RequestTwoFingerSwipe): WebSocketResponse? {
+
+      if (request.displayId != null) {
+        GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
+          return SwipeResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = request.requestId,
+            success = false,
+            totalTimeMs = 0L,
+            error = error,
+          )
+        }
+      }
+      multiFingerCountError(request.fingerCount)?.let { error ->
+        return SwipeResult(
+          timestamp = System.currentTimeMillis(),
+          requestId = request.requestId,
+          success = false,
+          totalTimeMs = 0L,
+          error = error,
+        )
+      }
+      // Two-finger swipe shares the swipe_result response type. `offset` is an Int (a pixel gap),
+      // so it cannot be non-finite and is not guarded.
+      firstNonFinite(
+          "x1" to request.x1,
+          "y1" to request.y1,
+          "x2" to request.x2,
+          "y2" to request.y2,
+        )
+        ?.let { (field, value) ->
+          return swipeError(request.requestId, field, value)
+        }
+      actions.requestTwoFingerSwipe(request)
+
+      return null
+    }
+
+    private suspend fun handleDrag(request: RequestDrag): WebSocketResponse? {
+
+      if (request.displayId != null) {
+        GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
+          return DragResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = request.requestId,
+            success = false,
+            totalTimeMs = 0L,
+            error = error,
+          )
+        }
+      }
+      firstNonFinite(
+          "x1" to request.x1,
+          "y1" to request.y1,
+          "x2" to request.x2,
+          "y2" to request.y2,
+        )
+        ?.let { (field, value) ->
+          return DragResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = request.requestId,
+            success = false,
+            totalTimeMs = 0L,
+            error = nonFiniteError(field, value),
+          )
+        }
+      actions.requestDrag(request)
+
+      return null
+    }
+
+    private suspend fun handlePinch(request: RequestPinch): WebSocketResponse? {
+
+      if (request.displayId != null) {
+        GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
+          return PinchResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = request.requestId,
+            success = false,
+            totalTimeMs = 0L,
+            error = error,
+          )
+        }
+      }
+      // `rotationDegrees` is a Float (not a coordinate) but still flows into the gesture-path
+      // math, so a computed non-finite value is guarded too (AC #4 of #2964).
+      firstNonFinite(
+          "centerX" to request.centerX,
+          "centerY" to request.centerY,
+          "distanceStart" to request.distanceStart,
+          "distanceEnd" to request.distanceEnd,
+          "rotationDegrees" to request.rotationDegrees.toDouble(),
+        )
+        ?.let { (field, value) ->
+          return PinchResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = request.requestId,
+            success = false,
+            totalTimeMs = 0L,
+            error = nonFiniteError(field, value),
+          )
+        }
+      actions.requestPinch(request)
+
+      return null
+    }
+
+    private suspend fun handleGestureStart(request: RequestGestureStart): WebSocketResponse? {
+
+      if (request.displayId != null) {
+        GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
+          return SwipeResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = request.requestId,
+            success = false,
+            totalTimeMs = 0L,
+            error = error,
+          )
+        }
+      }
+      firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
+        return swipeError(request.requestId, field, value)
+      }
+      actions.requestGestureStart(request)
+
+      return null
+    }
+
+    private suspend fun handleGestureMove(request: RequestGestureMove): WebSocketResponse? {
+
+      firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
+        return swipeError(request.requestId, field, value)
+      }
+      actions.requestGestureMove(request.requestId, request.gestureId, request.x, request.y)
+
+      return null
+    }
+
+    private suspend fun handleGestureEnd(request: RequestGestureEnd): WebSocketResponse? {
+
+      firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
+        return swipeError(request.requestId, field, value)
+      }
+      actions.requestGestureEnd(
+        request.requestId,
+        request.gestureId,
+        request.x,
+        request.y,
+        request.cancel,
+      )
+
+      return null
+    }
+  }
+}
+
+/**
+ * Reject a non-finite gesture coordinate (`NaN` / `±Infinity`) at the handler boundary before it
+ * flows into the accessibility [android.accessibilityservice.GestureDescription] engine — the
+ * Android analog of iOS `CommandHandler.requireFinite` (#2964, mirror of #2928 / PR #2957).
+ *
+ * A non-finite value cannot arrive over the wire: kotlinx.serialization's default config
+ * (`allowSpecialFloatingPointValues = false`, used by [WebSocketServer.protocolJson]) rejects a
+ * JSON overflow literal like `1e309` at decode ("Unexpected special floating-point value Infinity")
+ * rather than coercing it into the widened `Double` field, and standard JSON has no
+ * `NaN`/`Infinity` literal. So this is defense-in-depth for the non-wire construction path — an
+ * in-process caller building a request from a computed `Double` (division, `hypot`, a normalized
+ * offset) that yields a non-finite value — where it prevents a silent no-op / bogus gesture.
+ *
+ * @return the first non-finite `(field name, value)` among [fields], or null when all are finite.
+ */
+private fun firstNonFinite(vararg fields: Pair<String, Double>): Pair<String, Double>? =
+  fields.firstOrNull {
+    !it.second.isFinite()
+  }
+
+/** Actionable message for a rejected non-finite coordinate, naming the offending [field]. */
+private fun nonFiniteError(field: String, value: Double): String =
+  "Non-finite gesture coordinate: $field=$value. Coordinates must be finite (not NaN or Infinity)."
+
+/** Build a `swipe_result` failure — shared by [RequestSwipe] and [RequestTwoFingerSwipe]. */
+private fun swipeError(requestId: String?, field: String, value: Double): SwipeResult =
+  SwipeResult(
+    timestamp = System.currentTimeMillis(),
+    requestId = requestId,
+    success = false,
+    totalTimeMs = 0L,
+    error = nonFiniteError(field, value),
+  )
+
+private enum class RequestGroup {
+  HIERARCHY,
+  TEXT,
+  NODE,
+  DEVICE,
+  PROTOTYPE,
+  STORAGE,
+  SYSTEM,
+  GESTURE,
+}
+
+/** Exhaustive classification keeps additions to the sealed protocol visible to the compiler. */
+private class RequestRoute(request: WebSocketRequest) {
+  val group: RequestGroup =
+    when (request) {
+      is RequestHierarchy,
+      is RequestHierarchyIfStale,
+      is SetHierarchyInterval,
+      is RequestScreenshot -> RequestGroup.HIERARCHY
+      is RequestSetText,
+      is RequestInsertTextState,
+      is RequestInsertText,
+      is RequestCommitText,
+      is RequestCancelImeCommit,
+      is RequestSetKeyboardProfile,
+      is RequestListKeyboardProfiles,
+      is RequestImeAction,
+      is RequestSelectAll,
+      is RequestClickFocusedInput -> RequestGroup.TEXT
+      is RequestAction,
+      is RequestActivateAccessibilityLink,
+      is RequestHitTest,
+      is RequestClipboard,
+      is RequestGlobalAction,
+      is ValidateFrameContext,
+      is GetCurrentFocus,
+      is GetTraversalOrder,
+      is AddHighlight -> RequestGroup.NODE
+      is InstallCaCert,
+      is InstallCaCertFromPath,
+      is RemoveCaCert,
+      is RequestDeviceInfo,
+      is GetDeviceOwnerStatus,
+      is GetPermission,
+      is SetRecompositionTracking,
+      is SetAccessibilityFlags,
+      is SetNetworkMockRules,
+      is SetNetworkErrorSimulation -> RequestGroup.DEVICE
+      is ShowPrototype,
+      is DismissPrototype,
+      is InspectPrototypes,
+      is SavePrototype,
+      is PinSavedPrototype,
+      is ListSavedPrototypes,
+      is DeleteSavedPrototype,
+      is AdvancePrototypeClock,
+      is ClearPrototypeStorage,
+      is PatchPrototype,
+      is PutPrototypeAsset,
+      is RemovePrototypeAsset -> RequestGroup.PROTOTYPE
+      is ListPreferenceFiles,
+      is GetPreferences,
+      is DiscoverKeystore,
+      is GetSdkCapabilities,
+      is ListDataStores,
+      is GetDataStore,
+      is SubscribeStorage,
+      is UnsubscribeStorage,
+      is GetPreference,
+      is SetPreference,
+      is RemovePreference,
+      is ClearPreferences -> RequestGroup.STORAGE
+      is StartRecording,
+      is StopRecording,
+      is RequestSettingsGet,
+      is RequestSettingsPut,
+      is RequestSettingsList,
+      is RequestInstalledPackages,
+      is RequestPackageInfo,
+      is RequestLaunchIntent -> RequestGroup.SYSTEM
+      is RequestSwipe,
+      is RequestTapCoordinates,
+      is RequestTwoFingerSwipe,
+      is RequestDrag,
+      is RequestPinch,
+      is RequestGestureStart,
+      is RequestGestureMove,
+      is RequestGestureEnd -> RequestGroup.GESTURE
+    }
 }

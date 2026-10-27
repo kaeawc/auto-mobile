@@ -121,7 +121,9 @@ describe("deviceIncarnationToken", () => {
     const calls: string[] = [];
     const listener: DeviceIncarnationListener = {
       name: "test-listener",
-      onDeviceIncarnationChanged: (deviceId) => calls.push(deviceId),
+      onDeviceIncarnationChanged: (deviceId) => {
+        calls.push(deviceId);
+      },
     };
     const unregister = registerDeviceIncarnationListener(listener);
     setDeviceIncarnationResolver(undefined);

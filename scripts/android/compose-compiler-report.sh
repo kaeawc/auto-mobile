@@ -7,7 +7,7 @@ export LC_ALL=C
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 usage() { sed -n '2,4p' "${BASH_SOURCE[0]}" | sed 's/^# //'; }
 die() { echo "compose-compiler-report: $*" >&2; exit 2; }
-reports="${REPO_ROOT}/android/control-proxy/build/compose-compiler-reports"
+reports="${REPO_ROOT}/android/prototype-compose/build/compose-compiler-reports"
 package=dev.jasonpearson.automobile.ctrlproxy.prototype
 doc=""; compile=true
 while [[ $# -gt 0 ]]; do
@@ -25,12 +25,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if $compile; then
-  (cd "${REPO_ROOT}/android" && "${COMPOSE_REPORT_GRADLEW:-${REPO_ROOT}/android/gradlew}" :control-proxy:compileReleaseKotlin --rerun -Pautomobile.composeCompilerReports=true) >&2
+  (cd "${REPO_ROOT}/android" && "${COMPOSE_REPORT_GRADLEW:-${REPO_ROOT}/android/gradlew}" :prototype-compose:compileReleaseKotlin --rerun -Pautomobile.composeCompilerReports=true) >&2
 fi
-composables="${reports}/control-proxy-composables.txt"
-module="${reports}/release/control-proxy-module.json"
-[[ -f "$composables" ]] || die "missing report: control-proxy-composables.txt"
-[[ -f "$module" ]] || die "missing report: release/control-proxy-module.json"
+composables="${reports}/prototype-compose-composables.txt"
+module="${reports}/release/prototype-compose-module.json"
+[[ -f "$composables" ]] || die "missing report: prototype-compose-composables.txt"
+[[ -f "$module" ]] || die "missing report: release/prototype-compose-module.json"
 # Capture order is retained for overloads by the insertion sort in END.
 summary=$(awk -v prefix="$package." '
 function finish() {

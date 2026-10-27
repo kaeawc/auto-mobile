@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { registerStorageTools, type StorageToolsDependencies } from "../../src/server/storageTools";
 import {
-  registerStorageTools,
   preferenceSetWarning,
   validateTypeForPlatform,
-  type StorageToolsDependencies,
-} from "../../src/server/storageTools";
+} from "../../src/features/storage/storageChecks";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { ActionableError } from "../../src/models";
 import type { BootedDevice } from "../../src/models";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { schemaPropertyDescription, toolJson } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -180,6 +180,9 @@ describe("Storage Tools Registration", () => {
       }> = [];
       useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
+          deleteKeychainItemForIos: async () => {
+            throw new Error("unexpected keychain call");
+          },
           setPreference: async (appId, suite, key, value, type) => {
             calls.push({ appId, suite, key, value, type });
           },
@@ -209,6 +212,9 @@ describe("Storage Tools Registration", () => {
       let sdkCalls = 0;
       useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
+          deleteKeychainItemForIos: async () => {
+            throw new Error("unexpected keychain call");
+          },
           setPreference: async () => {
             sdkCalls += 1;
             throw new Error(
@@ -239,6 +245,9 @@ describe("Storage Tools Registration", () => {
       registerStorageTools(deps);
       useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
+          deleteKeychainItemForIos: async () => {
+            throw new Error("unexpected keychain call");
+          },
           setPreference: async () => {
             throw new Error("mutation_not_authorized");
           },
@@ -520,6 +529,9 @@ describe("Storage Tools Registration", () => {
       const result = resolvedStore ? { resolvedStore } : undefined;
       useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
+          deleteKeychainItemForIos: async () => {
+            throw new Error("unexpected keychain call");
+          },
           setPreference: async () => result,
           removePreference: async () => result,
           clearPreferenceStore: async () => result,
@@ -536,11 +548,7 @@ describe("Storage Tools Registration", () => {
         )!;
         const args = tool.schema.parse({ appId: "com.example.app", name: "", ...fields });
         const response = await tool.deviceAwareHandler!(device, args);
-        const content = response.content[0];
-        if (content.type !== "text") {
-          throw new Error("Expected JSON response");
-        }
-        const payload = JSON.parse(content.text);
+        const payload = toolJson(response);
         expect(payload.name).toBe("");
         expect(payload.success).toBe(true);
         if (resolvedStore) {
@@ -570,6 +578,9 @@ describe("Storage Tools Registration", () => {
       const device: BootedDevice = { deviceId: "ios-test", name: "iPhone", platform: "ios" };
       useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
+          deleteKeychainItemForIos: async () => {
+            throw new Error("unexpected keychain call");
+          },
           setPreference: async () => ({ resolvedStore: "standard", effectiveValueDiffers }),
           removePreference: async () => ({
             resolvedStore: "standard",
@@ -594,11 +605,7 @@ describe("Storage Tools Registration", () => {
           device,
           tool.schema.parse({ appId: "com.example.app", name: "", ...fields }),
         );
-        const content = response.content[0];
-        if (content.type !== "text") {
-          throw new Error("Expected JSON response");
-        }
-        const payload = JSON.parse(content.text);
+        const payload = toolJson(response);
         expect(payload.success).toBe(true);
         if (isSet && effectiveValueDiffers === true) {
           expect(payload.effectiveValueDiffers).toBe(true);
@@ -618,7 +625,7 @@ describe("Storage Tools Registration", () => {
     registerStorageTools(deps);
     for (const name of ["setKeyValue", "removeKeyValue", "clearKeyValueFile"]) {
       const definition = ToolRegistry.getToolDefinitions().find((item) => item.name === name)!;
-      const description = definition.inputSchema.properties?.name?.description;
+      const description = schemaPropertyDescription(definition.inputSchema.properties, "name");
       expect(description).toContain('"standard"');
       expect(description).toContain("bundle id");
       expect(description).toContain("no leading or trailing whitespace");

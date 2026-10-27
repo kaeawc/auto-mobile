@@ -51,7 +51,7 @@ import {
   resolveBrokerClient,
   type BrokerClientFiles,
 } from "./brokerClientFiles";
-import { withV1ClientErrors } from "../../src/server/mcpError";
+import { withV1ClientErrors } from "../../src/daemon/mcpError";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
 import { isProcessRunning } from "../../src/utils/processLiveness";

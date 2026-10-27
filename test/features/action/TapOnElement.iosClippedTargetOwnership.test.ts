@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeAll, expect, spyOn, test } from "bun:test";
@@ -30,7 +31,7 @@ const remove = (row: number, cart = "cart_A"): TapOnElementOptions => ({
   action: "tap",
   elementId: "remove",
   container: { elementId: `item_${row}`, container: { elementId: cart } },
-  strategy: "unique",
+  selectionStrategy: "unique",
   // These captures never change: use the supported minimum instead of re-projecting four times.
   searchUntil: { duration: 100 },
 });
@@ -43,29 +44,29 @@ function harness(observation: ObserveResult, platform: "ios" | "android" = "ios"
     new FakeAdbExecutor(),
     {
       timer,
-      tapStrategy: new FakeTapStrategy(),
+      tapStrategy: platform === "ios" ? FakeTapStrategy.ios() : new FakeTapStrategy(),
       visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     },
   );
   const points: Array<{ x: number; y: number }> = [];
-  tap.observedInteraction = async (action) => ({
-    ...(await action(recordObservationRead(observation))),
+  tap.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
     observation,
   });
   tap.refreshViewHierarchy = async () => observation.viewHierarchy!;
-  tap.executeiOSTap = async (_action, x, y) => {
+  tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
     points.push({ x, y });
-  };
+  });
   tap.executeAndroidTap = async (_action, x, y) => {
     points.push({ x, y });
   };
   tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
+    effect: undefined,
     observation: current,
   });
   tap.prepareSelectionCapture = async () => null;
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   return { tap, points };
 }
@@ -91,7 +92,7 @@ async function tapOn(
 
 function moveFrame(node: SearchableEntry, bounds: ElementBounds): void {
   const { left, top, right, bottom } = bounds;
-  node.source.bounds = [left, top, right, bottom];
+  node.source.bounds = { left, top, right, bottom };
 }
 
 function withDropFrame(bounds: ElementBounds): ObserveResult {

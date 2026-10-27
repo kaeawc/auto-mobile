@@ -3,18 +3,18 @@ import { randomUUID } from "node:crypto";
 import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
+import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/wire/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
-import { FakeSocket } from "../fakes/FakeNetServer";
-import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
+import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
+import { typedFrameSchema } from "../helpers/wireMessageSchemas";
+import { routedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   SESSION_REHYDRATION_DEADLINE_MS,
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
 } from "../../src/daemon/sessionManager";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
-import { decideOwnershipChange } from "../../src/daemon/streamSubscriptionPolicy";
+import { decideOwnershipChange } from "../../src/daemon/wire/streamSubscriptionPolicy";
 import {
   LIVE_OWNER_HANDOFF_ALLOWANCE_MS,
   type LivenessHandover,
@@ -27,7 +27,7 @@ import {
 import { DaemonState } from "../../src/daemon/daemonState";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
-import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
+import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import { OWNER_DISCONNECT_GRACE_MS } from "../../src/daemon/ownerDisconnectRelease";
 import { AppearanceSyncScheduler } from "../../src/daemon/AppearanceSyncScheduler";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
@@ -46,13 +46,14 @@ import {
 } from "../helpers/livenessScenarioHarness";
 
 // The two-sided liveness scenario matrix (#10667, umbrella #10655). Every row asserts BOTH
-// sides on the same scenario, driven by the real producers (the stdio proxy's own keeper, tool
-// calls through the proxy, tokenless desktop heartbeats) on a FakeTimer:
+// sides on the same scenario (the #10656 pair below is split in two rows, one per side, to stay
+// inside the 100 ms unit budget, #15059), driven by the real producers (the stdio proxy's own
+// keeper, tool calls through the proxy, tokenless desktop heartbeats) on a FakeTimer:
 //
 //   held      the device stays with its session for as long as the policy says
 //   released  and is freed, with the right reason, within the policy's bound afterwards
 //
-// The windows are the owner decisions of 2026-10-08 (src/daemon/sessionLivenessWindows.ts):
+// The windows are the owner decisions of 2026-10-08 (src/daemon/wire/sessionLivenessWindows.ts):
 // ~10 s after the owner's last heartbeat, 2 min after the END of the last tool call while
 // heartbeats keep arriving, and a call in flight is never released. Each row names the issue
 // whose fix flips it.
@@ -216,23 +217,45 @@ function expectFreed(deviceId?: string): void {
 }
 
 describe("live stdio proxy", () => {
-  test("tool calls inside the window hold the device the whole time; the last call's window then frees it as idle (#10656)", async () => {
+  test("tool calls inside the window hold the device across consecutive idle windows (#10656)", async () => {
     scenario = await LivenessScenario.start();
+    const acquiredAt = scenario.timer.now();
     const session = await scenario.acquire();
 
-    // Held side: a call every 110 s keeps the session across three idle windows.
-    const callEvery = IDLE_WINDOW_MS - 10_000;
-    for (let call = 0; call < 3; call++) {
-      expect(await scenario.idleWhileHeld(session, scenario.timer.now() + callEvery, 30_000)).toBe(
+    // Held side: calls at 10 s and 70 s, then held at 150 s. No renewal frees the session by
+    // 128 s (window + slack) and a clock renewed only by the first call by 138 s, so holding at
+    // 150 s needs the second call's renewal; the next deadline is 190 s. Every 2 s keeper tick is
+    // a timer event, so this short span keeps the row inside the 100 ms unit budget on slow CI.
+    for (const [until, step] of [
+      [10_000, 10_000],
+      [60_000, 30_000],
+    ] as const) {
+      expect(await scenario.idleWhileHeld(session, scenario.timer.now() + until, step)).toBe(
         undefined,
       );
       expectHeld(session);
       await scenario.toolCall(session);
     }
+    expect(await scenario.idleWhileHeld(session, acquiredAt + 150_000, 30_000)).toBe(undefined);
+    expectHeld(session);
+    expect(scenario.reaped).toEqual([]);
+  });
+
+  test("the last call's own window, not the acquisition's, frees it as idle (#10656)", async () => {
+    scenario = await LivenessScenario.start();
+    const acquiredAt = scenario.timer.now();
+    const session = await scenario.acquire();
+
+    // One call 30 s in is enough: the acquisition's own window (plus every release slack) would
+    // have ended by 128 s, 22 s before the call's window can, so the release time tells them apart.
+    expect(await scenario.idleWhileHeld(session, acquiredAt + 30_000, 30_000)).toBe(undefined);
+    expectHeld(session);
+    await scenario.toolCall(session);
     const lastCallAt = scenario.timer.now();
 
-    // Released side: only the last call's own window frees it, and as an idle expiry.
+    // Released side: the last call resets the idle window beyond acquisition's deadline.
     const releasedAt = await scenario.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expect(releasedAt).toBeGreaterThan(acquiredAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
     expect(releasedAt).toBeGreaterThan(lastCallAt + IDLE_WINDOW_MS);
     expect(releasedAt).toBeLessThanOrEqual(lastCallAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
     expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
@@ -445,7 +468,7 @@ describe("daemon release wiring (#10975)", () => {
     // The device passes to a new owner, who pins it.
     const second = await scenario.acquire();
     expect(second).not.toBe(first);
-    DeviceSessionManager.getInstance().setExplicitDevicePin({
+    scenario.daemon.daemon.getDeviceReadiness().setExplicitDevicePin({
       deviceId: DEVICE_A,
       name: DEVICE_A,
       platform: "android",
@@ -453,22 +476,21 @@ describe("daemon release wiring (#10975)", () => {
 
     try {
       // Held side: a killDevice-style terminal release of the FIRST session arrives late.
-      await scenario.daemon.manager.releaseSessionIfOwned(
-        first,
-        captured,
+      await scenario.daemon.manager.releaseSession(first, "device-killed", {
+        expectedOwner: { session: captured, deviceId: DEVICE_A },
+      });
+      expect(scenario.daemon.daemon.getDeviceReadiness().getExplicitDevicePin()?.deviceId).toBe(
         DEVICE_A,
-        "device-killed",
       );
-      expect(DeviceSessionManager.getInstance().getExplicitDevicePin()?.deviceId).toBe(DEVICE_A);
       expectHeld(second);
 
       // Released side: the successor's own idle release does clear its pin.
       expect(
         await scenario.idleUntilReleased(second, IDLE_WINDOW_MS + RELEASE_SLACK_MS),
       ).toBeDefined();
-      expect(DeviceSessionManager.getInstance().getExplicitDevicePin()).toBeUndefined();
+      expect(scenario.daemon.daemon.getDeviceReadiness().getExplicitDevicePin()).toBeUndefined();
     } finally {
-      DeviceSessionManager.getInstance().clearExplicitDevicePin(DEVICE_A);
+      scenario.daemon.daemon.getDeviceReadiness().clearExplicitDevicePin(DEVICE_A);
     }
   });
 
@@ -973,7 +995,8 @@ describe("host sleep longer than the idle window (#10661)", () => {
       expect(releasedAt! - sleptAt).toBeLessThanOrEqual(
         IDLE_WINDOW_MS + SUSPECT_GRACE_MS + 2 * SCAN_MS + RELEASE_SLACK_MS,
       );
-      expect(["cleanup-expired"]).toContain(scenario.releaseOf(session)?.reason);
+      const idleExpiry: Array<string | undefined> = ["cleanup-expired"];
+      expect(idleExpiry).toContain(scenario.releaseOf(session)?.reason);
       expectFreed();
     });
   }
@@ -1077,10 +1100,11 @@ describe("selector-routed calls (#10821)", () => {
     const provisioned = await scenario.provision(DEVICE_A);
     const other = await scenario.acquire(DEVICE_B);
 
-    // Held side: A is used every minute through its device id for four idle windows. The proxy
-    // must credit those calls to the provisioned session, or it stops heartbeating it.
+    // Held side: A is used every minute through its device id for two idle windows. A session the
+    // proxy stopped heartbeating would already be freed after the first, so holding through the
+    // second needs the proxy to credit those calls to the provisioned session.
     const callEvery = 60_000;
-    for (let call = 0; call < (4 * IDLE_WINDOW_MS) / callEvery; call++) {
+    for (let call = 0; call < (2 * IDLE_WINDOW_MS) / callEvery; call++) {
       await scenario.idle(callEvery);
       await scenario.selectorCall(DEVICE_A);
     }
@@ -1135,8 +1159,7 @@ describe("host appearance sync follows the session that holds the device (#8361,
     applyOnConnect: true,
   });
 
-  // #11442 o2: both target sources must name only held devices, each with its holder's session.
-  // The scheduler's own source is what a sync runs on until the daemon scopes it at startup.
+  // The daemon scopes sync to its holders. An unscoped scheduler must touch nothing (#11810).
   for (const source of ["the running daemon's scope", "the scheduler's own targets"] as const) {
     test(`two sessions with different configs and a free device, from ${source}: a tick applies each config to its holder's device only, and a freed device is left alone`, async () => {
       scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B, DEVICE_C] });
@@ -1162,7 +1185,9 @@ describe("host appearance sync follows the session that holds the device (#8361,
 
       // Held side: each held device gets its own session's mode; the free device gets nothing.
       await scheduler.trigger();
-      expect(applied.toSorted()).toEqual([`${DEVICE_A}:light`, `${DEVICE_B}:dark`]);
+      expect(applied.toSorted()).toEqual(
+        source === "the running daemon's scope" ? [`${DEVICE_A}:light`, `${DEVICE_B}:dark`] : [],
+      );
 
       // Released side: once A's session idles out, no tick re-themes its device from the global
       // config, while B's session still decides for B.
@@ -1176,7 +1201,7 @@ describe("host appearance sync follows the session that holds the device (#8361,
       configs.set(b, config("light"));
       applied.length = 0;
       await scheduler.trigger();
-      expect(applied).toEqual([`${DEVICE_B}:light`]);
+      expect(applied).toEqual(source === "the running daemon's scope" ? [`${DEVICE_B}:light`] : []);
       await scheduler.stop();
     });
   }
@@ -1459,21 +1484,18 @@ class ObservationStreamForScenario extends DeviceDataStreamSocketServer {
     super("/fake/path/matrix.sock", timer, { authorize: () => {} });
   }
 
-  start(): void {
-    (this as unknown as { server: unknown }).server = { listening: true };
-    (this as unknown as { onServerStarted(): void }).onServerStarted();
+  override async start(): Promise<void> {
+    this.server = new FakeListeningNetServer();
+    this.onServerStarted();
   }
 
   stopListening(): void {
-    (this as unknown as { onServerClosing(): void }).onServerClosing();
-    (this as unknown as { server: unknown }).server = null;
+    this.onServerClosing();
+    this.server = null;
   }
 
   async viewerSubscribes(socket: FakeSocket, sessionUuid: string): Promise<void> {
-    await (this as unknown as { processLine(s: Socket, line: string): Promise<void> }).processLine(
-      socket as unknown as Socket,
-      JSON.stringify({ command: "subscribe", sessionUuid }),
-    );
+    await this.processLine(socket, JSON.stringify({ command: "subscribe", sessionUuid }));
   }
 }
 
@@ -1482,12 +1504,12 @@ describe("a viewer stream follows its observer registration (#11076, #11084)", (
   const DESKTOP_BEAT_MS = 2_000;
   // The stream's keepalive pings are not what is asserted on.
   const errorFrames = (socket: FakeSocket) =>
-    socket.getWrittenMessages().filter((message) => message.type === "error");
+    socket.getWrittenMessages(typedFrameSchema).filter((message) => message.type === "error");
 
   test("an observer that heartbeats keeps its observation stream; one that stops has it ended with session_ended", async () => {
     scenario = await LivenessScenario.start();
     const stream = new ObservationStreamForScenario(scenario.timer);
-    stream.start();
+    await stream.start();
     try {
       const registered = await scenario.daemonMethod("daemon/registerSession", {
         sessionId: OBSERVER,
@@ -1702,6 +1724,9 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
       listResources: async () => ({ resources: [] }),
       readResource: async () => ({ contents: [] }),
       listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      request: async () => {
+        throw new Error("this scenario never issues a raw MCP request");
+      },
       close: async () => {},
     });
     await server.start();

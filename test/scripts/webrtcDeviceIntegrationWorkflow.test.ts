@@ -72,7 +72,7 @@ describe("#4308 device WebRTC integration workflow", () => {
       "src/features/screen-stream/**",
       "android/video-server/**",
       "ios/screen-capture/**",
-      "src/server/webrtcStreamManager.ts",
+      "src/daemon/webrtcStreamManager.ts",
       "src/daemon/webrtc*",
       "src/daemon/videoStreamSocket*",
       "src/daemon/videoStreamFraming.ts",
@@ -238,5 +238,15 @@ describe("#4308 device WebRTC integration workflow", () => {
       );
       expect(steps.indexOf(boot!)).toBeLessThan(steps.indexOf(capture!));
     }
+  });
+});
+
+describe("iOS WHEP retry cleanup scope (#14826)", () => {
+  test("never pkills AutoMobile daemons by name on a shared host", () => {
+    const capture = jobSteps(PULL_REQUEST_WORKFLOW, "ios-device-webrtc").find(
+      (step) => step.name === "Run iOS device capture integration",
+    );
+    expect(capture?.run).not.toContain("pkill");
+    expect(capture?.run).toContain("scripts/ci/reap-job-processes.sh");
   });
 });

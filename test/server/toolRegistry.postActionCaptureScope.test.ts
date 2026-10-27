@@ -3,27 +3,30 @@ import { z } from "zod/v4";
 import { ToolRegistryClass, DefaultAfterToolCallHandler } from "../../src/server/toolRegistry";
 import { createSendKeysCaptureHarness } from "../features/action/SendKeysTestHarness";
 import type { BootedDevice, ObserveResult } from "../../src/models";
-import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 import {
   beginPostActionCaptureAction,
   deferTerminalScreenshot,
   hasPendingTerminalScreenshot,
 } from "../../src/utils/PostActionCaptureContext";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
-import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
+import { readToolEnvelopePayload } from "../../src/daemon/toolEnvelopePayload";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { buildObserveResult } from "../helpers/observeFixture";
 
 const device: BootedDevice = { name: "fake", platform: "android", deviceId: "capture-device" };
+const CAPTURED_AT = "2026-01-01T00:00:00.000Z";
 function observation(id: string): ObserveResult {
-  return {
+  return buildObserveResult({
     deviceId: device.deviceId,
     observationId: id,
+    updatedAt: 0,
     screenSize: { width: 100, height: 100 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: { hierarchy: {} },
-  };
+  });
 }
 
 function payload(response: unknown) {
@@ -40,7 +43,7 @@ describe("ToolRegistry post-action capture scope", () => {
   let memoryAudit: ReturnType<typeof spyOn>;
   beforeEach(() => {
     registry = new ToolRegistryClass(new FakeTimer(), new FakeLogger());
-    registry.setToolCallRepositoryForTesting({ recordToolCall() {} });
+    registry.setToolCallRepositoryForTesting({ async recordToolCall() {} });
     memoryAudit = spyOn(serverConfig, "isMemPerfAuditEnabled").mockReturnValue(false);
     restore = registry.setPipelineOverridesForTesting({
       executionTargetResolver: {
@@ -70,7 +73,7 @@ describe("ToolRegistry post-action capture scope", () => {
       const capture = async (chosen: ObserveResult) => {
         captures++;
         chosen.screenshotPath = "client.png";
-        chosen.screenshotCapturedAt = 123;
+        chosen.screenshotCapturedAt = CAPTURED_AT;
       };
       const deferred = deferTerminalScreenshot(frame, capture);
       if (!deferred) {
@@ -85,7 +88,7 @@ describe("ToolRegistry post-action capture scope", () => {
     expect(payload(response).observation).toMatchObject({
       observationId: "client-action",
       screenshotPath: "client.png",
-      screenshotCapturedAt: 123,
+      screenshotCapturedAt: CAPTURED_AT,
     });
   });
 
@@ -112,7 +115,7 @@ describe("ToolRegistry post-action capture scope", () => {
         expect(final.observation).toMatchObject({
           observationId: h.captures[0].observationId,
           screenshotPath: `${h.captures[0].observationId}.png`,
-          screenshotCapturedAt: 123,
+          screenshotCapturedAt: new Date(123).toISOString(),
           settled: scenario === "imeAction",
         });
         const text = (response as { content: Array<{ text: string }> }).content[0].text;

@@ -1,3 +1,4 @@
+import { unbindDevice } from "../../src/daemon/deviceBinding";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { retireShutdownOwnership } from "../../src/server/deviceToolsShutdown";
@@ -217,12 +218,14 @@ describe("session clock restoration", () => {
       await h.state.setState({ clock: set });
       h.adapter.writeError = new Error("restore unavailable");
       const session = h.manager.getSession("clock-session")!;
-      const first = await h.manager["stateRestore"].getPendingClockRestoration.bind(
-        h.manager["stateRestore"],
-      )(session, null);
-      const second = await h.manager["stateRestore"].getPendingClockRestoration.bind(
-        h.manager["stateRestore"],
-      )(session, null);
+      const first =
+        await h.manager.testHooks.wiring.host.stateRestore.getPendingClockRestoration.bind(
+          h.manager.testHooks.wiring.host.stateRestore,
+        )(session, null);
+      const second =
+        await h.manager.testHooks.wiring.host.stateRestore.getPendingClockRestoration.bind(
+          h.manager.testHooks.wiring.host.stateRestore,
+        )(session, null);
       expect(second.pending).toBe(first.pending);
       expect(h.restored).toHaveLength(1);
       h.manager.retireRestorations(device.deviceId, "removal");
@@ -256,12 +259,14 @@ describe("session clock restoration", () => {
         rootedByUs: false,
       });
       h.adapter.writeError = new Error("restore unavailable");
-      const first = await h.manager["stateRestore"].getPendingClockRestoration.bind(
-        h.manager["stateRestore"],
-      )(h.manager.getSession("clock-session")!, null);
-      const second = await h.manager["stateRestore"].getPendingClockRestoration.bind(
-        h.manager["stateRestore"],
-      )(h.manager.getSession("second-session")!, null);
+      const first =
+        await h.manager.testHooks.wiring.host.stateRestore.getPendingClockRestoration.bind(
+          h.manager.testHooks.wiring.host.stateRestore,
+        )(h.manager.getSession("clock-session")!, null);
+      const second =
+        await h.manager.testHooks.wiring.host.stateRestore.getPendingClockRestoration.bind(
+          h.manager.testHooks.wiring.host.stateRestore,
+        )(h.manager.getSession("second-session")!, null);
       h.manager.retireRestorations(device.deviceId, "removal");
       expect(h.restoreSignals).toHaveLength(2);
       expect(h.restoreSignals.every((signal) => signal?.aborted)).toBe(true);
@@ -679,7 +684,7 @@ describe("session clock restoration", () => {
       await pool.releaseDevice(device.deviceId, "clock-session");
       const pending = h.manager.getPendingDeviceCleanup(device.deviceId);
       // Model the ownership detachment performed after a proven device shutdown.
-      pool.getDevice(device.deviceId)!.sessionId = null;
+      unbindDevice(pool.getDevice(device.deviceId)!);
       await pool.removeDevice(device.deviceId);
       expect(h.restoreSignals.at(-1)?.aborted).toBe(true);
       const writes = h.adapter.calls.filter((call) => call.startsWith("instant:")).length;

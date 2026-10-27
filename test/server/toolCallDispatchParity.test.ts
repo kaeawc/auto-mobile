@@ -1,13 +1,13 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
-import { McpError } from "../../src/server/mcpError";
+import { McpError } from "../../src/daemon/mcpError";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { daemonLoopbackToolArgs } from "../helpers/daemonLoopbackToolArgs";
 import { afterAll, beforeEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION, INTERNAL_EXECUTION_ID_PARAM } from "../../src/daemon/constants";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { DAEMON_VERSION, INTERNAL_EXECUTION_ID_PARAM } from "../../src/daemon/wire/constants";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { ActionableError } from "../../src/models";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ToolRegistry } from "../../src/server/toolRegistry";

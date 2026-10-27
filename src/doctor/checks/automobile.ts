@@ -19,8 +19,8 @@ import {
   buildIdentityFromStatus,
   describeBuildIdentity,
   getCurrentBuildIdentity,
-} from "../../daemon/buildIdentity";
-import type { BuildIdentity } from "../../daemon/buildIdentity";
+} from "../../daemon/wire/buildIdentity";
+import type { BuildIdentity } from "../../daemon/wire/buildIdentity";
 import {
   LATEST_RELEASE_VERSION,
   resolveApkUrl,
@@ -33,7 +33,7 @@ import { getMcpServerVersion } from "../../utils/mcpVersion";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
-import { loadSharp, type SharpFactory } from "../../utils/image/loadSharp";
+import { loadSharp } from "../../utils/image/loadSharp";
 import {
   WebpBinaryResolver,
   type ResolvedWebpBinaries,
@@ -48,6 +48,7 @@ import {
   DeviceOwnershipView,
   createDefaultDeviceOwnershipSources,
 } from "../../daemon/deviceOwnershipView";
+import { checkSpotlightIndexing } from "./spotlightIndexing";
 import { checkOrphanedDaemons } from "./orphanedDaemons";
 import { listForwardLeaseHolders } from "../../daemon/forwardLeaseHolders";
 
@@ -76,6 +77,7 @@ export interface AutoMobileCheckDependencies {
   checkDaemonStatus?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkDaemonConnectivity?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkDaemonBuildIdentity?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
+  checkSpotlightIndexing?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkOrphanedDaemons?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkForeignLeaseHolders?: () => Promise<CheckResult>;
   checkDeviceOwnership?: () => Promise<CheckResult>;
@@ -91,7 +93,8 @@ export interface ImageBackendDoctorLogger {
 export interface ImageBackendDoctorDependencies {
   platform?: NodeJS.Platform;
   hostPlatform?: NodeJS.Platform;
-  sharpLoader?: () => Promise<SharpFactory>;
+  /** Only load success matters; the loaded module is never inspected. */
+  sharpLoader?: () => Promise<unknown>;
   webpBinaryResolver?: { resolve(): Promise<ResolvedWebpBinaries> };
   logger?: ImageBackendDoctorLogger;
 }
@@ -724,6 +727,11 @@ export async function runAutoMobileChecks(
   );
   await run(() =>
     (dependencies.checkDaemonBuildIdentity ?? ((probe) => checkDaemonBuildIdentity({}, probe)))(
+      options,
+    ),
+  );
+  await run(() =>
+    (dependencies.checkSpotlightIndexing ?? ((probe) => checkSpotlightIndexing({}, probe)))(
       options,
     ),
   );

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { CLI_KEEPER_LIVENESS_OWNER_KIND } from "../../src/daemon/constants";
+import { CLI_KEEPER_LIVENESS_OWNER_KIND } from "../../src/daemon/wire/constants";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -25,6 +25,7 @@ const LEASE_MS = SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
 
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
+  releaseDevice: async () => {},
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
 };
 

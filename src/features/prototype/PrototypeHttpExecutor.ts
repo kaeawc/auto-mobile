@@ -1,9 +1,22 @@
 /**
- * Executes the HTTP call behind a host-proxied prototype `request` (#12527). Forwards to any
- * absolute http/https URL: there is deliberately no allowlist. Never throws; every failure is a
- * typed outcome.
+ * Executes host-proxied prototype `request` calls under an egress policy (#12527). Every
+ * destination and redirect is checked before connecting to a validated, pinned IP address.
+ * Local destinations and daemon ports on private addresses are restricted. Failures are typed outcomes.
  */
-import { errorMessage } from "../../utils/describeUnknownError";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { prototypeDaemonPorts } from "./prototypeDaemonPorts";
+import { pinnedPrototypeFetch, PrototypeResponseTooLargeError } from "./prototypePinnedTransport";
+import {
+  checkUrl,
+  destinationPort,
+  forbiddenHeaderOf,
+  StrictEgressPolicy,
+  type EgressPolicy,
+  type HostResolver,
+  type ResolvedHostAddress,
+} from "./prototypeEgressPolicy";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import {
@@ -44,15 +57,32 @@ export interface PrototypeHttpExecutor {
   execute(request: PrototypeHttpRequest, signal: AbortSignal): Promise<PrototypeHttpOutcome>;
 }
 
-export type PrototypeFetch = (url: string, init: RequestInit) => Promise<Response>;
+/** The URL is normalized; transports must connect only to `pinned`, preserving the URL's authority. */
+export type PrototypeFetch = (
+  url: string,
+  init: RequestInit,
+  pinned: ResolvedHostAddress,
+  maxResponseBytes: number,
+) => Promise<Response>;
 
 export interface FetchPrototypeHttpExecutorOptions {
   fetch?: PrototypeFetch;
+  policy?: EgressPolicy;
+  resolver?: HostResolver;
   timer: Pick<Timer, "setTimeout" | "clearTimeout" | "now">;
   maxResponseBytes?: number;
 }
 
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECT_HOPS = 5;
+
 const BODYLESS_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD"]);
+const REQUEST_BODY_HEADERS = new Set([
+  "content-type",
+  "content-encoding",
+  "content-language",
+  "content-location",
+]);
 
 /**
  * The JSON text with every object's keys in sorted (UTF-16 code unit) order, recursively: the
@@ -113,7 +143,7 @@ function parseBody(text: string): PrototypeRequestJson | null | typeof LITERAL_N
     return parsed === null ? LITERAL_NULL : parsed;
   } catch (error) {
     // Not JSON is a supported shape: the response carries the raw string.
-    logger.debug(`[PrototypeHttpExecutor] body is not JSON: ${errorMessage(error)}`);
+    logger.debug("[PrototypeHttpExecutor] body is not JSON.");
     return text;
   }
 }
@@ -123,12 +153,15 @@ const FORBIDDEN_HEADER_VALUE = /[\0\r\n]/;
 
 /** RFC 9110 field syntax, checked before fetch so the outcome is `invalid_request`, not `network`. */
 function headerProblemOf(headers: Record<string, string> | undefined): string | undefined {
+  if (forbiddenHeaderOf(headers) !== undefined) {
+    return "A request header is not permitted.";
+  }
   for (const [name, value] of Object.entries(headers ?? {})) {
     if (!HEADER_NAME.test(name)) {
-      return `Header name is not an HTTP token: ${JSON.stringify(name)}`;
+      return "Header name is not an HTTP token.";
     }
     if (FORBIDDEN_HEADER_VALUE.test(value)) {
-      return `Header ${name} has a value with a CR, LF or NUL character`;
+      return "A header value contains a CR, LF or NUL character.";
     }
   }
   return undefined;
@@ -156,8 +189,46 @@ function urlProblemOf(raw: string): string | undefined {
       : `Only http and https URLs are supported, got ${url.protocol}`;
   } catch (error) {
     // The parse failure is the finding: report it as the typed invalid_url outcome.
-    logger.debug(`[PrototypeHttpExecutor] URL parse failed: ${errorMessage(error)}`);
-    return `Not an absolute URL: ${raw}`;
+    logger.debug("[PrototypeHttpExecutor] URL parse failed.");
+    return "Not an absolute HTTP URL.";
+  }
+}
+
+function redirectedRequest(
+  request: PrototypeHttpRequest,
+  status: number,
+  from: URL,
+  to: URL,
+): PrototypeHttpRequest {
+  // Arbitrary authored headers may carry credentials; generated body headers are rebuilt.
+  const redirected = {
+    ...request,
+    headers: from.origin === to.origin ? request.headers : undefined,
+  };
+  const rewrite =
+    ((status === 301 || status === 302) && request.method === "POST") ||
+    (status === 303 && !BODYLESS_METHODS.has(request.method));
+  if (!rewrite) {
+    return redirected;
+  }
+  const headers =
+    redirected.headers === undefined
+      ? undefined
+      : Object.fromEntries(
+          Object.entries(redirected.headers).filter(
+            ([name]) => !REQUEST_BODY_HEADERS.has(name.toLowerCase()),
+          ),
+        );
+  return { ...redirected, method: "GET", body: undefined, headers };
+}
+
+function redirectUrl(location: string, base: URL): URL | undefined {
+  try {
+    return new URL(location, base);
+  } catch (error) {
+    // Invalid Location is an expected response shape, reported as a typed invalid_response.
+    logger.debug("[PrototypeHttpExecutor] redirect URL parse failed.");
+    return undefined;
   }
 }
 
@@ -182,10 +253,15 @@ function concat(chunks: Uint8Array[], total: number): Uint8Array {
 export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
   private readonly fetchImpl: PrototypeFetch;
   private readonly maxBytes: number;
+  private readonly policy: EgressPolicy;
+  private readonly resolver: HostResolver;
 
   constructor(private readonly options: FetchPrototypeHttpExecutorOptions) {
-    this.fetchImpl = options.fetch ?? ((url, init) => fetch(url, init));
+    this.fetchImpl = options.fetch ?? pinnedPrototypeFetch;
     this.maxBytes = options.maxResponseBytes ?? MAX_PROTOTYPE_RESPONSE_BYTES;
+    this.policy = options.policy ?? new StrictEgressPolicy(prototypeDaemonPorts);
+    this.resolver =
+      options.resolver ?? ((hostname) => lookup(hostname, { all: true, verbatim: true }));
   }
 
   async execute(request: PrototypeHttpRequest, signal: AbortSignal): Promise<PrototypeHttpOutcome> {
@@ -218,22 +294,121 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
     const combined = AbortSignal.any([signal, timeoutController.signal]);
 
     try {
-      const response = await this.fetchImpl(request.url, this.requestInit(request, combined));
-      return await this.outcomeOf(response, request.method, combined, startedAt);
+      const result = await this.fetchResponse(request, combined, startedAt);
+      if (!("response" in result)) {
+        return result;
+      }
+      return await this.outcomeOf(result.response, result.method, combined, startedAt);
     } catch (error) {
+      // Transport error text may contain query strings or credentials; retain only its category.
+      const refused = isConnectionRefused(error);
+      logger.warn("[PrototypeHttpExecutor] request could not complete.", {
+        connectionRefused: refused,
+        aborted: combined.aborted,
+        timedOut,
+      });
       if (combined.aborted) {
         return timedOut
           ? fail("timeout", `Request timed out after ${timeoutMs}ms.`)
           : fail("cancelled", "Request was cancelled.");
       }
-      if (isConnectionRefused(error)) {
-        return fail("connection_refused", `Connection refused: ${request.url}`);
+      if (refused) {
+        return fail("connection_refused", "Connection refused.");
       }
-      logger.warn(`[PrototypeHttpExecutor] request failed: ${errorMessage(error)}`, error);
-      return fail("network", errorMessage(error));
+      if (error instanceof PrototypeResponseTooLargeError) {
+        return fail("too_large", `Response body exceeds ${this.maxBytes} bytes.`);
+      }
+      return fail("network", "The request could not complete.");
     } finally {
       timer.clearTimeout(handle);
     }
+  }
+
+  /** Checks and resolves each hop once, then passes only a validated IP to the transport. */
+  private async fetchResponse(
+    original: PrototypeHttpRequest,
+    signal: AbortSignal,
+    startedAt: number,
+  ): Promise<{ response: Response; method: PrototypeRequestMethod } | PrototypeHttpOutcome> {
+    let request = original;
+    let url = new URL(request.url);
+    const fail = (code: PrototypeRequestErrorCode, message: string) =>
+      failed(code, message, this.options.timer.now() - startedAt);
+    for (let hop = 0; ; hop++) {
+      signal.throwIfAborted();
+      const problem = requestProblemOf({ ...request, url: url.href });
+      if (problem !== undefined) {
+        return fail(problem.code, problem.message);
+      }
+      const pinned = await this.pinDestination(url, signal);
+      if ("code" in pinned) {
+        return fail(pinned.code, pinned.message);
+      }
+      signal.throwIfAborted();
+      const response = await this.fetchImpl(
+        url.href,
+        this.requestInit(request, signal),
+        pinned,
+        this.maxBytes,
+      );
+      if (!REDIRECT_STATUSES.has(response.status)) {
+        return { response, method: request.method };
+      }
+      await response.body?.cancel();
+      if (hop === MAX_REDIRECT_HOPS) {
+        return fail("network", "Too many redirects.");
+      }
+      const location = response.headers.get("location");
+      if (!location) {
+        return fail("invalid_response", "Redirect response has no Location header.");
+      }
+      const next = redirectUrl(location, url);
+      if (next === undefined) {
+        return fail("invalid_response", "Redirect Location is not a valid URL.");
+      }
+      if (url.protocol === "https:" && next.protocol === "http:") {
+        return fail("blocked_destination", "The destination is not permitted: scheme downgrade.");
+      }
+      request = redirectedRequest(request, response.status, url, next);
+      url = next;
+    }
+  }
+
+  private async pinDestination(
+    url: URL,
+    signal: AbortSignal,
+  ): Promise<ResolvedHostAddress | { code: PrototypeRequestErrorCode; message: string }> {
+    if (url.username || url.password) {
+      return { code: "invalid_request", message: "URL credentials are not permitted." };
+    }
+    const blocked = checkUrl(url, this.policy);
+    if (blocked !== undefined) {
+      return { code: "blocked_destination", message: blocked };
+    }
+    const hostname = url.hostname.replace(/^\[|\]$/g, "");
+    const literalFamily = isIP(hostname);
+    const addresses = literalFamily
+      ? [{ address: hostname, family: literalFamily }]
+      : await raceWithDeadline(() => this.resolver(hostname), {
+          timer: this.options.timer,
+          signal,
+          label: "Prototype destination resolution",
+        });
+    signal.throwIfAborted();
+    if (addresses.length === 0) {
+      return { code: "network", message: "The destination did not resolve to an address." };
+    }
+    if (
+      addresses.some(
+        ({ address, family }) =>
+          !isIP(address) ||
+          isIP(address) !== family ||
+          !this.policy.permitsAddress(address, destinationPort(url)),
+      )
+    ) {
+      return { code: "blocked_destination", message: "The destination is not permitted." };
+    }
+    return addresses[0]!;
   }
 
   /** The outcome of an answered request: the status decides before any body is consumed. */
@@ -278,7 +453,7 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
         }
       }
     }
-    return { method: request.method, headers, body, signal, redirect: "follow" };
+    return { method: request.method, headers, body, signal, redirect: "manual" };
   }
 
   /** Reads a 2xx body incrementally and stops as soon as the cap is crossed. */
@@ -300,7 +475,11 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
     let total = 0;
     for (;;) {
       signal.throwIfAborted();
-      const { done, value } = await reader.read();
+      const { done, value } = await raceWithDeadline(() => reader.read(), {
+        timer: this.options.timer,
+        signal,
+        label: "Prototype response body",
+      });
       if (done) {
         break;
       }

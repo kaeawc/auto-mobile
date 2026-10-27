@@ -1,5 +1,6 @@
 import { logger } from "../../../utils/logger";
 import type { BootedDevice, PlanStep, Element } from "../../../models";
+import type { PointerOption } from "../../../models/PointerOption";
 import type {
   GestureEmitter,
   GestureEvent,
@@ -9,9 +10,12 @@ import type {
   TouchTrackFailure,
 } from "./types";
 import { GESTURE_THRESHOLDS } from "./types";
-import { AndroidCtrlProxyClient } from "../../observe/android";
+import { formsDoubleTap, hasUnknownAxes } from "./gesturePairing";
+import { noteExportLoss } from "./penExportWarnings";
+import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
-import { discoverTouchNode } from "./TouchNodeDiscovery";
+import { discoverInputNodes } from "./InputNodeDiscovery";
+import type { TouchInputNode } from "./TouchNodeDiscovery";
 import { queryDensity, queryDisplaySize } from "./AxisRanges";
 import { normalizedAxis } from "../normalizedAxis";
 import { ROTATION_UNKNOWN_CAVEAT, ScreenGeometryTimeline } from "./ScreenGeometryTimeline";
@@ -91,6 +95,8 @@ export class DualTrackRecorder {
   private orderedSteps: OrderedStep[] = [];
   private latestEntry: OrderedStep | null = null;
   private pendingGestures: PendingGesture[] = [];
+  /** Recorded input that the exported plan cannot represent, so it was left out (#13084). */
+  private readonly exportWarnings = new Set<string>();
   private bufferedInteractions: BufferedInteraction[] = [];
   private lastInputText: { elementKey: string; entry: OrderedStep } | null = null;
   private activeEmitter: GestureEmitter | null = null;
@@ -119,6 +125,11 @@ export class DualTrackRecorder {
     return this.steps;
   }
 
+  /** Warnings for input left out of the plan so far, for a stop that failed or timed out. */
+  get capturedExportWarnings(): readonly string[] {
+    return [...this.exportWarnings];
+  }
+
   constructor(
     private readonly device: BootedDevice,
     /** Optional override for testing — defaults to a real GetEventReader */
@@ -138,7 +149,7 @@ export class DualTrackRecorder {
   async start(): Promise<void> {
     // In real mode (no test override), obtain the AndroidCtrlProxyClient directly
     // so we can send start/stop recording notifications to the Kotlin service.
-    let a11yClient: AndroidCtrlProxyClient | undefined;
+    let a11yClient: AndroidCtrlProxy | undefined;
     if (!this.a11ySource) {
       a11yClient = AndroidCtrlProxyClient.getInstance(this.device);
     }
@@ -180,6 +191,8 @@ export class DualTrackRecorder {
     touchTrackFailure?: TouchTrackFailure;
     /** Rotation/size problems that may have mis-recorded tapAt/swipeOn steps (#10174). */
     geometryWarnings?: string[];
+    /** Recorded input left out of the plan because replay cannot reproduce it (#13084). */
+    exportWarnings?: string[];
   }> {
     if (options.hostOnly) {
       this.geometry?.dispose();
@@ -235,6 +248,7 @@ export class DualTrackRecorder {
       stepCount: this.steps.length,
       ...(this.touchTrackFailure ? { touchTrackFailure: this.touchTrackFailure } : {}),
       ...(geometryWarnings.length > 0 ? { geometryWarnings } : {}),
+      ...(this.exportWarnings.size > 0 ? { exportWarnings: [...this.exportWarnings] } : {}),
     };
   }
 
@@ -325,6 +339,11 @@ export class DualTrackRecorder {
       return;
     }
 
+    if (gesture.type === "hover") {
+      noteExportLoss(this.exportWarnings, gesture, null);
+      return;
+    }
+
     if (gesture.type === "pressButton") {
       this.enqueueStep({ resolved: true, step: buildPressButtonStep(gesture) });
       return;
@@ -366,36 +385,13 @@ export class DualTrackRecorder {
     if (gesture.type !== "doubleTap" || hasUnknownAxes(gesture)) {
       return false;
     }
-    const priorTap = [...this.pendingGestures].reverse().find((pending) => {
-      const prior = pending.gesture;
-      if (
-        prior.type !== "tap" ||
-        hasUnknownAxes(prior) ||
-        prior.screenX === undefined ||
-        prior.screenY === undefined
-      ) {
-        return false;
-      }
-      const elapsed = gesture.arrivedAt - prior.arrivedAt;
-      if (gesture.firstTapArrivedAt !== undefined) {
-        return (
-          prior.arrivedAt === gesture.firstTapArrivedAt &&
-          elapsed >= 0 &&
-          elapsed <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS
-        );
-      }
-      // Direct emitter events lack the classifier's correlation time.
-      const dx = (gesture.screenX ?? Infinity) - prior.screenX;
-      const dy = (gesture.screenY ?? Infinity) - prior.screenY;
-      return (
-        elapsed >= 0 &&
-        elapsed <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS &&
-        Math.hypot(dx, dy) <= GESTURE_THRESHOLDS.DOUBLE_TAP_SLOP_DP
-      );
-    });
+    const priorTap = [...this.pendingGestures]
+      .reverse()
+      .find((pending) => formsDoubleTap(pending.gesture, gesture));
     const step = priorTap?.step;
     if (step && ["tapOn", "tapAt"].includes(step.tool) && step.params.action === "tap") {
       step.params.action = "doubleTap";
+      noteExportLoss(this.exportWarnings, gesture, step);
       return true;
     }
     if (priorTap && !priorTap.resolved) {
@@ -483,6 +479,7 @@ export class DualTrackRecorder {
 
     const event = this.selectInteraction(pending, interaction);
     const step = buildMergedStep(pending.gesture, event);
+    noteExportLoss(this.exportWarnings, pending.gesture, step);
     pending.step = step ?? undefined;
     this.trackGeometrySpan(pending.gesture, step);
     this.flushResolvedSteps();
@@ -667,10 +664,13 @@ export class DualTrackRecorder {
 
   private async createGetEventReader(): Promise<GestureEmitter> {
     const adb = defaultAdbClientFactory.create(this.device);
-    const node = await discoverTouchNode(adb);
+    const { touch, pen } = await discoverInputNodes(adb);
+    // A pen-only device records through its first digitizer.
+    const node = touch ?? pen[0];
     if (!node) {
       throw new Error("[DualTrackRecorder] No multitouch input device found on this device");
     }
+    const penNodes = touch ? pen : pen.slice(1);
     const density = await queryDensity(adb);
     const probe = createAdbGeometryProbe(adb);
     const display = await queryDisplaySize(adb);
@@ -682,10 +682,18 @@ export class DualTrackRecorder {
       caveats,
     );
     this.geometry = new DisplayGeometryTracker(timeline, probe, this.timer);
+    const penReaders = followWithPenTimelines(
+      timeline,
+      penNodes,
+      { rotation, display },
+      this.timer.now(),
+      caveats,
+    );
 
     const reader = new GetEventReader({
       adb,
       touchNode: node,
+      penNodes: penReaders,
       // Each touch is mapped with the geometry in force at its DOWN, not at recording start.
       scaler: timeline,
       density,
@@ -693,6 +701,29 @@ export class DualTrackRecorder {
     });
     return withTimelineGeometry(reader, timeline, this.timer);
   }
+}
+
+/**
+ * Pen digitizers have their own raw ranges but share the display geometry, so each gets a
+ * timeline that mirrors the primary one.
+ */
+function followWithPenTimelines(
+  primary: ScreenGeometryTimeline,
+  penNodes: ReadonlyArray<TouchInputNode>,
+  initial: { rotation: number; display: { width: number; height: number } },
+  startedAt: number,
+  caveats: readonly string[],
+): Array<{ node: TouchInputNode; scaler: ScreenGeometryTimeline }> {
+  return penNodes.map((node) => {
+    const penTimeline = new ScreenGeometryTimeline(
+      { xMin: node.axisXMin, xMax: node.axisXMax, yMin: node.axisYMin, yMax: node.axisYMax },
+      initial,
+      startedAt,
+      caveats,
+    );
+    primary.follow(penTimeline);
+    return { node, scaler: penTimeline };
+  });
 }
 
 /**
@@ -843,6 +874,9 @@ function buildMergedStep(
   gesture: GestureEvent,
   event: ReceivedInteraction = { type: "", timestamp: 0 },
 ): PlanStep | null {
+  if (gesture.toolType !== undefined) {
+    return buildPenStep(gesture);
+  }
   const selector = buildSelector(event.element);
 
   switch (gesture.type) {
@@ -917,7 +951,27 @@ function buildSwipeAtStep(gesture: GestureEvent, endpoints: SwipeEndpoints): Pla
   if (gesture.speed === "fast") {
     params.speed = "fast";
   }
+  const pointer = pointerOf(gesture);
+  if (pointer) {
+    params.pointer = pointer;
+  }
   return { tool: "swipeAt", params };
+}
+
+/**
+ * A pen contact replays only as a coordinate step that carries its pointer: an element tap or a
+ * swipe direction cannot say "stylus", so either would replay as a finger. A swipe keeps only its
+ * endpoints. Only a stylus can be injected, so any other tool (an eraser) has no step.
+ */
+function buildPenStep(gesture: GestureEvent): PlanStep | null {
+  if (gesture.toolType !== "stylus") {
+    return null;
+  }
+  if (gesture.type === "swipe") {
+    const endpoints = swipeEndpoints(gesture);
+    return endpoints ? buildSwipeAtStep(gesture, endpoints) : null;
+  }
+  return buildCoordinateTapStep(gesture);
 }
 
 function buildSwipeStep(gesture: GestureEvent, event: ReceivedInteraction): PlanStep | null {
@@ -945,8 +999,12 @@ function buildSwipeStep(gesture: GestureEvent, event: ReceivedInteraction): Plan
   return { tool: "swipeOn", params };
 }
 
-function hasUnknownAxes(gesture: GestureEvent): boolean {
-  return Boolean(gesture.unknownAxes?.length);
+/**
+ * The replayable pointer for a recorded pen gesture. Only "stylus" can be injected, so an eraser
+ * has none (the recorder skips those gestures instead of replaying them as another tool).
+ */
+function pointerOf(gesture: GestureEvent): PointerOption | undefined {
+  return gesture.toolType === "stylus" ? { toolType: "stylus" } : undefined;
 }
 
 function buildCoordinateTapStep(gesture: GestureEvent): PlanStep | null {
@@ -966,6 +1024,10 @@ function buildCoordinateTapStep(gesture: GestureEvent): PlanStep | null {
       LONG_PRESS_MAX_MS,
       Math.max(LONG_PRESS_MIN_MS, gesture.durationMs),
     );
+  }
+  const pointer = pointerOf(gesture);
+  if (pointer) {
+    params.pointer = pointer;
   }
   return {
     tool: "tapAt",

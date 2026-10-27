@@ -22,7 +22,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
-# shellcheck source=scripts/lib/shell-core.sh disable=SC1091
+# shellcheck source=scripts/lib/shell-core.sh
 source "$ROOT/scripts/lib/shell-core.sh"
 if ! ensure_node_modules "$ROOT"; then
   echo "==> dependency bootstrap failed — aborting" >&2

@@ -24,7 +24,7 @@ import {
 import {
   registerDirectSessionDevice,
   unregisterDirectSession,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeScreenshotStateStore } from "../fakes/FakeScreenshotStateStore";
 import {

@@ -1,13 +1,16 @@
+import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
+import { FakeTimer } from "../fakes/FakeTimer";
+import type { GestureStartRequest } from "../../src/features/observe/android/CtrlProxyGestures";
 import { spyOn } from "bun:test";
 import {
   INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
 import type { DeviceObservationAccess } from "../../src/server/deviceObservationAccess";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { combineRequestAbortSignals } from "../../src/utils/AbortContext";
 import { withAdmittedSessionEcho } from "../../src/server/routedSessionEcho";
 import { registerInteractionTools } from "../../src/server/interactionTools";
@@ -18,7 +21,7 @@ import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
 import { setActiveDeviceSchema } from "../../src/server/utilityTools";
 import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
 /** One device tool body that reached the device boundary. */
@@ -39,7 +42,7 @@ const SUCCESS = { content: [{ type: "text", text: JSON.stringify({ success: true
  * `createToolExecutionContext`), and the execution tracker run exactly as the daemon's tool-call
  * entry runs them, so a tool call's start, end and request deadline reach the daemon wiring the
  * harness subscribes (`subscribeToolCallEndActivity`, the release vetoes' deadline lookup). Only
- * the device boundary is fake: device discovery and readiness ({@link FakeDeviceSessionManager}),
+ * the device boundary is fake: device discovery and readiness ({@link FakeDeviceReadiness}),
  * display inventory, CtrlProxy, and the handler's device work (the audit runner, which runs
  * {@link DeviceToolBody} instead of the handler).
  *
@@ -47,7 +50,7 @@ const SUCCESS = { content: [{ type: "text", text: JSON.stringify({ success: true
  * daemon's session manager and pool.
  */
 export class RealToolCallPath {
-  readonly deviceSessionManager = new FakeDeviceSessionManager();
+  readonly deviceReadiness = new FakeDeviceReadiness();
   /** Tool bodies that reached the device boundary, in order. */
   readonly runs: DeviceToolRun[] = [];
   /**
@@ -75,7 +78,7 @@ export class RealToolCallPath {
   private readonly restorers: Array<() => void> = [];
 
   constructor(private readonly devices: BootedDevice[]) {
-    this.deviceSessionManager.setConnectedDevices(devices);
+    this.deviceReadiness.setConnectedDevices(devices);
   }
 
   install(registerDefaultTools = true): this {
@@ -104,39 +107,40 @@ export class RealToolCallPath {
     const originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
     this.restorers.push(() => ToolRegistry.setCollaboratorsForTesting(originalCollaborators));
     ToolRegistry.setCollaboratorsForTesting({
-      deviceSessionManager: this.deviceSessionManager,
+      deviceReadiness: this.deviceReadiness,
       toolCallRepository: { async recordToolCall(): Promise<void> {} },
       navigationToolCallRecorder: { record: () => undefined },
     });
-    const ctrlProxy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
-      bindSession: () => undefined,
-      getScreenScaleMetadata: () => null,
-      requestTapCoordinates: async (
-        ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-      ) => {
-        args[6]?.();
-        return { success: true };
-      },
-      setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-        if (typeof args[5] === "object") {
-          args[5].onDispatch?.();
-        }
-        this.ctrlProxyWrites.push("setPreference");
-        return { success: true };
-      },
-      requestGestureStart: async (gestureId: string) => {
-        this.gestureFrames.push(`start:${gestureId}`);
-        return { success: true };
-      },
-      requestGestureMove: async (gestureId: string) => {
-        this.gestureFrames.push(`move:${gestureId}`);
-        return { success: true };
-      },
-      requestGestureEnd: async (gestureId: string, _x: number, _y: number, cancel: boolean) => {
-        this.gestureFrames.push(`${cancel ? "cancel" : "end"}:${gestureId}`);
-        return { success: true };
-      },
-    }));
+    const proxy = new FakeCtrlProxy(new FakeTimer());
+    proxy.bindSession = () => undefined;
+    proxy.getScreenScaleMetadata = () => null;
+    proxy.requestTapCoordinates = async (
+      ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+    ) => {
+      args[0].onDispatch?.();
+      return { success: true, totalTimeMs: 0 };
+    };
+    proxy.setPreference = async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+      if (typeof args[5] === "object") {
+        args[5].onDispatch?.();
+      }
+      this.ctrlProxyWrites.push("setPreference");
+    };
+    proxy.requestGestureStart = async (request: GestureStartRequest) => {
+      const { gestureId } = request;
+
+      this.gestureFrames.push(`start:${gestureId}`);
+      return { success: true, totalTimeMs: 0 };
+    };
+    proxy.requestGestureMove = async (gestureId: string) => {
+      this.gestureFrames.push(`move:${gestureId}`);
+      return { success: true, totalTimeMs: 0 };
+    };
+    proxy.requestGestureEnd = async (gestureId: string, _x: number, _y: number, cancel = false) => {
+      this.gestureFrames.push(`${cancel ? "cancel" : "end"}:${gestureId}`);
+      return { success: true, totalTimeMs: 0 };
+    };
+    const ctrlProxy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(proxy);
     this.restorers.push(() => ctrlProxy.mockRestore());
     // Focused admission suites register their own tool and keep the real pipeline above.
     if (!registerDefaultTools) {
@@ -175,7 +179,7 @@ export class RealToolCallPath {
       createSetActiveDeviceHandler({
         displayInventory: new FakeDisplayInventoryProvider(),
         resumeCtrlProxy: async () => undefined,
-        legacyDeviceSelection: () => this.deviceSessionManager,
+        legacyDeviceSelection: () => this.deviceReadiness,
       }),
       { defaultEnabled: true },
     );

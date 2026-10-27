@@ -1,7 +1,9 @@
 import { expect, describe, test, beforeEach, mock, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AvdManagerDependencies } from "../../../src/utils/android-cmdline-tools/avdmanager";
+import * as avdmanager from "../../../src/utils/android-cmdline-tools/avdmanager";
+import type { AvdManagerDependencies } from "../../../src/utils/android-cmdline-tools/avdmanager";
+import type { AndroidToolsLocation } from "../../../src/utils/android-cmdline-tools/detection";
 import { AvdManagerClient } from "../../../src/utils/android-cmdline-tools/AvdManagerClient";
 import { AvdManagerService } from "../../../src/utils/android-cmdline-tools/AvdManagerService";
 import { createDeviceImageResourcesHandler } from "../../../src/server/deviceImageResources";
@@ -46,17 +48,9 @@ async function expectRejection(promise: Promise<unknown>): Promise<Error> {
 }
 
 describe("AVDManager", function () {
-  let mockLocation: any;
-  let avdmanager: any;
+  let mockLocation: AndroidToolsLocation;
 
   beforeEach(() => {
-    // Clear module cache first
-    delete require.cache[require.resolve("../../../src/utils/android-cmdline-tools/avdmanager")];
-    delete require.cache[require.resolve("../../../src/utils/android-cmdline-tools/detection")];
-
-    // Now require the modules
-    avdmanager = require("../../../src/utils/android-cmdline-tools/avdmanager");
-
     // Mock location
     mockLocation = {
       path: "/mock/sdk/cmdline-tools/latest",
@@ -74,7 +68,7 @@ describe("AVDManager", function () {
         detectAndroidCommandLineTools: async () => {
           throw failure;
         },
-        logger: { info() {}, debug() {}, error() {}, warn },
+        logger: { info() {}, error() {}, warn },
       });
       const result =
         operation === "acceptLicenses"
@@ -1251,12 +1245,14 @@ id: 52 or "pixel_9"
           {
             path: "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest",
             source: "homebrew",
+            available_tools: ["avdmanager", "sdkmanager"],
           },
         ];
 
         mockDeps.getBestAndroidToolsLocation = () => ({
           path: "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest",
           source: "homebrew",
+          available_tools: ["avdmanager", "sdkmanager"],
         });
 
         // Set ANDROID_HOME to proper SDK location

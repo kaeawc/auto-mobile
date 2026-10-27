@@ -1,9 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { DatabaseHealthLateness } from "../../src/daemon/databaseHealthLateness";
-import {
-  DatabaseHealthProbeInitTimeoutError,
-  DatabaseHealthProbeTimeoutError,
-} from "../../src/db/DatabaseHealthProbe";
+import { DatabaseHealthProbeInitTimeoutError } from "../../src/db/DatabaseHealthProbeInitTimeoutError";
+import { DatabaseHealthProbeTimeoutError } from "../../src/db/DatabaseHealthProbeTimeoutError";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 

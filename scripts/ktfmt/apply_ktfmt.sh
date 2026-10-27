@@ -5,11 +5,11 @@ ONLY_TOUCHED_FILES=${ONLY_TOUCHED_FILES:-true}
 
 # Pinned ktfmt version + shared enforcement helpers -- single source of truth
 # shared with install_ktfmt.sh and validate_ktfmt.sh.
-# shellcheck source=scripts/ktfmt/ktfmt_version.sh disable=SC1091
+# shellcheck source=scripts/ktfmt/ktfmt_version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
 
 # Shared git file-selection + install-when-missing helpers (issue #2823).
-# shellcheck source=scripts/lib/file-selection.sh disable=SC1091
+# shellcheck source=scripts/lib/file-selection.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/file-selection.sh"
 
 # Colors for output

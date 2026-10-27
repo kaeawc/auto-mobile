@@ -96,12 +96,12 @@ final class AsyncLockOrderTests: XCTestCase {
                     try await client.callTool(name: "observe", arguments: [:], timeout: 1)
                 }
                 try await connection.receives.wait(for: 1)
-                try await scheduler.registered.wait(for: 1)
+                try await scheduler.waitForPendingSleep()
                 let start = TransportEvents()
                 let deadline = Task.detached {
                     try await start.wait(for: 1)
                     if iteration.isMultiple(of: 2) { await Task.yield() }
-                    scheduler.advance(by: 1)
+                    scheduler.advance(by: 3)
                 }
                 let cancellation = Task.detached {
                     try await start.wait(for: 1)

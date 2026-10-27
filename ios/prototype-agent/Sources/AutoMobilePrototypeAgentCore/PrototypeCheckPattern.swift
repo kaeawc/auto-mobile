@@ -6,10 +6,12 @@ import Foundation
 /// repeated more than once cannot transitively contain a variable quantifier or alternation;
 /// fixed {n} repetitions remain legal. These limits reject backtracking blowups.
 enum PrototypeCheckPattern {
-    static let maxValueLength = 4096
+    static let maxValueLength = PrototypeContractValidator.limit("MAX_PROTOTYPE_CHECK_VALUE_LENGTH")
+    private static let maxBound = PrototypeContractValidator.limit("MAX_PROTOTYPE_CHECK_QUANTIFIER_BOUND")
+    private static let maxVariable = PrototypeContractValidator.limit("MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS")
 
     static func withinLimits(_ pattern: String) -> Bool {
-        guard pattern.utf16.count <= 128 else { return false }
+        guard pattern.utf16.count <= PrototypeContractValidator.checkPatternMaxLength else { return false }
         var scanner = LimitScanner(pattern)
         return scanner.check()
     }
@@ -35,6 +37,24 @@ enum PrototypeCheckPattern {
             cursor < scalars.count ? scalars[cursor] : nil
         }
 
+        private mutating func applyQuantifier(
+            to char: Unicode.Scalar,
+            atom: (variable: Bool, alternation: Bool)
+        )
+            -> Bool
+        {
+            if let quantifier = quantifier() {
+                if char == "^" || char == "$" { valid = false }
+                if quantifier.max > 1, atom.variable || atom.alternation { valid = false }
+                if quantifier.variable {
+                    variableCount += 1
+                    if variableCount > maxVariable { valid = false }
+                    return true
+                }
+            }
+            return false
+        }
+
         private mutating func body(group: Bool) -> (variable: Bool, alternation: Bool) {
             var result = (variable: false, alternation: false)
             while let char = next, valid {
@@ -44,42 +64,64 @@ enum PrototypeCheckPattern {
                     return result
                 }
                 if char == "|" { result.alternation = true; continue }
-                var atom = (variable: false, alternation: false)
-                if char == "\\" {
-                    guard next != nil else { valid = false; return result }
-                    cursor += 1
-                } else if char == "[" {
-                    while let member = next, member != "]" {
-                        cursor += 1
-                        if member == "\\", next != nil { cursor += 1 }
-                    }
-                    guard next == "]" else { valid = false; return result }
-                    cursor += 1
-                } else if char == "(" {
-                    if next == "?" {
-                        cursor += 1
-                        guard next == ":" else { valid = false; return result }
-                        cursor += 1
-                    }
-                    atom = body(group: true)
-                } else if "*+?{}]".unicodeScalars.contains(char) {
-                    valid = false
-                    return result
-                }
-                if let quantifier = quantifier() {
-                    if char == "^" || char == "$" { valid = false }
-                    if quantifier.max > 1, atom.variable || atom.alternation { valid = false }
-                    if quantifier.variable {
-                        variableCount += 1
-                        if variableCount > 2 { valid = false }
-                        result.variable = true
-                    }
-                }
+                guard let atom = readAtom(char) else { return result }
+                if applyQuantifier(to: char, atom: atom) { result.variable = true }
                 result.variable = result.variable || atom.variable
                 result.alternation = result.alternation || atom.alternation
             }
             if group { valid = false }
             return result
+        }
+
+        private mutating func readAtom(_ char: Unicode.Scalar) -> (variable: Bool, alternation: Bool)? {
+            var atom = (variable: false, alternation: false)
+            if char == "\\" {
+                _ = escape()
+            } else if char == "[" {
+                characterClass()
+            } else if char == "(" {
+                if next == "?" {
+                    cursor += 1
+                    guard next == ":" else { valid = false; return nil }
+                    cursor += 1
+                }
+                atom = body(group: true)
+            } else if "*+?{}]".unicodeScalars.contains(char) {
+                valid = false
+                return nil
+            }
+            return atom
+        }
+
+        private mutating func escape() -> Unicode.Scalar? {
+            guard let char = next else { valid = false; return nil }
+            cursor += 1
+            if "dwsDWS".unicodeScalars.contains(char) { return nil }
+            if !"^$\\.*+?()[]{}|/-".unicodeScalars.contains(char) { valid = false }
+            return char
+        }
+
+        private mutating func classAtom() -> Unicode.Scalar? {
+            guard let char = next else { valid = false; return nil }
+            cursor += 1
+            return char == "\\" ? escape() : char
+        }
+
+        private mutating func characterClass() {
+            if next == "^" { cursor += 1 }
+            var hasMember = false
+            while let char = next, char != "]", valid {
+                let start = classAtom()
+                hasMember = true
+                if next == "-", cursor + 1 < scalars.count, scalars[cursor + 1] != "]" {
+                    cursor += 1
+                    let end = classAtom()
+                    if let start, let end { if start.value > end.value { valid = false } }
+                    else { valid = false }
+                }
+            }
+            guard next == "]", hasMember else { valid = false; return }
+            cursor += 1
         }
 
         private mutating func number() -> Int? {
@@ -89,7 +131,7 @@ enum PrototypeCheckPattern {
                 found = true
                 cursor += 1
                 value = value * 10 + Int(char.value - 48)
-                if value > 100 { valid = false; return nil }
+                if value > maxBound { valid = false; return nil }
             }
             return found ? value : nil
         }
@@ -142,6 +184,25 @@ enum PrototypeCheckPattern {
         return regex.firstMatch(in: value, options: [], range: range)?.range == range
     }
 
+    private static func unescapedSource(_ scalar: Unicode.Scalar, inClass: inout Bool) -> String {
+        let char = String(scalar)
+        var result = ""
+        switch scalar {
+        case "[":
+            result += inClass ? "\\[" : "["
+            inClass = true
+        case "]":
+            inClass = false
+            result += char
+        case "&": result += inClass ? "\\&" : char
+        case ".": result += inClass ? char : "[^\\r\\n\\u2028\\u2029]"
+        case "$": result += inClass ? char : "\\z"
+        case "^": result += inClass ? char : "\\A"
+        default: result += char
+        }
+        return result
+    }
+
     private static func source(_ pattern: String) -> String {
         let classes = [
             "d": "0-9", "w": "A-Za-z0-9_", "s": " \\t\\r\\n\\f\\u000B",
@@ -164,19 +225,7 @@ enum PrototypeCheckPattern {
             } else if scalar == "\\" {
                 escaped = true
             } else {
-                switch scalar {
-                case "[":
-                    result += inClass ? "\\[" : "["
-                    inClass = true
-                case "]":
-                    inClass = false
-                    result += char
-                case "&": result += inClass ? "\\&" : char
-                case ".": result += inClass ? char : "[^\\r\\n\\u2028\\u2029]"
-                case "$": result += inClass ? char : "\\z"
-                case "^": result += inClass ? char : "\\A"
-                default: result += char
-                }
+                result += unescapedSource(scalar, inClass: &inClass)
             }
         }
         return result

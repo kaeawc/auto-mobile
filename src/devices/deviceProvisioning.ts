@@ -1,3 +1,6 @@
+import type { ConfigurableDeviceResource } from "../models/DeviceResourceConfiguration";
+import { isIosDuoDeviceType } from "../utils/ios-cmdline-tools/iosDeviceType";
+import type { SimulatorCreator } from "./SimulatorCreator";
 /**
  * Device provisioning — creating a simulator/emulator when none matches.
  *
@@ -10,6 +13,7 @@
  * {@link DeviceCreationGate}'s job, checked by the caller.
  */
 
+import { SimulatorPrebootProfile } from "../utils/ios-cmdline-tools/SimulatorPrebootProfile";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import type { FormFactor } from "../models/DeviceMatchCriteria";
@@ -32,6 +36,7 @@ import { compareStrictNumericVersions } from "../utils/deviceMatcher";
 
 /** What was created, for logging and for handing straight to the boot path. */
 export interface ProvisionedDevice {
+  prebootDisabledResources?: readonly ConfigurableDeviceResource[];
   platform: "android" | "ios";
   /** Device name (iOS simulator name / AVD name). */
   name: string;
@@ -133,6 +138,9 @@ function iosProvisioningFormFactor(formFactor: FormFactor | undefined): IosProvi
     case "tablet":
       return "tablet";
     case "foldable":
+    case "tv":
+    case "watch":
+    case "automotive":
     case "unknown":
       throw new ActionableError(
         `iOS provisioning supports only phone or tablet form factors, not '${formFactor}'.`,
@@ -144,6 +152,11 @@ function deviceTypeMatchesIosFormFactor(
   deviceType: AppleDeviceType,
   formFactor: "phone" | "tablet" = "phone",
 ): boolean {
+  // The Duo is foldable, so a phone request must not select it: inventory would report it as
+  // foldable and the next phone request would provision again.
+  if (formFactor === "phone" && isIosDuoDeviceType(deviceType.identifier)) {
+    return false;
+  }
   const family = IOS_FAMILY_BY_FORM_FACTOR[formFactor];
   return deviceType.productFamily === family || deviceType.name.startsWith(family);
 }
@@ -309,6 +322,25 @@ export async function resolveIosProvisioningSelection(
  */
 const ANDROID_TAG_PREFERENCE = ["google_apis", "default", "google_apis_playstore"];
 
+/**
+ * Tags of handheld (phone/tablet) system images, the only ones a default Android
+ * provision may create an AVD from. The SDK also ships Wear OS (`android-wear*`),
+ * TV (`android-tv`, `google-tv*`), Automotive (`android-automotive*`), desktop, XR and
+ * glasses images; an AVD created from one of those boots a different product, so a newer
+ * non-handheld image must never beat an older phone image (#14900). Tablet, 16 KB-page
+ * (`_ps16k`) and ATD (automated test device) variants are handheld and rank behind the
+ * preferred tags via {@link tagRank}.
+ */
+const HANDHELD_ANDROID_TAGS: ReadonlySet<string> = new Set([
+  ...ANDROID_TAG_PREFERENCE,
+  "google_apis_ps16k",
+  "google_apis_playstore_ps16k",
+  "google_apis_tablet",
+  "google_apis_playstore_tablet",
+  "google_atd",
+  "aosp_atd",
+]);
+
 function tagRank(tag: string): number {
   const index = ANDROID_TAG_PREFERENCE.indexOf(tag);
   return index === -1 ? ANDROID_TAG_PREFERENCE.length : index;
@@ -400,6 +432,8 @@ function describeBound(bound: string | undefined, apiLevel: number | undefined):
 /**
  * Choose an installed system image: newest exact API identifier within the
  * requested major-API range, preferring a host-runnable ABI and a Google APIs tag.
+ * Only handheld (phone/tablet) images are candidates; Wear OS, TV and Automotive
+ * images are never selected (#14900).
  */
 export function pickAndroidSystemImage(
   images: SystemImage[],
@@ -452,9 +486,21 @@ export function pickAndroidSystemImage(
     );
   }
 
+  const handheld = inRange.filter((image) => HANDHELD_ANDROID_TAGS.has(image.tag));
+  if (handheld.length === 0) {
+    throw new ActionableError(
+      "No installed handheld (phone) Android system image matches the requested API range " +
+        `(min=${describeBound(criteria.minOsVersion, min)}, max=${describeBound(criteria.maxOsVersion, max)}). ` +
+        "Only non-handheld images (Wear OS, TV, Automotive or similar) are installed in that range: " +
+        `${inRange.map((image) => image.packageName).join(", ")}. ` +
+        "Default provisioning never creates an AVD from them. " +
+        "Install a phone image with 'sdkmanager \"system-images;android-<api>;google_apis;<abi>\"'.",
+    );
+  }
+
   const preferences = preferredAbis(architecture);
-  const runnable = inRange.filter((image) => preferences.includes(image.abi));
-  const candidates = runnable.length > 0 ? runnable : inRange;
+  const runnable = handheld.filter((image) => preferences.includes(image.abi));
+  const candidates = runnable.length > 0 ? runnable : handheld;
 
   // Precedence is major API > ABI > tag > minor > packageName; keep capability
   // and rootability preferences ahead of point-release freshness.
@@ -484,6 +530,8 @@ export function pickAndroidSystemImage(
 // ---------------------------------------------------------------------------
 
 export interface DefaultDeviceProvisionerDependencies {
+  simulatorCreation?: SimulatorCreator;
+  prebootProfile?: Pick<SimulatorPrebootProfile, "apply">;
   iosCreator: () => IosSimulatorCreator | undefined;
   androidCreator: () => AndroidAvdCreator;
   idGenerator?: IdGenerator;
@@ -561,7 +609,16 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
 
     let deviceId: string;
     try {
-      deviceId = await simctl.createSimulator(name, deviceType.identifier, runtime, creationSignal);
+      deviceId = this.dependencies.simulatorCreation
+        ? (
+            await this.dependencies.simulatorCreation.create({
+              name,
+              deviceType: deviceType.identifier,
+              runtime,
+              signal: creationSignal,
+            })
+          ).udid
+        : await simctl.createSimulator(name, deviceType.identifier, runtime, creationSignal);
     } catch (error) {
       throw toActionableError(
         error,
@@ -585,8 +642,21 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
         "' when no longer needed.",
     );
     await identityHooks?.bindAfterCreate(provisioned);
+    return this.applyPrebootProfile(deviceId, provisioned, creationSignal);
+  }
 
-    return provisioned;
+  private async applyPrebootProfile(
+    deviceId: string,
+    provisioned: ProvisionedDevice,
+    signal?: AbortSignal,
+  ): Promise<ProvisionedDevice> {
+    const preboot = await this.dependencies.prebootProfile?.apply(deviceId, {}, signal);
+    return {
+      ...provisioned,
+      ...(preboot?.applied && preboot.resources.length
+        ? { prebootDisabledResources: preboot.resources }
+        : {}),
+    };
   }
 
   private async provisionAndroid(
@@ -594,6 +664,19 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     signal?: AbortSignal,
     identityHooks?: DeviceProvisioningIdentityHooks,
   ): Promise<ProvisionedDevice> {
+    if (
+      criteria.formFactor === "tv" ||
+      criteria.formFactor === "watch" ||
+      criteria.formFactor === "automotive"
+    ) {
+      // pickAndroidSystemImage selects handheld images only; creating one here would silently
+      // satisfy a TV/watch/car request with a phone.
+      throw new ActionableError(
+        `Creating a '${criteria.formFactor}' AVD is not supported yet; AutoMobile only creates ` +
+          "phone, tablet and foldable AVDs. Create the AVD with avdmanager and the matching " +
+          "system image, or use provisionDevice with an explicit runtime and deviceType.",
+      );
+    }
     const avdManager = this.dependencies.androidCreator();
 
     let installed: SystemImage[];
@@ -660,9 +743,12 @@ export function createDefaultAndroidAvdCreator(): AndroidAvdCreator {
 export function createDefaultDeviceProvisioner(
   iosCreator: () => IosSimulatorCreator | undefined = () => new SimCtlClient(null),
   identityHooks?: DeviceProvisioningIdentityHooks,
+  simulatorCreation?: SimulatorCreator,
 ): DeviceProvisioner {
   return new DefaultDeviceProvisioner({
     iosCreator,
+    simulatorCreation,
+    prebootProfile: new SimulatorPrebootProfile(),
     androidCreator: createDefaultAndroidAvdCreator,
     identityHooks,
   });

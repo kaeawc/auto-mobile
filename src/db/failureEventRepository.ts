@@ -506,12 +506,9 @@ export class FailureEventRepository {
 
     await db.deleteFrom("anrs").where("timestamp", "<", cutoffTimestamp).execute();
 
-    // No `status = 'failure'` filter (#6464): the real write path
-    // (`ToolCallRepository.recordToolCall`) never sets `status`, so it falls
-    // through to the column's schema-level `DEFAULT 'success'`
-    // (`2026_01_27_000_crash_anr_monitoring.ts`) — never `'failure'` — so that
-    // filter previously matched zero rows regardless of age. Age-based
-    // deletion now mirrors the unconditional crash/ANR deletes above.
+    // Age-based deletion remains unconditional (#6464), mirroring crashes/ANRs.
+    // The write path now records status (#13608); both successes and failures
+    // intentionally expire by age rather than retaining successes indefinitely.
     await db.deleteFrom("tool_calls").where("timestamp", "<", cutoffDate).execute();
 
     logger.info(`[FAILURE_REPO] Deleted failures older than ${olderThanDays} days`);

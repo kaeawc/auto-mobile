@@ -3,7 +3,7 @@ import {
   NetworkState,
   type NetworkNotification,
   type ResourceNotifier,
-} from "../../src/server/NetworkState";
+} from "../../src/utils/NetworkState";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const DEVICE = "emulator-5554";

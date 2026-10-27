@@ -11,11 +11,6 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-interface DaemonAndroidAvdProvenanceStartupInternals {
-  warmAndroidAvdProvenanceCache(): void;
-  androidAvdProvenanceWarmPromise?: Promise<unknown>;
-}
-
 function buildDaemon(
   timer: FakeTimer,
   avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">,
@@ -57,11 +52,11 @@ describe("Daemon Android AVD provenance startup warm", () => {
     };
     avdManager.setListDeviceImagesResponse([expected]);
     const daemon = buildDaemon(timer, () => avdManager);
-    const internals = daemon as unknown as DaemonAndroidAvdProvenanceStartupInternals;
+    const internals = daemon.testHooks;
 
     internals.warmAndroidAvdProvenanceCache();
-    expect(internals.androidAvdProvenanceWarmPromise).toBeDefined();
-    await internals.androidAvdProvenanceWarmPromise;
+    expect(internals.androidAvdProvenanceWarmPromise()).toBeDefined();
+    await internals.androidAvdProvenanceWarmPromise();
 
     expect(avdManager.getListDeviceImagesCalls()).toHaveLength(1);
     expect(AndroidAvdProvenanceCache.getInstance().getCachedByName()?.get(expected.name)).toEqual(
@@ -73,10 +68,10 @@ describe("Daemon Android AVD provenance startup warm", () => {
     const daemon = buildDaemon(new FakeTimer(), () => {
       throw new Error("AVD manager unavailable");
     });
-    const internals = daemon as unknown as DaemonAndroidAvdProvenanceStartupInternals;
+    const internals = daemon.testHooks;
 
     expect(() => internals.warmAndroidAvdProvenanceCache()).not.toThrow();
-    expect(internals.androidAvdProvenanceWarmPromise).toBeDefined();
-    await expect(internals.androidAvdProvenanceWarmPromise).resolves.toBeUndefined();
+    expect(internals.androidAvdProvenanceWarmPromise()).toBeDefined();
+    await expect(internals.androidAvdProvenanceWarmPromise()).resolves.toBeUndefined();
   });
 });

@@ -56,7 +56,14 @@ public struct CommandLineOptions: Equatable {
     public static func parse(_ arguments: [String]) throws -> CommandLineOptions {
         var iterator = arguments.makeIterator()
         _ = iterator.next()
+        var parsed = ParsedArguments()
+        while let arg = iterator.next() {
+            try parsed.consume(arg, iterator: &iterator)
+        }
+        return try parsed.options()
+    }
 
+    private struct ParsedArguments {
         var listDevices = false
         var deviceID: String?
         var listSimulators = false
@@ -71,7 +78,26 @@ public struct CommandLineOptions: Equatable {
         var highlightJSON: String?
         var highlightDeviceName: String?
 
-        while let arg = iterator.next() {
+        mutating func consume(_ arg: String, iterator: inout IndexingIterator<[String]>) throws {
+            switch arg {
+            case "--highlight-simulator", "--highlight-json":
+                try parseHighlightArgument(arg, iterator: &iterator)
+            case "--list-devices", "--device-id", "--list-simulators":
+                try parseDeviceArgument(arg, iterator: &iterator)
+            case "--simulator-window", "--simulator-fps", "--audio":
+                try parseSimulatorArgument(arg, iterator: &iterator)
+            case "--encode", "--max-long-side":
+                try parseEncodeArgument(arg, iterator: &iterator)
+            case "--bitrate-bps", "--bits-per-pixel":
+                try parseBitrateArgument(arg, iterator: &iterator)
+            case "-h", "--help":
+                help = true
+            default:
+                throw ParseError.unknownArgument(arg)
+            }
+        }
+
+        private mutating func parseHighlightArgument(_ arg: String, iterator: inout IndexingIterator<[String]>) throws {
             switch arg {
             case "--highlight-simulator":
                 guard let value = iterator.next(), !value.isEmpty else { throw ParseError.missingValue(flag: arg) }
@@ -79,6 +105,13 @@ public struct CommandLineOptions: Equatable {
             case "--highlight-json":
                 guard let value = iterator.next() else { throw ParseError.missingValue(flag: arg) }
                 highlightJSON = value
+            default:
+                throw ParseError.unknownArgument(arg)
+            }
+        }
+
+        private mutating func parseDeviceArgument(_ arg: String, iterator: inout IndexingIterator<[String]>) throws {
+            switch arg {
             case "--list-devices":
                 listDevices = true
             case "--device-id":
@@ -88,6 +121,13 @@ public struct CommandLineOptions: Equatable {
                 deviceID = value
             case "--list-simulators":
                 listSimulators = true
+            default:
+                throw ParseError.unknownArgument(arg)
+            }
+        }
+
+        private mutating func parseSimulatorArgument(_ arg: String, iterator: inout IndexingIterator<[String]>) throws {
+            switch arg {
             case "--simulator-window":
                 guard let value = iterator.next() else {
                     throw ParseError.missingValue(flag: arg)
@@ -109,6 +149,13 @@ public struct CommandLineOptions: Equatable {
                 simulatorFPS = parsed
             case "--audio":
                 audio = true
+            default:
+                throw ParseError.unknownArgument(arg)
+            }
+        }
+
+        private mutating func parseEncodeArgument(_ arg: String, iterator: inout IndexingIterator<[String]>) throws {
+            switch arg {
             case "--encode":
                 guard let value = iterator.next() else {
                     throw ParseError.missingValue(flag: arg)
@@ -119,6 +166,19 @@ public struct CommandLineOptions: Equatable {
                     throw ParseError.invalidValue(flag: arg, value: value)
                 }
                 encodeRequested = true
+            case "--max-long-side":
+                guard let value = iterator.next() else { throw ParseError.missingValue(flag: arg) }
+                guard let parsed = Int(value), parsed >= 2, parsed.isMultiple(of: 2) else {
+                    throw ParseError.invalidValue(flag: arg, value: value)
+                }
+                maxLongSide = parsed
+            default:
+                throw ParseError.unknownArgument(arg)
+            }
+        }
+
+        private mutating func parseBitrateArgument(_ arg: String, iterator: inout IndexingIterator<[String]>) throws {
+            switch arg {
             case "--bitrate-bps":
                 guard let value = iterator.next() else {
                     throw ParseError.missingValue(flag: arg)
@@ -135,99 +195,116 @@ public struct CommandLineOptions: Equatable {
                     throw ParseError.invalidValue(flag: arg, value: value)
                 }
                 bitsPerPixel = parsed
-            case "--max-long-side":
-                guard let value = iterator.next() else { throw ParseError.missingValue(flag: arg) }
-                guard let parsed = Int(value), parsed >= 2, parsed % 2 == 0 else {
-                    throw ParseError.invalidValue(flag: arg, value: value)
-                }
-                maxLongSide = parsed
-            case "-h", "--help":
-                help = true
             default:
                 throw ParseError.unknownArgument(arg)
             }
         }
 
-        if help {
-            return CommandLineOptions(mode: .help)
-        }
-
-        if highlightJSON != nil || highlightDeviceName != nil {
-            guard let highlightJSON, let highlightDeviceName, simulatorWindowID == nil,
-                  !listDevices, !listSimulators, deviceID == nil,
-                  simulatorFPS == nil, !audio, !encodeRequested, bitrateBps == nil,
-                  bitsPerPixel == nil, maxLongSide == nil
-            else {
-                throw ParseError.conflictingFlags("--highlight-json requires only --highlight-simulator <device name>")
+        func options() throws -> CommandLineOptions {
+            if help {
+                return CommandLineOptions(mode: .help)
             }
-            return CommandLineOptions(mode: .highlightSimulator(deviceName: highlightDeviceName, json: highlightJSON))
-        }
 
-        let modeFlagCount = [
-            listDevices,
-            listSimulators,
-            simulatorWindowID != nil,
-            deviceID != nil,
-        ].filter { $0 }.count
-        if modeFlagCount > 1 {
-            throw ParseError.conflictingFlags(
-                "choose one of --list-devices, --device-id, --list-simulators, --simulator-window"
-            )
-        }
-
-        if simulatorFPS != nil && simulatorWindowID == nil {
-            throw ParseError.conflictingFlags(
-                "--simulator-fps requires --simulator-window"
-            )
-        }
-        if audio && simulatorWindowID == nil {
-            throw ParseError.conflictingFlags("--audio requires --simulator-window")
-        }
-
-        if bitrateBps != nil && bitsPerPixel != nil {
-            throw ParseError.conflictingFlags("--bitrate-bps and --bits-per-pixel are mutually exclusive")
-        }
-        if (bitrateBps != nil || bitsPerPixel != nil || maxLongSide != nil) && !encodeRequested {
-            throw ParseError.conflictingFlags("encode options require --encode h264")
-        }
-        // In-helper encoding is wired for both the Simulator (ScreenCaptureKit) and
-        // the physical-device (AVFoundation) capture paths (issues #4788 / #4790).
-        // It is only meaningful for a capture mode, so reject it on the discovery
-        // (`--list-*`) modes.
-        if encodeRequested && (listDevices || listSimulators) {
-            throw ParseError.conflictingFlags("--encode requires a capture mode, not --list-devices/--list-simulators")
-        }
-
-        var encodeSettings: EncodeSettings?
-        if encodeRequested {
-            let bitrate: EncodeSettings.Bitrate
-            if let bps = bitrateBps {
-                bitrate = .explicitBps(bps)
-            } else if let bpp = bitsPerPixel {
-                bitrate = .bitsPerPixel(bpp)
-            } else {
-                bitrate = .videoToolboxDefault
+            if let highlight = try highlightOptions() {
+                return highlight
             }
-            encodeSettings = EncodeSettings(bitrate: bitrate, maxLongSide: maxLongSide)
-        }
-
-        if listDevices {
-            return CommandLineOptions(mode: .listDevices)
-        }
-        if listSimulators {
-            return CommandLineOptions(mode: .listSimulators)
-        }
-        if let windowID = simulatorWindowID {
-            return CommandLineOptions(
-                mode: .captureSimulator(
-                    windowID: windowID,
-                    fps: simulatorFPS ?? defaultSimulatorFPS,
-                    audio: audio,
-                    encode: encodeSettings
+            try validateCaptureMode()
+            try validateEncodeOptions()
+            let encodeSettings = makeEncodeSettings()
+            if listDevices {
+                return CommandLineOptions(mode: .listDevices)
+            }
+            if listSimulators {
+                return CommandLineOptions(mode: .listSimulators)
+            }
+            if let windowID = simulatorWindowID {
+                return CommandLineOptions(
+                    mode: .captureSimulator(
+                        windowID: windowID,
+                        fps: simulatorFPS ?? defaultSimulatorFPS,
+                        audio: audio,
+                        encode: encodeSettings
+                    )
                 )
-            )
+            }
+            return CommandLineOptions(mode: .capture(deviceID: deviceID, encode: encodeSettings))
         }
-        return CommandLineOptions(mode: .capture(deviceID: deviceID, encode: encodeSettings))
+
+        private func highlightOptions() throws -> CommandLineOptions? {
+            if highlightJSON != nil || highlightDeviceName != nil {
+                guard let highlightJSON, let highlightDeviceName, simulatorWindowID == nil,
+                      !listDevices, !listSimulators, deviceID == nil,
+                      simulatorFPS == nil, !audio, !encodeRequested, bitrateBps == nil,
+                      bitsPerPixel == nil, maxLongSide == nil
+                else {
+                    throw ParseError
+                        .conflictingFlags("--highlight-json requires only --highlight-simulator <device name>")
+                }
+                return CommandLineOptions(mode: .highlightSimulator(
+                    deviceName: highlightDeviceName,
+                    json: highlightJSON
+                ))
+            }
+
+            return nil
+        }
+
+        private func validateCaptureMode() throws {
+            let modeFlagCount = [
+                listDevices,
+                listSimulators,
+                simulatorWindowID != nil,
+                deviceID != nil,
+            ].filter { $0 }.count
+            if modeFlagCount > 1 {
+                throw ParseError.conflictingFlags(
+                    "choose one of --list-devices, --device-id, --list-simulators, --simulator-window"
+                )
+            }
+
+            if simulatorFPS != nil && simulatorWindowID == nil {
+                throw ParseError.conflictingFlags(
+                    "--simulator-fps requires --simulator-window"
+                )
+            }
+            if audio && simulatorWindowID == nil {
+                throw ParseError.conflictingFlags("--audio requires --simulator-window")
+            }
+        }
+
+        private func validateEncodeOptions() throws {
+            if bitrateBps != nil && bitsPerPixel != nil {
+                throw ParseError.conflictingFlags("--bitrate-bps and --bits-per-pixel are mutually exclusive")
+            }
+            if (bitrateBps != nil || bitsPerPixel != nil || maxLongSide != nil) && !encodeRequested {
+                throw ParseError.conflictingFlags("encode options require --encode h264")
+            }
+            // In-helper encoding is wired for both the Simulator (ScreenCaptureKit) and
+            // the physical-device (AVFoundation) capture paths (issues #4788 / #4790).
+            // It is only meaningful for a capture mode, so reject it on the discovery
+            // (`--list-*`) modes.
+            if encodeRequested && (listDevices || listSimulators) {
+                throw ParseError
+                    .conflictingFlags("--encode requires a capture mode, not --list-devices/--list-simulators")
+            }
+        }
+
+        private func makeEncodeSettings() -> EncodeSettings? {
+            var encodeSettings: EncodeSettings?
+            if encodeRequested {
+                let bitrate: EncodeSettings.Bitrate
+                if let bps = bitrateBps {
+                    bitrate = .explicitBps(bps)
+                } else if let bpp = bitsPerPixel {
+                    bitrate = .bitsPerPixel(bpp)
+                } else {
+                    bitrate = .videoToolboxDefault
+                }
+                encodeSettings = EncodeSettings(bitrate: bitrate, maxLongSide: maxLongSide)
+            }
+
+            return encodeSettings
+        }
     }
 
     public static let helpText = """

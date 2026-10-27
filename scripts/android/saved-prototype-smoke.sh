@@ -17,7 +17,7 @@ cli_status=0
 spec='{"id":"smoke-saved-12269","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Saved smoke"}}'
 label='Saved smoke 12269'
 
-# shellcheck source=scripts/lib/session-release.sh disable=SC1091
+# shellcheck source=scripts/lib/session-release.sh
 source "${script_dir}/../lib/session-release.sh"
 
 cli() {

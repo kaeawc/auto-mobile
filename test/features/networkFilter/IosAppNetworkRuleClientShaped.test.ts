@@ -21,8 +21,10 @@ const resolution = {
     inboundBytesPerSecond: 10000,
     outboundBytesPerSecond: 5000,
   },
-  applied: ["latency", "downloadBandwidth", "uploadBandwidth"],
-  unapplied: ["packetLoss"],
+  applied: ["latency", "downloadBandwidth", "uploadBandwidth"] satisfies Array<
+    "latency" | "downloadBandwidth" | "uploadBandwidth"
+  >,
+  unapplied: ["packetLoss"] satisfies Array<"packetLoss">,
 };
 
 describe("shaped rule client and provider fake", () => {

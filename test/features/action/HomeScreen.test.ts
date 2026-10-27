@@ -1,8 +1,9 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { readFileSync } from "node:fs";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { HomeScreen } from "../../../src/features/action/HomeScreen";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { BootedDevice, ExecResult, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import type { CtrlProxyHierarchy } from "../../../src/features/observe/ios/types";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -29,16 +30,20 @@ import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 // Helper function to create mock ObserveResult
 // Each call creates a unique viewHierarchy object so change detection works
 let hierarchyCounter = 0;
-const createObserveResult = (): ObserveResult => ({
-  timestamp: Date.now(),
+type ObservationWithHierarchy = ObserveResult & { viewHierarchy: ViewHierarchyResult };
+
+const createObserveResult = (): ObservationWithHierarchy => ({
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+  observationId: `home-observation-${hierarchyCounter}`,
+  updatedAt: Date.now(),
   screenSize: { width: 1080, height: 1920 },
   systemInsets: { top: 48, bottom: 120, left: 0, right: 0 },
-  viewHierarchy: { node: {}, id: hierarchyCounter++ },
+  viewHierarchy: { hierarchy: { node: { text: `screen-${hierarchyCounter++}` } } },
 });
 
 // Read/parse each byte-exact capture at most once.
 const launcherCaptures = new Map<string, ViewHierarchyResult>();
-function launcherObservation(surface: string, deviceId: number): ObserveResult {
+function launcherObservation(surface: string, deviceId: number): ObservationWithHierarchy {
   const name = `launcher-${surface}-emulator-${deviceId}.json`;
   let viewHierarchy = launcherCaptures.get(name);
   if (!viewHierarchy) {
@@ -84,6 +89,8 @@ function iosHierarchy(packageName: string): CtrlProxyHierarchy {
   return { packageName, updatedAt: 1, hierarchy: { className: "XCUIApplication" } };
 }
 
+type GlobalActionResult = Awaited<ReturnType<AndroidCtrlProxyClient["requestGlobalAction"]>>;
+
 describe("HomeScreen", () => {
   let homeScreen: HomeScreen;
   let mockDevice: BootedDevice;
@@ -96,12 +103,20 @@ describe("HomeScreen", () => {
   let previousObserveCacheStore: ReturnType<typeof getObserveCacheStore>;
 
   // Collaborators are fixed at construction; a test that needs a different window builds its own.
-  const createHomeScreen = (window: WindowInterface = fakeWindow): HomeScreen =>
+  const createHomeScreen = (
+    window: WindowInterface = fakeWindow,
+    globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">,
+  ): HomeScreen =>
     new HomeScreen(mockDevice, fakeAdb, fakeTimer, undefined, {
       observeScreen: fakeObserveScreen,
       window,
       awaitIdle: fakeAwaitIdle,
+      globalActionClient,
     });
+
+  const globalActionResult = (
+    result: Pick<GlobalActionResult, "success" | "error">,
+  ): GlobalActionResult => ({ action: "home", totalTimeMs: 0, ...result });
 
   beforeEach(() => {
     previousObserveCacheStore = getObserveCacheStore();
@@ -154,10 +169,7 @@ describe("HomeScreen", () => {
   function createIosHomeScreen(options?: {
     simulator?: boolean;
     simctl?: {
-      executeCommandArgs: (
-        args: string[],
-        timeoutMs?: number,
-      ) => Promise<{ stdout: string; stderr: string }>;
+      executeCommandArgs: (args: string[], timeoutMs?: number) => Promise<ExecResult>;
     };
   }): { action: HomeScreen; client: FakeIOSCtrlProxy } {
     const iosDevice: BootedDevice = {
@@ -184,6 +196,9 @@ describe("HomeScreen", () => {
         if (platform === "android") {
           observation.viewHierarchy = launcherObservation("home", 5600).viewHierarchy;
           const launcherPackage = observation.viewHierarchy.packageName;
+          if (!launcherPackage) {
+            throw new Error("launcher observation has no package");
+          }
           fakeWindow.configureActiveWindow({
             appId: launcherPackage,
             activityName: "NexusLauncherActivity",
@@ -191,7 +206,7 @@ describe("HomeScreen", () => {
           });
           fakeAdb.setCommandResponse(
             "shell cmd package resolve-activity --brief -c android.intent.category.HOME -a android.intent.action.MAIN",
-            { stdout: `${launcherPackage}/.NexusLauncherActivity`, stderr: "" },
+            createExecResult(`${launcherPackage}/.NexusLauncherActivity`, ""),
           );
         } else {
           observation.viewHierarchy.hierarchy = { node: { $: { class: "Home" } } };
@@ -240,7 +255,7 @@ describe("HomeScreen", () => {
         });
         fakeAdb.setCommandResponse(
           "shell cmd package resolve-activity --brief -c android.intent.category.HOME -a android.intent.action.MAIN",
-          { stdout: `${launcherPackage}/.NexusLauncherActivity`, stderr: "" },
+          createExecResult(`${launcherPackage}/.NexusLauncherActivity`, ""),
         );
       });
 
@@ -456,7 +471,12 @@ describe("HomeScreen", () => {
           const fresh: ObserveResult = {
             observationId: "failed-read",
             updatedAt: fakeTimer.now(),
-            display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+            display: {
+              key: "0",
+              role: "unknown",
+              posture: "unknown",
+              generation: 0,
+            } satisfies ObserveResult["display"],
             screenSize: { width: 0, height: 0 },
             systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
             error: "Observation failed due to device access error",
@@ -541,7 +561,12 @@ describe("HomeScreen", () => {
               return {
                 observationId: "cancelled-read",
                 updatedAt: fakeTimer.now(),
-                display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+                display: {
+                  key: "0",
+                  role: "unknown",
+                  posture: "unknown",
+                  generation: 0,
+                } satisfies ObserveResult["display"],
                 screenSize: { width: 0, height: 0 },
                 systemInsets: cached.systemInsets,
               };
@@ -671,10 +696,7 @@ describe("HomeScreen", () => {
       });
       const resolveCommand =
         "shell cmd package resolve-activity --brief -c android.intent.category.HOME -a android.intent.action.MAIN";
-      fakeAdb.setCommandResponse(resolveCommand, {
-        stdout: "com.example.home/.Home",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(resolveCommand, createExecResult("com.example.home/.Home", ""));
 
       const result = await homeScreen.execute();
       expect(result.success).toBe(true);
@@ -746,7 +768,7 @@ describe("HomeScreen", () => {
     );
 
     test("should execute hardware navigation using keyevent 3", async () => {
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       const result = await homeScreen.execute();
       expect(result.success).toBe(true);
@@ -759,7 +781,7 @@ describe("HomeScreen", () => {
     });
 
     test("should work with progress callback", async () => {
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       let callbackCalled = false;
       const progressCallback = async () => {
@@ -773,7 +795,7 @@ describe("HomeScreen", () => {
     });
 
     test("should include observation in result", async () => {
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       const result = await homeScreen.execute();
 
@@ -845,6 +867,77 @@ describe("HomeScreen", () => {
       expect(fakeTimer.getSleepHistory()).toEqual([300, 600]);
     });
 
+    describe("simulator Spotlight recovery (#14827)", () => {
+      const simctl = { executeCommandArgs: async () => createExecResult("", "") };
+
+      test("falls back to the runner Home press when simctl leaves Spotlight foreground", async () => {
+        const { action, client } = createIosHomeScreen({ simulator: true, simctl });
+        spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
+          hierarchy: iosHierarchy(
+            client.getPressHomeRequestCount() > 0 ? "com.apple.springboard" : "com.apple.Spotlight",
+          ),
+        }));
+
+        await expect(action.executeIosHomeNavigation()).resolves.toBeUndefined();
+        expect(client.getPressHomeRequestCount()).toBe(1);
+      });
+
+      test("does not use the runner fallback for other foreground apps", async () => {
+        const { action, client } = createIosHomeScreen({ simulator: true, simctl });
+        client.setHierarchyData(iosHierarchy("com.apple.Maps"));
+
+        await expect(action.executeIosHomeNavigation()).rejects.toThrow(
+          "foreground verification failed",
+        );
+        expect(client.getPressHomeRequestCount()).toBe(0);
+      });
+
+      test("fails when Spotlight survives the runner Home press", async () => {
+        const { action, client } = createIosHomeScreen({ simulator: true, simctl });
+        client.setHierarchyData(iosHierarchy("com.apple.Spotlight"));
+
+        await expect(action.executeIosHomeNavigation()).rejects.toThrow("com.apple.Spotlight");
+        expect(client.getPressHomeRequestCount()).toBe(1);
+      });
+
+      test("polls instead of failing when the runner's one-shot foreground check lost the race", async () => {
+        const { action, client } = createIosHomeScreen({ simulator: true, simctl });
+        let pressed = false;
+        let readsAfterPress = 0;
+        spyOn(client, "requestHierarchySync").mockImplementation(async () => {
+          readsAfterPress += pressed ? 1 : 0;
+          // Spotlight until the press, then SpringBoard settles a couple of reads later.
+          return {
+            hierarchy: iosHierarchy(
+              readsAfterPress > 2 ? "com.apple.springboard" : "com.apple.Spotlight",
+            ),
+          };
+        });
+        spyOn(client, "requestPressHome").mockImplementation(async () => {
+          pressed = true;
+          return {
+            success: false,
+            totalTimeMs: 1,
+            error: "Home press did not bring SpringBoard to the foreground",
+          };
+        });
+
+        await expect(action.executeIosHomeNavigation()).resolves.toBeUndefined();
+      });
+
+      test("reports a failed runner Home press after Spotlight survives the launch", async () => {
+        const { action, client } = createIosHomeScreen({ simulator: true, simctl });
+        client.setHierarchyData(iosHierarchy("com.apple.Spotlight"));
+        spyOn(client, "requestPressHome").mockResolvedValue({
+          success: false,
+          totalTimeMs: 1,
+          error: "runner busy",
+        });
+
+        await expect(action.executeIosHomeNavigation()).rejects.toThrow("runner busy");
+      });
+    });
+
     describe("simulator launch budget regression", () => {
       test("returns a typed timeout when a successful retry uses the whole Home budget", async () => {
         const timeouts: number[] = [];
@@ -857,7 +950,7 @@ describe("HomeScreen", () => {
               if (timeouts.length === 1) {
                 throw new SimctlCommandTimeoutError("busy host launch timed out");
               }
-              return { stdout: "", stderr: "" };
+              return createExecResult("", "");
             },
           },
         });
@@ -898,7 +991,7 @@ describe("HomeScreen", () => {
               if (timeouts.length === 1) {
                 throw new SimctlCommandTimeoutError("busy host launch timed out");
               }
-              return { stdout: "", stderr: "" };
+              return createExecResult("", "");
             },
           },
         });
@@ -924,7 +1017,7 @@ describe("HomeScreen", () => {
                 await fakeTimer.sleep(timeoutMs);
                 throw new SimctlCommandTimeoutError("busy host launch timed out");
               }
-              return { stdout: "", stderr: "" };
+              return createExecResult("", "");
             },
           },
         });
@@ -952,7 +1045,7 @@ describe("HomeScreen", () => {
               if (timeoutMs < 1200) {
                 throw new SimctlCommandTimeoutError("slow launch timed out");
               }
-              return { stdout: "", stderr: "" };
+              return createExecResult("", "");
             },
           },
         });
@@ -1012,7 +1105,7 @@ describe("HomeScreen", () => {
           simctl: {
             executeCommandArgs: async (_args, timeoutMs = 0) => {
               timeouts.push(timeoutMs);
-              return { stdout: "", stderr: "" };
+              return createExecResult("", "");
             },
           },
         });
@@ -1109,7 +1202,7 @@ describe("HomeScreen", () => {
         simctl: {
           executeCommandArgs: async (args) => {
             calls.push(args);
-            return { stdout: "", stderr: "" };
+            return createExecResult("", "");
           },
         },
       });
@@ -1141,7 +1234,7 @@ describe("HomeScreen", () => {
     test("simulator waits for a slow SpringBoard switch using fake time", async () => {
       const { action, client } = createIosHomeScreen({
         simulator: true,
-        simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
+        simctl: { executeCommandArgs: async () => createExecResult("", "") },
       });
       const readSpy = spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
         hierarchy: iosHierarchy(
@@ -1159,7 +1252,7 @@ describe("HomeScreen", () => {
     test("simulator allows a slow hierarchy read within the 5s deadline", async () => {
       const { action, client } = createIosHomeScreen({
         simulator: true,
-        simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
+        simctl: { executeCommandArgs: async () => createExecResult("", "") },
       });
       const readSpy = spyOn(client, "requestHierarchySync").mockImplementation(async () => {
         await fakeTimer.sleep(1200);
@@ -1174,7 +1267,7 @@ describe("HomeScreen", () => {
     test("simctl launch reports the remaining foreground app after the bounded wait", async () => {
       const { action, client } = createIosHomeScreen({
         simulator: true,
-        simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
+        simctl: { executeCommandArgs: async () => createExecResult("", "") },
       });
       client.setHierarchyData(iosHierarchy("com.apple.Maps"));
 
@@ -1188,7 +1281,7 @@ describe("HomeScreen", () => {
     test("unknown foreground failure does not claim an app was backgrounded", async () => {
       const { action, client } = createIosHomeScreen({
         simulator: true,
-        simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
+        simctl: { executeCommandArgs: async () => createExecResult("", "") },
       });
       client.setHierarchyData(null);
 
@@ -1201,7 +1294,7 @@ describe("HomeScreen", () => {
     test("simulator foreground polling respects a shorter caller budget", async () => {
       const { action, client } = createIosHomeScreen({
         simulator: true,
-        simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
+        simctl: { executeCommandArgs: async () => createExecResult("", "") },
       });
       client.setHierarchyData(iosHierarchy("com.apple.Maps"));
       const readSpy = spyOn(client, "requestHierarchySync");
@@ -1216,12 +1309,12 @@ describe("HomeScreen", () => {
     test("unknown initial foreground succeeds once SpringBoard appears", async () => {
       const { action, client } = createIosHomeScreen({
         simulator: true,
-        simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
+        simctl: { executeCommandArgs: async () => createExecResult("", "") },
       });
       let readCount = 0;
-      spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
-        hierarchy: readCount++ === 0 ? undefined : iosHierarchy("com.apple.springboard"),
-      }));
+      spyOn(client, "requestHierarchySync").mockImplementation(async () =>
+        readCount++ === 0 ? null : { hierarchy: iosHierarchy("com.apple.springboard") },
+      );
 
       await action.executeIosHomeNavigation();
       expect(readCount).toBe(2);
@@ -1234,7 +1327,7 @@ describe("HomeScreen", () => {
         simctl: {
           executeCommandArgs: async (args) => {
             calls.push(args);
-            return { stdout: "", stderr: "" };
+            return createExecResult("", "");
           },
         },
       });
@@ -1251,7 +1344,7 @@ describe("HomeScreen", () => {
         simctl: {
           executeCommandArgs: async () => {
             launches++;
-            return { stdout: "", stderr: "" };
+            return createExecResult("", "");
           },
         },
       });
@@ -1296,7 +1389,7 @@ describe("HomeScreen", () => {
         awaitIdle: fakeAwaitIdle2,
       });
 
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       const result1 = await homeScreen.execute();
       const result2 = await homeScreen2.execute();
@@ -1314,9 +1407,10 @@ describe("HomeScreen", () => {
   // instead of trusting a dispatch method's self-reported result.
   describe("home-press verification (issue #6147)", () => {
     test("reports success when the accessibility global action actually backgrounds the app", async () => {
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: true }),
-      });
+      const globalActionClient = {
+        requestGlobalAction: async () => globalActionResult({ success: true }),
+      };
+      homeScreen = createHomeScreen(fakeWindow, globalActionClient);
       // Default fakeWindow already reports "com.android.launcher3" foreground.
 
       const result = await homeScreen.execute();
@@ -1333,11 +1427,11 @@ describe("HomeScreen", () => {
       // reports success, but the foreground package stays the app under
       // test on every check, including after the ADB fallback -- so this
       // must surface a failure rather than false success.
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: true }),
-      });
-      homeScreen = createHomeScreen(sequencedWindow(["com.android.settings"]));
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+      const globalActionClient = {
+        requestGlobalAction: async () => globalActionResult({ success: true }),
+      };
+      homeScreen = createHomeScreen(sequencedWindow(["com.android.settings"]), globalActionClient);
+      fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       await expect(homeScreen.execute()).rejects.toThrow(/did not background the foreground app/);
 
@@ -1347,9 +1441,9 @@ describe("HomeScreen", () => {
     });
 
     test("recovers via the ADB keyevent fallback when the global action is inert but the fallback reaches the launcher", async () => {
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: true }),
-      });
+      const globalActionClient = {
+        requestGlobalAction: async () => globalActionResult({ success: true }),
+      };
       // The post-global-action verification retries internally (initial
       // attempt + 2 backoff retries) before giving up, so it must see the
       // app unchanged on all 3 of those checks; only the post-ADB-keyevent
@@ -1361,8 +1455,9 @@ describe("HomeScreen", () => {
           "com.android.settings",
           "com.android.launcher3",
         ]),
+        globalActionClient,
       );
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       const result = await homeScreen.execute();
 
@@ -1371,11 +1466,12 @@ describe("HomeScreen", () => {
     });
 
     test("throws instead of reporting false success when the ADB keyevent fallback also fails to reach the launcher", async () => {
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: false, error: "global action unavailable" }),
-      });
-      homeScreen = createHomeScreen(sequencedWindow(["com.android.settings"]));
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+      const globalActionClient = {
+        requestGlobalAction: async () =>
+          globalActionResult({ success: false, error: "global action unavailable" }),
+      };
+      homeScreen = createHomeScreen(sequencedWindow(["com.android.settings"]), globalActionClient);
+      fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       await expect(homeScreen.execute()).rejects.toThrow(/did not background the foreground app/);
     });
@@ -1387,11 +1483,12 @@ describe("HomeScreen", () => {
     test("bounds the KEYCODE_HOME keyevent with a deadline and threads a signal", async () => {
       // Global action unavailable, so the ADB keyevent fallback runs; the
       // default fakeWindow reports the launcher, so verification passes.
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      const globalActionClient = {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      });
+      };
+      homeScreen = createHomeScreen(fakeWindow, globalActionClient);
 
       await homeScreen.execute();
 
@@ -1407,11 +1504,12 @@ describe("HomeScreen", () => {
     test("an ambient request abort cancels the KEYCODE_HOME fallback (combined signal)", async () => {
       // The forwarded private signal is combined with the ambient request
       // signal, so a cancelled MCP request still aborts the fallback read.
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      const globalActionClient = {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      });
+      };
+      homeScreen = createHomeScreen(fakeWindow, globalActionClient);
       fakeAdb.setThrowOnAbortedSignal();
       const controller = new AbortController();
       controller.abort();

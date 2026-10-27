@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely, sql } from "kysely";
+import type { Generated } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import {
@@ -8,6 +9,18 @@ import {
   up as vmReclaimUp,
 } from "../../src/db/migrations/2026_09_13_000_device_snapshot_vm_reclaim";
 import { runMigrations } from "../../src/db/migrator";
+
+interface MigrationDatabase {
+  device_snapshots: {
+    snapshot_name: string;
+    platform: string;
+    snapshot_type: string;
+    size_bytes: Generated<number>;
+    size_unknown: Generated<number>;
+    pending_reclaim: Generated<number>;
+    pending_reclaim_reason: Generated<string | null>;
+  };
+}
 
 const MIGRATION_NAME = "2026_09_13_000_device_snapshot_vm_reclaim";
 
@@ -19,7 +32,7 @@ function provider(): MigrationProvider {
   };
 }
 
-async function columnNames(db: Kysely<unknown>): Promise<string[]> {
+async function columnNames(db: Kysely<MigrationDatabase>): Promise<string[]> {
   const result = await sql<{ name: string }>`
     SELECT name FROM pragma_table_info('device_snapshots')
   `.execute(db);
@@ -27,10 +40,10 @@ async function columnNames(db: Kysely<unknown>): Promise<string[]> {
 }
 
 describe("device snapshot VM reclaim migration (#6490)", () => {
-  let db: Kysely<unknown>;
+  let db: Kysely<MigrationDatabase>;
 
   beforeEach(async () => {
-    db = new Kysely<unknown>({
+    db = new Kysely<MigrationDatabase>({
       dialect: new BunSqliteDialect({ database: new BunDatabase(":memory:") }),
     });
     await db.schema
@@ -56,7 +69,7 @@ describe("device snapshot VM reclaim migration (#6490)", () => {
 
   test("existing non-vm rows stay sized and not pending, so nothing is retroactively flagged", async () => {
     await db
-      .insertInto("device_snapshots" as never)
+      .insertInto("device_snapshots")
       .values({
         snapshot_name: "legacy",
         platform: "android",
@@ -68,9 +81,9 @@ describe("device snapshot VM reclaim migration (#6490)", () => {
     await runMigrations(db, { provider: provider(), env: {} });
 
     const row = await db
-      .selectFrom("device_snapshots" as never)
+      .selectFrom("device_snapshots")
       .selectAll()
-      .where("snapshot_name" as never, "=", "legacy")
+      .where("snapshot_name", "=", "legacy")
       .executeTakeFirst();
 
     expect(row).toMatchObject({
@@ -89,7 +102,7 @@ describe("device snapshot VM reclaim migration (#6490)", () => {
     // the budget forever while the archive reported zero unsized records
     // (#6891 review).
     await db
-      .insertInto("device_snapshots" as never)
+      .insertInto("device_snapshots")
       .values({
         snapshot_name: "legacy-vm",
         platform: "android",
@@ -102,9 +115,9 @@ describe("device snapshot VM reclaim migration (#6490)", () => {
 
     expect(
       await db
-        .selectFrom("device_snapshots" as never)
+        .selectFrom("device_snapshots")
         .selectAll()
-        .where("snapshot_name" as never, "=", "legacy-vm")
+        .where("snapshot_name", "=", "legacy-vm")
         .executeTakeFirst(),
     ).toMatchObject({ size_bytes: 0, size_unknown: 1, pending_reclaim: 0 });
   });

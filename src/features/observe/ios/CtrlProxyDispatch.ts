@@ -41,13 +41,16 @@ const IOS_WIRE_DEADLINE_REQUEST_TYPES: ReadonlySet<string> = new Set([
   "request_launch_app",
   "request_reset_permissions",
   "request_rotate",
+  "request_location",
   "set_hinge_angle",
+  "request_appearance",
   "request_clipboard",
   "set_voiceover_state",
   // Mutating storage commands (#10500); preference reads and SQL stay without a deadline.
   "set_preference",
   "remove_preference",
   "clear_preferences",
+  "delete_keychain_item",
 ]);
 
 /** The single place iOS requests learn their wire deadline; installed on the iOS delegate context. */

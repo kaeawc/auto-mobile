@@ -56,34 +56,39 @@ class ThreePaneShellDeviceKeyTest {
       setContent {
         MaterialTheme {
           ThreePaneShell(
-            showLeftPane = true,
-            onToggleLeftPane = { activity.navigated.add("toggleLeft") },
-            showRightPane = false,
-            onToggleRightPane = { activity.navigated.add("toggleRight") },
-            showBottomPane = false,
-            onToggleBottomPane = { activity.navigated.add("toggleBottom") },
-            deviceName = "emulator-5554",
-            foregroundApp = null,
-            crashCount = 0,
-            anrCount = 0,
-            nonFatalCount = 0,
-            toolFailureCount = 0,
-            currentFps = null,
-            currentMemoryMb = null,
-            isDaemonConnected = true,
-            onNavigateUp = { activity.navigated.add("up") },
-            onNavigateDown = { activity.navigated.add("down") },
-            onSelectEvent = { activity.navigated.add("select") },
-            onDeselectEvent = { activity.navigated.add("deselect") },
-            vimModeEnabled = vimModeEnabled,
-            deviceControlCapturesKeys = capturesKeys,
-            // Something inside the shell must hold focus, or the shell's preview handler is not on
-            // the focus path and never runs at all — which would make every assertion below pass
-            // vacuously. This stands in for the device canvas.
-            centerContent = { Box(Modifier.focusRequester(centerFocus).focusable()) },
-            leftPaneContent = {},
-            rightPaneContent = {},
-            bottomPaneContent = {},
+            options =
+              ThreePaneShellOptions(
+                showLeftPane = true,
+                onToggleLeftPane = { activity.navigated.add("toggleLeft") },
+                showRightPane = false,
+                onToggleRightPane = { activity.navigated.add("toggleRight") },
+                showBottomPane = false,
+                onToggleBottomPane = { activity.navigated.add("toggleBottom") },
+                deviceName = "emulator-5554",
+                foregroundApp = null,
+                crashCount = 0,
+                anrCount = 0,
+                nonFatalCount = 0,
+                toolFailureCount = 0,
+                currentFps = null,
+                currentMemoryMb = null,
+                isDaemonConnected = true,
+                onNavigateUp = { activity.navigated.add("up") },
+                onNavigateDown = { activity.navigated.add("down") },
+                onSelectEvent = { activity.navigated.add("select") },
+                onDeselectEvent = { activity.navigated.add("deselect") },
+                vimModeEnabled = vimModeEnabled,
+                deviceControlCapturesKeys = capturesKeys,
+                // Something inside the shell must hold focus, or the shell's preview handler is not
+                // on
+                // the focus path and never runs at all — which would make every assertion below
+                // pass
+                // vacuously. This stands in for the device canvas.
+                centerContent = { Box(Modifier.focusRequester(centerFocus).focusable()) },
+                leftPaneContent = {},
+                rightPaneContent = {},
+                bottomPaneContent = {},
+              ),
           )
         }
       }

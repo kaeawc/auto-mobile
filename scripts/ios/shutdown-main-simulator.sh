@@ -14,7 +14,7 @@ if [[ ! "${shutdown_window}" =~ ^[1-9][0-9]*$ ]]; then
   exit 1
 fi
 
-# shellcheck disable=SC1091 # Dynamic path resolves beside this script.
+# shellcheck source=scripts/ios/run_with_timeout.sh
 source "$(dirname "${BASH_SOURCE[0]}")/run_with_timeout.sh"
 echo "Shutting down main simulator ${simulator_udid} before booting iPhone 15."
 # The request and all state polls share one deadline. A slow request must not

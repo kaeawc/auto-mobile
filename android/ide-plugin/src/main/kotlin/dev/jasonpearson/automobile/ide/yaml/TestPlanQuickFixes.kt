@@ -165,8 +165,19 @@ object TestPlanQuickFixFactory {
   /** Create quick fixes for a validation error */
   fun createQuickFixes(error: TestPlanValidationError): List<LocalQuickFix> {
     val fixes = mutableListOf<LocalQuickFix>()
-    val path = TestPlanErrorPath.parse(error.field)
 
+    addDeprecatedFieldFixes(error, fixes)
+    addToolNameFixes(error, fixes)
+    addRequiredFieldFixes(error, fixes)
+    addUnknownPropertyFixes(error, fixes)
+
+    return fixes
+  }
+
+  private fun addDeprecatedFieldFixes(
+    error: TestPlanValidationError,
+    fixes: MutableList<LocalQuickFix>,
+  ) {
     // Handle deprecated fields
     when {
       error.field == "generated" && error.severity == ValidationSeverity.WARNING -> {
@@ -184,7 +195,9 @@ object TestPlanQuickFixFactory {
         fixes.add(RenameFieldQuickFix("description", "label"))
       }
     }
+  }
 
+  private fun addToolNameFixes(error: TestPlanValidationError, fixes: MutableList<LocalQuickFix>) {
     // Handle unknown tool names
     if (error.message.contains("Unknown tool")) {
       val toolMatch = Regex("Unknown tool '([^']+)'").find(error.message)
@@ -196,7 +209,13 @@ object TestPlanQuickFixFactory {
         }
       }
     }
+  }
 
+  private fun addRequiredFieldFixes(
+    error: TestPlanValidationError,
+    fixes: MutableList<LocalQuickFix>,
+  ) {
+    val path = TestPlanErrorPath.parse(error.field)
     // Handle missing required fields
     if (error.message.contains("Missing required property")) {
       val propertyMatch = Regex("Missing required property '([^']+)'").find(error.message)
@@ -213,7 +232,12 @@ object TestPlanQuickFixFactory {
           fixes.add(AddRequiredFieldQuickFix("tool", "\"observe\""))
       }
     }
+  }
 
+  private fun addUnknownPropertyFixes(
+    error: TestPlanValidationError,
+    fixes: MutableList<LocalQuickFix>,
+  ) {
     // Handle unknown properties
     if (error.message.contains("Unknown property") || error.message.contains("not allowed")) {
       val propertyMatch = Regex("property '([^']+)'").find(error.message)
@@ -229,7 +253,5 @@ object TestPlanQuickFixFactory {
         }
       }
     }
-
-    return fixes
   }
 }

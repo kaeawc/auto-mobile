@@ -1,4 +1,12 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
+import {
+  createAndroidHierarchyConverter,
+  wireHierarchyFrom,
+} from "../../helpers/androidHierarchyConverter";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../src/utils/logger";
 import { TapOnElement, tapFocusFailure } from "../../../src/features/action/TapOnElement";
@@ -34,20 +42,14 @@ import {
 } from "../../fixtures/observe/iosKeyboardTabbar";
 
 import capturedIme from "../../fixtures/android-ime-window/playground-gboard-api36.json";
-import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
-import type {
-  AccessibilityHierarchy,
-  HierarchyDelegateContext,
-} from "../../../src/features/observe/android/types";
+
 import * as skeletonProjection from "../../../src/features/observe/output/SkeletonProjection";
 import { iosKeyboardVisibleHierarchy } from "../../fixtures/observe/iosKeyboardStates";
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
 
 const capturedImeHierarchy = () =>
-  new CtrlProxyHierarchy({
-    timer: new FakeTimer(),
-  } as HierarchyDelegateContext).convertToViewHierarchyResult(
-    structuredClone(capturedIme) as AccessibilityHierarchy,
+  createAndroidHierarchyConverter().convertToViewHierarchyResult(
+    wireHierarchyFrom(structuredClone(capturedIme)),
   );
 
 // CI's per-test time excludes only beforeAll: one throwaway run of the captured-IME refusal
@@ -156,7 +158,7 @@ test("partial app target uses the exposed rectangle above the full IME frame", a
 test("tapOn preserves a linked window above the IME even where their rectangles overlap", async () => {
   const hierarchy = imeOcclusionHierarchy();
   const app = hierarchy.hierarchy.node!;
-  const keyboard = hierarchy.windows![0].hierarchy!.node!;
+  const keyboard = new DefaultElementParser().extractWindowRootNodes(hierarchy)[0]!;
   const upper = {
     $: {
       text: "Above IME Window",
@@ -166,14 +168,14 @@ test("tapOn preserves a linked window above the IME even where their rectangles 
   };
   hierarchy.hierarchy.node = { $: {}, node: [app, keyboard, upper] };
   hierarchy.windows = [
-    { windowLayer: 0, hierarchy: { node: app } },
+    { windowLayer: 0, hierarchy: app },
     {
       windowLayer: 1,
       type: 2,
       bounds: { left: 0, top: 150, right: 400, bottom: 240 },
-      hierarchy: { node: keyboard },
+      hierarchy: keyboard,
     },
-    { windowLayer: 2, hierarchy: { node: upper } },
+    { windowLayer: 2, hierarchy: upper },
   ];
   const { result, points } = await executeAt("Above IME Window", {
     fixture: hierarchy,
@@ -232,7 +234,7 @@ async function executeAt(
   if (display !== undefined) {
     hierarchy.displayId = Number(display);
   }
-  const keyboard = hierarchy.windows?.[0]?.hierarchy?.node;
+  const keyboard = new DefaultElementParser().extractWindowRootNodes(hierarchy)[0];
   if (keyboard && platform === "ios") {
     keyboard.$ = { class: "UIKeyboard" };
     const key = keyboard.node?.[0];
@@ -289,7 +291,7 @@ async function executeAt(
     selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
   });
   tap.observeScreen = observeScreen;
-  const observation: ObserveResult = {
+  const observation: ObserveResult = buildObserveResult({
     observationId: "ime-test",
     updatedAt: 1,
     screenSize:
@@ -301,13 +303,16 @@ async function executeAt(
     viewHierarchy: hierarchy,
     display: { key: "0", role: "unknown", posture: "unknown", generation: transitions.generation },
     displayRevision: transitions.fullRevision,
-  };
+  });
   observeScreen.setObserveResult(observation);
   const points: Array<{ x: number; y: number }> = [];
   let actionError: unknown;
-  tap.observedInteraction = async (action) => {
+  tap.observedInteraction = async (action, options) => {
     try {
-      return { ...(await action(recordObservationRead(observation))), observation };
+      return await runBlockWithEnvelope(() => recordObservationRead(observation), { observation })(
+        action,
+        options,
+      );
     } catch (error) {
       actionError = error;
       throw error;
@@ -316,15 +321,16 @@ async function executeAt(
   tap.executeAndroidTap = async (_action, x, y) => {
     points.push({ x, y });
   };
-  tap.executeiOSTap = async (_action, x, y) => {
+  tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
     points.push({ x, y });
-  };
+  });
   tap.prepareSelectionCapture = async () => null;
   tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
+    effect: undefined,
     observation: current,
   });
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   const result = await tap.execute(
     {
@@ -377,7 +383,12 @@ describe("internal typed focus failures", () => {
 
     test(`${display ?? "default"}: off-screen-but-present target is marked`, async () => {
       const fixture = imeOcclusionHierarchy(false);
-      fixture.hierarchy.node!.node![2].$.bounds = { left: 100, top: 300, right: 300, bottom: 350 };
+      fixture.hierarchy.node!.node![2]!.$!.bounds = {
+        left: 100,
+        top: 300,
+        right: 300,
+        bottom: 350,
+      };
       const { result, points } = await executeAt("Above Keyboard", {
         action: "focus",
         fixture,
@@ -589,7 +600,7 @@ async function executeCaptured(label: string, hierarchy = iosKeyboardTabbarHiera
   return executeAt(label, {
     platform: "ios",
     fixture: hierarchy,
-    screenSize: iosKeyboardCapture.screenSize,
+    screenSize: { ...iosKeyboardCapture.screenSize, units: "points" as const },
   });
 }
 
@@ -659,7 +670,7 @@ describe("iOS captured keyboard bottom strip (#9020)", () => {
     const keyboardTop = iosKeyboardCapture.ime.bounds[1];
     // Synthetic partial target: its centre is covered, but its top is exposed.
     bounds.top = keyboardTop - (bounds.bottom - keyboardTop) / 2;
-    hierarchy.hierarchy.node!.node![0].$.bounds = bounds;
+    hierarchy.hierarchy.node!.node![0]!.$!.bounds = bounds;
     const { result, points } = await executeCaptured("Demos", hierarchy);
     expect(result.success).toBe(true);
     expect(points).toEqual([
@@ -673,13 +684,13 @@ describe("iOS captured keyboard bottom strip (#9020)", () => {
 test("iOS visible-match fallback also avoids the docked keyboard", async () => {
   const hierarchy = iosKeyboardTabbarHierarchy();
   const original = capturedBounds(iosKeyboardCapture.demos);
-  hierarchy.hierarchy.node!.node![0].$.bounds = { ...original, top: 0 };
+  hierarchy.hierarchy.node!.node![0]!.$!.bounds = { ...original, top: 0 };
   const keyboardTop = iosKeyboardCapture.ime.bounds[1];
   const visible = { ...original, top: keyboardTop - (original.bottom - keyboardTop) / 2 };
   const { result, points } = await executeAt("Demos", {
     platform: "ios",
     fixture: hierarchy,
-    screenSize: iosKeyboardCapture.screenSize,
+    screenSize: { ...iosKeyboardCapture.screenSize, units: "points" as const },
     matchedBounds: visible,
   });
   expect(result.success).toBe(true);
@@ -692,7 +703,7 @@ test("iOS elementId selection behind the docked keyboard dispatches no tap", asy
   const { result, points, actionError } = await executeAt("Demos", {
     platform: "ios",
     fixture: iosKeyboardTabbarHierarchy(),
-    screenSize: iosKeyboardCapture.screenSize,
+    screenSize: { ...iosKeyboardCapture.screenSize, units: "points" as const },
     elementId: iosKeyboardCapture.demos.elementId,
   });
   expect(actionError).toBeInstanceOf(ActionableError);
@@ -754,18 +765,21 @@ describe("captured iOS keyboard selected through a registered observe capture", 
   });
 
   // iOS keys carry no input-method package, so a text selector still resolves the key.
-  test.each(layerCases)('text "q" taps the keyboard key ($name)', async ({ layer, prototype }) => {
-    const { result, points } = await executeAt("q", {
-      ...registeredIos(registeredKeyboardCapture({ prototype })),
-      layer,
-    });
-    expect(result.error).toBeUndefined();
-    expect(result.success).toBe(true);
-    expect(result.element["view-id"]).toBe(keyQ.elementId);
-    expect(points).toEqual([keyQ.point]);
-  });
+  test.each([...layerCases])(
+    'text "q" taps the keyboard key ($name)',
+    async ({ layer, prototype }) => {
+      const { result, points } = await executeAt("q", {
+        ...registeredIos(registeredKeyboardCapture({ prototype })),
+        layer,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.success).toBe(true);
+      expect(result.element["view-id"]).toBe(keyQ.elementId);
+      expect(points).toEqual([keyQ.point]);
+    },
+  );
 
-  test.each(layerCases)(
+  test.each([...layerCases])(
     "an app q sharing the key's bounds stays refused ($name)",
     async ({ layer, prototype }) => {
       const { result, points, actionError } = await executeAt("q", {
@@ -808,34 +822,36 @@ describe("captured iOS keyboard selected through a registered observe capture", 
     const app: ViewHierarchyNode[] = withAppQ
       ? [
           ...children,
-          {
+          createFlatNodeForTest({
             className: "UIButton",
             clickable: "true",
             text: "q",
             "view-id": appQ,
             bounds: { left: 4, top: 597, right: 43, bottom: 651 },
-          },
+          }),
         ]
       : children;
     root.node = prototype
       ? [
-          {
+          createFlatNodeForTest({
             className: "UIWindow",
             bounds: { left: 0, top: 0, right: 402, bottom: 874 },
             node: app,
-          },
-          {
+          }),
+          createFlatNodeForTest({
             className: "UIWindow",
             bounds: { left: 300, top: 20, right: 390, bottom: 56 },
-            node: {
-              className: "UIButton",
-              clickable: "true",
-              text: "Dismiss",
-              "resource-id": prototypeDismiss,
-              "view-id": prototypeDismiss,
-              bounds: { left: 300, top: 20, right: 390, bottom: 56 },
-            },
-          },
+            node: [
+              createFlatNodeForTest({
+                className: "UIButton",
+                clickable: "true",
+                text: "Dismiss",
+                "resource-id": prototypeDismiss,
+                "view-id": prototypeDismiss,
+                bounds: { left: 300, top: 20, right: 390, bottom: 56 },
+              }),
+            ],
+          }),
         ]
       : app;
     identifyObservedHierarchy("ios", hierarchy, "fresh", new FakeTimer());
@@ -858,7 +874,7 @@ function dialogOverRow(
     occludedByViewId: "app:id/dialog",
   };
   const dialog = { text: "Dialog", "resource-id": "app:id/dialog", clickable: true, bounds: cover };
-  return {
+  return createHierarchyForTest({
     hierarchy: { node: [row, dialog] },
     screenWidth: 400,
     screenHeight: 240,
@@ -866,7 +882,7 @@ function dialogOverRow(
       { type: 1, windowLayer: 0, hierarchy: row },
       { type, windowLayer: 1, hierarchy: dialog },
     ],
-  };
+  });
 }
 
 describe("Android application window tap occlusion", () => {

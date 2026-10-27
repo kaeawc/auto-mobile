@@ -345,7 +345,7 @@ describe("single-device allocation on a shared host", () => {
     expect(ownership.claims).toEqual(["d1"]);
     expect(ownership.releases).toEqual([]);
 
-    await releaseSessionAndDevice(sessions, pool, "d1", "s1", "test-release");
+    await releaseSessionAndDevice(sessions, pool, "d1", "s1", "explicit-release");
 
     expect(pool.getDevice("d1")?.sessionId).toBeNull();
     expect(ownership.releases).toEqual(["d1"]);

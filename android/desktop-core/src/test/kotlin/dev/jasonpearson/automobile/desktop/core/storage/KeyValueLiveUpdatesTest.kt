@@ -281,10 +281,13 @@ class KeyValueLiveUpdatesTest {
 
     val result =
       files.applyKeyValueEditIfGenerationUnchanged(
-        "prefs.xml",
-        "theme",
-        "dark",
-        KeyValueType.String,
+        edit =
+          KeyValueEdit(
+            fileName = "prefs.xml",
+            key = "theme",
+            value = "dark",
+            type = KeyValueType.String,
+          ),
         expectedGeneration = 4L,
         currentGeneration = 4L,
       )
@@ -298,10 +301,13 @@ class KeyValueLiveUpdatesTest {
 
     val result =
       afterLiveFrames.applyKeyValueEditIfGenerationUnchanged(
-        "prefs.xml",
-        "theme",
-        "dark",
-        KeyValueType.String,
+        edit =
+          KeyValueEdit(
+            fileName = "prefs.xml",
+            key = "theme",
+            value = "dark",
+            type = KeyValueType.String,
+          ),
         expectedGeneration = 4L,
         currentGeneration = 6L,
       )
@@ -316,10 +322,13 @@ class KeyValueLiveUpdatesTest {
 
     val result =
       files.applyKeyValueEditIfGenerationUnchanged(
-        "prefs.xml",
-        "fontScale",
-        "1.5",
-        KeyValueType.Float,
+        edit =
+          KeyValueEdit(
+            fileName = "prefs.xml",
+            key = "fontScale",
+            value = "1.5",
+            type = KeyValueType.Float,
+          ),
         expectedGeneration = 0L,
         currentGeneration = 0L,
       )

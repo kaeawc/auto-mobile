@@ -2,7 +2,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -12,7 +12,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { ActionableError } from "../../src/models/ActionableError";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 
 /**
  * #9945: in daemon mode a `deviceId` sent alongside a `sessionUuid` is a routing
@@ -34,7 +34,7 @@ describe("ToolRegistry daemon session/deviceId routing contract (#9945)", () => 
   };
   const sessionUuid = "session-on-a";
 
-  let fakeDeviceSessionManager: FakeDeviceSessionManager;
+  let fakeDeviceReadiness: FakeDeviceReadiness;
   let originalCollaborators: ToolRegistryCollaborators;
   let sessionManager: SessionManager;
   let restoreInventory: () => void;
@@ -63,10 +63,10 @@ describe("ToolRegistry daemon session/deviceId routing contract (#9945)", () => 
     restoreInventory = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
-    fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
+    fakeDeviceReadiness = new FakeDeviceReadiness();
+    fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: {
         async recordToolCall(): Promise<void> {},

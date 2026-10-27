@@ -58,9 +58,9 @@ final class SdkEventBuffer: EventBuffering, Sendable {
     func start() {
         state.withLock { state in
             guard state.timer == nil else { return }
-            let t = timerFactory()
-            state.timer = t
-            t.schedule(intervalMs: flushIntervalMs) { [weak self] in
+            let timer = timerFactory()
+            state.timer = timer
+            timer.schedule(intervalMs: flushIntervalMs) { [weak self] in
                 self?.flush()
             }
         }
@@ -84,8 +84,8 @@ final class SdkEventBuffer: EventBuffering, Sendable {
         // Run processor chain outside lock
         var current: (any SdkEvent)? = event
         for processor in processors {
-            guard let e = current else { break }
-            current = processor.process(e)
+            guard let eventToProcess = current else { break }
+            current = processor.process(eventToProcess)
         }
         guard let processed = current else {
             dropCounter?.increment(.filtered)

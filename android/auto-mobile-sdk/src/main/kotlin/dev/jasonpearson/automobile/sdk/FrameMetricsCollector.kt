@@ -60,16 +60,8 @@ internal object FrameMetricsCollector {
   private var context: Context? = null
   private var application: Application? = null
 
-  // Frame callbacks must run off the main thread; this is that thread.
-  private var metricsThread: HandlerThread? = null
-  private var metricsHandler: Handler? = null
-
   // Timestamped per-frame TOTAL_DURATION values (ms), pruned to WINDOW_MS.
   private val samples = ConcurrentLinkedQueue<FrameSample>()
-
-  // Windows we've attached a listener to, so we can detach exactly once.
-  private val attachedWindows =
-    Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<Window, Boolean>()))
 
   private val startedActivities =
     Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<Activity, Boolean>()))
@@ -107,14 +99,14 @@ internal object FrameMetricsCollector {
       return
     }
     if (isEnabled) {
-      startMetricsThread()
+      session.startMetricsThread()
       scheduleBroadcast()
       attachStartedWindows()
     } else {
       mainHandler.removeCallbacksAndMessages(null)
-      detachAllWindows()
+      session.detachAllWindows()
       samples.clear()
-      stopMetricsThread()
+      session.stopMetricsThread()
     }
   }
 
@@ -135,19 +127,6 @@ internal object FrameMetricsCollector {
     }
   }
 
-  private fun startMetricsThread() {
-    if (metricsThread != null) return
-    val thread = HandlerThread("automobile-frame-metrics").apply { start() }
-    metricsThread = thread
-    metricsHandler = Handler(thread.looper)
-  }
-
-  private fun stopMetricsThread() {
-    metricsThread?.quitSafely()
-    metricsThread = null
-    metricsHandler = null
-  }
-
   private fun scheduleBroadcast() {
     mainHandler.postDelayed(
       object : Runnable {
@@ -164,24 +143,13 @@ internal object FrameMetricsCollector {
   private fun broadcastSnapshot() {
     val ctx = context ?: return
     val now = System.currentTimeMillis()
-    val payload = buildSnapshotJson(ctx.packageName, drainWindow(now), now)
+    val payload = buildSnapshotJson(ctx.packageName, session.drainWindow(now), now)
     val intent =
       Intent(AutoMobileSDK.ACTION_FRAME_METRICS_SNAPSHOT).apply {
         putExtra(AutoMobileSDK.EXTRA_FRAME_METRICS_SNAPSHOT, payload)
         setPackage(SdkConstants.CTRL_PROXY_PACKAGE)
       }
     ctx.sendBroadcast(intent)
-  }
-
-  /** Prune samples older than the window and return those still inside it. */
-  private fun drainWindow(now: Long): List<FrameSample> {
-    val cutoff = now - WINDOW_MS
-    while (true) {
-      val head = samples.peek() ?: break
-      if (head.t >= cutoff) break
-      samples.poll()
-    }
-    return samples.filter { it.t in cutoff..now }
   }
 
   /**
@@ -221,38 +189,12 @@ internal object FrameMetricsCollector {
     }
   }
 
-  private fun attachWindow(window: Window?) {
-    val handler = metricsHandler ?: return
-    if (window == null || !attachedWindows.add(window)) return
-    try {
-      window.addOnFrameMetricsAvailableListener(frameListener, handler)
-    } catch (_: IllegalStateException) {
-      // Window not ready for frame metrics; drop it from the attached set.
-      attachedWindows.remove(window)
-    }
-  }
+  private val session = FrameMetricsSession(frameListener, samples, WINDOW_MS)
 
-  private fun detachWindow(window: Window?) {
-    if (window == null || !attachedWindows.remove(window)) return
-    try {
-      window.removeOnFrameMetricsAvailableListener(frameListener)
-    } catch (_: IllegalArgumentException) {
-      // Listener already removed — safe to ignore.
-    }
-  }
+  // Retain these forwarding methods because lifecycle callbacks expose JVM accessors for them.
+  private fun attachWindow(window: Window?) = session.attachWindow(window)
 
-  private fun detachAllWindows() {
-    synchronized(attachedWindows) {
-      for (window in attachedWindows.toList()) {
-        try {
-          window.removeOnFrameMetricsAvailableListener(frameListener)
-        } catch (_: IllegalArgumentException) {
-          // Already removed.
-        }
-      }
-      attachedWindows.clear()
-    }
-  }
+  private fun detachWindow(window: Window?) = session.detachWindow(window)
 
   private val activityCallbacks =
     // Capture the set locally so this anonymous class needs no new outer synthetic accessor.
@@ -288,6 +230,76 @@ internal object FrameMetricsCollector {
   private fun registerControlReceiver(context: Context) {
     controlReceiverRegistrar.register(context) {
       IntentFilter().apply { addAction(AutoMobileSDK.ACTION_FRAME_METRICS_CONTROL) }
+    }
+  }
+}
+
+/** Owns the metrics worker, attached windows and rolling sample pruning. */
+private class FrameMetricsSession(
+  private val frameListener: Window.OnFrameMetricsAvailableListener,
+  private val samples: ConcurrentLinkedQueue<FrameMetricsCollector.FrameSample>,
+  private val windowMs: Long,
+) {
+  // Frame callbacks must run off the main thread; this is that thread.
+  private var metricsThread: HandlerThread? = null
+  private var metricsHandler: Handler? = null
+  private val attachedWindows =
+    Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<Window, Boolean>()))
+
+  fun startMetricsThread() {
+    if (metricsThread != null) return
+    val thread = HandlerThread("automobile-frame-metrics").apply { start() }
+    metricsThread = thread
+    metricsHandler = Handler(thread.looper)
+  }
+
+  fun stopMetricsThread() {
+    metricsThread?.quitSafely()
+    metricsThread = null
+    metricsHandler = null
+  }
+
+  /** Prune samples older than the window and return those still inside it. */
+  fun drainWindow(now: Long): List<FrameMetricsCollector.FrameSample> {
+    val cutoff = now - windowMs
+    while (true) {
+      val head = samples.peek() ?: break
+      if (head.t >= cutoff) break
+      samples.poll()
+    }
+    return samples.filter { it.t in cutoff..now }
+  }
+
+  fun attachWindow(window: Window?) {
+    val handler = metricsHandler ?: return
+    if (window == null || !attachedWindows.add(window)) return
+    try {
+      window.addOnFrameMetricsAvailableListener(frameListener, handler)
+    } catch (_: IllegalStateException) {
+      // Window not ready for frame metrics; drop it from the attached set.
+      attachedWindows.remove(window)
+    }
+  }
+
+  fun detachWindow(window: Window?) {
+    if (window == null || !attachedWindows.remove(window)) return
+    try {
+      window.removeOnFrameMetricsAvailableListener(frameListener)
+    } catch (_: IllegalArgumentException) {
+      // Listener already removed — safe to ignore.
+    }
+  }
+
+  fun detachAllWindows() {
+    synchronized(attachedWindows) {
+      for (window in attachedWindows.toList()) {
+        try {
+          window.removeOnFrameMetricsAvailableListener(frameListener)
+        } catch (_: IllegalArgumentException) {
+          // Already removed.
+        }
+      }
+      attachedWindows.clear()
     }
   }
 }

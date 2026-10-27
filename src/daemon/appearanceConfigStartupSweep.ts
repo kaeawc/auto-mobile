@@ -1,4 +1,4 @@
-import { pruneSessionAppearanceConfigs } from "../server/appearanceManager";
+import { pruneSessionAppearanceConfigs } from "./appearanceManager";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import type { DeviceSession } from "../db/types";

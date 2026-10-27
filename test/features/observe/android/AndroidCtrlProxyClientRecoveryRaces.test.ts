@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, expect, test } from "bun:test";
 import {
   AndroidCtrlProxyClient,
@@ -24,7 +25,7 @@ async function flush(): Promise<void> {
 function harness(manager: AndroidServiceRecoveryManager, failures = 0) {
   const timer = new FakeTimer();
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+  adb.setCommandResponse("forward", createExecResult("8765", ""));
   adb.setDeviceStates([{ deviceId: device.deviceId, state: "device" }]);
   const sockets: FakeWebSocket[] = [];
   const sent: string[][] = [];
@@ -38,7 +39,7 @@ function harness(manager: AndroidServiceRecoveryManager, failures = 0) {
       };
       if (sockets.length < failures) {
         const emit = socket.emit.bind(socket);
-        socket.emit = (event, ...args) => {
+        socket.emit = (event: string | symbol, ...args: unknown[]) => {
           if (event === "open") {
             socket.readyState = WebSocketState.CLOSED;
             return emit("error", new Error("dial failure"));
@@ -167,18 +168,18 @@ test("Android replacement before async close clears cached hierarchy and resends
     fresh: true,
   };
   // Inspect the existing connection-scoped cache without invoking observation/ADB.
-  client["cachedHierarchy"] = oldCache;
-  expect(client["cachedHierarchy"]).not.toBeNull();
+  client.testHooks.setCachedHierarchy(oldCache);
+  expect(client.testHooks.cachedHierarchy()).not.toBeNull();
   client.terminateStaleConnection();
   expect(await client.ensureConnected()).toBe(true);
-  expect(client["cachedHierarchy"]).toBeNull();
+  expect(client.testHooks.cachedHierarchy()).toBeNull();
   // A queued old frame must not repopulate the replacement's cache.
   sockets[0]!.emit(
     "message",
     JSON.stringify({ type: "hierarchy_update", data: oldCache.hierarchy }),
   );
   await flush();
-  expect(client["cachedHierarchy"]).toBeNull();
+  expect(client.testHooks.cachedHierarchy()).toBeNull();
   await client.setRecompositionTrackingEnabled(true);
   expect(sent[1]!.filter((message) => message.includes("set_recomposition_tracking"))).toHaveLength(
     1,

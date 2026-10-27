@@ -1,12 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { DaemonRequestNotDeliveredError } from "../../../src/daemon/DaemonRequestNotDeliveredError";
+import { DaemonShuttingDownError } from "../../../src/daemon/DaemonShuttingDownError";
 import { DaemonErrorClassifier } from "../../../src/daemon/proxy/DaemonErrorClassifier";
-import {
-  DaemonRequestNotDeliveredError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-} from "../../../src/daemon/client";
-import { DaemonVersionMismatchError } from "../../../src/daemon/proxy/daemonErrors";
+import { DaemonUnavailableError } from "../../../src/daemon/client";
+import { DaemonVersionMismatchError } from "../../../src/daemon/proxy/DaemonVersionMismatchError";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../../src/daemon/types";
+import { DaemonRestartOptionsUnknownError } from "../../../src/daemon/proxy/DaemonRestartOptionsUnknownError";
 
 function classifier(
   facts: { structuredSessionNotFound?: boolean; registered?: string[] } = {},
@@ -19,6 +18,11 @@ function classifier(
 }
 
 describe("DaemonErrorClassifier", () => {
+  test("unknown private restart options require the original launcher, not a reconnect", () => {
+    const error = new DaemonRestartOptionsUnknownError();
+    expect(classifier().isRecoverableDaemonSessionError(error)).toBe(false);
+    expect(classifier().isRecoverableDaemonSessionError(error, false)).toBe(false);
+  });
   test("a structured not-found code is session loss on any daemon", () => {
     const error = Object.assign(new Error("gone"), { code: DAEMON_SESSION_NOT_FOUND_CODE });
     expect(

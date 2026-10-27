@@ -1,3 +1,5 @@
+import type { LayoutWarning } from "../../../../src/models/ObservationInsets";
+import type { LayoutWarnings } from "../../../../src/models/ObservationInsets";
 import { androidControlObservation } from "../../../helpers/androidDisabledControlCapture";
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
@@ -210,12 +212,12 @@ describe("diffObserveResult", () => {
     expect(diff.added).toHaveLength(1);
     expect(diff.added[0].attributes["resource-id"]).toBe("new");
     expect(diff.added[0].attributes["content-desc"]).toBe("Added row");
-    expect((diff.added[0] as Record<string, unknown>).selector).toBeUndefined();
+    expect(diff.added[0]).not.toHaveProperty("selector");
 
     expect(diff.removed).toHaveLength(1);
     expect(diff.removed[0].attributes["resource-id"]).toBe("gone");
     expect(diff.removed[0].attributes.text).toBe("Bye");
-    expect((diff.removed[0] as Record<string, unknown>).selector).toBeUndefined();
+    expect(diff.removed[0]).not.toHaveProperty("selector");
   });
 
   test("changed entries carry a real selector recovered from resource-id/text, since they carry no full attributes (issue #6221 item 4.3)", () => {
@@ -886,7 +888,7 @@ describe("diffObserveResult", () => {
 
   test("layout warnings are captured in action observation diffs", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
-    const warning = {
+    const warning: LayoutWarning = {
       type: "important-content-under-inset",
       severity: "warning",
       element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
@@ -897,9 +899,9 @@ describe("diffObserveResult", () => {
       insetPx: { top: 59.5 },
       overlapPercent: 100,
       confidence: "high",
-    } as const;
+    };
 
-    const layoutWarnings = { scope: "full", warnings: [warning] } as const;
+    const layoutWarnings: LayoutWarnings = { scope: "full", warnings: [warning] };
     const diff = diffObserveResult(obs({ ...node }), obs({ ...node }, { layoutWarnings }));
     expect(diff.fields!.layoutWarnings).toEqual({ from: undefined, to: layoutWarnings });
     expect(DIFF_SCALAR_FIELDS).toContain("layoutWarnings");
@@ -907,7 +909,7 @@ describe("diffObserveResult", () => {
 
   test("skeleton layout-warning diffs emit per-entry additions and removals", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
-    const warning = (text: string) => ({
+    const warning = (text: string): LayoutWarning => ({
       type: "important-content-under-inset",
       severity: "warning",
       element: { text, bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
@@ -928,12 +930,12 @@ describe("diffObserveResult", () => {
       { layoutWarningsDiffMode: "perEntry" },
     );
 
-    expect(diff.fields!.layoutWarnings).toEqual({ added: [added], removed: [removed] });
+    expect<unknown>(diff.fields!.layoutWarnings).toEqual({ added: [added], removed: [removed] });
   });
 
   test("skeleton layout-warning diffs emit envelope-only changes", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
-    const warning = {
+    const warning: LayoutWarning = {
       type: "important-content-under-inset",
       severity: "warning",
       element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
@@ -944,7 +946,7 @@ describe("diffObserveResult", () => {
       insetPx: { top: 59.5 },
       overlapPercent: 100,
       confidence: "high",
-    } as const;
+    };
     const warnings = [warning];
 
     const diff = diffObserveResult(
@@ -962,7 +964,7 @@ describe("diffObserveResult", () => {
 
   test("skeleton layout-warning diffs ignore confidence-only churn and systemui notification chrome", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
-    const appWarning = (confidence: string) => ({
+    const appWarning = (confidence: LayoutWarning["confidence"]): LayoutWarning => ({
       type: "important-content-under-inset",
       severity: "warning",
       element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
@@ -1003,7 +1005,7 @@ describe("diffObserveResult", () => {
   // synthetic `s2-` view id (same bounds) is not a change.
   test("skeleton layout-warning diffs ignore a regenerated synthetic view id (#11637)", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
-    const statusBarWarning = (viewId: string) => ({
+    const statusBarWarning = (viewId: string): LayoutWarning => ({
       type: "interaction-in-system-gesture-region",
       severity: "info",
       element: { viewId, bounds: { left: 0, top: 0, right: 1080, bottom: 136 } },
@@ -1031,7 +1033,7 @@ describe("diffObserveResult", () => {
 
   test("skeleton layout-warning diffs still report a moved warning with a synthetic id", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
-    const warningAt = (viewId: string, bottom: number) => ({
+    const warningAt = (viewId: string, bottom: number): LayoutWarning => ({
       type: "interaction-in-system-gesture-region",
       severity: "info",
       element: { viewId, bounds: { left: 0, top: 0, right: 1080, bottom } },
@@ -2318,19 +2320,18 @@ describe("diffObserveResult — volatile occlusion exclusion (#4399)", () => {
     ...extra,
   });
 
-  const warning = (confidence: "high" | "medium") =>
-    ({
-      type: "important-content-under-inset",
-      severity: "warning",
-      element: { viewId: "covered", bounds: { left: 0, top: 0, right: 100, bottom: 40 } },
-      categories: ["text"],
-      insetTypes: ["systemBars"],
-      sides: ["top"],
-      overflowPx: { top: 40 },
-      insetPx: { top: 59 },
-      overlapPercent: 100,
-      confidence,
-    }) as const;
+  const warning = (confidence: "high" | "medium"): LayoutWarning => ({
+    type: "important-content-under-inset",
+    severity: "warning",
+    element: { viewId: "covered", bounds: { left: 0, top: 0, right: 100, bottom: 40 } },
+    categories: ["text"],
+    insetTypes: ["systemBars"],
+    sides: ["top"],
+    overflowPx: { top: 40 },
+    insetPx: { top: 59 },
+    overlapPercent: 100,
+    confidence,
+  });
 
   test("occlusion-only node churn produces no changed entry", () => {
     const baseline = obs(
@@ -2531,7 +2532,7 @@ describe("diffObserveResult — view-id content identity (A7)", () => {
 
 // ---- P6: every advertised DIFF_SCALAR_FIELDS member is diffed --------------
 describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
-  const warning = {
+  const warning: LayoutWarning = {
     type: "important-content-under-inset",
     severity: "warning",
     element: { text: "T", bounds: { left: 0, top: 0, right: 10, bottom: 10 } },
@@ -2542,7 +2543,7 @@ describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
     insetPx: { top: 59.5 },
     overlapPercent: 100,
     confidence: "high",
-  } as const;
+  };
 
   const SCALAR_VALUE_PAIRS: Record<string, { from: unknown; to: unknown }> = {
     rotation: { from: 0, to: 1 },
@@ -2554,6 +2555,7 @@ describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
       from: { locked: false, keyguardShowing: false, secure: true },
       to: { locked: true, keyguardShowing: true, secure: true },
     },
+    deviceLockUnknown: { from: undefined, to: { reason: "timeout" } },
     awaitTimeout: { from: false, to: true },
     awaitDuration: { from: undefined, to: 250 },
     timeoutReason: { from: undefined, to: "posture wait timed out" },
@@ -2568,6 +2570,7 @@ describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
     "awaitDuration",
     "awaitTimeout",
     "deviceLock",
+    "deviceLockUnknown",
     "error",
     "intentChooserDetected",
     "layoutWarnings",
@@ -2921,7 +2924,7 @@ describe("isSameObservationScreen", () => {
     key: string,
     confidence: "high" | "medium" | "low" = "high",
     source: "heuristic" | "sdk" = "heuristic",
-  ): ObserveResult["screenIdentity"] => ({
+  ): NonNullable<ObserveResult["screenIdentity"]> => ({
     platform: "ios",
     source,
     confidence,

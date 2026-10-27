@@ -2,7 +2,7 @@ import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { z } from "zod/v4";
-import { INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM } from "../../src/daemon/wire/constants";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import { buildToolSelectionCandidateRoutes } from "../../src/features/toolSelection/toolSelectionPolicy";
 import {
@@ -10,11 +10,11 @@ import {
   registerToolSelectionTools,
 } from "../../src/server/toolSelectionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { InMemoryToolSelectionProfileRegistry } from "../../src/server/toolSelectionProfileRegistry";
+import { InMemoryToolSelectionProfileRegistry } from "../../src/daemon/InMemoryToolSelectionProfileRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
-import { executionTracker } from "../../src/server/executionTracker";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -27,10 +27,10 @@ import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
   resolveDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
-import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { isolateToolRegistry, preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
 
@@ -1482,6 +1482,9 @@ describe("post-handler cancellation guard scope", () => {
       async (args: { which: string }) => {
         if (args.which === "minter") {
           const sessionUuid = await pool.autolockDevice(device.deviceId, "android", sessionId);
+          if (!sessionUuid) {
+            throw new Error("Expected an autolocked session");
+          }
           minted.resolve(sessionUuid);
           // The sibling reuses and returns this handle to the client while the
           // minter is still in its own gated-tools enrichment.
@@ -1495,6 +1498,9 @@ describe("post-handler cancellation guard scope", () => {
         }
         await minted.promise;
         const reused = await pool.autolockDevice(device.deviceId, "android", sessionId);
+        if (!reused) {
+          throw new Error("Expected the reused autolocked session");
+        }
         return {
           content: [{ type: "text" as const, text: JSON.stringify(acquisitionPayload(reused)) }],
         };
@@ -1558,7 +1564,7 @@ describe("post-handler cancellation guard scope", () => {
     await pool.initializeWithDevices([device]);
     pool.notifyDeviceReady(device.deviceId);
 
-    const releases: Array<{ sessionUuid: string; reason: string }> = [];
+    const releases: Array<{ sessionUuid: string; reason: string | undefined }> = [];
     const releaseSession = sessionManager.releaseSession.bind(sessionManager);
     sessionManager.releaseSession = async (uuid, reason, allowExpired) => {
       releases.push({ sessionUuid: uuid, reason });
@@ -1675,7 +1681,16 @@ describe("post-handler cancellation guard scope", () => {
 
 // App-resource registration starts device discovery independently of deviceTools.
 let restoreHermeticServer: () => void;
-beforeAll(() => {
+beforeAll(async () => {
   restoreHermeticServer = installHermeticServerFixture();
+  // Warm lazy server initialization outside individual test timing.
+  const restoreTools = preserveToolRegistry();
+  const warmup = new McpTestFixture();
+  try {
+    await warmup.setup();
+  } finally {
+    await warmup.teardown();
+    restoreTools();
+  }
 });
 afterAll(() => restoreHermeticServer());

@@ -1,3 +1,4 @@
+import { viewHierarchyFromFixture } from "../../helpers/observeFixture";
 import { expect, test, spyOn } from "bun:test";
 import type { ElementBounds, ViewHierarchyResult } from "../../../src/models";
 import {
@@ -54,7 +55,7 @@ const rows: Row[] = [
   // and wait formerly treated unknown as visible; supplied observation now rejects.
   {
     name: "observation fallback: unknown accepted -> rejected",
-    capture: missingSizeCapture,
+    capture: () => viewHierarchyFromFixture(missingSizeCapture()),
     platform: "android",
     center: [750, 53],
     accepted: false,
@@ -62,14 +63,17 @@ const rows: Row[] = [
   },
   {
     name: "missing everything unchanged unknown/accepted",
-    capture: missingSizeCapture,
+    capture: () => viewHierarchyFromFixture(missingSizeCapture()),
     platform: "android",
     center: [750, 53],
     accepted: true,
   },
   {
     name: "other display observation ignored",
-    capture: () => ({ ...missingSizeCapture(), displayId: 7, panelUniqueId: "external" }),
+    capture: () =>
+      viewHierarchyFromFixture(
+        (() => ({ ...missingSizeCapture(), displayId: 7, panelUniqueId: "external" }))(),
+      ),
     platform: "android",
     center: [750, 53],
     accepted: true,
@@ -84,22 +88,28 @@ const rows: Row[] = [
   ...[collapsed, expanded].flatMap((fixture, index): Row[] => [
     {
       name: `Android narrow root ${index}: rejected -> accepted`,
-      capture: () => ({
-        ...structuredClone(fixture.viewHierarchy),
-        screenWidth: 1080,
-        screenHeight: 2400,
-      }),
+      capture: () =>
+        viewHierarchyFromFixture(
+          (() => ({
+            ...structuredClone(fixture.viewHierarchy),
+            screenWidth: 1080,
+            screenHeight: 2400,
+          }))(),
+        ),
       platform: "android",
       center: [500, 2350],
       accepted: true,
     },
     {
       name: `Android narrow root ${index}: outside display unchanged rejected`,
-      capture: () => ({
-        ...structuredClone(fixture.viewHierarchy),
-        screenWidth: 1080,
-        screenHeight: 2400,
-      }),
+      capture: () =>
+        viewHierarchyFromFixture(
+          (() => ({
+            ...structuredClone(fixture.viewHierarchy),
+            screenWidth: 1080,
+            screenHeight: 2400,
+          }))(),
+        ),
       platform: "android",
       center: [500, 2450],
       accepted: false,
@@ -110,7 +120,7 @@ const rows: Row[] = [
   // accepted by those four; now rejected by all, using runner-proven landscape.
   {
     name: "raw single-panel iOS right: rejected -> accepted",
-    capture: issue8379Hierarchy,
+    capture: () => viewHierarchyFromFixture(issue8379Hierarchy()),
     platform: "ios",
     panels: 1,
     center: [750, 53],
@@ -118,7 +128,7 @@ const rows: Row[] = [
   },
   {
     name: "raw single-panel iOS bottom: accepted -> rejected",
-    capture: issue8379Hierarchy,
+    capture: () => viewHierarchyFromFixture(issue8379Hierarchy()),
     platform: "ios",
     panels: 1,
     center: [500, 800],
@@ -128,7 +138,7 @@ const rows: Row[] = [
   // legacy selector formerly rejected; explicit multi-panel context now accepts.
   {
     name: "multi-panel selection: existing action decisions unchanged accepted",
-    capture: issue8379SelectionHierarchy,
+    capture: () => viewHierarchyFromFixture(issue8379SelectionHierarchy()),
     platform: "ios",
     panels: 2,
     center: [750, 53],
@@ -138,42 +148,47 @@ const rows: Row[] = [
   // projection-fixture rows were accepted before and remain accepted.
   {
     name: "android-home unchanged",
-    capture: () => structuredClone(androidHome.viewHierarchy),
+    capture: () => viewHierarchyFromFixture((() => structuredClone(androidHome.viewHierarchy))()),
     platform: "android",
     center: [500, 1000],
     accepted: true,
   },
   {
     name: "fractional iOS unchanged",
-    capture: () => structuredClone(fractional.viewHierarchy),
+    capture: () => viewHierarchyFromFixture((() => structuredClone(fractional.viewHierarchy))()),
     platform: "ios",
     center: [200, 400],
     accepted: true,
   },
   {
     name: "reminders before unchanged",
-    capture: () => structuredClone(remindersBefore.viewHierarchy),
+    capture: () =>
+      viewHierarchyFromFixture((() => structuredClone(remindersBefore.viewHierarchy))()),
     platform: "ios",
     center: [200, 400],
     accepted: true,
   },
   {
     name: "reminders after unchanged",
-    capture: () => structuredClone(remindersAfter.viewHierarchy),
+    capture: () =>
+      viewHierarchyFromFixture((() => structuredClone(remindersAfter.viewHierarchy))()),
     platform: "ios",
     center: [200, 400],
     accepted: true,
   },
   {
     name: "projection fixture unchanged",
-    capture: iosProjectionFixture,
+    capture: () => viewHierarchyFromFixture(iosProjectionFixture()),
     platform: "ios",
     center: [20, 20],
     accepted: true,
   },
   ...[false, true].map((multi): Row => ({
     name: `projected landscape unchanged multi=${multi}`,
-    capture: () => projectActionableHierarchy("ios", issue8379Hierarchy(), multi),
+    capture: () =>
+      viewHierarchyFromFixture(
+        (() => projectActionableHierarchy("ios", issue8379Hierarchy(), multi))(),
+      ),
     platform: "ios",
     panels: multi ? 2 : 1,
     center: [750, 53],
@@ -194,7 +209,7 @@ function withTarget(capture: ViewHierarchyResult, center: [number, number]) {
   } else if (root) {
     root.node = [...(Array.isArray(root.node) ? root.node : []), target];
   } else {
-    capture.hierarchy.node = [target];
+    capture.hierarchy.node = { node: [target] };
   }
   return { hierarchy: capture, target: new DefaultElementParser().parseNodeBounds(target)! };
 }
@@ -337,6 +352,13 @@ test("tapOn replacement cannot relabel a carried default-display size as a new d
   const previous = { ...missingSizeCapture(), displayId: 0, panelUniqueId: "default" };
   const observation = {
     observationId: "display-replacement",
+    display: {
+      key: "default",
+      role: "unknown" as const,
+      posture: "unknown" as const,
+      generation: 0,
+    },
+    systemInsets: { top: 0, left: 0, right: 0, bottom: 0 },
     updatedAt: 1,
     viewHierarchy: previous,
     screenSize: { width: 1080, height: 2400 },

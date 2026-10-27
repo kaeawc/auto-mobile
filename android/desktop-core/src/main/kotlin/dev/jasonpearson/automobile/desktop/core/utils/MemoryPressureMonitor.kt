@@ -4,7 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
-import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,6 +29,7 @@ class MemoryPressureMonitor(
   private val pollIntervalMs: Long = DEFAULT_POLL_INTERVAL_MS,
   private val onWarning: (() -> Unit)? = null,
   private val onTrimRequested: (() -> Unit)? = null,
+  private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
   companion object {
     const val WARNING_THRESHOLD = 0.80f
@@ -50,7 +51,7 @@ class MemoryPressureMonitor(
   /** Start periodic heap monitoring. Safe to call multiple times (restarts). */
   fun start() {
     stop()
-    val pollScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val pollScope = CoroutineScope(SupervisorJob() + dispatcher)
     scope = pollScope
     pollScope.launch {
       while (isActive) {
@@ -72,8 +73,11 @@ class MemoryPressureMonitor(
           } else {
             trimFired = false
           }
-        } catch (e: Exception) {
-          if (e is CancellationException) throw e
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+          throw cancellation
+        } catch (e: IllegalStateException) {
+          LOG.warn("Heap usage poll failed; continuing to monitor: ${e.message}", e)
+        } catch (e: IllegalArgumentException) {
           LOG.warn("Heap usage poll failed; continuing to monitor: ${e.message}", e)
         }
 

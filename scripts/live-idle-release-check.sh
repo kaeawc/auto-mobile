@@ -2,7 +2,7 @@
 # Live idle-release check (#10671).
 #
 # Drives a private AutoMobile daemon against one emulator and checks both sides
-# of the device-session release windows (src/daemon/sessionLivenessWindows.ts):
+# of the device-session release windows (src/daemon/wire/sessionLivenessWindows.ts):
 #
 #   active        A stdio proxy that heartbeats AND makes control calls keeps the
 #                 device past the idle window.
@@ -51,11 +51,9 @@
 # validation; the only CI entry point is the dispatch and
 # advisory-nightly workflow .github/workflows/live-idle-release.yml.
 #
-# Status-returning helpers (proxy_alive, wait_for_release, daemon_cmd,
-# active_sessions_json, stop_daemon, stop_proxy, call_tool, mcp_request) are called in conditions on
-# purpose. Each checks its own commands explicitly and fails through die, so none
-# relies on errexit inside it.
-# shellcheck disable=SC2310
+# Expected helper failures are captured explicitly before branching on their status.
+# Each helper checks its commands and fails through die where required, so optional
+# calls preserve their diagnostics without relying on errexit inside a condition.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -69,7 +67,7 @@ SLEEP_CMD="${AUTOMOBILE_IDLE_CHECK_SLEEP:-sleep}"
 NOW_CMD="${AUTOMOBILE_IDLE_CHECK_NOW:-}"
 NC="${AUTOMOBILE_IDLE_CHECK_NC:-nc}"
 
-# Mirrors src/daemon/sessionLivenessWindows.ts: idle release lands exactly one
+# Mirrors src/daemon/wire/sessionLivenessWindows.ts: idle release lands exactly one
 # idle window after the last control call (#11107), so the only slack after it is
 # one 2 s monitor scan. The 4 s owner lease and 4 s suspect grace judge the
 # owner's heartbeat, not the idle window, and no longer widen this bound.
@@ -398,6 +396,17 @@ setup_private_namespace() {
   log "evidence in ${evidence_dir}"
 }
 
+# Capture an expected failure explicitly, preserving the caller's errexit option.
+# The command runs in this shell so its result variables remain available.
+run_capture_status() {
+  local caller_options="$-" captured_status
+  set +e
+  "$@"
+  captured_status=$?
+  if [[ "$caller_options" == *e* ]]; then set -e; fi
+  RUN_STATUS=$captured_status
+}
+
 daemon_cmd() {
   local command="$1"
   shift
@@ -405,7 +414,8 @@ daemon_cmd() {
 }
 
 start_daemon() {
-  daemon_cmd start >> "${work_dir}/daemon-cli.log" 2>&1 || die "private daemon did not start; see ${work_dir}/daemon-cli.log"
+  run_capture_status daemon_cmd start >> "${work_dir}/daemon-cli.log" 2>&1
+  [[ "$RUN_STATUS" -eq 0 ]] || die "private daemon did not start; see ${work_dir}/daemon-cli.log"
   daemon_started=true
 }
 
@@ -419,7 +429,12 @@ stop_daemon() {
 
 active_sessions_json() {
   local output
-  output="$(daemon_cmd active-sessions 2>> "${work_dir}/daemon-cli.log")" || return 1
+  local capture_options="$-" capture_status
+  set +e
+  output="$(daemon_cmd active-sessions 2>> "${work_dir}/daemon-cli.log")"
+  capture_status=$?
+  if [[ "$capture_options" == *e* ]]; then set -e; fi
+  [[ "$capture_status" -eq 0 ]] || return 1
   # The reply is the last line; anything before it is incidental CLI output.
   printf '%s\n' "${output}" | tail -n 1
 }
@@ -428,13 +443,22 @@ active_sessions_json() {
 # session deliberately exits 1 while still printing its structured release evidence.
 query_release_info() {
   local session="$1" output timestamp deadline
-  timestamp="$(now_ms)" || die "could not read the clock"
+  local capture_options="$-" capture_status
+  set +e
+  timestamp="$(now_ms)"
+  capture_status=$?
+  if [[ "$capture_options" == *e* ]]; then set -e; fi
+  [[ "$capture_status" -eq 0 ]] || die "could not read the clock"
   deadline=$((timestamp + RELEASE_REASON_WAIT_S * 1000))
   while true; do
     output="$("${BUN}" "${server}" --daemon session-info "${session}" --json \
       2>> "${work_dir}/daemon-cli.log")" || true
     release_reply="$(printf '%s\n' "${output}" | tail -n 1)" || die "could not read the session-info reply"
-    timestamp="$(now_ms)" || die "could not read the clock"
+    set +e
+    timestamp="$(now_ms)"
+    capture_status=$?
+    if [[ "$capture_options" == *e* ]]; then set -e; fi
+    [[ "$capture_status" -eq 0 ]] || die "could not read the clock"
     printf '%s %s\n' "${timestamp}" "${release_reply}" >> "${evidence_dir}/${current_scenario}.release.log" ||
       die "could not save the session-info reply"
     if jq -e 'try (type == "object" and (.releaseReason | type == "string")) catch false' \
@@ -480,7 +504,12 @@ assert_release_reason() {
 # when none does.
 query_device_entry() {
   local target="${1:-${serial}}" snapshot
-  snapshot="$(active_sessions_json)" || die "could not query --daemon active-sessions"
+  local capture_options="$-" capture_status
+  set +e
+  snapshot="$(active_sessions_json)"
+  capture_status=$?
+  if [[ "$capture_options" == *e* ]]; then set -e; fi
+  [[ "$capture_status" -eq 0 ]] || die "could not query --daemon active-sessions"
   printf '%s %s\n' "$(now_ms)" "${snapshot}" >> "${evidence_dir}/${current_scenario:-setup}.sessions.log"
   entry="$(jq -c --arg device "${target}" \
     '[.sessions[]? | select(.assignedDevice == $device and .releasing != true)] | first // empty' \
@@ -517,8 +546,7 @@ start_proxy() {
   # stdin reaches the proxy through an anonymous pipe (`cat` reads the FIFO): Bun on macOS never
   # delivers `end` for a named FIFO, so the proxy would not see this script close its stdin and
   # stop_proxy would wait out its full timeout (#11073). $! is the proxy, the last command.
-  # shellcheck disable=SC2002 # The cat is the point: it supplies the anonymous pipe.
-  cat "${work_dir}/mcp.in" | "${BUN}" "${server}" --port "${port}" --strict-port \
+  cat < "${work_dir}/mcp.in" | "${BUN}" "${server}" --port "${port}" --strict-port \
     > "${work_dir}/mcp.out" 2>> "${work_dir}/proxy.stderr" &
   proxy_pid=$!
   # Open the writer first: the proxy opens its stdin before its stdout.
@@ -546,11 +574,11 @@ stop_proxy() {
   kill -CONT "${proxy_pid}" 2> /dev/null || true
   close_proxy_fds
   local waited=0
-  while proxy_alive && ((waited < 15)); do
+  while [[ -n "${proxy_pid}" ]] && kill -0 "${proxy_pid}" 2> /dev/null && ((waited < 15)); do
     "${SLEEP_CMD}" 1
     waited=$((waited + 1))
   done
-  if proxy_alive; then
+  if [[ -n "${proxy_pid}" ]] && kill -0 "${proxy_pid}" 2> /dev/null; then
     log "proxy ${proxy_pid} did not exit after stdin closed; sending SIGTERM"
     kill -TERM "${proxy_pid}" 2> /dev/null || true
   fi
@@ -629,9 +657,13 @@ acquire_device() {
 
 # Poll until the emulator is no longer held (setting released_at) or the deadline passes.
 wait_for_release() {
-  local deadline="$1" now
+  local deadline="$1" now capture_options="$-" capture_status
   while true; do
-    now="$(now_ms)" || die "could not read the clock"
+    set +e
+    now="$(now_ms)"
+    capture_status=$?
+    if [[ "$capture_options" == *e* ]]; then set -e; fi
+    [[ "$capture_status" -eq 0 ]] || die "could not read the clock"
     query_device_entry
     if [[ -z "${entry}" ]]; then
       released_at="${now}"
@@ -668,7 +700,8 @@ finish_scenario() {
 release_by_proxy_exit() {
   stop_proxy
   local deadline=$(($(now_ms) + NO_HEARTBEAT_BUDGET_MS + slack_ms))
-  wait_for_release "${deadline}" || die "${serial} still held after the proxy exited"
+  run_capture_status wait_for_release "${deadline}"
+  [[ "$RUN_STATUS" -eq 0 ]] || die "${serial} still held after the proxy exited"
 }
 
 # active_recoveries and active_control_error are scoped to scenario_active so the
@@ -676,10 +709,11 @@ release_by_proxy_exit() {
 active_control_call() {
   local arguments="$1" result attempt state
   while true; do
-    if call_tool "${CONTROL_TOOL}" "${arguments}" 120 "device '${serial}' not found"; then
+    run_capture_status call_tool "${CONTROL_TOOL}" "${arguments}" 120 "device '${serial}' not found"
+    if (( RUN_STATUS == 0 )); then
       return 0
     else
-      result=$?
+      result="$RUN_STATUS"
     fi
     [[ "${result}" -eq 3 ]] || die "active control call failed with status ${result}"
     active_control_error="tools/call returned an error: $(jq -c '.result.content' <<< "${last_response}")"
@@ -729,8 +763,8 @@ scenario_no_heartbeat() {
   kill -STOP "${proxy_pid}"
   local stopped
   stopped="$(now_ms)"
-  wait_for_release $((stopped + NO_HEARTBEAT_BUDGET_MS + slack_ms)) ||
-    die "${serial} still held $((NO_HEARTBEAT_BUDGET_MS + slack_ms)) ms after heartbeats stopped"
+  run_capture_status wait_for_release $((stopped + NO_HEARTBEAT_BUDGET_MS + slack_ms))
+  [[ "$RUN_STATUS" -eq 0 ]] || die "${serial} still held $((NO_HEARTBEAT_BUDGET_MS + slack_ms)) ms after heartbeats stopped"
   assert_release_reason heartbeat "${session_id}"
   log "no-heartbeat: released $((released_at - stopped)) ms after heartbeats stopped (budget ${NO_HEARTBEAT_BUDGET_MS} ms)"
   stop_proxy
@@ -750,11 +784,12 @@ assert_release_is_terminal() {
       value="${session_id}"
       expected="session_ownership_lost and acquire_new_session"
     fi
-    if call_tool "${CONTROL_TOOL}" "$(jq -cn --arg selector "${selector}" --arg value "${value}" \
-      '{($selector): $value}')" 120 "" true; then
+    run_capture_status call_tool "${CONTROL_TOOL}" "$(jq -cn --arg selector "${selector}" --arg value "${value}" \
+      '{($selector): $value}')" 120 "" true
+    if (( RUN_STATUS == 0 )); then
       call_status=0
     else
-      call_status=$?
+      call_status="$RUN_STATUS"
     fi
     printf '%s\n' "${last_response}" >> "${evidence_dir}/idle.refusals.log"
     ((call_status == 3)) ||
@@ -785,7 +820,7 @@ assert_release_is_terminal() {
     # Check each refusal so a re-acquisition cannot turn the next call into a misleading success.
     query_device_entry
     [[ -z "${entry}" ]] || die "a refused call re-acquired ${serial} after its idle release"
-    proxy_alive || die "the proxy exited after the terminal release refusal"
+    { [[ -n "${proxy_pid}" ]] && kill -0 "${proxy_pid}" 2> /dev/null; } || die "the proxy exited after the terminal release refusal"
   done
   log "idle: terminal release refused control calls with ${device_code} and session_ownership_lost (acquire_new_session; ${reasons})"
 }
@@ -809,15 +844,15 @@ scenario_idle() {
   while ((now < acquired + idle_timeout_ms - slack_ms)); do
     query_device_entry
     [[ -n "${entry}" ]] || die "${serial} released $((now - acquired)) ms into the ${idle_timeout_ms} ms idle window"
-    proxy_alive || die "the proxy exited during the idle window"
+    { [[ -n "${proxy_pid}" ]] && kill -0 "${proxy_pid}" 2> /dev/null; } || die "the proxy exited during the idle window"
     "${SLEEP_CMD}" 1
     now="$(now_ms)"
   done
   query_device_entry
   last="${entry}"
   [[ -n "${last}" ]] || die "${serial} released before the idle window ended"
-  same_instant "$(entry_field "${last}" lastToolActivityAt)" "$(entry_field "${first}" lastToolActivityAt)" ||
-    die "heartbeats moved lastToolActivityAt; a heartbeat must not count as use"
+  run_capture_status same_instant "$(entry_field "${last}" lastToolActivityAt)" "$(entry_field "${first}" lastToolActivityAt)"
+  [[ "$RUN_STATUS" -eq 0 ]] || die "heartbeats moved lastToolActivityAt; a heartbeat must not count as use"
   local first_beat last_beat
   first_beat="$(entry_field "${first}" lastOwnerHeartbeatAt)"
   last_beat="$(entry_field "${last}" lastOwnerHeartbeatAt)"
@@ -825,10 +860,10 @@ scenario_idle() {
     die "lastOwnerHeartbeatAt did not advance (${first_beat} -> ${last_beat}); the proxy is not heartbeating"
   fi
 
-  wait_for_release $((acquired + idle_timeout_ms + MONITOR_SCAN_MS + slack_ms)) ||
-    die "${serial} still held after the ${idle_timeout_ms} ms idle window"
+  run_capture_status wait_for_release $((acquired + idle_timeout_ms + MONITOR_SCAN_MS + slack_ms))
+  [[ "$RUN_STATUS" -eq 0 ]] || die "${serial} still held after the ${idle_timeout_ms} ms idle window"
   assert_release_reason idle "${session_id}"
-  proxy_alive || die "the proxy exited before the release, so this was not an idle release"
+  { [[ -n "${proxy_pid}" ]] && kill -0 "${proxy_pid}" 2> /dev/null; } || die "the proxy exited before the release, so this was not an idle release"
   log "idle: released $((released_at - acquired)) ms after the last tool call (idle window ${idle_timeout_ms} ms)"
   assert_release_is_terminal
   stop_proxy
@@ -882,15 +917,20 @@ scenario_observe_only() {
     # After the release the owner's next call is refused (lazy expiry): that refusal is the
     # release signal, not a failure (#11073). The entry query below confirms it.
     call_status=0
-    call_tool observe "$(jq -cn --arg device "${serial}" '{deviceId: $device}')" 120 no_active_device_session ||
-      call_status=$?
+    run_capture_status call_tool observe "$(jq -cn --arg device "${serial}" '{deviceId: $device}')" 120 no_active_device_session
+    call_status="$RUN_STATUS"
     now="$(now_ms)"
     query_device_entry
+    local activity_changed=false
+    if [[ -n "${entry}" ]]; then
+      run_capture_status same_instant "$(entry_field "${entry}" lastToolActivityAt)" "$(entry_field "${first}" lastToolActivityAt)"
+      if [[ "$RUN_STATUS" -ne 0 ]]; then activity_changed=true; fi
+    fi
     if ((call_status == 3)) && [[ -n "${entry}" ]]; then
       die "observe was refused with no_active_device_session while ${serial} is still held"
     elif [[ -z "${entry}" ]]; then
       released_at="${now}"
-    elif ! same_instant "$(entry_field "${entry}" lastToolActivityAt)" "$(entry_field "${first}" lastToolActivityAt)"; then
+    elif [[ "$activity_changed" == true ]]; then
       die "an observe moved lastToolActivityAt; a read must not count as use"
     elif ((now >= deadline)); then
       die "${serial} still held after its ${idle_timeout_ms} ms idle window although its owner only observed"
@@ -902,7 +942,7 @@ scenario_observe_only() {
   if ((released_at - acquired < idle_timeout_ms - slack_ms)); then
     die "${serial} was released only $((released_at - acquired)) ms after acquisition, before its ${idle_timeout_ms} ms idle window"
   fi
-  proxy_alive || die "the proxy exited before the release, so this was not an idle release"
+  { [[ -n "${proxy_pid}" ]] && kill -0 "${proxy_pid}" 2> /dev/null; } || die "the proxy exited before the release, so this was not an idle release"
   log "observe-only: released $((released_at - acquired)) ms after acquisition while observing (idle window ${idle_timeout_ms} ms)"
   stop_proxy
   finish_scenario
@@ -934,8 +974,8 @@ set_provision_args() {
   [[ -n "${avd_name}" ]] || die "could not read the AVD name of ${serial} (adb emu avd name)"
   config="${ANDROID_AVD_HOME:-${HOME}/.android/avd}/${avd_name}.avd/config.ini"
   [[ -f "${config}" ]] || die "no config.ini for AVD ${avd_name} at ${config}"
-  sysdir="$(avd_config_value "${config}" image.sysdir.1 || true)"
-  device_type="$(avd_config_value "${config}" hw.device.name || true)"
+  sysdir="$(run_capture_status avd_config_value "${config}" image.sysdir.1)"
+  device_type="$(run_capture_status avd_config_value "${config}" hw.device.name)"
   [[ -n "${sysdir}" ]] || die "${config} has no image.sysdir.1"
   [[ -n "${device_type}" ]] || die "${config} has no hw.device.name"
   # system-images/android-36/google_apis/arm64-v8a/ -> system-images;android-36;google_apis;arm64-v8a
@@ -965,13 +1005,13 @@ scenario_stdin_eof() {
   local closed waited=0
   closed="$(now_ms)"
   close_proxy_fds
-  while proxy_alive && ((waited < 15)); do
+  while [[ -n "${proxy_pid}" ]] && kill -0 "${proxy_pid}" 2> /dev/null && ((waited < 15)); do
     "${SLEEP_CMD}" 1
     waited=$((waited + 1))
   done
-  ! proxy_alive || die "the proxy did not exit within 15 s of its stdin closing"
-  wait_for_release $((closed + NO_HEARTBEAT_BUDGET_MS + slack_ms)) ||
-    die "${serial} still held $((NO_HEARTBEAT_BUDGET_MS + slack_ms)) ms after the proxy's stdin closed"
+  ! { [[ -n "${proxy_pid}" ]] && kill -0 "${proxy_pid}" 2> /dev/null; } || die "the proxy did not exit within 15 s of its stdin closing"
+  run_capture_status wait_for_release $((closed + NO_HEARTBEAT_BUDGET_MS + slack_ms))
+  [[ "$RUN_STATUS" -eq 0 ]] || die "${serial} still held $((NO_HEARTBEAT_BUDGET_MS + slack_ms)) ms after the proxy's stdin closed"
   log "stdin-eof: released $((released_at - closed)) ms after stdin closed (budget ${NO_HEARTBEAT_BUDGET_MS} ms)"
   stop_proxy
   finish_scenario
@@ -1008,7 +1048,7 @@ scenario_two_devices() {
   if ((released_a - acquired_a < idle_timeout_ms - slack_ms)); then
     die "${serial} was released only $((released_a - acquired_a)) ms after its last use, before its ${idle_timeout_ms} ms idle window"
   fi
-  proxy_alive || die "the proxy exited before ${serial} was released"
+  { [[ -n "${proxy_pid}" ]] && kill -0 "${proxy_pid}" 2> /dev/null; } || die "the proxy exited before ${serial} was released"
   query_device_entry "${second_serial}"
   [[ -n "${entry}" ]] || die "${second_serial} was released together with ${serial}"
   log "two-devices: ${serial} released $((released_a - acquired_a)) ms after its last use; ${second_serial} still held"
@@ -1018,7 +1058,9 @@ scenario_two_devices() {
   while true; do
     query_device_entry "${second_serial}"
     [[ -n "${entry}" ]] || break
-    (($(now_ms) < wait_until)) || die "${second_serial} still held after the proxy exited"
+    local now
+    now="$(run_capture_status now_ms)"
+    ((now < wait_until)) || die "${second_serial} still held after the proxy exited"
     "${SLEEP_CMD}" 1
   done
   assert_device_alive
@@ -1056,9 +1098,13 @@ stop_stream_subscriber() {
   fi
 }
 
-# True when the captured frames hold the terminal session-ended notice (code SESSION_ENDED).
+# Set STREAM_SESSION_ENDED when captured frames contain the terminal SESSION_ENDED notice.
 stream_has_session_ended() {
-  [[ -f "$1" ]] && jq -e -s 'any(.[]; .code == "SESSION_ENDED")' "$1" > /dev/null 2>&1
+  STREAM_SESSION_ENDED=false
+  if [[ -f "$1" ]] && jq -e -s 'any(.[]; .code == "SESSION_ENDED")' "$1" > /dev/null 2>&1; then
+    STREAM_SESSION_ENDED=true
+  fi
+  return 0
 }
 
 # An owner's session-authenticated subscription ends with a terminal SESSION_ENDED frame when its
@@ -1078,16 +1124,18 @@ scenario_stream() {
   grep -q '"subscription_response"' "${frames}" || die "the observation stream never acknowledged the subscription"
   jq -e -s 'map(select(.type == "subscription_response")) | first | .success == true' "${frames}" > /dev/null ||
     die "the observation stream refused the subscription: $(head -c 300 "${frames}")"
-  wait_for_release $((acquired + idle_timeout_ms + MONITOR_SCAN_MS + slack_ms)) ||
-    die "${serial} still held after the ${idle_timeout_ms} ms idle window"
+  run_capture_status wait_for_release $((acquired + idle_timeout_ms + MONITOR_SCAN_MS + slack_ms))
+  [[ "$RUN_STATUS" -eq 0 ]] || die "${serial} still held after the ${idle_timeout_ms} ms idle window"
   assert_release_reason idle "${session_id}"
   # The terminal frame is pushed on release; give it time to arrive before judging the stream.
   attempts=0
-  while ! stream_has_session_ended "${frames}" && ((attempts < 5)); do
+  stream_has_session_ended "${frames}"
+  while [[ "$STREAM_SESSION_ENDED" != true ]] && ((attempts < 5)); do
     "${SLEEP_CMD}" 1
     attempts=$((attempts + 1))
+    stream_has_session_ended "${frames}"
   done
-  stream_has_session_ended "${frames}" ||
+  [[ "$STREAM_SESSION_ENDED" == true ]] ||
     die "the observation stream did not end with SESSION_ENDED when the session was idle-released"
   if grep -q '"device_session_ended"' "${frames}"; then
     die "the idle release pushed device_session_ended; the device epoch must outlive the agent session"
@@ -1103,13 +1151,14 @@ cleanup() {
   if ((status != 0)) && [[ -n "${current_scenario}" ]]; then
     printf '%s\n' "${current_scenario}" >> "${evidence_dir}/failed-scenarios.txt"
   fi
-  stop_stream_subscriber || true
+  run_capture_status stop_stream_subscriber
   if [[ -n "${proxy_pid}" ]]; then
-    stop_proxy || true
+    run_capture_status stop_proxy
   fi
   close_proxy_fds
   if [[ -n "${work_dir}" ]]; then
-    if ! stop_daemon; then
+    run_capture_status stop_daemon
+    if (( RUN_STATUS != 0 )); then
       log "warning: the private daemon did not stop; keeping ${work_dir} for inspection"
       keep_work_dir=true
     fi
@@ -1151,7 +1200,7 @@ run_all_scenarios() {
       # Persist immediately, before any between-scenario query can abort the parent (#11368).
       printf '%s\n' "${name}" >> "${evidence_dir}/failed-scenarios.txt"
       # The failed scenario's proxy is gone; give its device time to release before the next one.
-      wait_for_release $(($(now_ms) + NO_HEARTBEAT_BUDGET_MS + slack_ms)) || true
+      run_capture_status wait_for_release $(($(now_ms) + NO_HEARTBEAT_BUDGET_MS + slack_ms))
     fi
   done
   if ((${#failed[@]} > 0)); then

@@ -36,9 +36,12 @@ class PackagedVersionSource(
     val stream = classLoader.getResourceAsStream(resourceName) ?: return null
     return try {
       stream.use { versionFromProperties(it.readBytes().decodeToString()) }
-    } catch (error: Exception) {
+    } catch (error: java.io.IOException) {
       // Best-effort: a malformed resource must not crash startup — fall through to the manifest.
       LOG.warn("Failed to read version resource '$resourceName': ${error.message}", error)
+      null
+    } catch (error: IllegalArgumentException) {
+      LOG.warn("Malformed version resource '$resourceName': ${error.message}", error)
       null
     }
   }
@@ -49,7 +52,7 @@ class PackagedVersionSource(
         .getResources("META-INF/MANIFEST.MF")
         .asSequence()
         .firstNotNullOfOrNull(::readManifestVersion)
-    } catch (error: Exception) {
+    } catch (error: java.io.IOException) {
       // Best-effort: manifest enumeration failures leave us at the Dev sentinel, never a crash.
       LOG.warn("Failed to scan classpath manifests for app version: ${error.message}", error)
       null
@@ -63,7 +66,7 @@ class PackagedVersionSource(
   private fun readManifestVersion(url: java.net.URL): String? =
     try {
       url.openStream().use { versionFromManifest(Manifest(it)) }
-    } catch (error: Exception) {
+    } catch (error: java.io.IOException) {
       // A broken third-party manifest is expected noise; keep scanning.
       LOG.debug("Skipping unreadable manifest at $url: ${error.message}")
       null

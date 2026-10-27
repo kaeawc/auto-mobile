@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeHierarchyCollector } from "../../fakes/FakeHierarchyCollector";
 import { FakeDeviceStateCollector } from "../../fakes/FakeDeviceStateCollector";
 import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
@@ -123,14 +124,14 @@ describe("ObserveScreen skip options", () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("cmd display get-displays", [
-      {
-        stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
-        stderr: "",
-      },
-      {
-        stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
-        stderr: "",
-      },
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
+        "",
+      ),
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
+        "",
+      ),
     ]);
     const hierarchy = new FakeViewHierarchy();
     hierarchy.configureHierarchySequence([
@@ -600,27 +601,9 @@ test("explicit capture freshness also controls the hierarchy collector fallback 
   const waits: boolean[] = [];
   const collector = new FakeHierarchyCollector();
   const originalCollect = collector.collect.bind(collector);
-  collector.collect = async (
-    result,
-    queryOptions,
-    perf,
-    skipWaitForFresh,
-    minTimestamp,
-    signal,
-    readOnly,
-    capturedHierarchy,
-  ) => {
-    waits.push(skipWaitForFresh);
-    return originalCollect(
-      result,
-      queryOptions,
-      perf,
-      skipWaitForFresh,
-      minTimestamp,
-      signal,
-      readOnly,
-      capturedHierarchy,
-    );
+  collector.collect = async (result, options) => {
+    waits.push(options?.skipWaitForFresh ?? false);
+    return originalCollect(result, options);
   };
   const { observeScreen } = createObserveScreen(
     undefined,

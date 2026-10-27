@@ -3,18 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy.ime
 import android.text.InputType
 import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 
-interface ImeCommitSink {
-  /** Changes on every input start and finish, including same-editor restarts. */
-  fun connectionGeneration(): Long
-
-  /** Stable editor metadata, or null between finish and start. */
-  fun editorIdentity(): String?
-
-  fun startedByRestart(): Boolean
-
-  /** Null means the editor did not answer, including a superseded session. */
-  fun readEditorTextBeforeCursor(maxChars: Int): String?
-
+interface ImeCommitSink : ImeEditorState {
   fun nowMs(): Long
 
   /** The active editor's inputType (EditorInfo.inputType), or null if no connection. */
@@ -51,6 +40,20 @@ interface ImeCommitSink {
   fun switchToIme(imeId: String)
 }
 
+/** Editor identity and read-back evidence used during reconnection. */
+interface ImeEditorState {
+  /** Changes on every input start and finish, including same-editor restarts. */
+  fun connectionGeneration(): Long
+
+  /** Stable editor metadata, or null between finish and start. */
+  fun editorIdentity(): String?
+
+  fun startedByRestart(): Boolean
+
+  /** Null means the editor did not answer, including a superseded session. */
+  fun readEditorTextBeforeCursor(maxChars: Int): String?
+}
+
 data class ImeCommitResult(
   val success: Boolean,
   val error: String?,
@@ -82,11 +85,10 @@ class ImeCommitDriver(
   private var terminalDecisionTraced = false
 
   private fun record(event: String, vararg fields: Pair<String, Any?>) {
-    if (
+    val isTerminalDecision =
       event == "decision" &&
         fields.any { it.first == "kind" && (it.second == "fail" || it.second == "succeed") }
-    )
-      terminalDecisionTraced = true
+    if (isTerminalDecision) terminalDecisionTraced = true
     runCatching { trace.record(event, fields) }
   }
 
@@ -112,15 +114,12 @@ class ImeCommitDriver(
     completed = true
     // Editor writes are oneway; a failed request may have already issued some of them.
     // Keep the result partial when the round-trip cannot confirm quiescence.
-    val outcome =
-      if (
-        !result.success &&
-          committedUnits > 0 &&
-          sink.nowMs() < hardDeadlineMs &&
-          !sink.syncEditorState()
-      )
-        result.copy(partialApplication = true)
-      else result
+    val hasUnconfirmedPartialWrite =
+      !result.success &&
+        committedUnits > 0 &&
+        sink.nowMs() < hardDeadlineMs &&
+        !sink.syncEditorState()
+    val outcome = if (hasUnconfirmedPartialWrite) result.copy(partialApplication = true) else result
     val delta =
       if (!reportInsertedText) null
       else outcome.insertedText ?: if (readDelta) insertedText?.invoke() else null
@@ -152,14 +151,16 @@ class ImeCommitDriver(
    * restoration as a backstop.
    */
   fun commit(
-    text: String,
-    priorImeId: String?,
+    request: ImeCommitRequest,
     deadlineMs: Long = Long.MAX_VALUE,
-    isCancelled: () -> Boolean = { false },
-    delivery: ImeTextDelivery = ImeTextDelivery.COMMIT,
     hardDeadlineMs: Long = Long.MAX_VALUE,
     onComplete: (ImeCommitResult) -> Unit,
   ) {
+    val text = request.text
+    val priorImeId = request.priorImeId
+    val isCancelled = request.isCancelled
+    val delivery = request.delivery
+
     check(completion == null) { "An IME commit driver handles one request" }
     completion = onComplete
     restoreId = priorImeId
@@ -199,6 +200,10 @@ class ImeCommitDriver(
     private val deadlineMs: Long,
     private val isCancelled: () -> Boolean,
   ) {
+    private val recovery = Reconnection()
+    private val delivery = SegmentDelivery()
+    private val pacing = TypingPacing()
+
     private val segments = splitInlineFormatSpans(text)
     private val segmentUnits = segments.map { splitGraphemes(it.text) }
     private val dispatched = mutableListOf<ExpectedUnit>()
@@ -253,20 +258,19 @@ class ImeCommitDriver(
         val waitMs =
           if (postDispatch) FINAL_VERIFY_ATTEMPTS * POLL_INTERVAL_MS
           else CtrlProxyIme.INPUT_CONNECTION_TIMEOUT_MS
-        reconnect(minOf(effectiveDeadlineMs(), sink.nowMs() + waitMs), next)
+        recovery.reconnect(minOf(effectiveDeadlineMs(), sink.nowMs() + waitMs), next)
         return false
       }
       return true
     }
 
     fun readInsertedText(): String? {
-      if (
+      val cannotReadInsertedText =
         !reportInsertedText ||
           baseline == null ||
           sink.editorIdentity() != identity ||
           sink.nowMs() >= hardDeadlineMs
-      )
-        return null
+      if (cannotReadInsertedText) return null
       return editorDelta(sink.readEditorTextBeforeCursor(EDITOR_READ_CAP))
     }
 
@@ -278,283 +282,262 @@ class ImeCommitDriver(
       complete(ImeCommitResult(true, null, insertedText = delta), readDelta = false)
     }
 
-    private fun reconnect(waitDeadlineMs: Long, next: () -> Unit) {
-      if (!canContinue()) return
-      val currentIdentity = sink.editorIdentity()
-      when {
-        currentIdentity == null -> pollReconnect(waitDeadlineMs, next)
-        currentIdentity != identity -> {
+    fun commitSegment(index: Int) = delivery.commitSegment(index)
+
+    private inner class Reconnection {
+      fun reconnect(waitDeadlineMs: Long, next: () -> Unit) {
+        if (!canContinue()) return
+        val currentIdentity = sink.editorIdentity()
+        when {
+          currentIdentity == null -> pollReconnect(waitDeadlineMs, next)
+          currentIdentity != identity -> {
+            if (postDispatch) succeed()
+            else {
+              record("decision", "kind" to "fail", "reason" to "identityChanged")
+              complete(failure(DISCONNECTED_ERROR))
+            }
+          }
+          baseline == null -> applyReconciliation(null, next)
+          else -> reconcileReadBack(waitDeadlineMs, next)
+        }
+      }
+
+      private fun pollReconnect(waitDeadlineMs: Long, next: () -> Unit) {
+        val remaining = minOf(waitDeadlineMs, effectiveDeadlineMs()) - sink.nowMs()
+        if (remaining <= 0) {
           if (postDispatch) succeed()
           else {
-            record("decision", "kind" to "fail", "reason" to "identityChanged")
+            record("decision", "kind" to "fail", "reason" to "disconnected")
             complete(failure(DISCONNECTED_ERROR))
           }
-        }
-        baseline == null -> applyReconciliation(null, next)
-        else -> reconcileReadBack(waitDeadlineMs, next)
-      }
-    }
-
-    private fun pollReconnect(waitDeadlineMs: Long, next: () -> Unit) {
-      val remaining = minOf(waitDeadlineMs, effectiveDeadlineMs()) - sink.nowMs()
-      if (remaining <= 0) {
-        if (postDispatch) succeed()
-        else {
-          record("decision", "kind" to "fail", "reason" to "disconnected")
-          complete(failure(DISCONNECTED_ERROR))
-        }
-        return
-      }
-      record("reconcileWait", "reason" to "identityNull")
-      sink.postDelayed(minOf(CtrlProxyIme.INPUT_CONNECTION_POLL_MS, remaining)) {
-        reconnect(waitDeadlineMs, next)
-      }
-    }
-
-    private fun reconcileReadBack(waitDeadlineMs: Long, next: () -> Unit) {
-      val now = sink.readEditorTextBeforeCursor(EDITOR_READ_CAP)
-      if (!canContinue()) return
-      if (sink.editorIdentity() != identity) {
-        reconnect(waitDeadlineMs, next)
-        return
-      }
-      if (now == null && !postDispatch && sink.nowMs() < waitDeadlineMs) {
-        record("reconcileWait", "reason" to "readNull")
-        sink.postDelayed(
-          minOf(CtrlProxyIme.INPUT_CONNECTION_POLL_MS, waitDeadlineMs - sink.nowMs()),
-        ) {
-          reconnect(waitDeadlineMs, next)
-        }
-        return
-      }
-      applyReconciliation(now, next)
-    }
-
-    private fun applyReconciliation(now: String?, next: () -> Unit) {
-      val startedByRestart = sink.startedByRestart()
-      val expected = dispatched.map { it.text }
-      val lastResumeConfirmed = dispatched.indexOfLast { it.requestPosition <= lastResumePosition }
-      val decision =
-        reconcileDecision(
-          postDispatch,
-          startedByRestart,
-          baseline,
-          now,
-          expected,
-          // Express the last resent request position in the remaining expectation's indices.
-          lastResumeConfirmed,
-        )
-      generation = sink.connectionGeneration()
-      val delta = editorDelta(now)
-      val confirmed = delta?.let { confirmedUnits(it, expected) }
-      record(
-        "readBack",
-        "baselineLength" to if (secureInput) null else baseline?.length,
-        "nowLength" to if (secureInput) null else now?.length,
-        "nowNull" to if (now == null) true else null,
-        "deltaLength" to if (secureInput) null else delta?.length,
-        "dispatchedCount" to dispatched.size,
-        "confirmed" to (confirmed ?: "none"),
-        "startedByRestart" to startedByRestart,
-        "postDispatch" to postDispatch,
-        "lastResumeConfirmed" to lastResumeConfirmed,
-        "secure" to if (secureInput) true else null,
-      )
-      record(
-        "decision",
-        "kind" to
-          when (decision) {
-            Reconciliation.Continue -> "continue"
-            is Reconciliation.Consumed -> "consumed"
-            is Reconciliation.DropRejected -> "dropRejected"
-            is Reconciliation.Resume -> "resume"
-            is Reconciliation.Fail -> "fail"
-            is Reconciliation.Succeed -> "succeed"
-          },
-        "confirmed" to confirmed,
-        "reason" to if (decision is Reconciliation.Fail) failureCode(decision.error) else null,
-      )
-      when (decision) {
-        Reconciliation.Continue -> next()
-        is Reconciliation.Consumed -> {
-          editorConsumed = true
-          retainConfirmed(decision.confirmed, now)
-          next()
-        }
-        is Reconciliation.DropRejected -> {
-          dropRejected(decision.confirmed, now)
-          next()
-        }
-        is Reconciliation.Resume -> reconcileMissingUnit(decision.confirmed, now, next)
-        is Reconciliation.Fail ->
-          complete(failure(decision.error).copy(insertedText = decision.delta))
-        is Reconciliation.Succeed -> succeed(decision.delta, decisionTraced = true)
-      }
-    }
-
-    private fun reconcileMissingUnit(confirmed: Int, now: String?, next: () -> Unit) {
-      if (dispatched[confirmed].text in rejectedUnitTexts) {
-        dropRejected(confirmed, now)
-        next()
-      } else {
-        resumeFrom(confirmed, now)
-      }
-    }
-
-    private fun dropRejected(confirmed: Int, now: String?) {
-      val rejected = dispatched[confirmed]
-      record("dropRejected", "index" to rejected.requestPosition)
-      rejectedUnitTexts.add(rejected.text)
-      // Only recovered losses consume the budget. Each request position is still resent at
-      // most once (lastResumePosition is monotonic), bounding rejected resends by unit count.
-      if (rejected.requestPosition == lastResumePosition) resumes--
-      retainConfirmed(confirmed, now)
-    }
-
-    private fun resumeFrom(confirmed: Int, now: String?) {
-      val applied = requireNotNull(editorDelta(now))
-      if (resumes >= MAX_RESUMES) {
-        record("decision", "kind" to "fail", "reason" to "resumeLimit", "confirmed" to confirmed)
-        complete(
-          failure("Editor restarted its input connection during IME commit; resume limit exceeded")
-            .copy(insertedText = applied),
-        )
-        return
-      }
-      resumes++
-      val requestPosition = dispatched[confirmed].requestPosition
-      record("resend", "index" to requestPosition, "resumes" to resumes)
-      lastResumePosition = requestPosition
-      retainConfirmed(confirmed, now)
-      dispatchedPosition = requestPosition
-      committedUnits = requestPosition
-      // A missing last dispatched newline is treated as consumed before reaching this path.
-      // Other missing units may be resent once when the visible prefix advances.
-      resumeAt(requestPosition)
-    }
-
-    private fun retainConfirmed(confirmed: Int, now: String?) {
-      while (dispatched.size > confirmed) dispatched.removeAt(dispatched.lastIndex)
-      currentLine.setLength(0)
-      currentLine.append(requireNotNull(editorDelta(now)).substringAfterLast('\n'))
-    }
-
-    private fun resumeAt(requestPosition: Int) {
-      var offset = 0
-      for ((index, units) in segmentUnits.withIndex()) {
-        if (requestPosition < offset + units.size) {
-          commitUnits(index, units, requestPosition - offset)
           return
         }
-        offset += units.size
-      }
-      syncCommit()
-    }
-
-    private fun syncCommit(attempt: Int = 0) {
-      if (!checkpoint { syncCommit(attempt) }) return
-      if (sink.syncEditorState()) {
-        verifyFinalText(0)
-        return
-      }
-      if (!checkpoint { syncCommit(attempt) }) return
-      // Preserve #10799's bounded retry on the current connection.
-      if (
-        attempt >= SYNC_RETRY_ATTEMPTS ||
-          remainingMs() < SYNC_RETRY_DELAY_MS + SYNC_RETRY_RESERVE_MS
-      ) {
-        complete(failure(SYNC_LOST_ERROR))
-        return
-      }
-      sink.postDelayed(SYNC_RETRY_DELAY_MS) { syncCommit(attempt + 1) }
-    }
-
-    private fun verifyFinalText(
-      attempt: Int,
-      nullReadDeadlineMs: Long = sink.nowMs() + CtrlProxyIme.INPUT_CONNECTION_TIMEOUT_MS,
-    ) {
-      if (!checkpoint { verifyFinalText(attempt, nullReadDeadlineMs) }) return
-      if (baseline == null) {
-        succeed()
-        return
-      }
-      val now = sink.readEditorTextBeforeCursor(EDITOR_READ_CAP)
-      if (!checkpoint { verifyFinalText(attempt, nullReadDeadlineMs) }) return
-      when {
-        now == baseline + text -> succeed(editorDelta(now))
-        now == null && sink.nowMs() < nullReadDeadlineMs -> {
-          waitForEditor(minOf(POLL_INTERVAL_MS, nullReadDeadlineMs - sink.nowMs())) {
-            verifyFinalText(attempt + 1, nullReadDeadlineMs)
-          }
+        record("reconcileWait", "reason" to "identityNull")
+        sink.postDelayed(minOf(CtrlProxyIme.INPUT_CONNECTION_POLL_MS, remaining)) {
+          reconnect(waitDeadlineMs, next)
         }
-        now == null || attempt >= FINAL_VERIFY_ATTEMPTS -> succeed(editorDelta(now))
-        else -> waitForEditor(POLL_INTERVAL_MS) { verifyFinalText(attempt + 1, nullReadDeadlineMs) }
+      }
+
+      private fun reconcileReadBack(waitDeadlineMs: Long, next: () -> Unit) {
+        val now = sink.readEditorTextBeforeCursor(EDITOR_READ_CAP)
+        if (!canContinue()) return
+        if (sink.editorIdentity() != identity) {
+          reconnect(waitDeadlineMs, next)
+          return
+        }
+        if (now == null && !postDispatch && sink.nowMs() < waitDeadlineMs) {
+          record("reconcileWait", "reason" to "readNull")
+          sink.postDelayed(
+            minOf(CtrlProxyIme.INPUT_CONNECTION_POLL_MS, waitDeadlineMs - sink.nowMs()),
+          ) {
+            reconnect(waitDeadlineMs, next)
+          }
+          return
+        }
+        applyReconciliation(now, next)
+      }
+
+      private fun applyReconciliation(now: String?, next: () -> Unit) {
+        val startedByRestart = sink.startedByRestart()
+        val expected = dispatched.map { it.text }
+        val lastResumeConfirmed = dispatched.indexOfLast {
+          it.requestPosition <= lastResumePosition
+        }
+        val decision =
+          reconcileDecision(
+            ImeReconciliationState(
+              postDispatch = postDispatch,
+              startedByRestart = startedByRestart,
+              baseline = baseline,
+              now = now,
+              dispatched = expected,
+              // Express the last resent request position in the remaining expectation's indices.
+              lastResumeConfirmed = lastResumeConfirmed,
+            ),
+          )
+        generation = sink.connectionGeneration()
+        val delta = editorDelta(now)
+        val confirmed = delta?.let { confirmedUnits(it, expected) }
+        traceReconciliation(
+          ReconciliationTrace(now, delta, confirmed, startedByRestart, lastResumeConfirmed),
+          decision,
+        )
+        when (decision) {
+          Reconciliation.Continue -> next()
+          is Reconciliation.Consumed -> {
+            editorConsumed = true
+            retainConfirmed(decision.confirmed, now)
+            next()
+          }
+          is Reconciliation.DropRejected -> {
+            dropRejected(decision.confirmed, now)
+            next()
+          }
+          is Reconciliation.Resume -> reconcileMissingUnit(decision.confirmed, now, next)
+          is Reconciliation.Fail ->
+            complete(failure(decision.error).copy(insertedText = decision.delta))
+          is Reconciliation.Succeed -> succeed(decision.delta, decisionTraced = true)
+        }
+      }
+
+      private fun traceReconciliation(
+        details: ReconciliationTrace,
+        decision: Reconciliation,
+      ) {
+        val (now, delta, confirmed, startedByRestart, lastResumeConfirmed) = details
+        record(
+          "readBack",
+          "baselineLength" to if (secureInput) null else baseline?.length,
+          "nowLength" to if (secureInput) null else now?.length,
+          "nowNull" to if (now == null) true else null,
+          "deltaLength" to if (secureInput) null else delta?.length,
+          "dispatchedCount" to dispatched.size,
+          "confirmed" to (confirmed ?: "none"),
+          "startedByRestart" to startedByRestart,
+          "postDispatch" to postDispatch,
+          "lastResumeConfirmed" to lastResumeConfirmed,
+          "secure" to if (secureInput) true else null,
+        )
+        record(
+          "decision",
+          "kind" to reconciliationKind(decision),
+          "confirmed" to confirmed,
+          "reason" to if (decision is Reconciliation.Fail) failureCode(decision.error) else null,
+        )
+      }
+
+      private fun reconcileMissingUnit(confirmed: Int, now: String?, next: () -> Unit) {
+        if (dispatched[confirmed].text in rejectedUnitTexts) {
+          dropRejected(confirmed, now)
+          next()
+        } else {
+          resumeFrom(confirmed, now)
+        }
+      }
+
+      private fun dropRejected(confirmed: Int, now: String?) {
+        val rejected = dispatched[confirmed]
+        record("dropRejected", "index" to rejected.requestPosition)
+        rejectedUnitTexts.add(rejected.text)
+        // Only recovered losses consume the budget. Each request position is still resent at
+        // most once (lastResumePosition is monotonic), bounding rejected resends by unit count.
+        if (rejected.requestPosition == lastResumePosition) resumes--
+        retainConfirmed(confirmed, now)
+      }
+
+      private fun resumeFrom(confirmed: Int, now: String?) {
+        val applied = requireNotNull(editorDelta(now))
+        if (resumes >= MAX_RESUMES) {
+          record("decision", "kind" to "fail", "reason" to "resumeLimit", "confirmed" to confirmed)
+          complete(
+            failure(
+                "Editor restarted its input connection during IME commit; resume limit exceeded",
+              )
+              .copy(insertedText = applied),
+          )
+          return
+        }
+        resumes++
+        val requestPosition = dispatched[confirmed].requestPosition
+        record("resend", "index" to requestPosition, "resumes" to resumes)
+        lastResumePosition = requestPosition
+        retainConfirmed(confirmed, now)
+        dispatchedPosition = requestPosition
+        committedUnits = requestPosition
+        // A missing last dispatched newline is treated as consumed before reaching this path.
+        // Other missing units may be resent once when the visible prefix advances.
+        resumeAt(requestPosition)
+      }
+
+      private fun retainConfirmed(confirmed: Int, now: String?) {
+        while (dispatched.size > confirmed) dispatched.removeAt(dispatched.lastIndex)
+        currentLine.setLength(0)
+        currentLine.append(requireNotNull(editorDelta(now)).substringAfterLast('\n'))
+      }
+
+      private fun resumeAt(requestPosition: Int) {
+        var offset = 0
+        for ((index, units) in segmentUnits.withIndex()) {
+          if (requestPosition < offset + units.size) {
+            delivery.commitUnits(index, units, requestPosition - offset)
+            return
+          }
+          offset += units.size
+        }
+        delivery.syncCommit()
       }
     }
 
-    private fun waitForEditor(delayMs: Long, next: () -> Unit) {
-      val boundedDelayMs = minOf(delayMs, hardDeadlineMs - sink.nowMs()).coerceAtLeast(0)
-      settleWaitMs += boundedDelayMs
-      sink.postDelayed(boundedDelayMs) { if (checkpoint(next)) next() }
-    }
+    private inner class SegmentDelivery {
+      fun syncCommit(attempt: Int = 0) {
+        if (!checkpoint { syncCommit(attempt) }) return
+        if (sink.syncEditorState()) {
+          verifyFinalText(0)
+          return
+        }
+        if (!checkpoint { syncCommit(attempt) }) return
+        // Preserve #10799's bounded retry on the current connection.
+        if (
+          attempt >= SYNC_RETRY_ATTEMPTS ||
+            remainingMs() < SYNC_RETRY_DELAY_MS + SYNC_RETRY_RESERVE_MS
+        ) {
+          complete(failure(SYNC_LOST_ERROR))
+          return
+        }
+        sink.postDelayed(SYNC_RETRY_DELAY_MS) { syncCommit(attempt + 1) }
+      }
 
-    fun commitSegment(index: Int) {
-      if (!checkpoint { commitSegment(index) }) return
-      if (index == segments.size) {
-        syncCommit()
-        return
+      private fun verifyFinalText(
+        attempt: Int,
+        nullReadDeadlineMs: Long = sink.nowMs() + CtrlProxyIme.INPUT_CONNECTION_TIMEOUT_MS,
+      ) {
+        if (!checkpoint { verifyFinalText(attempt, nullReadDeadlineMs) }) return
+        if (baseline == null) {
+          succeed()
+          return
+        }
+        val now = sink.readEditorTextBeforeCursor(EDITOR_READ_CAP)
+        if (!checkpoint { verifyFinalText(attempt, nullReadDeadlineMs) }) return
+        when {
+          now == baseline + text -> succeed(editorDelta(now))
+          now == null && sink.nowMs() < nullReadDeadlineMs -> {
+            pacing.waitForEditor(minOf(POLL_INTERVAL_MS, nullReadDeadlineMs - sink.nowMs())) {
+              verifyFinalText(attempt + 1, nullReadDeadlineMs)
+            }
+          }
+          now == null || attempt >= FINAL_VERIFY_ATTEMPTS -> succeed(editorDelta(now))
+          else ->
+            pacing.waitForEditor(POLL_INTERVAL_MS) {
+              verifyFinalText(attempt + 1, nullReadDeadlineMs)
+            }
+        }
       }
-      commitUnits(index, segmentUnits[index], 0)
-    }
 
-    private fun finishSegment(index: Int) {
-      if (!checkpoint { finishSegment(index) }) return
-      // Composing profiles retain the last word until explicitly finished.
-      if (!sink.finishComposing()) {
-        complete(failure("Input connection lost while finishing composition"))
-        return
+      fun commitSegment(index: Int) {
+        if (!checkpoint { commitSegment(index) }) return
+        if (index == segments.size) {
+          syncCommit()
+          return
+        }
+        commitUnits(index, segmentUnits[index], 0)
       }
-      val literal = segments[index].trailingSpan
-      if (literal != null && index < segments.lastIndex) {
-        pollInlineConversion(literal, 0) { commitSegment(index + 1) }
-      } else {
-        commitSegment(index + 1)
-      }
-    }
 
-    private fun pollInlineConversion(literal: String, attempt: Int, next: () -> Unit) {
-      if (!checkpoint { pollInlineConversion(literal, attempt, next) }) return
-      val seen = sink.readTextBeforeCursor(literal.length)
-      // A short unconverted read is a suffix of the literal. Empty/null reads wait to the ceiling.
-      val converted = seen != null && seen.isNotEmpty() && !literal.endsWith(seen)
-      if (converted || attempt >= MAX_POLL_ATTEMPTS) {
-        next()
-      } else {
-        waitForEditor(POLL_INTERVAL_MS) { pollInlineConversion(literal, attempt + 1, next) }
+      private fun finishSegment(index: Int) {
+        if (!checkpoint { finishSegment(index) }) return
+        // Composing profiles retain the last word until explicitly finished.
+        if (!sink.finishComposing()) {
+          complete(failure("Input connection lost while finishing composition"))
+          return
+        }
+        val literal = segments[index].trailingSpan
+        if (literal != null && index < segments.lastIndex) {
+          pacing.pollInlineConversion(literal, 0) { commitSegment(index + 1) }
+        } else {
+          commitSegment(index + 1)
+        }
       }
-    }
 
-    private fun awaitLineStartConversion(literal: String, attempt: Int, next: () -> Unit) {
-      if (!checkpoint { awaitLineStartConversion(literal, attempt, next) }) return
-      if (attempt == 0) {
-        // Pause as in realistic typing so the rich-text composer can react to the typed shortcut.
-        waitForEditor(REALISTIC_TYPING_PAUSE_MS) { awaitLineStartConversion(literal, 1, next) }
-        return
-      }
-      val seen = sink.readTextBeforeCursor(literal.length)
-      val converted = seen != null && !seen.endsWith(literal)
-      if (converted || attempt >= MAX_POLL_ATTEMPTS) {
-        waitForEditor(SETTLE_AFTER_CONVERSION_MS, next)
-      } else {
-        waitForEditor(POLL_INTERVAL_MS) { awaitLineStartConversion(literal, attempt + 1, next) }
-      }
-    }
-
-    private fun commitUnits(segmentIndex: Int, units: List<String>, start: Int) {
-      // Word runs stay synchronous without consuming one stack frame per grapheme.
-      for (unitIndex in start until units.size) {
-        if (!checkpoint { commitUnits(segmentIndex, units, unitIndex) }) return
-        val unit = units[unitIndex]
+      private fun dispatchUnit(unit: String): Boolean {
         // A false return can follow an applied prefix: count conservatively before dispatch.
         committedUnits++
         record(
@@ -567,27 +550,84 @@ class ImeCommitDriver(
         dispatched.add(ExpectedUnit(unit, dispatchedPosition++))
         if (!sink.commitChar(unit)) {
           complete(failure("Input connection lost during commit"))
+          return false
+        }
+        return true
+      }
+
+      fun commitUnits(segmentIndex: Int, units: List<String>, start: Int) {
+        // Word runs stay synchronous without consuming one stack frame per grapheme.
+        for (unitIndex in start until units.size) {
+          if (!checkpoint { commitUnits(segmentIndex, units, unitIndex) }) return
+          val unit = units[unitIndex]
+          if (!dispatchUnit(unit)) return
+          if (unit == "\n") currentLine.setLength(0) else currentLine.append(unit)
+          val hasMore = unitIndex < units.lastIndex || segmentIndex < segments.lastIndex
+          val next = { commitUnits(segmentIndex, units, unitIndex + 1) }
+          if (pacing.pauseAfterUnit(unit, hasMore, unitIndex < units.lastIndex, next)) return
+        }
+        if (canContinue()) finishSegment(segmentIndex)
+      }
+    }
+
+    private inner class TypingPacing {
+      fun waitForEditor(delayMs: Long, next: () -> Unit) {
+        val boundedDelayMs = minOf(delayMs, hardDeadlineMs - sink.nowMs()).coerceAtLeast(0)
+        settleWaitMs += boundedDelayMs
+        sink.postDelayed(boundedDelayMs) { if (checkpoint(next)) next() }
+      }
+
+      fun pollInlineConversion(literal: String, attempt: Int, next: () -> Unit) {
+        if (!checkpoint { pollInlineConversion(literal, attempt, next) }) return
+        val seen = sink.readTextBeforeCursor(literal.length)
+        // A short unconverted read is a suffix of the literal. Empty/null reads wait to the
+        // ceiling.
+        val converted = seen != null && seen.isNotEmpty() && !literal.endsWith(seen)
+        if (converted || attempt >= MAX_POLL_ATTEMPTS) {
+          next()
+        } else {
+          waitForEditor(POLL_INTERVAL_MS) { pollInlineConversion(literal, attempt + 1, next) }
+        }
+      }
+
+      private fun awaitLineStartConversion(literal: String, attempt: Int, next: () -> Unit) {
+        if (!checkpoint { awaitLineStartConversion(literal, attempt, next) }) return
+        if (attempt == 0) {
+          // Pause as in realistic typing so the rich-text composer can react to the typed shortcut.
+          waitForEditor(REALISTIC_TYPING_PAUSE_MS) { awaitLineStartConversion(literal, 1, next) }
           return
         }
-        if (unit == "\n") currentLine.setLength(0) else currentLine.append(unit)
-        val hasMore = unitIndex < units.lastIndex || segmentIndex < segments.lastIndex
-        val next = { commitUnits(segmentIndex, units, unitIndex + 1) }
+        val seen = sink.readTextBeforeCursor(literal.length)
+        val converted = seen != null && !seen.endsWith(literal)
+        if (converted || attempt >= MAX_POLL_ATTEMPTS) {
+          waitForEditor(SETTLE_AFTER_CONVERSION_MS, next)
+        } else {
+          waitForEditor(POLL_INTERVAL_MS) { awaitLineStartConversion(literal, attempt + 1, next) }
+        }
+      }
+
+      fun pauseAfterUnit(
+        unit: String,
+        hasMore: Boolean,
+        moreInSegment: Boolean,
+        next: () -> Unit,
+      ): Boolean {
         when {
           unit == " " && hasMore && MENTION_BEFORE_SPACE.containsMatchIn(currentLine) -> {
             waitForEditor(SETTLE_AFTER_MENTION_MS, next)
-            return
+            return true
           }
           hasMore && LINE_START_SHORTCUT.matches(currentLine) -> {
             awaitLineStartConversion(currentLine.toString(), 0, next)
-            return
+            return true
           }
-          unitIndex < units.lastIndex && !isWordUnit(unit) -> {
+          moreInSegment && !isWordUnit(unit) -> {
             waitForEditor(REALISTIC_TYPING_PAUSE_MS, next)
-            return
+            return true
           }
         }
+        return false
       }
-      if (canContinue()) finishSegment(segmentIndex)
     }
   }
 
@@ -695,6 +735,21 @@ class ImeCommitDriver(
     data class Succeed(val delta: String?) : Reconciliation
   }
 
+  private data class ReconciliationTrace(
+    val now: String?,
+    val delta: String?,
+    val confirmed: Int?,
+    val startedByRestart: Boolean,
+    val lastResumeConfirmed: Int,
+  )
+
+  private data class ReconciliationPrefix(
+    val confirmed: Int,
+    val dispatched: List<String>,
+    val startedByRestart: Boolean,
+    val lastResumeConfirmed: Int,
+  )
+
   private data class ExpectedUnit(val text: String, val requestPosition: Int)
 
   private data class Segment(val text: String, val trailingSpan: String?)
@@ -731,6 +786,16 @@ class ImeCommitDriver(
     private const val NONE_APPLIED_ERROR =
       "Editor restarted its input connection during IME commit; none of the dispatched text is in the editor"
 
+    private fun reconciliationKind(decision: Reconciliation): String =
+      when (decision) {
+        Reconciliation.Continue -> "continue"
+        is Reconciliation.Consumed -> "consumed"
+        is Reconciliation.DropRejected -> "dropRejected"
+        is Reconciliation.Resume -> "resume"
+        is Reconciliation.Fail -> "fail"
+        is Reconciliation.Succeed -> "succeed"
+      }
+
     private fun failureCode(error: String?): String =
       when (error) {
         NONE_APPLIED_ERROR -> "noneApplied"
@@ -750,12 +815,11 @@ class ImeCommitDriver(
         else -> "other"
       }
 
-    private fun editorDelta(baseline: String?, now: String?): String? =
-      if (
+    private fun editorDelta(baseline: String?, now: String?): String? {
+      val hasAppendedText =
         baseline != null && now != null && now.length < EDITOR_READ_CAP && now.startsWith(baseline)
-      )
-        now.removePrefix(baseline)
-      else null
+      return if (hasAppendedText) now.removePrefix(baseline) else null
+    }
 
     private fun confirmedUnits(applied: String, dispatched: List<String>): Int? {
       var length = 0
@@ -769,33 +833,45 @@ class ImeCommitDriver(
     }
 
     /** Treat editor consumption separately from losses with an advancing visible prefix. */
-    internal fun reconcileDecision(
-      postDispatch: Boolean,
-      startedByRestart: Boolean,
-      baseline: String?,
-      now: String?,
-      dispatched: List<String>,
-      lastResumeConfirmed: Int = -1,
-    ): Reconciliation {
+    internal fun reconcileDecision(state: ImeReconciliationState): Reconciliation {
+      val postDispatch = state.postDispatch
+      val startedByRestart = state.startedByRestart
+      val baseline = state.baseline
+      val now = state.now
+      val dispatched = state.dispatched
+      val lastResumeConfirmed = state.lastResumeConfirmed
+
       val delta = editorDelta(baseline, now)
       val confirmed = delta?.let { confirmedUnits(it, dispatched) }
       return when {
         confirmed == dispatched.size ->
           if (postDispatch) Reconciliation.Succeed(delta) else Reconciliation.Continue
         confirmed != null && confirmed > 0 ->
-          when {
-            confirmed == dispatched.size - 1 && dispatched[confirmed] == "\n" && startedByRestart ->
-              if (postDispatch) Reconciliation.Succeed(delta)
-              else Reconciliation.Consumed(confirmed)
-            confirmed > lastResumeConfirmed -> Reconciliation.Resume(confirmed)
-            postDispatch -> Reconciliation.Succeed(delta)
-            else -> Reconciliation.DropRejected(confirmed)
-          }
+          reconcilePrefix(
+            ReconciliationPrefix(confirmed, dispatched, startedByRestart, lastResumeConfirmed),
+            postDispatch,
+            delta,
+          )
         postDispatch -> Reconciliation.Succeed(delta)
         confirmed == 0 && startedByRestart -> Reconciliation.Consumed(0)
         confirmed == 0 -> Reconciliation.Fail(NONE_APPLIED_ERROR, delta)
         startedByRestart -> Reconciliation.Continue
         else -> Reconciliation.Fail(DISCONNECTED_ERROR, delta)
+      }
+    }
+
+    private fun reconcilePrefix(
+      prefix: ReconciliationPrefix,
+      postDispatch: Boolean,
+      delta: String?,
+    ): Reconciliation {
+      val (confirmed, dispatched, startedByRestart, lastResumeConfirmed) = prefix
+      return when {
+        confirmed == dispatched.size - 1 && dispatched[confirmed] == "\n" && startedByRestart ->
+          if (postDispatch) Reconciliation.Succeed(delta) else Reconciliation.Consumed(confirmed)
+        confirmed > lastResumeConfirmed -> Reconciliation.Resume(confirmed)
+        postDispatch -> Reconciliation.Succeed(delta)
+        else -> Reconciliation.DropRejected(confirmed)
       }
     }
 

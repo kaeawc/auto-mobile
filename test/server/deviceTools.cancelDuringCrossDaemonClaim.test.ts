@@ -1,6 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { ChildProcess } from "child_process";
-import { EventEmitter } from "node:events";
+import { afterEach, describe, expect, test } from "bun:test";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import {
   registerDeviceTools,
@@ -15,7 +13,7 @@ import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwner
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { ExactProvisionedDevice } from "../../src/devices/exactDeviceProvisioning";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import { classifyDisplayCutout } from "../../src/utils/displayCutout";
@@ -26,6 +24,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 isolateToolRegistry();
@@ -64,13 +63,8 @@ const ANDROID_SPEC = {
 };
 
 /** The boot's process handle: `kill` is what shuts the cold-booted device down. */
-class RecordingBootHandle extends EventEmitter {
-  readonly pid = 4242;
-  exitCode: number | null = null;
-  readonly signalCode: NodeJS.Signals | null = null;
-  killed = false;
-
-  kill(): boolean {
+class RecordingBootHandle extends FakeChildProcess {
+  override kill(): boolean {
     this.killed = true;
     this.exitCode = 0;
     queueMicrotask(() => this.emit("exit", 0, null));
@@ -129,7 +123,7 @@ describe.each([
     let ownership: GatedClaimOwnership;
     let bootHandle: RecordingBootHandle;
 
-    beforeEach(() => {
+    function arrangeHarness(): void {
       resetDeviceToolsDependencies();
       DaemonState.getInstance().reset();
       clearDirectSessionDevices();
@@ -141,8 +135,8 @@ describe.each([
       devices.setDeviceImages("android", [avd]);
       devices.setDeviceImages("ios", [simulator]);
       bootHandle = new RecordingBootHandle();
-      devices.setMockChildProcess(avd.name, bootHandle as unknown as ChildProcess);
-      devices.setMockChildProcess(simulator.name, bootHandle as unknown as ChildProcess);
+      devices.setMockChildProcess(avd.name, bootHandle);
+      devices.setMockChildProcess(simulator.name, bootHandle);
       ownership = new GatedClaimOwnership();
       const idGenerator = new CountingIdGenerator("cancel-claim");
       const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: autolock };
@@ -189,7 +183,49 @@ describe.each([
         new DeviceSessionRegistry(timer, idGenerator),
       );
       registerDeviceTools();
-    });
+    }
+
+    // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+    function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+      test(
+        name,
+        async () => {
+          await arrangeHarness();
+          await fn();
+        },
+        timeout,
+      );
+    }
+
+    function arrangedEach<T>(table: readonly T[]) {
+      return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+        test.each(table.map((row) => ({ row })))(
+          name,
+          async ({ row }) => {
+            await arrangeHarness();
+            await fn(row);
+          },
+          timeout,
+        );
+      };
+    }
+
+    function arrangedEachRow(table: Array<[string, Record<string, unknown>, string]>) {
+      return (
+        name: string,
+        fn: (...row: [string, Record<string, unknown>, string]) => void | Promise<void>,
+        timeout?: number,
+      ): void => {
+        test.each(table)(
+          name,
+          async (...row: [string, Record<string, unknown>, string]) => {
+            await arrangeHarness();
+            await fn(...row);
+          },
+          timeout,
+        );
+      };
+    }
 
     afterEach(() => {
       resetDeviceToolsDependencies();
@@ -278,26 +314,29 @@ describe.each([
       expect([...ownership.held]).toEqual([]);
     };
 
-    test("control: an uncancelled getApple binds its session once the claim is published", async () => {
-      const outcome = acquire("getApple", { udid: SIM_UDID });
-      await untilClaimsPending(1);
-      ownership.pending[0](true);
-      const settled = await outcome;
+    arranged(
+      "control: an uncancelled getApple binds its session once the claim is published",
+      async () => {
+        const outcome = acquire("getApple", { udid: SIM_UDID });
+        await untilClaimsPending(1);
+        ownership.pending[0](true);
+        const settled = await outcome;
 
-      expect(settled.ok).toBe(true);
-      expect(pool.getDevice(SIM_UDID)?.sessionId).toBe(
-        settled.ok ? settled.payload.runtime.session.sessionUuid : undefined,
-      );
-      expect([...ownership.held]).toEqual([SIM_UDID]);
-      expect(bootHandle.killed).toBe(false);
-    });
+        expect(settled.ok).toBe(true);
+        expect(pool.getDevice(SIM_UDID)?.sessionId).toBe(
+          settled.ok ? settled.payload.runtime.session.sessionUuid : undefined,
+        );
+        expect([...ownership.held]).toEqual([SIM_UDID]);
+        expect(bootHandle.killed).toBe(false);
+      },
+    );
 
-    test.each([
+    arrangedEachRow([
       ["getApple", { udid: SIM_UDID }, SIM_UDID],
       ["getAndroid", { avdName: avd.name }, AVD_SERIAL],
       ["startDevice", { platform: "ios", deviceId: SIM_UDID }, SIM_UDID],
       ["startDevice", { platform: "android", name: avd.name }, AVD_SERIAL],
-    ] as const)(
+    ])(
       "%s %j: the cancelled cold boot leaves no session bound and no claim published",
       async (tool, args, deviceId) => {
         const cancelled = await cancelledAtClaim(tool, args);
@@ -316,50 +355,56 @@ describe.each([
       },
     );
 
-    test("provisionDevice: the cancelled call leaves no session bound to the device it prepared", async () => {
-      const controller = new AbortController();
-      const response = call(
-        "provisionDevice",
-        {
-          device: { platform: "android", name: avd.name, spec: ANDROID_SPEC },
-          boot: true,
-          readiness: "automation",
-        },
-        controller.signal,
-      ).then(
-        (result) => JSON.parse(result.content[0].text) as { sessionId?: string },
-        () => ({ sessionId: undefined }),
-      );
-      await untilClaimsPending(1);
-      controller.abort(new Error("client cancelled"));
-      await spin();
-      ownership.pending[0](true);
-      const payload = await response;
-      await drain();
+    arranged(
+      "provisionDevice: the cancelled call leaves no session bound to the device it prepared",
+      async () => {
+        const controller = new AbortController();
+        const response = call(
+          "provisionDevice",
+          {
+            device: { platform: "android", name: avd.name, spec: ANDROID_SPEC },
+            boot: true,
+            readiness: "automation",
+          },
+          controller.signal,
+        ).then(
+          (result) => JSON.parse(result.content[0].text) as { sessionId?: string },
+          () => ({ sessionId: undefined }),
+        );
+        await untilClaimsPending(1);
+        controller.abort(new Error("client cancelled"));
+        await spin();
+        ownership.pending[0](true);
+        const payload = await response;
+        await drain();
 
-      expect(payload.sessionId).toBeUndefined();
-      expectColdBootStopped();
-    });
+        expect(payload.sessionId).toBeUndefined();
+        expectColdBootStopped();
+      },
+    );
 
-    test("the acquisition deadline passing during the publish leaves nothing bound either", async () => {
-      const outcome = acquire("startDevice", {
-        platform: "android",
-        name: avd.name,
-        timeoutMs: 20_000,
-      });
-      await untilClaimsPending(1);
-      timer.advanceTime(20_000);
-      const settled = await outcome;
-      // The call has already failed, and the session it committed is still bound.
-      expect(settled.ok).toBe(false);
-      expect(pool.getDevice(AVD_SERIAL)?.sessionId).toBeTruthy();
-      ownership.pending[0](true);
-      await drain();
+    arranged(
+      "the acquisition deadline passing during the publish leaves nothing bound either",
+      async () => {
+        const outcome = acquire("startDevice", {
+          platform: "android",
+          name: avd.name,
+          timeoutMs: 20_000,
+        });
+        await untilClaimsPending(1);
+        timer.advanceTime(20_000);
+        const settled = await outcome;
+        // The call has already failed, and the session it committed is still bound.
+        expect(settled.ok).toBe(false);
+        expect(pool.getDevice(AVD_SERIAL)?.sessionId).toBeTruthy();
+        ownership.pending[0](true);
+        await drain();
 
-      expectColdBootStopped();
-    });
+        expectColdBootStopped();
+      },
+    );
 
-    test("a device that was already running stays running and idle", async () => {
+    arranged("a device that was already running stays running and idle", async () => {
       devices.setBootedDevices("ios", [bootedSimulator]);
       await pool.initializeWithDevices([bootedSimulator]);
 
@@ -374,28 +419,34 @@ describe.each([
       expect(devices.wasMethodCalled("killDevice")).toBe(false);
     });
 
-    test("a claim another daemon wins after the cancel is rolled back the same way", async () => {
-      const cancelled = await cancelledAtClaim("getAndroid", { avdName: avd.name });
-      ownership.pending[0](false);
-      const settled = await cancelled.settled;
-      await drain();
+    arranged(
+      "a claim another daemon wins after the cancel is rolled back the same way",
+      async () => {
+        const cancelled = await cancelledAtClaim("getAndroid", { avdName: avd.name });
+        ownership.pending[0](false);
+        const settled = await cancelled.settled;
+        await drain();
 
-      expect(settled.ok).toBe(false);
-      expectColdBootStopped();
-    });
+        expect(settled.ok).toBe(false);
+        expectColdBootStopped();
+      },
+    );
 
-    test("a claim publish that fails releases the session the failed call created", async () => {
-      const outcome = acquire("getAndroid", { avdName: avd.name });
-      await untilClaimsPending(1);
-      ownership.pending[0](new Error("claim directory is not writable"));
-      const settled = await outcome;
-      await drain();
+    arranged(
+      "a claim publish that fails releases the session the failed call created",
+      async () => {
+        const outcome = acquire("getAndroid", { avdName: avd.name });
+        await untilClaimsPending(1);
+        ownership.pending[0](new Error("claim directory is not writable"));
+        const settled = await outcome;
+        await drain();
 
-      expect(settled.ok).toBe(false);
-      expectColdBootStopped();
-    });
+        expect(settled.ok).toBe(false);
+        expectColdBootStopped();
+      },
+    );
 
-    test("the session a cancelled repeat call reused stays bound to its owner", async () => {
+    arranged("the session a cancelled repeat call reused stays bound to its owner", async () => {
       devices.setBootedDevices("ios", [bootedSimulator]);
       await pool.initializeWithDevices([bootedSimulator]);
       const first = acquire("getApple", { udid: SIM_UDID });
@@ -419,49 +470,55 @@ describe.each([
       expect([...ownership.held]).toEqual([SIM_UDID]);
     });
 
-    test("owner disconnect: the bindings released with the connection are not released twice", async () => {
-      devices.setBootedDevices("ios", [bootedSimulator]);
-      await pool.initializeWithDevices([bootedSimulator]);
-      const releases: string[] = [];
-      const releaseSession = sessions.releaseSession.bind(sessions);
-      sessions.releaseSession = async (sessionId, ...rest) => {
-        releases.push(sessionId);
-        return await releaseSession(sessionId, ...rest);
-      };
+    arranged(
+      "owner disconnect: the bindings released with the connection are not released twice",
+      async () => {
+        devices.setBootedDevices("ios", [bootedSimulator]);
+        await pool.initializeWithDevices([bootedSimulator]);
+        const releases: string[] = [];
+        const releaseSession = sessions.releaseSession.bind(sessions);
+        sessions.releaseSession = async (sessionId, ...rest) => {
+          releases.push(sessionId);
+          return await releaseSession(sessionId, ...rest);
+        };
 
-      const cancelled = await cancelledAtClaim("getApple", { udid: SIM_UDID });
-      pool.releaseMcpSessionBindings("mcp-client");
-      await drain();
-      ownership.pending[0](true);
-      const settled = await cancelled.settled;
-      await drain();
+        const cancelled = await cancelledAtClaim("getApple", { udid: SIM_UDID });
+        pool.releaseMcpSessionBindings("mcp-client");
+        await drain();
+        ownership.pending[0](true);
+        const settled = await cancelled.settled;
+        await drain();
 
-      expect(settled.ok).toBe(false);
-      expectNothingBound(SIM_UDID);
-      expect(new Set(releases).size).toBe(releases.length);
-    });
+        expect(settled.ok).toBe(false);
+        expectNothingBound(SIM_UDID);
+        expect(new Set(releases).size).toBe(releases.length);
+      },
+    );
 
-    test("daemon shutdown: a claim that lands after the sessions were released is withdrawn", async () => {
-      devices.setBootedDevices("ios", [bootedSimulator]);
-      await pool.initializeWithDevices([bootedSimulator]);
+    arranged(
+      "daemon shutdown: a claim that lands after the sessions were released is withdrawn",
+      async () => {
+        devices.setBootedDevices("ios", [bootedSimulator]);
+        await pool.initializeWithDevices([bootedSimulator]);
 
-      const cancelled = await cancelledAtClaim("getApple", { udid: SIM_UDID });
-      const sessionUuid = pool.getDevice(SIM_UDID)!.sessionId!;
-      await sessions.releaseSession(sessionUuid, "daemon-shutdown");
-      await pool.releaseDevice(SIM_UDID, sessionUuid);
-      pool.releaseDeviceClaimsForShutdown();
-      ownership.pending[0](true);
-      const settled = await cancelled.settled;
-      await drain();
+        const cancelled = await cancelledAtClaim("getApple", { udid: SIM_UDID });
+        const sessionUuid = pool.getDevice(SIM_UDID)!.sessionId!;
+        await sessions.releaseSession(sessionUuid, "daemon-shutdown");
+        await pool.releaseDevice(SIM_UDID, sessionUuid);
+        pool.releaseDeviceClaimsForShutdown();
+        ownership.pending[0](true);
+        const settled = await cancelled.settled;
+        await drain();
 
-      expect(settled.ok).toBe(false);
-      expectNothingBound(SIM_UDID);
-    });
+        expect(settled.ok).toBe(false);
+        expectNothingBound(SIM_UDID);
+      },
+    );
 
     // The compensation decides from the request signal right after the publish settles. Whatever
     // the cancel's timing relative to that decision, the two sides must agree: the caller holds the
     // bound session's id, or it holds an error and nothing is bound.
-    test.each(Array.from({ length: 48 }, (_, turns) => turns))(
+    arrangedEach(Array.from({ length: 48 }, (_, turns) => turns))(
       "a cancel %i microtasks after the publish settles never splits the caller from the pool",
       async (turns) => {
         devices.setBootedDevices("ios", [bootedSimulator]);
@@ -486,29 +543,34 @@ describe.each([
       },
     );
 
-    test("a second caller queued on the device acquires it once the cancelled bind is undone", async () => {
-      devices.setBootedDevices("ios", [bootedSimulator]);
-      await pool.initializeWithDevices([bootedSimulator]);
+    arranged(
+      "a second caller queued on the device acquires it once the cancelled bind is undone",
+      async () => {
+        devices.setBootedDevices("ios", [bootedSimulator]);
+        await pool.initializeWithDevices([bootedSimulator]);
 
-      const cancelled = await cancelledAtClaim("getApple", { udid: SIM_UDID });
-      const orphan = pool.getDevice(SIM_UDID)!.sessionId!;
-      const second = acquire("getApple", { udid: SIM_UDID }, undefined, "other-client");
-      await spin();
-      // The cancelled request keeps the simulator's lifecycle lease until its bind has settled.
-      expect(ownership.pending.length).toBe(1);
-      ownership.pending[0](true);
-      await cancelled.settled;
-      await untilClaimsPending(2);
-      ownership.pending[1](true);
-      const acquired = await second;
-      await drain();
+        const cancelled = await cancelledAtClaim("getApple", { udid: SIM_UDID });
+        const orphan = pool.getDevice(SIM_UDID)!.sessionId!;
+        const second = acquire("getApple", { udid: SIM_UDID }, undefined, "other-client");
+        await spin();
+        // The cancelled request keeps the simulator's lifecycle lease until its bind has settled.
+        expect(ownership.pending.length).toBe(1);
+        ownership.pending[0](true);
+        await cancelled.settled;
+        await untilClaimsPending(2);
+        ownership.pending[1](true);
+        const acquired = await second;
+        await drain();
 
-      expect(acquired.ok).toBe(true);
-      const sessionUuid = acquired.ok ? acquired.payload.runtime.session.sessionUuid : "";
-      expect(sessionUuid).not.toBe(orphan);
-      expect(pool.getDevice(SIM_UDID)?.sessionId).toBe(sessionUuid);
-      expect(sessions.getAllSessions().map((session) => session.sessionId)).toEqual([sessionUuid]);
-      expect([...ownership.held]).toEqual([SIM_UDID]);
-    });
+        expect(acquired.ok).toBe(true);
+        const sessionUuid = acquired.ok ? acquired.payload.runtime.session.sessionUuid : "";
+        expect(sessionUuid).not.toBe(orphan);
+        expect(pool.getDevice(SIM_UDID)?.sessionId).toBe(sessionUuid);
+        expect(sessions.getAllSessions().map((session) => session.sessionId)).toEqual([
+          sessionUuid,
+        ]);
+        expect([...ownership.held]).toEqual([SIM_UDID]);
+      },
+    );
   },
 );

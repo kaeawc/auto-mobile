@@ -27,18 +27,18 @@ async function insert(table: KeyedJsonConfigTableName, config: unknown) {
 }
 
 test("oldest appearance row round-trips", async () => {
-  const config = { syncWithHost: false, defaultMode: "dark", applyOnConnect: true };
+  const config = { syncWithHost: false, defaultMode: "dark" as const, applyOnConnect: true };
   await insert("appearance_configs", config);
   expect(await createAppearanceConfigRepository(db).getConfig()).toEqual(config);
 });
 test("oldest video recording row round-trips without optional resolution", async () => {
   const config = {
-    qualityPreset: "high",
+    qualityPreset: "high" as const,
     targetBitrateKbps: 2000,
     maxThroughputMbps: 8,
     fps: 30,
     maxArchiveSizeMb: 45,
-    format: "mp4",
+    format: "mp4" as const,
   };
   await insert("video_recording_configs", config);
   expect(await createVideoRecordingConfigRepository(db).getConfig()).toEqual(config);

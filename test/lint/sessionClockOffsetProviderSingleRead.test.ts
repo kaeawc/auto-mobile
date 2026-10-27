@@ -1,7 +1,8 @@
+import { guardDirectoryEntries, readGuardFile, GuardVisitor as Visitor } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import path from "node:path";
-import { parseSync, Visitor } from "oxc-parser";
+import { parseSync } from "oxc-parser";
 
 // #11576: `ExecutionTracker` adds the session-clock offset to the wall reading it took for an
 // execution's start, and passes that reading to the provider. A test that runs the session clock
@@ -20,7 +21,7 @@ const TREE_SCAN_HOOK_TIMEOUT_MS = 20_000;
 const SELF = "test/lint/sessionClockOffsetProviderSingleRead.test.ts";
 
 function typeScriptFiles(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(dir).flatMap((entry) => {
     const file = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       return entry.name === "node_modules" ? [] : typeScriptFiles(file);
@@ -76,7 +77,21 @@ export function findClockReadingOffsetProviders(source: string): string[] {
             found.add(lineOf(inner.start));
           }
         },
-      }).visit(provider);
+      }).visit({
+        type: "Program",
+        start: provider.start,
+        end: provider.end,
+        sourceType: "module",
+        hashbang: null,
+        body: [
+          {
+            type: "ExpressionStatement",
+            start: provider.start,
+            end: provider.end,
+            expression: provider,
+          },
+        ],
+      });
     },
   }).visit(parsed.program);
   return [...found];
@@ -126,7 +141,7 @@ describe("session-clock offset providers never read a clock twice (#11576)", () 
         if (relative === SELF) {
           return [];
         }
-        const source = readFileSync(file, "utf8");
+        const source = readGuardFile(file);
         callSites += source.split(`.${SETTER}(`).length - 1;
         return findClockReadingOffsetProviders(source).map((line) => `${relative}:${line}`);
       },

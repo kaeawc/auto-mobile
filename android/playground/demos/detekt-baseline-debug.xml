@@ -2,18 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:NetworkTestScreen.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun NetworkTestScreen</ID>
-    <ID>InjectDispatcher:NetworkTestScreen.kt:IO</ID>
-    <ID>LongMethod:AccessibilityScreens.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun ContrastDemoScreen</ID>
-    <ID>LongMethod:AccessibilityScreens.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun TapTargetsDemoScreen</ID>
-    <ID>LongMethod:BugReproScreen.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun BugReproScreen</ID>
-    <ID>LongMethod:DemoIndexScreen.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun DemoIndexScreen</ID>
-    <ID>LongMethod:HandledExceptionDemoScreen.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun HandledExceptionDemoScreen</ID>
-    <ID>LongMethod:NestedSelectionScreen.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun NestedSelectionDemoScreen</ID>
-    <ID>LongMethod:NetworkTestScreen.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun NetworkTestScreen</ID>
-    <ID>LongMethod:PerformanceScreens.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun PerformanceListScreen</ID>
-    <ID>LongMethod:SemanticLinksScreens.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun ComposeSemanticLinksDemoScreen</ID>
-    <ID>LongParameterList:DemoIndexScreen.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun DemoIndexScreen</ID>
     <ID>TooGenericExceptionCaught:HandledExceptionDemoScreen.kt:e: IndexOutOfBoundsException</ID>
     <ID>TooGenericExceptionCaught:HandledExceptionDemoScreen.kt:e: NullPointerException</ID>
     <ID>TooGenericExceptionCaught:HandledExceptionDemoScreen.kt:e: RuntimeException</ID>

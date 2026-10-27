@@ -1,5 +1,10 @@
 import { toJSONSchema } from "zod/v4";
 import { flattenTopLevelUnion } from "../TopLevelUnionFlattener";
+import { visitJsonSchemaAlternatives } from "../jsonSchemaReferences";
+import {
+  dropDefaultedKeysFromRequired,
+  dropReferencedDefaultsFromRequired,
+} from "./advertisedSchemaDefaults";
 import {
   APP_ID_MAX_LENGTH,
   APP_ID_PATTERN,
@@ -7,14 +12,14 @@ import {
   applyPostFlattenJsonSchemaOverride,
   enforceAnthropicToolSchemaSubset,
   isInjectedDeviceIdSchema,
-} from "../toolSchemaHelpers";
+} from "../../utils/schemaHelpers";
 import { toolOutputArtifactDetailsSchema } from "../toolOutputSchemas";
 import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
-} from "../../daemon/constants";
+} from "../../daemon/wire/constants";
 
 /**
  * Internal params a plan step inherits from its enclosing request. Listed once
@@ -62,33 +67,6 @@ export function applyInheritedPlanRequestParams(
   return inherited;
 }
 
-/**
- * A field with a default is never truly required — the default supplies it when
- * the caller omits it. zod v4's `toJSONSchema` nonetheless lists defaulted keys
- * in `required`, which reads to a client as "you must send `action` on every
- * tap" (issue #5870). Drop any `required` entry whose property carries a
- * `default`; runtime validation is unaffected (the default still applies).
- */
-function dropDefaultedKeysFromRequired(jsonSchema: Record<string, unknown>): void {
-  const required = jsonSchema.required;
-  const properties = jsonSchema.properties as Record<string, unknown> | undefined;
-  if (!Array.isArray(required) || !properties) {
-    return;
-  }
-  const pruned = required.filter((key) => {
-    const prop = properties[key as string];
-    return !(prop && typeof prop === "object" && "default" in (prop as Record<string, unknown>));
-  });
-  if (pruned.length === required.length) {
-    return;
-  }
-  if (pruned.length === 0) {
-    delete jsonSchema.required;
-  } else {
-    jsonSchema.required = pruned;
-  }
-}
-
 /** Apply the app ID contract after every per-node and whole-schema transformation. */
 function constrainAdvertisedAppIdProperties(value: unknown): void {
   if (Array.isArray(value)) {
@@ -116,9 +94,15 @@ function constrainAdvertisedAppIdProperties(value: unknown): void {
 
 export function toAdvertisedJsonSchema(
   schema: any,
-  options: { constrainAppIds: boolean; anthropicSubset?: boolean; exposeDeviceId?: boolean },
+  options: {
+    constrainAppIds: boolean;
+    anthropicSubset?: boolean;
+    exposeDeviceId?: boolean;
+    reused?: "inline" | "ref";
+  },
 ): Record<string, unknown> {
   const jsonSchema = toJSONSchema(schema, {
+    reused: options.reused,
     override: ({ zodSchema, jsonSchema }) => {
       applyJsonSchemaOverride(zodSchema, jsonSchema);
       dropDefaultedKeysFromRequired(jsonSchema);
@@ -130,6 +114,9 @@ export function toAdvertisedJsonSchema(
       }
     },
   });
+  if (options.reused === "ref") {
+    dropReferencedDefaultsFromRequired(jsonSchema);
+  }
   const flattened = flattenTopLevelUnion(jsonSchema);
   // Re-assert any wire contract that must survive union flattening (e.g. the
   // observe join keys required on the successful-observation arm, issue #7018):
@@ -178,12 +165,6 @@ export function addSpillArtifactToAdvertisedOutputSchema(
     };
   };
 
-  addArtifactProperty(jsonSchema);
-  for (const unionKey of ["oneOf", "anyOf"] as const) {
-    const branches = jsonSchema[unionKey];
-    if (Array.isArray(branches)) {
-      branches.forEach(addArtifactProperty);
-    }
-  }
+  visitJsonSchemaAlternatives(jsonSchema, addArtifactProperty);
   return jsonSchema;
 }

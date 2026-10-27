@@ -1,3 +1,9 @@
+import {
+  BootReservationScope,
+  type BootReservationOptions,
+  type BootSlotReservation,
+} from "../../src/devices/bootAdmission/BootSlotReservation";
+import { assertCapacityGranted } from "../../src/features/iosSimFleet/CapacityGate";
 import type {
   CapacityDecision,
   CapacityAdmitOptions,
@@ -13,6 +19,7 @@ export class FakeSimulatorCapacityGate implements SimulatorCapacityGate {
   admitOptions: CapacityAdmitOptions[] = [];
   /** Admissions handed out by `admitBoot` and not yet released. */
   admitted = 0;
+  private readonly reservations = new BootReservationScope<CapacityAdmission>();
   releaseOutcomes: Parameters<NonNullable<CapacityAdmission["releaseAdmission"]>>[0][] = [];
   constructor(
     private readonly timer: Pick<Timer, "now"> & { advanceTime(ms: number): void },
@@ -25,10 +32,24 @@ export class FakeSimulatorCapacityGate implements SimulatorCapacityGate {
     return this.decision;
   }
 
+  async reserveBoot(options: BootReservationOptions): Promise<BootSlotReservation> {
+    const admission = await this.admitBoot(undefined, { signal: options.signal });
+    assertCapacityGranted(admission);
+    return this.reservations.hold(
+      () => admission,
+      () => admission.releaseAdmission?.({ bootFailed: true }),
+    );
+  }
+
   async admitBoot(
     request: WarmDeviceRequest | undefined,
     options: CapacityAdmitOptions,
   ): Promise<CapacityAdmission> {
+    options.signal?.throwIfAborted();
+    const reserved = this.reservations.take(options.bootUdid);
+    if (reserved) {
+      return reserved;
+    }
     this.requests.push(request);
     this.admitOptions.push(options);
     const result = { decision: this.decision };

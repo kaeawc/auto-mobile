@@ -1,9 +1,11 @@
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
 import { afterEach, expect, test } from "bun:test";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
 import { attachRawViewHierarchy } from "../../../src/features/utility/viewHierarchySearch";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
+import type { ViewHierarchyResult } from "../../../src/models";
 import { iosFormsSwitch } from "../../fixtures/observe/ios-forms-switch";
 
 afterEach(() => serverConfig.setRawElementSearchEnabled(false));
@@ -25,14 +27,14 @@ test("a checkable SwiftUI Toggle ranks its smaller control ahead of the labelled
   expect(selected.element?.bounds).toEqual({ left: 301, top: 296, right: 364, bottom: 324 });
 });
 const bounds = { left: 0, top: 0, right: 100, bottom: 100 };
-const hierarchy = {
+const hierarchy = createHierarchyForTest({
   hierarchy: {
     node: [
       { bounds, clickable: true, text: "Login help", "resource-id": "app:id/login_help" },
       { bounds, clickable: true, text: "Login", "resource-id": "app:id/login" },
     ],
   },
-};
+});
 
 test("action adapter defaults to namespace IDs and exact-first text", () => {
   const selector = new ResolverElementSelector();
@@ -43,7 +45,7 @@ test("action adapter defaults to namespace IDs and exact-first text", () => {
 });
 
 test("fuzzy sibling selection keeps partial label anchors", () => {
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: {
         node: [
@@ -53,7 +55,7 @@ test("fuzzy sibling selection keeps partial label anchors", () => {
         ],
       },
     },
-  };
+  });
   const result = new ResolverElementSelector().selectClickableSiblingOfText(capture, "Email", {
     fuzzyMatch: true,
     index: 1,
@@ -75,16 +77,21 @@ test("raw element search uses attached raw nodes even with an actionable snapsho
 });
 
 test("iOS observed selectors cannot reopen an attached offscreen raw tree", () => {
-  const visible = {
+  const visible = createHierarchyForTest({
     screenWidth: 100,
     screenHeight: 100,
     hierarchy: {
       node: { bounds, clickable: true, text: "Visible", "resource-id": "visible" },
     },
-  };
-  const raw = {
+  });
+  const raw: ViewHierarchyResult = {
     hierarchy: {
-      node: { bounds: [0, 500, 20, 520], clickable: true, text: "Hidden", "resource-id": "hidden" },
+      node: {
+        bounds: { left: 0, top: 500, right: 20, bottom: 520 },
+        clickable: true,
+        text: "Hidden",
+        "resource-id": "hidden",
+      },
     },
   };
   identifyObservedHierarchy("ios", visible, "cached-ok");
@@ -97,21 +104,21 @@ test("iOS observed selectors cannot reopen an attached offscreen raw tree", () =
 });
 
 test("adapter fails ambiguity before returning any action target", () => {
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: [
         { bounds, clickable: true, "resource-id": "one:id/map" },
         { bounds, clickable: true, "resource-id": "two:id/map" },
       ],
     },
-  };
+  });
   expect(() => new ResolverElementSelector().selectByResourceId(capture, "map")).toThrow(
     "Ambiguous",
   );
 });
 
 test("tapAny only indexes action-eligible nodes across windows", () => {
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: [
         { bounds, text: "Not a button" },
@@ -121,17 +128,17 @@ test("tapAny only indexes action-eligible nodes across windows", () => {
     windows: [
       {
         windowLayer: 10,
-        hierarchy: { node: { bounds, clickable: true, "resource-id": "dialog" } },
+        hierarchy: { node: [{ bounds, clickable: true, "resource-id": "dialog" }] },
       },
     ],
-  };
+  });
   const result = new ResolverElementSelector().selectClickable(capture, { strategy: "first" });
   expect(result.element?.["resource-id"]).toBe("dialog");
   expect(result.totalMatches).toBe(2);
 });
 
 test("action adapter skips offscreen duplicate targets", () => {
-  const capture = {
+  const capture = createHierarchyForTest({
     screenWidth: 200,
     screenHeight: 200,
     hierarchy: {
@@ -140,7 +147,7 @@ test("action adapter skips offscreen duplicate targets", () => {
         { clickable: true, text: "Done", bounds: { left: 20, top: 20, right: 120, bottom: 70 } },
       ],
     },
-  };
+  });
   expect(new ResolverElementSelector().selectByText(capture, "Done").element?.bounds?.left).toBe(
     20,
   );
@@ -151,11 +158,15 @@ test("missing container remains retryable but synthetic container keys are recog
   expect(
     selector.selectByText(hierarchy, "Login", { container: { elementId: "missing" } }).element,
   ).toBeNull();
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
-      node: { "view-id": "s-container", bounds, node: { text: "Login", bounds, clickable: true } },
+      node: {
+        "view-id": "s-container",
+        bounds,
+        node: [{ text: "Login", bounds, clickable: true }],
+      },
     },
-  };
+  });
   expect(selector.hasContainer(capture, { elementId: "s-container" })).toBe(true);
   expect(
     selector.selectByText(capture, "Login", { container: { elementId: "s-container" } }).element
@@ -164,7 +175,7 @@ test("missing container remains retryable but synthetic container keys are recog
 });
 
 test("tapAny scrollable scope selects clickable rows instead of the scrolling list", () => {
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: [
         { bounds, clickable: true, "resource-id": "outside" },
@@ -176,7 +187,7 @@ test("tapAny scrollable scope selects clickable rows instead of the scrolling li
         },
       ],
     },
-  };
+  });
   const selector = new ResolverElementSelector();
   expect(
     selector.selectClickable(capture, { scrollableContainer: true }).element?.["resource-id"],
@@ -205,14 +216,14 @@ test("long press falls back to ordinary clickable targets for tapOn and tapAny",
 
 test("long-press candidate set includes an ordinary clickable control alongside a long-clickable one (#7707)", async () => {
   const { ElementResolver } = await import("../../../src/features/utility/ElementResolver");
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: [
         { bounds, clickable: true, "resource-id": "A" },
         { bounds, clickable: true, longClickable: true, "resource-id": "B" },
       ],
     },
-  };
+  });
   const first = new ResolverElementSelector(new ElementResolver(() => 0)).selectClickable(capture, {
     intentAction: "long-press",
     strategy: "first",
@@ -235,7 +246,7 @@ test("long-press candidate set includes an ordinary clickable control alongside 
 
 test("indexed and random selection count only onscreen action candidates", async () => {
   const { ElementResolver } = await import("../../../src/features/utility/ElementResolver");
-  const capture = {
+  const capture = createHierarchyForTest({
     screenWidth: 200,
     screenHeight: 200,
     hierarchy: {
@@ -244,7 +255,7 @@ test("indexed and random selection count only onscreen action candidates", async
         { clickable: true, text: "Done", bounds: { left: 20, top: 20, right: 120, bottom: 70 } },
       ],
     },
-  };
+  });
   const selector = new ResolverElementSelector(new ElementResolver(() => 0));
   const first = selector.selectByText(capture, "Done", { index: 0 });
   expect(first.element?.bounds?.left).toBe(20);
@@ -257,15 +268,15 @@ test("indexed and random selection count only onscreen action candidates", async
 
 test("tap lookup preserves a bounded inert label inside a scroll container", () => {
   const labelBounds = { left: 20, top: 40, right: 130, bottom: 70 };
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: {
         scrollable: true,
         bounds: { left: 0, top: 0, right: 300, bottom: 500 },
-        node: { text: "Details", bounds: labelBounds },
+        node: [{ text: "Details", bounds: labelBounds }],
       },
     },
-  };
+  });
   expect(
     new ResolverElementSelector().selectByText(capture, "Details", {
       intentAction: "inspect",
@@ -275,7 +286,7 @@ test("tap lookup preserves a bounded inert label inside a scroll container", () 
 });
 
 test("tap intent ranks a clickable text peer ahead of a smaller input", () => {
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: [
         {
@@ -290,7 +301,7 @@ test("tap intent ranks a clickable text peer ahead of a smaller input", () => {
         },
       ],
     },
-  };
+  });
   expect(
     new ResolverElementSelector().selectByText(capture, "Login", {
       intentAction: "inspect",
@@ -302,16 +313,20 @@ test("tap intent ranks a clickable text peer ahead of a smaller input", () => {
 test("focus promotes a Compose label child to its editable ancestor (#7759)", () => {
   const inputBounds = { left: 84, top: 1115, right: 996, bottom: 1262 };
   const labelBounds = { left: 126, top: 1157, right: 461, bottom: 1220 };
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
-      node: {
-        class: "android.widget.EditText",
-        bounds: inputBounds,
-        node: [{ class: "android.widget.TextView", text: "Basic Text Field", bounds: labelBounds }],
-      },
+      node: [
+        {
+          class: "android.widget.EditText",
+          bounds: inputBounds,
+          node: [
+            { class: "android.widget.TextView", text: "Basic Text Field", bounds: labelBounds },
+          ],
+        },
+      ],
     },
-  };
+  });
   const result = new ResolverElementSelector().selectByText(capture, "Basic Text Field", {
     intentAction: "focus-input",
   });
@@ -321,32 +336,38 @@ test("focus promotes a Compose label child to its editable ancestor (#7759)", ()
 test("focus prefers an exact label's promoted field over a partial match elsewhere (PR #7780 review)", () => {
   const exactInputBounds = { left: 20, top: 100, right: 220, bottom: 160 };
   const partialInputBounds = { left: 20, top: 200, right: 320, bottom: 280 };
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       bounds: { left: 0, top: 0, right: 400, bottom: 400 },
-      node: {
-        class: "android.widget.EditText",
-        bounds: exactInputBounds,
-        node: {
-          class: "android.widget.TextView",
-          text: "Email",
-          bounds: { left: 30, top: 110, right: 100, bottom: 140 },
+      node: [
+        {
+          class: "android.widget.EditText",
+          bounds: exactInputBounds,
+          node: [
+            {
+              class: "android.widget.TextView",
+              text: "Email",
+              bounds: { left: 30, top: 110, right: 100, bottom: 140 },
+            },
+          ],
         },
-      },
+      ],
     },
     windows: [
       {
         windowLayer: 10,
         hierarchy: {
-          node: {
-            class: "android.widget.EditText",
-            text: "Email Address",
-            bounds: partialInputBounds,
-          },
+          node: [
+            {
+              class: "android.widget.EditText",
+              text: "Email Address",
+              bounds: partialInputBounds,
+            },
+          ],
         },
       },
     ],
-  };
+  });
   const result = new ResolverElementSelector().selectByText(capture, "Email", {
     intentAction: "focus-input",
   });
@@ -356,18 +377,20 @@ test("focus prefers an exact label's promoted field over a partial match elsewhe
 test("focus rejects a nested label outside a distant editable ancestor (#7759)", () => {
   const outerBounds = { left: 0, top: 0, right: 200, bottom: 80 };
   const labelBounds = { left: 20, top: 200, right: 100, bottom: 230 };
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: {
         class: "android.widget.EditText",
         bounds: outerBounds,
-        node: {
-          bounds: { left: 0, top: 180, right: 200, bottom: 250 },
-          node: { class: "android.widget.TextView", text: "Email", bounds: labelBounds },
-        },
+        node: [
+          {
+            bounds: { left: 0, top: 180, right: 200, bottom: 250 },
+            node: [{ class: "android.widget.TextView", text: "Email", bounds: labelBounds }],
+          },
+        ],
       },
     },
-  };
+  });
   const result = new ResolverElementSelector().selectByText(capture, "Email", {
     intentAction: "focus-input",
   });
@@ -377,25 +400,31 @@ test("focus rejects a nested label outside a distant editable ancestor (#7759)",
 
 test("focus rejects a label three hops below a full-screen editable ancestor (#7759)", () => {
   const outerBounds = { left: 0, top: 0, right: 1080, bottom: 2400 };
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: {
         class: "android.widget.EditText",
         bounds: outerBounds,
-        node: {
-          bounds: { left: 0, top: 900, right: 1080, bottom: 1400 },
-          node: {
-            bounds: { left: 40, top: 1080, right: 1040, bottom: 1250 },
-            node: {
-              class: "android.widget.TextView",
-              text: "Email",
-              bounds: { left: 126, top: 1157, right: 461, bottom: 1220 },
-            },
+        node: [
+          {
+            bounds: { left: 0, top: 900, right: 1080, bottom: 1400 },
+            node: [
+              {
+                bounds: { left: 40, top: 1080, right: 1040, bottom: 1250 },
+                node: [
+                  {
+                    class: "android.widget.TextView",
+                    text: "Email",
+                    bounds: { left: 126, top: 1157, right: 461, bottom: 1220 },
+                  },
+                ],
+              },
+            ],
           },
-        },
+        ],
       },
     },
-  };
+  });
   const result = new ResolverElementSelector().selectByText(capture, "Email", {
     intentAction: "focus-input",
   });
@@ -404,19 +433,21 @@ test("focus rejects a label three hops below a full-screen editable ancestor (#7
 });
 
 test("focus stops at an interactive ancestor before a distant editable input (#7759)", () => {
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: {
         class: "android.widget.EditText",
         bounds: { left: 0, top: 0, right: 300, bottom: 300 },
-        node: {
-          clickable: true,
-          bounds: { left: 0, top: 0, right: 200, bottom: 100 },
-          node: { text: "Email", bounds: { left: 10, top: 10, right: 100, bottom: 40 } },
-        },
+        node: [
+          {
+            clickable: true,
+            bounds: { left: 0, top: 0, right: 200, bottom: 100 },
+            node: [{ text: "Email", bounds: { left: 10, top: 10, right: 100, bottom: 40 } }],
+          },
+        ],
       },
     },
-  };
+  });
   expect(
     new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
       .element,
@@ -425,7 +456,7 @@ test("focus stops at an interactive ancestor before a distant editable input (#7
 
 test("focus promotes an iOS text label to its text-field role ancestor (#7759)", () => {
   const inputBounds = { left: 0, top: 0, right: 200, bottom: 70 };
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: {
         role: "textfield",
@@ -433,7 +464,7 @@ test("focus promotes an iOS text label to its text-field role ancestor (#7759)",
         node: [{ text: "Email", bounds: { left: 10, top: 10, right: 100, bottom: 40 } }],
       },
     },
-  };
+  });
   // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
   expect(
     new ResolverElementSelector(undefined, undefined, { platform: "ios" }).selectByText(
@@ -456,7 +487,7 @@ test("focus resolves a label merged from flattened skeleton siblings (#7759)", (
     media: [],
   }).skeleton;
   expect(skeleton.find((row) => row.affordances.includes("input"))?.label).toBe("Email");
-  const capture = { hierarchy: { node: { ...input, node: [label] } } };
+  const capture = createHierarchyForTest({ hierarchy: { node: { ...input, node: [label] } } });
   expect(
     new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
       .element?.bounds,
@@ -464,14 +495,14 @@ test("focus resolves a label merged from flattened skeleton siblings (#7759)", (
 });
 
 test("focus rejects a stray non-editable label beside an unrelated input (#7759)", () => {
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: [
         { class: "android.widget.TextView", text: "Email", bounds },
         { class: "android.widget.EditText", bounds: { ...bounds, top: 120, bottom: 180 } },
       ],
     },
-  };
+  });
   expect(
     new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
       .element,
@@ -480,14 +511,14 @@ test("focus rejects a stray non-editable label beside an unrelated input (#7759)
 
 test("indexed focus excludes an exact clickable Email before the exact input (#7708)", () => {
   const inputBounds = { left: 0, top: 120, right: 100, bottom: 180 };
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: [
         { clickable: true, text: "Email", bounds },
         { class: "android.widget.EditText", text: "Email", bounds: inputBounds },
       ],
     },
-  };
+  });
   const result = new ResolverElementSelector().selectByText(capture, "Email", {
     intentAction: "focus-input",
     index: 0,
@@ -497,7 +528,7 @@ test("indexed focus excludes an exact clickable Email before the exact input (#7
 });
 
 test("tap lookup falls back to a bounded Compose ID when exact native ID is unbounded", () => {
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: [
         { "resource-id": "app:id/login", text: "Unbounded" },
@@ -508,7 +539,7 @@ test("tap lookup falls back to a bounded Compose ID when exact native ID is unbo
         },
       ],
     },
-  };
+  });
   expect(
     new ResolverElementSelector().selectByResourceId(capture, "app:id/login", {
       intentAction: "inspect",
@@ -517,7 +548,7 @@ test("tap lookup falls back to a bounded Compose ID when exact native ID is unbo
 });
 
 test("selector adapter requires an explicit hint opt-in even for focus-input", () => {
-  const capture = {
+  const capture = createHierarchyForTest({
     hierarchy: {
       node: {
         bounds,
@@ -529,7 +560,7 @@ test("selector adapter requires an explicit hint opt-in even for focus-input", (
         clickable: true,
       },
     },
-  };
+  });
   const selector = new ResolverElementSelector();
   expect(selector.selectByText(capture, "Phone").element).toBeNull();
   expect(

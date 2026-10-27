@@ -1,5 +1,5 @@
-import XCTest
 @testable import AutoMobileSDK
+import XCTest
 
 private final class EventCollector: @unchecked Sendable {
     private let lock = NSLock()
@@ -43,11 +43,12 @@ final class SdkEventBufferTests: XCTestCase {
         let buffer = SdkEventBuffer(
             maxBufferSize: 100,
             flushIntervalMs: 500,
-            timerFactory: { fakeTimer }
-        ) { events in
-            collector.collect(events)
-            expectation.fulfill()
-        }
+            timerFactory: { fakeTimer },
+            onFlush: { events in
+                collector.collect(events)
+                expectation.fulfill()
+            }
+        )
 
         buffer.start()
         buffer.add(SdkInteractionEvent(interactionType: "e1"))
@@ -90,8 +91,9 @@ final class SdkEventBufferTests: XCTestCase {
         let buffer = SdkEventBuffer(
             maxBufferSize: 100,
             flushIntervalMs: 500,
-            timerFactory: { fakeTimer }
-        ) { _ in }
+            timerFactory: { fakeTimer },
+            onFlush: { _ in }
+        )
 
         buffer.start()
         XCTAssertEqual(fakeTimer.intervalMs, 500)
@@ -115,10 +117,11 @@ final class SdkEventBufferTests: XCTestCase {
             maxBufferSize: 100,
             flushIntervalMs: 500,
             timerFactory: { fakeTimer },
-            dropCounter: dropCounter
-        ) { _ in
-            throw FlushError()
-        }
+            dropCounter: dropCounter,
+            onFlush: { _ in
+                throw FlushError()
+            }
+        )
 
         buffer.start()
 

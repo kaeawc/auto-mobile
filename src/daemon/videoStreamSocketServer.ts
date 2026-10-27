@@ -1,334 +1,58 @@
-import {
-  getDefaultDeviceCaptureRegistry,
-  createDeviceCaptureRegistry,
-  canRetainSharedCapture,
-  stopStaleCapture,
-  type DeviceCaptureRegistry,
-} from "../features/webrtc/deviceCaptureRegistry";
-import { SocketServerSingleton } from "./socketServerSingleton";
-import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
-import { ObserverReleaseBroadcaster, type ObserverReleaseSource } from "./observerReleaseBroadcast";
-import {
-  decideLifecycleEvent,
-  decideOwnershipChange,
-  subscriptionKindForIdentity,
-  type StreamSubscriptionKind,
-  type StreamSubscriptionIdentity,
-  type StreamSubscriptionEndReason,
-} from "./streamSubscriptionPolicy";
-import {
-  getDaemonStreamDeviceLifecycleEmitter,
-  type StreamDeviceLifecycleEvents,
-} from "./streamDeviceLifecycleEvents";
-import { errorMessage } from "../utils/describeUnknownError";
+import type { DeviceReadiness } from "./readiness/DeviceReadiness";
 import type { Socket } from "node:net";
-import { logger } from "../utils/logger";
-import { toActionableError } from "../models/ActionableError";
-import { ActionableError } from "../models";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
-import type { PlatformDeviceManager } from "../devices/deviceUtils";
-import { createH264CaptureSource } from "../features/webrtc/h264CaptureSourceFactory";
-import { ScreenRecordingPermissionError } from "../features/webrtc/IosH264Source";
-import { resolveVideoServerJar } from "../features/webrtc/videoServerJar";
-import { SIMULATOR_FPS_DEFAULT } from "../features/screen-stream/IosScreenCaptureHelper";
-import { WEBRTC_ANDROID_FPS_DEFAULT } from "../features/webrtc/webrtcStreamingConfig";
-import type { BootedDevice } from "../models";
-import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
-import type { H264CaptureSource } from "../features/webrtc/H264CaptureSource";
 import {
-  H264AccessUnitAssembler,
-  H264AnnexBParser,
-  MAX_ANNEX_B_BUFFER_BYTES,
-  nalUnitType,
-  NAL_TYPE_IDR,
-  NAL_TYPE_PPS,
-  NAL_TYPE_SPS,
-} from "../features/webrtc/h264";
+  canRetainSharedCapture,
+  createDeviceCaptureRegistry,
+  stopStaleCapture,
+} from "../features/webrtc/deviceCaptureRegistry";
+import { H264AccessUnitAssembler, H264AnnexBParser } from "../features/webrtc/h264";
+import type { BootedDevice } from "../models";
+import { ActionableError } from "../models";
+import { toActionableError } from "../models/ActionableError";
+import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { errorMessage } from "../utils/describeUnknownError";
+import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
+import { logger } from "../utils/logger";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { VIDEO_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { BaseSocketServer, getSocketPath } from "./socketServer/index";
 import {
   authorizeResolvedDevice,
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
-  streamAuthRefusalFields,
 } from "./streamSocketAuth";
-import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
-import { resolveStreamDevice } from "./streamDeviceResolver";
-import { defaultDaemonContext } from "./daemonContext";
 import {
-  encodeDroppedFrames,
-  encodeHeartbeat,
-  encodePacket,
-  encodePtsAndFlags,
-  encodeStreamHeader,
-  encodeSubscriptionNotice,
-} from "./videoStreamFraming";
-import type { VideoStreamSocketRequest, VideoStreamSocketResponse } from "./videoStreamSocketTypes";
-
-/** Creates the capture source for a device. Injected so tests never touch adb. */
-export type CaptureSourceFactory = (options: {
-  device: BootedDevice;
-  onData: (chunk: Buffer) => void;
-  /** Fresh producer frame; used by iOS where encoder output can replay a cached frame. */
-  onSourceFrame?: () => void;
-  /** Genuine native Simulator idle callback, scoped to this capture generation. */
-  onSourceIdle?: () => void;
-  onEncodedAccessUnit?: () => void;
-  onIdleAttestationSupport?: (supported: boolean) => void;
-  onError: (error: Error) => void;
-  /** Receives the attested display rotation (0..3) when the source can prove it (issue #4786). */
-  onRotation?: (rotation: number) => void;
-  /** Receives cumulative source-side encoder drops for client quality control. */
-  onDroppedFrames?: (droppedFrames: number) => void;
-  bitrateBps?: number;
-  size?: { width: number; height: number };
-  /** Aspect-preserving resolution/bitrate preset; see `VideoStreamSocketRequest.quality`. */
-  quality?: "low" | "medium" | "high";
-  /** Capture rate for iOS Simulator sources; see the call site for why it is pinned. */
-  fps?: number;
-}) => Promise<H264CaptureSource>;
-
-function defaultCaptureFps(device: BootedDevice): number {
-  return device.platform === "android" ? WEBRTC_ANDROID_FPS_DEFAULT : SIMULATOR_FPS_DEFAULT;
-}
-
-function tracksConsumers(
-  source: H264CaptureSource | null,
-): source is H264CaptureSource & { setHasConsumers(hasConsumers: boolean): void } {
-  return (
-    source !== null && "setHasConsumers" in source && typeof source.setHasConsumers === "function"
-  );
-}
-
-export interface VideoStreamSocketServerDependencies {
-  createCaptureSource: CaptureSourceFactory;
-  /** Share across transports by injection; omitted registries are local to this server. */
-  captureRegistry?: DeviceCaptureRegistry;
-  resolveDevice: (deviceId?: string, platform?: "android" | "ios") => Promise<BootedDevice>;
-  /** Monotonic microseconds, used for packet presentation timestamps. */
-  nowUs: () => bigint;
-  ownershipChanges?: () => DeviceOwnershipChanges | null;
-  deviceLifecycle?: () => StreamDeviceLifecycleEvents | null;
-  /** Also covers device-less viewer sessions, whose release changes no device owner. */
-  sessionReleases?: { subscribe(callback: (sessionId: string) => void): () => void };
-  /** Released or expired observer registrations, which change no device owner (#11076). */
-  observerReleases?: ObserverReleaseSource;
-  /** Maximum time a subscriber may wait for outbound drain. */
-  outboundStallTimeoutMs?: number;
-}
-
-/** The only session-manager event surface the relay needs. */
-export interface DeviceOwnershipChanges {
-  onDeviceOwnershipChange(callback: (deviceId: string) => void): () => void;
-}
-
-/** One capture shared by every subscriber watching the same device. */
-interface DeviceCapture {
-  device: BootedDevice;
-  /** Latest explicit hint for each field wins; omitted fields retain their current value. */
-  desiredHints: CaptureHints;
-  appliedHints: CaptureHints;
-  hintKind: StreamSubscriptionKind;
-  /** Also identifies the SPS/PPS and GOP cache; both are cleared when this advances at swap. */
-  generation: number;
-  reconfigureTimer: NodeJS.Timeout | null;
-  reconfiguring: Promise<void> | null;
-  source: H264CaptureSource | null;
-  /** Resolves only after the shared source has started, so late subscribers share startup failures. */
-  startup: Promise<void>;
-  /** Sockets waiting for startup, kept off the binary broadcast path until their acknowledgement. */
-  pendingSubscribers: Set<Socket>;
-  subscribers: Set<Socket>;
-  backpressuredSubscribers: Set<Socket>;
-  waitingForKeyFrame: Set<Socket>;
-  /** Joiners held off the old encoder until the requested configuration is applied. */
-  waitingForReplacement: Set<Socket>;
-  /**
-   * Most recent parameter sets (SPS/PPS). A client that joins mid-stream cannot decode until it
-   * sees these, and the encoder only re-emits them on key frames.
-   */
-  sps: Buffer | null;
-  pps: Buffer | null;
-  parser: H264AnnexBParser;
-  /** Bounded, complete IDR access unit for a late viewer of an unchanged screen. */
-  keyFrameAssembler: H264AccessUnitAssembler;
-  keyFrameAuBytes: number;
-  latestKeyFrameAu: Buffer | null;
-  latestInterFrameAus: Buffer[];
-  cachedGopBytes: number;
-  sourceFrameSequence: number;
-  lastEncodedBoundarySequence: number | null;
-  /**
-   * Latest attested display rotation (0..3) from the source, or null when the source cannot attest
-   * it (screenrecord/iOS) or none has arrived yet (issue #4786). Re-emitted on every config packet
-   * the relay writes so a late joiner or a post-rotation client sees the current orientation.
-   */
-  rotation: number | null;
-  idleTimer: NodeJS.Timeout | null;
-  /**
-   * Fires every `HEARTBEAT_INTERVAL_MS` once either pipeline stage reports data (issue #7549),
-   * null before then and after teardown. A single stage arms retirement without sending packets.
-   */
-  heartbeatTimer: NodeJS.Timeout | null;
-  /** First producer or encoder evidence; bounds startup when the other stage never reports. */
-  firstEvidenceMs: number | null;
-  /** Time of the latest fresh producer frame, never refreshed by replay or the relay. */
-  lastSourceDataMs: number | null;
-  /** Native producer-idle evidence; cleared by the next complete source frame. */
-  lastIdleMs: number | null;
-  /** An encoded chunk followed the most recent complete source frame. */
-  encodedSinceSourceFrame: boolean;
-  /** Temporary compatibility for a released helper without native idle markers. */
-  legacySimulatorHelper: boolean;
-  /** Time of the latest encoded output; both producer and encoder must keep making progress. */
-  lastEncodedDataMs: number | null;
-  /** Limits active key-frame probes while a source is quiet. A request is not proof of life. */
-  lastLivenessProbeMs: number | null;
-}
-
-type CaptureHints = Pick<VideoStreamSocketRequest, "quality" | "fps" | "bitrateKbps" | "size">;
-
-const ANNEX_B_START_CODE = Buffer.from([0, 0, 0, 1]);
-
-/** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
-const VIDEO_STREAM_PURPOSE = "to stream video";
-
-const SUPPORTED_QUALITIES = new Set(["low", "medium", "high"]);
-// The relay resolves the device only after this validation, so it bounds fps to the range every
-// capture backend can honor rather than a per-platform limit. The iOS Simulator helper is the
-// tightest at [5, 60] (SIMULATOR_FPS_MIN/MAX); the Android video-server accepts any positive
-// rate, so [5, 60] is the safe universal window — a hint outside it would pass here and then throw
-// at iOS capture startup.
-const MIN_FPS_HINT = 5;
-const MAX_FPS_HINT = 60;
-// A generous encoder ceiling (~1 Gbps) that still leaves headroom below Number.MAX_SAFE_INTEGER
-// after the kbps→bps ×1000 conversion at the capture-options boundary, so a huge-but-finite hint
-// cannot silently lose integer precision downstream.
-const MAX_BITRATE_KBPS = 1_000_000;
-
-// A key-frame request can be rejected when the capture source is rate-limiting them (Android and
-// raw iOS gate requests for ~3s, encoded iOS for ~500ms). When one is throttled we retry on the
-// injected timer instead of leaving the subscriber frozen until the encoder's natural GOP. The
-// interval × attempts span the widest (~3s) throttle window with headroom.
-const KEY_FRAME_RETRY_INTERVAL_MS = 500;
-const KEY_FRAME_RETRY_MAX_ATTEMPTS = 8;
-// Covers brief viewer reconnects without keeping an abandoned encoder alive for long.
-const CAPTURE_IDLE_GRACE_MS = 3_000;
-const RECONFIGURE_DEBOUNCE_MS = 200;
-const OUTBOUND_STALL_TIMEOUT_MS = 30_000;
-
-/**
- * Cadence for the relay-originated heartbeat (issue #7549), also advertised to the client in the
- * subscribe ack (`heartbeatMs`) so it can size its own stall-reconnect window.
- */
-const HEARTBEAT_INTERVAL_MS = 1_000;
-// Give screenrecord and iOS's encoder time to answer a key-frame request before allowing the
-// desktop's 10s stall watchdog to reconnect. A silent-but-attached process cannot extend this.
-const SOURCE_PROBE_AFTER_MS = 6_000;
-const SOURCE_EVIDENCE_MAX_AGE_MS = 9_000;
-// Same bound the WebRTC server puts on its close (WEBRTC_SOCKET_CLOSE_TIMEOUT_MS).
-const VIDEO_STREAM_SOCKET_CLOSE_TIMEOUT_MS = 5_000;
-
-function subscriberMaySetCaptureHints(
-  kind: StreamSubscriptionKind,
-  identity?: StreamSubscriptionIdentity,
-): boolean {
-  return kind !== "viewer" || identity?.hasDeviceOwner === false;
-}
-
-function sameHints(left: CaptureHints, right: CaptureHints): boolean {
-  return (
-    left.quality === right.quality &&
-    left.fps === right.fps &&
-    left.bitrateKbps === right.bitrateKbps &&
-    left.size?.width === right.size?.width &&
-    left.size?.height === right.size?.height
-  );
-}
-
-function isIntegerInRange(value: number, min: number, max: number): boolean {
-  return Number.isInteger(value) && value >= min && value <= max;
-}
-
-function validateQuality(quality: VideoStreamSocketRequest["quality"]): string | null {
-  return quality === undefined || SUPPORTED_QUALITIES.has(quality)
-    ? null
-    : `Unsupported quality "${quality}"; expected low, medium, or high.`;
-}
-
-function validateFps(fps: VideoStreamSocketRequest["fps"]): string | null {
-  return fps === undefined || isIntegerInRange(fps, MIN_FPS_HINT, MAX_FPS_HINT)
-    ? null
-    : `Invalid fps ${fps}; expected an integer between ${MIN_FPS_HINT} and ${MAX_FPS_HINT}.`;
-}
-
-function validateBitrate(bitrateKbps: VideoStreamSocketRequest["bitrateKbps"]): string | null {
-  return bitrateKbps === undefined || isIntegerInRange(bitrateKbps, 1, MAX_BITRATE_KBPS)
-    ? null
-    : `Invalid bitrateKbps ${bitrateKbps}; expected an integer between 1 and ${MAX_BITRATE_KBPS}.`;
-}
-
-function validateSize(size: VideoStreamSocketRequest["size"]): string | null {
-  if (size === undefined) {
-    return null;
-  }
-  const { width, height } = size ?? {};
-  return isIntegerInRange(width, 2, Number.MAX_SAFE_INTEGER) &&
-    isIntegerInRange(height, 2, Number.MAX_SAFE_INTEGER)
-    ? null
-    : `Invalid size ${JSON.stringify(size)}; expected integer width/height >= 2.`;
-}
-
-/**
- * Validate the optional capture hints on a subscribe request, returning an error message for the
- * first invalid field or null when all hints are usable. TypeScript's wire types are erased at
- * runtime, so this is the only thing standing between a malformed hint and the encoder argv.
- */
-export function validateCaptureHints(
-  request: Omit<VideoStreamSocketRequest, "platform"> & { platform?: unknown },
-): string | null {
-  return (
-    validatePlatform(request.platform) ??
-    validateQuality(request.quality) ??
-    validateFps(request.fps) ??
-    validateBitrate(request.bitrateKbps) ??
-    validateSize(request.size)
-  );
-}
-
-function validatePlatform(platform: unknown): string | null {
-  return platform === undefined || platform === "android" || platform === "ios"
-    ? null
-    : `Invalid platform ${JSON.stringify(platform)}; expected "android" or "ios".`;
-}
-
-function subscribeFailureResponse(
-  requestId: string | undefined,
-  error: unknown,
-): VideoStreamSocketResponse {
-  if (error instanceof ScreenRecordingPermissionError) {
-    return {
-      id: requestId,
-      type: "video_stream_response",
-      success: false,
-      permission: {
-        kind: "screen_recording",
-        status: "needs_approval",
-        approvalTarget: error.approvalTarget,
-      },
-      // Keep pre-permission desktop clients actionable during rolling updates.
-      error: error.message,
-    };
-  }
-  return {
-    id: requestId,
-    type: "video_stream_response",
-    success: false,
-    error: errorMessage(error),
-    ...streamAuthRefusalFields(error),
-  };
-}
+  decideLifecycleEvent,
+  decideOwnershipChange,
+  subscriptionKindForIdentity,
+  type StreamSubscriptionEndReason,
+  type StreamSubscriptionIdentity,
+  type StreamSubscriptionKind,
+} from "./wire/streamSubscriptionPolicy";
+import {
+  HEARTBEAT_INTERVAL_MS,
+  OUTBOUND_STALL_TIMEOUT_MS,
+  VideoStreamCapturePipeline,
+} from "./videoStream/VideoStreamCapturePipeline";
+import type { CaptureHints, DeviceCapture } from "./videoStream/captureTypes";
+import { encodeStreamHeader, encodeSubscriptionNotice } from "./videoStreamFraming";
+import { defaultDependencies, socketServer } from "./videoStreamSocketDefaults";
+import {
+  CAPTURE_IDLE_GRACE_MS,
+  RECONFIGURE_DEBOUNCE_MS,
+  VIDEO_STREAM_PURPOSE,
+  VIDEO_STREAM_SOCKET_CLOSE_TIMEOUT_MS,
+  sameHints,
+  subscribeFailureResponse,
+  subscriberMaySetCaptureHints,
+  tracksConsumers,
+  validateCaptureHints,
+  type VideoStreamSocketServerDependencies,
+} from "./videoStreamSocketSupport";
+import type {
+  VideoStreamSocketRequest,
+  VideoStreamSocketResponse,
+} from "./wire/videoStreamSocketTypes";
 
 /**
  * Relays a device's live H.264 stream to local clients over `~/.auto-mobile/video-stream.sock`.
@@ -374,7 +98,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
 
   private readonly authenticator: StreamSocketAuthenticator;
   private readonly admissionGate: DeviceAdmissionGate;
-  private readonly captureRegistry: DeviceCaptureRegistry;
+  private readonly pipeline: VideoStreamCapturePipeline;
 
   constructor(
     private readonly deps: VideoStreamSocketServerDependencies,
@@ -392,7 +116,17 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     super(socketPath, timer, "VideoStream", 0);
     this.authenticator = authenticator;
     this.admissionGate = admissionGate;
-    this.captureRegistry = deps.captureRegistry ?? createDeviceCaptureRegistry();
+    this.pipeline = new VideoStreamCapturePipeline(
+      {
+        getCapture: (deviceId) => this.captures.get(deviceId),
+        detach: (socket) => this.detach(socket),
+        stopCapture: (deviceId, stale) => this.stopCapture(deviceId, stale),
+      },
+      deps,
+      deps.captureRegistry ?? createDeviceCaptureRegistry(),
+      timer,
+      this.outboundStalls,
+    );
   }
 
   /** Devices with an active capture, for diagnostics and tests. */
@@ -941,7 +675,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
 
     capture.startup = (async () => {
       try {
-        const source = await this.createSource(capture, capture.appliedHints, capture.generation);
+        const source = await this.pipeline.createSource(
+          capture,
+          capture.appliedHints,
+          capture.generation,
+        );
         // A final disconnect during construction arms the same idle grace as any
         // last-subscriber detach. Only a removed entry or expired grace aborts startup.
         if (
@@ -969,7 +707,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
           throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
         }
       } catch (error) {
-        this.clearHeartbeatTimer(capture);
+        this.pipeline.clearHeartbeatTimer(capture);
         // A replacement subscriber may have installed a new capture while this
         // asynchronous start was unwinding. Never remove that newer capture.
         if (this.captures.get(deviceId) === capture) {
@@ -982,121 +720,6 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     await capture.startup;
     this.promoteSubscriber(capture, socket, true);
     return capture;
-  }
-
-  private async createSource(
-    capture: DeviceCapture,
-    hints: CaptureHints,
-    generation: number,
-  ): Promise<H264CaptureSource> {
-    const { device } = capture;
-    const deviceId = device.deviceId;
-    const attestSource = (): void => {
-      if (this.captures.get(deviceId) !== capture || capture.generation !== generation) {
-        return;
-      }
-      capture.lastSourceDataMs = this.timer.now();
-      capture.firstEvidenceMs ??= capture.lastSourceDataMs;
-      capture.sourceFrameSequence++;
-      capture.lastIdleMs = null;
-      capture.encodedSinceSourceFrame = false;
-      if (!capture.heartbeatTimer) {
-        this.startHeartbeat(deviceId, capture);
-      }
-    };
-    const consumeData = (chunk: Buffer, fresh: boolean): void => {
-      const current = this.captures.get(deviceId);
-      if (current !== capture || capture.generation !== generation || chunk.length === 0) {
-        return;
-      }
-      if (fresh) {
-        current.lastEncodedDataMs = this.timer.now();
-        current.firstEvidenceMs ??= current.lastEncodedDataMs;
-        current.encodedSinceSourceFrame = true;
-        if (!current.heartbeatTimer) {
-          this.startHeartbeat(deviceId, current);
-        }
-      }
-      this.broadcast(deviceId, chunk);
-    };
-    return this.captureRegistry.acquire({
-      device,
-      create: (options) => this.deps.createCaptureSource({ ...options, onError: options.onError! }),
-      hasConsumers: this.hasSubscribers(capture),
-      flexibleHints: hints.fps === undefined ? ["fps"] : [],
-      options: {
-        device,
-        onData: (chunk) => consumeData(chunk, true),
-        onReplayData: (chunk) => consumeData(chunk, false),
-        onSourceFrame: attestSource,
-        onSourceIdle: () => {
-          if (
-            this.captures.get(deviceId) !== capture ||
-            capture.generation !== generation ||
-            !capture.encodedSinceSourceFrame
-          ) {
-            return;
-          }
-          capture.lastIdleMs = this.timer.now();
-        },
-        onEncodedAccessUnit: () => {
-          if (this.captures.get(deviceId) !== capture || capture.generation !== generation) {
-            return;
-          }
-          for (const nal of capture.parser.flush()) {
-            this.broadcastNal(deviceId, capture, nal);
-          }
-          this.cacheCompletedAccessUnits(capture, capture.keyFrameAssembler.flush());
-          capture.keyFrameAuBytes = 0;
-          capture.lastEncodedBoundarySequence = capture.sourceFrameSequence;
-        },
-        onIdleAttestationSupport: (supported) => {
-          if (
-            this.captures.get(deviceId) === capture &&
-            capture.generation === generation &&
-            device.platform === "ios"
-          ) {
-            capture.legacySimulatorHelper = !supported;
-          }
-        },
-        // Record the source's attested rotation so the next config packet re-attests it to
-        // subscribers, including a late joiner via replayParameterSets (issue #4786).
-        onRotation: (rotation) => {
-          const current = this.captures.get(deviceId);
-          if (current === capture && capture.generation === generation) {
-            current.rotation = rotation;
-          }
-        },
-        onDroppedFrames: (droppedFrames) => {
-          const current = this.captures.get(deviceId);
-          if (
-            current !== capture ||
-            capture.generation !== generation ||
-            !Number.isSafeInteger(droppedFrames) ||
-            droppedFrames < 0 ||
-            !this.sourceEvidenceIsRecent(capture, this.timer.now())
-          ) {
-            return;
-          }
-          const packet = encodeDroppedFrames(droppedFrames);
-          for (const subscriber of capture.subscribers) {
-            this.writePacketToSubscriber(deviceId, capture, subscriber, packet, false, false);
-          }
-        },
-        onError: (error) => {
-          if (this.captures.get(deviceId) === capture && capture.generation === generation) {
-            logger.warn(`[VideoStream] capture failed for ${deviceId}: ${error}`);
-            void this.stopCapture(deviceId);
-          }
-        },
-        bitrateBps: hints.bitrateKbps ? hints.bitrateKbps * 1000 : undefined,
-        size: hints.size,
-        quality: hints.quality,
-        // Use the observation rate for this platform when the client sent no hint.
-        // A client hint wins so farm viewers can lower the rate across streams.
-        fps: hints.fps ?? defaultCaptureFps(device),
-      },
-    });
   }
 
   private updateDesiredHints({
@@ -1141,19 +764,14 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     return capture.reconfiguring !== null || !sameHints(capture.desiredHints, capture.appliedHints);
   }
 
-  private primeSubscriber(capture: DeviceCapture, socket: Socket): void {
-    this.replayParameterSets(capture, socket);
-    this.replayCurrentIosKeyFrame(capture.device, capture, socket);
-  }
-
   private primeAcknowledgedSubscriber(capture: DeviceCapture, socket: Socket): void {
     if (!this.reconfigurePending(capture)) {
       capture.waitingForReplacement.delete(socket);
-      this.primeSubscriber(capture, socket);
+      this.pipeline.primeSubscriber(capture, socket);
     }
     // A source may have emitted before acknowledgement. Ask for a post-ack IDR when the
     // subscriber is allowed to consume this encoder; throttled requests use the retry path.
-    this.requestKeyFrameForWaitingSubscriber(capture.device.deviceId, socket);
+    this.pipeline.requestKeyFrameForWaitingSubscriber(capture.device.deviceId, socket);
   }
 
   private releaseReplacementWaiters(capture: DeviceCapture): void {
@@ -1165,8 +783,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         continue;
       }
       capture.waitingForReplacement.delete(subscriber);
-      this.primeSubscriber(capture, subscriber);
-      this.requestKeyFrameForWaitingSubscriber(capture.device.deviceId, subscriber);
+      this.pipeline.primeSubscriber(capture, subscriber);
+      this.pipeline.requestKeyFrameForWaitingSubscriber(capture.device.deviceId, subscriber);
     }
   }
 
@@ -1194,31 +812,6 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         this.scheduleReconfigure(deviceId, capture);
       });
     }, RECONFIGURE_DEBOUNCE_MS);
-  }
-
-  private resetForNewEncoder(capture: DeviceCapture): void {
-    this.clearHeartbeatTimer(capture);
-    capture.parser = new H264AnnexBParser();
-    capture.keyFrameAssembler = new H264AccessUnitAssembler();
-    capture.keyFrameAuBytes = 0;
-    capture.sps = null;
-    capture.pps = null;
-    capture.latestKeyFrameAu = null;
-    capture.latestInterFrameAus = [];
-    capture.cachedGopBytes = 0;
-    capture.rotation = null;
-    capture.firstEvidenceMs = null;
-    capture.lastSourceDataMs = null;
-    capture.lastEncodedDataMs = null;
-    capture.lastIdleMs = null;
-    capture.lastLivenessProbeMs = null;
-    capture.encodedSinceSourceFrame = false;
-    capture.legacySimulatorHelper = false;
-    capture.sourceFrameSequence = 0;
-    capture.lastEncodedBoundarySequence = null;
-    for (const subscriber of capture.subscribers) {
-      capture.waitingForKeyFrame.add(subscriber);
-    }
   }
 
   private retainSharedHints(capture: DeviceCapture, hints: CaptureHints): boolean {
@@ -1256,14 +849,14 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     // output through the debounce; joiners held for the new hints cannot.
     capture.generation++;
     capture.source = null;
-    this.resetForNewEncoder(capture);
+    this.pipeline.resetForNewEncoder(capture);
     try {
       // Incompatible settings acquire a private source without disturbing other transports.
       await outgoing.stop();
       if (this.captures.get(deviceId) !== capture) {
         return;
       }
-      const source = await this.createSource(capture, hints, capture.generation);
+      const source = await this.pipeline.createSource(capture, hints, capture.generation);
       if (this.captures.get(deviceId) !== capture) {
         await source.stop();
         return;
@@ -1281,7 +874,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       logger.info(`[VideoStream] ${deviceId} shared capture quality changed`);
       const waiting = capture.waitingForKeyFrame.values().next().value;
       if (waiting) {
-        this.requestKeyFrameForWaitingSubscriber(deviceId, waiting);
+        this.pipeline.requestKeyFrameForWaitingSubscriber(deviceId, waiting);
       }
     } catch (error) {
       logger.warn(`[VideoStream] failed to reconfigure capture for ${deviceId}: ${error}`);
@@ -1321,285 +914,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     }
   }
 
-  private broadcast(deviceId: string, chunk: Buffer): void {
-    const capture = this.captures.get(deviceId);
-    if (!capture || chunk.length === 0) {
-      return;
-    }
-
-    // Source chunks are arbitrary byte boundaries. Split incrementally so a start code or NAL
-    // spanning two reads cannot be mistaken for a complete frame.
-    for (const nal of capture.parser.push(chunk)) {
-      this.broadcastNal(deviceId, capture, nal);
-    }
-  }
-
-  private broadcastNal(deviceId: string, capture: DeviceCapture, nal: Buffer): void {
-    const type = nalUnitType(nal);
-    this.cacheCompleteKeyFrame(capture, nal, type);
-    const isConfig = type === NAL_TYPE_SPS || type === NAL_TYPE_PPS;
-    if (type === NAL_TYPE_SPS) {
-      capture.sps = Buffer.from(nal);
-    }
-    if (type === NAL_TYPE_PPS) {
-      capture.pps = Buffer.from(nal);
-    }
-
-    const isKeyFrame = type === NAL_TYPE_IDR;
-    // Attest the current rotation on config packets so a client can re-prove orientation from the
-    // live stream alone after a rotation (issue #4786); non-config packets carry no rotation.
-    const rotation = isConfig ? capture.rotation : null;
-    const packet = encodePacket(
-      encodePtsAndFlags(this.deps.nowUs(), { isConfig, isKeyFrame, rotation }),
-      Buffer.concat([ANNEX_B_START_CODE, nal]),
-    );
-
-    for (const subscriber of capture.subscribers) {
-      this.writePacketToSubscriber(deviceId, capture, subscriber, packet, isConfig, isKeyFrame);
-    }
-  }
-
-  private cacheCompleteKeyFrame(capture: DeviceCapture, nal: Buffer, type: number): void {
-    const completed = capture.keyFrameAssembler.push(nal);
-    capture.keyFrameAuBytes += nal.length;
-    this.cacheCompletedAccessUnits(capture, completed);
-    if (type === NAL_TYPE_SPS || type === NAL_TYPE_PPS) {
-      // An old IDR may have completed exactly as a new parameter set arrived.
-      capture.latestKeyFrameAu = null;
-      capture.latestInterFrameAus = [];
-      capture.cachedGopBytes = 0;
-    }
-    if (capture.keyFrameAuBytes > MAX_ANNEX_B_BUFFER_BYTES) {
-      capture.keyFrameAssembler = new H264AccessUnitAssembler();
-      capture.keyFrameAuBytes = 0;
-    }
-  }
-
-  private cacheCompletedAccessUnits(capture: DeviceCapture, completed: Buffer[][]): void {
-    for (const au of completed) {
-      const bytes = au.reduce((sum, item) => sum + item.length, 0);
-      capture.keyFrameAuBytes -= bytes;
-      if (bytes > MAX_ANNEX_B_BUFFER_BYTES) {
-        capture.latestKeyFrameAu = null;
-        capture.latestInterFrameAus = [];
-        capture.cachedGopBytes = 0;
-        continue;
-      }
-      const encoded = Buffer.concat(
-        au
-          .filter(
-            (item) => nalUnitType(item) !== NAL_TYPE_SPS && nalUnitType(item) !== NAL_TYPE_PPS,
-          )
-          .flatMap((item) => [ANNEX_B_START_CODE, item]),
-      );
-      if (au.some((item) => nalUnitType(item) === NAL_TYPE_IDR)) {
-        capture.latestKeyFrameAu = encoded;
-        capture.latestInterFrameAus = [];
-        capture.cachedGopBytes = encoded.length;
-      } else if (capture.latestKeyFrameAu) {
-        if (capture.cachedGopBytes + encoded.length > MAX_ANNEX_B_BUFFER_BYTES) {
-          capture.latestKeyFrameAu = null;
-          capture.latestInterFrameAus = [];
-          capture.cachedGopBytes = 0;
-        } else {
-          capture.latestInterFrameAus.push(encoded);
-          capture.cachedGopBytes += encoded.length;
-        }
-      }
-    }
-  }
-
-  private replayKeyFrame(capture: DeviceCapture, socket: Socket, deviceId: string): void {
-    if (!capture.sps || !capture.pps || !capture.latestKeyFrameAu) {
-      return;
-    }
-    this.writePacketToSubscriber(
-      deviceId,
-      capture,
-      socket,
-      encodePacket(
-        encodePtsAndFlags(this.deps.nowUs(), { isKeyFrame: true }),
-        capture.latestKeyFrameAu,
-      ),
-      false,
-      true,
-    );
-    for (const au of capture.latestInterFrameAus) {
-      this.writePacketToSubscriber(
-        deviceId,
-        capture,
-        socket,
-        encodePacket(encodePtsAndFlags(this.deps.nowUs(), {}), au),
-        false,
-        false,
-      );
-    }
-  }
-
-  private replayCurrentIosKeyFrame(
-    device: BootedDevice,
-    capture: DeviceCapture,
-    socket: Socket,
-  ): void {
-    if (
-      device.platform === "ios" &&
-      capture.lastIdleMs !== null &&
-      capture.encodedSinceSourceFrame &&
-      capture.lastEncodedBoundarySequence === capture.sourceFrameSequence &&
-      this.timer.now() - capture.lastIdleMs <= SOURCE_EVIDENCE_MAX_AGE_MS
-    ) {
-      this.replayKeyFrame(capture, socket, device.deviceId);
-    }
-  }
-
-  /**
-   * Deliver one framed packet to a single subscriber, honoring the destroyed/backpressured/
-   * awaiting-keyframe gates. Extracted from [broadcastNal] so that method stays under the
-   * cyclomatic-complexity ratchet.
-   */
-  private writePacketToSubscriber(
-    deviceId: string,
-    capture: DeviceCapture,
-    subscriber: Socket,
-    packet: Buffer,
-    isConfig: boolean,
-    isKeyFrame: boolean,
-  ): void {
-    if (subscriber.destroyed) {
-      this.detach(subscriber);
-      return;
-    }
-    if (this.shouldSkipPacket(capture, subscriber, isConfig, isKeyFrame)) {
-      return;
-    }
-    if (!subscriber.write(packet)) {
-      logger.debug(`[VideoStream] subscriber is behind on ${deviceId}; dropping to next key frame`);
-      capture.backpressuredSubscribers.add(subscriber);
-      capture.waitingForKeyFrame.add(subscriber);
-      const onDrain = () => {
-        const stall = this.outboundStalls.get(subscriber);
-        if (!stall) {
-          return;
-        }
-        this.timer.clearTimeout(stall.timeout);
-        this.outboundStalls.delete(subscriber);
-        const current = this.captures.get(deviceId);
-        if (current !== capture || !current.subscribers.has(subscriber)) {
-          return;
-        }
-        current.backpressuredSubscribers.delete(subscriber);
-        // The subscriber caught up, but it is still waiting for an IDR to resync — every inter
-        // frame is skipped until one arrives. The natural GOP can be seconds away
-        // (KEY_I_FRAME_INTERVAL), which would freeze this subscriber's video that whole time even
-        // though it is ready to receive. Ask the encoder for an immediate key frame so recovery
-        // takes ~one round-trip instead. Idempotent enough: a burst of drains just coalesces into
-        // one IDR at the encoder.
-        this.requestKeyFrameForWaitingSubscriber(deviceId, subscriber);
-      };
-      const timeout = this.timer.setTimeout(() => {
-        if (!this.outboundStalls.has(subscriber)) {
-          return;
-        }
-        logger.warn(`[VideoStream] subscriber stalled on ${deviceId}; detaching`);
-        this.detach(subscriber);
-        subscriber.destroy();
-      }, this.deps.outboundStallTimeoutMs ?? OUTBOUND_STALL_TIMEOUT_MS);
-      this.outboundStalls.set(subscriber, { timeout, onDrain });
-      subscriber.once("drain", onDrain);
-    }
-  }
-
-  private shouldSkipPacket(
-    capture: DeviceCapture,
-    subscriber: Socket,
-    isConfig: boolean,
-    isKeyFrame: boolean,
-  ): boolean {
-    if (
-      capture.waitingForReplacement.has(subscriber) ||
-      capture.backpressuredSubscribers.has(subscriber)
-    ) {
-      return true;
-    }
-    if (!capture.waitingForKeyFrame.has(subscriber)) {
-      return false;
-    }
-    // Keep configuration flowing while waiting for an IDR. An IDR from a replacement encoder
-    // is not decodable until its parameter sets have arrived.
-    if (!isKeyFrame) {
-      return !isConfig;
-    }
-    if (capture.generation > 0 && (!capture.sps || !capture.pps)) {
-      return true;
-    }
-    capture.waitingForKeyFrame.delete(subscriber);
-    return false;
-  }
-
-  /**
-   * Ask the capture source for an immediate key frame on behalf of a subscriber waiting to resync,
-   * retrying through the injected timer while the request is throttled.
-   *
-   * `requestKeyFrame()` returns false when the source is rate-limiting requests (Android + raw iOS
-   * gate them for ~3s, encoded iOS ~500ms). Ignoring that rejection leaves the subscriber in
-   * `waitingForKeyFrame`, dropping every inter frame until the encoder's natural GOP — seconds of
-   * frozen video, the very symptom this drain recovery exists to prevent. The retry self-terminates:
-   * each attempt stops once the subscriber has resynced (left `waitingForKeyFrame`), disconnected,
-   * or the capture is gone, and attempts are bounded so a source that never honors one cannot loop.
-   */
-  private requestKeyFrameForWaitingSubscriber(
-    deviceId: string,
-    subscriber: Socket,
-    attemptsLeft: number = KEY_FRAME_RETRY_MAX_ATTEMPTS,
-  ): void {
-    const capture = this.captures.get(deviceId);
-    if (!capture) {
-      return;
-    }
-    // Nothing to do once the subscriber left or already resynced on a key frame.
-    if (subscriber.destroyed || !capture.waitingForKeyFrame.has(subscriber)) {
-      return;
-    }
-    if (capture.waitingForReplacement.has(subscriber)) {
-      return;
-    }
-    const source = capture.source;
-    // A source without requestKeyFrame can't force one; only the natural GOP recovers it.
-    if (!source?.requestKeyFrame) {
-      return;
-    }
-    if (source.requestKeyFrame() || attemptsLeft <= 0) {
-      return;
-    }
-    this.timer.setTimeout(
-      () => this.requestKeyFrameForWaitingSubscriber(deviceId, subscriber, attemptsLeft - 1),
-      KEY_FRAME_RETRY_INTERVAL_MS,
-    );
-  }
-
-  private replayParameterSets(capture: DeviceCapture, socket: Socket): void {
-    const parameterSets = [capture.sps, capture.pps].filter((nal): nal is Buffer => nal !== null);
-    if (parameterSets.length === 0) {
-      return;
-    }
-    const payload = Buffer.concat(parameterSets.flatMap((nal) => [ANNEX_B_START_CODE, nal]));
-    // Replayed parameter sets carry the current rotation too, so a late joiner never applies a
-    // stale orientation before the next live config packet (issue #4786).
-    socket.write(
-      encodePacket(
-        encodePtsAndFlags(this.deps.nowUs(), { isConfig: true, rotation: capture.rotation }),
-        payload,
-      ),
-    );
-  }
-
   private detach(socket: Socket): void {
-    const stall = this.outboundStalls.get(socket);
-    if (stall) {
-      this.timer.clearTimeout(stall.timeout);
-      socket.off("drain", stall.onDrain);
-      this.outboundStalls.delete(socket);
-    }
+    this.pipeline.clearSubscriberStall(socket);
     const deviceId = this.socketDeviceIds.get(socket);
     this.socketDeviceIds.delete(socket);
     this.socketSessionUuids.delete(socket);
@@ -1643,131 +959,6 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     }
   }
 
-  /**
-   * Start the relay-originated heartbeat (issue #7549): a zero-payload packet on the injected
-   * timer, sent every `HEARTBEAT_INTERVAL_MS` to every promoted, non-backpressured subscriber
-   * while the capture has recent source output. A subscriber still `waitingForKeyFrame` is skipped, same
-   * as any other packet — see `writePacketToSubscriber`.
-   */
-  private startHeartbeat(deviceId: string, capture: DeviceCapture): void {
-    capture.heartbeatTimer = this.timer.setInterval(() => {
-      if (this.captures.get(deviceId) !== capture || !capture.source) {
-        return;
-      }
-      if (!this.hasFreshSourceEvidence(deviceId, capture)) {
-        // A reconnect must never inherit a capture we have already declared stale.
-        // stopCapture removes it synchronously and serializes replacement behind source.stop().
-        if (this.captures.get(deviceId) === capture) {
-          void this.stopCapture(deviceId, true);
-        }
-        return;
-      }
-      // A lone stage needs recent native idle evidence to attest live video.
-      if (
-        capture.lastEncodedDataMs === null ||
-        (capture.lastSourceDataMs === null && !this.idleEvidenceIsRecent(capture, this.timer.now()))
-      ) {
-        return;
-      }
-      const packet = encodeHeartbeat();
-      for (const subscriber of capture.subscribers) {
-        if (
-          subscriber.destroyed ||
-          capture.waitingForKeyFrame.has(subscriber) ||
-          capture.backpressuredSubscribers.has(subscriber)
-        ) {
-          continue;
-        }
-        subscriber.write(packet);
-      }
-    }, HEARTBEAT_INTERVAL_MS);
-  }
-
-  private hasFreshSourceEvidence(deviceId: string, capture: DeviceCapture): boolean {
-    if (capture.lastSourceDataMs === null || capture.lastEncodedDataMs === null) {
-      return this.incompleteEvidenceIsRecent(capture);
-    }
-    return this.hasFreshCompleteSourceEvidence(deviceId, capture);
-  }
-
-  private incompleteEvidenceIsRecent(capture: DeviceCapture): boolean {
-    const now = this.timer.now();
-    return (
-      capture.source !== null &&
-      capture.firstEvidenceMs !== null &&
-      (this.idleEvidenceIsRecent(capture, now) ||
-        now - capture.firstEvidenceMs < SOURCE_EVIDENCE_MAX_AGE_MS)
-    );
-  }
-
-  private hasFreshCompleteSourceEvidence(deviceId: string, capture: DeviceCapture): boolean {
-    const { source, lastSourceDataMs, lastEncodedDataMs } = capture;
-    if (!source || lastSourceDataMs === null || lastEncodedDataMs === null) {
-      return false;
-    }
-    const now = this.timer.now();
-    if (this.sourceEvidenceIsRecent(capture, now) && capture.lastIdleMs !== null) {
-      return true;
-    }
-    const oldestEvidenceAgeMs = Math.max(now - lastSourceDataMs, now - lastEncodedDataMs, 0);
-    if (
-      oldestEvidenceAgeMs >= SOURCE_PROBE_AFTER_MS &&
-      (capture.lastLivenessProbeMs === null ||
-        now - capture.lastLivenessProbeMs >= SOURCE_PROBE_AFTER_MS)
-    ) {
-      try {
-        if (source.requestKeyFrame?.("probe")) {
-          capture.lastLivenessProbeMs = now;
-        }
-      } catch (error) {
-        logger.warn(`[VideoStream] liveness key-frame request failed for ${deviceId}: ${error}`);
-      }
-    }
-    return this.sourceEvidenceIsRecent(capture, now);
-  }
-
-  /** Telemetry must not refresh the desktop's activity clock after producer or encoder stalls. */
-  private sourceEvidenceIsRecent(capture: DeviceCapture, now: number): boolean {
-    if (capture.lastSourceDataMs === null || capture.lastEncodedDataMs === null) {
-      return false;
-    }
-    if (capture.legacySimulatorHelper) {
-      return true;
-    }
-    if (this.idleEvidenceIsRecent(capture, now)) {
-      return true;
-    }
-    return (
-      Math.max(now - capture.lastSourceDataMs, now - capture.lastEncodedDataMs, 0) <=
-      SOURCE_EVIDENCE_MAX_AGE_MS
-    );
-  }
-
-  private idleEvidenceIsRecent(capture: DeviceCapture, now: number): boolean {
-    return (
-      capture.lastIdleMs !== null &&
-      capture.encodedSinceSourceFrame &&
-      now - capture.lastIdleMs <= SOURCE_EVIDENCE_MAX_AGE_MS
-    );
-  }
-
-  /** A stalled per-source encoder must not retire a producer shared by other leases. */
-  private producerEvidenceIsStale(capture: DeviceCapture): boolean {
-    const now = this.timer.now();
-    return (
-      (capture.lastSourceDataMs === null ||
-        now - capture.lastSourceDataMs > SOURCE_EVIDENCE_MAX_AGE_MS) &&
-      (capture.lastIdleMs === null || now - capture.lastIdleMs > SOURCE_EVIDENCE_MAX_AGE_MS)
-    );
-  }
-
-  private clearHeartbeatTimer(capture: DeviceCapture): void {
-    if (capture.heartbeatTimer) {
-      this.timer.clearInterval(capture.heartbeatTimer);
-      capture.heartbeatTimer = null;
-    }
-  }
-
   private stopCapture(deviceId: string, stale = false): Promise<void> {
     const pending = this.pendingStops.get(deviceId);
     if (pending) {
@@ -1779,7 +970,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     }
     this.captures.delete(deviceId);
     this.clearIdleTimer(capture);
-    this.clearHeartbeatTimer(capture);
+    this.pipeline.clearHeartbeatTimer(capture);
     if (capture.reconfigureTimer) {
       this.timer.clearTimeout(capture.reconfigureTimer);
       capture.reconfigureTimer = null;
@@ -1799,7 +990,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       try {
         try {
           if (stale && capture.source) {
-            await stopStaleCapture(capture.source, this.producerEvidenceIsStale(capture));
+            await stopStaleCapture(capture.source, this.pipeline.producerEvidenceIsStale(capture));
           } else {
             await capture.source?.stop();
           }
@@ -1823,84 +1014,23 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   }
 }
 
-const socketServer = new SocketServerSingleton<VideoStreamSocketServer>();
-
-export function getVideoStreamSocketPath(): string {
-  return socketServer.instance?.getSocketPath?.() ?? getSocketPath(VIDEO_STREAM_SOCKET_CONFIG);
-}
-
-export function setVideoStreamSocketServerForTesting(server: VideoStreamSocketServer | null): void {
-  socketServer.instance = server;
-}
-
-/** Legacy video requests discover either platform; explicit platform requests stay scoped. */
-export async function resolveVideoStreamDevice(
-  deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
-  deviceId?: string,
-  platform: "android" | "ios" | "either" = "either",
-  timer: Timer = defaultTimer,
-  signal?: AbortSignal,
-): Promise<BootedDevice> {
-  return resolveStreamDevice(
-    deviceManager,
-    deviceId,
-    platform,
-    timer,
-    signal,
-    "video-stream-resolve",
+export async function startVideoStreamSocketServer(
+  readiness?: Pick<DeviceReadiness, "getPlatformDeviceManager">,
+): Promise<void> {
+  await socketServer.start(
+    () => new VideoStreamSocketServer(defaultDependencies(readiness?.getPlatformDeviceManager())),
   );
-}
-
-async function defaultResolveDevice(
-  deviceId?: string,
-  platform?: "android" | "ios",
-): Promise<BootedDevice> {
-  return resolveVideoStreamDevice(
-    DeviceReadiness.getInstance().getPlatformDeviceManager(),
-    deviceId,
-    platform,
-  );
-}
-
-function defaultDependencies(): VideoStreamSocketServerDependencies {
-  return {
-    captureRegistry: getDefaultDeviceCaptureRegistry(),
-    ownershipChanges: () => defaultDaemonContext.sessionManager() ?? null,
-    deviceLifecycle: getDaemonStreamDeviceLifecycleEmitter,
-    sessionReleases: SessionReleaseBroadcaster,
-    observerReleases: ObserverReleaseBroadcaster,
-    resolveDevice: defaultResolveDevice,
-    createCaptureSource: async (options) => {
-      // Resolved once per stream, off the frame path. A null jar means the Android source falls
-      // back to `screenrecord`.
-      const jarPath = await resolveVideoServerJar();
-      return createH264CaptureSource(
-        {
-          device: options.device,
-          onData: options.onData,
-          onSourceFrame: options.onSourceFrame,
-          onSourceIdle: options.onSourceIdle,
-          onEncodedAccessUnit: options.onEncodedAccessUnit,
-          onIdleAttestationSupport: options.onIdleAttestationSupport,
-          onError: options.onError,
-          onRotation: options.onRotation,
-          onDroppedFrames: options.onDroppedFrames,
-          bitrateBps: options.bitrateBps,
-          size: options.size,
-          quality: options.quality,
-          fps: options.fps,
-        },
-        jarPath,
-      );
-    },
-    nowUs: () => BigInt(Math.round(performance.now() * 1000)),
-  };
-}
-
-export async function startVideoStreamSocketServer(): Promise<void> {
-  await socketServer.start(() => new VideoStreamSocketServer(defaultDependencies()));
 }
 
 export async function stopVideoStreamSocketServer(): Promise<void> {
   await socketServer.stop();
 }
+
+export {
+  getVideoStreamSocketPath,
+  resolveVideoStreamDevice,
+  setVideoStreamSocketServerForTesting,
+  validateCaptureHints,
+  type DeviceOwnershipChanges,
+  type VideoStreamSocketServerDependencies,
+} from "./videoStreamSocketDefaults";

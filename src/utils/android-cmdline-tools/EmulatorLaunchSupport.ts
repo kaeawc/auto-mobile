@@ -8,6 +8,7 @@ import type {
   EmulatorDeviceIdReservation,
   EmulatorPortReservations,
 } from "./EmulatorPortReservations";
+import { AMBIENT_ENV, ENV, readEnvRaw, readEnvTrimmed } from "../../config/env";
 
 export type LaunchFailureCategory =
   | "display_initialization_failed"
@@ -20,6 +21,10 @@ export interface EmulatorLaunchState {
   duplicateAvdDetected: boolean;
   earlyExitCategory: LaunchFailureCategory | undefined;
   startupValidationComplete: boolean;
+  stdoutGraceTimeout: NodeJS.Timeout | undefined;
+  serialPollInterval: NodeJS.Timeout | undefined;
+  serialProbeInFlight: boolean;
+  startupAccelerationFailureDetected: boolean;
   childTerminationObserved: boolean;
   exitCode: number | null | undefined;
   exitSignal: NodeJS.Signals | null | undefined;
@@ -134,7 +139,7 @@ export function resolveHeadlessMode(
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv,
 ): { headless: boolean; reason: string } {
-  const explicit = env.AUTOMOBILE_EMULATOR_HEADLESS;
+  const explicit = readEnvRaw(ENV.EMULATOR_HEADLESS, env);
   if (explicit === "true") {
     return { headless: true, reason: "AUTOMOBILE_EMULATOR_HEADLESS=true" };
   }
@@ -152,7 +157,7 @@ export function resolveHeadlessMode(
 
   if (platform === "linux") {
     const hasDisplay = Boolean(
-      (env.DISPLAY && env.DISPLAY.trim()) || (env.WAYLAND_DISPLAY && env.WAYLAND_DISPLAY.trim()),
+      readEnvTrimmed(AMBIENT_ENV.DISPLAY, env) || readEnvTrimmed(AMBIENT_ENV.WAYLAND_DISPLAY, env),
     );
     if (!hasDisplay) {
       return {
@@ -179,7 +184,7 @@ export function parseExtraEmulatorArguments(raw: string): string[] {
     parsed = JSON.parse(raw);
   } catch {
     throw new ActionableError(
-      'AUTOMOBILE_EMULATOR_ARGS must be a JSON array of emulator arguments, for example ["-gpu", "swiftshader_indirect"]',
+      'AUTOMOBILE_EMULATOR_ARGS must be a JSON array of emulator arguments, for example ["-gpu", "swiftshader"]',
     );
   }
 
@@ -236,6 +241,7 @@ export interface EmulatorLauncherHost {
   launchErrors(): WeakMap<ChildProcess, ActionableError>;
   launchErrorFinalizations(): WeakMap<ChildProcess, Promise<ActionableError | undefined>>;
   launchTargetDeviceIds(): WeakMap<ChildProcess, string>;
+  isEmulatorSerialListed(serial: string, signal?: AbortSignal): Promise<boolean>;
   accelerationCheckCategory(output: string): LaunchFailureCategory | undefined;
   adoptsExistingAvdLaunch(
     avdName: string,

@@ -1,3 +1,5 @@
+import { disabledDeviceResourceReport } from "../utils/iosDeviceResourceImpact";
+import { mergeProvenResourceStates } from "../utils/deviceResourceStates";
 import type {
   DeviceResourceConfigurationResult,
   ConfigurableDeviceResource,
@@ -8,16 +10,26 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { z } from "zod/v4";
 import type { DeviceToolsDependencies } from "./deviceTools";
-import { reconcileDeviceResourcesSchema, setDeviceResourcesSchema } from "./deviceResourceSchemas";
+import {
+  reconcileDeviceResourcesSchema,
+  setDeviceResourcesSchema,
+} from "../utils/deviceResourceSchemas";
 import type { BootedDevice } from "../models/DeviceInfo";
 import { ToolRegistry } from "./toolRegistry";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
+import {
+  reconcileDeviceResourcesResultSchema,
+  setDeviceResourcesResultSchema,
+} from "./deviceResourceToolOutputSchemas";
 import { getAbortSignal } from "../utils/AbortContext";
 import {
   DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
 } from "../utils/deviceTimeouts";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM, deleteInternalToolParams } from "../daemon/constants";
+import {
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  deleteInternalToolParams,
+} from "../daemon/wire/constants";
 import {
   trackDeviceAcquisitionReadiness,
   deviceReadinessLockKey,
@@ -27,7 +39,7 @@ import {
 export function registerDeviceResourceTools(dependencies: () => DeviceToolsDependencies): void {
   ToolRegistry.registerDeviceAware(
     "setDeviceResources",
-    "Set selected device resources and verify native state. All settings are opt-in; omitted resources stay unchanged. iOS Simulator services and Android optional apps/settings are runtime-dependent. Android changes return a restore receipt for exact restoration during the same boot. Disabling Google infrastructure changes push/auth behavior.",
+    "Set selected device resources and verify native state, including disabled iOS service impacts. All settings are opt-in; omitted resources stay unchanged. iOS Simulator services and Android optional apps/settings are runtime-dependent. Android changes return a restore receipt for exact restoration during the same boot. Disabling Google infrastructure changes push/auth behavior. Disabling calendarServices on a booted simulator is refused with code unsafe_device_resource_combination unless its service is not running. Request it when provisioning a new simulator so it applies before first boot, or leave it enabled. Preboot is unaffected; unsafeWith lists the applicable phases.",
     setDeviceResourcesSchema,
     async (device, args: z.infer<typeof setDeviceResourcesSchema>, _progress, signal) => {
       const callerSignal = signal ?? getAbortSignal();
@@ -58,14 +70,14 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
             deadlineMs,
             signal: operationSignal,
           });
-          return {
-            ...createJSONToolResponse({ device, ...result }),
-            ...(result.success ? {} : { isError: true }),
-          };
+          return withIsErrorOnFailure(
+            createStructuredToolResponse({ device, ...result }),
+            result.success,
+          );
         },
       );
     },
-    { defaultEnabled: false },
+    { defaultEnabled: false, outputSchema: setDeviceResourcesResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -97,14 +109,14 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
               signal: operationSignal,
             }),
           );
-          return {
-            ...createJSONToolResponse({ device, ...result }),
-            ...(result.success ? {} : { isError: true }),
-          };
+          return withIsErrorOnFailure(
+            createStructuredToolResponse({ device, ...result }),
+            result.success,
+          );
         },
       );
     },
-    { defaultEnabled: false },
+    { defaultEnabled: false, outputSchema: reconcileDeviceResourcesResultSchema },
   );
 }
 
@@ -175,6 +187,9 @@ export async function observeConfiguredDeviceResources(
   result: DeviceResourceConfigurationResult,
   request: DeviceResourceObservationRequest,
 ): Promise<DeviceResourceConfigurationResult> {
+  // Recompute the companion report from current evidence, including on repeated calls.
+  result = { ...result };
+  delete result.disabledResources;
   const now = deps.timer.now();
   request = {
     ...request,
@@ -200,6 +215,7 @@ export async function observeConfiguredDeviceResources(
     return {
       ...result,
       observed,
+      ...configuredResourceImpact(request.device, result, states),
       ...(contradictions.length
         ? { success: false, observationContradictions: contradictions }
         : {}),
@@ -212,11 +228,21 @@ export async function observeConfiguredDeviceResources(
       const abort =
         reason instanceof Error ? reason : new DOMException(String(reason), "AbortError");
       throw Object.assign(abort, {
-        deviceResourceResult: result,
+        deviceResourceResult: { ...result, ...configuredResourceImpact(request.device, result) },
       }) satisfies DeviceResourceObservationAbort;
     }
     logger.warn(`Device resource observation failed: ${errorMessage(error)}`, error);
     // Keep mutation evidence usable when independent observation cannot complete.
-    return result;
+    return { ...result, ...configuredResourceImpact(request.device, result) };
   }
+}
+
+function configuredResourceImpact(
+  device: BootedDevice,
+  result: DeviceResourceConfigurationResult,
+  observed?: DeviceResourceConfigurationResult["resources"],
+): Pick<DeviceResourceConfigurationResult, "disabledResources"> {
+  return device.platform === "ios"
+    ? disabledDeviceResourceReport(mergeProvenResourceStates(result.resources, observed))
+    : {};
 }

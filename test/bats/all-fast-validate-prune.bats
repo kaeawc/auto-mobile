@@ -81,6 +81,7 @@ teardown() {
   LIST_CHECKS_FIXTURE="$(mktemp -d)"
   mkdir -p "${LIST_CHECKS_FIXTURE}/scripts/lib"
   cp "${ABS_SCRIPT}" "${LIST_CHECKS_FIXTURE}/scripts/all_fast_validate_checks.sh"
+  cp "scripts/lib/spotlight-exclude.sh" "${LIST_CHECKS_FIXTURE}/scripts/lib/"
   cp "scripts/lib/shell-core.sh" "${LIST_CHECKS_FIXTURE}/scripts/lib/shell-core.sh"
 
   run "${LIST_CHECKS_FIXTURE}/scripts/all_fast_validate_checks.sh" --list-checks
@@ -114,7 +115,7 @@ teardown() {
   [[ "$output" == *"0.1.0"* ]]
 }
 
-@test "Bun coherence allows only the declared advisory Bun 1.4 canary" {
+@test "Bun coherence rejects a setup-bun version off the repo pin" {
   run bun "$COHERENCE_SCRIPT"
   [ "$status" -eq 0 ]
 
@@ -127,13 +128,13 @@ teardown() {
     '    steps:' \
     '      - uses: oven-sh/setup-bun@v2' \
     '        with:' \
-    '          bun-version: 1.4.2' > "$COHERENCE_WORKFLOW_FIXTURE"
+    '          bun-version: 1.5.0' > "$COHERENCE_WORKFLOW_FIXTURE"
 
   run bun "$COHERENCE_SCRIPT"
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"zz-bun-coherence-fixture.yml"* ]]
-  [[ "$output" == *"1.4.2"* ]]
+  [[ "$output" == *"1.5.0"* ]]
 }
 
 @test "fast validation registers the tool definitions drift check" {
@@ -146,6 +147,58 @@ teardown() {
 @test "pull_request Fast Validation runs the tool definitions drift check" {
   # CI runs an explicit --only list; a registered check missing from it never runs.
   run grep -E -- '--only .*(^|,)tool-definitions(,|[[:space:]])' .github/workflows/pull_request.yml
+
+  [ "$status" -eq 0 ]
+}
+
+@test "fast validation registers the prototype model drift check" {
+  run "$ABS_SCRIPT" --list-checks
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'prototype-spec-models\tscripts/prototype/generate-prototype-spec-models.ts'* ]]
+}
+
+@test "pull_request Fast Validation runs the prototype model drift check" {
+  run grep -E -- '--only .*(^|,)prototype-spec-models(,|[[:space:]])' .github/workflows/pull_request.yml
+
+  [ "$status" -eq 0 ]
+}
+
+@test "fast validation registers the ProtoViewer notices drift check" {
+  run "$ABS_SCRIPT" --list-checks
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'protoviewer-notices\tscripts/ios/protoviewer-notices.ts'* ]]
+}
+
+@test "all_fast_validate_checks registers the ProtoViewer store-listing check" {
+  run "$ABS_SCRIPT" --list-checks
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'store-listing\tscripts/store-listing/validate-store-listing.ts'* ]]
+}
+
+@test "pull_request Fast Validation runs the ProtoViewer store-listing check" {
+  run grep -E -- '--only .*(^|,)store-listing(,|[[:space:]])' .github/workflows/pull_request.yml
+
+  [ "$status" -eq 0 ]
+}
+
+@test "pull_request Fast Validation runs the ProtoViewer notices drift check" {
+  run grep -E -- '--only .*(^|,)protoviewer-notices(,|[[:space:]])' .github/workflows/pull_request.yml
+
+  [ "$status" -eq 0 ]
+}
+
+@test "fast validation registers the privacy manifest guard" {
+  run "$ABS_SCRIPT" --list-checks
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'privacy-manifests\tscripts/ios/check-privacy-manifests.ts'* ]]
+}
+
+@test "pull_request Fast Validation runs the privacy manifest guard" {
+  run grep -E -- '--only .*(^|,)privacy-manifests(,|[[:space:]])' .github/workflows/pull_request.yml
 
   [ "$status" -eq 0 ]
 }

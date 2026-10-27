@@ -28,69 +28,74 @@ class RealTestDataSource(
       val client = provider()
       val summary = client.getTestRuns(TestRunQuery(limit = 100, deviceId = deviceId))
 
-      // Map TestRunEntry to TestRun
-      val testRuns =
-        summary.testRuns.map { entry ->
-          val status =
-            when (entry.status) {
-              "passed" -> TestStatus.Passed
-              "failed" -> TestStatus.Failed
-              "skipped" -> TestStatus.Skipped
-              else -> TestStatus.Skipped
-            }
-
-          val steps =
-            entry.steps.map { step ->
-              val stepStatus =
-                when (step.status) {
-                  "completed" -> TestStatus.Passed
-                  "failed" -> TestStatus.Failed
-                  "skipped" -> TestStatus.Skipped
-                  else -> TestStatus.Skipped
-                }
-              TestStep(
-                id = "step-${step.id}",
-                index = step.index,
-                action = step.action,
-                target = step.target ?: "",
-                screenshotPath = step.screenshotPath,
-                screenName = step.screenName,
-                durationMs = step.durationMs,
-                status = stepStatus,
-                errorMessage = step.errorMessage,
-              )
-            }
-
-          val platform =
-            when (entry.platform?.lowercase()) {
-              "ios" -> TestPlatform.iOS
-              else -> TestPlatform.Android
-            }
-
-          TestRun(
-            id = "run-${entry.id}",
-            testId = "${entry.testClass}.${entry.testMethod}",
-            testName = entry.testName,
-            status = status,
-            startTime = entry.startTime,
-            durationMs = entry.durationMs,
-            steps = steps,
-            screensVisited = entry.screensVisited,
-            errorMessage = entry.errorMessage,
-            deviceId = entry.deviceId ?: "unknown",
-            deviceName = entry.deviceName ?: "Unknown device",
-            platform = platform,
-            videoPath = entry.videoPath,
-            snapshotPath = entry.snapshotPath,
-            sampleSize = entry.sampleSize,
-          )
-        }
+      val testRuns = summary.testRuns.map(::toTestRun)
 
       Result.Success(testRuns)
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
       Result.Error(e, "Failed to load test data: ${e.message}")
     }
+  }
+
+  private fun toTestRun(
+    entry: dev.jasonpearson.automobile.desktop.core.daemon.TestRunEntry,
+  ): TestRun {
+    val status =
+      when (entry.status) {
+        "passed" -> TestStatus.Passed
+        "failed" -> TestStatus.Failed
+        "skipped" -> TestStatus.Skipped
+        else -> TestStatus.Skipped
+      }
+
+    val steps = entry.steps.map(::toTestStep)
+
+    val platform =
+      when (entry.platform?.lowercase()) {
+        "ios" -> TestPlatform.iOS
+        else -> TestPlatform.Android
+      }
+
+    return TestRun(
+      id = "run-${entry.id}",
+      testId = "${entry.testClass}.${entry.testMethod}",
+      testName = entry.testName,
+      status = status,
+      startTime = entry.startTime,
+      durationMs = entry.durationMs,
+      steps = steps,
+      screensVisited = entry.screensVisited,
+      errorMessage = entry.errorMessage,
+      deviceId = entry.deviceId ?: "unknown",
+      deviceName = entry.deviceName ?: "Unknown device",
+      platform = platform,
+      videoPath = entry.videoPath,
+      snapshotPath = entry.snapshotPath,
+      sampleSize = entry.sampleSize,
+    )
+  }
+
+  private fun toTestStep(
+    step: dev.jasonpearson.automobile.desktop.core.daemon.TestRunStep,
+  ): TestStep {
+    val stepStatus =
+      when (step.status) {
+        "completed" -> TestStatus.Passed
+        "failed" -> TestStatus.Failed
+        "skipped" -> TestStatus.Skipped
+        else -> TestStatus.Skipped
+      }
+    return TestStep(
+      id = "step-${step.id}",
+      index = step.index,
+      action = step.action,
+      target = step.target ?: "",
+      screenshotPath = step.screenshotPath,
+      screenName = step.screenName,
+      durationMs = step.durationMs,
+      status = stepStatus,
+      errorMessage = step.errorMessage,
+    )
   }
 }

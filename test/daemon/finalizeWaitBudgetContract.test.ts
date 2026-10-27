@@ -9,24 +9,24 @@ import {
   DeviceOwnedByOtherDaemonError,
   DeviceShuttingDownError,
   type RetryableDeviceAcquisitionError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import {
   getSessionReleaseCleanupWorstCaseMs,
   getSessionReleaseStuckDeadlineMs,
   SESSION_RELEASE_TEARDOWN_CAP_MS,
 } from "../../src/daemon/sessionManager";
-import { getSessionHeartbeatCheckIntervalMs } from "../../src/daemon/sessionLivenessWindows";
-import { readDeviceCleanupInProgressRefusal } from "../../src/server/deviceSessionResult";
+import { getSessionHeartbeatCheckIntervalMs } from "../../src/daemon/wire/sessionLivenessWindows";
+import { readDeviceCleanupInProgressRefusal } from "../../src/daemon/deviceSessionResult";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   RECORDING_TEARDOWN_RETRY_BUDGET_MS,
-} from "../../src/server/recordingSessionCleanup";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+} from "../../src/daemon/recordingSessionCleanup";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { createDeviceSettingDefaultsAcquisitionReset } from "../../src/features/utility/DeviceSettingDefaults";
-import { NetworkState } from "../../src/server/NetworkState";
-import { createOwnerlessNetworkStateAcquisitionCleanup } from "../../src/server/networkStateSessionCleanup";
+import { NetworkState } from "../../src/utils/NetworkState";
+import { createOwnerlessNetworkStateAcquisitionCleanup } from "../../src/daemon/networkStateSessionCleanup";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
@@ -71,7 +71,7 @@ function registeredRecordingCapMs(deviceId: string): number | undefined {
         unbound.push(callback);
       },
       registerPendingDeviceCleanup: (_deviceId, _cleanup, capMs) => {
-        caps.push(capMs);
+        caps.push(typeof capMs === "number" ? capMs : undefined);
       },
     },
     {

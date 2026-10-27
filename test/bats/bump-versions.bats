@@ -78,7 +78,7 @@ EOF
   cat > "${TEST_ROOT}/android/playground/app/build.gradle.kts" <<'EOF'
 android {
   defaultConfig {
-    versionName = "0.0.1-SNAPSHOT"
+    versionCode = 1
   }
 }
 EOF
@@ -116,7 +116,7 @@ run_bump() {
 
   grep -q "^VERSION_NAME=${VERSION}-SNAPSHOT$" "${TEST_ROOT}/android/gradle.properties"
   grep -q "^version = \"${VERSION}-SNAPSHOT\"$" "${TEST_ROOT}/android/junit-runner/build.gradle.kts"
-  grep -q "versionName = \"${VERSION}-SNAPSHOT\"" "${TEST_ROOT}/android/playground/app/build.gradle.kts"
+  ! grep -q "versionName" "${TEST_ROOT}/android/playground/app/build.gradle.kts"
   grep -q "releases/download/${VERSION}/AutoMobile-${VERSION}-macos.dmg" \
     "${TEST_ROOT}/docs/index.md"
   grep -q "auto-mobile-junit-runner:${VERSION}" "${TEST_ROOT}/docs/using/ui-tests.md"
@@ -133,6 +133,21 @@ run_bump() {
     "${TEST_ROOT}/ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift"
   grep -q "public enum AutoMobileVersion" \
     "${TEST_ROOT}/ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift"
+}
+
+@test "refuses a hard-coded Android versionName before writing anything" {
+  cat > "${TEST_ROOT}/android/playground/app/build.gradle.kts" <<'GRADLE'
+android {
+  defaultConfig {
+    versionName = "0.0.1-SNAPSHOT"
+  }
+}
+GRADLE
+  run_bump
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Hard-coded versionName"*"playground/app/build.gradle.kts"* ]]
+  [ "$(json_field "${TEST_ROOT}/package.json" 'data["version"]')" = "0.0.1" ]
+  grep -q "^VERSION_NAME=0.0.1-SNAPSHOT$" "${TEST_ROOT}/android/gradle.properties"
 }
 
 @test "rejects a non-semver --new-version before writing anything" {

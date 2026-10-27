@@ -2,9 +2,22 @@ import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
-} from "./constants";
+} from "./wire/constants";
 import type { DaemonRequest } from "./types";
 import type { Timer } from "../utils/SystemTimer";
+
+let socketRequestOrder = 0;
+let barrierCompletionOrder = 0;
+
+/** Order admissions and inventory flights without depending on clock resolution. */
+export function nextSocketRequestOrder(): number {
+  return ++socketRequestOrder;
+}
+
+/** Host inventory must be newer than every completed barrier, across all sockets. */
+export function latestBarrierCompletionOrder(): number {
+  return barrierCompletionOrder;
+}
 
 interface PendingRequest {
   lane: string | undefined;
@@ -31,6 +44,8 @@ interface QueueWait {
  * - A laned request starts as soon as no earlier barrier is pending or running and
  *   no earlier request in the same lane is pending or running. Requests in
  *   different lanes run concurrently; requests in one lane keep arrival order.
+ * - Host-inventory reads may overlap within their lane to join shared discovery;
+ *   they still wait for barriers and hold back later barriers.
  */
 export class SocketRequestAdmissionQueue {
   private readonly pending: PendingRequest[] = [];
@@ -122,12 +137,13 @@ export class SocketRequestAdmissionQueue {
     this.runningCount++;
     if (entry.lane === undefined) {
       this.barrierRunning = true;
-    } else {
+    } else if (entry.lane !== "host:inventory") {
       this.runningLanes.add(entry.lane);
     }
     void entry.run().finally(() => {
       this.runningCount--;
       if (entry.lane === undefined) {
+        barrierCompletionOrder = Math.max(barrierCompletionOrder, nextSocketRequestOrder());
         this.barrierRunning = false;
       } else {
         this.runningLanes.delete(entry.lane);

@@ -1,5 +1,6 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import { join, relative } from "node:path";
 import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 
@@ -110,7 +111,7 @@ function directlyExecutesDevicectl(source: string): boolean {
 }
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(directory).flatMap((entry) => {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
       return sourceFiles(path);
@@ -129,7 +130,7 @@ describe("devicectl execution boundary (issue #4053)", () => {
       if (OWNERS.includes(repoPath) || exceptions.has(repoPath)) {
         return [];
       }
-      const source = readFileSync(file, "utf8");
+      const source = readGuardFile(file);
       return directlyExecutesDevicectl(source)
         ? [
             `${repoPath} directly executes devicectl; route it through ${PRIMARY_OWNER} (or another sanctioned owner) instead.`,

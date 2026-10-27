@@ -69,7 +69,7 @@ private final class StorageHarness {
     private(set) var lastPreparation: PrototypeStoragePreparation?
     private let maxBytes: Int
     lazy var coordinator = PrototypeStorageCoordinator(
-        store: store, clock: clock, maxBytes: maxBytes, log: { [unowned self] in logs.append($0) }
+        store: store, clock: clock, maxBytes: maxBytes, log: { [weak self] in self?.logs.append($0) }
     )
 
     init(maxBytes: Int = PrototypeLimits.maxStorageBytes) {

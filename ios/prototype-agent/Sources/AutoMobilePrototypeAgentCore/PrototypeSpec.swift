@@ -98,9 +98,11 @@ struct PrototypeSpec: Decodable {
     /// The authored `root` before data resolution and repeat expansion, kept so a device data write
     /// (#12519) can rebuild `root` from the changed data without the host re-sending the spec.
     let authoredRoot: JSONValue
+    let platformHandlers: [String: JSONValue]
+    private(set) var platformState: [String: JSONValue] = [:]
 
     private enum CodingKeys: String, CodingKey {
-        case id, window, state, data, theme, motion, root, storage
+        case id, window, state, data, theme, motion, root, storage, requires, platform
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -125,12 +127,21 @@ struct PrototypeSpec: Decodable {
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         // The host validator owns the strict shape; a malformed block means "no storage" here.
-        storage = (try? container.decodeIfPresent(PrototypeStorageBlock.self, forKey: .storage)) ?? nil
+        storage = (try? container.decodeIfPresent(PrototypeStorageBlock.self, forKey: .storage))
         let raw = try container.decode(JSONValue.self, forKey: .root)
         authoredRoot = raw
+        platformHandlers = try container.decodeIfPresent(JSONValue.self, forKey: .platform)?.objectFields?["on"]?
+            .objectFields ?? [:]
         // Menus validate against state, but state is decoded (and checked) after root to keep the
         // key order; a state that does not decode is reported at its own turn below.
-        let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state)) ?? nil
+        let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state))
+        // Validate platform vocabulary before resolving device-owned reads.
+        try PrototypePlatformValidator.validate(
+            requires: container.decodeIfPresent(JSONValue.self, forKey: .requires),
+            handlers: container.decodeIfPresent(JSONValue.self, forKey: .platform),
+            root: raw,
+            state: menuState ?? [:]
+        )
         root = try Self.buildRoot(raw, data: data, menuState: menuState ?? [:])
         state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
         // Android's `PrototypeScalarSerializer` and the host schema accept only string, number and
@@ -154,7 +165,8 @@ struct PrototypeSpec: Decodable {
     /// Everything between the authored root and the drawn one, in the order the host reports
     /// errors. It depends on `data` and the initial state only, so a data write reruns it.
     private static func buildRoot(
-        _ raw: JSONValue, data: [String: JSONValue]?, menuState: [String: JSONValue]
+        _ raw: JSONValue, data: [String: JSONValue]?, menuState: [String: JSONValue],
+        platform: [String: JSONValue] = [:]
     )
         throws -> PrototypeNode
     {
@@ -163,9 +175,10 @@ struct PrototypeSpec: Decodable {
         try PrototypeRequestValidator.validate(raw, state: menuState)
         try PrototypeLimits.guardRepeatPathCells(raw, data: data)
         try PrototypeMenus.validateAuthoredText(raw)
+        try PrototypeLoadingStates.validate(raw)
         try PrototypeRepeat.validateEmitContexts(raw, data: data)
         try PrototypeLimits.guardSubstitutedText(raw, data: data)
-        let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
+        let resolved = PrototypeDataResolver.resolveRoot(raw, data: data, platform: platform)
         try PrototypeLimits.guardTree(resolved)
         let expanded = PrototypeRepeat.expand(resolved)
         try PrototypePagerOptions.validate(expanded)
@@ -173,6 +186,7 @@ struct PrototypeSpec: Decodable {
         try PrototypeCarousel.validate(expanded)
         try PrototypeRefresh.validate(expanded)
         try PrototypeMenus.validate(expanded, state: menuState)
+        try PrototypeTooltips.validate(expanded)
         let root = try JSONDecoder().decode(
             DecodedRoot.self,
             from: JSONEncoder().encode(JSONValue.object(["root": expanded]))
@@ -185,6 +199,8 @@ struct PrototypeSpec: Decodable {
         replacing spec: PrototypeSpec, data: [String: JSONValue]?, root: PrototypeNode,
         authoredRoot: JSONValue? = nil, state: [String: JSONValue]? = nil
     ) {
+        platformHandlers = spec.platformHandlers
+        platformState = spec.platformState
         id = spec.id
         window = spec.window
         self.state = state ?? spec.state
@@ -196,6 +212,13 @@ struct PrototypeSpec: Decodable {
         self.authoredRoot = authoredRoot ?? spec.authoredRoot
     }
 
+    func replacingPlatform(_ platform: [String: JSONValue]) throws -> PrototypeSpec {
+        let rebuilt = try Self.buildRoot(authoredRoot, data: data, menuState: state ?? [:], platform: platform)
+        var next = PrototypeSpec(replacing: self, data: data, root: rebuilt)
+        next.platformState = platform
+        return next
+    }
+
     /// This spec after a host patch (#11675): the authored root, data and state replaced, and the drawn
     /// tree rebuilt and re-validated the way a show would. Id, window and theme are carried over, as
     /// the patch grammar cannot address them. Throws what a show of the same content would.
@@ -205,7 +228,7 @@ struct PrototypeSpec: Decodable {
         throws -> PrototypeSpec
     {
         if let data { try PrototypeLimits.guardData(data) }
-        let rebuilt = try Self.buildRoot(raw, data: data, menuState: state ?? [:])
+        let rebuilt = try Self.buildRoot(raw, data: data, menuState: state ?? [:], platform: platformState)
         try PrototypeStacks.validate(root: rebuilt)
         try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
         return PrototypeSpec(replacing: self, data: data, root: rebuilt, authoredRoot: raw, state: state)
@@ -215,7 +238,7 @@ struct PrototypeSpec: Decodable {
     /// bindings, `repeat` rows and data conditions follow the write. Throws when the changed data
     /// breaks a limit the show enforces (for example more repeat cells than the tree allows).
     func replacingData(_ data: [String: JSONValue]) throws -> PrototypeSpec {
-        let rebuilt = try Self.buildRoot(authoredRoot, data: data, menuState: state ?? [:])
+        let rebuilt = try Self.buildRoot(authoredRoot, data: data, menuState: state ?? [:], platform: platformState)
         try PrototypeStacks.validate(root: rebuilt)
         try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
         return PrototypeSpec(replacing: self, data: data, root: rebuilt)
@@ -291,42 +314,24 @@ struct WindowSpec: Decodable {
     }
 }
 
-struct Placement: Decodable {
-    let type: String
-    let scrim: PrototypeModeValue?
-    let edge: String?
-    let height: Double?
-    let gravity: String?
-    let offset: Offset?
-}
-
-struct Offset: Decodable {
-    let x: Double
-    let y: Double
-}
-
 enum Dimension: Decodable, Equatable {
     case fill
     case wrap
     case points(Double)
 
-    private struct Fixed: Decodable { let dp: Double }
+    private struct Fixed: Decodable {
+        let points: Double
+        private enum CodingKeys: String, CodingKey { case points = "dp" }
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let keyword = try? container.decode(String.self) {
             self = keyword == "fill" ? .fill : .wrap
         } else {
-            self = try .points(container.decode(Fixed.self).dp)
+            self = try .points(container.decode(Fixed.self).points)
         }
     }
-}
-
-struct Padding: Decodable {
-    let top: Double?
-    let bottom: Double?
-    let start: Double?
-    let end: Double?
 }
 
 /// Fixed columns or adaptive equal-width slots. Positivity is enforced by the host;
@@ -345,11 +350,6 @@ enum PrototypeGridColumns: Decodable, Equatable {
             self = try .adaptive(minWidth: container.decode(Adaptive.self).minWidth)
         }
     }
-}
-
-struct Border: Decodable {
-    let width: Double
-    let color: PrototypeModeValue
 }
 
 /// `cornerRadius`: dp number, Material 3 shape token, or per-corner dp radii.
@@ -436,6 +436,8 @@ struct Style: Decodable {
     let fontFamily: FontFamily?
     let elevation: Double?
     let shadowColor: PrototypeModeValue?
+    var shadows: [Shadow]? = nil
+    var cornerStyle: String? = nil
     let offset: Offset?
     let lineHeight: Double?
     let letterSpacing: Double?
@@ -444,6 +446,11 @@ struct Style: Decodable {
     let overflow: String?
     /// A Material 3 type role (`titleLarge`...) supplying size, weight, line height and spacing.
     let textStyle: String?
+    /// A box, row, column or card placeholder whose background a highlight sweeps (#14207).
+    let shimmer: Bool?
+    /// Paint-only looks applied in order (#15128): objects the structural contract has already
+    /// validated, kept raw until a renderer draws them. Gated by `prototype_effects_v1`.
+    var effects: [JSONValue]?
 
     /// Android's `mergedOver`: properties set on `prototype` win, unset ones keep this style's value.
     /// A present property replaces the base value as a whole (`padding` and `border` included).
@@ -476,13 +483,17 @@ struct Style: Decodable {
             fontFamily: prototype.fontFamily ?? fontFamily,
             elevation: prototype.elevation ?? elevation,
             shadowColor: prototype.shadowColor ?? shadowColor,
+            shadows: prototype.shadows ?? shadows,
+            cornerStyle: prototype.cornerStyle ?? cornerStyle,
             offset: prototype.offset ?? offset,
             lineHeight: prototype.lineHeight ?? lineHeight,
             letterSpacing: prototype.letterSpacing ?? letterSpacing,
             textDecoration: prototype.textDecoration ?? textDecoration,
             fontStyle: prototype.fontStyle ?? fontStyle,
             overflow: prototype.overflow ?? overflow,
-            textStyle: prototype.textStyle ?? textStyle
+            textStyle: prototype.textStyle ?? textStyle,
+            shimmer: prototype.shimmer ?? shimmer,
+            effects: prototype.effects ?? effects
         )
     }
 
@@ -513,6 +524,7 @@ struct PrototypeAction: Decodable, Sendable {
     let page: JSONValue?
     let stack: String?
     let screen: String?
+    let transition: PrototypeStackTransition?
     /// `setData`/`appendData`/`removeData`: `/data/<pointer>`, a whole `{index}` segment bound per
     /// repeat row at expansion (#12519).
     let path: String?
@@ -521,7 +533,7 @@ struct PrototypeAction: Decodable, Sendable {
     /// `{data}`), with `item`/`index` already bound to `{value}` by repeat expansion.
     let value: JSONValue?
     /// `increment`/`decrement` step; 1 when omitted.
-    let by: Double?
+    let incrementAmount: Double?
     let requireValid: [String]?
     // `request` (#12529): method defaults to GET and `via` to host. `headers` and `query` entries
     // are a literal string or a binding object; `body` is a binding; `url`, `statusKey` and `into`
@@ -535,17 +547,36 @@ struct PrototypeAction: Decodable, Sendable {
     let statusKey: String?
     let via: String?
     let timeoutMs: Double?
+    let id: String?
+    let afterMs: Int?
+    let everyMs: Int?
+    let maxRuns: Int?
+    let actions: [PrototypeAction]?
     let onSuccess: [PrototypeAction]?
     let onError: [PrototypeAction]?
+
+    private enum CodingKeys: String, CodingKey {
+        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value
+        case id, afterMs, everyMs, maxRuns, actions
+        case incrementAmount = "by"
+        case requireValid, method, url, headers, query, body, into, statusKey, via, timeoutMs, onSuccess, onError
+    }
 
     init(
         type: String, name: String?, payload: JSONValue?, context: PrototypeEmitContext?, pager: String?,
         page: JSONValue?, stack: String?, screen: String?, path: String?, key: String?, value: JSONValue?,
-        by: Double?, requireValid: [String]?, method: String? = nil, url: String? = nil,
+        by incrementAmount: Double?, requireValid: [String]?, method: String? = nil, url: String? = nil,
         headers: [String: JSONValue]? = nil, query: [String: JSONValue]? = nil, body: JSONValue? = nil,
         into: String? = nil, statusKey: String? = nil, via: String? = nil, timeoutMs: Double? = nil,
-        onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil
+        onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
+        id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
+        actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil
     ) {
+        self.id = id
+        self.afterMs = afterMs
+        self.everyMs = everyMs
+        self.maxRuns = maxRuns
+        self.actions = actions
         self.type = type
         self.name = name
         self.payload = payload
@@ -554,10 +585,11 @@ struct PrototypeAction: Decodable, Sendable {
         self.page = page
         self.stack = stack
         self.screen = screen
+        self.transition = transition
         self.path = path
         self.key = key
         self.value = value
-        self.by = by
+        self.incrementAmount = incrementAmount
         self.requireValid = requireValid
         self.method = method
         self.url = url
@@ -574,7 +606,7 @@ struct PrototypeAction: Decodable, Sendable {
 
     /// This action and every action nested in its `onSuccess` / `onError` lists, depth first.
     var flattened: [PrototypeAction] {
-        [self] + ((onSuccess ?? []) + (onError ?? [])).flatMap(\.flattened)
+        [self] + ((onSuccess ?? []) + (onError ?? []) + (actions ?? [])).flatMap(\.flattened)
     }
 }
 
@@ -591,7 +623,9 @@ indirect enum Condition: Decodable, Equatable {
     case valid([String], PrototypeValidityContext)
 
     private enum CodingKeys: String, CodingKey {
-        case key, equals, notEquals, gt, lt, all, any, not, valid
+        case key, equals, notEquals, all, any, not, valid
+        case greaterThan = "gt"
+        case lessThan = "lt"
     }
 
     init(from decoder: Decoder) throws {
@@ -616,9 +650,9 @@ indirect enum Condition: Decodable, Equatable {
                 self = .equals(key: key, value: value)
             } else if let value = try container.decodeIfPresent(JSONValue.self, forKey: .notEquals) {
                 self = .notEquals(key: key, value: value)
-            } else if let value = try container.decodeIfPresent(Double.self, forKey: .gt) {
+            } else if let value = try container.decodeIfPresent(Double.self, forKey: .greaterThan) {
                 self = .greaterThan(key: key, value: value)
-            } else if let value = try container.decodeIfPresent(Double.self, forKey: .lt) {
+            } else if let value = try container.decodeIfPresent(Double.self, forKey: .lessThan) {
                 self = .lessThan(key: key, value: value)
             } else {
                 throw DecodingError.dataCorruptedError(
@@ -652,14 +686,17 @@ enum Detent: Decodable, Equatable {
     case full
     case points(Double)
 
-    private struct Fixed: Decodable { let dp: Double }
+    private struct Fixed: Decodable {
+        let points: Double
+        private enum CodingKeys: String, CodingKey { case points = "dp" }
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let keyword = try? container.decode(String.self) {
             self = keyword == "full" ? .full : .half
         } else {
-            self = try .points(container.decode(Fixed.self).dp)
+            self = try .points(container.decode(Fixed.self).points)
         }
     }
 
@@ -673,11 +710,6 @@ enum Detent: Decodable, Equatable {
     }
 }
 
-struct SafeAreaPadding: Decodable {
-    let edges: [String]
-    let types: [String]
-}
-
 struct NavItem: Decodable {
     let label: String
     let icon: String?
@@ -689,26 +721,6 @@ struct NavItem: Decodable {
 struct PrototypeOption: Decodable, Equatable {
     let value: String
     let label: String
-}
-
-/// A `topAppBar` navigation icon or action: an icon-only button with its accessible label.
-struct PrototypeAppBarAction: Decodable {
-    let icon: String
-    let label: String
-    let onTap: [PrototypeAction]?
-}
-
-/// A `dialog` or `snackbar` button: a tap closes its container, then runs `onTap`.
-struct PrototypeDialogButton: Decodable {
-    let label: String
-    let onTap: [PrototypeAction]?
-}
-
-/// The control at the end of a `listItem`: a bound `switch` or `checkbox`, or a decorative `icon`.
-struct PrototypeListItemTrailing: Decodable {
-    let type: String
-    let stateKey: String?
-    let name: String?
 }
 
 /// One spec node. A class so `child` can recurse; the renderer reads only the fields its type uses.
@@ -725,7 +737,8 @@ final class PrototypeNode: Decodable {
     let enabledWhen: Condition?
     let checks: [PrototypeCheck]?
     let validateOn: PrototypeValidateOn?
-    /// The `visibleWhen` enter/exit: `none`, `fade`, `expand` or `slide`; absent is fade + expand.
+    /// Stack navigation, or other nodes' `visibleWhen` enter/exit (`none`, `fade`, `expand`, `slide`).
+    /// Absent visibility transitions use fade + expand; stacks always use that visibility default.
     let transition: String?
     let safeAreaPadding: SafeAreaPadding?
     /// Screen placement resolved by the host (#9316); see `PrototypeAnchor`.
@@ -739,12 +752,18 @@ final class PrototypeNode: Decodable {
     let child: PrototypeNode?
     let start: String?
     let screens: [String: PrototypeNode]?
+    /// Structured screen definitions distinguish content edits from an unchanged navigation rebuild.
+    let screenDefinitions: JSONValue?
     let text: String?
     let spans: [PrototypeTextSpan]?
+    /// Mentions, hashtags and URLs in `text` as links (#14233).
+    let linkify: PrototypeLinkifyOptions?
     /// Authored accessible label (#10446); wins over the label derived from text or icon.
     let contentDescription: String?
     /// An uploaded image asset id, or a `{light, dark}` pair of ids (#11218).
     let asset: PrototypeModeValue?
+    let filter: ImageFilter?
+    let fadeEdges: FadeEdges?
     let contentScale: String?
     let name: String?
     /// `button`/`chip`/extended `fab` text, and the optional `switch`/`checkbox`/`slider` label.
@@ -770,6 +789,11 @@ final class PrototypeNode: Decodable {
     let itemWidth: Double?
     let itemSpacing: Double?
     let items: [NavItem]?
+    let anchorTo: String?
+    let caret: PrototypeCaret?
+    let spotlight: TooltipSpotlight?
+    let onDismiss: [PrototypeAction]?
+    let edge: String?
     /// Menu entries decoded from the same `items` JSON key, preserving navigation items.
     let menuItems: [PrototypeMenuItem]?
     let pager: String?
@@ -826,6 +850,11 @@ final class PrototypeNode: Decodable {
     let multiline: Bool?
     let minLines: Int?
     let maxLength: Int?
+    /// `chart` series, fixed y axis, x label mode and goal line (#14209), read through `/data`.
+    let chartSeries: [PrototypeChartSeries]?
+    let yRange: PrototypeChartRange?
+    let xLabels: String?
+    let goal: Double?
 
     /// Gesture-only nodes have the same touch target and accessibility semantics as tap nodes.
     var isInteractive: Bool {
@@ -836,15 +865,19 @@ final class PrototypeNode: Decodable {
         case type, id, testTag, onTap, style, styleWhen, visibleWhen, transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale
         case name, label, variant, stateKey, placeholder, axis, items, pager
+        case anchorTo, caret, spotlight, onDismiss, edge
         case scrollable, openWhen, detents, scrim, dragHandle, options, icon, size
         case orientation, min, max, step, title, navigationIcon, actions, confirm
         case dismiss, action, durationMs, hourKey, minuteKey, is24Hour, headline, supporting
         case leadingIcon, trailing, swipeActions
         case refresh
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
+             linkify,
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
              dismissOnSwipe, supportingText, keyboardType, secure, multiline, minLines, maxLength, trailingIcon,
-             imeAction
+             imeAction, yRange, xLabels, goal
+        case filter, fadeEdges
+        case chartSeries = "series"
     }
 
     init(from decoder: Decoder) throws {
@@ -857,7 +890,7 @@ final class PrototypeNode: Decodable {
         style = try container.decodeIfPresent(Style.self, forKey: .style)
         styleWhen = try container.decodeIfPresent([StyleWhen].self, forKey: .styleWhen)
         visibleWhen = try container.decodeIfPresent(Condition.self, forKey: .visibleWhen)
-        transition = try container.decodeIfPresent(String.self, forKey: .transition)
+        transition = try container.decodeIfPresent(PrototypeTransitionForm.self, forKey: .transition)?.type
         safeAreaPadding = try container.decodeIfPresent(SafeAreaPadding.self, forKey: .safeAreaPadding)
         anchor = try container.decodeIfPresent(PrototypeAnchor.self, forKey: .anchor)
         children = try container.decodeIfPresent([PrototypeNode].self, forKey: .children)
@@ -865,6 +898,8 @@ final class PrototypeNode: Decodable {
         text = try container.decodeIfPresent(String.self, forKey: .text)
         contentDescription = try container.decodeIfPresent(String.self, forKey: .contentDescription)
         asset = try container.decodeIfPresent(PrototypeModeValue.self, forKey: .asset)
+        filter = try container.decodeIfPresent(ImageFilter.self, forKey: .filter)
+        fadeEdges = try container.decodeIfPresent(FadeEdges.self, forKey: .fadeEdges)
         contentScale = try container.decodeIfPresent(String.self, forKey: .contentScale)
         name = try container.decodeIfPresent(String.self, forKey: .name)
         label = try container.decodeIfPresent(String.self, forKey: .label)
@@ -881,6 +916,11 @@ final class PrototypeNode: Decodable {
         }
         pager = try container.decodeIfPresent(String.self, forKey: .pager)
         scrollable = try container.decodeIfPresent(Bool.self, forKey: .scrollable)
+        anchorTo = try container.decodeIfPresent(String.self, forKey: .anchorTo)
+        caret = try container.decodeIfPresent(PrototypeCaret.self, forKey: .caret)
+        spotlight = try container.decodeIfPresent(TooltipSpotlight.self, forKey: .spotlight)
+        onDismiss = try container.decodeIfPresent([PrototypeAction].self, forKey: .onDismiss)
+        edge = try container.decodeIfPresent(String.self, forKey: .edge)
         openWhen = try container.decodeIfPresent(Condition.self, forKey: .openWhen)
         refresh = try container.decodeIfPresent(PrototypeScrollRefresh.self, forKey: .refresh)
         detents = try container.decodeIfPresent([Detent].self, forKey: .detents)
@@ -918,7 +958,9 @@ final class PrototypeNode: Decodable {
         span = try container.decodeIfPresent(Int.self, forKey: .span)
         start = try container.decodeIfPresent(String.self, forKey: .start)
         screens = try container.decodeIfPresent([String: PrototypeNode].self, forKey: .screens)
+        screenDefinitions = try container.decodeIfPresent(JSONValue.self, forKey: .screens)
         spans = try container.decodeIfPresent([PrototypeTextSpan].self, forKey: .spans)
+        linkify = try container.decodeIfPresent(PrototypeLinkifyOptions.self, forKey: .linkify)
         activeKey = try container.decodeIfPresent(String.self, forKey: .activeKey)
         trailingActions = try container.decodeIfPresent([PrototypeAppBarAction].self, forKey: .trailingActions)
         onSubmit = try container.decodeIfPresent([PrototypeAction].self, forKey: .onSubmit)
@@ -937,6 +979,10 @@ final class PrototypeNode: Decodable {
         maxLength = try container.decodeIfPresent(Int.self, forKey: .maxLength)
         trailingIcon = try container.decodeIfPresent(PrototypeAppBarAction.self, forKey: .trailingIcon)
         imeAction = try container.decodeIfPresent(String.self, forKey: .imeAction)
+        chartSeries = try container.decodeIfPresent([PrototypeChartSeries].self, forKey: .chartSeries)
+        yRange = try container.decodeIfPresent(PrototypeChartRange.self, forKey: .yRange)
+        xLabels = try container.decodeIfPresent(String.self, forKey: .xLabels)
+        goal = try container.decodeIfPresent(Double.self, forKey: .goal)
     }
 
     /// Android's `resolvePrototypeStyle`: every `styleWhen` entry whose condition holds is merged over
@@ -986,5 +1032,41 @@ final class PrototypeNode: Decodable {
         children?.forEach { $0.collectAssets(into: &ids) }
         child?.collectAssets(into: &ids)
         screens?.values.forEach { $0.collectAssets(into: &ids) }
+    }
+}
+
+// Compatibility accessors keep layout consumers independent of the wire union's cases.
+extension Placement {
+    var type: String {
+        switch self {
+        case .fullscreen: "fullscreen"
+        case .sheet: "sheet"
+        case .floating: "floating"
+        }
+    }
+
+    var scrim: PrototypeModeValue? {
+        if case let .fullscreen(scrim) = self { return scrim }
+        return nil
+    }
+
+    var edge: String? {
+        if case let .sheet(edge, _) = self { return edge }
+        return nil
+    }
+
+    var height: Double? {
+        if case let .sheet(_, height) = self { return height }
+        return nil
+    }
+
+    var gravity: String? {
+        if case let .floating(gravity, _) = self { return gravity }
+        return nil
+    }
+
+    var offset: Offset? {
+        if case let .floating(_, offset) = self { return offset }
+        return nil
     }
 }

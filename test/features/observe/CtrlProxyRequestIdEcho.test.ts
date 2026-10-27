@@ -39,28 +39,27 @@ async function harness() {
   const timer = new FakeTimer();
   const socket = new RecordingSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "request-id-echo", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "request-id-echo", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
       webSocketFactory: () => socket,
       timer,
       installedAppsRepository: new FakeInstalledAppsRepository(),
+      // Per-client fake: never touch the module-global observation-stream notifier.
+      deviceConnectionLostNotifier: { onDeviceConnectionLost: () => {} },
     },
   );
   await Promise.resolve(); // FakeWebSocket opens on a microtask, without real timers.
   client.connectionTestHooks.socket = socket;
-  spyOn(client, "ensureConnected").mockResolvedValue(true);
+  client.ensureConnected = mock(async () => true);
   // Keep hierarchy delivery on the real cache/waiter path, with downstream consumers neutralized.
   const streamPushes: string[] = [];
   client["pushHierarchyToObservationStream"] = (data) => {
     streamPushes.push(data.hierarchy?.text ?? "");
   };
   client["startScreenshotBackoff"] = () => {};
-  client["shouldUseHierarchyNavigation"] = () => false;
-  spyOn(client["deviceConnectionLostNotifier"], "onDeviceConnectionLost").mockImplementation(
-    () => {},
-  );
-  const receive = (message: object) => client["handleWebSocketMessage"](JSON.stringify(message));
+  const receive = (message: object) =>
+    client.testHooks.handleWebSocketMessage(JSON.stringify(message));
   const advertise = (commands: string[]) =>
     receive({ type: "connected", supportedCommands: commands });
   const waitForHierarchy = (requestId: string) =>
@@ -139,7 +138,7 @@ describe("Android request ID echo", () => {
     await h.pushHierarchy("unsolicited");
     h.timer.advanceTime(50);
     await Promise.resolve();
-    expect(h.client["cachedHierarchy"]?.hierarchy.hierarchy.text).toBe("unsolicited");
+    expect(h.client.testHooks.cachedHierarchy()?.hierarchy.hierarchy.text).toBe("unsolicited");
     expect(h.streamPushes).toEqual(["unsolicited"]);
     expect(h.client["hierarchy"]["pendingHierarchyRejectors"].has("requested")).toBe(true);
     expect(settled).toBe(false);
@@ -232,7 +231,7 @@ describe("Android request ID echo", () => {
     const idLess = [...ANDROID_ID_LESS_MESSAGE_TYPES];
     expect(correlated.filter((type) => ANDROID_ID_LESS_MESSAGE_TYPES.has(type))).toEqual([]);
     expect([...correlated, ...idLess].sort()).toEqual(
-      Object.keys(h.client["webSocketMessageHandlers"]).sort(),
+      Object.keys(h.client.testHooks.webSocketMessageHandlers()).sort(),
     );
     expect(ANDROID_ID_LESS_MESSAGE_TYPES.has("hierarchy_update")).toBe(true);
     expect(ANDROID_ID_LESS_MESSAGE_TYPES.has("error")).toBe(true);
@@ -246,19 +245,21 @@ describe("Android request ID echo", () => {
         : ["node_selector_actions", "set_hierarchy_interval"];
       await h.advertise(commands);
       const visibleTypes = [...KNOWN_REQUEST_TYPES, ...ANDROID_CAPABILITY_FLAGS, "future_command"];
-      const before = visibleTypes.map((type) => h.client["isCommandSupported"](type));
+      const before = visibleTypes.map((type) => h.client.testHooks.isCommandSupported(type));
       const rawBefore = await h.client.getSupportedCommands();
       const supportsBefore = await Promise.all(
         visibleTypes.map((type) => h.client.supportsCommand(type)),
       );
       await h.advertise([...commands, echoCapability]);
-      expect(visibleTypes.map((type) => h.client["isCommandSupported"](type))).toEqual(before);
+      expect(visibleTypes.map((type) => h.client.testHooks.isCommandSupported(type))).toEqual(
+        before,
+      );
       expect(await Promise.all(visibleTypes.map((type) => h.client.supportsCommand(type)))).toEqual(
         supportsBefore,
       );
       expect(await h.client.getSupportedCommands()).toEqual([...rawBefore!, echoCapability].sort());
       expect(await h.client.supportsCommand(echoCapability)).toBe(true);
-      expect(h.client["isCommandSupported"](echoCapability)).toBe(true);
+      expect(h.client.testHooks.isCommandSupported(echoCapability)).toBe(true);
       expect(ANDROID_CAPABILITY_GATED_COMMANDS.has(echoCapability)).toBe(false);
       expect(ANDROID_CAPABILITY_FLAGS).not.toContain(echoCapability);
     });

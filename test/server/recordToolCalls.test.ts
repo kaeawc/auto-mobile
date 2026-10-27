@@ -1,3 +1,4 @@
+import { recordPlanCall } from "../helpers/recordPlanCall";
 import {
   afterAll,
   afterEach,
@@ -16,7 +17,7 @@ import {
   getToolCallRecorder,
   resetToolCallRecordingState,
   startToolCallRecording,
-} from "../../src/server/toolCallRecordingManager";
+} from "../../src/daemon/toolCallRecordingManager";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 import { defaultTimer } from "../../src/utils/SystemTimer";
@@ -94,7 +95,7 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
     const b = await tool.handler({ ...publicBegin, __mcpSessionId: "B" });
     expect(toolField(a, "success")).toBe(true);
     expect(toolField(b, "alreadyActive")).toBeUndefined();
-    getToolCallRecorder({ connectionId: "A" })!.record("tapOn", { text: "Only A" });
+    recordPlanCall(getToolCallRecorder({ connectionId: "A" })!, "tapOn", { text: "Only A" });
     const statusB = await tool.handler({ action: "status", __mcpSessionId: "B" });
     expect(toolField(statusB, "stepCount")).toBe(0);
     const endB = await tool.handler({ action: "end", __mcpSessionId: "B" });
@@ -160,7 +161,7 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
     serverConfig.setToolCallRecordingEnabled(true);
     const tool = ToolRegistry.getTool("recordToolCalls")!;
     await tool.handler({ action: "begin", __mcpSessionId: "clean-export" });
-    getToolCallRecorder({ connectionId: "clean-export" })!.record("launchApp", {
+    recordPlanCall(getToolCallRecorder({ connectionId: "clean-export" })!, "launchApp", {
       appId: "com.android.settings",
       sessionUuid: "session",
       __mcpRequestTimeoutMs: 120000,

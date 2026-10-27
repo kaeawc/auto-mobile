@@ -3,7 +3,7 @@ import { DaemonClient } from "../../src/daemon/client";
 import {
   DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -13,14 +13,9 @@ import { daemonRequestFrameSchema } from "../helpers/wireMessageSchemas";
 function setup() {
   const timer = new FakeTimer();
   const socket = new FakeSocket();
-  const client = new DaemonClient(
-    "/fake/socket",
-    1000,
-    timer,
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-    new FakeIdGenerator(),
-  );
+  const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+    idGenerator: new FakeIdGenerator(),
+  });
   client.testHooks.attachSocket(socket);
   const respond = (id: string) =>
     client.testHooks.simulateIncomingData(

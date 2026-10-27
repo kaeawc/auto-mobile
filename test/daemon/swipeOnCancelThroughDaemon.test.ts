@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_CANCEL_REQUEST_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_CANCEL_REQUEST_METHOD, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -185,14 +185,9 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     daemonSide = new DaemonSideSocket();
     clientSide = new ClientSideSocket(daemonSide);
     internals.connect(daemonSide);
-    daemonClient = new DaemonClient(
-      "/fake/socket",
-      60_000,
-      timer,
-      ISOLATED_DAEMON_RECOVERY,
-      null,
-      new FakeIdGenerator(),
-    );
+    daemonClient = new DaemonClient("/fake/socket", 60_000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+      idGenerator: new FakeIdGenerator(),
+    });
     daemonClient.testHooks.attachSocket(clientSide);
     daemonSide.deliver = (frame) => daemonClient.testHooks.simulateIncomingData(Buffer.from(frame));
   });

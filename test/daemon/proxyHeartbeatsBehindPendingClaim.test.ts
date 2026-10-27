@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_HEARTBEAT_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_HEARTBEAT_METHOD, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import {
   handleDaemonRequest,
@@ -62,6 +62,7 @@ describe("the proxy heartbeats behind a claim whose reply is still outstanding",
       getSessionManager: () => manager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),

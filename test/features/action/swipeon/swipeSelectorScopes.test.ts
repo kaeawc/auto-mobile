@@ -91,7 +91,11 @@ test("unique scope is required by target or any ancestor and not other strategie
 
 test("binding missing elements preserves nodes; matching requires object identity", () => {
   const nodes = [entry("scope", 0)];
-  for (const element of [undefined, { ...nodes[0].element }]) {
+  const original = nodes[0].element;
+  if (!original) {
+    throw new Error("Expected source element");
+  }
+  for (const element of [undefined, { ...original }]) {
     const bound = bindSwipeScope(nodes, element);
     expect(bound.nodes).toBe(nodes);
     expect(bound.container).toBeUndefined();
@@ -170,13 +174,13 @@ test("real resolver returns source element or null for empty, absent target and 
   const nodes = [entry("target", 0)];
   expect(resolve(nodes, {})).toBeNull();
   expect(resolve(nodes, { text: "", elementId: "" })).toBeNull();
-  expect(resolve(nodes, { text: "target" })).toBe(nodes[0].element);
+  expect<unknown>(resolve(nodes, { text: "target" })).toBe(nodes[0].element);
   expect(resolve(nodes, { text: "missing" })).toBeNull();
   expect(resolve(nodes, { text: "missing", selectionStrategy: "unique" })).toBeNull();
   expect(resolve(nodes, { text: "target", container: { text: "missing" } })).toBeNull();
-  expect(resolve([{ ...nodes[0], nativeId: "target-id" }], { elementId: "target-id" })).toBe(
-    nodes[0].element,
-  );
+  expect<unknown>(
+    resolve([{ ...nodes[0], nativeId: "target-id" }], { elementId: "target-id" }),
+  ).toBe(nodes[0].element);
   // A resolved node without its source element returns null.
   expect(resolve([{ ...nodes[0], element: undefined }], { text: "target" })).toBeNull();
 });
@@ -208,7 +212,7 @@ test("bound container pins a nonunique selection to the already selected node", 
     entry("scope", 2),
     entry("target", 3, 2),
   ];
-  expect(
+  expect<unknown>(
     resolve(
       nodes,
       { text: "target" },
@@ -216,8 +220,8 @@ test("bound container pins a nonunique selection to the already selected node", 
       nodes[2].element,
     ),
   ).toBe(nodes[3].element);
-  expect(resolve(nodes, { text: "target" }, { text: "scope" })).toBe(nodes[1].element);
-  expect(
+  expect<unknown>(resolve(nodes, { text: "target" }, { text: "scope" })).toBe(nodes[1].element);
+  expect<unknown>(
     resolve(
       nodes,
       { text: "target", selectionStrategy: "unique" },
@@ -230,11 +234,7 @@ test("bound container pins a nonunique selection to the already selected node", 
 
 test("other resolver errors are surfaced rather than swallowed", () => {
   expect(() => resolve([entry("target", 0)], { text: " " })).toThrow(ActionableError);
-  // Invalid regex container IDs become missing-container errors and are swallowed as null.
-  expect(
-    resolve([entry("target", 0)], {
-      text: "target",
-      container: { elementId: "target", match: "regex" },
-    }),
-  ).toBeNull();
+  // Legacy extra match metadata is ignored; a missing nested target resolves to null.
+  const legacySelector = { text: "target", container: { elementId: "target", match: "regex" } };
+  expect(resolve([entry("target", 0)], legacySelector)).toBeNull();
 });

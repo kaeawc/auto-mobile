@@ -30,8 +30,7 @@ describe("getVisionEnrichedError", () => {
       { text: "Login" },
       disabledConfig,
       "Element not found",
-      undefined,
-      analyzer,
+      { visionAnalyzer: analyzer },
     );
 
     expect(result).toBe("Element not found");
@@ -49,8 +48,7 @@ describe("getVisionEnrichedError", () => {
       { text: "Login" },
       enabledConfig,
       "Element not found",
-      undefined,
-      analyzer,
+      { visionAnalyzer: analyzer },
     );
 
     expect(result).toBe("Element not found");
@@ -80,8 +78,7 @@ describe("getVisionEnrichedError", () => {
       { text: "Login" },
       enabledConfig,
       "Element not found",
-      undefined,
-      analyzer,
+      { visionAnalyzer: analyzer },
     );
 
     expect(result).toContain("AI suggests these steps");
@@ -117,8 +114,7 @@ describe("getVisionEnrichedError", () => {
       { text: "Login" },
       enabledConfig,
       "Element not found",
-      undefined,
-      analyzer,
+      { visionAnalyzer: analyzer },
     );
 
     expect(result).toContain("AI suggests trying");
@@ -146,8 +142,7 @@ describe("getVisionEnrichedError", () => {
       { text: "Login" },
       enabledConfig,
       "Element not found",
-      undefined,
-      analyzer,
+      { visionAnalyzer: analyzer },
     );
 
     expect(result).toContain("Element not found");
@@ -170,8 +165,7 @@ describe("getVisionEnrichedError", () => {
       { text: "Login" },
       enabledConfig,
       "Element not found",
-      undefined,
-      analyzer,
+      { visionAnalyzer: analyzer },
     );
 
     expect(result).toBe("Element not found");
@@ -188,15 +182,9 @@ describe("getVisionEnrichedError", () => {
       description: "Submit button",
     };
 
-    await getVisionEnrichedError(
-      capturer,
-      hierarchy,
-      criteria,
-      enabledConfig,
-      "base error",
-      undefined,
-      analyzer,
-    );
+    await getVisionEnrichedError(capturer, hierarchy, criteria, enabledConfig, "base error", {
+      visionAnalyzer: analyzer,
+    });
 
     const calls = analyzer.getCalls();
     expect(calls).toHaveLength(1);
@@ -224,8 +212,7 @@ describe("getVisionEnrichedError", () => {
       { text: "Button" },
       enabledConfig,
       "Not found error",
-      undefined,
-      analyzer,
+      { visionAnalyzer: analyzer },
     );
 
     expect(result).toContain("No clear path found.");

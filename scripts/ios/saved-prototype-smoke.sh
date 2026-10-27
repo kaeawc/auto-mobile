@@ -19,7 +19,7 @@ label='Saved smoke 12259'
 template="${AUTOMOBILE_IOS_PROTOTYPE_VIEWER_TEMPLATE:-}"
 viewer="${AUTOMOBILE_IOS_PROTOTYPE_VIEWER:-}"
 skip_template='skipped: iOS prototype viewer template unavailable (set AUTOMOBILE_IOS_PROTOTYPE_VIEWER_TEMPLATE or provide the release asset)'
-# shellcheck source=scripts/lib/session-release.sh disable=SC1091
+# shellcheck source=scripts/lib/session-release.sh
 source "${script_dir}/../lib/session-release.sh"
 cli() { "${cli_base[@]}" "$@"; }
 call_cli() {

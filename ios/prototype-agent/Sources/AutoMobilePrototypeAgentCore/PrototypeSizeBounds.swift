@@ -7,6 +7,12 @@ enum PrototypeSizeBounds {
     static let maxLength = 10000.0
     static let maxTypography = 1000.0
     static let maxElevation = 1000.0
+    static let maxDurationMs = 2000.0
+    static let maxTransitionDelayMs = 600.0
+    static let maxStaggerMs = 100.0
+    static let maxZoomScale = 8.0
+    static let maxStyleScale = 4.0
+    static let maxRotation = 360.0
     static let minPositive = 0.000001
 
     static let ranges: [String: [String: ClosedRange<Double>]] = [
@@ -20,6 +26,10 @@ enum PrototypeSizeBounds {
         "cornerRadius": ["topStart": 0 ... maxLength, "topEnd": 0 ... maxLength,
                          "bottomStart": 0 ... maxLength, "bottomEnd": 0 ... maxLength],
         "border": ["width": 0 ... maxLength],
+        "animate": ["durationMs": 0 ... maxDurationMs],
+        "transition": ["delayMs": 0 ... maxTransitionDelayMs],
+        "stagger": ["ms": 0 ... maxStaggerMs],
+        "zoomable": ["maxScale": 1 ... maxZoomScale],
         "sheet": ["height": minPositive ... maxLength],
         "textSpanStyle": ["textSize": minPositive ... maxTypography,
                           "letterSpacing": -maxTypography ... maxTypography],
@@ -29,6 +39,7 @@ enum PrototypeSizeBounds {
             "minHeight": 0 ... maxLength, "maxHeight": 0 ... maxLength,
             "cornerRadius": 0 ... maxLength, "spacing": 0 ... maxLength,
             "runSpacing": 0 ... maxLength,
+            "scale": 0 ... maxStyleScale, "rotation": -maxRotation ... maxRotation,
             "elevation": 0 ... maxElevation, "textSize": minPositive ... maxTypography,
             "lineHeight": minPositive ... maxTypography, "letterSpacing": -maxTypography ... maxTypography,
         ],
@@ -63,27 +74,27 @@ enum PrototypeSizeBounds {
     }
 
     private static func childGroup(_ group: String, key: String, fields: [String: JSONValue]) -> String? {
-        switch (group, key) {
-        case ("spec", "root"), ("node", "child"), ("node", "children"): return "node"
-        case ("spec", "window"): return "window"
-        case ("window", "placement"):
+        if let simple = childGroups[group]?[key] { return simple }
+        if group == "window", key == "placement" {
             if case let .object(placement)? = fields[key], placement["type"]?.stringValue == "sheet" {
                 return "sheet"
             }
             return "placement"
-        case ("node", "style"), ("styleWhen", "style"): return "style"
-        case ("node", "spans"): return "textSpan"
-        case ("textSpan", "style"): return "textSpanStyle"
-        case ("node", "styleWhen"): return "styleWhen"
-        case ("node", "anchor"): return "anchor"
-        case ("node", "detents"): return "detent"
-        case ("anchor", "bounds"): return "bounds"
-        case ("anchor", "offset"), ("placement", "offset"), ("style", "offset"): return "offset"
-        case ("style", "width"), ("style", "height"): return "dimension"
-        case ("style", "padding"): return "padding"
-        case ("style", "border"): return "border"
-        case ("style", "cornerRadius"): return "cornerRadius"
-        default: return nil
         }
+        return nil
     }
+
+    private static let childGroups: [String: [String: String]] = [
+        "spec": ["root": "node", "window": "window"],
+        "node": ["child": "node", "children": "node", "style": "style", "spans": "textSpan",
+                 "styleWhen": "styleWhen", "animate": "animate", "zoomable": "zoomable",
+                 "transition": "transition", "stagger": "stagger",
+                 "anchor": "anchor", "detents": "detent"],
+        "styleWhen": ["style": "style"],
+        "textSpan": ["style": "textSpanStyle"],
+        "anchor": ["bounds": "bounds", "offset": "offset"],
+        "placement": ["offset": "offset"],
+        "style": ["offset": "offset", "width": "dimension", "height": "dimension", "padding": "padding",
+                  "border": "border", "cornerRadius": "cornerRadius"],
+    ]
 }

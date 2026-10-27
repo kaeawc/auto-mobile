@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.sdk.NotificationAction
 import dev.jasonpearson.automobile.sdk.NotificationPostResult
 import dev.jasonpearson.automobile.sdk.NotificationStyle
 import org.json.JSONArray
+import org.json.JSONException
 
 class AutoMobileNotificationReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent?) {
@@ -78,7 +79,7 @@ class AutoMobileNotificationReceiver : BroadcastReceiver() {
           null
         }
       }
-    } catch (e: Exception) {
+    } catch (e: JSONException) {
       Log.w(TAG, "Failed to parse notification actions", e)
       emptyList()
     }

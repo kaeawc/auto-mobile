@@ -1,7 +1,11 @@
-import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
+import {
+  registerDirectSessionDevice,
+  unregisterDirectSession,
+} from "../../src/utils/directSessionDeviceRegistry";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { BootedDevice } from "../../src/models";
 import { z } from "zod/v4";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -18,21 +22,22 @@ describe("ToolRegistry iOS session context", () => {
     platform: "ios",
   };
 
-  let fakeDeviceSessionManager: FakeDeviceSessionManager;
+  let fakeDeviceReadiness: FakeDeviceReadiness;
   let originalCollaborators: ToolRegistryCollaborators;
   let restorePipelineOverrides: (() => void) | undefined;
 
   beforeEach(() => {
     ToolRegistry.clearTools();
-    fakeDeviceSessionManager = new FakeDeviceSessionManager();
+    fakeDeviceReadiness = new FakeDeviceReadiness();
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
   });
 
   afterEach(() => {
+    unregisterDirectSession("session-123");
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
@@ -40,7 +45,7 @@ describe("ToolRegistry iOS session context", () => {
   });
 
   test("requires sessionUuid when multiple iOS simulators are booted", async () => {
-    fakeDeviceSessionManager.setConnectedDevices([iosDeviceA, iosDeviceB]);
+    fakeDeviceReadiness.setConnectedDevices([iosDeviceA, iosDeviceB]);
 
     ToolRegistry.registerDeviceAware(
       "iosSessionRequiredTool",
@@ -69,11 +74,12 @@ describe("ToolRegistry iOS session context", () => {
     expect((error as Error).message).toContain(
       "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator.",
     );
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("allows sessionUuid when multiple iOS simulators are booted", async () => {
-    fakeDeviceSessionManager.setConnectedDevices([iosDeviceA, iosDeviceB]);
+    registerDirectSessionDevice("session-123", iosDeviceA);
+    fakeDeviceReadiness.setConnectedDevices([iosDeviceA, iosDeviceB]);
 
     ToolRegistry.registerDeviceAware(
       "iosSessionAllowedTool",
@@ -90,11 +96,11 @@ describe("ToolRegistry iOS session context", () => {
 
     const response = await tool!.handler({ platform: "ios", sessionUuid: "session-123" });
     expect(response).toEqual({ success: true });
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(1);
   });
 
   test("allows explicit deviceId when multiple iOS simulators are booted", async () => {
-    fakeDeviceSessionManager.setConnectedDevices([iosDeviceA, iosDeviceB]);
+    fakeDeviceReadiness.setConnectedDevices([iosDeviceA, iosDeviceB]);
 
     ToolRegistry.registerDeviceAware(
       "iosDeviceIdAllowedTool",
@@ -112,14 +118,14 @@ describe("ToolRegistry iOS session context", () => {
 
     const response = await tool!.handler({ platform: "ios", deviceId: "ios-device-b" });
     expect(response).toEqual({ success: true });
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(1);
   });
 
   test("allows operation when setActiveDevice was called with an iOS device and platform is ios", async () => {
-    fakeDeviceSessionManager.setConnectedDevices([iosDeviceA, iosDeviceB]);
+    fakeDeviceReadiness.setConnectedDevices([iosDeviceA, iosDeviceB]);
     // Simulate setActiveDevice having been called
-    fakeDeviceSessionManager.setCurrentDevice(iosDeviceA, "ios");
-    fakeDeviceSessionManager.setExplicitDevicePin(iosDeviceA);
+    fakeDeviceReadiness.setExplicitDevicePin(iosDeviceA);
+    fakeDeviceReadiness.setExplicitDevicePin(iosDeviceA);
 
     ToolRegistry.registerDeviceAware(
       "iosActiveDeviceTool",
@@ -137,14 +143,14 @@ describe("ToolRegistry iOS session context", () => {
     // Should succeed without sessionUuid because setActiveDevice was called with platform: ios
     const response = await tool!.handler({ platform: "ios" });
     expect(response).toEqual({ success: true });
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(1);
   });
 
   test("still requires sessionUuid when setActiveDevice was called but platform is not ios", async () => {
-    fakeDeviceSessionManager.setConnectedDevices([iosDeviceA, iosDeviceB]);
+    fakeDeviceReadiness.setConnectedDevices([iosDeviceA, iosDeviceB]);
     // Simulate setActiveDevice having been called
-    fakeDeviceSessionManager.setCurrentDevice(iosDeviceA, "ios");
-    fakeDeviceSessionManager.setExplicitDevicePin(iosDeviceA);
+    fakeDeviceReadiness.setExplicitDevicePin(iosDeviceA);
+    fakeDeviceReadiness.setExplicitDevicePin(iosDeviceA);
 
     ToolRegistry.registerDeviceAware(
       "iosActiveDeviceEitherPlatformTool",
@@ -164,6 +170,6 @@ describe("ToolRegistry iOS session context", () => {
     await expect(tool!.handler({})).rejects.toThrow(
       "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator.",
     );
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 });

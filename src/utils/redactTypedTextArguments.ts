@@ -2,6 +2,7 @@ import * as yaml from "js-yaml";
 import { logger } from "./logger";
 import { errorMessage } from "./describeUnknownError";
 import { decodePlanYamlContent, PLAN_YAML_LOAD_OPTIONS } from "./plan/planYaml";
+import { redactToolSecrets } from "./redactToolSecrets";
 
 /**
  * Generic request and argument logs run before a tool knows whether the target field is a
@@ -117,5 +118,6 @@ const REDACTORS: ReadonlyMap<string, Redactor> = new Map([
  */
 export function redactTypedTextArguments(toolName: string | undefined, args: unknown): unknown {
   const redactor = toolName === undefined ? undefined : REDACTORS.get(toolName);
-  return redactor && isRecord(args) ? redactor(args) : args;
+  // Credentials (keystore passwords) never reach a log sink either.
+  return redactToolSecrets(toolName, redactor && isRecord(args) ? redactor(args) : args);
 }

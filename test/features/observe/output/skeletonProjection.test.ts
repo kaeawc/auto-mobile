@@ -1,3 +1,10 @@
+import { viewHierarchyFromFixture } from "../../../helpers/observeFixture";
+import { createHierarchyForTest } from "../observeScreenTestBuilders";
+import {
+  createAndroidHierarchyConverter,
+  wireHierarchyFrom,
+} from "../../../helpers/androidHierarchyConverter";
+import { DefaultElementParser } from "../../../../src/features/utility/ElementParser";
 import { readFileSync } from "node:fs";
 import { androidControlObservation } from "../../../helpers/androidDisabledControlCapture";
 import { sanitizeObserveResult } from "../../../../src/features/observe/output/ObserveResultOutput";
@@ -16,7 +23,7 @@ import { ResolverElementSelector } from "../../../../src/features/utility/Resolv
 import { tapOnSchema } from "../../../../src/server/interactionTools";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../../../src/features/utility/viewHierarchySearch";
-import { createFlatHierarchyForTest } from "../flatHierarchyBuilders";
+import { createFlatHierarchyForTest, createFlatNodeForTest } from "../flatHierarchyBuilders";
 import type { Element } from "../../../../src/models/Element";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { SkeletonElement } from "../../../../src/models/ObserveResult";
@@ -26,18 +33,10 @@ import { imeOcclusionHierarchy } from "../../../fixtures/observe/imeOcclusion";
 import iosFormsEmptyFields from "../../../fixtures/observe/ios-forms-empty-fields";
 
 import capturedIme from "../../../fixtures/android-ime-window/playground-gboard-api36.json";
-import { CtrlProxyHierarchy } from "../../../../src/features/observe/android/CtrlProxyHierarchy";
-import type {
-  AccessibilityHierarchy,
-  HierarchyDelegateContext,
-} from "../../../../src/features/observe/android/types";
-import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const capturedImeHierarchy = () =>
-  new CtrlProxyHierarchy({
-    timer: new FakeTimer(),
-  } as HierarchyDelegateContext).convertToViewHierarchyResult(
-    structuredClone(capturedIme) as AccessibilityHierarchy,
+  createAndroidHierarchyConverter().convertToViewHierarchyResult(
+    wireHierarchyFrom(structuredClone(capturedIme)),
   );
 
 type ObserveElements = NonNullable<ObserveResult["elements"]>;
@@ -67,16 +66,14 @@ function findById(skeleton: SkeletonElement[], id: string): SkeletonElement | un
 
 describe("Android IME occlusion", () => {
   test("pins captured enabled text-field bytes", () => {
-    const pending = [(capturedIme as AccessibilityHierarchy).hierarchy];
+    const pending = [wireHierarchyFrom(capturedIme).hierarchy];
     while (pending.length) {
       const node = pending.pop();
       if (!node) {
         continue;
       }
       if (node["view-id"] === "6b9279dc-8ced-8c76-7de6-a9d07f621ae5") {
-        const hierarchy = new CtrlProxyHierarchy({
-          timer: new FakeTimer(),
-        } as HierarchyDelegateContext).convertToViewHierarchyResult({
+        const hierarchy = createAndroidHierarchyConverter().convertToViewHierarchyResult({
           updatedAt: 1,
           packageName: capturedIme.packageName,
           hierarchy: { node: structuredClone(node) },
@@ -150,7 +147,7 @@ describe("Android IME occlusion", () => {
 
   test("iOS keyboard overlap leaves app affordances unchanged", () => {
     const hierarchy = imeOcclusionHierarchy();
-    const keyboard = hierarchy.windows?.[0]?.hierarchy.node;
+    const keyboard = new DefaultElementParser().extractWindowRootNodes(hierarchy)[0];
     if (!keyboard?.$ || !keyboard.node?.[0]?.$) {
       throw new Error("Missing keyboard fixture");
     }
@@ -247,7 +244,7 @@ describe("toSkeleton — acceptance criteria", () => {
       const entry = skeleton[0];
       expect(entry.elementId).toBe("com.app:id/submit");
       // No stray `id` key survives the rename.
-      expect((entry as Record<string, unknown>).id).toBeUndefined();
+      expect(Object.getOwnPropertyDescriptor(entry, "id")?.value).toBeUndefined();
 
       // The docs promise a skeleton entry's elementId is "directly usable as a
       // tapOn selector" — verify that promise against the real selector schema.
@@ -1069,7 +1066,7 @@ describe("toSkeleton — acceptance criteria", () => {
 
     test("end-to-end: the real collector emits provenance that hoists the exact-fill descendant", () => {
       const elements = new DefaultObserveElementCollector().collect(
-        scrollBeforeFixture.viewHierarchy as NonNullable<ObserveResult["viewHierarchy"]>,
+        viewHierarchyFromFixture(scrollBeforeFixture.viewHierarchy),
         "android",
       );
       expect(elements).toBeDefined();
@@ -1094,17 +1091,17 @@ describe("toSkeleton — acceptance criteria", () => {
   describe("#6221 item 2: duplicate-id disambiguator", () => {
     test("long-press-only rows with a shared elementId replay both indexes", () => {
       const resourceId = "com.example:id/hold";
-      const viewHierarchy = {
+      const viewHierarchy = createHierarchyForTest({
         hierarchy: {
           node: {
             bounds: bounds(0, 0, 100, 200),
             node: [
-              {
+              createFlatNodeForTest({
                 "resource-id": resourceId,
                 "long-clickable": true,
                 text: "Hold",
                 bounds: bounds(0, 0, 80, 40),
-              },
+              }),
               {
                 "resource-id": resourceId,
                 "long-clickable": true,
@@ -1114,7 +1111,7 @@ describe("toSkeleton — acceptance criteria", () => {
             ],
           },
         },
-      } as ViewHierarchyResult;
+      });
       const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
       const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton.filter(
         (entry) => entry.elementId === resourceId,
@@ -1135,7 +1132,7 @@ describe("toSkeleton — acceptance criteria", () => {
 
     test("scroll-only row before clickable duplicate labels shares resolver positions", () => {
       const label = "Results";
-      const viewHierarchy = {
+      const viewHierarchy = createHierarchyForTest({
         hierarchy: {
           node: {
             bounds: bounds(0, 0, 100, 200),
@@ -1146,7 +1143,7 @@ describe("toSkeleton — acceptance criteria", () => {
             ],
           },
         },
-      } as ViewHierarchyResult;
+      });
       const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
       const rows = projectSkeleton(elements!, { width: 100, height: 200 })
         .skeleton.filter((entry) => entry.label === label)
@@ -1168,7 +1165,7 @@ describe("toSkeleton — acceptance criteria", () => {
 
     test("input-only fields with a shared elementId replay each focus-input index", () => {
       const resourceId = "com.example:id/answer";
-      const viewHierarchy = {
+      const viewHierarchy = createHierarchyForTest({
         hierarchy: {
           node: {
             bounds: bounds(0, 0, 100, 200),
@@ -1190,7 +1187,7 @@ describe("toSkeleton — acceptance criteria", () => {
             ],
           },
         },
-      } as ViewHierarchyResult;
+      });
       const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
       const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton.filter(
         (entry) => entry.elementId === resourceId,
@@ -1210,16 +1207,16 @@ describe("toSkeleton — acceptance criteria", () => {
     });
 
     test("id-less iOS controls index only visible duplicate labels and replay each index", () => {
-      const viewHierarchy = {
+      const viewHierarchy = createHierarchyForTest({
         hierarchy: {
           node: {
             bounds: bounds(0, 0, 100, 200),
             node: [
-              {
+              createFlatNodeForTest({
                 "ios-accessibility-label": "Remove",
                 clickable: true,
                 bounds: bounds(0, 240, 80, 280),
-              },
+              }),
               {
                 "ios-accessibility-label": "Remove",
                 clickable: true,
@@ -1233,7 +1230,7 @@ describe("toSkeleton — acceptance criteria", () => {
             ],
           },
         },
-      } as ViewHierarchyResult;
+      });
       const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "ios");
       const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton.filter(
         (entry) => entry.label === "Remove",
@@ -1256,21 +1253,21 @@ describe("toSkeleton — acceptance criteria", () => {
 
     test("off-screen duplicate before an on-screen label replays both indexes in raw search", () => {
       const label = "Remove";
-      const viewHierarchy = {
+      const viewHierarchy = createHierarchyForTest({
         hierarchy: {
           node: {
             bounds: bounds(0, 0, 100, 200),
             node: [
-              {
+              createFlatNodeForTest({
                 "ios-accessibility-label": label,
                 clickable: true,
                 bounds: bounds(0, 240, 80, 280),
-              },
+              }),
               { "ios-accessibility-label": label, clickable: true, bounds: bounds(0, 0, 80, 40) },
             ],
           },
         },
-      } as ViewHierarchyResult;
+      });
       const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "ios");
       const viewport = { width: 100, height: 200 };
       const previous = serverConfig.isRawElementSearchEnabled();
@@ -1325,20 +1322,20 @@ describe("toSkeleton — acceptance criteria", () => {
     test("id-less labels in an overlay rank ahead of the main hierarchy and replay both indexes", () => {
       const backgroundBounds = bounds(0, 0, 80, 40);
       const overlayBounds = bounds(0, 60, 80, 100);
-      const viewHierarchy = {
+      const viewHierarchy = createHierarchyForTest({
         hierarchy: {
           node: {
             bounds: bounds(0, 0, 100, 200),
-            node: { text: "Remove", clickable: true, bounds: backgroundBounds },
+            node: [{ text: "Remove", clickable: true, bounds: backgroundBounds }],
           },
         },
         windows: [
           {
             windowLayer: 10,
-            hierarchy: { node: { text: "Remove", clickable: true, bounds: overlayBounds } },
+            hierarchy: { node: [{ text: "Remove", clickable: true, bounds: overlayBounds }] },
           },
         ],
-      } as ViewHierarchyResult;
+      });
       const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
       const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton.filter(
         (entry) => entry.label === "Remove",
@@ -1363,16 +1360,16 @@ describe("toSkeleton — acceptance criteria", () => {
       ["Remove\u2019s", "curly quote"],
     ])("id-less exact-label %s variant shares indexes and replays each row (%s)", (variant) => {
       const canonical = variant.includes("\u2019") ? "Remove's" : "Remove";
-      const viewHierarchy = {
+      const viewHierarchy = createHierarchyForTest({
         hierarchy: {
           node: {
             bounds: bounds(0, 0, 100, 200),
             node: [
-              {
+              createFlatNodeForTest({
                 "ios-accessibility-label": canonical,
                 clickable: true,
                 bounds: bounds(0, 0, 80, 40),
-              },
+              }),
               {
                 "ios-accessibility-label": variant,
                 clickable: true,
@@ -1381,7 +1378,7 @@ describe("toSkeleton — acceptance criteria", () => {
             ],
           },
         },
-      } as ViewHierarchyResult;
+      });
       const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "ios");
       const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton;
       expect(rows).toHaveLength(2);
@@ -1989,14 +1986,17 @@ describe("a filled Android text field keeps its hint beside the entered text (#9
     return { result, field: result.skeleton.find((row) => row.elementId === FOLDER_NAME_ID) };
   }
 
-  test.each(captureFiles)("%s: a filled field carries the text as label and the hint", (file) => {
-    const { field } = project(loadCapture(file));
+  test.each([...captureFiles])(
+    "%s: a filled field carries the text as label and the hint",
+    (file) => {
+      const { field } = project(loadCapture(file));
 
-    expect(field).toMatchObject({ label: "Google", sublabel: "Edit Name" });
-    expect(skeletonElementSchema.parse(field)).toEqual(field);
-  });
+      expect(field).toMatchObject({ label: "Google", sublabel: "Edit Name" });
+      expect<unknown>(skeletonElementSchema.parse(field)).toEqual(field);
+    },
+  );
 
-  test.each(captureFiles)("%s: an empty field with a hint is unchanged", (file) => {
+  test.each([...captureFiles])("%s: an empty field with a hint is unchanged", (file) => {
     const { field } = project(
       loadCapture(file, (node) => {
         delete node.text;
@@ -2007,7 +2007,7 @@ describe("a filled Android text field keeps its hint beside the entered text (#9
     expect(field?.sublabel).toBeUndefined();
   });
 
-  test.each(captureFiles)("%s: a field with no hint is unchanged", (file) => {
+  test.each([...captureFiles])("%s: a field with no hint is unchanged", (file) => {
     const { field } = project(
       loadCapture(file, (node) => {
         delete node["hint-text"];
@@ -2018,7 +2018,7 @@ describe("a filled Android text field keeps its hint beside the entered text (#9
     expect(field?.sublabel).toBeUndefined();
   });
 
-  test.each(captureFiles)("%s: only the field's row changes, by its sublabel", (file) => {
+  test.each([...captureFiles])("%s: only the field's row changes, by its sublabel", (file) => {
     const withHint = project(loadCapture(file)).result;
     const withoutHint = project(
       loadCapture(file, (node) => {
@@ -2035,7 +2035,7 @@ describe("a filled Android text field keeps its hint beside the entered text (#9
     );
   });
 
-  test.each(captureFiles)("%s: a hint equal to the entered text is not duplicated", (file) => {
+  test.each([...captureFiles])("%s: a hint equal to the entered text is not duplicated", (file) => {
     const { field } = project(
       loadCapture(file, (node) => {
         node["hint-text"] = node.text;

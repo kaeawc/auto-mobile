@@ -4,7 +4,7 @@ import {
   type CreateTaskInput,
   type RunningTask,
   type TaskManager,
-} from "../../src/server/tasks/TaskManager";
+} from "../../src/daemon/tasks/TaskManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeMcpTaskStore } from "./FakeMcpTaskStore";
 import { FakeTimer } from "./FakeTimer";

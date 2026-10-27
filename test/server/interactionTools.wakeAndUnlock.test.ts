@@ -1,6 +1,6 @@
 import { cancellationHandlers, warmedTests } from "../helpers/interactionCancellation";
 import { expect, spyOn } from "bun:test";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/wire/constants";
 import { WakeAndUnlock } from "../../src/features/action/WakeAndUnlock";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -13,6 +13,7 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { IosLockScreenUnlocker } from "../../src/features/action/IosLockScreenUnlocker";
 import { getStructuredPayload } from "../../src/utils/toolUtils";
+import { readToolResponse } from "../helpers/toolResponse";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
@@ -39,7 +40,8 @@ test("wakeAndUnlock renders the no-swipe-needed message after a post-wake unlock
       iosLockStateProbe: {
         async read() {
           calls.push("read");
-          return { locked: ++reads === 1 };
+          const locked = ++reads === 1;
+          return { kind: "known", lock: { locked, keyguardShowing: locked } };
         },
       },
       iosUnlocker: new IosLockScreenUnlocker(
@@ -57,7 +59,7 @@ test("wakeAndUnlock renders the no-swipe-needed message after a post-wake unlock
         timer,
       ),
     });
-  const response = await handler("wakeAndUnlock")(device, {});
+  const response = readToolResponse(await handler("wakeAndUnlock")(device, {}));
   expect(calls).toEqual(["read", "home", "read"]);
   expect(getStructuredPayload(response)).toMatchObject({
     success: true,
@@ -72,12 +74,7 @@ test("wakeAndUnlock renders the no-swipe-needed message after a post-wake unlock
 });
 
 test("wakeAndUnlock handler forwards the daemon's absolute transport deadline", async () => {
-  let handler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;
-  const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation((...args) => {
-    if (args[0] === "wakeAndUnlock") {
-      handler = args[3];
-    }
-  });
+  const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation(() => {});
   const adb = spyOn(defaultAdbClientFactory, "create").mockReturnValue(new FakeAdbExecutor());
   const calls: unknown[][] = [];
   const execute = spyOn(WakeAndUnlock.prototype, "execute").mockImplementation(async (...args) => {
@@ -92,6 +89,7 @@ test("wakeAndUnlock handler forwards the daemon's absolute transport deadline", 
   });
   try {
     registerInteractionTools(interactionDeps);
+    const handler = registration.mock.calls.find(([name]) => name === "wakeAndUnlock")?.[3];
     expect(handler).toBeDefined();
     const device: BootedDevice = { deviceId: "fake-unlock", platform: "android", name: "Fake" };
     await handler!(device, { pin: "1234", [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 123_000 });

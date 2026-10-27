@@ -6,18 +6,11 @@ class InputConnectionDriver(private val connection: ImeConnection) {
   fun execute(ops: List<ImeOp>): Boolean {
     var openBatches = 0
     val batchAccepted = ArrayDeque<Boolean>()
+    var completed = false
     try {
       for (op in ops) {
         val succeeded =
           when (op) {
-            is ImeOp.CommitText -> connection.commitText(op.text)
-            is ImeOp.SetComposingText -> connection.setComposingText(op.text, op.newCursorPosition)
-            ImeOp.FinishComposingText -> connection.finishComposingText()
-            is ImeOp.SetComposingRegion -> connection.setComposingRegion(op.start, op.end)
-            is ImeOp.SetSelection -> connection.setSelection(op.start, op.end)
-            is ImeOp.DeleteSurroundingText -> connection.deleteSurroundingText(op.before, op.after)
-            is ImeOp.SendKey -> connection.sendDownUpKey(op.keyCode)
-            is ImeOp.PerformEditorAction -> connection.performEditorAction(op.actionId)
             ImeOp.BeginBatchEdit -> {
               val accepted = connection.beginBatchEdit()
               batchAccepted.addLast(accepted)
@@ -31,18 +24,32 @@ class InputConnectionDriver(private val connection: ImeConnection) {
               }
               true
             }
+            else -> executeEdit(op)
           }
         if (!succeeded) {
-          closeBatches(openBatches)
           return false
         }
       }
+      completed = true
       return true
-    } catch (failure: Exception) {
-      closeBatches(openBatches)
-      throw failure
+    } finally {
+      if (!completed) closeBatches(openBatches)
     }
   }
+
+  private fun executeEdit(op: ImeOp): Boolean =
+    when (op) {
+      is ImeOp.CommitText -> connection.commitText(op.text)
+      is ImeOp.SetComposingText -> connection.setComposingText(op.text, op.newCursorPosition)
+      ImeOp.FinishComposingText -> connection.finishComposingText()
+      is ImeOp.SetComposingRegion -> connection.setComposingRegion(op.start, op.end)
+      is ImeOp.SetSelection -> connection.setSelection(op.start, op.end)
+      is ImeOp.DeleteSurroundingText -> connection.deleteSurroundingText(op.before, op.after)
+      is ImeOp.SendKey -> connection.sendDownUpKey(op.keyCode)
+      is ImeOp.PerformEditorAction -> connection.performEditorAction(op.actionId)
+      ImeOp.BeginBatchEdit,
+      ImeOp.EndBatchEdit -> error("Batch operation must be handled by execute")
+    }
 
   private fun closeBatches(openBatches: Int) {
     repeat(openBatches) {

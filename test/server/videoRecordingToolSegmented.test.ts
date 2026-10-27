@@ -40,8 +40,8 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
   stopVideoRecordingUnattended,
-} from "../../src/server/videoRecordingManager";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+} from "../../src/daemon/videoRecordingManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
@@ -122,7 +122,7 @@ describe("videoRecording tool segmentation branch", () => {
   let segmentTimer: FakeTimer;
   let fakeBackend: FakeVideoCaptureBackend;
   let fakeRepository: FakeVideoRecordingRepository;
-  let fakeDeviceSessionManager: FakeDeviceSessionManager;
+  let fakeDeviceReadiness: FakeDeviceReadiness;
   let archiveBase = "";
   let archiveCount = 0;
   let archiveRoot: string;
@@ -143,12 +143,12 @@ describe("videoRecording tool segmentation branch", () => {
     fakeBackend.setNowProvider(() => new Date(fakeTimer.now()));
     fakeRepository = new FakeVideoRecordingRepository();
     // A bare (by-device) stop resolves target devices via detectConnectedPlatforms(), which on
-    // the real DeviceSessionManager spawns `adb`/`xcrun simctl` subprocesses. On a loaded macOS
+    // the real DeviceReadiness spawns `adb`/`xcrun simctl` subprocesses. On a loaded macOS
     // CI runner `simctl list` can stall past the test timeout (#3943), so inject a fake detector
     // that resolves the connected device synchronously with no subprocess.
-    fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    fakeDeviceSessionManager.setConnectedDevices([androidDevice]);
-    videoRecording.configure({ deviceDetector: fakeDeviceSessionManager });
+    fakeDeviceReadiness = new FakeDeviceReadiness();
+    fakeDeviceReadiness.setConnectedDevices([androidDevice]);
+    videoRecording.configure({ deviceDetector: fakeDeviceReadiness });
     segmentStarts = [];
     segmentStops = [];
     archiveRoot = path.join(archiveBase, `t${archiveCount++}`);
@@ -461,7 +461,7 @@ describe("videoRecording tool segmentation branch", () => {
   test("all-device start preserves partial failures and bare-stop discovery order", async () => {
     const second: BootedDevice = { ...androidDevice, deviceId: "second" };
     const third: BootedDevice = { ...androidDevice, deviceId: "third" };
-    fakeDeviceSessionManager.setConnectedDevices([androidDevice, second, third]);
+    fakeDeviceReadiness.setConnectedDevices([androidDevice, second, third]);
     const calls: string[] = [];
     const originalStart = fakeBackend.start.bind(fakeBackend);
     fakeBackend.start = async (config) => {
@@ -832,7 +832,7 @@ describe("videoRecording tool segmentation branch", () => {
     const active = await startVideoRecording({ device: iosDevice });
     await fsPromises.writeFile(active.outputPath, "video-bytes");
     fakeBackend.setStopResultOverrides({ sizeBytes: 101 * 1024 * 1024 });
-    fakeDeviceSessionManager.setConnectedDevices([iosDevice]);
+    fakeDeviceReadiness.setConnectedDevices([iosDevice]);
     const response = parse(await handler()(iosDevice, { action: "stop", platform: "ios" }));
     const recordings = response.recordings as Array<{
       recordingId: string;
@@ -853,7 +853,7 @@ describe("videoRecording tool segmentation branch", () => {
       platform: "android",
       name: "Test Device 2",
     };
-    fakeDeviceSessionManager.setConnectedDevices([androidDevice, secondDevice]);
+    fakeDeviceReadiness.setConnectedDevices([androidDevice, secondDevice]);
     const controller = new AbortController();
     let markSecondStart: (() => void) | undefined;
     const secondStart = new Promise<void>((resolve) => {
@@ -903,7 +903,7 @@ describe("videoRecording tool segmentation branch", () => {
       platform: "android",
       name: "Test Device 3",
     };
-    fakeDeviceSessionManager.setConnectedDevices([androidDevice, secondDevice, thirdDevice]);
+    fakeDeviceReadiness.setConnectedDevices([androidDevice, secondDevice, thirdDevice]);
     const controller = new AbortController();
     let markThirdStart: (() => void) | undefined;
     const thirdStart = new Promise<void>((resolve) => {
@@ -966,7 +966,7 @@ describe("videoRecording tool segmentation branch", () => {
       platform: "android",
       name: "Test Device 2",
     };
-    fakeDeviceSessionManager.setConnectedDevices([androidDevice, secondDevice]);
+    fakeDeviceReadiness.setConnectedDevices([androidDevice, secondDevice]);
     const controller = new AbortController();
     const rolledBack: string[] = [];
     let secondStartSignal: AbortSignal | undefined;
@@ -1452,11 +1452,9 @@ describe("videoRecording tool segmentation branch", () => {
     );
 
     // Regression guard for #3943: the bare stop must resolve its target device through the
-    // injected DeviceSessionManager singleton, never the real one (whose detectConnectedPlatforms
+    // injected DeviceReadiness singleton, never the real one (whose detectConnectedPlatforms
     // spawns an `xcrun simctl` subprocess that stalls the test on macOS CI).
-    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBeGreaterThanOrEqual(
-      1,
-    );
+    expect(fakeDeviceReadiness.getDetectConnectedPlatformsCallCount()).toBeGreaterThanOrEqual(1);
 
     expect(stopRes.segmented).toBe(true);
     const segments = stopRes.recordings as Array<Record<string, unknown>>;
@@ -1595,10 +1593,8 @@ describe("videoRecording tool segmentation branch", () => {
     );
 
     // Regression guard for #3943 (this bare stop hits the same device-resolution path):
-    // it must go through the injected DeviceSessionManager, never the real subprocess one.
-    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBeGreaterThanOrEqual(
-      1,
-    );
+    // it must go through the injected DeviceReadiness, never the real subprocess one.
+    expect(fakeDeviceReadiness.getDetectConnectedPlatformsCallCount()).toBeGreaterThanOrEqual(1);
 
     const segments = stopRes.recordings as Array<Record<string, unknown>>;
     expect(segments.length).toBe(1);

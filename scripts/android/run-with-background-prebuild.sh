@@ -33,12 +33,13 @@ terminate_prebuild() {
     terminate_tree "$prebuild_pid"
   fi
 }
-# shellcheck disable=SC2317,SC2329 # Invoked by the EXIT trap.
 cleanup() {
   terminate_prebuild
   rm -rf "$tmp_dir"
 }
-trap cleanup EXIT
+# Static reference for indirect callers; this branch never executes.
+if false; then cleanup "$@"; fi
+trap 'cleanup' EXIT
 
 bash -c "$prebuild_command" > "$tmp_dir/output.log" 2>&1 < /dev/null &
 prebuild_pid=$!

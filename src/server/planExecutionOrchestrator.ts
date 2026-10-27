@@ -1,452 +1,89 @@
-import { idleReleaseField } from "../daemon/releaseReasons";
+import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/wire/constants";
+import { defaultDaemonContext } from "../daemon/daemonContext";
+import type { DevicePool } from "../daemon/devicePool";
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+import { DeviceOutsideBrokerGrantError } from "../daemon/sessionBroker/connectionRefusal";
 import {
-  ActionableError,
-  BootedDevice,
-  ExecutePlanResult,
-  Platform,
-  PlanExecutionResult,
-  type VideoRecordingMetadata,
-} from "../models";
-import {
-  ExecutePlanStepDebugInfo,
-  PlanExecutionOptions,
-  type PlanStepToolResult,
-  type PlanToolResultsTruncation,
-  type PlanStepWarnings,
-  type PlanSkippedStep,
-  type PlanDeviceFailure,
-} from "../models/ExecutePlanResult";
+  brokerConnectionPlanLabelRefusal,
+  grantedDeviceFailsLabelCriteria,
+} from "../daemon/sessionBroker/connectionScope";
+import { PLAN_LABEL_SESSION_SOURCE, type SessionManager } from "../daemon/sessionManager";
 import {
   TestExecutionRepository,
   TestExecutionStatus,
   TestStepRecord,
 } from "../db/testExecutionRepository";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import { ActionableError, BootedDevice, ExecutePlanResult, PlanExecutionResult } from "../models";
+import { PlanExecutionOptions } from "../models/ExecutePlanResult";
+import type { Plan } from "../models/Plan";
+import { serverConfig, type PlanExecutionLease } from "../utils/ServerConfig";
+import { defaultTimer, Timer } from "../utils/SystemTimer";
+import { errorMessage } from "../utils/describeUnknownError";
+import { logger } from "../utils/logger";
+import { normalizePlanDevices } from "../utils/plan/PlanDevices";
 import { PlanPartitioner } from "../utils/plan/PlanPartitioner";
 import { PlanSchemaValidator } from "../utils/plan/PlanSchemaValidator";
-import { normalizePlanDevices } from "../utils/plan/PlanDevices";
 import { decodePlanYamlContent } from "../utils/plan/planYaml";
-
-type NormalizedPlanDevices = ReturnType<typeof normalizePlanDevices>;
+import {
+  AndroidSegmentedPlanVideoSession,
+  type SegmentedSessionResult,
+} from "./androidSegmentedPlanVideoSession";
 import {
   buildDeviceLabelMap,
   planLifecycleSessionUuid,
   registerDeviceLabelMap,
   requireMultiDeviceDaemon,
 } from "./deviceLabelMapping";
-import { executePlan, importPlanFromYaml } from "./planExecutorFactory";
-import { defaultDaemonContext } from "../daemon/daemonContext";
-import { DAEMON_SHUTTING_DOWN_ERROR_CODE, INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
-import {
-  brokerConnectionPlanLabelRefusal,
-  grantedDeviceFailsLabelCriteria,
-} from "../daemon/sessionBroker/connectionScope";
-import { DeviceOutsideBrokerGrantError } from "../daemon/sessionBroker/connectionRefusal";
-import type { DevicePool } from "../daemon/devicePool";
-import { PLAN_LABEL_SESSION_SOURCE, type SessionManager } from "../daemon/sessionManager";
-import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
-import { SESSION_OWNERSHIP_LOST_CODE } from "../daemon/sessionReleasedDuringCall";
-import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
-import {
-  AndroidSegmentedPlanVideoSession,
-  ROTATION_STOP_TIMEOUT_MS,
-  type SegmentedSessionResult,
-} from "./androidSegmentedPlanVideoSession";
+import { type PlanHealthWriter } from "./filePlanHealthWriter";
 import { daemonPlanDeviceOwnership, type PlanDeviceOwnership } from "./planDeviceOwnership";
+import {
+  CANCELLED_VIDEO_DISCARD_TIMEOUT_MS,
+  CANCELLED_VIDEO_FINALIZE_TIMEOUT_MS,
+  type CancelledVideoTeardown,
+  convertDebugStepsToRecords,
+  convertPerDeviceSkippedStepsToRecords,
+  DEFAULT_IOS_VIDEO_MAX_DURATION_SECONDS,
+  type ExecutionContext,
+  type FinalizedVideo,
+  getDeviceType,
+  HEARTBEAT_INTERVAL_MS,
+  type NormalizedPlanDevices,
+  planBaseEndFields,
+  planDeviceFailuresField,
+  type PlanExecutionDependencies,
+  type PlanExecutionRequest,
+  planRefusalFields,
+  planShutdownInterruptionFields,
+  planSkippedStepsField,
+  planToolResultsField,
+  planToolResultsTruncatedField,
+  planWarningsField,
+  rethrowDeviceLoss,
+  sharedTestExecutionRepository,
+  type VideoRecorder,
+  type VideoState,
+} from "./planExecutionRecords";
+import { executePlan, importPlanFromYaml } from "./planExecutorFactory";
+import { healthSummaryField, planHealthWriterFromEnv, reportPlanHealth } from "./planHealthSummary";
+import { recoverCompletedIosVideo, runShieldedTeardown } from "./planVideoRecovery";
 import { type StoppedSegment, writeSegmentManifest } from "./segmentManifest";
+import { ProgressCallback } from "./toolRegistry";
 import {
   getVideoRecordingMetadata as defaultGetVideoRecordingMetadata,
   getVideoRecordingStatus as defaultGetVideoRecordingStatus,
   rollbackVideoRecordingStart as defaultRollbackVideoRecordingStart,
   startVideoRecording as defaultStartVideoRecording,
   stopVideoRecording as defaultStopVideoRecording,
-} from "./videoRecordingManager";
-import { serverConfig } from "../utils/ServerConfig";
-import { defaultTimer, Timer } from "../utils/SystemTimer";
-import { logger } from "../utils/logger";
-import { ProgressCallback } from "./toolRegistry";
-import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import type { Plan } from "../models/Plan";
-import { isDeviceLostError } from "./deviceLossOutcome";
-import { errorMessage } from "../utils/describeUnknownError";
-import { typedRefusalFields } from "../models/typedRefusalFields";
-import { isTypedToolRefusal, shapeToolCallError } from "./shapeToolCallError";
-import { runWithAbortSignal } from "../utils/AbortContext";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
-import {
-  healthSummaryField,
-  planHealthWriterFromEnv,
-  reportPlanHealth,
-  type PlanHealthWriter,
-} from "./planHealthSummary";
-
-/**
- * Test metadata captured per-execution for the test-execution timing repository.
- */
-export interface PlanExecutionTestMetadata {
-  testClass: string;
-  testMethod: string;
-  appVersion?: string;
-  gitCommit?: string;
-  targetSdk?: number;
-  jdkVersion?: string;
-  jvmTarget?: string;
-  gradleVersion?: string;
-  isCi?: boolean;
-}
-
-/**
- * All parameters accepted by the executePlan MCP tool — modeled as a value object
- * so the orchestrator's surface stays narrow and testable.
- */
-export interface PlanExecutionRequest {
-  planContent: string;
-  startStep: number;
-  platform: Platform;
-  sessionUuid?: string;
-  keepScreenAwake?: boolean;
-  deviceId?: string;
-  device?: string;
-  devices?: string[];
-  deviceAllocationTimeoutMs: number;
-  abortStrategy?: "immediate" | "finish-current-step";
-  testMetadata?: PlanExecutionTestMetadata;
-  cleanupAppId?: string;
-  cleanupClearAppData?: boolean;
-  captureObserveSteps?: "summary" | "full";
-}
-
-/** Subset of videoRecordingManager APIs used by the orchestrator (so tests can inject fakes). */
-export interface VideoRecorder {
-  startVideoRecording: typeof defaultStartVideoRecording;
-  stopVideoRecording: typeof defaultStopVideoRecording;
-  getVideoRecordingStatus?: typeof defaultGetVideoRecordingStatus;
-  getVideoRecordingMetadata?: typeof defaultGetVideoRecordingMetadata;
-  /** Force-stops and discards a recording without pulling it; used when the plan was cancelled. */
-  rollbackVideoRecordingStart?: typeof defaultRollbackVideoRecordingStart;
-}
-
-/**
- * Injectable dependencies for the orchestrator. Tests can swap any of these to
- * exercise individual phases without spinning up a daemon or device pool.
- *
- * Production callers should pass an empty object — sensible defaults are wired up.
- */
-export interface PlanExecutionDependencies {
-  /** Factory for the schema validator (lets tests skip schema loading). */
-  createSchemaValidator?: () => Pick<PlanSchemaValidator, "loadSchema" | "validateYaml">;
-  /** Repository used to record per-execution timing rows. */
-  testExecutionRepository?: Pick<TestExecutionRepository, "recordExecution">;
-  /** Clock + scheduled-task primitives, replaced by FakeTimer in tests. */
-  timer?: Timer;
-  /** Video recording manager surface — replaced by a fake in tests. */
-  videoRecorder?: VideoRecorder;
-  /** Whether the plan's session still holds its device at teardown — replaced by a fake in tests. */
-  deviceOwnership?: PlanDeviceOwnership;
-  /** Receives the end-of-run health summary; defaults to the AUTOMOBILE_PLAN_HEALTH_DIR writer. */
-  healthWriter?: PlanHealthWriter;
-}
-
-interface VideoState {
-  warnings?: string[];
-  androidSession?: AndroidSegmentedPlanVideoSession;
-  /**
-   * True when the Android session rotates segments from its own timer rather than from the
-   * per-step hook. Multi-device plans run their tracks concurrently and never call the step
-   * hook, so only the session's timer can rotate ahead of screenrecord's 180 s cap (#10026).
-   */
-  androidTimerDriven?: boolean;
-  iosRecordingId?: string;
-}
-
-interface FinalizedVideo {
-  videoFilePaths: string[];
-  videoRecordingIds: string[];
-  videoWarnings?: string[];
-}
-
-type ExecutionContext = {
-  device: BootedDevice;
-  request: PlanExecutionRequest;
-  progress?: ProgressCallback;
-  signal?: AbortSignal;
-};
-
-const HEARTBEAT_INTERVAL_MS = 30_000;
-const DEFAULT_IOS_VIDEO_MAX_DURATION_SECONDS = 300;
-// Allow small timestamp skew between backend completion and the orchestrator stop attempt.
-const IOS_VIDEO_PLAN_END_TOLERANCE_MS = 100;
-/**
- * Bound on discarding a cancelled plan's recording after its session released the
- * device (#9885). The discard is a host process reap plus our own device temp file's
- * `rm -f` and row deletes, which takes well under a second when the device answers;
- * this caps a wedged device so a cancelled `executePlan` still returns promptly.
- */
-const CANCELLED_VIDEO_DISCARD_TIMEOUT_MS = 5_000;
-/**
- * Overall bound on stopping and pulling the recording of a plan cancelled while its
- * session still owns the device (deadline, client cancel). It is the existing budget
- * for one whole segment stop-and-pull (rotation's `ROTATION_STOP_TIMEOUT_MS`, the
- * 10 s between screenrecord's 180 s cap and the 170 s rotation), applied once to the
- * whole teardown rather than per segment.
- */
-const CANCELLED_VIDEO_FINALIZE_TIMEOUT_MS = ROTATION_STOP_TIMEOUT_MS;
-
-/** One way to tear down a cancelled plan's recording, bounded by {@link runShieldedTeardown}. */
-interface CancelledVideoTeardown {
-  label: string;
-  capMs: number;
-  run: () => Promise<FinalizedVideo>;
-  /** What survives when `run` fails or hits its cap. */
-  salvage: () => Promise<FinalizedVideo>;
-  successWarning: string;
-}
-
-const getDeviceType = (device: BootedDevice): "emulator" | "simulator" | "device" => {
-  if (device.platform === "android") {
-    return device.deviceId.startsWith("emulator-") ? "emulator" : "device";
-  }
-  return device.deviceId.includes("-") && device.deviceId.length > 30 ? "simulator" : "device";
-};
-
-const sharedTestExecutionRepository = new TestExecutionRepository();
-
-const rethrowDeviceLoss = (error: unknown): void => {
-  if (isDeviceLostError(error)) {
-    throw error;
-  }
-};
-
-/**
- * The `warnings` field of an `executePlan` response, or nothing when the plan
- * produced none (#6887 review).
- */
-function planWarningsField(warnings: PlanStepWarnings[] | undefined): {
-  warnings?: PlanStepWarnings[];
-} {
-  return warnings?.length ? { warnings } : {};
-}
-
-/** The skippedSteps response field, omitted when no optional steps were skipped. */
-function planSkippedStepsField(skippedSteps: PlanSkippedStep[] | undefined): {
-  skippedSteps?: PlanSkippedStep[];
-} {
-  return skippedSteps?.length ? { skippedSteps } : {};
-}
-
-/** The toolResults response field, omitted when no completed step produced an object payload. */
-function planToolResultsField(toolResults: PlanStepToolResult[] | undefined): {
-  toolResults?: PlanStepToolResult[];
-} {
-  return toolResults?.length ? { toolResults } : {};
-}
-
-/** The toolResultsTruncated marker, present only when the plan's shared budget ran out. */
-function planToolResultsTruncatedField(truncated: PlanToolResultsTruncation | undefined): {
-  toolResultsTruncated?: PlanToolResultsTruncation;
-} {
-  return truncated ? { toolResultsTruncated: truncated } : {};
-}
-
-/**
- * The typed refusal fields of an error that failed the plan, so a typed retryable refusal (e.g.
- * `capacity_exhausted` from device allocation) is not flattened into the `error` string (#11236).
- * A refusal with its own wire payload also keeps that evidence (`deviceLabel`, `reason`,
- * `scopeKey`, ...), so a client can branch on fields instead of parsing the message (#11421).
- */
-export function planRefusalFields(
-  error: unknown,
-): Pick<ExecutePlanResult, "code" | "retryable" | "retryAfterMs" | "nextAction" | "details"> &
-  Record<string, unknown> {
-  const fields = typedRefusalFields(error);
-  return fields ? { ...refusalPayloadEvidence(error, fields.details ?? {}), ...fields } : {};
-}
-
-/**
- * The typed outcome of a plan that daemon shutdown cut (#11572): the shutdown aborts the plan's
- * call and releases its sessions, and the plan still answers with its own result, so that result
- * carries `daemon_shutting_down` and `retryable: true` like every call the shutdown answers itself.
- * The caller runs the plan again against the restarted daemon; its derived label sessions are
- * minted by that run. Steps may already have run, as `executedSteps` reports.
- */
-export function planShutdownInterruptionFields(
-  signal: AbortSignal | undefined,
-  planSucceeded = false,
-): Pick<ExecutePlanResult, "code" | "retryable"> {
-  const sessionManager =
-    planSucceeded || !signal?.aborted ? undefined : defaultDaemonContext.sessionManager();
-  if (!sessionManager || sessionManager.isAcceptingSessionCreations()) {
-    return {};
-  }
-  return { code: DAEMON_SHUTTING_DOWN_ERROR_CODE, retryable: true };
-}
-
-/**
- * The typed outcome of a failed plan whose base session ended while it ran (#11640): the base's
- * end ends its labels, so the plan's next step is refused with the base's terminal release and
- * the result says so in fields, `session_ownership_lost` with the base's release reason, instead
- * of leaving the caller to parse the failed step's message. A plan's steps on a label do not keep
- * its base alive; the plan's own call does, until that call's request deadline.
- */
-export function planBaseEndFields(
-  baseSessionUuid: string | undefined,
-  planSucceeded: boolean,
-  failedStep?: PlanExecutionResult["failedStep"],
-): Pick<ExecutePlanResult, "code" | "retryable" | "nextAction" | "details"> {
-  if (planSucceeded || !baseSessionUuid || !failedStep) {
-    return {};
-  }
-  const manager = defaultDaemonContext.sessionManager();
-  if (!manager) {
-    return {};
-  }
-  const ended = manager.peekTerminalAnswerForEndedSession(baseSessionUuid);
-  if (!ended) {
-    return {};
-  }
-  // The executor retains only the failed step's string, not its thrown error. Match the exact
-  // terminal answer, never infer causality from the base merely having expired (#11640).
-  const labelEnd = failedStep.device
-    ? manager.peekTerminalAnswerForEndedSession(`${baseSessionUuid}:${failedStep.device}`)
-    : undefined;
-  if (
-    failedStep.error !== String(ended) &&
-    !(
-      labelEnd?.release.releaseReason === ended.release.releaseReason &&
-      failedStep.error === String(labelEnd)
-    )
-  ) {
-    return {};
-  }
-  return {
-    code: SESSION_OWNERSHIP_LOST_CODE,
-    retryable: false,
-    nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
-    details: {
-      sessionUuid: ended.sessionUuid,
-      reason: ended.release.releaseReason,
-      ...idleReleaseField(ended.release.releaseReason),
-    },
-  };
-}
-
-/**
- * The evidence a thrown `tools/call` gives the same refusal, read from `shapeToolCallError`'s
- * payload so the two surfaces cannot drift. `success` and `error` are the plan result's own, and
- * fields `details` already carries are not repeated beside it.
- */
-function refusalPayloadEvidence(
-  error: unknown,
-  details: Record<string, unknown>,
-): Record<string, unknown> {
-  if (!isTypedToolRefusal(error)) {
-    return {};
-  }
-  const wire: unknown = JSON.parse(
-    shapeToolCallError(error, { toolName: "executePlan", source: "MCP" }).content[0].text,
-  );
-  if (typeof wire !== "object" || wire === null || typeof Reflect.get(wire, "code") !== "string") {
-    return {};
-  }
-  return Object.fromEntries(
-    Object.entries(wire).filter(
-      ([key]) => key !== "success" && key !== "error" && !(key in details),
-    ),
-  );
-}
-
-/** The deviceFailures response field, omitted when no device failures were reported. */
-function planDeviceFailuresField(deviceFailures: PlanDeviceFailure[] | undefined): {
-  deviceFailures?: PlanDeviceFailure[];
-} {
-  return deviceFailures?.length ? { deviceFailures } : {};
-}
-
-/**
- * Converts debug step traces from PlanExecutor into the row shape expected by
- * TestExecutionRepository. Exported for unit testing — used to be inlined.
- */
-export function convertDebugStepsToRecords(
-  debugSteps: ExecutePlanStepDebugInfo[] | undefined,
-): TestStepRecord[] {
-  if (!debugSteps || debugSteps.length === 0) {
-    return [];
-  }
-
-  return debugSteps.map((step, index) => {
-    const toolMatch = step.step.match(/:\s*(\w+)$/);
-    const action = toolMatch ? toolMatch[1] : step.step;
-
-    const details = step.details as
-      | { params?: Record<string, unknown>; error?: string }
-      | undefined;
-
-    return {
-      stepIndex: index,
-      action,
-      target: buildStepRecordTarget(details?.params),
-      status: step.status,
-      durationMs: step.durationMs,
-      screenName: null,
-      screenshotPath: null,
-      errorMessage: details?.error ?? null,
-      details: step.details,
-    };
-  });
-}
-
-function buildStepRecordTarget(
-  params: { text?: unknown; elementId?: unknown; direction?: unknown } | undefined,
-): string | null {
-  if (!params) {
-    return null;
-  }
-  if (params.text) {
-    return `text="${params.text}"`;
-  }
-  if (params.elementId) {
-    return `id="${params.elementId}"`;
-  }
-  if (params.direction) {
-    return `direction=${params.direction}`;
-  }
-  return null;
-}
-
-export function convertPerDeviceSkippedStepsToRecords(
-  perDeviceResults: PlanExecutionResult["perDeviceResults"] | undefined,
-): TestStepRecord[] {
-  if (!perDeviceResults) {
-    return [];
-  }
-
-  const skippedRecords: TestStepRecord[] = [];
-  for (const deviceResult of perDeviceResults.values()) {
-    for (const skippedStep of deviceResult.skippedSteps ?? []) {
-      const details = skippedStep.details as
-        | { params?: Record<string, unknown>; error?: string }
-        | undefined;
-      skippedRecords.push({
-        stepIndex: skippedStep.stepIndex,
-        action: skippedStep.tool,
-        target: buildStepRecordTarget(details?.params),
-        status: "skipped",
-        durationMs: skippedStep.durationMs,
-        screenName: null,
-        screenshotPath: null,
-        errorMessage: skippedStep.error,
-        details: {
-          device: deviceResult.device,
-          trackIndex: skippedStep.trackIndex,
-          ...(skippedStep.details ?? {}),
-        },
-      });
-    }
-  }
-
-  return skippedRecords.sort(
-    (a, b) => a.stepIndex - b.stepIndex || a.action.localeCompare(b.action),
-  );
-}
+} from "../daemon/videoRecordingManager";
+export {
+  convertDebugStepsToRecords,
+  planBaseEndFields,
+  type PlanExecutionDependencies,
+  type PlanExecutionRequest,
+  planRefusalFields,
+  type VideoRecorder,
+} from "./planExecutionRecords";
 
 /**
  * Orchestrates a single executePlan invocation end-to-end.
@@ -508,6 +145,33 @@ export class PlanExecutionOrchestrator {
     logger.info(`[PERF +${this.timer.now() - this.perfStart}ms] ${message}`);
   }
 
+  private registerPlanExecution(): PlanExecutionLease {
+    const context = getToolSelectionContext();
+    const labelSessionUuids = this.request.sessionUuid
+      ? Object.values(
+          buildDeviceLabelMap(
+            this.effectiveLabels(),
+            this.request.sessionUuid,
+            this.request.device,
+          ),
+        )
+      : [];
+    return serverConfig.acquirePlanExecutionLease({
+      sessionUuid: this.request.sessionUuid ?? context?.routingSessionUuid,
+      deviceId: this.device.deviceId,
+      executionId: context?.execution?.executionId,
+      // The label sessions allocateDevices() will publish, named before its first await (#14444).
+      labelSessionUuids,
+    });
+  }
+
+  /** The labels this invocation allocates: the request's `devices`, else the plan's own. */
+  private effectiveLabels(): string[] {
+    return this.request.devices && this.request.devices.length > 0
+      ? this.request.devices
+      : (this.normalizedDevices ?? normalizePlanDevices()).labels;
+  }
+
   /**
    * Run all phases, returning a structured ExecutePlanResult for ordinary plan
    * failures. Device-loss cancellation is rethrown for the MCP boundary to
@@ -527,12 +191,12 @@ export class PlanExecutionOrchestrator {
 
       const plan = await this.preparePlan();
 
-      // Enable the plan-execution guard BEFORE allocation. Allocation can
-      // auto-boot a simulator, and the device-disconnect monitor must not prune
-      // a just-booted device out from under it (otherwise allocation fails with
-      // "no devices match criteria"). The finally always releases this lease, even
-      // if allocation or video startup throws.
-      const planExecutionLease = serverConfig.acquirePlanExecutionLease();
+      // Register before allocation so current session/label assignments are
+      // protected even before adb binds the execution. Unassigned booting devices
+      // use Android startup leases and ordinary discovery/debounce protection;
+      // this lease does not globally defer their cleanup. Always release it,
+      // including allocation or video startup failures.
+      const planExecutionLease = this.registerPlanExecution();
 
       let deviceMapping: Record<string, string> | undefined;
       let video: VideoState | undefined;
@@ -712,11 +376,7 @@ export class PlanExecutionOrchestrator {
    */
   private async allocateDevices(_plan: Plan): Promise<Record<string, string> | undefined> {
     const normalized = this.normalizedDevices ?? normalizePlanDevices();
-    const planDeviceLabels = normalized.labels;
-    const effectiveLabels =
-      this.request.devices && this.request.devices.length > 0
-        ? this.request.devices
-        : planDeviceLabels;
+    const effectiveLabels = this.effectiveLabels();
 
     if (effectiveLabels.length === 0) {
       if (this.request.device) {
@@ -1242,92 +902,15 @@ export class PlanExecutionOrchestrator {
         "Plan was cancelled after its device was released; its in-progress video segment was discarded",
     };
   }
-
-  /**
-   * Runs a teardown under a private abort signal, not the cancelled request's, and
-   * bounded by its cap. The cap cannot cancel work already started, so reaching it
-   * aborts the private signal, which fails every further adb call that honors the
-   * ambient signal (exec and spawn do); calls already past that check, and host-side
-   * database work, still run to completion. A failure after the cap is logged here,
-   * once, since the caller has stopped waiting.
-   */
   private async runShieldedTeardown(teardown: CancelledVideoTeardown): Promise<FinalizedVideo> {
-    const shield = new AbortController();
-    let capped = false;
-    const observed = () =>
-      teardown.run().catch((error: unknown) => {
-        if (capped) {
-          logger.warn(
-            `${teardown.label} failed after its ${teardown.capMs}ms cap: ${errorMessage(error)}`,
-            error,
-          );
-        }
-        throw error;
-      });
-    return runWithAbortSignal(shield.signal, () =>
-      raceWithDeadline(observed, {
-        timer: this.timer,
-        timeoutMs: teardown.capMs,
-        label: teardown.label,
-        onTimeout: () => {
-          capped = true;
-          shield.abort(
-            new ActionableError(`${teardown.label} exceeded its ${teardown.capMs}ms cap`),
-          );
-        },
-      }),
-    );
+    return runShieldedTeardown({ timer: this.timer }, teardown);
   }
 
   private async recoverCompletedIosVideo(
     recordingId: string,
     planEndMs: number,
   ): Promise<FinalizedVideo | undefined> {
-    const { getVideoRecordingStatus, getVideoRecordingMetadata } = this.videoRecorder;
-    if (!getVideoRecordingStatus || !getVideoRecordingMetadata) {
-      return undefined;
-    }
-    try {
-      if ((await getVideoRecordingStatus(recordingId)) !== "completed") {
-        return undefined;
-      }
-      const metadata = await getVideoRecordingMetadata(recordingId, { touch: false });
-      if (!metadata?.filePath) {
-        return undefined;
-      }
-      if (!(metadata.sizeBytes > 0)) {
-        logger.warn(
-          `Cannot recover archived plan video ${recordingId}: completed metadata must prove host bytes exist`,
-        );
-        return undefined;
-      }
-      const videoWarnings = this.recoveredIosVideoWarnings(metadata, planEndMs);
-      return {
-        videoFilePaths: [metadata.filePath],
-        videoRecordingIds: [recordingId],
-        ...(videoWarnings.length ? { videoWarnings } : {}),
-      };
-    } catch (error) {
-      logger.warn(`Failed to recover archived plan video ${recordingId}: ${errorMessage(error)}`);
-      return undefined;
-    }
-  }
-
-  private recoveredIosVideoWarnings(metadata: VideoRecordingMetadata, planEndMs: number): string[] {
-    const recordingId = metadata.recordingId;
-    const endedWithPlan =
-      Date.parse(metadata.endedAt ?? "") >= planEndMs - IOS_VIDEO_PLAN_END_TOLERANCE_MS;
-    const warning =
-      metadata.durationMs !== undefined &&
-      metadata.durationMs >= DEFAULT_IOS_VIDEO_MAX_DURATION_SECONDS * 1000
-        ? `Video recording ${recordingId} stopped at the ${DEFAULT_IOS_VIDEO_MAX_DURATION_SECONDS}s cap; the remainder of the plan was not recorded`
-        : endedWithPlan
-          ? undefined
-          : `Video recording ${recordingId} ended before the plan finished; the remainder of the plan was not recorded`;
-    const videoWarnings = [
-      ...new Set([...(metadata.warnings ?? []), ...(warning ? [warning] : [])]),
-    ];
-    return videoWarnings;
+    return recoverCompletedIosVideo({ videoRecorder: this.videoRecorder }, recordingId, planEndMs);
   }
 
   private async finalizeWithFallback(

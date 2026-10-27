@@ -1,4 +1,5 @@
 import { specTypeSchemas } from "@modelcontextprotocol/server";
+import { asObservedResult } from "../../src/features/action/observedInteractionStages";
 import { recordObservationRead } from "../../src/features/observe/observationReadScope";
 import { z } from "zod/v4";
 import { FakeTapStrategy } from "../fakes/FakeTapStrategy";
@@ -217,8 +218,12 @@ describe("buildTapOnResultMessage", () => {
 // selector that matched nothing still produced "Tapped on element (...)" and no
 // `isError` on the envelope — the exact shape #5902 first fixed for text input.
 describe("tapOnHandler (registered handler wiring)", () => {
-  const fakeDevice = { deviceId: "fake", platform: "android" } as unknown as BootedDevice;
-  const args: TapOnArgs = { selector: { text: "ZZZ_NO_SUCH_TEXT_ZZZ" }, platform: "android" };
+  const fakeDevice: BootedDevice = { deviceId: "fake", name: "fake", platform: "android" };
+  const args: TapOnArgs = {
+    selector: { text: "ZZZ_NO_SUCH_TEXT_ZZZ" },
+    action: "tap",
+    platform: "android",
+  };
 
   afterEach(() => {
     delete interactionDeps.tapAtElementFactory;
@@ -237,7 +242,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
     });
     const registered = ToolRegistry.getTool("tapOn")?.deviceAwareHandler;
     expect(registered).toBeDefined();
-    expect(await registered!(fakeDevice, args)).toEqual(
+    expect(await registered!(fakeDevice, { ...args })).toEqual(
       await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps),
     );
   });
@@ -252,22 +257,26 @@ describe("tapOnHandler (registered handler wiring)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    const tap = new TapOnElement(device, adb, {
-      timer,
-      elementSelector: new FakeElementSelector(element),
-      tapStrategy: new FakeTapStrategy(),
-      selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
-    });
     const observation: ObserveResult = {
       observationId: "occluded-focus",
       updatedAt: 1,
       screenSize: { width: 400, height: 240 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: hierarchy,
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     };
-    tap.observedInteraction = async (action) => ({
-      ...(await action(recordObservationRead(observation))),
-      observation,
+    class ObservedTap extends TapOnElement {
+      override observedInteraction: TapOnElement["observedInteraction"] = async (action) => {
+        const result = asObservedResult(await action(recordObservationRead(observation)));
+        result.observation = observation;
+        return result;
+      };
+    }
+    const tap = new ObservedTap(device, adb, {
+      timer,
+      elementSelector: new FakeElementSelector(element),
+      tapStrategy: new FakeTapStrategy(),
+      selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     });
     const error =
       'Failed to perform tap on element: Target "Continue as Guest" is covered by the soft keyboard; dismiss the keyboard first.';
@@ -369,10 +378,11 @@ describe("tapOnHandler (registered handler wiring)", () => {
 
   // `||` not `??`: an empty-string error must still yield a non-empty failure
   // message (#4183 P4), never a blank or success-shaped one.
-  test.each([
+  const emptyErrorCases: ReadonlyArray<readonly [string | undefined, string]> = [
     [undefined, "Failed to tap: unknown error"],
     ["", "Failed to tap: unknown error"],
-  ])("a failure with error %p yields %p", async (error, expected) => {
+  ];
+  test.each(emptyErrorCases)("a failure with error %p yields %p", async (error, expected) => {
     interactionDeps.tapOnElementFactory = () => ({ execute: async () => fakeResult({ error }) });
 
     const response = await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
@@ -459,6 +469,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
       fakeDevice,
       {
         selector: { text: "Network & internet" },
+        action: "tap",
         platform: "android",
       },
       undefined,
@@ -488,6 +499,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
       fakeDevice,
       {
         selector: { text: "Wi-Fi" },
+        action: "tap",
         ensureChecked: false,
         platform: "android",
       },
@@ -503,7 +515,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
 });
 
 describe("tapAtHandler (registered handler wiring)", () => {
-  const fakeDevice = { deviceId: "fake", platform: "android" } as unknown as BootedDevice;
+  const fakeDevice: BootedDevice = { deviceId: "fake", name: "fake", platform: "android" };
   const args: TapAtArgs = { x: 12, y: 34, platform: "android" };
 
   afterEach(() => {
@@ -667,7 +679,7 @@ describe("hitTestHandler", () => {
 
   test("registered hitTest schema rejects obsolete observation controls", () => {
     registerInteractionTools(interactionDeps);
-    const schema: typeof hitTestSchema = ToolRegistry.getTool("hitTest")!.schema;
+    const schema = ToolRegistry.getTool("hitTest")!.schema;
     const validInput = {
       x: 0.5,
       y: 1,
@@ -778,18 +790,13 @@ describe("tapOn handler transport deadline", () => {
     const action = new TapOnElement(device, adb, { timer });
     interactionDeps.tapOnElementFactory = () => action;
 
-    const call = tapOnHandler(
-      device,
-      {
-        selector: { text: "Target" },
-        action: "longPress",
-        duration: 20000,
-        __mcpRequestDeadlineMs: timer.now() + 5000,
-      },
-      undefined,
-      undefined,
-      interactionDeps,
-    );
+    const internalArgs = {
+      selector: { text: "Target" },
+      action: "longPress" as const,
+      duration: 20000,
+      __mcpRequestDeadlineMs: timer.now() + 5000,
+    };
+    const call = tapOnHandler(device, internalArgs, undefined, undefined, interactionDeps);
     await expect(call).rejects.toBeInstanceOf(ActionableError);
     await expect(call).rejects.toThrow(
       "longPress duration 20000 ms does not fit the remaining request budget (5000 ms; needs 22000 ms including dispatch headroom); the press was not started.",
@@ -806,7 +813,11 @@ describe("tapOn handler transport deadline", () => {
         execute: async (_options, call) => {
           received = (call as TapOnCall | undefined)?.deadlineMs;
           recoveryPolicy = (call as TapOnCall | undefined)?.recovery;
-          return { success: true, action: "longPress", element: { text: "Target" } };
+          return {
+            success: true,
+            action: "longPress",
+            element: { text: "Target", bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+          };
         },
       });
       const args = {

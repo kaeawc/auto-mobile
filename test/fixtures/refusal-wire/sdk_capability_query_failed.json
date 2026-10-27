@@ -1,0 +1,13 @@
+{
+  "code": "sdk_capability_query_failed",
+  "builder": "SdkCapabilityQueryError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"SDK capability query failed: invalid capability reply\",\"code\":\"sdk_capability_query_failed\",\"retryable\":true}"
+      }
+    ],
+    "isError": true
+  }
+}

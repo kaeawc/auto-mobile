@@ -16,6 +16,7 @@ import { classifyDisplayCutout } from "../../../../src/utils/displayCutout";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { expectFailed, expectReady } from "../../../helpers/reconcileResult";
 import { assignBindingDevice } from "./bindingFixtures";
 import {
   FakeClaims,
@@ -30,7 +31,7 @@ const IPHONE_15 = "com.apple.CoreSimulator.SimDeviceType.iPhone-15";
 const IPHONE_16 = "com.apple.CoreSimulator.SimDeviceType.iPhone-16";
 const IPAD_OLD = "com.apple.CoreSimulator.SimDeviceType.iPad-Air";
 const IPAD_NEW = "com.apple.CoreSimulator.SimDeviceType.iPad-Pro";
-const FAMILIES = ["phone", "tablet", "foldable"] as const;
+const FAMILIES = ["phone", "tablet", "foldable", "tv", "watch", "automotive"] as const;
 
 function model(identifier: string, min = "17.0", max = "65535.255.255"): AppleDeviceType {
   return {
@@ -161,7 +162,7 @@ describe("binding iOS family constraints", () => {
   test("phone reuses an assigned non-default iPhone and reports the original constraints", async () => {
     const h = await harness("ios", { assigned: iosDevice(IPHONE_15) });
     const spec: BindingRequestedSpec = { runtime: IOS, deviceFamily: "phone" };
-    const result = await h.acquire(spec);
+    const result = expectReady(await h.acquire(spec));
     expect(result).toMatchObject({
       outcome: "ready",
       disposition: "reused",
@@ -231,7 +232,7 @@ describe("binding iOS family constraints", () => {
       const h = await harness("ios", {
         iosCatalog: catalog([model(IPHONE_16), model(IPAD_OLD, "19.0")]),
       });
-      const result = await h.acquire({ runtime: IOS, deviceFamily });
+      const result = expectFailed(await h.acquire({ runtime: IOS, deviceFamily }));
       expect(result.failure?.code).toBe("runtime_incompatible");
       expect(result.failure?.message).toContain(deviceFamily);
       expect(result.failure?.message).toContain(IOS);
@@ -257,16 +258,18 @@ describe("binding Android family constraints", () => {
   afterEach(() => mock.restore());
 
   for (const field of ["screenWidth", "screenHeight", "screenDensity"] as const) {
-    test.each(FAMILIES)(
+    test.each([...FAMILIES])(
       `refuses ${field} override with %s before mutation`,
       async (deviceFamily) => {
         const h = await harness("android");
         const journal = spyOn(h.registry, "openBindingJournal");
-        const result = await h.acquire({
-          runtime: ANDROID,
-          deviceFamily,
-          configuration: { [field]: 240 },
-        });
+        const result = expectFailed(
+          await h.acquire({
+            runtime: ANDROID,
+            deviceFamily,
+            configuration: { [field]: 240 },
+          }),
+        );
         expect(result).toMatchObject({
           outcome: "failed",
           failure: { code: "spec_unsupported", retryable: false },
@@ -344,13 +347,82 @@ describe("binding Android family constraints", () => {
     { name: "foldable profile", config: androidConfig("pixel_fold"), family: "foldable" },
   ] as const;
   for (const entry of cases) {
-    test.each(FAMILIES)(`${entry.name} against %s`, async (deviceFamily) => {
+    test.each([...FAMILIES])(`${entry.name} against %s`, async (deviceFamily) => {
       const matcher = new DefaultManagedSpecMatcher({ readConfig: async () => entry.config });
       expect(await matcher.matches(ANDROID_DEVICE, { runtime: ANDROID, deviceFamily })).toBe(
         deviceFamily === entry.family ? "match" : "mismatch",
       );
     });
   }
+
+  test.each([
+    ["tv", "android-tv", "tv_1080p"],
+    ["watch", "android-wear", "wearos_small_round"],
+    ["automotive", "android-automotive", "automotive_1024p_landscape"],
+  ] as const)("a %s image is never a phone or tablet", async (family, tag, profile) => {
+    const runtime = `system-images;android-34;${tag};x86_64`;
+    const config = androidConfig(profile, {
+      systemImagePackage: runtime,
+      apiLevel: 34,
+      tag,
+      screenWidth: 1920,
+      screenHeight: 1080,
+      screenDensity: 160,
+    });
+    const matcher = new DefaultManagedSpecMatcher({ readConfig: async () => config });
+    for (const deviceFamily of FAMILIES) {
+      expect(await matcher.matches(ANDROID_DEVICE, { runtime, deviceFamily })).toBe(
+        deviceFamily === family ? "match" : "mismatch",
+      );
+    }
+  });
+
+  test("a family-only watch request creates the default watch profile", async () => {
+    expect(
+      await new DefaultManagedSpecResolver().resolve(
+        "android",
+        { runtime: "system-images;android-34;android-wear;x86_64", deviceFamily: "watch" },
+        {},
+      ),
+    ).toMatchObject({ kind: "resolved", resolvedSpec: { deviceType: "wearos_small_round" } });
+  });
+
+  test.each([
+    ["android-tv", "phone"],
+    ["android-wear", "tablet"],
+    ["android-automotive", "tv"],
+  ] as const)(
+    "a %s runtime conflicts with deviceFamily %s even when deviceType is defaulted",
+    async (tag, deviceFamily) => {
+      expect(
+        await new DefaultManagedSpecResolver().resolve(
+          "android",
+          { runtime: `system-images;android-34;${tag};x86_64`, deviceFamily },
+          {},
+        ),
+      ).toMatchObject({ kind: "unsupported", message: expect.stringContaining("image") });
+    },
+  );
+
+  test("a tv runtime with deviceFamily tv resolves to the tv default profile", async () => {
+    expect(
+      await new DefaultManagedSpecResolver().resolve(
+        "android",
+        { runtime: "system-images;android-34;android-tv;x86_64", deviceFamily: "tv" },
+        {},
+      ),
+    ).toMatchObject({ kind: "resolved", resolvedSpec: { deviceType: "tv_1080p" } });
+  });
+
+  test("an explicit tv profile conflicts with a phone family", async () => {
+    expect(
+      await new DefaultManagedSpecResolver().resolve(
+        "android",
+        { runtime: ANDROID, deviceType: "tv_1080p", deviceFamily: "phone" },
+        {},
+      ),
+    ).toMatchObject({ kind: "unsupported", message: expect.stringContaining("is a tv") });
+  });
 
   test("unreadable geometry is unknown and never deletes the assigned device", async () => {
     const config = androidConfig("pixel_8", { screenDensity: undefined });
@@ -361,9 +433,9 @@ describe("binding Android family constraints", () => {
     expect(await matcher.matches(ANDROID_DEVICE, { runtime: ANDROID })).toBe("match");
     const h = await harness("android", { assigned: { ...ANDROID_DEVICE }, config });
     const before = await h.registry.getAssignment(h.key);
-    expect((await h.acquire({ runtime: ANDROID, deviceFamily: "phone" })).failure?.code).toBe(
-      "discovery_incomplete",
-    );
+    expect(
+      expectFailed(await h.acquire({ runtime: ANDROID, deviceFamily: "phone" })).failure.code,
+    ).toBe("discovery_incomplete");
     expectNoMutation(h);
     expect(await h.registry.getAssignment(h.key)).toEqual(before);
   });
@@ -377,7 +449,7 @@ describe("binding Android family constraints", () => {
     async (deviceFamily, deviceType) => {
       const h = await harness("android");
       const spec: BindingRequestedSpec = { runtime: ANDROID, deviceFamily };
-      const result = await h.acquire(spec);
+      const result = expectReady(await h.acquire(spec));
       expect(result).toMatchObject({
         outcome: "ready",
         disposition: "created",
@@ -419,7 +491,7 @@ describe("binding Android family constraints", () => {
     const h = await harness("android", {
       resolverOptions: { androidProfileCatalog: { listProfileIds: async () => ["pixel_8"] } },
     });
-    const result = await h.acquire({ runtime: ANDROID, deviceFamily: "tablet" });
+    const result = expectFailed(await h.acquire({ runtime: ANDROID, deviceFamily: "tablet" }));
     expect(result.failure?.code).toBe("spec_unsupported");
     expect(result.failure?.message).toContain("pixel_tablet");
     expectNoMutation(h);
@@ -463,7 +535,7 @@ describe("managed family/model validation and fingerprint compatibility", () => 
       const h = await harness(platform, {
         iosCatalog: catalog([model(IPHONE_16), model(deviceType)]),
       });
-      const result = await h.acquire({ runtime, deviceType, deviceFamily });
+      const result = expectFailed(await h.acquire({ runtime, deviceType, deviceFamily }));
       expect(result.failure?.code).toBe("spec_unsupported");
       expect(result.failure?.message).toContain(deviceType);
       expect(result.failure?.message).toContain(deviceFamily);
@@ -497,11 +569,13 @@ describe("managed family/model validation and fingerprint compatibility", () => 
     "%s cutout without model stays refused with family",
     async (platform) => {
       const h = await harness(platform);
-      const result = await h.acquire({
-        runtime: platform === "android" ? ANDROID : IOS,
-        deviceFamily: "phone",
-        displayCutout: "none",
-      });
+      const result = expectFailed(
+        await h.acquire({
+          runtime: platform === "android" ? ANDROID : IOS,
+          deviceFamily: "phone",
+          displayCutout: "none",
+        }),
+      );
       expect(result.failure?.code).toBe("spec_unsupported");
       expect(result.failure?.message).toContain("explicit deviceType");
       expectNoMutation(h);
@@ -528,4 +602,26 @@ describe("managed family/model validation and fingerprint compatibility", () => 
     });
     expect(phone).toEqual(plain);
   });
+});
+
+test("fold RAM override separates fingerprints and rejects a different AVD RAM size", async () => {
+  const spec = {
+    runtime: ANDROID,
+    deviceType: "pixel_9_pro_fold",
+  };
+  const displayCutout = classifyDisplayCutout("android", "pixel_9_pro_fold");
+  const overridden = { ...spec, configuration: { memoryMb: 4096 } };
+  expect(computeManagedSpecFingerprint("android", { ...spec, displayCutout })).not.toEqual(
+    computeManagedSpecFingerprint("android", { ...overridden, displayCutout }),
+  );
+  for (const ramSizeMb of [4096, 11674]) {
+    const matcher = new DefaultManagedSpecMatcher({
+      readConfig: async () => androidConfig(spec.deviceType, { ramSizeMb }),
+    });
+    const device = { ...ANDROID_DEVICE, deviceType: spec.deviceType };
+    expect(await matcher.matches(device, overridden)).toBe(
+      ramSizeMb === 4096 ? "match" : "mismatch",
+    );
+    expect(await matcher.matches(device, spec)).toBe("match");
+  }
 });

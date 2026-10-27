@@ -1,9 +1,5 @@
 <?xml version="1.0" ?>
 <SmellBaseline>
   <ManuallySuppressedIssues/>
-  <CurrentIssues>
-    <ID>EmptyFunctionBlock:VideoHandshakeTest.kt:VideoHandshakeTest.FakeConnection${}</ID>
-    <ID>LongMethod:RotationMonitorTest.kt:RotationMonitorTest$@Test fun throwingCallbackDoesNotRetryRotationOrResetNestedReaderFailures</ID>
-    <ID>TooGenericExceptionThrown:VideoSessionLeaseTest.kt:VideoSessionLeaseTest$throw RuntimeException("chmod denied")</ID>
-  </CurrentIssues>
+  <CurrentIssues/>
 </SmellBaseline>

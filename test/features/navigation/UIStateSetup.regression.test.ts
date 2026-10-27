@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { DefaultUIStateSetup } from "../../../src/features/navigation/DefaultUIStateSetup";
@@ -29,7 +30,13 @@ const settings: ObserveResult = JSON.parse(
 const device: BootedDevice = { deviceId: "setup-device", name: "Setup", platform: "ios" };
 
 function edge(text: string): NavigationEdge {
-  return { from: "Demos", to: "Startup", timestamp: 0, uiState: { selectedElements: [{ text }] } };
+  return {
+    edgeType: "tool",
+    from: "Demos",
+    to: "Startup",
+    timestamp: 0,
+    uiState: { selectedElements: [{ text }] },
+  };
 }
 
 function setup(after = demos.structuredContent) {
@@ -54,10 +61,15 @@ describe("UI-state setup only taps exact selectable controls", () => {
   for (const text of ["Heavy", "Heavy Computation"]) {
     test(`does not tap ${text}: substring or exact non-selectable button`, async () => {
       const taps: unknown[] = [];
-      ToolRegistry.register("tapOn", "Fake tap", {}, async (args) => {
-        taps.push(args.selector);
-        return createStructuredToolResponse({ success: true });
-      });
+      ToolRegistry.register(
+        "tapOn",
+        "Fake tap",
+        z.record(z.string(), z.unknown()),
+        async (args) => {
+          taps.push(args.selector);
+          return createStructuredToolResponse({ success: true });
+        },
+      );
       expect(await setup().setupUIState(edge(text), "ios")).toEqual([]);
       expect(taps).toEqual([]);
     });
@@ -65,7 +77,7 @@ describe("UI-state setup only taps exact selectable controls", () => {
 
   test("a current-screen unselected tab remains replayable", async () => {
     const taps: unknown[] = [];
-    ToolRegistry.register("tapOn", "Fake tap", {}, async (args) => {
+    ToolRegistry.register("tapOn", "Fake tap", z.record(z.string(), z.unknown()), async (args) => {
       taps.push(args.selector);
       expect(args.deviceId).toBe(device.deviceId);
       return createStructuredToolResponse({ success: true });
@@ -78,7 +90,7 @@ describe("UI-state setup only taps exact selectable controls", () => {
 
   test("a setup tap changing screens aborts before any later selection", async () => {
     const taps: unknown[] = [];
-    ToolRegistry.register("tapOn", "Fake tap", {}, async (args) => {
+    ToolRegistry.register("tapOn", "Fake tap", z.record(z.string(), z.unknown()), async (args) => {
       taps.push(args.selector);
       return createStructuredToolResponse({ success: true });
     });
@@ -92,7 +104,7 @@ describe("UI-state setup only taps exact selectable controls", () => {
 
   test("an already-selected tab does not issue a setup tap", async () => {
     let taps = 0;
-    ToolRegistry.register("tapOn", "Fake tap", {}, async () => {
+    ToolRegistry.register("tapOn", "Fake tap", z.record(z.string(), z.unknown()), async () => {
       taps++;
       return createStructuredToolResponse({ success: true });
     });
@@ -102,7 +114,7 @@ describe("UI-state setup only taps exact selectable controls", () => {
 
   test("navigateTo aborts a screen-changing setup even if its screen tracker still reports the source", async () => {
     const taps: unknown[] = [];
-    ToolRegistry.register("tapOn", "Fake tap", {}, async (args) => {
+    ToolRegistry.register("tapOn", "Fake tap", z.record(z.string(), z.unknown()), async (args) => {
       taps.push(args.selector);
       return createStructuredToolResponse({ success: true });
     });
@@ -126,22 +138,18 @@ describe("UI-state setup only taps exact selectable controls", () => {
     let observations = 0;
     const findPath = spyOn(graph, "findPath");
     try {
-      const nav = new NavigateTo(
-        device,
-        new FakeAdbClientFactory(),
-        setup(settings),
-        { waitForScreen: async () => true },
-        graph,
-        new FakeTimer(),
-        undefined,
-        undefined,
-        () => ({
+      const nav = new NavigateTo(device, new FakeAdbClientFactory(), {
+        uiStateSetup: setup(settings),
+        screenWaiter: { waitForScreen: async () => true },
+        navigationManager: graph,
+        timer: new FakeTimer(),
+        foregroundObserverProvider: () => ({
           execute: async () => {
             observations++;
             return {};
           },
         }),
-      );
+      });
       const result = await nav.execute({ targetScreen: "Startup", platform: "ios" });
       expect(result.success).toBe(false);
       expect(result.error).toContain("changed screen");

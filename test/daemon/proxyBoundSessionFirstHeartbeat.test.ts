@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { describe, expect, test, spyOn, beforeEach, afterEach } from "bun:test";
 import {
@@ -11,12 +12,12 @@ import {
 } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   SUSPECT_GRACE_MS,
-} from "../../src/daemon/sessionLivenessWindows";
-import { DAEMON_VERSION, HEARTBEAT_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
+} from "../../src/daemon/wire/sessionLivenessWindows";
+import { DAEMON_VERSION, HEARTBEAT_SESSION_LIVENESS_POLICY } from "../../src/daemon/wire/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -110,9 +111,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
               structuredContent: { devices: [] },
             }
           : undefined,
-      onCallDaemonMethod: (method, params) => {
+      onCallDaemonMethod: async (method, params) => {
         if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
-          sessionManager.recordHeartbeat(params.sessionId);
+          await deliverDaemonHeartbeat(sessionManager, params.sessionId);
         }
       },
     });
@@ -159,9 +160,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
             throw new Error("inventory failed");
           }
         },
-        onCallDaemonMethod: (method, params) => {
+        onCallDaemonMethod: async (method, params) => {
           if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
-            sessionManager.recordHeartbeat(params.sessionId);
+            await deliverDaemonHeartbeat(sessionManager, params.sessionId);
           }
         },
       });
@@ -329,7 +330,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
           heartbeatObserved = true;
           await released.promise;
-          sessionManager.recordHeartbeat(params.sessionId);
+          await deliverDaemonHeartbeat(sessionManager, params.sessionId);
         }
       },
     });
@@ -390,7 +391,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
           heartbeatObserved = true;
           await released.promise;
-          sessionManager.recordHeartbeat(params.sessionId);
+          await deliverDaemonHeartbeat(sessionManager, params.sessionId);
         }
       },
     });
@@ -454,7 +455,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
           heartbeatObserved = true;
           await released.promise;
-          sessionManager.recordHeartbeat(params.sessionId);
+          await deliverDaemonHeartbeat(sessionManager, params.sessionId);
         }
       },
     });
@@ -506,7 +507,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   } {
     let attempts = 0;
     const client: FakeDaemonClient = new FakeDaemonClient({
-      onCallDaemonMethod: (method, params) => {
+      onCallDaemonMethod: async (method, params) => {
         if (method !== "daemon/heartbeat" || typeof params.sessionId !== "string") {
           return;
         }
@@ -515,7 +516,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
           client.emitConnectionClosed();
           throw new DaemonUnavailableError("Daemon socket connection lost: connection closed");
         }
-        sessionManager.recordHeartbeat(params.sessionId);
+        await deliverDaemonHeartbeat(sessionManager, params.sessionId);
       },
     });
     const ownershipClaims = () =>
@@ -720,8 +721,8 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         if (heartbeatAttempts === 1) {
           throw new Error("transport closed before delivery");
         }
-        sessionManager.recordHeartbeat(params.sessionId, {
-          livenessOwnerToken: params.livenessOwnerToken as string,
+        await deliverDaemonHeartbeat(sessionManager, params.sessionId, {
+          livenessOwnerToken: params.livenessOwnerToken,
           claimLivenessOwnership: params.claimLivenessOwnership === true,
         });
       },
@@ -864,7 +865,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
           staleHeartbeats += 1;
           if (staleHeartbeats === 1) {
             // Establishment heartbeat succeeds.
-            sessionManager.recordHeartbeat(params.sessionId);
+            await deliverDaemonHeartbeat(sessionManager, params.sessionId);
             return;
           }
           // The keeper's next tick finds the transport gone, forcing a reconnect.
@@ -1227,13 +1228,13 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     });
     let attempts = 0;
     const client = new FakeDaemonClient({
-      onCallDaemonMethod: (method, params) => {
+      onCallDaemonMethod: async (method, params) => {
         if (method !== "daemon/heartbeat" || typeof params.sessionId !== "string") {
           return;
         }
         attempts++;
         if (attempts === 1) {
-          sessionManager.recordHeartbeat(params.sessionId);
+          await deliverDaemonHeartbeat(sessionManager, params.sessionId);
           return;
         }
         return new Promise<void>(() => {});
@@ -1281,11 +1282,11 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     let subscriptionStartedAtHeartbeat = false;
     let heartbeatObserved = false;
     const fakeClient = new FakeDaemonClient({
-      onCallDaemonMethod: (method, params) => {
+      onCallDaemonMethod: async (method, params) => {
         if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
           heartbeatObserved = true;
           subscriptionStartedAtHeartbeat = subscriptionStarted;
-          sessionManager.recordHeartbeat(params.sessionId);
+          await deliverDaemonHeartbeat(sessionManager, params.sessionId);
         }
       },
     });

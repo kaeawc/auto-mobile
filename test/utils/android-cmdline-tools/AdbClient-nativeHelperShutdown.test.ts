@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import {
   AdbClient,
@@ -12,6 +12,8 @@ import { FakeNativeHelperProcessControl } from "../../fakes/FakeNativeHelperProc
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeLogger } from "../../fakes/FakeLogger";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
+
+afterEach(() => mock.restore());
 
 function harness() {
   const timer = new FakeTimer();
@@ -28,25 +30,15 @@ function harness() {
   const host = new FakeHostCommandExecutor();
   function client(child: FakeChildProcess) {
     control.processes.set(child.pid!, "helper");
-    return new AdbClient(
-      null,
-      () => host.executeCommand("adb"),
-      () => {
+    return new AdbClient(null, () => host.executeCommand("adb"), {
+      spawnFn: () => {
         // Spawn acknowledgement is asynchronous, as with a real child, without a host timer.
         queueMicrotask(() => child.emit("spawn"));
         return child as ChildProcess;
       },
-      undefined,
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      registry,
-    );
+      nativeHelperRegistry: registry,
+    });
   }
   return { timer, store, control, registry, client, host };
 }
@@ -64,15 +56,16 @@ describe("host adb native helper shutdown", () => {
     const h = harness();
     const children = [new FakeChildProcess(h.timer), new FakeChildProcess(h.timer)];
     const signals: string[] = [];
-    const spies = children.map((child, index) =>
-      spyOn(child, "kill").mockImplementation((signal) => {
+    const spies = [spyOn(children[0]!, "kill"), spyOn(children[1]!, "kill")];
+    for (const [index, child] of children.entries()) {
+      spies[index]!.mockImplementation((signal) => {
         signals.push(`${index}:${signal}`);
         if (signal === "SIGKILL" || index === 0) {
           child.simulateExit(0, typeof signal === "string" ? signal : null);
         }
         return true;
-      }),
-    );
+      });
+    }
     try {
       await h.client(children[0]!).spawn(["shell", "getevent"]);
       await h.client(children[1]!).spawn(["exec-out", "screenrecord"]);
@@ -130,21 +123,11 @@ describe("host adb native helper shutdown", () => {
       spawn: () => child as ChildProcess,
       executeCommandWithChild: () => ({ child: child as ChildProcess, result }),
     };
-    const client = new AdbClient(
-      null,
-      () => h.host.executeCommand("adb"),
-      null,
-      undefined,
-      h.timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      host,
-      undefined,
-      undefined,
-      h.registry,
-    );
+    const client = new AdbClient(null, () => h.host.executeCommand("adb"), {
+      timer: h.timer,
+      hostProcessExecutor: host,
+      nativeHelperRegistry: h.registry,
+    });
     // Exercise the production child-returning exec path with an injected host executor.
     Reflect.set(client, "isTestMode", false);
     const pending = client.execute(["get-state"], { noRetry: true });

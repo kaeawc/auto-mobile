@@ -73,7 +73,7 @@ class FakePoolPort implements EmulatorLossIncidentPoolPort {
     name: "Pixel",
     platform: "android",
     sessionId: null,
-    status: "available",
+    status: "idle",
     lastUsedAt: 0,
     assignmentCount: 0,
     errorCount: 0,

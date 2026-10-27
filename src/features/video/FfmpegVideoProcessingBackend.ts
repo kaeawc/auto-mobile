@@ -1,61 +1,88 @@
-import { toActionableError } from "../../models/ActionableError";
-import { readProcessGenerationTokenForPid } from "../../daemon/daemonFiles";
-import {
-  forceStopHostRecorder,
-  defaultHostRecorderProcessControl,
-  type HostRecorderProcessControl,
-} from "./hostRecorderTeardown";
-import { errorMessage } from "../../utils/describeUnknownError";
 import { platform } from "node:os";
 import path from "node:path";
-import { promises as fsPromises } from "node:fs";
+import { readProcessGenerationTokenForPid } from "../../daemon/daemonFiles";
 import { ActionableError, type BootedDevice } from "../../models";
-import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { exponentialBackoff, normalizeBackoff, type BackoffInput } from "../../utils/Backoff";
-import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { createVideoSimCtl, type VideoSimCtl } from "./VideoSimCtl";
-import { selectLiveSimulatorDisplay } from "../../utils/ios-cmdline-tools/SimulatorDisplays";
-import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
-import { logger } from "../../utils/logger";
-import { getRequestContext } from "../../utils/AbortContext";
-import { withRemainingBudget } from "../../utils/withRemainingBudget";
-import {
-  defaultRecordingCodecProbe,
-  probeDurationMs,
-  type RecordingCodecProbe,
-} from "./recordingCodec";
-import { probeScreenrecordDisplayFlag } from "./AndroidRecordingDisplay";
-import {
-  DefaultFfmpegClient,
-  type FfmpegClient,
-  type FfmpegProbeResult,
-  type FfmpegProcess,
-} from "../../utils/media/FfmpegClient";
 import {
   PROCESS_EXIT_TIMEOUT_MS,
-  ProcessTeardownUnconfirmedError,
   trackProcess,
   waitForExit,
   waitForSpawn,
-  type ProcessExitState,
   type ProcessTracker,
-  type StoppableProcess,
 } from "../../utils/ChildProcessTracker";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { selectLiveSimulatorDisplay } from "../../utils/ios-cmdline-tools/SimulatorDisplays";
+import { logger } from "../../utils/logger";
+import {
+  DefaultFfmpegClient,
+  type FfmpegClient,
+  type FfmpegProcess,
+} from "../../utils/media/FfmpegClient";
+import { withRemainingBudget } from "../../utils/withRemainingBudget";
+import { probeScreenrecordDisplayFlag } from "./AndroidRecordingDisplay";
+import {
+  FfmpegCapabilities,
+  runWithinDeadline,
+  throwIfRecordingStartAborted,
+  type HardwareAccelInfo,
+} from "./FfmpegCapabilities";
+import type { FfmpegBackendHandle } from "./FfmpegRecordingHandle";
+import { FfmpegRecordingPostProcessor } from "./FfmpegRecordingPostProcessor";
+import {
+  defaultLiveScreenPixels,
+  type FfmpegVideoProcessingBackendDependencies,
+  type LiveScreenPixels,
+} from "./FfmpegVideoProcessingBackendDependencies";
+import { createVideoSimCtl, type VideoSimCtl } from "./VideoSimCtl";
 import {
   VideoCaptureFinalizationError,
   VideoCaptureStartCleanupError,
+  type OrphanCaptureStopOptions,
   type RecordingHandle,
   type RecordingResult,
   type VideoCaptureBackend,
   type VideoCaptureConfig,
   type VideoCaptureTeardownDescriptor,
-  type OrphanCaptureStopOptions,
 } from "./VideoRecorderService";
+import { buildProcessFailureMessage, logProcessWarnings } from "./ffmpegDiagnostics";
+import { buildFfmpegArgs } from "./ffmpegRecordingArgs";
+import {
+  defaultRecordingFileProbe,
+  defaultRecordingFileRemover,
+  type RecordingFileProbe,
+  type RecordingFileRemover,
+} from "./ffmpegRecordingFiles";
+import {
+  IOS_RECORDING_START_MESSAGES,
+  IOS_RECORDING_START_TIMEOUT_MS,
+  IOS_RECORDING_START_MAX_ATTEMPTS,
+  waitForStderrMessage,
+  waitWithinDeadline,
+  forceStopStartingProcess,
+  throwAndroidRecordingStartFailure,
+} from "./ffmpegRecordingStartup";
+import {
+  defaultHostRecorderProcessControl,
+  forceStopHostRecorder,
+  type HostRecorderProcessControl,
+} from "./hostRecorderTeardown";
+import {
+  defaultRecordingCodecProbe,
+  probeDurationMs,
+  type RecordingCodecProbe,
+} from "./recordingCodec";
+
+export * from "./ffmpegRecordingArgs";
+export * from "./ffmpegRecordingFiles";
+export * from "./ffmpegRecordingStartup";
+export type { FfmpegBackendHandle } from "./FfmpegRecordingHandle";
+
+export { buildFfmpegFailureMessage } from "./ffmpegDiagnostics";
 
 export { PROCESS_EXIT_TIMEOUT_MS, waitForExit };
-export type { ProcessTracker, StoppableProcess };
+export type { ProcessTracker, StoppableProcess } from "../../utils/ChildProcessTracker";
 // `xcrun simctl io ... recordVideo` only writes the MP4/MOV moov atom after it
 // receives SIGINT. If we SIGKILL it before the flush finishes the on-disk file is
 // truncated (often 0 bytes), and the downstream ffmpeg `-c copy` remux fails with
@@ -63,119 +90,8 @@ export type { ProcessTracker, StoppableProcess };
 // the generic 5s window, so the iOS stop path waits much longer before escalating
 // to SIGKILL. In the normal case simctl exits within ~1s and we return immediately.
 export const IOS_RECORDING_STOP_TIMEOUT_MS = 30000;
-// Even after the `simctl recordVideo` process has fully exited, the raw `.mov`
-// can lag behind on a loaded CI runner: the moov-atom flush and the filesystem
-// write are not guaranteed to be visible the instant the process exits, so a
-// single `stat` immediately after `waitForExit` can momentarily see the file
-// missing or 0 bytes and hard-fail. We poll (bounded, with backoff) for the file
-// to exist, be non-empty, and have a stable size before handing it to ffmpeg.
-export const IOS_RECORDING_FILE_READY_TIMEOUT_MS = 15000;
-const IOS_RECORDING_FILE_READY_INITIAL_BACKOFF_MS = 100;
-const IOS_RECORDING_FILE_READY_MAX_BACKOFF_MS = 1000;
-// The iOS post-process is a stream copy unless a `resolution` was requested; then it is a
-// full decode, scale and re-encode of every frame, which grows with the recording (up to
-// 3600 s). A fixed 60 s SIGKILLed long re-encodes and failed the stop (#10188). The copy
-// keeps the 60 s budget, and that is also the floor for a re-encode. The ratio and ceilings
-// below are judgment, NOT measured on a host: half a second of budget per recorded second
-// assumes the encoder runs at least twice as fast as real time (hardware encoders and even
-// libx264 ultrafast at a phone-sized frame are expected to be well above that).
-//
-// Who bounds a stop decides the ceiling. A stop made by a live tool request is bounded by
-// that request's remaining time (see boundPostProcessBudgetToRequest), with 30 min (the
-// ratio at the longest iOS recording) as the ceiling when the request carries no deadline.
-// A stop that is not driven by a live request (the auto-stop and size-cap timers, a device
-// disconnect, teardown) runs outside any request context and has only its own budget: the
-// ceiling there is 10 min, the ratio at a 20 minute recording, so an unattended stop never
-// holds ffmpeg and the recording's ownership for half an hour.
-const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
-const FFMPEG_REENCODE_BUDGET_PER_RECORDED_SECOND_MS = 500;
-const FFMPEG_REENCODE_MAX_BUDGET_MS = 30 * 60 * 1000;
-export const FFMPEG_UNATTENDED_REENCODE_MAX_BUDGET_MS = 10 * 60 * 1000;
-
-/** Whether the iOS post-process can stream-copy the raw capture instead of re-encoding it. */
-function isStreamCopyPostProcess(config: VideoCaptureConfig): boolean {
-  return !config.resolution;
-}
-
-/**
- * Time ffmpeg may take to post-process the iOS capture. `recordedSeconds` is how long the
- * capture ran; unknown means no safe estimate, so a re-encode gets the ceiling.
- */
-export function ffmpegPostProcessBudgetMs(
-  config: VideoCaptureConfig,
-  recordedSeconds: number | undefined,
-  reencodeCeilingMs: number = FFMPEG_REENCODE_MAX_BUDGET_MS,
-): number {
-  if (isStreamCopyPostProcess(config)) {
-    return FFMPEG_POST_PROCESS_TIMEOUT_MS;
-  }
-  if (recordedSeconds === undefined || !Number.isFinite(recordedSeconds)) {
-    return reencodeCeilingMs;
-  }
-  // The output is capped at maxDurationSeconds (`-t`), so that is all ffmpeg re-encodes.
-  const outputSeconds =
-    config.maxDurationSeconds && config.maxDurationSeconds > 0
-      ? Math.min(recordedSeconds, config.maxDurationSeconds)
-      : recordedSeconds;
-  return Math.min(
-    reencodeCeilingMs,
-    Math.max(
-      FFMPEG_POST_PROCESS_TIMEOUT_MS,
-      Math.ceil(Math.max(0, outputSeconds) * FFMPEG_REENCODE_BUDGET_PER_RECORDED_SECOND_MS),
-    ),
-  );
-}
-
-// Left for the stop's own tail (codec probe, size read, database update) and the response.
-// A judgment, not measured.
-const POST_PROCESS_RESPONSE_MARGIN_MS = 5000;
-
-/**
- * Cuts a post-process budget to the time left in the stop request, or returns undefined
- * when nothing is left. A stream copy or a re-encode takes whatever is left: the estimate
- * of a re-encode is a guess, so it is attempted with the time the request has rather than
- * refused up front (#10217), and only a run that really overruns falls back to the raw
- * capture. `remainingMs` is undefined when no request deadline is ambient, which leaves the
- * budget as is.
- */
-export function boundPostProcessBudgetToRequest(
-  budgetMs: number,
-  remainingMs: number | undefined,
-): number | undefined {
-  if (remainingMs === undefined) {
-    return budgetMs;
-  }
-  const availableMs = remainingMs - POST_PROCESS_RESPONSE_MARGIN_MS;
-  return availableMs <= 0 ? undefined : Math.min(budgetMs, availableMs);
-}
-
-/**
- * ffmpeg ran out of its time (or the stop request had none left to give it), as opposed to
- * failing. The raw capture is returned for either, but the warning says which.
- */
-class PostProcessOutOfTimeError extends ActionableError {}
-
-/** What iOS post-processing produced: the processed output, or the raw capture kept instead. */
-type PostProcessOutcome = { kind: "processed" } | { kind: "kept-raw"; warning: string };
-// Total budget for the whole iOS start path: the simctl availability probe, the
-// spawn, and every attempt's "Recording started" handshake. The handshake is the
-// expensive part — simctl only emits it after encoding the first video frame — and
-// the budget is split across the bounded retries, so the original 5s left each
-// attempt under two seconds. On the self-hosted macOS runner (which also runs
-// xcodebuild and Simulator) that was routinely too short, so essentially every PR
-// saw the iOS video-recording lane fail with "Timed out waiting for Recording
-// started" (#6857). Keep it bounded — an actually-wedged simulator must still
-// fail rather than hang — but at the same order as the stop-side waits, which
-// already carry the "loaded CI macOS runner" rationale.
-export const IOS_RECORDING_START_TIMEOUT_MS = 15000;
 const IOS_LIVE_DISPLAY_PROBE_TIMEOUT_MS = 2000;
 const IOS_RECORDING_START_CLEANUP_TIMEOUT_MS = 500;
-// A cold or loaded simulator can silently miss the very first `recordVideo`
-// start handshake (#4076): simctl produces no "Recording started" and no error,
-// and the single attempt times out. Retry the start a bounded number of times
-// before failing, capturing simulator state on each miss so a genuine wedge is
-// diagnosable rather than surfacing as a bare timeout.
-const IOS_RECORDING_START_MAX_ATTEMPTS = 2;
 // Budget for the terminal attempt's simulator-state probe. Nothing is waiting on
 // the start deadline once the last attempt has failed, so the probe gets a budget a
 // loaded host can actually deliver — `xcrun simctl list devices` regularly needs
@@ -186,483 +102,53 @@ const IOS_RECORDING_DIAGNOSTIC_TIMEOUT_MS = 3000;
 // the pending retry, so it stays a small slice: enriching a failure must never
 // starve the attempt that could still succeed.
 const IOS_RECORDING_RETRY_DIAGNOSTIC_TIMEOUT_MS = 250;
-// `simctl` emits this only after processing its first video frame. The earlier
-// "Defaulting to display" diagnostic proves only display selection, which can
-// still produce a zero-byte capture on a cold simulator.
-const IOS_RECORDING_START_MESSAGES = ["Recording started"];
-
-interface HardwareAccelInfo {
-  encoder: string;
-  available: boolean;
-  description: string;
-}
-
-type FfmpegInput = { type: "pipe" } | { type: "file"; path: string };
-
-type FfmpegDiagnosticsTracker = Pick<ProcessTracker, "exitState" | "stderr">;
-type ProcessDiagnosticsTracker = Pick<ProcessTracker, "exitState" | "stderr">;
-
-function isFailedExitCode(exitCode: number | null | undefined): boolean {
-  return exitCode !== undefined && exitCode !== 0;
-}
-
-function isFailedExitState(exitState: ProcessExitState): boolean {
-  return (
-    isFailedExitCode(exitState.exitCode) ||
-    (exitState.signal !== undefined && exitState.signal !== null)
-  );
-}
-
-interface FfmpegBackendHandle {
-  kind: "ffmpeg";
-  platform: "android" | "ios";
-  captureTracker: ProcessTracker;
-  ffmpegTracker?: ProcessTracker;
-  capturePath?: string;
-  captureTeardown?: VideoCaptureTeardownDescriptor;
-  config: VideoCaptureConfig;
-}
-
-/**
- * Minimal filesystem surface for probing a recording file's size. Returns the
- * size in bytes, or `null` when the file does not yet exist. Narrowed so the
- * readiness poll can be unit-tested with a fake instead of a real `stat`.
- */
-export interface RecordingFileProbe {
-  size(filePath: string): Promise<number | null>;
-}
-
-const defaultRecordingFileProbe: RecordingFileProbe = {
-  async size(filePath: string): Promise<number | null> {
-    try {
-      const stats = await fsPromises.stat(filePath);
-      return stats.size;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw toActionableError(error, `Failed to stat recording ${filePath}`);
-      }
-      // ENOENT is expected while ffmpeg hasn't created the output file yet;
-      // null lets the readiness poll keep waiting instead of erroring out.
-      logger.debug(
-        `src/features/video/FfmpegVideoProcessingBackend.ts recording file stat failed: ${error}`,
-        error,
-      );
-      return null;
-    }
-  },
-};
-
-/**
- * Minimal filesystem surface for deleting a raw capture file. Narrowed to the one
- * operation the iOS start-retry needs (rather than reusing the repo-wide
- * `FileSystem`) so the retry path can be unit-tested with a fake.
- */
-export interface RecordingFileRemover {
-  remove(filePath: string): Promise<void>;
-}
-
-const defaultRecordingFileRemover: RecordingFileRemover = {
-  async remove(filePath: string): Promise<void> {
-    await fsPromises.rm(filePath, { force: true });
-  },
-};
-
-export interface WaitForRecordingFileOptions {
-  probe?: RecordingFileProbe;
-  timeoutMs?: number;
-  backoff?: BackoffInput;
-  timer?: Timer;
-}
-
-/**
- * Wait for a `simctl recordVideo` raw capture file to fully materialize after the
- * recorder process has exited. Polls with backoff until the file exists, is
- * non-empty, and its size has stopped changing between two consecutive probes
- * (so we never hand a still-flushing/truncated file to ffmpeg). Throws a
- * diagnostic error on timeout describing what was actually observed
- * (never appeared / stayed empty / never stabilized) instead of failing on the
- * first missing-file glance.
- */
-export async function waitForRecordingFileReady(
-  filePath: string,
-  options: WaitForRecordingFileOptions = {},
-): Promise<number> {
-  const probe = options.probe ?? defaultRecordingFileProbe;
-  const timer = options.timer ?? defaultTimer;
-  const timeoutMs = options.timeoutMs ?? IOS_RECORDING_FILE_READY_TIMEOUT_MS;
-  const backoff = normalizeBackoff(
-    options.backoff ??
-      exponentialBackoff({
-        initialDelayMs: IOS_RECORDING_FILE_READY_INITIAL_BACKOFF_MS,
-        maxDelayMs: IOS_RECORDING_FILE_READY_MAX_BACKOFF_MS,
-      }),
-  );
-
-  const deadline = timer.now() + timeoutMs;
-  let attempt = 0;
-  let everExisted = false;
-  let previousSize: number | null = null;
-
-  for (;;) {
-    attempt++;
-    const size = await probe.size(filePath);
-    if (size !== null) {
-      everExisted = true;
-      // A non-empty file whose size matches the previous probe has finished flushing.
-      if (size > 0 && size === previousSize) {
-        return size;
-      }
-    }
-    previousSize = size;
-
-    if (timer.now() >= deadline) {
-      const observed = describeRecordingFileReadiness(everExisted, previousSize);
-      throw new Error(
-        `iOS recording file not ready at ${filePath} after ${timeoutMs}ms (${attempt} probes): ${observed}`,
-      );
-    }
-
-    await timer.sleep(backoff.delayForAttempt(attempt));
-  }
-}
-
-function describeRecordingFileReadiness(everExisted: boolean, previousSize: number | null): string {
-  return !everExisted
-    ? "never appeared"
-    : previousSize === null
-      ? "disappeared after appearing"
-      : previousSize === 0
-        ? "stayed empty (0 bytes)"
-        : `stopped at ${previousSize} bytes but never stabilized`;
-}
-
-function stderrMessages(messages: string | string[]): string[] {
-  return Array.isArray(messages) ? messages : [messages];
-}
-
-async function waitWithinDeadline<T>(
-  operation: Promise<T>,
-  deadlineMs: number,
-  timer: Timer,
-  timeoutMessage: string,
-): Promise<T> {
-  const remainingMs = Math.max(0, deadlineMs - timer.now());
-  const deadline = new AbortController();
-  const timeoutId = timer.setTimeout(() => deadline.abort(new Error(timeoutMessage)), remainingMs);
-  try {
-    return await raceWithDeadline(operation, {
-      timer,
-      signal: deadline.signal,
-      label: "FFmpeg operation",
-    });
-  } finally {
-    if (timeoutId) {
-      timer.clearTimeout(timeoutId);
-    }
-  }
-}
-
-async function runWithinDeadline<T>(
-  operation: (signal: AbortSignal) => Promise<T>,
-  deadlineMs: number,
-  timer: Timer,
-  callerSignal: AbortSignal | undefined,
-  timeoutMessage: string,
-): Promise<T> {
-  callerSignal?.throwIfAborted();
-  const deadlineController = new AbortController();
-  const signal = callerSignal
-    ? AbortSignal.any([callerSignal, deadlineController.signal])
-    : deadlineController.signal;
-  const timeoutError = new Error(timeoutMessage);
-  const remainingMs = Math.max(0, deadlineMs - timer.now());
-  const operationPromise = operation(signal);
-  const timeoutId = timer.setTimeout(() => deadlineController.abort(timeoutError), remainingMs);
-
-  try {
-    return await raceWithDeadline(operationPromise, {
-      timer,
-      signal,
-      label: "FFmpeg operation",
-    });
-  } finally {
-    timer.clearTimeout(timeoutId);
-  }
-}
-
-function hasStderrMessage(
-  tracker: Pick<ProcessTracker, "stderr">,
-  messages: string | string[],
-): boolean {
-  const stderr = tracker.stderr.join("");
-  return stderrMessages(messages).some((message) => stderr.includes(message));
-}
-
-export function containsIosRecordingStartMessage(stderr: string): boolean {
-  return IOS_RECORDING_START_MESSAGES.some((message) => stderr.includes(message));
-}
-
-export interface WaitForStderrMessageOptions {
-  timer?: Timer;
-  signal?: AbortSignal;
-}
-
-/**
- * Pipe the capture process's stdout into the encoder's stdin, attaching an
- * error handler to both streams first.
- *
- * `.pipe()` alone routes destination write errors nowhere. If the ffmpeg
- * encoder exits or crashes mid-recording (bad codec args, OOM), its stdin
- * closes while the still-running `screenrecord` capture keeps writing into it,
- * producing an unhandled stream `'error'` (EPIPE / ERR_STREAM_WRITE_AFTER_END)
- * that can crash the daemon. A broken encoder pipe is expected on abnormal
- * encoder exit, so we log at debug and swallow (error-handling strategy 3).
- */
-export function pipeCaptureToEncoder(
-  source: NodeJS.ReadableStream | null,
-  dest: NodeJS.WritableStream | null,
-): void {
-  if (!source || !dest) {
-    throw new ActionableError(
-      "Cannot pipe screenrecord output to ffmpeg: capture stdout or encoder stdin stream is unavailable",
-    );
-  }
-  dest.on("error", (error: Error) => {
-    // Encoder stdin closing (EPIPE) is expected when ffmpeg exits before capture stops.
-    logger.debug(`[FfmpegVideo] encoder stdin stream error (expected on encoder exit): ${error}`);
-  });
-  source.on("error", (error: Error) => {
-    // Capture stdout erroring after the encoder pipe closed is likewise expected.
-    logger.debug(`[FfmpegVideo] capture stdout stream error: ${error}`);
-  });
-  source.pipe(dest);
-}
-
-export async function waitForStderrMessage(
-  tracker: ProcessTracker,
-  messages: string | string[],
-  timeoutMs: number,
-  options: WaitForStderrMessageOptions = {},
-): Promise<void> {
-  const expected = stderrMessages(messages);
-  const expectedDescription = expected.join(" or ");
-  const timer = options.timer ?? defaultTimer;
-
-  if (hasStderrMessage(tracker, expected)) {
-    return;
-  }
-  if (
-    tracker.exitState.endedAt !== undefined ||
-    (tracker.process.exitCode !== null && tracker.process.exitCode !== undefined) ||
-    (tracker.process.signalCode !== null && tracker.process.signalCode !== undefined)
-  ) {
-    throw new Error(`Process exited before ${expectedDescription}`);
-  }
-  options.signal?.throwIfAborted();
-  const stderrStream = tracker.process.stderr;
-  if (!stderrStream) {
-    throw new Error(`Cannot wait for ${expectedDescription}: process stderr is not captured`);
-  }
-
-  let timeoutId: NodeJS.Timeout | undefined;
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    const cleanup = () => {
-      stderrStream.off("data", onData);
-      tracker.process.off("exit", onExit);
-      tracker.process.off("error", onError);
-      options.signal?.removeEventListener("abort", onAbort);
-      if (timeoutId) {
-        timer.clearTimeout(timeoutId);
-      }
-    };
-    const complete = (callback: () => void) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      callback();
-    };
-    const onData = () => {
-      if (hasStderrMessage(tracker, expected)) {
-        complete(resolve);
-      }
-    };
-    const onExit = () => {
-      complete(() => reject(new Error(`Process exited before ${expectedDescription}`)));
-    };
-    const onError = (error: Error) => {
-      complete(() => reject(error));
-    };
-    const onAbort = () => {
-      complete(() => reject(options.signal?.reason ?? new Error("Recording start was cancelled.")));
-    };
-
-    stderrStream.on("data", onData);
-    tracker.process.once("exit", onExit);
-    tracker.process.once("error", onError);
-    options.signal?.addEventListener("abort", onAbort, { once: true });
-    onData();
-    timeoutId = timer.setTimeout(() => {
-      if (hasStderrMessage(tracker, expected)) {
-        complete(resolve);
-        return;
-      }
-      complete(() => reject(new Error(`Timed out waiting for ${expectedDescription}`)));
-    }, timeoutMs);
-  });
-}
-
-function forceStopStartingProcess(process: StoppableProcess | undefined): void {
-  if (process && process.exitCode === null && !process.killed) {
-    process.kill("SIGKILL");
-  }
-}
-
-function throwIfRecordingStartAborted(
-  abortSignal: AbortSignal | undefined,
-  platformName: "Android" | "iOS",
-): void {
-  if (abortSignal?.aborted) {
-    throw new ActionableError(`${platformName} recording start was cancelled during shutdown.`);
-  }
-}
-
-function throwAndroidRecordingStartFailure(
-  error: unknown,
-  abortSignal: AbortSignal | undefined,
-): never {
-  throwIfRecordingStartAborted(abortSignal, "Android");
-  logger.error(`[FfmpegVideo] Failed to start Android recording: ${error}`);
-  throw toActionableError(error, `Failed to start Android recording`);
-}
-
-export function buildFfmpegArgs(
-  config: VideoCaptureConfig,
-  hwAccel: HardwareAccelInfo,
-  input: FfmpegInput,
-): string[] {
-  const args: string[] = [];
-
-  if (input.type === "pipe") {
-    args.push("-f", "mp4", "-i", "pipe:0");
-  } else {
-    args.push("-i", input.path);
-
-    if (isStreamCopyPostProcess(config)) {
-      args.push("-c", "copy");
-      args.push("-movflags", "+faststart");
-      // Keep the iOS simulator fast stream-copy remux while honoring explicit duration caps.
-      if (config.maxDurationSeconds && config.maxDurationSeconds > 0) {
-        args.push("-t", String(config.maxDurationSeconds));
-      }
-      args.push("-y");
-      args.push(config.outputPath);
-      return args;
-    }
-  }
-
-  args.push("-r", String(config.fps));
-
-  if (config.resolution) {
-    args.push("-vf", `scale=${config.resolution.width}:${config.resolution.height}`);
-  }
-
-  if (hwAccel.available) {
-    args.push("-c:v", hwAccel.encoder);
-    logger.info(`[FfmpegVideo] Using hardware acceleration: ${hwAccel.description}`);
-  } else {
-    args.push("-c:v", "libx264");
-    args.push("-preset", "ultrafast");
-    logger.warn(
-      `[FfmpegVideo] Hardware acceleration unavailable, falling back to software encoding`,
-    );
-  }
-
-  args.push("-b:v", `${config.targetBitrateKbps}k`);
-  args.push("-maxrate", `${config.targetBitrateKbps}k`);
-  args.push("-bufsize", `${config.targetBitrateKbps * 2}k`);
-
-  args.push("-profile:v", "baseline");
-  args.push("-level", "3.0");
-  args.push("-pix_fmt", "yuv420p");
-
-  args.push("-movflags", "+faststart");
-
-  if (config.maxDurationSeconds && config.maxDurationSeconds > 0) {
-    args.push("-t", String(config.maxDurationSeconds));
-  }
-
-  args.push("-y");
-  args.push(config.outputPath);
-
-  return args;
-}
-
-export function buildFfmpegFailureMessage(
-  binaryPath: string,
-  summary: string,
-  args: string[],
-  tracker: FfmpegDiagnosticsTracker,
-  outputPath?: string,
-): string {
-  const details = [
-    summary,
-    outputPath ? `output: ${outputPath}` : undefined,
-    `command: ${binaryPath} ${args.join(" ")}`,
-    `exitCode: ${tracker.exitState.exitCode ?? "null"}`,
-    `signal: ${tracker.exitState.signal ?? "null"}`,
-    `stderr:\n${tracker.stderr.join("").trim() || "(empty)"}`,
-  ].filter((line): line is string => Boolean(line));
-
-  return details.join("\n");
-}
 
 export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
-  private hwAccelCache: Map<string, HardwareAccelInfo> = new Map();
-  private ffmpegProbeResult: FfmpegProbeResult | undefined;
   // Overridable in tests so the retry path can be exercised without real waits.
   iosRecordingStartTimeoutMs: number = IOS_RECORDING_START_TIMEOUT_MS;
   iosRecordingStartMaxAttempts: number = IOS_RECORDING_START_MAX_ATTEMPTS;
 
+  private readonly simctlFactory: (device: BootedDevice) => VideoSimCtl;
+  private readonly ffmpegClient: FfmpegClient;
+  private readonly codecProbe: RecordingCodecProbe;
+  private readonly timer: Timer;
+  private readonly captureFileRemover: RecordingFileRemover;
+  private readonly liveScreenPixels: LiveScreenPixels;
+  private readonly recordingFileProbe: RecordingFileProbe;
+  private readonly readHostStartToken: (pid: number) => string | undefined;
+  private readonly hostRecorderControl: HostRecorderProcessControl;
   constructor(
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    private readonly simctlFactory: (device: BootedDevice) => VideoSimCtl = createVideoSimCtl,
-    private readonly ffmpegClient: FfmpegClient = new DefaultFfmpegClient(),
-    // Injectable so hardware-accel detection can be tested for every OS branch on
-    // any CI host, rather than only the branch matching the runner's platform.
-    private readonly platformProvider: () => NodeJS.Platform = platform,
-    // Injectable so the codec label can be asserted from synthetic files without
-    // producing real recordings (#4965).
-    private readonly codecProbe: RecordingCodecProbe = defaultRecordingCodecProbe,
-    private readonly timer: Timer = defaultTimer,
-    // Injectable so the stale-capture cleanup between iOS start attempts can be
-    // asserted without touching the real filesystem.
-    private readonly captureFileRemover: RecordingFileRemover = defaultRecordingFileRemover,
-    private readonly liveScreenPixels: (
-      device: BootedDevice,
-      timeoutMs: number,
-    ) => Promise<{ width: number; height: number } | null> = async (device, timeoutMs) => {
-      const client = IOSCtrlProxyClient.getInstance(device);
-      if (!(await client.ensureConnected())) {
-        return null;
-      }
-      const hierarchy = await client.requestHierarchySyncWithoutObservationStreamPush(
-        undefined,
-        false,
-        undefined,
-        timeoutMs,
-      );
-      const metadata = hierarchy ? client.getScreenScaleMetadata() : null;
-      return metadata ? { width: metadata.pixelWidth, height: metadata.pixelHeight } : null;
-    },
-    private readonly recordingFileProbe: RecordingFileProbe = defaultRecordingFileProbe,
-    private readonly readHostStartToken: (
-      pid: number,
-    ) => string | undefined = readProcessGenerationTokenForPid,
-    private readonly hostRecorderControl: HostRecorderProcessControl = defaultHostRecorderProcessControl,
-  ) {}
+    dependencies: FfmpegVideoProcessingBackendDependencies = {},
+  ) {
+    this.simctlFactory = dependencies.simctlFactory ?? createVideoSimCtl;
+    this.ffmpegClient = dependencies.ffmpegClient ?? new DefaultFfmpegClient();
+    this.timer = dependencies.timer ?? defaultTimer;
+    this.liveScreenPixels = dependencies.liveScreenPixels ?? defaultLiveScreenPixels;
+    const host = FfmpegVideoProcessingBackend.resolveHostSeams(dependencies);
+    this.capabilities = new FfmpegCapabilities(
+      this.ffmpegClient,
+      host.platformProvider,
+      this.timer,
+      () => this.iosRecordingStartTimeoutMs,
+    );
+    this.codecProbe = host.codecProbe;
+    this.captureFileRemover = host.captureFileRemover;
+    this.recordingFileProbe = host.recordingFileProbe;
+    this.readHostStartToken = host.readHostStartToken;
+    this.hostRecorderControl = host.hostRecorderControl;
+  }
+
+  private static resolveHostSeams(dependencies: FfmpegVideoProcessingBackendDependencies) {
+    return {
+      platformProvider: dependencies.platformProvider ?? platform,
+      codecProbe: dependencies.codecProbe ?? defaultRecordingCodecProbe,
+      captureFileRemover: dependencies.captureFileRemover ?? defaultRecordingFileRemover,
+      recordingFileProbe: dependencies.recordingFileProbe ?? defaultRecordingFileProbe,
+      readHostStartToken: dependencies.readHostStartToken ?? readProcessGenerationTokenForPid,
+      hostRecorderControl: dependencies.hostRecorderControl ?? defaultHostRecorderProcessControl,
+    };
+  }
 
   describeCaptureTeardown(handle: RecordingHandle): VideoCaptureTeardownDescriptor | undefined {
     const backendHandle = handle.backendHandle as FfmpegBackendHandle | undefined;
@@ -770,9 +256,9 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       if (outputPath !== backendHandle.capturePath) {
         await this.removeRawCapture(backendHandle.capturePath);
       }
-      this.logProcessWarnings("capture", backendHandle.captureTracker);
+      logProcessWarnings("capture", backendHandle.captureTracker);
       if (backendHandle.ffmpegTracker) {
-        this.logProcessWarnings("ffmpeg", backendHandle.ffmpegTracker);
+        logProcessWarnings("ffmpeg", backendHandle.ffmpegTracker);
       }
       return {
         recordingId: handle.recordingId,
@@ -815,6 +301,17 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       );
     }
     return { outputPath: handle.outputPath, warnings: [] };
+  }
+
+  private postProcessRecording(backendHandle: FfmpegBackendHandle) {
+    return new FfmpegRecordingPostProcessor({
+      ffmpegClient: this.ffmpegClient,
+      timer: this.timer,
+      recordingFileProbe: this.recordingFileProbe,
+      captureFileRemover: this.captureFileRemover,
+      codecProbe: this.codecProbe,
+      detectHardwareAccel: () => this.detectHardwareAccel(),
+    }).postProcessRecording(backendHandle);
   }
 
   private async removeRawCapture(capturePath: string | undefined): Promise<void> {
@@ -1254,7 +751,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         });
         attemptFailures.push(failedAttempt.description);
         if (failedAttempt.cleanupError) {
-          const message = this.buildProcessFailureMessage(
+          const message = buildProcessFailureMessage(
             `Failed to clean up iOS recording after startup failed: ${failedAttempt.description}`,
             "xcrun simctl",
             args,
@@ -1280,7 +777,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
 
         if (attempt >= maxAttempts) {
           throw new ActionableError(
-            this.buildProcessFailureMessage(
+            buildProcessFailureMessage(
               `Failed to start iOS recording after ${maxAttempts} attempt(s): ${attemptFailures.join(" | ")}`,
               "xcrun simctl",
               args,
@@ -1447,427 +944,11 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       return `simulator state unavailable: ${reason}`;
     }
   }
-
-  private async postProcessRecording(
-    backendHandle: FfmpegBackendHandle,
-  ): Promise<PostProcessOutcome> {
-    const capturePath = backendHandle.capturePath;
-    if (!capturePath) {
-      throw new ActionableError("Missing iOS capture path for FFmpeg processing.");
-    }
-
-    // simctl finalizes the moov atom on SIGINT, but the flush + filesystem write
-    // can lag behind process exit on a loaded runner. Poll for a stable, non-empty
-    // file before failing, so a momentarily-missing file is not a hard error (#2730).
-    try {
-      await waitForRecordingFileReady(capturePath, {
-        timer: this.timer,
-        probe: this.recordingFileProbe,
-      });
-    } catch (error) {
-      const reason = errorMessage(error);
-      throw new ActionableError(
-        this.buildProcessFailureMessage(
-          `iOS recording file missing at ${capturePath}: ${reason}`,
-          "xcrun simctl",
-          [
-            "io",
-            backendHandle.config.device?.deviceId ?? "(unknown-device)",
-            "recordVideo",
-            capturePath,
-          ],
-          backendHandle.captureTracker,
-          capturePath,
-        ),
-      );
-    }
-
-    try {
-      await this.runFfmpegPostProcess(backendHandle, capturePath);
-      return { kind: "processed" };
-    } catch (error) {
-      if (error instanceof ProcessTeardownUnconfirmedError) {
-        // ffmpeg may still be running against the files: nothing is safe to hand back.
-        throw error;
-      }
-      return this.keepRawCaptureAfterPostProcessFailure(backendHandle, capturePath, error);
-    }
+  private readonly capabilities: FfmpegCapabilities;
+  detectHardwareAccel(): Promise<HardwareAccelInfo> {
+    return this.capabilities.detectHardwareAccel();
   }
-
-  /**
-   * ffmpeg could not produce the processed output (it failed, ran out of its time, or left
-   * no usable file). When the raw capture is itself playable, return it with a warning
-   * instead of failing the stop and discarding the recording (#10188); the partial output
-   * ffmpeg left behind is removed so only one file is offered. A raw capture that is not
-   * playable (the recorder was killed before it wrote the moov atom) is no recording: the
-   * original error is rethrown so the stop reports a finalization failure.
-   */
-  private async keepRawCaptureAfterPostProcessFailure(
-    backendHandle: FfmpegBackendHandle,
-    capturePath: string,
-    error: unknown,
-  ): Promise<PostProcessOutcome> {
-    await this.removePartialPostProcessOutput(backendHandle.config.outputPath);
-    if (!(await this.isRawCaptureUsable(backendHandle, capturePath))) {
-      logger.warn(
-        `[FfmpegVideo] iOS post-processing failed and the raw capture is not playable: ${errorMessage(error)}`,
-        error,
-      );
-      throw error;
-    }
-    logger.warn(
-      `[FfmpegVideo] iOS post-processing did not finish; keeping the unprocessed capture: ${errorMessage(error)}`,
-      error,
-    );
-    const reason = errorMessage(error).split("\n")[0];
-    const what =
-      error instanceof PostProcessOutOfTimeError
-        ? "post-processing ran out of time"
-        : "post-processing failed";
-    return {
-      kind: "kept-raw",
-      warning:
-        `iOS ${what} (${reason}); returning the unprocessed simulator capture, which has not ` +
-        "been remuxed or scaled to the requested resolution.",
-    };
-  }
-
-  private async removePartialPostProcessOutput(outputPath: string): Promise<void> {
-    try {
-      await this.captureFileRemover.remove(outputPath);
-    } catch (removeError) {
-      logger.warn(
-        `[FfmpegVideo] Failed to remove the partial post-processed output: ${errorMessage(removeError)}`,
-        removeError,
-      );
-    }
-  }
-
-  /**
-   * Whether the raw simulator capture can be offered as the recording: the recorder must
-   * have been stopped by its signal rather than killed past its stop timeout (simctl writes
-   * the moov atom at the end, so a killed one leaves nothing playable), and the repo's
-   * container probe must find the video track in it.
-   */
-  private async isRawCaptureUsable(
-    backendHandle: FfmpegBackendHandle,
-    capturePath: string,
-  ): Promise<boolean> {
-    if (backendHandle.captureTracker.exitState.signal === "SIGKILL") {
-      return false;
-    }
-    try {
-      return (await this.codecProbe.codec(capturePath)) !== undefined;
-    } catch (error) {
-      logger.warn(
-        `[FfmpegVideo] Could not probe the raw capture ${capturePath}: ${errorMessage(error)}`,
-        error,
-      );
-      return false;
-    }
-  }
-
-  private async runFfmpegPostProcess(
-    backendHandle: FfmpegBackendHandle,
-    capturePath: string,
-  ): Promise<void> {
-    // ffmpeg is attempted with whatever time the stop has (a request with none left skips it).
-    const budgetMs = this.requestBoundedPostProcessBudgetMs(backendHandle.config);
-    const hwAccel = await this.detectHardwareAccel();
-    const ffmpegArgs = buildFfmpegArgs(backendHandle.config, hwAccel, {
-      type: "file",
-      path: capturePath,
-    });
-
-    logger.info(
-      `[FfmpegVideo] Starting ffmpeg post-process: ${this.ffmpegClient.binaryPath} ${ffmpegArgs.join(" ")}`,
-    );
-
-    const { process: ffmpegProcess } = this.ffmpegClient.start({
-      args: ffmpegArgs,
-      context: "iOS recording post-processing",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    try {
-      await waitForSpawn(ffmpegProcess);
-    } catch (error) {
-      throw toActionableError(error, `Failed to start FFmpeg post-processing`);
-    }
-
-    const ffmpegTracker = trackProcess(ffmpegProcess);
-    backendHandle.ffmpegTracker = ffmpegTracker;
-
-    await waitForExit(ffmpegProcess, ffmpegTracker.exitPromise, {
-      timeoutMs: budgetMs,
-      signal: null,
-      timer: this.timer,
-    });
-
-    if (isFailedExitState(ffmpegTracker.exitState)) {
-      const { exitCode, signal } = ffmpegTracker.exitState;
-      // Nothing else signals ffmpeg here: a SIGKILL is waitForExit escalating past its budget.
-      if (signal === "SIGKILL") {
-        throw new PostProcessOutOfTimeError(
-          buildFfmpegFailureMessage(
-            this.ffmpegClient.binaryPath,
-            `FFmpeg post-processing timed out after ${budgetMs}ms`,
-            ffmpegArgs,
-            ffmpegTracker,
-          ),
-        );
-      }
-      throw new ActionableError(
-        buildFfmpegFailureMessage(
-          this.ffmpegClient.binaryPath,
-          `FFmpeg post-processing failed (exit ${exitCode ?? `signal ${signal}`})`,
-          ffmpegArgs,
-          ffmpegTracker,
-        ),
-      );
-    }
-
-    await this.assertFfmpegOutputReady(backendHandle.config.outputPath, ffmpegArgs, ffmpegTracker);
-  }
-
-  /**
-   * The post-process budget. A stop made by a live tool request is cut to what is left of
-   * that request; a stop outside any request context (timer-driven, device disconnect,
-   * teardown) has only its own budget, with the lower unattended ceiling. Throws when the
-   * request has no time left, which the caller turns into the raw-capture fallback.
-   */
-  private requestBoundedPostProcessBudgetMs(config: VideoCaptureConfig): number {
-    const request = getRequestContext();
-    const budgetMs = ffmpegPostProcessBudgetMs(
-      config,
-      this.recordedSeconds(config),
-      request ? FFMPEG_REENCODE_MAX_BUDGET_MS : FFMPEG_UNATTENDED_REENCODE_MAX_BUDGET_MS,
-    );
-    const deadlineMs = request?.getDeadlineMs?.();
-    const boundedMs = boundPostProcessBudgetToRequest(
-      budgetMs,
-      deadlineMs === undefined ? undefined : deadlineMs - this.timer.now(),
-    );
-    if (boundedMs === undefined) {
-      throw new PostProcessOutOfTimeError("the stop request has no time left for post-processing");
-    }
-    return boundedMs;
-  }
-
-  /** Seconds the recording has been running, or undefined when its start time is unusable. */
-  private recordedSeconds(config: VideoCaptureConfig): number | undefined {
-    const startedAtMs = Date.parse(config.startedAt);
-    return Number.isNaN(startedAtMs) ? undefined : (this.timer.now() - startedAtMs) / 1000;
-  }
-
-  /**
-   * Resolves the encoder used for new recordings: a platform hardware encoder
-   * when the FFmpeg build advertises one, otherwise libx264. The result is
-   * cached per platform, so FFmpeg is probed at most once.
-   */
-  async detectHardwareAccel(): Promise<HardwareAccelInfo> {
-    const os = this.platformProvider();
-    const cacheKey = os;
-
-    if (this.hwAccelCache.has(cacheKey)) {
-      return this.hwAccelCache.get(cacheKey)!;
-    }
-
-    let result: HardwareAccelInfo;
-
-    if (os === "darwin") {
-      result = await this.detectVideoToolbox();
-    } else if (os === "linux") {
-      result = await this.detectLinuxHwAccel();
-    } else {
-      result = {
-        encoder: "libx264",
-        available: false,
-        description: `Unsupported platform: ${os}`,
-      };
-    }
-
-    this.hwAccelCache.set(cacheKey, result);
-    return result;
-  }
-
-  private async detectVideoToolbox(): Promise<HardwareAccelInfo> {
-    try {
-      const encoders = await this.listEncoders();
-      const hasVideoToolbox = encoders.some((enc) => enc.includes("h264_videotoolbox"));
-
-      if (hasVideoToolbox) {
-        return {
-          encoder: "h264_videotoolbox",
-          available: true,
-          description: "macOS VideoToolbox (hardware acceleration)",
-        };
-      }
-
-      return {
-        encoder: "libx264",
-        available: false,
-        description: "VideoToolbox not available",
-      };
-    } catch (error) {
-      logger.warn(`[FfmpegVideo] Failed to detect VideoToolbox: ${error}`);
-      return {
-        encoder: "libx264",
-        available: false,
-        description: "VideoToolbox detection failed",
-      };
-    }
-  }
-
-  private async detectLinuxHwAccel(): Promise<HardwareAccelInfo> {
-    try {
-      const encoders = await this.listEncoders();
-
-      const nvencAvailable = encoders.some((enc) => enc.includes("h264_nvenc"));
-      if (nvencAvailable) {
-        return {
-          encoder: "h264_nvenc",
-          available: true,
-          description: "NVIDIA NVENC (hardware acceleration)",
-        };
-      }
-
-      const vaapiAvailable = encoders.some((enc) => enc.includes("h264_vaapi"));
-      if (vaapiAvailable) {
-        return {
-          encoder: "h264_vaapi",
-          available: true,
-          description: "VAAPI (hardware acceleration)",
-        };
-      }
-
-      return {
-        encoder: "libx264",
-        available: false,
-        description: "No hardware acceleration available (VAAPI/NVENC not found)",
-      };
-    } catch (error) {
-      logger.warn(`[FfmpegVideo] Failed to detect Linux HW accel: ${error}`);
-      return {
-        encoder: "libx264",
-        available: false,
-        description: "Hardware acceleration detection failed",
-      };
-    }
-  }
-
-  private async listEncoders(): Promise<string[]> {
-    return (await this.probeFfmpeg()).encoders;
-  }
-
-  /**
-   * Verifies FFmpeg can be launched, probing it once and reusing the result.
-   * Throws an `ActionableError` with install guidance when it is unavailable.
-   */
-  async ensureFfmpegAvailable(deadlineMs?: number, abortSignal?: AbortSignal): Promise<void> {
-    try {
-      await this.checkFfmpegVersion(deadlineMs, abortSignal);
-    } catch (error) {
-      throwIfRecordingStartAborted(abortSignal, "iOS");
-      throw new ActionableError(
-        `FFmpeg is not available. Please install FFmpeg to use video recording.\n` +
-          `  macOS: brew install ffmpeg\n` +
-          `  Linux: apt-get install ffmpeg or yum install ffmpeg\n` +
-          `Error: ${error}`,
-      );
-    }
-  }
-
-  private async checkFfmpegVersion(deadlineMs?: number, abortSignal?: AbortSignal): Promise<void> {
-    const { version } = await this.probeFfmpeg(deadlineMs, abortSignal);
-    logger.debug(`[FfmpegVideo] Found FFmpeg ${version}`);
-  }
-
-  private async probeFfmpeg(
-    deadlineMs?: number,
-    abortSignal?: AbortSignal,
-  ): Promise<FfmpegProbeResult> {
-    if (this.ffmpegProbeResult) {
-      return this.ffmpegProbeResult;
-    }
-    const probe =
-      deadlineMs === undefined
-        ? this.ffmpegClient.probe()
-        : runWithinDeadline(
-            async (signal) =>
-              await this.ffmpegClient.probe({
-                timeoutMs: Math.max(0, deadlineMs - this.timer.now()),
-                signal,
-              }),
-            deadlineMs,
-            this.timer,
-            abortSignal,
-            `Timed out checking FFmpeg availability within ${this.iosRecordingStartTimeoutMs}ms`,
-          );
-    const result = await probe;
-    this.ffmpegProbeResult = result;
-    return result;
-  }
-
-  private async assertFfmpegOutputReady(
-    outputPath: string,
-    args: string[],
-    tracker: FfmpegDiagnosticsTracker,
-  ): Promise<void> {
-    const sizeBytes = await this.recordingFileProbe.size(outputPath);
-    if (sizeBytes === null) {
-      throw new ActionableError(
-        buildFfmpegFailureMessage(
-          this.ffmpegClient.binaryPath,
-          "FFmpeg output file missing",
-          args,
-          tracker,
-          outputPath,
-        ),
-      );
-    }
-
-    if (!sizeBytes) {
-      throw new ActionableError(
-        buildFfmpegFailureMessage(
-          this.ffmpegClient.binaryPath,
-          "FFmpeg output file is empty",
-          args,
-          tracker,
-          outputPath,
-        ),
-      );
-    }
-  }
-
-  private buildProcessFailureMessage(
-    summary: string,
-    command: string,
-    args: string[],
-    tracker: ProcessDiagnosticsTracker,
-    outputPath?: string,
-  ): string {
-    const details = [
-      summary,
-      outputPath ? `output: ${outputPath}` : undefined,
-      `command: ${command} ${args.join(" ")}`,
-      `exitCode: ${tracker.exitState.exitCode ?? "null"}`,
-      `signal: ${tracker.exitState.signal ?? "null"}`,
-      `stderr:\n${tracker.stderr.join("").trim() || "(empty)"}`,
-    ].filter((line): line is string => Boolean(line));
-
-    return details.join("\n");
-  }
-
-  private logProcessWarnings(label: string, tracker: ProcessTracker): void {
-    if (isFailedExitCode(tracker.exitState.exitCode)) {
-      logger.warn(
-        `[FfmpegVideo] ${label} exited with code ${tracker.exitState.exitCode}: ${tracker.stderr.join("")}`,
-      );
-    }
-
-    if (tracker.stderr.length > 0) {
-      logger.info(`[FfmpegVideo] ${label} stderr: ${tracker.stderr.join("")}`);
-    }
+  ensureFfmpegAvailable(deadlineMs?: number, abortSignal?: AbortSignal): Promise<void> {
+    return this.capabilities.ensureFfmpegAvailable(deadlineMs, abortSignal);
   }
 }

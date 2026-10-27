@@ -20,10 +20,13 @@ class StreamQualityControlsTest {
     setContent {
       MaterialTheme {
         StreamQualityControls(
-          currentQuality = VideoStreamQuality.Medium,
-          actualFps = 23.6f,
-          autoAdjustEnabled = true,
-          expanded = false,
+          state =
+            StreamQualityState(
+              currentQuality = VideoStreamQuality.Medium,
+              actualFps = 23.6f,
+              autoAdjustEnabled = true,
+              expanded = false,
+            ),
           onToggleExpanded = {},
           onSelectQuality = {},
           onToggleAutoAdjust = {},
@@ -43,10 +46,13 @@ class StreamQualityControlsTest {
     setContent {
       MaterialTheme {
         StreamQualityControls(
-          currentQuality = VideoStreamQuality.Medium,
-          actualFps = 30f,
-          autoAdjustEnabled = true,
-          expanded = false,
+          state =
+            StreamQualityState(
+              currentQuality = VideoStreamQuality.Medium,
+              actualFps = 30f,
+              autoAdjustEnabled = true,
+              expanded = false,
+            ),
           onToggleExpanded = { toggled++ },
           onSelectQuality = {},
           onToggleAutoAdjust = {},
@@ -63,10 +69,13 @@ class StreamQualityControlsTest {
     setContent {
       MaterialTheme {
         StreamQualityControls(
-          currentQuality = VideoStreamQuality.Medium,
-          actualFps = 30f,
-          autoAdjustEnabled = true,
-          expanded = true,
+          state =
+            StreamQualityState(
+              currentQuality = VideoStreamQuality.Medium,
+              actualFps = 30f,
+              autoAdjustEnabled = true,
+              expanded = true,
+            ),
           onToggleExpanded = {},
           onSelectQuality = { selected = it },
           onToggleAutoAdjust = {},
@@ -85,10 +94,13 @@ class StreamQualityControlsTest {
     setContent {
       MaterialTheme {
         StreamQualityControls(
-          currentQuality = VideoStreamQuality.Low,
-          actualFps = 10f,
-          autoAdjustEnabled = true,
-          expanded = true,
+          state =
+            StreamQualityState(
+              currentQuality = VideoStreamQuality.Low,
+              actualFps = 10f,
+              autoAdjustEnabled = true,
+              expanded = true,
+            ),
           onToggleExpanded = {},
           onSelectQuality = {},
           onToggleAutoAdjust = { toggledTo = it },

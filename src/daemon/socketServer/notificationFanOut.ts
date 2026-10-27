@@ -1,4 +1,8 @@
 import {
+  SESSION_DEVICE_REBOUND_NOTIFICATION_METHOD,
+  type SessionDeviceRebound,
+} from "../sessionDeviceReboundBroadcast";
+import {
   type DaemonNotification,
   type DaemonRequest,
   type DaemonResponse,
@@ -10,8 +14,8 @@ import {
   RESOURCE_UPDATED_NOTIFICATION_METHOD,
   type ListChangedKind,
   type ResourceUpdateTargets,
-} from "../../server/listChangedBroadcast";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../server/sessionReleaseBroadcast";
+} from "../listChangedBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../sessionReleaseBroadcast";
 import { idleReleaseField } from "../releaseReasons";
 
 /**
@@ -167,4 +171,29 @@ export function pushProgressNotification(
     ...(total !== undefined ? { total } : {}),
     ...(message !== undefined ? { message } : {}),
   });
+}
+
+/** Rebind pushes use the same subscriber and shutdown-drain rules as session releases. */
+export function broadcastSessionDeviceRebound(
+  subscribers: Iterable<string>,
+  transport: NotificationTransport,
+  pendingWrites: Set<Promise<void>>,
+  event: SessionDeviceRebound,
+): void {
+  const notification: DaemonNotification = {
+    type: "daemon_notification",
+    method: SESSION_DEVICE_REBOUND_NOTIFICATION_METHOD,
+    ...event,
+  };
+  for (const sessionId of subscribers) {
+    if (!transport.hasSocket(sessionId)) {
+      continue;
+    }
+    const pending = Promise.withResolvers<void>();
+    pendingWrites.add(pending.promise);
+    transport.write(sessionId, notification, () => {
+      pendingWrites.delete(pending.promise);
+      pending.resolve();
+    });
+  }
 }

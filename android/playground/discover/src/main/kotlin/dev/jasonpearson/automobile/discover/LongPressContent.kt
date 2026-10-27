@@ -72,88 +72,15 @@ fun LongPressContent(modifier: Modifier = Modifier) {
   var hapticConfirmation by remember { mutableStateOf(false) }
 
   Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-    Text(
-      text = "Basic Long Press",
-      fontSize = 18.sp,
-      fontWeight = FontWeight.Bold,
-      modifier = Modifier.fillMaxWidth(),
+    BasicLongPress(
+      longPressFeedback,
+      { longPressFeedback = "Tap detected" },
+      { longPressFeedback = "Long pressed!" },
     )
-
-    AutoMobileContentCard(
-      modifier =
-        Modifier.fillMaxWidth()
-          .combinedClickable(
-            onClick = { longPressFeedback = "Tap detected" },
-            onLongClick = { longPressFeedback = "Long pressed!" },
-          )
-          .semantics {
-            testTag = "long_press_card"
-            contentDescription = "Basic long press card"
-          },
-      colors =
-        CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-    ) {
-      Column(modifier = Modifier.padding(16.dp)) {
-        Text(
-          text = "Long press me",
-          fontSize = 16.sp,
-          fontWeight = FontWeight.Medium,
-          color = MaterialTheme.colorScheme.onSecondaryContainer,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-          text = longPressFeedback,
-          fontSize = 14.sp,
-          color = MaterialTheme.colorScheme.onSecondaryContainer,
-          modifier = Modifier.semantics { testTag = "long_press_card_feedback" },
-        )
-      }
-    }
 
     Divider()
 
-    Text(
-      text = "Context Menu Trigger",
-      fontSize = 18.sp,
-      fontWeight = FontWeight.Bold,
-      modifier = Modifier.fillMaxWidth(),
-    )
-
-    Text(
-      text = "Long press for options",
-      modifier =
-        Modifier.fillMaxWidth()
-          .combinedClickable(
-            onClick = { contextMenuExpanded = false },
-            onLongClick = { contextMenuExpanded = true },
-          )
-          .padding(12.dp)
-          .semantics { testTag = "context_menu_trigger" },
-      fontSize = 16.sp,
-      color = MaterialTheme.colorScheme.primary,
-    )
-
-    DropdownMenu(
-      expanded = contextMenuExpanded,
-      onDismissRequest = { contextMenuExpanded = false },
-      modifier = Modifier.semantics { testTag = "context_menu" },
-    ) {
-      DropdownMenuItem(
-        text = { Text("Copy") },
-        onClick = { contextMenuExpanded = false },
-        modifier = Modifier.semantics { testTag = "context_menu_item_copy" },
-      )
-      DropdownMenuItem(
-        text = { Text("Share") },
-        onClick = { contextMenuExpanded = false },
-        modifier = Modifier.semantics { testTag = "context_menu_item_share" },
-      )
-      DropdownMenuItem(
-        text = { Text("Delete") },
-        onClick = { contextMenuExpanded = false },
-        modifier = Modifier.semantics { testTag = "context_menu_item_delete" },
-      )
-    }
+    LongPressContextMenu(contextMenuExpanded, { contextMenuExpanded = it })
 
     Divider()
 
@@ -185,68 +112,13 @@ fun LongPressContent(modifier: Modifier = Modifier) {
 
     Divider()
 
-    Text(
-      text = "Variable Duration Buttons",
-      fontSize = 18.sp,
-      fontWeight = FontWeight.Bold,
-      modifier = Modifier.fillMaxWidth(),
-    )
-
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-      LongPressDurationButton(
-        requiredDurationMs = 300,
-        label = "Quick hold (300ms)",
-        testTag = "quick_hold_button",
-      )
-      LongPressDurationButton(
-        requiredDurationMs = 1000,
-        label = "Standard hold (1s)",
-        testTag = "standard_hold_button",
-      )
-      LongPressDurationButton(
-        requiredDurationMs = 2000,
-        label = "Long hold (2s)",
-        testTag = "long_hold_button",
-      )
-    }
+    LongPressDurationButtons()
 
     Divider()
 
-    Text(
-      text = "Haptic Feedback",
-      fontSize = 18.sp,
-      fontWeight = FontWeight.Bold,
-      modifier = Modifier.fillMaxWidth(),
-    )
-
-    AutoMobileContentCard(
-      modifier =
-        Modifier.fillMaxWidth()
-          .combinedClickable(
-            onClick = { hapticConfirmation = false },
-            onLongClick = {
-              haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-              hapticConfirmation = true
-            },
-          )
-          .semantics { testTag = "haptic_long_press_card" },
-      colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-    ) {
-      Column(modifier = Modifier.padding(16.dp)) {
-        Text(
-          text = "Long press for haptic feedback",
-          fontSize = 16.sp,
-          fontWeight = FontWeight.Medium,
-          color = MaterialTheme.colorScheme.onPrimaryContainer,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-          text = if (hapticConfirmation) "Haptic feedback triggered" else "Waiting...",
-          fontSize = 14.sp,
-          color = MaterialTheme.colorScheme.onPrimaryContainer,
-          modifier = Modifier.semantics { testTag = "haptic_feedback_status" },
-        )
-      }
+    HapticLongPress(hapticConfirmation, { hapticConfirmation = false }) {
+      haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+      hapticConfirmation = true
     }
 
     Divider()
@@ -359,49 +231,7 @@ private fun LongPressDragList() {
       items(items, key = { it.id }) { item ->
         val isDragging = draggingItemId == item.id
         val offsetY = if (isDragging) dragOffset else 0f
-
-        AutoMobileContentCard(
-          modifier =
-            Modifier.fillMaxWidth()
-              .height(DragRowHeight)
-              .offset { IntOffset(0, offsetY.roundToInt()) }
-              .zIndex(if (isDragging) 1f else 0f)
-              .pointerInput(item.id) {
-                detectDragGesturesAfterLongPress(
-                  onDragStart = { dragState.start(item.id) },
-                  onDragEnd = { dragState.end(item.id) },
-                  onDragCancel = { dragState.cancel(item.id) },
-                ) { change, dragAmount ->
-                  if (dragState.draggingItemId == item.id) {
-                    change.consume()
-                    dragState.move(item.id, dragAmount.y, rowStridePx)
-                  }
-                }
-              }
-              .semantics {
-                testTag = "draggable_item_${item.id}"
-                contentDescription = "Drag item ${item.id}"
-              },
-          colors =
-            CardDefaults.cardColors(
-              containerColor =
-                if (isDragging) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surfaceVariant,
-            ),
-        ) {
-          Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-          ) {
-            Text(text = item.label, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Icon(
-              imageVector = Icons.Filled.TouchApp,
-              contentDescription = "Drag handle",
-              tint = MaterialTheme.colorScheme.primary,
-            )
-          }
-        }
+        LongPressDragItem(item, dragState, isDragging, offsetY) { rowStridePx }
       }
     }
   }
@@ -468,6 +298,225 @@ private fun CancelableLongPress() {
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
       }
+    }
+  }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BasicLongPress(
+  longPressFeedback: String,
+  onClick: () -> Unit,
+  onLongClick: () -> Unit,
+) {
+  Text(
+    text = "Basic Long Press",
+    fontSize = 18.sp,
+    fontWeight = FontWeight.Bold,
+    modifier = Modifier.fillMaxWidth(),
+  )
+
+  AutoMobileContentCard(
+    modifier =
+      Modifier.fillMaxWidth()
+        .combinedClickable(
+          onClick = onClick,
+          onLongClick = onLongClick,
+        )
+        .semantics {
+          testTag = "long_press_card"
+          contentDescription = "Basic long press card"
+        },
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+  ) {
+    Column(modifier = Modifier.padding(16.dp)) {
+      Text(
+        text = "Long press me",
+        fontSize = 16.sp,
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.onSecondaryContainer,
+      )
+      Spacer(modifier = Modifier.height(8.dp))
+      Text(
+        text = longPressFeedback,
+        fontSize = 14.sp,
+        color = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = Modifier.semantics { testTag = "long_press_card_feedback" },
+      )
+    }
+  }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LongPressContextMenu(
+  contextMenuExpanded: Boolean,
+  onExpandedChange: (Boolean) -> Unit,
+) {
+  Text(
+    text = "Context Menu Trigger",
+    fontSize = 18.sp,
+    fontWeight = FontWeight.Bold,
+    modifier = Modifier.fillMaxWidth(),
+  )
+
+  Text(
+    text = "Long press for options",
+    modifier =
+      Modifier.fillMaxWidth()
+        .combinedClickable(
+          onClick = { onExpandedChange(false) },
+          onLongClick = { onExpandedChange(true) },
+        )
+        .padding(12.dp)
+        .semantics { testTag = "context_menu_trigger" },
+    fontSize = 16.sp,
+    color = MaterialTheme.colorScheme.primary,
+  )
+
+  DropdownMenu(
+    expanded = contextMenuExpanded,
+    onDismissRequest = { onExpandedChange(false) },
+    modifier = Modifier.semantics { testTag = "context_menu" },
+  ) {
+    DropdownMenuItem(
+      text = { Text("Copy") },
+      onClick = { onExpandedChange(false) },
+      modifier = Modifier.semantics { testTag = "context_menu_item_copy" },
+    )
+    DropdownMenuItem(
+      text = { Text("Share") },
+      onClick = { onExpandedChange(false) },
+      modifier = Modifier.semantics { testTag = "context_menu_item_share" },
+    )
+    DropdownMenuItem(
+      text = { Text("Delete") },
+      onClick = { onExpandedChange(false) },
+      modifier = Modifier.semantics { testTag = "context_menu_item_delete" },
+    )
+  }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LongPressDurationButtons() {
+  Text(
+    text = "Variable Duration Buttons",
+    fontSize = 18.sp,
+    fontWeight = FontWeight.Bold,
+    modifier = Modifier.fillMaxWidth(),
+  )
+
+  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    LongPressDurationButton(
+      requiredDurationMs = 300,
+      label = "Quick hold (300ms)",
+      testTag = "quick_hold_button",
+    )
+    LongPressDurationButton(
+      requiredDurationMs = 1000,
+      label = "Standard hold (1s)",
+      testTag = "standard_hold_button",
+    )
+    LongPressDurationButton(
+      requiredDurationMs = 2000,
+      label = "Long hold (2s)",
+      testTag = "long_hold_button",
+    )
+  }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HapticLongPress(
+  hapticConfirmation: Boolean,
+  onClick: () -> Unit,
+  onLongClick: () -> Unit,
+) {
+  Text(
+    text = "Haptic Feedback",
+    fontSize = 18.sp,
+    fontWeight = FontWeight.Bold,
+    modifier = Modifier.fillMaxWidth(),
+  )
+
+  AutoMobileContentCard(
+    modifier =
+      Modifier.fillMaxWidth()
+        .combinedClickable(
+          onClick = onClick,
+          onLongClick = onLongClick,
+        )
+        .semantics { testTag = "haptic_long_press_card" },
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+  ) {
+    Column(modifier = Modifier.padding(16.dp)) {
+      Text(
+        text = "Long press for haptic feedback",
+        fontSize = 16.sp,
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.onPrimaryContainer,
+      )
+      Spacer(modifier = Modifier.height(8.dp))
+      Text(
+        text = if (hapticConfirmation) "Haptic feedback triggered" else "Waiting...",
+        fontSize = 14.sp,
+        color = MaterialTheme.colorScheme.onPrimaryContainer,
+        modifier = Modifier.semantics { testTag = "haptic_feedback_status" },
+      )
+    }
+  }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LongPressDragItem(
+  item: DraggableListItem,
+  dragState: DragReorderState,
+  isDragging: Boolean,
+  offsetY: Float,
+  rowStridePx: () -> Float,
+) {
+  AutoMobileContentCard(
+    modifier =
+      Modifier.fillMaxWidth()
+        .height(DragRowHeight)
+        .offset { IntOffset(0, offsetY.roundToInt()) }
+        .zIndex(if (isDragging) 1f else 0f)
+        .pointerInput(item.id) {
+          detectDragGesturesAfterLongPress(
+            onDragStart = { dragState.start(item.id) },
+            onDragEnd = { dragState.end(item.id) },
+            onDragCancel = { dragState.cancel(item.id) },
+          ) { change, dragAmount ->
+            if (dragState.draggingItemId == item.id) {
+              change.consume()
+              dragState.move(item.id, dragAmount.y, rowStridePx())
+            }
+          }
+        }
+        .semantics {
+          testTag = "draggable_item_${item.id}"
+          contentDescription = "Drag item ${item.id}"
+        },
+    colors =
+      CardDefaults.cardColors(
+        containerColor =
+          if (isDragging) MaterialTheme.colorScheme.primaryContainer
+          else MaterialTheme.colorScheme.surfaceVariant,
+      ),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Text(text = item.label, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+      Icon(
+        imageVector = Icons.Filled.TouchApp,
+        contentDescription = "Drag handle",
+        tint = MaterialTheme.colorScheme.primary,
+      )
     }
   }
 }

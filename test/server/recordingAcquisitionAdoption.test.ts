@@ -10,7 +10,7 @@ import {
   createOwnerlessRecordingAcquisitionCleanup,
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
-} from "../../src/server/recordingSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
 import {
   adoptOwnerlessActiveVideoRecordings,
   getVideoRecordingMetadata,
@@ -19,7 +19,7 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import {
   hasSegmentedVideoRecordingsForOwner,
   resetSegmentedSessions,
@@ -36,13 +36,14 @@ import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeSecurePermissions } from "../fakes/FakeSecurePermissions";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
+import { toolIsError, toolText } from "../helpers/toolResponse";
 
 const videoRecording = createVideoRecordingToolsHarness();
 
@@ -136,7 +137,7 @@ describe("ownerless recording acquisition adoption", () => {
             : undefined,
       },
     });
-    const detector = new FakeDeviceSessionManager();
+    const detector = new FakeDeviceReadiness();
     detector.setConnectedDevices([device, free]);
     videoRecording.configure({ deviceDetector: detector });
     setSegmentedSessionTimer(timer);
@@ -159,7 +160,7 @@ describe("ownerless recording acquisition adoption", () => {
 
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each([...table])(
         name,
         async (row: T) => {
           await arrangeHarness();
@@ -265,7 +266,7 @@ describe("ownerless recording acquisition adoption", () => {
           ? { sessionUuid: "holder" }
           : { __mcpSessionId: connectionOwner }),
       });
-      expect(response.isError).not.toBe(true);
+      expect(toolIsError(response)).not.toBe(true);
       expect(backend.stopCalls.map((call) => call.recordingId)).toEqual([recording.recordingId]);
     },
   );
@@ -332,7 +333,6 @@ describe("ownerless recording acquisition adoption", () => {
         {
           archiveRoot,
           getById: (id) => getVideoRecordingMetadata(id, { ownerSessionUuid: "holder" }),
-          getLatest: async () => null,
           lookupLatest: async () => ({ recording: null }),
           list: async () => [],
           readFile: async (file) => {
@@ -384,7 +384,7 @@ describe("ownerless recording acquisition adoption", () => {
       const response = await runWithToolSelectionContext({ callerMcpSessionId: connection }, () =>
         handler()(free, { action: "start", maxDuration: 300 }),
       );
-      expect(JSON.parse(response.content[0].text).count).toBe(2);
+      expect(JSON.parse(toolText(response)).count).toBe(2);
       expect(listActiveVideoRecordingIdsForOwner(owner, device.deviceId)).toHaveLength(1);
       expect(hasSegmentedVideoRecordingsForOwner(owner, device.deviceId)).toBe(true);
       expect(listActiveVideoRecordingIdsForOwner(undefined, device.deviceId)).toEqual([]);
@@ -407,7 +407,7 @@ describe("ownerless recording acquisition adoption", () => {
             maxDuration,
             __mcpSessionId: connectionOwner,
           });
-          const started = JSON.parse(response.content[0].text);
+          const started = JSON.parse(toolText(response));
           const recordingId: string = started.recordings.find(
             (record: { deviceId: string }) => record.deviceId === device.deviceId,
           ).recordingId;
@@ -470,7 +470,9 @@ describe("ownerless recording acquisition adoption", () => {
       await inWindow;
       expect(await listActiveVideoRecordings({ deviceId: device.deviceId })).toEqual([]);
       expect(listActiveVideoRecordingIdsForOwner(undefined, device.deviceId)).toEqual([]);
-      expect(backend.startCalls.map((call) => call.device.deviceId)).not.toContain(device.deviceId);
+      expect(backend.startCalls.map((call) => call.device?.deviceId)).not.toContain(
+        device.deviceId,
+      );
     },
   );
 
@@ -521,7 +523,7 @@ describe("ownerless recording acquisition adoption", () => {
         maxDuration: 181,
         platform: "android",
       });
-      const handle: string = JSON.parse(response.content[0].text).recordings[0].recordingId;
+      const handle: string = JSON.parse(toolText(response)).recordings[0].recordingId;
       expect(hasSegmentedVideoRecordingsForOwner(undefined, device.deviceId)).toBe(true);
       await manager.createSession("holder", device.deviceId, "android");
       expect(hasSegmentedVideoRecordingsForOwner(undefined, device.deviceId)).toBe(false);

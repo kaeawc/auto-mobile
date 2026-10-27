@@ -1,9 +1,18 @@
+import type { BootedDevice, GfxMetrics } from "../../models";
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
+import { prototypeMotionActive } from "./prototypeMotion";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
+import { ViewHierarchy } from "./ViewHierarchy";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { KNOWN_ANDROID_LAUNCHER_PACKAGES } from "./androidLauncherRegistry";
+import { hierarchyUpdatedAtToMillis } from "./observeTimestamp";
 
 /**
  * Verify that a "go home" action actually landed on the home screen by
@@ -46,19 +55,10 @@ const RESOLVE_HOME_TIMEOUT_MS = 5000;
  * launcher cannot be resolved at runtime (e.g. `cmd package` unavailable, or
  * the resolve command failing/timing out). Matched by EXACT package name --
  * never by prefix, so an unrelated app like `com.android.launcher3.example`
- * cannot be misclassified as a launcher. Mirrors `Idle.isSystemLauncher`'s
- * launcher packages, including the legacy AOSP `com.android.launcher`.
+ * cannot be misclassified as a launcher. Read from the shared launcher
+ * registry, as `Idle.isSystemLauncher` is.
  */
-const FALLBACK_LAUNCHER_PACKAGES: ReadonlySet<string> = new Set([
-  "com.android.launcher",
-  "com.android.launcher3",
-  "com.google.android.apps.nexuslauncher",
-  "com.samsung.android.app.launcher",
-  "com.miui.home",
-  "com.oneplus.launcher",
-  "com.huawei.android.launcher",
-  "com.sec.android.app.launcher",
-]);
+const FALLBACK_LAUNCHER_PACKAGES: ReadonlySet<string> = new Set(KNOWN_ANDROID_LAUNCHER_PACKAGES);
 
 /**
  * How long a resolved HOME launcher package stays valid before it must be
@@ -297,13 +297,12 @@ export async function isForegroundLauncher(
   adb: AdbExecutor,
   deviceId: string,
   timer: Timer = defaultTimer,
-  incarnationToken?: string,
-  signal?: AbortSignal,
-  timeoutMs?: number,
+  options: { incarnationToken?: string; signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<boolean> {
   if (!appId) {
     return false;
   }
+  const { incarnationToken, signal, timeoutMs } = options;
   const configuredHome = await resolveConfiguredHomePackage(
     adb,
     deviceId,
@@ -316,4 +315,105 @@ export async function isForegroundLauncher(
     return appId === configuredHome;
   }
   return isFallbackLauncherPackage(appId);
+}
+
+/** Best-effort stability signal for surfaces whose gfxinfo is empty. */
+export class QuietTreeStability {
+  private reader?: ViewHierarchyRequestReader;
+  private lastUpdatedAt?: number;
+
+  constructor(
+    private readonly device: BootedDevice,
+    private readonly adbFactory: AdbClientFactory,
+    private readonly timer: Timer,
+    reader?: ViewHierarchyRequestReader,
+  ) {
+    this.reader = reader;
+  }
+
+  async wait(timeoutMs: number, signal?: AbortSignal): Promise<void> {
+    const deadline = this.timer.now() + Math.max(0, timeoutMs);
+    let previous: string | null = null;
+    while (this.timer.now() < deadline && !signal?.aborted) {
+      const remainingMs = deadline - this.timer.now();
+      try {
+        const fingerprint = await this.readFingerprint(remainingMs, signal);
+        if (fingerprint !== null && fingerprint === previous) {
+          return;
+        }
+        previous = fingerprint;
+      } catch (error) {
+        previous = null;
+        if (signal?.aborted || this.timer.now() >= deadline) {
+          // The tree is an optional signal; cancellation/deadline ends the bounded fallback.
+          logger.debug(`Quiet-tree stability read ended: ${errorMessage(error)}`);
+          return;
+        }
+        logger.warn(`Quiet-tree stability read failed: ${errorMessage(error)}`);
+      }
+      if (signal?.aborted) {
+        return;
+      }
+      await this.timer.sleep(Math.min(17, Math.max(0, deadline - this.timer.now())));
+    }
+  }
+
+  private async readFingerprint(remainingMs: number, signal?: AbortSignal): Promise<string | null> {
+    const controller = new AbortController();
+    const readSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    // Lazy construction avoids starting a hierarchy service for ordinary gfxinfo callers.
+    const reader = (this.reader ??= new ViewHierarchy(
+      this.device,
+      this.adbFactory,
+      null,
+      this.timer,
+    ));
+    const tree = await raceWithDeadline(
+      () =>
+        reader.getViewHierarchy(undefined, {
+          timeoutMs: remainingMs,
+          requireFreshExtraction: true,
+          skipWaitForFresh: true,
+          ...(this.lastUpdatedAt === undefined ? {} : { minTimestamp: this.lastUpdatedAt + 1 }),
+          signal: readSignal,
+        }),
+      {
+        timer: this.timer,
+        timeoutMs: remainingMs,
+        signal,
+        label: "Quiet-tree stability read",
+        onTimeout: () => controller.abort(),
+      },
+    );
+    if (!tree.hierarchy.error) {
+      this.lastUpdatedAt = hierarchyUpdatedAtToMillis(tree) ?? this.lastUpdatedAt;
+    }
+    // A tree read while the prototype still animates is not evidence of a settled screen (#15114).
+    if (prototypeMotionActive(tree) > 0) {
+      return null;
+    }
+    return tree.fresh === true && !tree.hierarchy.error ? hierarchyFingerprint(tree) : null;
+  }
+
+  async metrics(
+    packageName: string,
+    startTime: number,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<GfxMetrics> {
+    await this.wait(startTime + timeoutMs - this.timer.now(), signal);
+    return {
+      packageName,
+      percentile50thMs: null,
+      percentile90thMs: null,
+      percentile95thMs: null,
+      percentile99thMs: null,
+      missedVsyncCount: null,
+      slowUiThreadCount: null,
+      frameDeadlineMissedCount: null,
+      pollCount: 0,
+      stabilityWaitMs: this.timer.now() - startTime,
+      isStable: true,
+    };
+  }
 }

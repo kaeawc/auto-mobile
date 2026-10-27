@@ -5,13 +5,16 @@ import type { Element } from "../../src/models/Element";
 import type { GfxMetrics } from "../../src/models/GfxMetrics";
 import type { RawViewHierarchyResult } from "../../src/models/RawViewHierarchyResult";
 import type { TestHierarchyNode } from "../features/observe/observeScreenTestBuilders";
-import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
+import { readToolEnvelopePayload } from "../../src/daemon/toolEnvelopePayload";
 import {
   deferTerminalScreenshot,
   hasPendingTerminalScreenshot,
   runWithPostActionCaptureScope,
 } from "../../src/utils/PostActionCaptureContext";
-import type { SettleObserve } from "../../src/features/observe/interfaces/SettleObserve";
+import type {
+  SettleObserve,
+  SettleResult,
+} from "../../src/features/observe/interfaces/SettleObserve";
 import { describe, expect, spyOn, test } from "bun:test";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import {
@@ -42,7 +45,7 @@ import { displayTransitions } from "../../src/features/observe/DisplayTransition
 import { createDeviceHierarchyCapture } from "../../src/features/observe/DeviceHierarchyCapture";
 import type { AccessibilityHierarchy } from "../../src/features/observe/android/types";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
-import { buildObservationScreenshotUri } from "../../src/server/observationResourceUris";
+import { buildObservationScreenshotUri } from "../../src/daemon/observationResourceUris";
 import { FakeScreenshotStateStore } from "../fakes/FakeScreenshotStateStore";
 
 /**
@@ -164,6 +167,16 @@ function obs(node: TestHierarchyNode, updatedAt: number): ObserveResult {
   } as ObserveResult;
 }
 
+/** A settled {@link SettleResult} for `observation`, as the gate reads it. */
+function settleResult(observation: ObserveResult, polls = 2): SettleResult {
+  return { observation, settled: true, polls, waitMs: 0, terminalReason: "settled" };
+}
+
+/** `DisplayRef.pinned` is only ever `true` or absent. */
+function pinnedMarker(pinned: boolean): { pinned?: true } {
+  return pinned ? { pinned: true } : {};
+}
+
 /** The content-derived `s2-…` id the skeleton projection would emit for the row. */
 function airplaneRowStableId(observation: ObserveResult): string {
   const root = structuredClone(observation.viewHierarchy!.hierarchy);
@@ -197,7 +210,6 @@ class ScreenshotSettleScreen extends FakeObserveScreen {
       const timestamp = Number(this.cached.updatedAt) + 1;
       this.cached = {
         ...obs(AIRPLANE_ROW_INFLATED, timestamp),
-        platform: this.action.platform,
         deviceId: this.action.deviceId,
         observationId: `settle-${timestamp}`,
         display: this.action.display,
@@ -218,7 +230,7 @@ class ScreenshotSettleScreen extends FakeObserveScreen {
     }
     observation.screenshotCaptureAttempted = true;
     const path = `/fake/${observation.observationId}.png`;
-    this.screenshots.updateForObservation(observation.deviceId, observation.observationId, path);
+    this.screenshots.updateForObservation(observation.deviceId!, observation.observationId, path);
     if (this.settledScreenshot) {
       observation.screenshotPath = path;
       observation.screenshotSettled = true;
@@ -232,7 +244,6 @@ class ScreenshotSettleScreen extends FakeObserveScreen {
 function screenshotAction(platform: "android" | "ios" = "android"): ObserveResult {
   return {
     ...obs(AIRPLANE_ROW_HALF_INFLATED, 10),
-    platform,
     deviceId: `screenshot-${platform}`,
     observationId: "action-capture",
     screenshotCaptureAttempted: true,
@@ -288,7 +299,7 @@ describe("embedded settle screenshot evidence", () => {
       const finalized = finalizeToolResponse(response, { name: "tapOn" });
       const emitted = finalized.structuredContent!.observation;
       expect(emitted.observationScreenshotResourceUri).toBe(
-        buildObservationScreenshotUri(action.deviceId, adopted.observationId),
+        buildObservationScreenshotUri(action.deviceId!, adopted.observationId),
       );
       expect(emitted.screenshotPath).toBe(adopted.screenshotPath);
     },
@@ -554,7 +565,7 @@ describe("embedded settle on a still Android frame (#9579)", () => {
             role: "unknown",
             posture: "unknown",
             generation: 0,
-            pinned: "pinned" in scenario && scenario.pinned,
+            ...pinnedMarker("pinned" in scenario && scenario.pinned === true),
           },
         },
         args: routed && !scenario.pinned ? { display: "0" } : undefined,
@@ -719,7 +730,7 @@ describe("embedded settle on a still Android frame (#9579)", () => {
         role: "cover",
         posture: "closed",
         generation: 2,
-        pinned,
+        ...pinnedMarker(pinned),
       };
       const other = obs(AIRPLANE_ROW_INFLATED, 20);
       other.display = { key: "inside", role: "inner", posture: "opened", generation: 2 };
@@ -1196,7 +1207,7 @@ describe("settleEmbeddedObservation adoption guard (#6866)", () => {
     const result = await settleEmbeddedObservation({
       actionClass: "navigation",
       observation: action,
-      settleObserve: { execute: async () => ({ observation: settled, settled: true, polls: 2 }) },
+      settleObserve: { execute: async () => settleResult(settled) },
     });
 
     expect(result.observation).toBe(action);
@@ -1325,7 +1336,7 @@ describe("settleEmbeddedObservation abort fence (#9880)", () => {
     const pendingAtStart: number[][] = [];
     const settle: SettleObserve = {
       captureScreenshot: inner.captureScreenshot?.bind(inner),
-      execute: async (options) => {
+      execute: async (options = {}) => {
         pendingAtStart.push(timer.uncleared());
         if (options.signal) {
           signals.push(options.signal);
@@ -1432,7 +1443,7 @@ describe("settleEmbeddedObservation abort fence (#9880)", () => {
     const timer = new FenceRecordingTimer();
     let seen: AbortSignal | undefined;
     const hung: SettleObserve = {
-      execute: (options) =>
+      execute: (options = {}) =>
         new Promise((_resolve, reject) => {
           seen = options.signal;
           options.signal?.addEventListener("abort", () => reject(options.signal!.reason), {
@@ -1560,6 +1571,7 @@ describe("settleEmbeddedObservation stale-state clearing (#6866)", () => {
 describe("settleEmbeddedObservation accessibility audit (#6890)", () => {
   /** The shape `AccessibilityAuditor.run` attaches, trimmed to what matters here. */
   const auditOfTheHalfInflatedTree: AccessibilityAuditResult = {
+    screenId: "half-inflated",
     config: { level: "AA", failureMode: "report", useBaseline: false },
     summary: {
       totalViolations: 1,
@@ -1769,9 +1781,9 @@ describe("explicit-display embedded observation", () => {
       internal: false,
       timer,
       createSettleObserve: () => ({
-        execute: async (options) => {
-          requestedDisplay = options?.display;
-          return { observation: settled, settled: true, polls: 2 };
+        execute: async (options = {}) => {
+          requestedDisplay = options.display;
+          return settleResult(settled);
         },
       }),
     });
@@ -1797,9 +1809,9 @@ describe("explicit-display embedded observation", () => {
         observation: action,
         args: { display: "external" },
         settleObserve: {
-          execute: async (options) => {
-            requestedDisplay = options?.display;
-            return { observation: settled, settled: true, polls: 2 };
+          execute: async (options = {}) => {
+            requestedDisplay = options.display;
+            return settleResult(settled);
           },
         },
       });
@@ -1820,9 +1832,9 @@ describe("explicit-display embedded observation", () => {
       actionClass: "navigation",
       observation: action,
       settleObserve: {
-        execute: async (options) => {
-          requestedDisplay = options?.display;
-          return { observation: settled, settled: true, polls: 2 };
+        execute: async (options = {}) => {
+          requestedDisplay = options.display;
+          return settleResult(settled);
         },
       },
     });
@@ -1834,20 +1846,18 @@ describe("explicit-display embedded observation", () => {
 
   test("default polling adopts a focused panel capture after a posture-default action capture", async () => {
     const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
-    action.platform = "android";
     action.display = { key: "outside", role: "cover", posture: "closed", generation: 2 };
     action.selectedElements = [];
     const settled = obs(AIRPLANE_ROW_INFLATED, 11);
-    settled.platform = "android";
     settled.display = { key: "inside", role: "inner", posture: "opened", generation: 2 };
     let requestedDisplay: string | undefined = "unexpected";
     const result = await settleEmbeddedObservation({
       actionClass: "navigation",
       observation: action,
       settleObserve: {
-        execute: async (options) => {
-          requestedDisplay = options?.display;
-          return { observation: settled, settled: true, polls: 2 };
+        execute: async (options = {}) => {
+          requestedDisplay = options.display;
+          return settleResult(settled);
         },
       },
     });
@@ -1861,8 +1871,7 @@ describe("explicit-display embedded observation", () => {
     "default iOS polling adopts a capture with a changed fallback key (reverse: %s)",
     async (reverse) => {
       const action = obs({ class: "XCUIElementTypeStaticText", label: "Loading" }, 10);
-      action.platform = "ios";
-      action.activeWindow = { appId: "com.example.app" };
+      action.activeWindow = { appId: "com.example.app", activityName: "", layoutSeqSum: 0 };
       action.screenSize = reverse ? { width: 1170, height: 2532 } : { width: 0, height: 0 };
       action.viewHierarchy!.packageName = "com.example.app";
       action.display = {
@@ -1872,8 +1881,7 @@ describe("explicit-display embedded observation", () => {
         generation: 0,
       };
       const settled = obs({ class: "XCUIElementTypeStaticText", label: "Ready" }, 11);
-      settled.platform = "ios";
-      settled.activeWindow = { appId: "com.example.app" };
+      settled.activeWindow = { appId: "com.example.app", activityName: "", layoutSeqSum: 0 };
       settled.screenSize = reverse ? { width: 0, height: 0 } : { width: 1170, height: 2532 };
       settled.viewHierarchy!.packageName = "com.example.app";
       settled.display = {
@@ -1886,9 +1894,9 @@ describe("explicit-display embedded observation", () => {
         actionClass: "navigation",
         observation: action,
         settleObserve: {
-          execute: async (options) => {
+          execute: async (options = {}) => {
             expect(options?.display).toBeUndefined();
-            return { observation: settled, settled: true, polls: 2 };
+            return settleResult(settled);
           },
         },
       });
@@ -1916,9 +1924,9 @@ describe("session-pinned embedded observation", () => {
       actionClass: "navigation",
       observation: action,
       settleObserve: {
-        execute: async (options) => {
-          requestedDisplay = options?.display;
-          return { observation: settled, settled: true, polls: 2 };
+        execute: async (options = {}) => {
+          requestedDisplay = options.display;
+          return settleResult(settled);
         },
       },
     });
@@ -1941,7 +1949,7 @@ describe("session-pinned embedded observation", () => {
     const result = await settleEmbeddedObservation({
       actionClass: "navigation",
       observation: action,
-      settleObserve: { execute: async () => ({ observation: settled, settled: true, polls: 2 }) },
+      settleObserve: { execute: async () => settleResult(settled) },
     });
     expect(result.observation).toBe(action);
     expect(result.settled).toBe(false);
@@ -1963,7 +1971,7 @@ describe("pending terminal screenshot finalization", () => {
     async (reason) => {
       const original = action();
       original.display = { key: "panel", role: "external", posture: "unknown", generation: 1 };
-      const candidate = {
+      const candidate: ObserveResult = {
         ...original,
         observationId: "candidate",
         updatedAt: 20,
@@ -2159,13 +2167,7 @@ test("explicit-display terminal capture failure degrades the chosen frame withou
       observation: original,
       args: { display: "external" },
       settleObserve: {
-        execute: async () => ({
-          observation: chosen,
-          settled: true,
-          polls: 2,
-          waitMs: 0,
-          terminalReason: "settled",
-        }),
+        execute: async () => settleResult(chosen),
         captureScreenshot: async () => {
           attempts++;
           throw new Error("display capture failed");
@@ -2191,7 +2193,24 @@ test("single terminal capture produces the audit for the chosen frame", async ()
     accessibilityAuditSkipped: "settled_capture_adopted" as const,
   };
   let captures = 0;
-  const audit = { frame: "audit-chosen" };
+  const audit: AccessibilityAuditResult = {
+    config: { level: "AA", failureMode: "report", useBaseline: false },
+    summary: {
+      totalViolations: 0,
+      bySeverity: { error: 0, warning: 0, info: 0 },
+      byType: {
+        "missing-content-description": 0,
+        "insufficient-contrast": 0,
+        "touch-target-too-small": 0,
+        "unlabeled-form-input": 0,
+      },
+      baselinedViolations: 0,
+      passed: true,
+    },
+    violations: [],
+    timestamp: 20,
+    screenId: "audit-chosen",
+  };
   await runWithPostActionCaptureScope(undefined, async () => {
     deferTerminalScreenshot(original, async () => {
       throw new Error("wrong frame");
@@ -2291,7 +2310,16 @@ test.each([
   expect(captures).toBe(0);
 });
 
-const captureFailurePaths = [
+type CaptureFailurePath =
+  | "rejected gate"
+  | "thrown settle"
+  | "failed action"
+  | "handler settled"
+  | "no settle observe"
+  | "not gated"
+  | "adopt"
+  | "finally bypass";
+const captureFailurePaths: CaptureFailurePath[] = [
   "rejected gate",
   "thrown settle",
   "failed action",
@@ -2300,7 +2328,7 @@ const captureFailurePaths = [
   "not gated",
   "adopt",
   "finally bypass",
-] as const;
+];
 describe("explicit-display deferred terminal capture failure", () => {
   test.each(captureFailurePaths)(
     "%s preserves warning and stale display in structured and text envelopes",
@@ -2317,10 +2345,10 @@ describe("explicit-display deferred terminal capture failure", () => {
           pinned: true,
         };
         action.freshness = { isFresh: true, warning: "existing warning" };
-        const chosen = {
+        const chosen: ObserveResult = {
           ...action,
           observationId: "adopted",
-          viewHierarchy: { ...action.viewHierarchy, updatedAt: 20 },
+          viewHierarchy: { ...action.viewHierarchy!, updatedAt: 20 },
         };
         const error = new StaleDisplayError({
           observedGeneration: 1,

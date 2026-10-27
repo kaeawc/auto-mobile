@@ -1,15 +1,22 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DefaultDeviceResourceObserver,
   type DeviceResourceObservationRequest,
+  type DeviceResourceObserver,
 } from "../../src/utils/deviceResourceObserver";
-import type { DeviceResourceStatus } from "../../src/models/DeviceResource";
+import type { AndroidDeviceResource } from "../../src/models/AndroidDeviceResource";
+import type { AppleDeviceResource } from "../../src/models/AppleDeviceResource";
+import type { DeviceResourceState, DeviceResourceStatus } from "../../src/models/DeviceResource";
 import { androidResourceSettings } from "../../src/utils/androidDeviceResourceCatalog";
 import { iosDeviceResourceCatalog } from "../../src/utils/iosDeviceResourceCatalog";
 import { logger } from "../../src/utils/logger";
 import { ResourceAdb } from "../fakes/FakeAndroidResourceAdb";
 import { FakeWallpaperSimctl, FakeWallpaperPlist, udid } from "../fakes/FakeIosResourceRuntime";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const commonKeys = [
   "wallpaperRendering",
@@ -19,6 +26,26 @@ const commonKeys = [
   "searchIndexing",
   "animations",
 ];
+async function observeAndroid(
+  observer: DeviceResourceObserver,
+  request: DeviceResourceObservationRequest,
+): Promise<AndroidDeviceResource> {
+  const result = await observer.observeResources(request);
+  if (result.platform !== "android") {
+    throw new Error(`expected an Android snapshot, got ${result.platform}`);
+  }
+  return result;
+}
+async function observeIos(
+  observer: DeviceResourceObserver,
+  request: DeviceResourceObservationRequest,
+): Promise<AppleDeviceResource> {
+  const result = await observer.observeResources(request);
+  if (result.platform !== "ios") {
+    throw new Error(`expected an iOS snapshot, got ${result.platform}`);
+  }
+  return result;
+}
 function setup(platform: "android" | "ios") {
   const adb = new ResourceAdb();
   adb.packages.set("com.google.android.gms", "1");
@@ -45,7 +72,7 @@ function setup(platform: "android" | "ios") {
   };
   return { adb, simctl, plist, timer, observer, request };
 }
-function expectReason(status: DeviceResourceStatus | undefined, state: string) {
+function expectReason(status: DeviceResourceStatus | undefined, state: DeviceResourceState) {
   expect(status?.state).toBe(state);
   expect(status?.reason).toBeTruthy();
 }
@@ -53,7 +80,7 @@ function expectReason(status: DeviceResourceStatus | undefined, state: string) {
 describe("Android resource observation", () => {
   test("returns every required key with native observations and no configuration receipt", async () => {
     const { observer, request } = setup("android");
-    const result = await observer.observeResources(request);
+    const result = await observeAndroid(observer, request);
     expect(result.deviceId).toBe(request.device.deviceId);
     expect(result.platform).toBe("android");
     expect(Object.keys(result.resources)).toEqual(
@@ -75,13 +102,13 @@ describe("Android resource observation", () => {
   test("mixed animation scales are unknown", async () => {
     const { observer, request, adb } = setup("android");
     adb.settings.set("window_animation_scale", "0");
-    expectReason((await observer.observeResources(request)).resources.animations, "unknown");
+    expectReason((await observeAndroid(observer, request)).resources.animations, "unknown");
   });
   test("absent setting and default package override are unknown, never inferred", async () => {
     const { observer, request, adb } = setup("android");
     adb.settings.delete("window_animation_scale");
     adb.packages.set("com.google.android.gms", "0");
-    const result = await observer.observeResources(request);
+    const result = await observeAndroid(observer, request);
     expectReason(result.resources.animations, "unknown");
     expectReason(result.resources.googlePlayServices, "unknown");
   });
@@ -91,13 +118,13 @@ describe("Android resource observation", () => {
       adb.settings.set(key, "0");
     }
     adb.packages.set("com.google.android.gms", "3");
-    const result = await observer.observeResources(request);
+    const result = await observeAndroid(observer, request);
     expect(result.resources.animations.state).toBe("disabled");
     expect(result.resources.googlePlayServices?.state).toBe("disabled");
   });
   test("partially installed optional groups are unknown; wholly absent groups unsupported", async () => {
     const { observer, request } = setup("android");
-    const result = await observer.observeResources(request);
+    const result = await observeAndroid(observer, request);
     expectReason(result.resources.mailApp, "unknown");
     expectReason(result.resources.calendarApp, "unsupported");
   });
@@ -105,7 +132,7 @@ describe("Android resource observation", () => {
     const { observer, request, adb } = setup("android");
     adb.packages.delete("com.google.android.gms");
     expectReason(
-      (await observer.observeResources(request)).resources.googlePlayServices,
+      (await observeAndroid(observer, request)).resources.googlePlayServices,
       "unsupported",
     );
   });
@@ -114,7 +141,7 @@ describe("Android resource observation", () => {
     adb.settings.set("window_animation_scale", "permission denied");
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      const result = await observer.observeResources(request);
+      const result = await observeAndroid(observer, request);
       expectReason(result.resources.animations, "unknown");
       expect(result.resources.googlePlayServices?.state).toBe("enabled");
       expect(warning).toHaveBeenCalled();
@@ -125,7 +152,7 @@ describe("Android resource observation", () => {
   test("physical devices return unsupported required keys without native commands", async () => {
     const { observer, request, adb } = setup("android");
     request.device.deviceId = "physical-device";
-    const result = await observer.observeResources(request);
+    const result = await observeAndroid(observer, request);
     expect(Object.keys(result.resources)).toEqual(
       expect.arrayContaining([...commonKeys, "googlePlayServices"]),
     );
@@ -136,7 +163,7 @@ describe("Android resource observation", () => {
   });
   test("never dispatches package/settings/backup writes, including optional groups", async () => {
     const { observer, request, adb } = setup("android");
-    await observer.observeResources(request);
+    await observeAndroid(observer, request);
     expect(
       adb.commands.some(
         (words) =>
@@ -152,7 +179,7 @@ describe("Android resource observation", () => {
 describe("iOS Simulator resource observation", () => {
   test("returns complete required keys with native enabled evidence", async () => {
     const { observer, request, plist } = setup("ios");
-    const result = await observer.observeResources(request);
+    const result = await observeIos(observer, request);
     expect(result.deviceId).toBe(udid);
     expect(result.platform).toBe("ios");
     expect(Object.keys(result.resources)).toEqual(
@@ -181,7 +208,7 @@ describe("iOS Simulator resource observation", () => {
     const { observer, request, simctl } = setup("ios");
     simctl.disabled = true;
     simctl.loaded = false;
-    expect((await observer.observeResources(request)).resources.wallpaperRendering.state).toBe(
+    expect((await observeIos(observer, request)).resources.wallpaperRendering.state).toBe(
       "disabled",
     );
     expect(simctl.mutations()).toEqual([]);
@@ -189,42 +216,36 @@ describe("iOS Simulator resource observation", () => {
   test("mixed group evidence is unknown", async () => {
     const { observer, request, simctl } = setup("ios");
     simctl.states.set("com.apple.healthd", { disabled: true, loaded: false });
-    expectReason((await observer.observeResources(request)).resources.healthServices, "unknown");
+    expectReason((await observeIos(observer, request)).resources.healthServices, "unknown");
   });
   test("missing one definition yields incomplete unknown evidence", async () => {
     const { observer, request, simctl, plist } = setup("ios");
     plist.missing.add("com.apple.healthd");
     simctl.states.set("com.apple.healthd", { disabled: false, loaded: false });
-    expectReason((await observer.observeResources(request)).resources.healthServices, "unknown");
+    expectReason((await observeIos(observer, request)).resources.healthServices, "unknown");
   });
   test("wholly absent groups are unsupported", async () => {
     const { observer, request, simctl, plist } = setup("ios");
     plist.missing.add("com.apple.photoanalysisd");
     simctl.states.set("com.apple.photoanalysisd", { disabled: false, loaded: false });
-    expectReason((await observer.observeResources(request)).resources.photoAnalysis, "unsupported");
+    expectReason((await observeIos(observer, request)).resources.photoAnalysis, "unsupported");
   });
   test("incompatible installed definition yields unknown incomplete evidence", async () => {
     const { observer, request, plist } = setup("ios");
     plist.definitions.set("com.apple.healthd", { Label: "com.apple.healthd", Disabled: true });
-    expectReason((await observer.observeResources(request)).resources.healthServices, "unknown");
+    expectReason((await observeIos(observer, request)).resources.healthServices, "unknown");
   });
   test("override/registration disagreement is unknown", async () => {
     const { observer, request, simctl } = setup("ios");
     simctl.disabled = true;
-    expectReason(
-      (await observer.observeResources(request)).resources.wallpaperRendering,
-      "unknown",
-    );
+    expectReason((await observeIos(observer, request)).resources.wallpaperRendering, "unknown");
   });
   test("malformed native read evidence is logged unknown", async () => {
     const { observer, request, simctl } = setup("ios");
     simctl.malformed = true;
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      expectReason(
-        (await observer.observeResources(request)).resources.wallpaperRendering,
-        "unknown",
-      );
+      expectReason((await observeIos(observer, request)).resources.wallpaperRendering, "unknown");
       expect(warning).toHaveBeenCalled();
     } finally {
       warning.mockRestore();
@@ -233,7 +254,7 @@ describe("iOS Simulator resource observation", () => {
   test("physical iOS has a complete unsupported snapshot without native reads", async () => {
     const { observer, request, simctl, plist } = setup("ios");
     request.device.deviceId = "physical-device";
-    const result = await observer.observeResources(request);
+    const result = await observeIos(observer, request);
     for (const status of Object.values(result.resources)) {
       expectReason(status, "unsupported");
     }
@@ -243,13 +264,13 @@ describe("iOS Simulator resource observation", () => {
   test("a non-booted simulator is unsupported without service reads", async () => {
     const { observer, request, simctl } = setup("ios");
     simctl.booted = false;
-    const result = await observer.observeResources(request);
+    const result = await observeIos(observer, request);
     expectReason(result.resources.wallpaperRendering, "unsupported");
     expect(simctl.calls).toHaveLength(1);
   });
   test("never issues launchctl writes across the full catalog", async () => {
     const { observer, request, simctl } = setup("ios");
-    await observer.observeResources(request);
+    await observeIos(observer, request);
     expect(simctl.mutations()).toEqual([]);
     expect(
       simctl.calls
@@ -313,7 +334,7 @@ for (const platform of ["android", "ios"] as const) {
     try {
       const result = await observer.observeResources(request);
       expectReason(
-        platform === "android"
+        result.platform === "android"
           ? result.resources.googlePlayServices
           : result.resources.wallpaperRendering,
         "unknown",
@@ -359,7 +380,7 @@ test("Android mixed installed package evidence is unknown and optional settings/
   adb.packages.set("com.android.email", "3");
   adb.settings.set("screensaver_enabled", "0");
   adb.backupEnabled = false;
-  const result = await observer.observeResources(request);
+  const result = await observeAndroid(observer, request);
   expectReason(result.resources.mailApp, "unknown");
   expect(result.resources.screensavers?.state).toBe("disabled");
   expect(result.resources.backup?.state).toBe("disabled");
@@ -371,7 +392,7 @@ test("iOS permission failure in one native service is unknown without obscuring 
   simctl.failLabel = "com.apple.PosterBoard";
   const warning = spyOn(logger, "warn").mockImplementation(() => {});
   try {
-    const result = await observer.observeResources(request);
+    const result = await observeIos(observer, request);
     expectReason(result.resources.wallpaperRendering, "unknown");
     expect(result.resources.photoAnalysis?.state).toBe("enabled");
     expect(warning).toHaveBeenCalled();
@@ -392,10 +413,7 @@ test("iOS filesystem read failure is unknown, not runtime absence", async () => 
   });
   const warning = spyOn(logger, "warn").mockImplementation(() => {});
   try {
-    expectReason(
-      (await observer.observeResources(request)).resources.wallpaperRendering,
-      "unknown",
-    );
+    expectReason((await observeIos(observer, request)).resources.wallpaperRendering, "unknown");
     expect(warning).toHaveBeenCalled();
   } finally {
     warning.mockRestore();

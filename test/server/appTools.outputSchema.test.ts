@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { readToolResponse, toolIsError, toolStructured } from "../helpers/toolResponse";
 import { registerAppTools } from "../../src/server/appTools";
 import {
   getAppPermissionsResultSchema,
@@ -145,10 +146,12 @@ describe("app tool output schemas", () => {
       device,
       { appId: inspection.appId },
     );
-    expect(response.content).toEqual([{ type: "text", text: JSON.stringify(inspection) }]);
-    expect(response.isError).toBeUndefined();
-    expect(response.structuredContent).toEqual(inspection);
-    expect(inspectPackageSigningResultSchema.safeParse(response.structuredContent).success).toBe(
+    expect(readToolResponse(response).content).toEqual([
+      { type: "text", text: JSON.stringify(inspection) },
+    ]);
+    expect(toolIsError(response)).toBe(false);
+    expect(toolStructured(response)).toEqual({ ...inspection });
+    expect(inspectPackageSigningResultSchema.safeParse(toolStructured(response)).success).toBe(
       true,
     );
   });
@@ -185,9 +188,11 @@ describe("app tool output schemas", () => {
     registerAppTools({ listApps: { queryInstalledApps: async () => content } });
     const response = await ToolRegistry.getTool("listApps")!.deviceAwareHandler!(device, {});
     const expected = { message: `Found 0 app(s) on ${device.deviceId}`, ...content };
-    expect(response.content).toEqual([{ type: "text", text: JSON.stringify(expected) }]);
-    expect(response.isError).toBeUndefined();
-    expect(response.structuredContent).toEqual(expected);
-    expect(listAppsResultSchema.safeParse(response.structuredContent).success).toBe(true);
+    expect(readToolResponse(response).content).toEqual([
+      { type: "text", text: JSON.stringify(expected) },
+    ]);
+    expect(toolIsError(response)).toBe(false);
+    expect(toolStructured(response)).toEqual(expected);
+    expect(listAppsResultSchema.safeParse(toolStructured(response)).success).toBe(true);
   });
 });

@@ -1,5 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   ToolRegistry,
   type AuditRunnerInput,
@@ -11,12 +11,12 @@ import {
 } from "../../src/server/interactionTools";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import {
   DEVICE_OWNED_BY_OTHER_SESSION_CODE,
   InputDeviceOwnedError,
 } from "../../src/daemon/inputDeviceOwnership";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -26,7 +26,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { setDebugModeEnabled } from "../../src/utils/debug";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import {
   getToolSelectionContext,
@@ -56,7 +56,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
   let originalCollaborators: ToolRegistryCollaborators;
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
-  let devices: FakeDeviceSessionManager;
+  let devices: FakeDeviceReadiness;
   let gate: Promise<void> | undefined;
   let dispatched: (() => void) | undefined;
   let callerSignal: AbortSignal | undefined;
@@ -74,7 +74,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     return undefined;
   }
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     ran = [];
     watchContexts = [];
     ToolRegistry.clearTools();
@@ -101,11 +101,11 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
         },
       },
     });
-    const fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    fakeDeviceSessionManager.setConnectedDevices([held, free]);
-    devices = fakeDeviceSessionManager;
+    const fakeDeviceReadiness = new FakeDeviceReadiness();
+    fakeDeviceReadiness.setConnectedDevices([held, free]);
+    devices = fakeDeviceReadiness;
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { async recordToolCall(): Promise<void> {} },
     });
@@ -152,7 +152,19 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
         getMostRecentCachedObserveResult: async () => loadAndroidHomeObserve().observe,
       }),
     });
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     gate = undefined;
@@ -173,25 +185,28 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
   ];
 
   for (const [name, args] of mutatingCalls) {
-    test(`${name} from another session's sessionUuid is refused before any device work`, async () => {
-      const error = await refusal(name, {
-        ...args,
-        platform: "android",
-        sessionUuid: observer,
-        deviceId: held.deviceId,
-      });
-      expect(error).toBeInstanceOf(InputDeviceOwnedError);
-      expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-      expect((error as Error).message).toBe(
-        `${name} refused: device '${held.deviceId}' is held by another session. ` +
-          `Session ${observer} does not hold it; acquire the device (setActiveDevice) and call ` +
-          `the tool with that session's sessionUuid, or wait for the holder to release it.`,
-      );
-      expect(ran).toEqual([]);
-      expect(sessionManager.getSessionForDevice(held.deviceId)).toBe(agent);
-    });
+    arranged(
+      `${name} from another session's sessionUuid is refused before any device work`,
+      async () => {
+        const error = await refusal(name, {
+          ...args,
+          platform: "android",
+          sessionUuid: observer,
+          deviceId: held.deviceId,
+        });
+        expect(error).toBeInstanceOf(InputDeviceOwnedError);
+        expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+        expect((error as Error).message).toBe(
+          `${name} refused: device '${held.deviceId}' is held by another session. ` +
+            `Session ${observer} does not hold it; acquire the device (setActiveDevice) and call ` +
+            `the tool with that session's sessionUuid, or wait for the holder to release it.`,
+        );
+        expect(ran).toEqual([]);
+        expect(sessionManager.getSessionForDevice(held.deviceId)).toBe(agent);
+      },
+    );
 
-    test(`a sessionless ${name} on a held device is refused`, async () => {
+    arranged(`a sessionless ${name} on a held device is refused`, async () => {
       const error = await refusal(name, { ...args, platform: "android", deviceId: held.deviceId });
       expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
       expect((error as Error).message).toContain("The request carried no sessionUuid;");
@@ -199,12 +214,12 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     });
   }
 
-  test("the holder's own rotate runs on its device", async () => {
+  arranged("the holder's own rotate runs on its device", async () => {
     await call("rotate", { orientation: "landscape", sessionUuid: agent, deviceId: held.deviceId });
     expect(ran).toEqual([{ name: "rotate", deviceId: held.deviceId }]);
   });
 
-  test("a sessionless rotate on an unheld device still runs", async () => {
+  arranged("a sessionless rotate on an unheld device still runs", async () => {
     await call("rotate", {
       orientation: "landscape",
       platform: "android",
@@ -213,39 +228,51 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     expect(ran).toEqual([{ name: "rotate", deviceId: free.deviceId }]);
   });
 
-  test("observe on a device another session holds is allowed (watching is not use)", async () => {
-    await call("observe", { platform: "android", deviceId: held.deviceId });
-    expect(ran).toEqual([{ name: "observe", deviceId: held.deviceId }]);
-    // #10830: watching never readies the holder's device.
-    expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
-    expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
-  });
+  arranged(
+    "observe on a device another session holds is allowed (watching is not use)",
+    async () => {
+      await call("observe", { platform: "android", deviceId: held.deviceId });
+      expect(ran).toEqual([{ name: "observe", deviceId: held.deviceId }]);
+      // #10830: watching never readies the holder's device.
+      expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
+      expect(devices.getExplicitDevicePin()).toBeUndefined();
+    },
+  );
 
   // #10828: a call without a deviceId used to run ensureDeviceReady (CtrlProxy setup, the
   // current-device pin, settings) on the held device before the ownership check refused it.
-  test("a sessionless rotate with no deviceId that would land on a held device does no device work", async () => {
-    devices.setConnectedDevices([held]);
-    const error = await refusal("rotate", { orientation: "landscape", platform: "android" });
-    expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
-    expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
-    expect(ran).toEqual([]);
-  });
+  arranged(
+    "a sessionless rotate with no deviceId that would land on a held device does no device work",
+    async () => {
+      devices.setConnectedDevices([held]);
+      const error = await refusal("rotate", { orientation: "landscape", platform: "android" });
+      expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
+      expect(devices.getExplicitDevicePin()).toBeUndefined();
+      expect(ran).toEqual([]);
+    },
+  );
 
-  test("a sessionless rotate with no deviceId is checked against the setActiveDevice pin first", async () => {
-    devices.setExplicitDevicePin(held);
-    const error = await refusal("rotate", { orientation: "landscape", platform: "android" });
-    expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
-    expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
-  });
+  arranged(
+    "a sessionless rotate with no deviceId is checked against the setActiveDevice pin first",
+    async () => {
+      devices.setExplicitDevicePin(held);
+      const error = await refusal("rotate", { orientation: "landscape", platform: "android" });
+      expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
+      expect(devices.getExplicitDevicePin()).toEqual(held);
+    },
+  );
 
-  test("a sessionless rotate with no deviceId on an unheld only device still readies and runs", async () => {
-    devices.setConnectedDevices([free]);
-    await call("rotate", { orientation: "landscape", platform: "android" });
-    expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
-    expect(ran).toEqual([{ name: "rotate", deviceId: free.deviceId }]);
-  });
+  arranged(
+    "a sessionless rotate with no deviceId on an unheld only device still readies and runs",
+    async () => {
+      devices.setConnectedDevices([free]);
+      await call("rotate", { orientation: "landscape", platform: "android" });
+      expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
+      expect(ran).toEqual([{ name: "rotate", deviceId: free.deviceId }]);
+    },
+  );
 
   // #10965: hitTest and identifyInteractions are reads. A sessionless call watches the held device
   // through the observer capture, with no readiness and no session pipeline (#10828).
@@ -253,31 +280,34 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     ["hitTest", { x: 10, y: 10 }],
     ["identifyInteractions", {}],
   ] as Array<[string, Record<string, unknown>]>) {
-    test(`a sessionless ${name} on a held device watches it without readiness (#10965)`, async () => {
-      interactionDeps.hitTestDeviceReadFactory = (device) => ({
-        executeDeviceRead: async () => {
-          ran.push({ name: "hitTest", deviceId: device.deviceId });
-          return loadAndroidHomeObserve().observe;
-        },
-      });
-      setDebugModeEnabled(true); // identifyInteractions is debugOnly
-      try {
-        await call(name, { ...args, platform: "android", deviceId: held.deviceId });
-      } finally {
-        setDebugModeEnabled(false);
-        delete interactionDeps.hitTestDeviceReadFactory;
-      }
-      expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
-      expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
-      // identifyInteractions reads through observe's screen seam, which records "observe".
-      expect(ran).toEqual([
-        { name: name === "hitTest" ? "hitTest" : "observe", deviceId: held.deviceId },
-      ]);
-      expect(sessionManager.getSessionForDevice(held.deviceId)).toBe(agent);
-    });
+    arranged(
+      `a sessionless ${name} on a held device watches it without readiness (#10965)`,
+      async () => {
+        interactionDeps.hitTestDeviceReadFactory = (device) => ({
+          executeDeviceRead: async () => {
+            ran.push({ name: "hitTest", deviceId: device.deviceId });
+            return loadAndroidHomeObserve().observe;
+          },
+        });
+        setDebugModeEnabled(true); // identifyInteractions is debugOnly
+        try {
+          await call(name, { ...args, platform: "android", deviceId: held.deviceId });
+        } finally {
+          setDebugModeEnabled(false);
+          delete interactionDeps.hitTestDeviceReadFactory;
+        }
+        expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
+        expect(devices.getExplicitDevicePin()).toBeUndefined();
+        // identifyInteractions reads through observe's screen seam, which records "observe".
+        expect(ran).toEqual([
+          { name: name === "hitTest" ? "hitTest" : "observe", deviceId: held.deviceId },
+        ]);
+        expect(sessionManager.getSessionForDevice(held.deviceId)).toBe(agent);
+      },
+    );
   }
 
-  test("the refusal reaches the client with the typed code", async () => {
+  arranged("the refusal reaches the client with the typed code", async () => {
     const error = await refusal("rotate", {
       orientation: "landscape",
       platform: "android",
@@ -325,23 +355,26 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
 
   // #10829: ownership was checked once, at target resolution. A session acquiring the device while
   // a sessionless call was in flight did not stop it, so its work landed on the new holder's device.
-  test("a sessionless rotate in flight is cancelled when another session acquires its device", async () => {
-    const call = await startGated("rotate", {
-      orientation: "landscape",
-      platform: "android",
-      deviceId: free.deviceId,
-    });
-    await sessionManager.createSession("late-holder", free.deviceId, "android");
-    call.release();
-    const error = await call.outcome;
+  arranged(
+    "a sessionless rotate in flight is cancelled when another session acquires its device",
+    async () => {
+      const call = await startGated("rotate", {
+        orientation: "landscape",
+        platform: "android",
+        deviceId: free.deviceId,
+      });
+      await sessionManager.createSession("late-holder", free.deviceId, "android");
+      call.release();
+      const error = await call.outcome;
 
-    expect(error).toBeInstanceOf(InputDeviceOwnedError);
-    expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    expect((error as Error).message).toContain("acquired it while this call was in flight");
-    expect(ran).toEqual([]);
-  });
+      expect(error).toBeInstanceOf(InputDeviceOwnedError);
+      expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect((error as Error).message).toContain("acquired it while this call was in flight");
+      expect(ran).toEqual([]);
+    },
+  );
 
-  test("a sessionless rotate on a device nobody acquires runs to completion", async () => {
+  arranged("a sessionless rotate on a device nobody acquires runs to completion", async () => {
     const call = await startGated("rotate", {
       orientation: "landscape",
       platform: "android",
@@ -352,15 +385,18 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     expect(ran).toEqual([{ name: "rotate", deviceId: free.deviceId }]);
   });
 
-  test("a sessionless observe in flight keeps watching after another session acquires the device", async () => {
-    const call = await startGated("observe", { platform: "android", deviceId: free.deviceId });
-    await sessionManager.createSession("late-holder", free.deviceId, "android");
-    call.release();
-    expect(await call.outcome).toBeUndefined();
-    expect(ran).toEqual([{ name: "observe", deviceId: free.deviceId }]);
-  });
+  arranged(
+    "a sessionless observe in flight keeps watching after another session acquires the device",
+    async () => {
+      const call = await startGated("observe", { platform: "android", deviceId: free.deviceId });
+      await sessionManager.createSession("late-holder", free.deviceId, "android");
+      call.release();
+      expect(await call.outcome).toBeUndefined();
+      expect(ran).toEqual([{ name: "observe", deviceId: free.deviceId }]);
+    },
+  );
 
-  test("the holder's own call is not cancelled by another device's acquisition", async () => {
+  arranged("the holder's own call is not cancelled by another device's acquisition", async () => {
     const call = await startGated("rotate", {
       orientation: "landscape",
       sessionUuid: agent,
@@ -395,22 +431,25 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     ["an explicit deviceId", { deviceId: free.deviceId }],
     ["the predicted target", {}],
   ] as Array<[string, Record<string, unknown>]>) {
-    test(`a sessionless rotate inside readiness on ${label} is cancelled when a session acquires it`, async () => {
-      devices.setConnectedDevices([free]);
-      const call = await startInReadiness("rotate", {
-        orientation: "landscape",
-        platform: "android",
-        ...args,
-      });
-      await sessionManager.createSession("late-holder", free.deviceId, "android");
-      call.release();
-      const error = await call.outcome;
+    arranged(
+      `a sessionless rotate inside readiness on ${label} is cancelled when a session acquires it`,
+      async () => {
+        devices.setConnectedDevices([free]);
+        const call = await startInReadiness("rotate", {
+          orientation: "landscape",
+          platform: "android",
+          ...args,
+        });
+        await sessionManager.createSession("late-holder", free.deviceId, "android");
+        call.release();
+        const error = await call.outcome;
 
-      expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-      expect((error as Error).message).toContain("acquired it while this call was in flight");
-      expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
-      expect(ran).toEqual([]);
-    });
+        expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+        expect((error as Error).message).toContain("acquired it while this call was in flight");
+        expect(devices.getExplicitDevicePin()).toBeUndefined();
+        expect(ran).toEqual([]);
+      },
+    );
   }
 
   // #10970: a sessionless read was never marked, so a session acquiring its device during the
@@ -419,30 +458,36 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     ["an explicit deviceId", { deviceId: free.deviceId }],
     ["the predicted target", {}],
   ] as Array<[string, Record<string, unknown>]>) {
-    test(`a sessionless observe inside readiness on ${label} watches when a session acquires it`, async () => {
-      devices.setConnectedDevices([free]);
-      const call = await startInReadiness("observe", { platform: "android", ...args });
-      await sessionManager.createSession("late-holder", free.deviceId, "android");
-      call.release();
-      expect(await call.outcome).toBeUndefined();
-      expect(call.ambientSignal?.aborted).toBe(true);
-      expect(callerSignal?.aborted).toBe(false);
+    arranged(
+      `a sessionless observe inside readiness on ${label} watches when a session acquires it`,
+      async () => {
+        devices.setConnectedDevices([free]);
+        const call = await startInReadiness("observe", { platform: "android", ...args });
+        await sessionManager.createSession("late-holder", free.deviceId, "android");
+        call.release();
+        expect(await call.outcome).toBeUndefined();
+        expect(call.ambientSignal?.aborted).toBe(true);
+        expect(callerSignal?.aborted).toBe(false);
 
-      expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
-      expect(ran).toEqual([{ name: "observe", deviceId: free.deviceId }]);
-      expect(watchContexts).toEqual([{ signal: callerSignal, readPath: true }]);
-      expect(watchContexts[0].signal?.aborted).toBe(false);
-    });
+        expect(devices.getExplicitDevicePin()).toBeUndefined();
+        expect(ran).toEqual([{ name: "observe", deviceId: free.deviceId }]);
+        expect(watchContexts).toEqual([{ signal: callerSignal, readPath: true }]);
+        expect(watchContexts[0].signal?.aborted).toBe(false);
+      },
+    );
   }
 
-  test("a read that names another device than its session's watches that device (#10970)", async () => {
-    await call("observe", { platform: "android", sessionUuid: agent, deviceId: free.deviceId });
-    expect(ran).toEqual([{ name: "observe", deviceId: free.deviceId }]);
-    expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
-    expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
-  });
+  arranged(
+    "a read that names another device than its session's watches that device (#10970)",
+    async () => {
+      await call("observe", { platform: "android", sessionUuid: agent, deviceId: free.deviceId });
+      expect(ran).toEqual([{ name: "observe", deviceId: free.deviceId }]);
+      expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
+      expect(devices.getExplicitDevicePin()).toBeUndefined();
+    },
+  );
 
-  test("a control call naming another device than its session's is still refused", async () => {
+  arranged("a control call naming another device than its session's is still refused", async () => {
     const error = await refusal("rotate", {
       orientation: "landscape",
       sessionUuid: agent,
@@ -452,47 +497,57 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     expect(ran).toEqual([]);
   });
 
-  test("the multiple-device ambiguity asks a read for deviceId and a control call for a session", async () => {
-    const read = await refusal("observe", { platform: "android" });
-    expect((read as Error).message).toBe(
-      "Multiple Android devices detected. Provide deviceId to target a specific device. (code ambiguous_device_target)",
-    );
-    expect(read).toMatchObject({
-      code: "ambiguous_device_target",
-      retryable: false,
-      candidates: [held, free].map(({ deviceId, platform }) => ({ deviceId, platform })),
-    });
-    const control = await refusal("rotate", { orientation: "landscape", platform: "android" });
-    expect((control as Error).message).toBe(
-      "Multiple Android devices detected. Provide sessionUuid to target a specific device. (code ambiguous_device_target)",
-    );
-    expect(control).toMatchObject({
-      code: "ambiguous_device_target",
-      retryable: false,
-      candidates: [held, free].map(({ deviceId, platform }) => ({ deviceId, platform })),
-    });
-  });
+  arranged(
+    "the multiple-device ambiguity asks a read for deviceId and a control call for a session",
+    async () => {
+      const read = await refusal("observe", { platform: "android" });
+      expect((read as Error).message).toBe(
+        "Multiple Android devices detected. Provide deviceId to target a specific device. (code ambiguous_device_target)",
+      );
+      expect(read).toMatchObject({
+        code: "ambiguous_device_target",
+        retryable: false,
+        candidates: [held, free].map(({ deviceId, platform }) => ({ deviceId, platform })),
+      });
+      const control = await refusal("rotate", { orientation: "landscape", platform: "android" });
+      expect((control as Error).message).toBe(
+        "Multiple Android devices detected. Provide sessionUuid to target a specific device. (code ambiguous_device_target)",
+      );
+      expect(control).toMatchObject({
+        code: "ambiguous_device_target",
+        retryable: false,
+        candidates: [held, free].map(({ deviceId, platform }) => ({ deviceId, platform })),
+      });
+    },
+  );
 
-  test("a call whose readiness settles on another device than predicted moves its mark", async () => {
-    const third: BootedDevice = { name: "Pixel C", deviceId: "emulator-5558", platform: "android" };
-    devices.setConnectedDevices([free]);
-    const readiness = await startInReadiness("rotate", {
-      orientation: "landscape",
-      platform: "android",
-    });
-    // Readiness lands on another device than the one predicted from the shared scan.
-    devices.setConnectedDevices([third]);
-    const release = Promise.withResolvers<void>();
-    const entered = Promise.withResolvers<void>();
-    gate = release.promise;
-    dispatched = () => entered.resolve();
-    readiness.release();
-    await entered.promise;
+  arranged(
+    "a call whose readiness settles on another device than predicted moves its mark",
+    async () => {
+      const third: BootedDevice = {
+        name: "Pixel C",
+        deviceId: "emulator-5558",
+        platform: "android",
+      };
+      devices.setConnectedDevices([free]);
+      const readiness = await startInReadiness("rotate", {
+        orientation: "landscape",
+        platform: "android",
+      });
+      // Readiness lands on another device than the one predicted from the shared scan.
+      devices.setConnectedDevices([third]);
+      const release = Promise.withResolvers<void>();
+      const entered = Promise.withResolvers<void>();
+      gate = release.promise;
+      dispatched = () => entered.resolve();
+      readiness.release();
+      await entered.promise;
 
-    // The predicted device is no longer this call's: acquiring it cancels nothing.
-    await sessionManager.createSession("free-holder", free.deviceId, "android");
-    release.resolve();
-    expect(await readiness.outcome).toBeUndefined();
-    expect(ran).toEqual([{ name: "rotate", deviceId: third.deviceId }]);
-  });
+      // The predicted device is no longer this call's: acquiring it cancels nothing.
+      await sessionManager.createSession("free-holder", free.deviceId, "android");
+      release.resolve();
+      expect(await readiness.outcome).toBeUndefined();
+      expect(ran).toEqual([{ name: "rotate", deviceId: third.deviceId }]);
+    },
+  );
 });

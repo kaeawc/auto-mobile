@@ -1,2711 +1,140 @@
-import { defineDeviceTool } from "./defineTool";
-import { resolveTransportDeadlineMs } from "./formTools";
-import { imageRelativePointSchema } from "./imageRelativePointSchema";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
-import { toActionableError } from "../models/ActionableError";
-import { nodeAttributes } from "../models/ViewHierarchyResult";
-import { z } from "zod/v4";
-import { ToolRegistry, ProgressCallback } from "./toolRegistry";
-import { isSessionlessDeviceRead } from "../features/toolSelection/toolSelectionContext";
-import { TapOnElement } from "../features/action/TapOnElement";
 import {
-  LONG_PRESS_MIN_MS,
-  LONG_PRESS_MAX_MS,
-  LONG_PRESS_HARD_MAX_MS,
-  LONG_PRESS_DEFAULT_MS,
-} from "../features/action/tapAtGesture";
-import { TapAtCoordinate } from "../features/action/TapAtCoordinate";
-import { dragPathHandler, dragPathSchema } from "./dragPathTool";
-import { pointerSchema } from "./pointerSchema";
-import { validateCoordinateRange } from "./coordinateRangeValidation";
-import { previewHierarchyHitTest } from "../features/observe/HierarchyHitTest";
-import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
-import { TapAnyElement } from "../features/action/TapAnyElement";
-import { WakeAndUnlock } from "../features/action/WakeAndUnlock";
-import { DeviceLockStore } from "../devices/DeviceLockStore";
-import { IosLockScreenUnlocker } from "../features/action/IosLockScreenUnlocker";
-import { SelectAllText } from "../features/action/SelectAllText";
-import { PressButton } from "../features/action/PressButton";
-import {
-  DragAndDrop,
-  PRESS_DURATION_MIN_MS,
-  PRESS_DURATION_MAX_MS,
-  DRAG_DURATION_MIN_MS,
-  DRAG_DURATION_MAX_MS,
-  HOLD_DURATION_MIN_MS,
-  HOLD_DURATION_MAX_MS,
-} from "../features/action/DragAndDrop";
-import {
-  SWIPE_APEX_PAUSE_MIN_MS,
-  SWIPE_APEX_PAUSE_MAX_MS,
-  SWIPE_RETURN_SPEED_MAX,
-  SWIPE_RETURN_DURATION_MAX_MS,
-  SWIPE_BOOMERANG_MAX_MS,
-  validateSwipeTimingOptions,
-  SWIPE_DURATION_MIN_MS,
-  SWIPE_DURATION_MAX_MS,
-  SWIPE_RETURN_SPEED_EXCLUSIVE_MIN,
-} from "../features/action/swipeon/swipeTiming";
-import { SwipeOn } from "../features/action/swipeon";
-import {
-  EDGE_AT_DEFAULT,
-  EDGE_INSET_DEFAULT,
-  EDGE_INSET_MAX,
-  validateEdgeSwipeOptions,
-} from "../features/action/swipeon/edgeSwipe";
-import {
-  PinchOn,
-  PINCH_DISTANCE_EXCLUSIVE_MIN,
-  PINCH_SCALE_EXCLUSIVE_MIN,
-  PINCH_DURATION_MIN_MS,
-  PINCH_DURATION_MAX_MS,
-  PINCH_ROTATION_MAX_DEGREES,
-  PINCH_ROTATION_MIN_DEGREES,
-} from "../features/action/PinchOn";
-import { Shake } from "../features/action/Shake";
-import {
-  SHAKE_DURATION_MAX_MS,
-  SHAKE_DURATION_MIN_MS,
-  SHAKE_INTENSITY_MAX,
-  SHAKE_INTENSITY_MIN,
-} from "../models/ShakeOptions";
-import { RecentApps } from "../features/action/RecentApps";
-import { HomeScreen } from "../features/action/HomeScreen";
-import { defaultDaemonContext } from "../daemon/daemonContext";
-import { runSessionRotationMutation } from "./sessionRotation";
-import { Rotate, type RotateOptions } from "../features/action/Rotate";
-import {
-  SetPosture,
-  type SetPostureOutput,
-  type RequestedPosture,
-  HINGE_ANGLE_MIN_DEGREES,
-  HINGE_ANGLE_MAX_DEGREES,
-} from "../features/device/SetPosture";
-import { OpenURL } from "../features/action/OpenURL";
-import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
-import { Clipboard } from "../features/action/Clipboard";
-import { Keyboard, KeyboardOpenIndeterminateError } from "../features/action/Keyboard";
-import { dismissKeyboardAfterSendKeys } from "../features/action/dismissKeyboardAfterSendKeys";
-import { serverConfig } from "../utils/ServerConfig";
-import { withAndroidImeLock } from "../features/action/androidImeLock";
-import {
-  KEYBOARD_PROFILE_CATALOG_ID,
-  KEYBOARD_PROFILE_CATALOG_VERSIONS,
-  KEYBOARD_PROFILE_IDS,
-  type KeyboardProfileCatalog,
-} from "../features/action/keyboardProfiles";
-import {
-  AndroidImeCatalog,
-  createForegroundUserSource,
-} from "../features/action/AndroidImeCatalog";
-import { createInstalledImeKeySession } from "../features/action/InstalledImeKeySession";
-import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
-import {
-  SEND_KEYS_CLEAR_MODES,
-  SEND_KEYS_MAX_COMMANDS,
-  SEND_KEYS_MAX_MODIFIERS,
-  SEND_KEYS_OPERATIONS,
-  SEND_KEYS_SEMANTIC_KEYS,
-  SEND_KEYS_TYPING_MODES,
-  SendKeys,
-} from "../features/action/SendKeys";
-import { INPUT_KEY_MODIFIERS, SUPPORTED_INPUT_KEYS } from "../features/action/InputKey";
-import {
-  ActionableError,
-  BootedDevice,
-  ClipboardResult,
-  OpenURLResult,
-  PinchOnResult,
-  SwipeOnToolPayload,
-  type DragAndDropResult,
-  type PressButtonResult,
-  type RotateResult,
-  type SelectAllTextResult,
-  type ObserveResult,
-  type TapOnElementResult,
-  type TapOnSelectedElement,
-} from "../models";
-import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../features/observe/android";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
-import {
-  assertActiveWindowWaitForSupportedOnPlatform,
-  overrideWaitForJsonSchema,
-  refineWaitForArgs,
-  settledSchema,
-  waitForObservation,
-  type WaitForObservationOutcome,
-  waitForSchema,
-} from "./observeTools";
-import { defaultTimer } from "../utils/SystemTimer";
-import { displayWaitInventory } from "../utils/deviceMatcher";
-import {
-  withIsErrorOnFailure,
-  throwIfAborted,
-  createJSONToolResponse,
-  createStructuredToolResponse,
-  StructuredToolResponse,
-} from "../utils/toolUtils";
-import { resolveSwipeDirection } from "../features/action/swipeon/swipeOnUtils";
-import { RecompositionTracker } from "../features/performance/RecompositionTracker";
-import {
-  addDeviceTargetingToSchema,
-  appIdFieldAliases,
-  platformSchema,
-  withAppIdAliases,
-  withCanonicalDiscriminatedUnionJsonSchema,
-  withJsonSchemaOverride,
-  compactExclusiveSelectorProperties,
-  responseShapeControlFields,
-} from "./toolSchemaHelpers";
-import { isTruthyFlag } from "../features/utility/elementProperties";
-import {
-  createElementIdTextSelectorSchema,
-  hierarchyLayerSchema,
-  tapOnSelectorSchema,
-  resolverSelectionStrategySchema,
-  nestedElementContainerSchema,
-} from "./elementSelectorSchemas";
-import {
-  keyboardResultSchema,
-  pressButtonResultSchema,
-  wakeAndUnlockResultSchema,
-  openLinkResultSchema,
-  rotateResultSchema,
-  setPostureResultSchema,
-  sendKeysResultSchema,
-  tapOnResultSchema,
-} from "./toolOutputSchemas";
-
-// Import from extracted modules
-import type {
-  SelectAllTextArgs,
-  PressButtonArgs,
-  SystemTrayNotificationArgs,
-  SystemTrayArgs,
-  SendKeysArgs,
-  WakeAndUnlockArgs,
-  OpenLinkArgs,
-  TapOnArgs,
-  TapAtArgs,
-  TapAnyArgs,
-  DragAndDropArgs,
-  SwipeOnArgs,
-  PinchOnArgs,
-  ShakeArgs,
-  KeyboardArgs,
-  RecentAppsArgs,
-  RotateArgs,
-  ClipboardArgs,
-} from "./interactionToolTypes";
-
-import { SystemTray } from "../features/systemTray/SystemTray";
-
-import {
-  SystemTrayObserver,
   SystemTrayAdb,
   SystemTrayDependencies,
-  setSystemTrayDependencies,
+  SystemTrayObserver,
   resetSystemTrayDependencies,
+  setSystemTrayDependencies,
   waitForNotificationMatch,
 } from "../features/systemTray/systemTrayHelpers";
+import { defineDeviceTool } from "./defineTool";
+import { dragPathHandler, dragPathSchema } from "./dragPathTool";
+import {
+  createClipboardHandler,
+  createKeyboardHandler,
+  createOpenLinkHandler,
+  createRecentAppsHandler,
+  createSendKeysHandler,
+  createShakeHandler,
+  createWakeAndUnlockHandler,
+  homeScreenHandler,
+  systemTrayHandler,
+} from "./interactionToolHandlers";
+import type { InteractionToolDependencies } from "./interactionTools/dependencies";
+import {
+  pressButtonHandler,
+  rotateHandler,
+  selectAllTextHandler,
+  setPostureHandler,
+} from "./interactionTools/deviceHandlers";
+import {
+  KEYBOARD_READ_ACTIONS,
+  homeScreenInput,
+  keyboardInput,
+  openLinkSchema,
+  pressButtonInput,
+  recentAppsInput,
+  rotateInput,
+  selectAllTextInput,
+  setPostureSchema,
+  shakeInput,
+  systemTraySchema,
+  wakeAndUnlockInput,
+} from "./interactionTools/deviceSchemas";
+import {
+  dragAndDropHandler,
+  pinchOnHandler,
+  swipeOnHandler,
+} from "./interactionTools/gestureHandlers";
+import { dragAndDropSchema, pinchOnSchema, swipeOnSchema } from "./interactionTools/gestureSchemas";
+import { clipboardSchema, sendKeysSchema } from "./interactionTools/inputSchemas";
+import {
+  hitTestHandler,
+  tapAnyHandler,
+  tapAtHandler,
+  tapOnHandler,
+} from "./interactionTools/tapHandlers";
+import {
+  hitTestSchema,
+  tapAnySchema,
+  tapAtSchema,
+  tapOnSchema,
+} from "./interactionTools/tapSchemas";
+import type {
+  ClipboardArgs,
+  DragAndDropArgs,
+  KeyboardArgs,
+  OpenLinkArgs,
+  PinchOnArgs,
+  PressButtonArgs,
+  RecentAppsArgs,
+  RotateArgs,
+  SelectAllTextArgs,
+  SendKeysArgs,
+  ShakeArgs,
+  SwipeOnArgs,
+  SystemTrayArgs,
+  SystemTrayNotificationArgs,
+  TapAnyArgs,
+  TapOnArgs,
+  WakeAndUnlockArgs,
+} from "./interactionToolTypes";
+import {
+  keyboardResultSchema,
+  openLinkResultSchema,
+  pressButtonResultSchema,
+  rotateResultSchema,
+  sendKeysResultSchema,
+  setPostureResultSchema,
+  tapOnResultSchema,
+  wakeAndUnlockResultSchema,
+} from "./toolOutputSchemas";
+import { ToolRegistry } from "./toolRegistry";
+import { ANSWERS_SYSTEM_ALERTS, PLAN_RELEVANT, PLAN_SKELETON } from "./toolRegistryTypes";
 
 // Re-export types for backward compatibility
 export type {
-  SelectAllTextArgs,
-  PressButtonArgs,
-  SystemTrayNotificationArgs,
-  SystemTrayArgs,
-  SendKeysArgs,
-  WakeAndUnlockArgs,
-  OpenLinkArgs,
-  TapOnArgs,
-  TapAnyArgs,
+  ClipboardArgs,
   DragAndDropArgs,
-  SwipeOnArgs,
-  PinchOnArgs,
-  ShakeArgs,
   KeyboardArgs,
+  OpenLinkArgs,
+  PinchOnArgs,
+  PressButtonArgs,
   RecentAppsArgs,
   RotateArgs,
-  ClipboardArgs,
+  SelectAllTextArgs,
+  SendKeysArgs,
+  ShakeArgs,
+  SwipeOnArgs,
+  SystemTrayArgs,
+  SystemTrayNotificationArgs,
+  TapAnyArgs,
+  TapOnArgs,
+  WakeAndUnlockArgs,
 };
 
 // Re-export system tray helpers for backward compatibility
-export type { SystemTrayObserver, SystemTrayAdb, SystemTrayDependencies };
+export type { SystemTrayAdb, SystemTrayDependencies, SystemTrayObserver };
 
-export { setSystemTrayDependencies, resetSystemTrayDependencies, waitForNotificationMatch };
-
-// ============================================================================
-// Schema Definitions
-// ============================================================================
-
-const shakeInput = z.object({
-  duration: z
-    .number()
-    .finite()
-    .int()
-    .min(SHAKE_DURATION_MIN_MS)
-    .max(SHAKE_DURATION_MAX_MS)
-    .optional()
-    .describe(
-      `Shake duration ms (${SHAKE_DURATION_MIN_MS}-${SHAKE_DURATION_MAX_MS}, default 1000)`,
-    ),
-  intensity: z
-    .number()
-    .finite()
-    .min(SHAKE_INTENSITY_MIN)
-    .max(SHAKE_INTENSITY_MAX)
-    .optional()
-    .describe(
-      `Shake intensity on Android (${SHAKE_INTENSITY_MIN}-${SHAKE_INTENSITY_MAX}, default 100); ignored on iOS`,
-    ),
-  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-  // not required — a device handle from getAndroid/getApple is sufficient on
-  // its own.
-  platform: platformSchema.optional(),
-  ...responseShapeControlFields,
-});
-
-const keyboardInput = z.object({
-  action: z
-    .enum([
-      "open",
-      "close",
-      "detect",
-      "setProfile",
-      "listProfiles",
-      "listImes",
-      "setIme",
-      "tapImeKey",
-    ])
-    .describe(
-      "Keyboard action; listProfiles returns AutoMobile behavior models and listImes returns installed Android input methods",
-    ),
-  profile: z
-    .enum(KEYBOARD_PROFILE_IDS)
-    .optional()
-    .describe("AutoMobile keyboard behavior profile; required for setProfile"),
-  imeId: z.string().optional().describe("Installed Android IME component; required for setIme"),
-  key: z
-    .string()
-    .optional()
-    .describe("Exact visible key text or accessibility label; required for tapImeKey"),
-  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-  // not required — a device handle from getAndroid/getApple is sufficient on
-  // its own.
-  platform: platformSchema.optional(),
-});
-
-/** Keyboard actions that change no UI (#10965): reads, allowed without holding the device. */
-const KEYBOARD_READ_ACTIONS: ReadonlySet<string> = new Set(["detect", "listImes", "listProfiles"]);
-
-export async function setKeyboardProfileForTool(
-  device: BootedDevice,
-  profile: KeyboardArgs["profile"],
-  client?: Pick<AndroidCtrlProxy, "supportsCommand" | "setKeyboardProfile">,
-  signal?: AbortSignal,
-): Promise<{ activeProfileId?: string; previousProfileId?: string }> {
-  if (!profile) {
-    throw new ActionableError(
-      `keyboard setProfile requires profile: ${KEYBOARD_PROFILE_IDS.join(", ")}.`,
-    );
-  }
-  if (device.platform !== "android") {
-    throw new ActionableError("Keyboard profiles are Android-only; select an Android device.");
-  }
-  const profileClient = client ?? AndroidCtrlProxyClient.getInstance(device);
-  const supported = await profileClient.supportsCommand("request_set_keyboard_profile");
-  throwIfAborted(signal);
-  if (!supported) {
-    throw new ActionableError(
-      "The installed control-proxy build does not support keyboard profiles; update/re-cut the APK.",
-    );
-  }
-  const result = await withAndroidImeLock(
-    device.deviceId,
-    () => {
-      throwIfAborted(signal);
-      return profileClient.setKeyboardProfile(profile);
-    },
-    signal,
-  );
-  if (!result.success) {
-    throw new ActionableError(result.error ?? "Failed to set keyboard profile.");
-  }
-  return { activeProfileId: result.activeProfileId, previousProfileId: result.previousProfileId };
-}
-
-export async function listKeyboardProfilesForTool(
-  device: BootedDevice,
-  client?: Pick<AndroidCtrlProxy, "supportsCommand" | "listKeyboardProfiles">,
-  signal?: AbortSignal,
-): Promise<KeyboardProfileCatalog> {
-  if (device.platform !== "android") {
-    throw new ActionableError(
-      "AutoMobile keyboard profiles are Android-only; select an Android device.",
-    );
-  }
-  const profileClient = client ?? AndroidCtrlProxyClient.getInstance(device);
-  const command = "request_list_keyboard_profiles";
-  const supported = await profileClient.supportsCommand(command);
-  throwIfAborted(signal);
-  if (!supported) {
-    throw new ActionableError(
-      "The installed control-proxy build does not support keyboard profile catalogs; update/re-cut the APK.",
-    );
-  }
-  const catalog = await profileClient.listKeyboardProfiles();
-  if (!catalog.success) {
-    throw new ActionableError(catalog.error ?? "Failed to list AutoMobile keyboard profiles.");
-  }
-  validateKeyboardProfileCatalog(catalog);
-  return catalog;
-}
-
-function validateKeyboardProfileCatalog(catalog: KeyboardProfileCatalog): void {
-  if (catalog.catalogId !== KEYBOARD_PROFILE_CATALOG_ID) {
-    throw new ActionableError(`Unsupported keyboard profile catalog '${catalog.catalogId}'.`);
-  }
-  if (
-    catalog.catalogVersion === undefined ||
-    !KEYBOARD_PROFILE_CATALOG_VERSIONS.some((version) => version === catalog.catalogVersion)
-  ) {
-    throw new ActionableError(
-      `Unsupported keyboard profile catalog version '${catalog.catalogVersion ?? "missing"}'.`,
-    );
-  }
-  if (!catalog.profiles?.length || !catalog.activeProfileId) {
-    throw new ActionableError("The AutoMobile keyboard profile catalog is incomplete.");
-  }
-  if (!catalog.profiles.some(({ id }) => id === catalog.activeProfileId)) {
-    throw new ActionableError("The active AutoMobile keyboard profile is not in its catalog.");
-  }
-}
-
-function validateEnsureCheckedSchema(
-  value: Pick<TapOnArgs, "ensureChecked" | "action" | "selectionStrategy">,
-  ctx: z.RefinementCtx,
-): void {
-  if (value.ensureChecked !== undefined && value.action !== "tap") {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'ensureChecked requires action "tap"',
-      path: ["ensureChecked"],
-    });
-  }
-  if (value.ensureChecked !== undefined && value.selectionStrategy === "random") {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "ensureChecked cannot use random selection; use a unique selector or index",
-      path: ["ensureChecked"],
-    });
-  }
-}
-
-export const tapOnSchema = withJsonSchemaOverride(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        selector: tapOnSelectorSchema,
-        display: z.string().optional().describe("Target panel key, role, or active"),
-        layer: hierarchyLayerSchema.optional(),
-        sibling: z
-          .boolean()
-          .optional()
-          .describe("Tap a clickable sibling of the match, e.g. checkbox beside label"),
-        container: nestedElementContainerSchema
-          .optional()
-          .describe(
-            "Nested container scope; outermost resolves first, each level searches strict descendants. Per-level index is zero-based.",
-          ),
-        action: z
-          .enum(["tap", "doubleTap", "longPress", "focus"])
-          .default("tap")
-          .describe("Action type (default: tap)"),
-        selectionStrategy: resolverSelectionStrategySchema
-          .optional()
-          .describe(
-            "Selection strategy: first (default), random, or unique. Unique requires exactly one match at every unindexed scope and target.",
-          ),
-        index: z
-          .number()
-          .int()
-          .nonnegative()
-          .optional()
-          .describe(
-            "0-based index into the full candidate list, ranked by topmost window, then " +
-              "smallest eligible area. Index 0 is the default first pick when candidates share " +
-              "an action. Out of range → no match.",
-          ),
-        // A negative duration used to be accepted and silently degraded a
-        // longPress into a plain tap (#5769); bound it like the sibling params.
-        duration: z
-          .number()
-          .min(0, "must be >= 0")
-          .max(LONG_PRESS_HARD_MAX_MS, `longPress duration must be <= ${LONG_PRESS_HARD_MAX_MS} ms`)
-          .optional()
-          .describe(
-            `Long press duration (ms; maximum ${LONG_PRESS_HARD_MAX_MS}; must fit the remaining request budget including 2000 ms dispatch headroom; 0 or omitted uses the platform default)`,
-          ),
-        subtext: z
-          .object({
-            text: z
-              .string()
-              .trim()
-              .min(1)
-              .describe("Exact visible text of a semantic link inside the selected element"),
-            occurrence: z
-              .number()
-              .int()
-              .nonnegative()
-              .optional()
-              .describe("Zero-based occurrence among exact semantic-link matches (default: 0)"),
-          })
-          .strict()
-          .optional()
-          .describe(
-            "Semantic link inside the selected element; fails if the platform does not expose that link",
-          ),
-        searchUntil: z
-          .object({
-            duration: z
-              .number()
-              .min(100)
-              .max(12000)
-              .optional()
-              .describe("Polling duration (ms, default: 1500)"),
-          })
-          .optional()
-          .describe("Poll for element before tapping"),
-        preTapStability: z
-          .boolean()
-          .optional()
-          .describe("Require stable bounds before tapping; use for dynamic UI"),
-        retryIfNoChange: z
-          .boolean()
-          .optional()
-          .describe("Retry once if the view hierarchy is unchanged after tap"),
-        ensureTap: z.boolean().optional().describe("Enable preTapStability and retryIfNoChange"),
-        ensureChecked: z
-          .boolean()
-          .optional()
-          .describe(
-            'Skip tapping if the resolved toggle element\'s checked state already matches this value; otherwise tap and verify it flipped. Requires the element to have the toggle affordance and action "tap".',
-          ),
-        // #5870: a `sessionUuid` resolves the platform, so `platform` is not
-        // required — a device handle from getAndroid is sufficient on its own.
-        platform: platformSchema.optional(),
-        ...responseShapeControlFields,
-      })
-      .strict(),
-  ).superRefine((value, ctx) => {
-    validateEnsureCheckedSchema(value, ctx);
-    const isDirectLink = "accessibilityLink" in value.selector;
-    const addIssue = (invalid: unknown, message: string, path: (string | number)[]) => {
-      if (!invalid) {
-        return;
-      }
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message,
-        path,
-      });
-    };
-    addIssue(
-      value.selectionStrategy === "unique" && (value.sibling || isDirectLink),
-      "unique selection cannot use sibling or direct accessibilityLink; select a unique owner with subtext instead",
-      ["selectionStrategy"],
-    );
-    if (!isDirectLink && !value.subtext) {
-      return;
-    }
-    addIssue(
-      isDirectLink && value.subtext,
-      "accessibilityLink and subtext cannot be used together",
-      ["subtext"],
-    );
-    addIssue(value.action !== "tap", "semantic link activation supports only the tap action", [
-      "action",
-    ]);
-    addIssue(value.sibling, "semantic link activation cannot use sibling", ["sibling"]);
-    addIssue(
-      value.retryIfNoChange || value.ensureTap,
-      "semantic link activation cannot retry an acknowledged link activation",
-      value.retryIfNoChange
-        ? ["retryIfNoChange"]
-        : value.ensureTap
-          ? ["ensureTap"]
-          : ["ensureChecked"],
-    );
-    addIssue(
-      value.ensureChecked !== undefined,
-      "semantic link activation cannot ensure checked state",
-      ["ensureChecked"],
-    );
-    addIssue(value.searchUntil, "semantic link activation cannot use searchUntil", ["searchUntil"]);
-    addIssue(value.layer !== undefined, "semantic link activation cannot use layer", ["layer"]);
-    addIssue(
-      value.subtext && value.index !== undefined,
-      "owner-scoped semantic link activation cannot use index; use a unique owner selector",
-      ["index"],
-    );
-    addIssue(
-      value.subtext && value.selectionStrategy === "random",
-      "owner-scoped semantic link activation cannot use random selection; use a unique owner selector",
-      ["selectionStrategy"],
-    );
-  }),
-  (js) => {
-    compactExclusiveSelectorProperties(js, ["selector", "container"]);
-  },
-);
-
-const coordinatePointInputSchema = () =>
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        display: z.string().optional().describe("Target panel key, role, or active"),
-        snapshotId: z
-          .string()
-          .min(1)
-          .optional()
-          .describe(
-            "Short-lived reference from observe.snapshotReference; reject stale geometry or frame context",
-          ),
-        x: z
-          .number()
-          .describe("Screen x coordinate in the selected coordinateSpace (native by default)"),
-        y: z
-          .number()
-          .describe("Screen y coordinate in the selected coordinateSpace (native by default)"),
-        coordinateSpace: z
-          .enum(["absolute", "normalized", "percent"])
-          .optional()
-          .describe(
-            "Coordinate units: native absolute (default), normalized 0–1, or percent 0–100",
-          ),
-        ...responseShapeControlFields,
-      })
-      .strict(),
-  );
-
-export const tapAtSchema = withJsonSchemaOverride(
-  coordinatePointInputSchema()
-    .extend({
-      x: coordinatePointInputSchema().shape.x.optional(),
-      y: coordinatePointInputSchema().shape.y.optional(),
-      image: imageRelativePointSchema
-        .optional()
-        .describe(
-          "Screenshot-relative point; mutually exclusive with outer x, y, and coordinateSpace. Without image, x and y are required.",
-        ),
-      action: z
-        .enum(["tap", "longPress", "doubleTap"])
-        .optional()
-        .describe("Coordinate gesture (default: tap)"),
-      layer: hierarchyLayerSchema.optional(),
-      durationMs: z
-        .number()
-        .int()
-        .min(LONG_PRESS_MIN_MS)
-        .max(LONG_PRESS_MAX_MS)
-        .optional()
-        .describe(
-          `Long-press duration in milliseconds (${LONG_PRESS_MIN_MS}–${LONG_PRESS_MAX_MS}; default ${LONG_PRESS_DEFAULT_MS}); only with longPress`,
-        ),
-      pointer: pointerSchema.optional(),
-    })
-    .superRefine((value, context) => {
-      if (value.durationMs !== undefined && value.action !== "longPress") {
-        context.addIssue({
-          code: "custom",
-          message: "durationMs is only valid with action longPress",
-          path: ["durationMs"],
-        });
-      }
-      if (value.image !== undefined) {
-        if (value.x !== undefined || value.y !== undefined || value.coordinateSpace !== undefined) {
-          context.addIssue({
-            code: "custom",
-            message: "image is mutually exclusive with x, y, and coordinateSpace",
-            path: ["image"],
-          });
-        }
-      } else {
-        for (const axis of ["x", "y"] as const) {
-          if (value[axis] === undefined) {
-            context.addIssue({
-              code: "custom",
-              message: `${axis} is required without image`,
-              path: [axis],
-            });
-          }
-        }
-        validateCoordinateRange(value, context);
-      }
-    }),
-  (js) => {
-    js.description =
-      "Tap, long press, or double tap a screen point. Bare x/y use platform-native observe coordinates; image uses explicit normalized fractions (preferred) or real raster pixels from a screenshot or observe.crop.";
-  },
-);
-
-/** The preview retains the bare coordinate target without dispatching input. */
-export const hitTestSchema = withJsonSchemaOverride(
-  coordinatePointInputSchema()
-    .omit({ raw: true, project: true })
-    .superRefine(validateCoordinateRange),
-  (js) => {
-    js.description =
-      "Preview which hierarchy nodes sit beneath one absolute point without dispatching input.";
-  },
-);
-
-export const tapAnySchema = withJsonSchemaOverride(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        display: z.string().optional().describe("Target panel key, role, or active"),
-        container: nestedElementContainerSchema
-          .optional()
-          .describe(
-            "Nested container scope; outermost resolves first, each level searches strict descendants. Per-level index is zero-based.",
-          ),
-        selectionStrategy: resolverSelectionStrategySchema
-          .optional()
-          .describe(
-            "Element selection strategy: first (default), random, or unique; unique requires exactly one eligible target and every unindexed container",
-          ),
-        scrollableContainer: z
-          .boolean()
-          .optional()
-          .describe("Search only scrollable containers/lists"),
-        layer: hierarchyLayerSchema.optional(),
-        action: z
-          .enum(["tap", "doubleTap", "longPress"])
-          .default("tap")
-          .describe("Action type (default: tap)"),
-        // Bounded like tapOn.duration so a negative longPress cannot silently
-        // become a plain tap (#5769).
-        duration: z
-          .number()
-          .min(0, "must be >= 0")
-          .max(LONG_PRESS_HARD_MAX_MS, `longPress duration must be <= ${LONG_PRESS_HARD_MAX_MS} ms`)
-          .optional()
-          .describe(
-            `Long press duration (ms; maximum ${LONG_PRESS_HARD_MAX_MS}; must fit the remaining request budget including 2000 ms dispatch headroom; 0 or omitted uses the platform default)`,
-          ),
-        searchUntil: z
-          .object({
-            duration: z
-              .number()
-              .min(100)
-              .max(12000)
-              .optional()
-              .describe("Polling duration (ms, default: 1500)"),
-          })
-          .optional()
-          .describe("Poll for clickable element before tapping"),
-        // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-        // not required — a device handle from getAndroid/getApple is sufficient on
-        // its own.
-        platform: platformSchema.optional(),
-        ...responseShapeControlFields,
-      })
-      .strict(),
-  ),
-  (js) => compactExclusiveSelectorProperties(js, ["container"]),
-);
-
-const dragAndDropSelectorSchema = (label: "Source" | "Target") => {
-  const selector = createElementIdTextSelectorSchema({
-    elementId: `${label} ID`,
-    text: `${label} text`,
-  });
-  const scope = {
-    container: nestedElementContainerSchema
-      .optional()
-      .describe("Nested container scope for this endpoint; outermost container resolves first"),
-    selectionStrategy: resolverSelectionStrategySchema
-      .optional()
-      .describe(
-        "Endpoint selection strategy (default: first); unique requires one match at every unindexed scope level and at the target",
-      ),
-  };
-  return z
-    .union([selector.options[0].extend(scope), selector.options[1].extend(scope)])
-    .describe(`${label} element`);
-};
-
-const swipeOnLookForSelector = createElementIdTextSelectorSchema({
-  elementId: "ID of the element to look for",
-  text: "Text to look for",
-});
-const swipeOnLookForScope = {
-  container: nestedElementContainerSchema
-    .optional()
-    .describe(
-      "Additional nested scope within the swipe container; re-resolved on every observation",
-    ),
-  selectionStrategy: resolverSelectionStrategySchema
-    .optional()
-    .describe(
-      "Target selection strategy (default: first); unique requires one target and every unindexed scope",
-    ),
-};
-const swipeOnLookForSchema = z.union([
-  swipeOnLookForSelector.options[0].extend(swipeOnLookForScope),
-  swipeOnLookForSelector.options[1].extend(swipeOnLookForScope),
-]);
-
-// #6613: dragAndDrop/swipeOn/pinchOn advertised
-// `additionalProperties: false` but were not `.strict()`, so an undeclared
-// caller argument was silently dropped instead of rejected. Same treatment as
-// tapOn/tapAny (#6154).
-export const dragAndDropSchema = withJsonSchemaOverride(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        display: z.string().optional().describe("Target panel key, role, or active"),
-        source: dragAndDropSelectorSchema("Source"),
-        target: dragAndDropSelectorSchema("Target"),
-        layer: hierarchyLayerSchema.optional(),
-        pressDurationMs: z
-          .number()
-          .min(PRESS_DURATION_MIN_MS)
-          .max(PRESS_DURATION_MAX_MS)
-          .optional()
-          .describe(
-            `Press duration ms (min: ${PRESS_DURATION_MIN_MS}, max: ${PRESS_DURATION_MAX_MS}, default: 600)`,
-          ),
-        dragDurationMs: z
-          .number()
-          .min(DRAG_DURATION_MIN_MS)
-          .max(DRAG_DURATION_MAX_MS)
-          .optional()
-          .describe(
-            `Drag duration ms (min: ${DRAG_DURATION_MIN_MS}, max: ${DRAG_DURATION_MAX_MS}, default: 300)`,
-          ),
-        holdDurationMs: z
-          .number()
-          .min(HOLD_DURATION_MIN_MS)
-          .max(HOLD_DURATION_MAX_MS)
-          .optional()
-          .describe(
-            `Hold duration ms (min: ${HOLD_DURATION_MIN_MS}, max: ${HOLD_DURATION_MAX_MS}, default: 100)`,
-          ),
-        // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-        // not required — a device handle from getAndroid/getApple is sufficient on
-        // its own.
-        platform: platformSchema.optional(),
-        ...responseShapeControlFields,
-      })
-      .strict(),
-  ),
-  (js) => compactExclusiveSelectorProperties(js, ["source", "target"]),
-);
-
-function swipeTimingErrorPath(error: string): string {
-  if (error.startsWith("durationMs")) {
-    return "durationMs";
-  }
-  return error.startsWith("apexPause") ? "apexPause" : "returnSpeed";
-}
-
-export const swipeOnSchema = withJsonSchemaOverride(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        display: z.string().optional().describe("Target panel key, role, or active"),
-        includeSystemInsets: z
-          .boolean()
-          .optional()
-          .describe(
-            "Use full screen including status/nav bars; with display, requires the selected Android panel's own available insets",
-          ),
-        container: nestedElementContainerSchema
-          .optional()
-          .describe(
-            "Nested swipe container scope; outermost resolves first, with per-level index and selectionStrategy",
-          ),
-        autoTarget: z
-          .boolean()
-          .optional()
-          .describe(
-            "Auto-target scrollable containers (default: true; with Android display, opt-in)",
-          ),
-        direction: z.enum(["up", "down", "left", "right"]).describe("Swipe/scroll direction"),
-        gestureType: z
-          .enum(["swipeFingerTowardsDirection", "scrollTowardsDirection"])
-          .optional()
-          .describe(
-            "Finger direction or content scroll direction; default: swipeFingerTowardsDirection",
-          ),
-        lookFor: swipeOnLookForSchema
-          .optional()
-          .describe(
-            "Element to find by scrolling; with display, observes and swipes only the selected Android panel",
-          ),
-        boomerang: z.boolean().optional().describe("Return to start position after swipe apex"),
-        apexPause: z
-          .number()
-          .finite()
-          .min(SWIPE_APEX_PAUSE_MIN_MS)
-          .max(SWIPE_APEX_PAUSE_MAX_MS)
-          .optional()
-          .describe(
-            `Pause duration at swipe apex in ms (${SWIPE_APEX_PAUSE_MIN_MS}-${SWIPE_APEX_PAUSE_MAX_MS}; default: 100)`,
-          ),
-        returnSpeed: z
-          .number()
-          .finite()
-          .gt(SWIPE_RETURN_SPEED_EXCLUSIVE_MIN)
-          .max(SWIPE_RETURN_SPEED_MAX)
-          .optional()
-          .describe(
-            `Speed multiplier for return swipe (> ${SWIPE_RETURN_SPEED_EXCLUSIVE_MIN}, <= ${SWIPE_RETURN_SPEED_MAX}; default: 1); return duration <= ${SWIPE_RETURN_DURATION_MAX_MS} ms and total boomerang <= ${SWIPE_BOOMERANG_MAX_MS} ms`,
-          ),
-        speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
-        durationMs: z
-          .number()
-          .int()
-          .min(SWIPE_DURATION_MIN_MS)
-          .max(SWIPE_DURATION_MAX_MS)
-          .optional()
-          .describe(
-            `Forward-stroke duration in ms (integer ${SWIPE_DURATION_MIN_MS}-${SWIPE_DURATION_MAX_MS}); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total) and, for a single swipe, velocityPxPerSecond (omitted for boomerang, lookFor, and the TalkBack route that ignores duration; uses effectiveDurationMs when clamped). Android may quantize very short strokes. Limits: the TalkBack semantic-scroll route has no timed stroke and ignores it (durationIgnored + warnings); the iOS XCUICoordinate route clamps velocity to 100-10000 pt/s (effectiveDurationMs + warnings).`,
-          ),
-        fromEdge: z
-          .enum(["left", "right", "top", "bottom"])
-          .optional()
-          .describe(
-            "Start at this screen (or display panel) edge and swipe inward; direction must point inward (left->right, right->left, top->down, bottom->up). Exclusive with container, lookFor, autoTarget=true. By default the start point is inset from the edge by the system bars/gesture insets (Android left/right: gesture inset plus edgeInset, e.g. x=88 for 78px + edgeInset 10), so the swipe stays in the app; pass includeSystemInsets:true to start at the physical screen edge (edgeInset px in), where a very-near-edge swipe may be taken as system back/home",
-          ),
-        edgeInset: z
-          .number()
-          .int()
-          .min(0)
-          .max(EDGE_INSET_MAX)
-          .optional()
-          .describe(
-            `With fromEdge: how far inside the edge the touch starts, px (iOS points); default ${EDGE_INSET_DEFAULT} (iOS swipe-back needs the first ~20 pt). Measured from the content edge (after system insets) unless includeSystemInsets:true`,
-          ),
-        at: z
-          .number()
-          .finite()
-          .min(0)
-          .max(1)
-          .optional()
-          .describe(
-            `With fromEdge: normalized 0-1 position along the edge (default ${EDGE_AT_DEFAULT})`,
-          ),
-        layer: hierarchyLayerSchema.optional(),
-        // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-        // not required — a device handle from getAndroid/getApple is sufficient on
-        // its own.
-        platform: platformSchema.optional(),
-        ...responseShapeControlFields,
-      })
-      .strict(),
-  ).superRefine((options, context) => {
-    const error = validateSwipeTimingOptions(options);
-    if (error) {
-      context.addIssue({
-        code: "custom",
-        message: error,
-        path: [swipeTimingErrorPath(error)],
-      });
-    }
-    const edgeError = validateEdgeSwipeOptions({
-      ...options,
-      direction: resolveSwipeDirection(options).direction ?? options.direction,
-    });
-    if (edgeError) {
-      context.addIssue({ code: "custom", message: edgeError, path: ["fromEdge"] });
-    }
-  }),
-  (js) => compactExclusiveSelectorProperties(js, ["container", "lookFor"]),
-);
-
-export const pinchOnSchema = withJsonSchemaOverride(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        display: z.string().optional().describe("Target panel key, role, or active"),
-        direction: z
-          .enum(["in", "out"])
-          .describe(
-            "Pinch direction; ignored when the finger distance does not change (rotation only)",
-          ),
-        distanceStart: z
-          .number()
-          .gt(PINCH_DISTANCE_EXCLUSIVE_MIN)
-          .optional()
-          .describe(
-            `Initial finger distance (> ${PINCH_DISTANCE_EXCLUSIVE_MIN}) defaults to 60% of the target's smaller dimension for direction 'in' and 20% for 'out'; clamped to 10%-90% with a 10 px floor capped by the 90% ceiling (below 10 px for targets under 11.1 px).`,
-          ),
-        distanceEnd: z
-          .number()
-          .gt(PINCH_DISTANCE_EXCLUSIVE_MIN)
-          .optional()
-          .describe(
-            `Final finger distance (> ${PINCH_DISTANCE_EXCLUSIVE_MIN}) defaults to 20% of the target's smaller dimension for direction 'in' and 60% for 'out'; clamped to 10%-90% with a 10 px floor capped by the 90% ceiling (below 10 px for targets under 11.1 px).`,
-          ),
-        scale: z
-          .number()
-          .gt(PINCH_SCALE_EXCLUSIVE_MIN)
-          .optional()
-          .describe(`Scale factor (> ${PINCH_SCALE_EXCLUSIVE_MIN}; overrides distances)`),
-        duration: z
-          .number()
-          .int()
-          .min(PINCH_DURATION_MIN_MS)
-          .max(PINCH_DURATION_MAX_MS)
-          .optional()
-          .describe(
-            `Gesture duration (integer ${PINCH_DURATION_MIN_MS}-${PINCH_DURATION_MAX_MS} ms, default: 300)`,
-          ),
-        rotationDegrees: z
-          .number()
-          .min(PINCH_ROTATION_MIN_DEGREES)
-          .max(PINCH_ROTATION_MAX_DEGREES)
-          .optional()
-          .describe(
-            `Degrees (${PINCH_ROTATION_MIN_DEGREES} to ${PINCH_ROTATION_MAX_DEGREES}) the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS. To rotate without zooming set scale: 1 (or equal distanceStart and distanceEnd); direction is then ignored.`,
-          ),
-        includeSystemInsets: z
-          .boolean()
-          .optional()
-          .describe("Use full screen including status/nav bars"),
-        container: nestedElementContainerSchema
-          .optional()
-          .describe(
-            "Nested container scope; selectionStrategy (first/random/unique) is supported only inside each container level, not at the top level",
-          ),
-        autoTarget: z.boolean().optional().describe("Auto-target pinchable containers"),
-        layer: hierarchyLayerSchema.optional(),
-        // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-        // not required — a device handle from getAndroid/getApple is sufficient on
-        // its own.
-        platform: platformSchema.optional(),
-        ...responseShapeControlFields,
-      })
-      .strict(),
-  ),
-  (js) => compactExclusiveSelectorProperties(js, ["container"]),
-);
-
-const selectAllTextInput = z.object({
-  layer: hierarchyLayerSchema.optional(),
-  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-  // not required — a device handle from getAndroid/getApple is sufficient on
-  // its own.
-  platform: platformSchema.optional(),
-  ...responseShapeControlFields,
-});
-
-const pressButtonInput = z.object({
-  button: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"]),
-  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-  // not required — a device handle from getAndroid/getApple is sufficient on
-  // its own.
-  platform: platformSchema.optional(),
-  ...responseShapeControlFields,
-});
-
-const systemTrayNotificationSchema = z.object({
-  title: z.string().optional().describe("Notification title to match"),
-  body: z.string().optional().describe("Notification body to match"),
-  appId: z.string().optional().describe("App package ID to match"),
-  tapActionLabel: z.string().optional().describe("Action button label to tap (for 'tap' action)"),
-});
-
-const systemTraySchemaBase = z
-  .object({
-    action: z
-      .enum(["open", "close", "list", "find", "tap", "dismiss", "clearAll"])
-      .describe("open/close/list/find/tap/dismiss/clearAll notification"),
-    notification: systemTrayNotificationSchema
-      .optional()
-      .describe(
-        "Notification criteria to match; list requires appId and scans up to three swipes on Android",
-      ),
-    awaitTimeout: z
-      .number()
-      .optional()
-      .describe("Timeout in ms to wait for notification (default: 5000)"),
-    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-    // not required — a device handle from getAndroid/getApple is sufficient on
-    // its own.
-    platform: platformSchema.optional(),
-    ...responseShapeControlFields,
-  })
-  .strict();
-
-export const systemTraySchema = withJsonSchemaOverride(
-  withAppIdAliases(
-    addDeviceTargetingToSchema(systemTraySchemaBase).superRefine((value, ctx) => {
-      const notification = value.notification ?? {};
-
-      if (value.action === "open" || value.action === "close") {
-        return;
-      }
-
-      const hasCriteria = notification.title || notification.body || notification.appId;
-      if (!hasCriteria) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `${value.action} requires at least one criterion under 'notification': notification: { title | body | appId }`,
-        });
-      }
-
-      if ((value.action === "clearAll" || value.action === "list") && !notification.appId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `${value.action} action requires notification.appId`,
-        });
-      }
-
-      if (notification.tapActionLabel && value.action !== "tap") {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "notification.tapActionLabel is only valid for tap action",
-        });
-      }
-    }),
-  ),
-  (jsonSchema) => {
-    const notificationSchema = (jsonSchema.properties as Record<string, Record<string, unknown>>)
-      .notification;
-    const notificationProperties = notificationSchema.properties as Record<string, unknown>;
-    Object.assign(
-      notificationProperties,
-      Object.fromEntries(appIdFieldAliases.map((alias) => [alias, { type: "string" }])),
-    );
-  },
-);
-
-export const stopAppSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-    }),
-  ),
-);
-
-export const clearStateSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-      clearKeychain: z.boolean().optional().describe("Clear iOS keychain"),
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-    }),
-  ),
-);
-
-// A selector focuses the target field before typing (issue #5872 AC3), so a
-// form field no longer costs a mandatory tapOn-then-sendKeys pair. Kept to the
-// selector variants that identify an input; semantic-link activation is a tapOn
-// concern, not a field to type into.
-const sendKeysSelectorSchema = z
-  .union([
-    z
-      .object({ elementId: z.string().min(1).describe("Resource ID, e.g. com.app:id/field") })
-      .strict(),
-    z.object({ testTag: z.string().min(1).describe("Android accessibility test tag") }).strict(),
-    z
-      .object({
-        text: z.string().min(1).describe("Text, content-desc, or placeholder of the field"),
-      })
-      .strict(),
-    z
-      .object({
-        textAny: z
-          .array(z.string().min(1))
-          .min(1)
-          .describe("Ordered text variants; first visible match wins"),
-      })
-      .strict(),
-  ])
-  .describe(
-    "Field to focus before typing: elementId, Android testTag, text, or ordered text variants",
-  );
-
-const sendKeysKeyValues = [...SUPPORTED_INPUT_KEYS, ...SEND_KEYS_SEMANTIC_KEYS] as const;
-
-const sendKeysTypeCommandSchema = withJsonSchemaOverride(
-  z
-    .object({
-      action: z.literal("type"),
-      text: z.string().min(1).describe("Text to insert or replace; never echoed in the result"),
-      operation: z
-        .enum(SEND_KEYS_OPERATIONS)
-        .default("insert")
-        .describe("Insert at the current selection (default) or replace the focused field"),
-      mode: z
-        .enum(SEND_KEYS_TYPING_MODES)
-        .default("auto")
-        .describe(
-          "Android delivery mode. Use ime, a11y, or auto for Unicode and emoji. auto uses the AutoMobile IME when supported, otherwise eventAll for insert or a11y for replace. ime commits complete graphemes; eventAll inserts whole graphemes and uses key events only for single printable ASCII characters. eventLast can split keycaps or decomposed letters. eventOnly and imeKeyEvents are ASCII-only; imeKeyEvents requires a compatible CtrlProxy APK and does not verify resulting editor text. iOS uses xcuiTypeText for every requested mode",
-        ),
-      keyboardProfile: z
-        .enum(KEYBOARD_PROFILE_IDS)
-        .optional()
-        .describe("Android keyboard behavior profile for this IME type call; restored afterward"),
-    })
-    .strict()
-    .superRefine((command, context) => {
-      if (command.keyboardProfile && command.mode !== "auto" && command.mode !== "ime") {
-        context.addIssue({
-          code: "custom",
-          path: ["mode"],
-          message: "keyboardProfile requires mode: ime or auto",
-        });
-      }
-    }),
-  (jsonSchema) => {
-    jsonSchema.dependentSchemas = {
-      ...(jsonSchema.dependentSchemas as Record<string, unknown> | undefined),
-      keyboardProfile: {
-        properties: { mode: { enum: ["auto", "ime"] } },
-      },
-    };
-  },
-);
-
-const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
-  z.discriminatedUnion("action", [
-    sendKeysTypeCommandSchema,
-    z
-      .object({
-        action: z.literal("key"),
-        key: z
-          .enum(sendKeysKeyValues)
-          .describe(
-            "Raw key or semantic IME key. Semantic next/previous/done/search/send/go ignore modifiers",
-          ),
-        modifiers: z
-          .array(z.enum(INPUT_KEY_MODIFIERS))
-          .max(SEND_KEYS_MAX_MODIFIERS)
-          .optional()
-          .describe(
-            `Raw-key modifier chord: shift, ctrl, alt, or meta (maximum ${SEND_KEYS_MAX_MODIFIERS} entries, including duplicates)`,
-          ),
-      })
-      .strict(),
-    z
-      .object({
-        action: z.literal("clear"),
-        mode: z
-          .enum(SEND_KEYS_CLEAR_MODES)
-          .optional()
-          .describe(
-            "Android clear delivery. auto (default) and ime clear through the AutoMobile IME, or key-event deletes on an older control-proxy APK or when the IME cannot be activated, so rich-text editors keep live formatting. a11y uses the accessibility set-text clear. iOS ignores this",
-          ),
-      })
-      .strict(),
-  ]),
-);
-
-export const sendKeysSchema = withJsonSchemaOverride(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        display: z.string().optional().describe("Target panel key, role, or active"),
-        selector: sendKeysSelectorSchema
-          .optional()
-          .describe(
-            "Field to focus once before executing the ordered command sequence; supports nested container scope and unique selection",
-          ),
-        container: nestedElementContainerSchema
-          .optional()
-          .describe(
-            "Nested container scope; outermost resolves first, each level searches strict descendants. Per-level index is zero-based. Requires a selector naming the field to focus.",
-          ),
-        selectionStrategy: resolverSelectionStrategySchema
-          .optional()
-          .describe(
-            "Selection strategy: first (default), random, or unique. Unique requires exactly one match at every unindexed scope and target. Requires a selector naming the field to focus.",
-          ),
-        layer: hierarchyLayerSchema.optional(),
-        commands: z
-          .array(sendKeysCommandSchema)
-          .min(1)
-          .max(SEND_KEYS_MAX_COMMANDS)
-          .describe(
-            `One to ${SEND_KEYS_MAX_COMMANDS} commands executed serially; execution stops on the first failure`,
-          ),
-        // #5870: Device or session targeting resolves the platform.
-        platform: platformSchema.optional(),
-        ...responseShapeControlFields,
-      })
-      .strict(),
-  ).superRefine((value, ctx) => {
-    if (value.selector !== undefined) {
-      return;
-    }
-    for (const field of ["container", "selectionStrategy", "layer"] as const) {
-      if (value[field] !== undefined) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `${field} requires a selector naming the field to focus`,
-          path: [field],
-        });
-      }
-    }
-  }),
-  (jsonSchema) => {
-    jsonSchema.dependentRequired = {
-      container: ["selector"],
-      selectionStrategy: ["selector"],
-      layer: ["selector"],
-    };
-  },
-);
-
-export interface SendKeysRunnerCommandSource {
-  getSupportedCommands(): Promise<string[] | null>;
-}
-
-export type SendKeysRunnerCommandSourceFactory = (
-  device: BootedDevice,
-) => SendKeysRunnerCommandSource;
-
-const defaultSendKeysRunnerCommandSourceFactory: SendKeysRunnerCommandSourceFactory = (device) =>
-  device.platform === "android"
-    ? AndroidCtrlProxyClient.getInstance(device)
-    : IOSCtrlProxyClient.getInstance(device);
-
-export async function assertSendKeysRunnerCompatible(
-  device: BootedDevice,
-  sourceFactory: SendKeysRunnerCommandSourceFactory = defaultSendKeysRunnerCommandSourceFactory,
-): Promise<void> {
-  const requiredCommand =
-    device.platform === "android" ? "request_insert_text" : "request_press_key";
-  const supportedCommands = await sourceFactory(device).getSupportedCommands();
-  if (supportedCommands?.includes(requiredCommand)) {
-    return;
-  }
-  throw new ActionableError(
-    `${device.platform === "android" ? "Android CtrlProxy APK" : "iOS CtrlProxy runner"} ` +
-      `does not support sendKeys (${requiredCommand} is unavailable). Rebuild and redeploy the ` +
-      `CtrlProxy from this source checkout.`,
-  );
-}
-
-const wakeAndUnlockInput = z.object({
-  pin: z
-    .string()
-    .optional()
-    .describe(
-      "Credential to unlock a secure Android device. Optional; logically required to unlock a secure lock unless a pin was already remembered this session. Ignored on iOS.",
-    ),
-  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-  // not required — a device handle from getAndroid/getApple is sufficient on
-  // its own.
-  platform: platformSchema.optional(),
-});
-
-// openLink gains an optional integrated waitFor (issue #3490 §5): after opening
-// the URL, poll for the predicate — reusing observe's waitFor/settled schema and
-// semantics — so the open→settle→observe→verify workaround collapses into one call.
-export const openLinkSchema = withAppIdAliases(
-  withJsonSchemaOverride(
-    addDeviceTargetingToSchema(
-      z
-        .object({
-          url: z.string().describe("URL to open"),
-          acceptOpenAlert: z
-            .boolean()
-            .optional()
-            .describe(
-              "On iOS, automatically tap Open when a system 'Open in <app>?' alert appears",
-            ),
-          chooserAppPackage: z
-            .string()
-            .min(1)
-            .optional()
-            .describe(
-              "On Android, select this exact package if opening the URL displays an intent chooser",
-            ),
-          // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-          // not required — a device handle from getAndroid/getApple is sufficient on
-          // its own.
-          platform: platformSchema.optional(),
-          waitFor: waitForSchema
-            .optional()
-            .describe("After opening, wait for this predicate before returning the observation"),
-          settled: settledSchema
-            .optional()
-            .describe(
-              "After waitFor matches, wait for a quiet hierarchy period (requires waitFor)",
-            ),
-          ...responseShapeControlFields,
-        })
-        .strict(),
-    ).superRefine(refineWaitForArgs),
-    overrideWaitForJsonSchema,
-  ),
-);
-
-/** Outcome of a post-open waitFor poll, as produced by {@link waitForObservation}. */
-export type OpenLinkWaitOutcome = WaitForObservationOutcome;
-
-function confirmsPostTapPackage(
-  selection: Awaited<ReturnType<HandleIntentChooser["execute"]>>,
-  packageName: string,
-): boolean {
-  const observed = selection.observation?.viewHierarchy;
-  return (
-    selection.tappedAt !== undefined &&
-    observed?.updatedAt !== undefined &&
-    observed.updatedAt >= selection.tappedAt &&
-    observed.packageName === packageName
-  );
-}
+export { resetSystemTrayDependencies, setSystemTrayDependencies, waitForNotificationMatch };
 
 /**
- * Selects the requested Android link handler and fails unless the chooser
- * reports success and, when needed, a fresh hierarchy confirms the package.
+ * UI interactions that may cause in-app navigation (the navigation recorder records them); they
+ * also run behind the device's `systemAlerts` policy.
  */
-export async function selectAndroidOpenLinkChooser(
-  device: BootedDevice,
-  packageName: string,
-  opened: OpenURLResult,
-  url?: string,
-  chooser: Pick<HandleIntentChooser, "execute"> = new HandleIntentChooser(device),
-  signal?: AbortSignal,
-): Promise<OpenURLResult> {
-  if (device.platform !== "android") {
-    throw new ActionableError("chooserAppPackage is supported only on Android.");
-  }
-  if (!opened.success) {
-    return opened;
-  }
-  throwIfAborted(signal);
-  const selection = await chooser.execute("custom", packageName, url, signal);
-  throwIfAborted(signal);
-  if (!selection.detected || !selection.success) {
-    return {
-      ...opened,
-      success: false,
-      error: selection.error ?? `Intent chooser for ${packageName} was not found`,
-      observation: selection.observation ?? opened.observation,
-    };
-  }
-  if (selection.packageVerified === false && !confirmsPostTapPackage(selection, packageName)) {
-    return {
-      ...opened,
-      success: false,
-      error: `Unverified chooser selection for ${packageName}: the post-tap hierarchy is stale or does not confirm the foreground package.`,
-      observation: selection.observation ?? opened.observation,
-    };
-  }
-  return { ...opened, observation: selection.observation ?? opened.observation };
-}
+const NAV = { recordsNavigation: true, ...ANSWERS_SYSTEM_ALERTS } as const;
 
-/**
- * Build the openLink response payload. Without a wait it is the plain open
- * result; with a wait (issue #3490 §5) the awaited observation replaces the
- * open-time snapshot and the await metadata is surfaced to the caller.
- */
-export const buildOpenLinkPayload = (
-  url: string,
-  openResult: OpenURLResult,
-  waitOutcome: OpenLinkWaitOutcome | null,
-) => {
-  const message = openResult.success
-    ? `Opened link ${url}`
-    : `Failed to open ${url}: ${openResult.error || "unknown error"}`;
-  if (!waitOutcome) {
-    return {
-      message,
-      ...openResult,
-      observation: openResult.observation,
-    };
-  }
-  return {
-    message,
-    ...openResult,
-    observation: waitOutcome.observation,
-    awaitedElement: waitOutcome.awaitedElement,
-    awaitDuration: waitOutcome.awaitDuration,
-    awaitTimeout: waitOutcome.awaitTimeout,
-    matched: waitOutcome.matched,
-    settled: waitOutcome.settled,
-    timedOut: waitOutcome.timedOut,
-    timeoutReason: waitOutcome.timeoutReason,
-    polls: waitOutcome.polls,
-    waitMs: waitOutcome.waitMs,
-    matchedElement: waitOutcome.matchedElement,
-    candidates: waitOutcome.candidates,
-  };
-};
-
-const recentAppsInput = z.object({
-  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-  // not required — a device handle from getAndroid/getApple is sufficient on
-  // its own.
-  platform: platformSchema.optional(),
-  ...responseShapeControlFields,
-});
-
-const homeScreenInput = z.object({
-  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-  // not required — a device handle from getAndroid/getApple is sufficient on
-  // its own.
-  platform: platformSchema.optional(),
-  ...responseShapeControlFields,
-});
-
-const rotateInput = z.object({
-  orientation: z.enum(["portrait", "landscape"]),
-  lockOrientation: z
-    .boolean()
-    .optional()
-    .describe(
-      "Android only. In a device session, omission or true holds the orientation until false or session release; an unreadable initial auto-rotate setting is left unchanged by omission. Direct calls restore auto-rotate at the end unless true. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
-    ),
-  display: z
-    .number()
-    .int()
-    .nonnegative()
-    .optional()
-    .describe(
-      "Android logical display ID (default 0). Non-default displays use the per-display window-manager rotation command and do not change or restore global rotation settings; iOS supports only the default display.",
-    ),
-  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-  // not required — a device handle from getAndroid/getApple is sufficient on
-  // its own.
-  platform: platformSchema.optional(),
-  ...responseShapeControlFields,
-});
-
-export const setPostureSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      posture: z
-        .enum(["closed", "half_opened", "opened", "rear_display", "flipped", "tent"])
-        .optional(),
-      hingeAngle: z
-        .number()
-        .finite()
-        .min(HINGE_ANGLE_MIN_DEGREES)
-        .max(HINGE_ANGLE_MAX_DEGREES)
-        .optional()
-        .describe(
-          "Best effort hinge angle in degrees, 0-180 inclusive; specify exactly one of posture or hingeAngle. Emulator/simulator only; no displayPreset.",
-        ),
-      displayPreset: z.enum(["phone", "unfolded", "tablet"]).optional(),
-      platform: platformSchema.optional(),
-    })
-    .strict(),
-).superRefine((args, context) => {
-  if ((args.posture !== undefined) === (args.hingeAngle !== undefined)) {
-    context.addIssue({
-      code: "custom",
-      message: "Specify exactly one of posture or hingeAngle.",
-      path: ["posture"],
-    });
-  }
-  if (args.hingeAngle !== undefined && args.displayPreset !== undefined) {
-    context.addIssue({
-      code: "custom",
-      message: "displayPreset requires posture and cannot be combined with hingeAngle.",
-      path: ["displayPreset"],
-    });
-  }
-});
-
-const clipboardTextRequiredMessage = "text is required when action is copy";
-const optionalClipboardTextSchema = z
-  .string()
-  .min(1)
-  .optional()
-  .describe("Text to copy (required for 'copy' action)");
-const clipboardPlatformSchema = {
-  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-  // not required — a device handle from getAndroid/getApple is sufficient on
-  // its own.
-  platform: platformSchema.optional(),
-};
-
-export const clipboardSchema = z.discriminatedUnion("action", [
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        action: z.literal("copy").describe("Clipboard action"),
-        text: z
-          .string({ error: clipboardTextRequiredMessage })
-          .min(1, clipboardTextRequiredMessage)
-          .describe("Text to copy (required for 'copy' action)"),
-        ...clipboardPlatformSchema,
-      })
-      .strict(),
-  ),
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        action: z.literal("paste").describe("Clipboard action"),
-        text: optionalClipboardTextSchema,
-        ...clipboardPlatformSchema,
-      })
-      .strict(),
-  ),
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        action: z.literal("clear").describe("Clipboard action"),
-        text: optionalClipboardTextSchema,
-        ...clipboardPlatformSchema,
-      })
-      .strict(),
-  ),
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        action: z.literal("get").describe("Clipboard action"),
-        text: optionalClipboardTextSchema,
-        ...clipboardPlatformSchema,
-      })
-      .strict(),
-  ),
-]);
-
-export function formatClipboardMessage(result: ClipboardResult): string {
-  if (!result.success) {
-    return `Failed to execute clipboard ${result.action}: ${result.error ?? "unknown error"}`;
-  }
-
-  switch (result.action) {
-    case "copy":
-      return "Copied text to clipboard";
-    case "paste":
-      return "Pasted clipboard content into focused field";
-    case "clear":
-      return "Cleared clipboard";
-    case "get":
-      return result.text
-        ? `Retrieved clipboard content: "${result.text.substring(0, 50)}${result.text.length > 50 ? "..." : ""}"`
-        : "Retrieved empty clipboard";
-  }
-}
-
-export function formatRecentAppsMessage(result: { success?: boolean; error?: string }): string {
-  if (result.success === false) {
-    return `Failed to open recent apps: ${result.error ?? "unknown error"}`;
-  }
-  return "Opened recent apps";
-}
-
-export function formatSwipeOnMessage(
-  result: Pick<
-    SwipeOnToolPayload,
-    "success" | "error" | "found" | "scrollIterations" | "navigated"
-  >,
-  direction: string,
-): string {
-  if (!result.success) {
-    // `||` not `??`: an empty-string error (`error: ""`) must still yield the
-    // non-empty fallback, otherwise the tool returns a blank message (#4183 P4).
-    return result.error || `Swipe ${direction} failed`;
-  }
-  if (result.found) {
-    return `Swiped ${direction} and found element after ${result.scrollIterations ?? 1} swipe(s)`;
-  }
-  // A swipe that opened another screen did not scroll; say so instead of "Swiped up".
-  return result.navigated
-    ? `Swiped ${direction}, but the screen changed instead of scrolling (see warning)`
-    : `Swiped ${direction}`;
-}
-
-// Injection seam for the swipeOn handler (mirrors the pinchOn/tapOn factory
-// seams). Lets a unit test exercise the registered handler wiring with a fake
-// SwipeOn whose execute() returns a failure, so a revert of the `isError`
-// gating below is caught by a test — not just the formatter (#6163).
-export type SwipeOnLike = Pick<SwipeOn, "execute">;
-
-/**
- * Overridable collaborators for the interaction tool handlers. Every field is
- * optional and defaults to the real implementation; tests pass fakes instead
- * of mutating module-level state (#11831).
- */
-export interface InteractionToolDependencies {
-  sendKeysFactory?: (device: BootedDevice) => SendKeysLike;
-  swipeOnFactory?: (device: BootedDevice) => SwipeOnLike;
-  pinchOnFactory?: (device: BootedDevice) => PinchOnLike;
-  tapOnElementFactory?: (device: BootedDevice) => TapOnElementLike;
-  tapAtElementFactory?: (device: BootedDevice) => TapAtElementLike;
-  hitTestObservationFactory?: (device: BootedDevice) => HitTestObservationReader;
-  hitTestDeviceReadFactory?: (device: BootedDevice, display?: string) => HitTestDeviceReader;
-  tapAnyElementFactory?: (device: BootedDevice) => TapAnyElementLike;
-  dragAndDropFactory?: (device: BootedDevice) => DragAndDropLike;
-  selectAllTextFactory?: (device: BootedDevice) => SelectAllTextLike;
-  pressButtonFactory?: (device: BootedDevice) => PressButtonLike;
-  rotateFactory?: (device: BootedDevice, options?: RotateOptions) => RotateLike;
-  setPostureFactory?: (device: BootedDevice) => SetPostureLike;
-  keyboardFactory?: (device: BootedDevice) => Pick<Keyboard, "execute">;
-  openUrlFactory?: (device: BootedDevice) => Pick<OpenURL, "execute">;
-  openLinkChooserFactory?: (device: BootedDevice) => Pick<HandleIntentChooser, "execute">;
-  shakeFactory?: (device: BootedDevice) => Pick<Shake, "execute">;
-  recentAppsFactory?: (device: BootedDevice) => Pick<RecentApps, "execute">;
-  clipboardFactory?: (device: BootedDevice) => Pick<Clipboard, "execute">;
-  wakeAndUnlockFactory?: (device: BootedDevice) => Pick<WakeAndUnlock, "execute">;
-}
-
-type SendKeysLike = Pick<SendKeys, "execute">;
-const defaultSendKeysFactory: NonNullable<InteractionToolDependencies["sendKeysFactory"]> = (
-  device,
-) => new SendKeys(device);
-
-const defaultSwipeOnFactory: NonNullable<InteractionToolDependencies["swipeOnFactory"]> = (
-  device,
-) => new SwipeOn(device);
-
-export async function swipeOnHandler(
-  device: BootedDevice,
-  args: SwipeOnArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
-): Promise<StructuredToolResponse<SwipeOnToolPayload> & { isError?: true }> {
-  RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-  const swipeOn = (deps.swipeOnFactory ?? defaultSwipeOnFactory)(device);
-  const resolvedDirection = resolveSwipeDirection({
-    direction: args.direction,
-    gestureType: args.gestureType,
-  });
-  const result = await swipeOn.execute(
-    {
-      display: args.display,
-      container: args.container,
-      // An edge swipe targets the screen/panel edge, never an auto-selected scrollable.
-      autoTarget:
-        args.display === undefined
-          ? (args.autoTarget ?? args.fromEdge === undefined)
-          : args.autoTarget,
-      // SwipeOnArgs requires a direction, and the resolver's inversion map covers all four values.
-      direction: resolvedDirection.direction!,
-      lookFor: args.lookFor,
-      speed: args.speed,
-      durationMs: args.durationMs,
-      fromEdge: args.fromEdge,
-      edgeInset: args.edgeInset,
-      at: args.at,
-      includeSystemInsets:
-        args.display === undefined ? (args.includeSystemInsets ?? false) : args.includeSystemInsets,
-      boomerang: args.boomerang,
-      apexPause: args.apexPause,
-      returnSpeed: args.returnSpeed,
-      layer: args.layer,
-    },
-    { progress, signal },
-  );
-
-  const response = createStructuredToolResponse({
-    message: formatSwipeOnMessage(result, args.direction),
-    observation: result.observation,
-    ...result,
-  });
-  // formatSwipeOnMessage already gates the message on `result.success`; the MCP
-  // envelope must agree, exactly as tapOn does (#6152, #5902), so a
-  // conforming client can't mistake a failed swipe for a completed one (#6163).
-  return result.success ? response : { ...response, isError: true };
-}
-
-export function formatPinchOnMessage(
-  result: Pick<PinchOnResult, "success" | "error">,
-  direction: string,
-): string {
-  if (!result.success) {
-    // `||` not `??`: an empty-string error (`error: ""`) must still yield the
-    // non-empty fallback, mirroring formatSwipeOnMessage (#4183 P4). Without this
-    // a validation failure (e.g. scale:0) reported a success-shaped message (#6056).
-    return result.error || `Pinch ${direction} failed`;
-  }
-  return `Pinched ${direction}`;
-}
-
-// Injection seam for the pinchOn handler (mirrors the systemTray factory seam in
-// this file). Lets a unit test exercise the registered handler wiring with a fake
-// PinchOn whose execute() returns a failure, so a revert of the handler message
-// wiring is caught by a test — not just the formatter (#6056).
-export type PinchOnLike = Pick<PinchOn, "execute">;
-
-const defaultPinchOnFactory: NonNullable<InteractionToolDependencies["pinchOnFactory"]> = (
-  device,
-) => new PinchOn(device);
-
-export async function pinchOnHandler(
-  device: BootedDevice,
-  args: PinchOnArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
-) {
-  RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-  const pinchOn = (deps.pinchOnFactory ?? defaultPinchOnFactory)(device);
-  const result = await pinchOn.execute(
-    {
-      display: args.display,
-      direction: args.direction,
-      distanceStart: args.distanceStart,
-      distanceEnd: args.distanceEnd,
-      scale: args.scale,
-      duration: args.duration,
-      rotationDegrees: args.rotationDegrees,
-      includeSystemInsets: args.includeSystemInsets,
-      container: args.container,
-      autoTarget: args.autoTarget,
-      layer: args.layer,
-    },
-    { progress, signal },
-  );
-
-  const response = createJSONToolResponse({
-    message: formatPinchOnMessage(result, args.direction),
-    observation: result.observation,
-    ...result,
-  });
-  // formatPinchOnMessage already gates the message on `result.success`; the MCP
-  // envelope must agree, exactly as tapOn does (#6152, #5902), so a
-  // conforming client can't mistake a failed pinch for a completed one (#6163).
-  return result.success ? response : { ...response, isError: true };
-}
-
-/**
- * Build the tapOn success message so it says *what* it matched, not just
- * "Tapped on element" (#5868). A correct tap and a wrong tap were byte-identical;
- * now the message carries the resolved match identity and match count (so an
- * ambiguous selector is distinguishable from a precise one) alongside the
- * existing hierarchy-changed search summary. The structured `selectedElement`
- * (resourceId/text/bounds/totalMatches) still rides on the result for clients
- * that read the payload.
- */
-export function buildTapOnResultMessage(
-  selectedElement: TapOnSelectedElement | undefined,
-  searchSummary: string | undefined,
-  activatedSubtext?: { text: string; occurrence: number },
-  selectorLabel?: string,
-): string {
-  const details = buildTapOnResultDetails(
-    selectedElement,
-    searchSummary,
-    activatedSubtext,
-    selectorLabel,
-  );
-  return details.length > 0 ? `Tapped on element (${details.join("; ")})` : "Tapped on element";
-}
-
-/**
- * The label a caller can recognise the tapped element by: the selected node's
- * own text, else the originally matched node's text / content description (the
- * match is often promoted to a clickable row that carries no text of its own),
- * else the text the selector searched for (#11638).
- */
-function selectedElementLabel(
-  selectedElement: TapOnSelectedElement | undefined,
-  selectorLabel: string | undefined,
-): string {
-  const matched = selectedElement?.matchedElement;
-  return (
-    selectedElement?.text || matched?.text || matched?.["content-desc"] || (selectorLabel ?? "")
-  );
-}
-
-function buildTapOnResultDetails(
-  selectedElement: TapOnSelectedElement | undefined,
-  searchSummary: string | undefined,
-  activatedSubtext?: { text: string; occurrence: number },
-  selectorLabel?: string,
-): string[] {
-  const details: string[] = [];
-  if (selectedElement) {
-    // Include every available identity field, not just the resource id: Android
-    // list rows commonly reuse an id such as `...:id/title`, so the id alone can't
-    // tell "Internet" from "Calendar" — the text can.
-    const identity: string[] = [];
-    if (selectedElement.resourceId) {
-      identity.push(`id=${selectedElement.resourceId}`);
-    }
-    if (selectedElement.testTag) {
-      identity.push(`testTag=${selectedElement.testTag}`);
-    }
-    const label = selectedElementLabel(selectedElement, selectorLabel);
-    if (label) {
-      identity.push(`text=${JSON.stringify(label)}`);
-    }
-    details.push(`matched ${identity.length > 0 ? identity.join(" ") : "element"}`);
-    const count = selectedElement.totalMatches;
-    // For an ambiguous selector, name which occurrence was tapped so index 0 vs 2
-    // (or a random pick) among identical rows is distinguishable.
-    const index = count > 1 ? ` (index ${selectedElement.indexInMatches})` : "";
-    details.push(`${count} ${count === 1 ? "match" : "matches"}${index}`);
-  }
-  // Append the activated semantic link whenever present, additively: an
-  // owner-scoped subtext tap resolves BOTH an owner (selectedElement) and the
-  // activated link, and the accessibilityLink selector resolves only the link —
-  // either way, naming the link keeps taps on different links from being
-  // byte-identical.
-  if (activatedSubtext) {
-    const occurrence =
-      activatedSubtext.occurrence > 0 ? ` [occurrence ${activatedSubtext.occurrence}]` : "";
-    details.push(`activated link ${JSON.stringify(activatedSubtext.text)}${occurrence}`);
-  }
-  if (searchSummary) {
-    details.push(searchSummary);
-  }
-  return details;
-}
-
-// Injection seam for the tapOn handler (mirrors the pinchOn factory seam above).
-// Lets a unit test exercise the registered handler wiring with a fake
-// TapOnElement whose execute() returns a selector miss, so a revert of the
-// failure gating below is caught by a test — not just the formatter (#6152).
-export type TapOnElementLike = Pick<TapOnElement, "execute">;
-
-const defaultTapOnElementFactory: NonNullable<
-  InteractionToolDependencies["tapOnElementFactory"]
-> = (device) => new TapOnElement(device);
-
-export type TapAtElementLike = Pick<TapAtCoordinate, "execute">;
-
-const defaultTapAtElementFactory: NonNullable<
-  InteractionToolDependencies["tapAtElementFactory"]
-> = (device) => new TapAtCoordinate(device);
-
-type HitTestObservationReader = Pick<RealObserveScreen, "execute">;
-const defaultHitTestObservationFactory: NonNullable<
-  InteractionToolDependencies["hitTestObservationFactory"]
-> = (device) => new RealObserveScreen(device);
-
-type HitTestDeviceReader = Pick<RealObserveScreen, "executeDeviceRead">;
-const defaultHitTestDeviceReadFactory: NonNullable<
-  InteractionToolDependencies["hitTestDeviceReadFactory"]
-> = (device, display) =>
-  new RealObserveScreen(device, undefined, { display, deviceReadOnly: true });
-
-/**
- * hitTest's observation. A watcher of a held device (the read-only device path) reads through the
- * observer capture, connect-only, like `observe {deviceId}`; it never touches the holder's session
- * pipeline or cache (#10965). Every other caller reads the session pipeline's cached-ok capture.
- */
-async function readHitTestObservation(
-  device: BootedDevice,
-  display: string | undefined,
-  signal: AbortSignal | undefined,
-  deps: InteractionToolDependencies,
-) {
-  if (isSessionlessDeviceRead()) {
-    return await (deps.hitTestDeviceReadFactory ?? defaultHitTestDeviceReadFactory)(
-      device,
-      display,
-    ).executeDeviceRead(signal, "none");
-  }
-  return await (deps.hitTestObservationFactory ?? defaultHitTestObservationFactory)(device).execute(
-    {
-      display,
-      freshness: "cached-ok",
-      skipScreenshot: true,
-      skipAccessibilityAudit: true,
-      skipPerformanceAudit: true,
-      skipRecompositionTracking: true,
-    },
-  );
-}
-
-const VISIBLE_HIERARCHY_TEXT_KEYS = new Set([
-  "text",
-  "label",
-  "content-desc",
-  "contentDescription",
-]);
-const IOS_SYSTEM_DIALOG_CLASSES = new Set([
-  "UIAlertController",
-  "UIActionSheet",
-  "XCUIElementTypeAlert",
-  "XCUIElementTypeSheet",
-]);
-const IOS_OPEN_ALERT_ACCEPT_ATTEMPTS = 8;
-const IOS_OPEN_ALERT_RETRY_INTERVAL_MS = 250;
-const IOS_OPEN_ALERT_VERIFY_ATTEMPTS = 4;
-const IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS = 2_000;
-
-function collectVisibleHierarchyText(value: unknown, texts: string[]): void {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      collectVisibleHierarchyText(item, texts);
-    }
-    return;
-  }
-  if (!value || typeof value !== "object") {
-    return;
-  }
-  for (const [key, child] of Object.entries(value)) {
-    if (VISIBLE_HIERARCHY_TEXT_KEYS.has(key) && typeof child === "string") {
-      texts.push(child.trim());
-    } else {
-      collectVisibleHierarchyText(child, texts);
-    }
-  }
-}
-
-function nodeAttribute(node: Record<string, unknown>, key: string): unknown {
-  return node[key] ?? nodeAttributes(node)[key];
-}
-
-function countIosDialogButtons(value: unknown): number {
-  if (Array.isArray(value)) {
-    return value.reduce((count, item) => count + countIosDialogButtons(item), 0);
-  }
-  if (!value || typeof value !== "object") {
-    return 0;
-  }
-  const node = value as Record<string, unknown>;
-  const className = nodeAttribute(node, "className") ?? nodeAttribute(node, "class");
-  const role = nodeAttribute(node, "role");
-  const ownCount = className === "UIButton" || role === "button" ? 1 : 0;
-  return (
-    ownCount +
-    Object.entries(node).reduce(
-      (count, [key, child]) => count + (key === "$" ? 0 : countIosDialogButtons(child)),
-      0,
-    )
-  );
-}
-
-function containsIosSystemDialog(value: unknown): boolean {
-  if (Array.isArray(value)) {
-    return value.some(containsIosSystemDialog);
-  }
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const node = value as Record<string, unknown>;
-  const className = nodeAttribute(node, "className") ?? nodeAttribute(node, "class");
-  if (
-    typeof className === "string" &&
-    IOS_SYSTEM_DIALOG_CLASSES.has(className) &&
-    countIosDialogButtons(node) >= 2
-  ) {
-    return true;
-  }
-  return Object.entries(node).some(([key, child]) => key !== "$" && containsIosSystemDialog(child));
-}
-
-function isIosAppOpenAlertHierarchy(
-  hierarchy: ObserveResult["viewHierarchy"] | undefined,
-): boolean {
-  const texts: string[] = [];
-  collectVisibleHierarchyText(hierarchy?.hierarchy, texts);
-  const hasEnglishOpenLabels =
-    texts.some((text) => /^open in .+\?$/i.test(text)) &&
-    texts.some((text) => text.toLowerCase() === "open");
-  return (
-    hasEnglishOpenLabels ||
-    (hierarchy?.packageName === "com.apple.springboard" &&
-      containsIosSystemDialog(hierarchy.hierarchy))
-  );
-}
-
-/** True when an iOS observation contains the system custom-URL confirmation. */
-export function isIosAppOpenAlert(observation: ObserveResult | undefined): boolean {
-  return isIosAppOpenAlertHierarchy(observation?.viewHierarchy);
-}
-
-type OpenAlertHierarchyRefresh = () => Promise<ObserveResult["viewHierarchy"] | null>;
-type SystemAlertTap = () => Promise<{ success: boolean; error?: string }>;
-
-type OpenAlertResolution =
-  | { hierarchy: ObserveResult["viewHierarchy"] }
-  | { systemTapped: true }
-  | null;
-
-function throwIfOpenAlertAcceptanceAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) {
-    throw signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
-  }
-}
-
-async function refreshOpenAlertHierarchy(
-  hierarchy: ObserveResult["viewHierarchy"] | undefined,
-  refreshHierarchy: OpenAlertHierarchyRefresh | undefined,
-): Promise<ObserveResult["viewHierarchy"] | undefined> {
-  return refreshHierarchy ? ((await refreshHierarchy()) ?? hierarchy) : hierarchy;
-}
-
-async function tapLiveSystemAlert(tapSystemAlert: SystemAlertTap | undefined): Promise<boolean> {
-  return tapSystemAlert ? (await tapSystemAlert()).success : false;
-}
-
-async function verifyIosOpenAlertDismissed(
-  refreshHierarchy: OpenAlertHierarchyRefresh | undefined,
-  tapSystemAlert: SystemAlertTap | undefined,
-  signal: AbortSignal | undefined,
-): Promise<boolean> {
-  if (!refreshHierarchy) {
-    return true;
-  }
-  for (let attempt = 0; attempt < IOS_OPEN_ALERT_VERIFY_ATTEMPTS; attempt += 1) {
-    throwIfOpenAlertAcceptanceAborted(signal);
-    const hierarchy = await refreshHierarchy();
-    if (!hierarchy) {
-      continue;
-    }
-    if (!isIosAppOpenAlertHierarchy(hierarchy)) {
-      return true;
-    }
-    if (!(await tapLiveSystemAlert(tapSystemAlert))) {
-      return false;
-    }
-  }
-  return false;
-}
-
-async function resolveIosOpenAlert(
-  initialHierarchy: ObserveResult["viewHierarchy"] | undefined,
-  refreshHierarchy: OpenAlertHierarchyRefresh | undefined,
-  tapSystemAlert: SystemAlertTap | undefined,
-  signal: AbortSignal | undefined,
-): Promise<OpenAlertResolution> {
-  if (isIosAppOpenAlertHierarchy(initialHierarchy) && !tapSystemAlert) {
-    return initialHierarchy ? { hierarchy: initialHierarchy } : null;
-  }
-  if (!refreshHierarchy && !tapSystemAlert) {
-    return null;
-  }
-
-  let hierarchy = initialHierarchy;
-  for (let attempt = 0; attempt < IOS_OPEN_ALERT_ACCEPT_ATTEMPTS; attempt += 1) {
-    throwIfOpenAlertAcceptanceAborted(signal);
-    hierarchy = await refreshOpenAlertHierarchy(hierarchy, refreshHierarchy);
-    if (await tapLiveSystemAlert(tapSystemAlert)) {
-      return { systemTapped: true };
-    }
-    if (isIosAppOpenAlertHierarchy(hierarchy)) {
-      return hierarchy ? { hierarchy } : null;
-    }
-    if (attempt + 1 < IOS_OPEN_ALERT_ACCEPT_ATTEMPTS) {
-      await defaultTimer.sleep(IOS_OPEN_ALERT_RETRY_INTERVAL_MS);
-    }
-  }
-  return null;
-}
-
-export interface AcceptIosAppOpenAlertOptions {
-  refreshHierarchy?: OpenAlertHierarchyRefresh;
-  tapSystemAlert?: SystemAlertTap;
-  tapOnElementFactory?: InteractionToolDependencies["tapOnElementFactory"];
-}
-
-/**
- * Tap the system-owned Open button only when the merged SpringBoard hierarchy
- * proves the custom-URL confirmation is present.
- */
-export async function acceptIosAppOpenAlert(
-  device: BootedDevice,
-  observation: ObserveResult | undefined,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  options: AcceptIosAppOpenAlertOptions = {},
-): Promise<TapOnElementResult | null> {
-  const { refreshHierarchy, tapSystemAlert, tapOnElementFactory } = options;
-  if (device.platform !== "ios") {
-    return null;
-  }
-
-  const resolution = await resolveIosOpenAlert(
-    observation?.viewHierarchy,
-    refreshHierarchy,
-    tapSystemAlert,
-    signal,
-  );
-  if (!resolution) {
-    return null;
-  }
-  if ("systemTapped" in resolution) {
-    const result = {
-      success: true,
-      action: "tap",
-      element: { text: "Open", bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
-    } as TapOnElementResult;
-    if (!(await verifyIosOpenAlertDismissed(refreshHierarchy, tapSystemAlert, signal))) {
-      throw new ActionableError("Failed to accept iOS app-open alert: dialog remained visible");
-    }
-    return result;
-  }
-
-  const result = await (tapOnElementFactory ?? defaultTapOnElementFactory)(device).execute(
-    { text: "Open", action: "tap" },
-    { progress, signal },
-  );
-  if (!result.success) {
-    throw new ActionableError(
-      `Failed to accept iOS app-open alert: ${result.error || "unknown error"}`,
-    );
-  }
-  if (!(await verifyIosOpenAlertDismissed(refreshHierarchy, tapSystemAlert, signal))) {
-    throw new ActionableError("Failed to accept iOS app-open alert: dialog remained visible");
-  }
-  return result;
-}
-
-/**
- * The hierarchy-changed search summary appended to the tapOn message. Emitted
- * when the search polled or observed changes, or when `searchUntil` was
- * requested and the observation is confirmed fresh.
- */
-function buildTapOnSearchSummary(
-  result: Pick<TapOnElementResult, "searchUntil" | "observation">,
-  searchUntilRequested: boolean,
-): string | undefined {
-  const searchStats = result.searchUntil;
-  if (!searchStats) {
-    return undefined;
-  }
-  const freshness = result.observation?.freshness;
-  const hasConfirmedFreshObservation =
-    typeof freshness?.requestedAfter === "number" &&
-    typeof freshness?.actualTimestamp === "number" &&
-    freshness.actualTimestamp >= freshness.requestedAfter;
-  const shouldIncludeSearchSummary =
-    searchStats.requestCount > 0 ||
-    searchStats.changeCount > 0 ||
-    (searchUntilRequested && hasConfirmedFreshObservation);
-  return shouldIncludeSearchSummary
-    ? `${searchStats.changeCount} view hierarchy changes over ${searchStats.requestCount} requests within ${searchStats.durationMs}ms`
-    : undefined;
-}
-
-function buildTapOnSuccessMessage(
-  result: TapOnElementResult,
-  searchSummary: string | undefined,
-  ensureChecked: boolean | undefined,
-  selectorLabel: string | undefined,
-): string {
-  const label = tapOnElementLabel(result, selectorLabel);
-  if (result.skipped === "already-checked") {
-    const state = ensureChecked ? "checked" : "unchecked";
-    return `${label} already ${state}, no tap${searchSummary ? ` (${searchSummary})` : ""}`;
-  }
-  if (ensureChecked !== undefined && !result.error) {
-    const beforeState = isTruthyFlag(result.element.checked) ? "checked" : "unchecked";
-    const afterState = ensureChecked ? "checked" : "unchecked";
-    const details = buildTapOnResultDetails(
-      result.selectedElement,
-      searchSummary,
-      result.activatedSubtext,
-      selectorLabel,
-    );
-    return `${label} was ${beforeState}, tapped, now ${afterState} (verified)${details.length > 0 ? `; ${details.join("; ")}` : ""}`;
-  }
-  return buildTapOnResultMessage(
-    result.selectedElement,
-    searchSummary,
-    result.activatedSubtext,
-    selectorLabel,
-  );
-}
-
-function tapOnElementLabel(result: TapOnElementResult, selectorLabel: string | undefined): string {
-  // Name the thing the caller asked for before a resource id, which generic
-  // widgets share across rows (`...:id/switchWidget`) (#11638).
-  return (
-    selectedElementLabel(result.selectedElement, selectorLabel) ||
-    result.selectedElement?.resourceId ||
-    result.selectedElement?.testTag ||
-    result.element.text ||
-    "toggle"
-  );
-}
-
-export async function tapOnHandler(
-  device: BootedDevice,
-  args: TapOnArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
-) {
-  RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-  const tapOnTextCommand = (deps.tapOnElementFactory ?? defaultTapOnElementFactory)(device);
-  const result = await tapOnTextCommand.execute(
-    {
-      display: args.display,
-      container: args.container,
-      text: args.selector.text,
-      textAny: args.selector.textAny,
-      elementId: args.selector.elementId,
-      testTag: args.selector.testTag,
-      accessibilityLink: args.selector.accessibilityLink,
-      sibling: args.sibling,
-      selectionStrategy: args.selectionStrategy,
-      index: args.index,
-      action: args.action,
-      duration: args.duration,
-      searchUntil: args.searchUntil,
-      preTapStability: args.preTapStability,
-      retryIfNoChange: args.retryIfNoChange,
-      ensureTap: args.ensureTap,
-      ensureChecked: args.ensureChecked,
-      subtext: args.subtext,
-      layer: args.layer,
-    },
-    { progress, signal, deadlineMs: resolveTransportDeadlineMs(args) },
-  );
-
-  const searchSummary = buildTapOnSearchSummary(result, Boolean(args.searchUntil));
-
-  // A selector miss must not read as a completed tap: gate the message on the
-  // outcome and mark the MCP envelope `isError`, exactly as other action tools do since
-  // #5902 (#6152). `||` not `??`: an empty-string error must still yield the
-  // non-empty fallback (#4183 P4). The failure keeps the search summary so the
-  // user still sees how long the selector was looked for before it missed.
-  const message = result.success
-    ? `${buildTapOnSuccessMessage(
-        result,
-        searchSummary,
-        args.ensureChecked,
-        args.selector.text ?? args.selector.textAny?.[0],
-      )}${result.warnings?.length ? `. Warning: ${result.warnings.join("; ")}` : ""}`
-    : `Failed to tap: ${result.error || "unknown error"}${searchSummary ? ` (${searchSummary})` : ""}`;
-  const payload = { message, observation: result.observation, ...result };
-  const response: StructuredToolResponse<typeof payload> & { isError?: true } =
-    createStructuredToolResponse(payload);
-  return result.success ? response : { ...response, isError: true as const };
-}
-
-export async function tapAtHandler(
-  device: BootedDevice,
-  args: TapAtArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
-) {
-  RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-  const result = await (deps.tapAtElementFactory ?? defaultTapAtElementFactory)(device).execute(
-    {
-      ...(args.image !== undefined
-        ? { image: args.image }
-        : { x: args.x, y: args.y, coordinateSpace: args.coordinateSpace }),
-      display: args.display,
-      snapshotId: args.snapshotId,
-      action: args.action,
-      durationMs: args.durationMs,
-      layer: args.layer,
-      pointer: args.pointer,
-    } as Parameters<TapAtElementLike["execute"]>[0],
-    { progress, signal, planContext: args.__tapAtPlanContext ?? args.__tapAtRecordingContext },
-  );
-  const message = result.success
-    ? `${result.action === "longPress" ? "Long pressed" : result.action === "doubleTap" ? "Double tapped" : "Tapped"} at (${result.x}, ${result.y})`
-    : `Failed to tap at (${result.x}, ${result.y}): ${result.error || "unknown error"}`;
-  const payload = {
-    message,
-    observation: result.observation,
-    ...result,
-    deviceId: device.deviceId,
-    platform: device.platform,
-  };
-  const response: StructuredToolResponse<typeof payload> & { isError?: true } =
-    createStructuredToolResponse(payload);
-  return result.success ? response : { ...response, isError: true as const };
-}
-
-export async function hitTestHandler(
-  device: BootedDevice,
-  args: z.infer<typeof hitTestSchema>,
-  _progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
-) {
-  const observation = await readHitTestObservation(device, args.display, signal, deps);
-  if (args.snapshotId) {
-    const staleReason = snapshotReferences.staleReason(
-      args.snapshotId,
-      device.deviceId,
-      observation,
-    );
-    if (staleReason) {
-      throw new ActionableError(staleReason);
-    }
-  }
-  const preview = previewHierarchyHitTest(args, observation, device.platform);
-  return createStructuredToolResponse({ ...preview, deviceId: device.deviceId });
-}
-
-// Injection seam for the tapAny handler (mirrors the tapOn factory seam above).
-// Lets a unit test exercise the registered handler wiring with a fake
-// TapAnyElement whose execute() returns a failure (#6163).
-export type TapAnyElementLike = Pick<TapAnyElement, "execute">;
-
-const defaultTapAnyElementFactory: NonNullable<
-  InteractionToolDependencies["tapAnyElementFactory"]
-> = (device) => new TapAnyElement(device);
-
-function buildTapAnySearchSummary(
-  result: Pick<TapOnElementResult, "searchUntil">,
-): string | undefined {
-  const searchStats = result.searchUntil;
-  const shouldIncludeSearchSummary =
-    Boolean(searchStats) && (searchStats!.requestCount > 0 || searchStats!.changeCount > 0);
-  return shouldIncludeSearchSummary && searchStats
-    ? `${searchStats.changeCount} view hierarchy changes over ${searchStats.requestCount} requests within ${searchStats.durationMs}ms`
-    : undefined;
-}
-
-export async function tapAnyHandler(
-  device: BootedDevice,
-  args: TapAnyArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
-) {
-  RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-  const tapAnyCommand = (deps.tapAnyElementFactory ?? defaultTapAnyElementFactory)(device);
-  const result = await tapAnyCommand.execute(
-    {
-      display: args.display,
-      container: args.container,
-      selectionStrategy: args.selectionStrategy,
-      scrollableContainer: args.scrollableContainer,
-      action: args.action,
-      duration: args.duration,
-      searchUntil: args.searchUntil,
-      layer: args.layer,
-    },
-    { progress, signal, deadlineMs: resolveTransportDeadlineMs(args) },
-  );
-
-  const searchSummary = buildTapAnySearchSummary(result);
-  // A miss must not read as a completed tap: gate the message on the outcome
-  // and mark the MCP envelope `isError`, exactly as tapOn does (#6152, #6163).
-  const failurePrefix = "Failed to tap clickable element: ";
-  const failure = result.error || "unknown error";
-  const message = result.success
-    ? searchSummary
-      ? `Tapped clickable element (${searchSummary})`
-      : "Tapped clickable element"
-    : failure.startsWith(failurePrefix)
-      ? failure
-      : `${failurePrefix}${failure}`;
-  const response = createStructuredToolResponse({
-    message,
-    observation: result.observation,
-    ...result,
-  });
-  return result.success ? response : { ...response, isError: true as const };
-}
-
-// Injection seam for the dragAndDrop handler. Lets a unit test exercise the
-// registered handler wiring with a fake DragAndDrop whose execute() returns a
-// failure (#6163).
-export type DragAndDropLike = Pick<DragAndDrop, "execute">;
-
-const defaultDragAndDropFactory: NonNullable<InteractionToolDependencies["dragAndDropFactory"]> = (
-  device,
-) => new DragAndDrop(device);
-
-export async function dragAndDropHandler(
-  device: BootedDevice,
-  args: DragAndDropArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
-) {
-  RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-  const dragAndDrop = (deps.dragAndDropFactory ?? defaultDragAndDropFactory)(device);
-  const result: DragAndDropResult = await dragAndDrop.execute(
-    {
-      display: args.display,
-      source: args.source,
-      target: args.target,
-      layer: args.layer,
-      pressDurationMs: args.pressDurationMs,
-      dragDurationMs: args.dragDurationMs,
-      holdDurationMs: args.holdDurationMs,
-    },
-    { progress, signal },
-  );
-
-  const message = result.success
-    ? "Dragged element to target"
-    : `Failed to drag element to target: ${result.error || "unknown error"}`;
-  const response = createJSONToolResponse({
-    message,
-    observation: result.observation,
-    ...result,
-  });
-  return result.success ? response : { ...response, isError: true as const };
-}
-
-// Injection seam for the selectAllText handler. Lets a unit test exercise the
-// registered handler wiring with a fake SelectAllText whose execute() returns
-// a failure (#6163).
-export type SelectAllTextLike = Pick<SelectAllText, "execute">;
-
-const defaultSelectAllTextFactory: NonNullable<
-  InteractionToolDependencies["selectAllTextFactory"]
-> = (device) => new SelectAllText(device);
-
-export async function selectAllTextHandler(
-  device: BootedDevice,
-  args: SelectAllTextArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
-) {
-  try {
-    const selectAllText = (deps.selectAllTextFactory ?? defaultSelectAllTextFactory)(device);
-    const result: SelectAllTextResult = await selectAllText.execute(progress, signal, {
-      layer: args.layer,
-    });
-
-    const message = result.success
-      ? "Selected all text in focused input field"
-      : `Failed to select all text: ${result.error || "unknown error"}`;
-    const response = createJSONToolResponse({
-      message,
-      observation: result.observation,
-      ...result,
-    });
-    return result.success ? response : { ...response, isError: true as const };
-  } catch (error) {
-    throw toActionableError(error, `Failed to select all text`);
-  }
-}
-
-// Injection seam for the pressButton handler. Lets a unit test exercise the
-// registered handler wiring with a fake PressButton whose execute() returns a
-// failure (#6163).
-export type PressButtonLike = Pick<PressButton, "execute">;
-
-const defaultPressButtonFactory: NonNullable<InteractionToolDependencies["pressButtonFactory"]> = (
-  device,
-) => new PressButton(device);
-
-export async function pressButtonHandler(
-  device: BootedDevice,
-  args: PressButtonArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
-) {
-  RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-  try {
-    const pressButton = (deps.pressButtonFactory ?? defaultPressButtonFactory)(device);
-    const result: PressButtonResult = await pressButton.execute(args.button, { progress, signal });
-
-    const message = result.success
-      ? `Pressed button ${args.button}`
-      : `Failed to press button ${args.button}: ${result.error || "unknown error"}`;
-    const response = createStructuredToolResponse({
-      message,
-      observation: result.observation,
-      ...result,
-    });
-    return result.success ? response : { ...response, isError: true as const };
-  } catch (error) {
-    throw toActionableError(error, `Failed to press button`);
-  }
-}
-
-// Injection seam for the rotate handler. In particular, persistent-orientation
-// failures must reach MCP clients as errors rather than success-shaped results.
-export type RotateLike = Pick<Rotate, "execute">;
-
-const defaultRotateFactory: NonNullable<InteractionToolDependencies["rotateFactory"]> = (
-  device,
-  options,
-) => new Rotate(device, null, defaultTimer, options);
-
-export type SetPostureLike = Pick<SetPosture, "execute" | "executeHingeAngle">;
-
-const defaultSetPostureFactory: NonNullable<InteractionToolDependencies["setPostureFactory"]> = (
-  device,
-) => new SetPosture(device);
-
-export function formatSetPostureMessage(result: SetPostureOutput): string {
-  if ("status" in result) {
-    return result.message;
-  }
-  const message =
-    result.hingeAngle !== undefined
-      ? result.observedHingeAngle === undefined
-        ? `Requested hinge angle ${result.hingeAngle} degrees; the resulting angle could not be verified (posture ${result.posture})`
-        : Math.abs(result.observedHingeAngle - result.hingeAngle) > 1
-          ? `Requested hinge angle ${result.hingeAngle} degrees; the device reports ${result.observedHingeAngle} degrees (posture ${result.posture})`
-          : `Set hinge angle to ${result.hingeAngle} degrees; device reports posture ${result.posture}${result.postureReason ? ` (${result.postureReason})` : ""}`
-      : `Set device posture to ${result.posture}`;
-  return result.keyguardDismissed
-    ? `${message}; dismissed the swipe keyguard the change raised (the device was unlocked and has no lock credential)`
-    : message;
-}
-
-export async function setPostureHandler(
-  device: BootedDevice,
-  args: {
-    posture?: RequestedPosture;
-    hingeAngle?: number;
-    displayPreset?: "phone" | "unfolded" | "tablet";
-  },
-  _progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
-) {
-  try {
-    throwIfAborted(signal);
-    // The tool boundary validates public args before injecting execution metadata.
-    // Direct callers still need the schema's cross-field invariants.
-    if ((args.posture !== undefined) === (args.hingeAngle !== undefined)) {
-      throw new ActionableError("Specify exactly one of posture or hingeAngle.");
-    }
-    if (args.hingeAngle !== undefined && args.displayPreset !== undefined) {
-      throw new ActionableError(
-        "displayPreset requires posture and cannot be combined with hingeAngle.",
-      );
-    }
-    const action = (deps.setPostureFactory ?? defaultSetPostureFactory)(device);
-    const result: SetPostureOutput =
-      args.hingeAngle !== undefined
-        ? await action.executeHingeAngle(args.hingeAngle, {
-            displayPreset: args.displayPreset,
-            signal,
-          })
-        : await action.execute(args.posture!, args.displayPreset, signal);
-    return createStructuredToolResponse({ message: formatSetPostureMessage(result), ...result });
-  } catch (error) {
-    throw toActionableError(error, "Failed to set device posture");
-  }
-}
-
-export function formatRotateMessage(
-  result: Pick<RotateResult, "success" | "orientation" | "error" | "message">,
-): string {
-  if (!result.success) {
-    return `Failed to rotate device: ${result.error || "unknown error"}`;
-  }
-  return result.message ?? `Rotated device to ${result.orientation} orientation`;
-}
-
-export async function rotateHandler(
-  device: BootedDevice,
-  args: RotateArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
-) {
-  try {
-    if (args.lockOrientation !== undefined && device.platform !== "android") {
-      throw new ActionableError("lockOrientation is supported only on Android devices.");
-    }
-    const manager =
-      args.sessionUuid && device.platform === "android"
-        ? defaultDaemonContext.sessionManager()
-        : undefined;
-    const deadlineMs = resolveTransportDeadlineMs(args);
-    const rotate = (deps.rotateFactory ?? defaultRotateFactory)(device, {
-      ...(deadlineMs === undefined ? {} : { deadlineMs }),
-      sessionRotation: (mutation) =>
-        runSessionRotationMutation(manager, args.sessionUuid, device.deviceId, mutation),
-    });
-    const result = await rotate.execute(args.orientation, {
-      progress,
-      lockOrientation: args.lockOrientation,
-      signal,
-      display: args.display,
-    });
-    const response = createStructuredToolResponse({
-      observation: result.observation,
-      ...result,
-      message: formatRotateMessage(result),
-    });
-    return result.success ? response : { ...response, isError: true as const };
-  } catch (error) {
-    throw toActionableError(error, `Failed to rotate device`);
-  }
-}
-
-// ============================================================================
-// Tool Registration
-// ============================================================================
-
-async function handleInstalledImeAction(
-  device: BootedDevice,
-  args: KeyboardArgs,
-  signal?: AbortSignal,
-) {
-  if (device.platform !== "android") {
-    throw new ActionableError("Installed IME actions are Android-only; select an Android device.");
-  }
-  if (args.action === "tapImeKey") {
-    if (!args.imeId || !args.key) {
-      throw new ActionableError("tapImeKey requires imeId and key.");
-    }
-    return createStructuredToolResponse(
-      await createInstalledImeKeySession(device).tapKey(args.imeId, args.key, signal),
-    );
-  }
-  const adb = defaultAdbClientFactory.create(device);
-  const catalog = new AndroidImeCatalog(adb, device.deviceId, createForegroundUserSource(adb));
-  if (args.action === "listImes") {
-    return createStructuredToolResponse(await catalog.list(signal));
-  }
-  if (!args.imeId) {
-    throw new ActionableError("keyboard setIme requires imeId from listImes.");
-  }
-  return createStructuredToolResponse(await catalog.select(args.imeId, signal));
-}
-
-// Per-command factories preserve the default device implementations in production.
-const defaultKeyboardFactory: NonNullable<InteractionToolDependencies["keyboardFactory"]> = (
-  device,
-) => new Keyboard(device);
-const defaultOpenUrlFactory: NonNullable<InteractionToolDependencies["openUrlFactory"]> = (
-  device,
-) => new OpenURL(device);
-const defaultOpenLinkChooserFactory: NonNullable<
-  InteractionToolDependencies["openLinkChooserFactory"]
-> = (device) => new HandleIntentChooser(device);
-
-const defaultShakeFactory: NonNullable<InteractionToolDependencies["shakeFactory"]> = (device) =>
-  new Shake(device);
-const defaultRecentAppsFactory: NonNullable<InteractionToolDependencies["recentAppsFactory"]> = (
-  device,
-) => new RecentApps(device);
-const defaultClipboardFactory: NonNullable<InteractionToolDependencies["clipboardFactory"]> = (
-  device,
-) => new Clipboard(device);
-const defaultWakeAndUnlockFactory: NonNullable<
-  InteractionToolDependencies["wakeAndUnlockFactory"]
-> = (device) =>
-  new WakeAndUnlock(device, undefined, {
-    credentialStore: new DeviceLockStore(),
-    iosUnlocker: device.platform === "ios" ? new IosLockScreenUnlocker(device) : undefined,
-    iosRunnerRecovery:
-      device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : undefined,
-  });
-
-/** UI interactions that may cause in-app navigation (the navigation recorder records them). */
-const NAV = { recordsNavigation: true } as const;
+const NAV_PLAN_SKELETON = { ...NAV, ...PLAN_SKELETON } as const;
 
 export const pressButtonTool = defineDeviceTool({
   name: "pressButton",
   description:
-    "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS.",
+    "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
   input: pressButtonInput,
   options: {
     outputSchema: pressButtonResultSchema,
     defaultEnabled: true,
     supportsProgress: true,
-    ...NAV,
+    ...NAV_PLAN_SKELETON,
   },
 });
 
@@ -2716,7 +145,7 @@ export const wakeAndUnlockTool = defineDeviceTool({
   description:
     "Wake a device and unlock its keyguard. Android: swipe lock or secure PIN via `pin`; iOS: wake + swipe-dismiss (pin ignored).",
   input: wakeAndUnlockInput,
-  options: { outputSchema: wakeAndUnlockResultSchema, defaultEnabled: true },
+  options: { ...PLAN_RELEVANT, outputSchema: wakeAndUnlockResultSchema, defaultEnabled: true },
 });
 
 export const wakeAndUnlockSchema = wakeAndUnlockTool.schema;
@@ -2725,7 +154,7 @@ export const recentAppsTool = defineDeviceTool({
   name: "recentApps",
   description: "Open recent apps",
   input: recentAppsInput,
-  options: { defaultEnabled: true, supportsProgress: true },
+  options: { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON },
 });
 
 export const recentAppsSchema = recentAppsTool.schema;
@@ -2734,7 +163,7 @@ const homeScreenTool = defineDeviceTool({
   name: "homeScreen",
   description: "Go to home screen",
   input: homeScreenInput,
-  options: { defaultEnabled: true, supportsProgress: true },
+  options: { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON },
 });
 
 export const homeScreenSchema = homeScreenTool.schema;
@@ -2743,16 +172,17 @@ export const selectAllTextTool = defineDeviceTool({
   name: "selectAllText",
   description: "Select all text in focused input",
   input: selectAllTextInput,
-  options: { defaultEnabled: false, supportsProgress: true },
+  options: { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
 });
 
 export const selectAllTextSchema = selectAllTextTool.schema;
 
 export const shakeTool = defineDeviceTool({
   name: "shake",
-  description: "Shake device; iOS Simulator only.",
+  description:
+    "Shake device; iOS Simulator and Android emulator only (unsupported on physical iOS and Android devices).",
   input: shakeInput,
-  options: { defaultEnabled: false, supportsProgress: true },
+  options: { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
 });
 
 export const shakeSchema = shakeTool.schema;
@@ -2761,7 +191,12 @@ export const rotateTool = defineDeviceTool({
   name: "rotate",
   description: "Rotate device orientation",
   input: rotateInput,
-  options: { defaultEnabled: false, supportsProgress: true, outputSchema: rotateResultSchema },
+  options: {
+    defaultEnabled: false,
+    supportsProgress: true,
+    outputSchema: rotateResultSchema,
+    ...PLAN_SKELETON,
+  },
 });
 
 export const rotateSchema = rotateTool.schema;
@@ -2772,6 +207,7 @@ export const keyboardTool = defineDeviceTool({
     "Open, close, detect, list/select installed Android IMEs, or switch the AutoMobile typing profile",
   input: keyboardInput,
   options: {
+    ...PLAN_RELEVANT,
     defaultEnabled: true,
     outputSchema: keyboardResultSchema,
     // detect, listImes and listProfiles change no UI: reads (#10965). The rest are control.
@@ -2782,38 +218,6 @@ export const keyboardTool = defineDeviceTool({
 
 export const keyboardSchema = keyboardTool.schema;
 
-function buildIosOpenAlertOptions(
-  iosClient: IOSCtrlProxyClient | null,
-  signal: AbortSignal | undefined,
-  tapOnElementFactory: InteractionToolDependencies["tapOnElementFactory"],
-): AcceptIosAppOpenAlertOptions {
-  return {
-    tapOnElementFactory,
-    refreshHierarchy: iosClient
-      ? async () => {
-          const refreshed = await iosClient.requestHierarchySync(
-            undefined,
-            true,
-            signal,
-            IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
-          );
-          return refreshed ? iosClient.convertToViewHierarchyResult(refreshed.hierarchy) : null;
-        }
-      : undefined,
-    tapSystemAlert: iosClient
-      ? () =>
-          iosClient.requestAction(
-            "system_alert_accept",
-            undefined,
-            undefined,
-            IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
-            undefined,
-            { abortSignal: signal },
-          )
-      : undefined,
-  };
-}
-
 export function registerInteractionTools(deps: InteractionToolDependencies = {}) {
   // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
   // are defined at module scope (each with an
@@ -2821,16 +225,6 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
   // wiring (#6152, #6163).
 
   // System tray handler: domain logic lives in features/systemTray/SystemTray.
-  const systemTrayHandler = async (
-    device: BootedDevice,
-    args: SystemTrayArgs,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ) => {
-    const { payload, isError } = await new SystemTray(device, progress, signal).execute(args);
-    const response = createJSONToolResponse(payload);
-    return isError ? { ...response, isError: true as const } : response;
-  };
 
   // swipeOn handler is defined at module scope (with an injectable SwipeOn
   // factory) so a unit test can exercise the registered handler wiring (#6163).
@@ -2839,284 +233,19 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
   // pinchOn handler is defined at module scope (with an injectable PinchOn
   // factory) so a unit test can exercise the registered handler wiring (#6056).
 
-  const sendKeysHandler = async (
-    device: BootedDevice,
-    args: SendKeysArgs,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ) => {
-    await assertSendKeysRunnerCompatible(device);
-    RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-    const sendKeys = (deps.sendKeysFactory ?? defaultSendKeysFactory)(device);
-    const result = await sendKeys.execute(
-      args.commands,
-      args.selector,
-      progress,
-      signal,
-      args.display,
-      { container: args.container, selectionStrategy: args.selectionStrategy, layer: args.layer },
-    );
-    const dismissal = await dismissKeyboardAfterSendKeys(
-      device,
-      serverConfig.isDismissKeyboardAfterInputEnabled(),
-      result.success,
-      async (closeSignal) =>
-        (deps.keyboardFactory ?? defaultKeyboardFactory)(device).execute("close", {
-          signal: closeSignal,
-        }),
-      signal,
-    );
-    const response = createStructuredToolResponse({
-      message: result.success
-        ? `Executed ${result.completedCommands} sendKeys command(s)${dismissal.warnings?.length ? `. Warning: ${dismissal.warnings.join("; ")}` : ""}`
-        : `sendKeys stopped at command ${result.failedIndex}: ${result.error}`,
-      ...result,
-      ...dismissal,
-    });
-    return result.success ? response : { ...response, isError: true };
-  };
-
   // Wake and unlock handler
-  const wakeAndUnlockHandler = async (
-    device: BootedDevice,
-    args: WakeAndUnlockArgs,
-    _progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ) => {
-    const wakeAndUnlock = (deps.wakeAndUnlockFactory ?? defaultWakeAndUnlockFactory)(device);
-    const transportDeadlineMs = (args as Record<string, unknown>)[
-      INTERNAL_MCP_REQUEST_DEADLINE_PARAM
-    ];
-    const result = await wakeAndUnlock.execute(args.pin, {
-      deadlineMs: typeof transportDeadlineMs === "number" ? transportDeadlineMs : undefined,
-      signal,
-    });
-    const message = result.success
-      ? result.wasLocked
-        ? "Device unlocked"
-        : "Device awake"
-      : `Failed to unlock device: ${result.error ?? "unknown error"}`;
-    const response = createStructuredToolResponse({
-      message: result.warning ? `${message}. Warning: ${result.warning}` : message,
-      ...result,
-    });
-    return withIsErrorOnFailure(response, result.success);
-  };
 
   // Open link handler
-  const openLinkHandler = async (
-    device: BootedDevice,
-    args: OpenLinkArgs,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ) => {
-    throwIfAborted(signal);
-    // #6154 follow-up: `platform` is optional on the wire, so the schema's
-    // iOS-rejects-activityName check (raw request platform) can be skipped
-    // entirely when the caller omitted it. Re-validate against the resolved
-    // `device.platform` before opening the URL.
-    assertActiveWindowWaitForSupportedOnPlatform(device.platform, args.waitFor);
-    if (args.chooserAppPackage && device.platform !== "android") {
-      throw new ActionableError("chooserAppPackage is supported only on Android.");
-    }
-
-    const openUrl = (deps.openUrlFactory ?? defaultOpenUrlFactory)(device);
-    const opened = await openUrl.execute(args.url, { signal });
-    throwIfAborted(signal);
-    const result = args.chooserAppPackage
-      ? await selectAndroidOpenLinkChooser(
-          device,
-          args.chooserAppPackage,
-          opened,
-          opened.url,
-          (deps.openLinkChooserFactory ?? defaultOpenLinkChooserFactory)(device),
-          signal,
-        )
-      : opened;
-    throwIfAborted(signal);
-    const iosClient = device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : null;
-    const acceptedOpenAlert =
-      args.acceptOpenAlert && result.success
-        ? await acceptIosAppOpenAlert(
-            device,
-            result.observation,
-            progress,
-            signal,
-            buildIosOpenAlertOptions(iosClient, signal, deps.tapOnElementFactory),
-          )
-        : null;
-    const effectiveResult: OpenURLResult & { openAlertAccepted?: true } = acceptedOpenAlert
-      ? {
-          ...result,
-          observation: acceptedOpenAlert.observation ?? result.observation,
-          openAlertAccepted: true,
-        }
-      : result;
-
-    // Integrated waitFor (issue #3490 §5): once the URL is opened, poll for the
-    // predicate exactly as `observe` does, surfacing the awaited observation and
-    // await metadata so callers no longer need a separate observe round-trip.
-    const waitOutcome = args.waitFor
-      ? await waitForObservation(
-          new RealObserveScreen(device),
-          { ...args.waitFor, settled: args.settled },
-          signal,
-          false,
-          defaultTimer,
-          device.platform,
-          undefined,
-          undefined,
-          ...displayWaitInventory(device),
-        )
-      : null;
-
-    const response = createStructuredToolResponse(
-      buildOpenLinkPayload(args.url, effectiveResult, waitOutcome),
-    );
-    return withIsErrorOnFailure(response, effectiveResult.success);
-  };
 
   // Shake handler
-  const shakeHandler = async (
-    device: BootedDevice,
-    args: ShakeArgs,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ) => {
-    try {
-      const shake = (deps.shakeFactory ?? defaultShakeFactory)(device);
-      const result = await shake.execute(
-        {
-          duration: args.duration ?? 1000,
-          intensity: args.intensity ?? 100,
-        },
-        { progress, signal },
-      );
-
-      const response = createJSONToolResponse({
-        message: result.success
-          ? `Shook device for ${args.duration ?? 1000}ms with intensity ${args.intensity ?? 100}`
-          : `Failed to shake device: ${result.error ?? "unknown error"}`,
-        observation: result.observation,
-        ...result,
-      });
-      return withIsErrorOnFailure(response, result.success);
-    } catch (error) {
-      throw toActionableError(error, `Failed to shake device`);
-    }
-  };
 
   // Keyboard handler
-  const keyboardHandler = async (
-    device: BootedDevice,
-    args: KeyboardArgs,
-    _progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ) => {
-    try {
-      throwIfAborted(signal);
-      if (args.action === "setProfile") {
-        return createStructuredToolResponse(
-          await setKeyboardProfileForTool(device, args.profile, undefined, signal),
-        );
-      }
-      if (args.action === "listProfiles") {
-        return createStructuredToolResponse(
-          await listKeyboardProfilesForTool(device, undefined, signal),
-        );
-      }
-      if (args.action === "listImes" || args.action === "setIme" || args.action === "tapImeKey") {
-        return handleInstalledImeAction(device, args, signal);
-      }
-      throwIfAborted(signal);
-      const keyboard = (deps.keyboardFactory ?? defaultKeyboardFactory)(device);
-      const result = await keyboard.execute(args.action, { signal });
-      throwIfAborted(signal);
-
-      const response = createStructuredToolResponse(result);
-      return withIsErrorOnFailure(response, result.success);
-    } catch (error) {
-      // A click/tap already sent when the abort landed is indeterminate; keep that
-      // warning instead of reporting a plain cancellation.
-      if (!(error instanceof KeyboardOpenIndeterminateError)) {
-        throwIfAborted(signal);
-      }
-      throw toActionableError(error, `Failed to execute keyboard ${args.action}`);
-    }
-  };
 
   // Recent Apps handler
-  const recentAppsHandler = async (
-    device: BootedDevice,
-    args: RecentAppsArgs,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ) => {
-    try {
-      const recentApps = (deps.recentAppsFactory ?? defaultRecentAppsFactory)(device);
-      const result = await recentApps.execute({ progress, signal });
-
-      const response = createJSONToolResponse({
-        message: formatRecentAppsMessage(result),
-        observation: result.observation,
-        ...result,
-      });
-      return result.success ? response : { ...response, isError: true as const };
-    } catch (error) {
-      throw toActionableError(error, `Failed to open recent apps`);
-    }
-  };
 
   // Home Screen handler
-  const homeScreenHandler = async (
-    device: BootedDevice,
-    args: any,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ) => {
-    try {
-      throwIfAborted(signal);
-      const homeScreen = new HomeScreen(device);
-      const result = await homeScreen.execute({ progress, signal });
-
-      const response = createJSONToolResponse({
-        message: "Pressed home button to return to the home screen",
-        observation: result.observation,
-        ...result,
-      });
-      return withIsErrorOnFailure(response, result.success);
-    } catch (error) {
-      throwIfAborted(signal);
-      throw toActionableError(error, `Failed to go to home screen`);
-    }
-  };
 
   // Clipboard handler
-  const clipboardHandler = async (
-    device: BootedDevice,
-    args: ClipboardArgs,
-    _progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ) => {
-    try {
-      const clipboard = (deps.clipboardFactory ?? defaultClipboardFactory)(device);
-      const result = await clipboard.execute(args.action, args.text, { signal });
-
-      let message = formatClipboardMessage(result);
-
-      if (result.method) {
-        message += ` (via ${result.method})`;
-      }
-
-      const response = createJSONToolResponse({
-        message,
-        ...result,
-      });
-      return result.success ? response : { ...response, isError: true as const };
-    } catch (error) {
-      throw toActionableError(error, `Failed to execute clipboard ${args.action}`);
-    }
-  };
 
   // Register with the tool registry
   selectAllTextTool.register(ToolRegistry, (device, args, progress, signal) =>
@@ -3132,25 +261,30 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)",
     systemTraySchema,
     systemTrayHandler,
-    { defaultEnabled: false, supportsProgress: true },
+    { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
   );
 
   ToolRegistry.registerDeviceAware(
     "sendKeys",
     "Execute ordered typing, clear, raw-key, and semantic IME commands. Unicode: iOS any mode; Android a11y/ime/auto/eventAll/eventLast (event modes use a11y for unsupported runs). Android eventOnly/imeKeyEvents are ASCII-only. textLength counts code points.",
     sendKeysSchema,
-    sendKeysHandler,
-    { defaultEnabled: true, supportsProgress: true, outputSchema: sendKeysResultSchema, ...NAV },
+    createSendKeysHandler(deps),
+    {
+      defaultEnabled: true,
+      supportsProgress: true,
+      outputSchema: sendKeysResultSchema,
+      ...NAV_PLAN_SKELETON,
+    },
   );
 
-  wakeAndUnlockTool.register(ToolRegistry, wakeAndUnlockHandler);
+  wakeAndUnlockTool.register(ToolRegistry, createWakeAndUnlockHandler(deps));
 
   ToolRegistry.registerDeviceAware(
     "openLink",
-    "Open URL in browser",
+    'Open URL in browser. A transient Android ADB failure returns device_transport_unavailable (retryable: true, retryAfterMs, deviceId). dispatched is false before dispatch or "unknown" after transport loss (true is reserved for confirmed dispatch). For "unknown", the link may already have opened: observe before reissuing a single-use link.',
     openLinkSchema,
-    openLinkHandler,
-    { defaultEnabled: false, outputSchema: openLinkResultSchema },
+    createOpenLinkHandler(deps),
+    { defaultEnabled: false, outputSchema: openLinkResultSchema, ...PLAN_SKELETON },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3158,7 +292,12 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls.",
     tapOnSchema,
     (device, args, progress, signal) => tapOnHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true, outputSchema: tapOnResultSchema, ...NAV },
+    {
+      defaultEnabled: true,
+      supportsProgress: true,
+      outputSchema: tapOnResultSchema,
+      ...NAV_PLAN_SKELETON,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3166,7 +305,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Tap, long press, or double tap at screen coordinates in native, normalized, or percent units.",
     tapAtSchema,
     (device, args, progress, signal) => tapAtHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true },
+    { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3174,7 +313,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android and iOS).",
     dragPathSchema,
     dragPathHandler,
-    { defaultEnabled: false, supportsProgress: true },
+    { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3192,7 +331,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Tap any clickable element; scope with container or scrollableContainer.",
     tapAnySchema,
     (device, args, progress, signal) => tapAnyHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true },
+    { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3200,7 +339,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Drag and drop element",
     dragAndDropSchema,
     (device, args, progress, signal) => dragAndDropHandler(device, args, progress, signal, deps),
-    { defaultEnabled: false, supportsProgress: true, ...NAV },
+    { defaultEnabled: false, supportsProgress: true, ...NAV_PLAN_SKELETON },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3208,7 +347,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Swipe/scroll on screen or elements",
     swipeOnSchema,
     (device, args, progress, signal) => swipeOnHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true, ...NAV },
+    { defaultEnabled: true, supportsProgress: true, ...NAV_PLAN_SKELETON },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3219,15 +358,15 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     {
       defaultEnabled: false,
       supportsProgress: true,
-      ...NAV,
+      ...NAV_PLAN_SKELETON,
     },
   );
 
-  shakeTool.register(ToolRegistry, shakeHandler);
+  shakeTool.register(ToolRegistry, createShakeHandler(deps));
 
-  keyboardTool.register(ToolRegistry, keyboardHandler);
+  keyboardTool.register(ToolRegistry, createKeyboardHandler(deps));
 
-  recentAppsTool.register(ToolRegistry, recentAppsHandler);
+  recentAppsTool.register(ToolRegistry, createRecentAppsHandler(deps));
 
   homeScreenTool.register(ToolRegistry, homeScreenHandler);
 
@@ -3241,7 +380,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Set Android device posture or iPhone Duo simulator posture, with an optional Resizable Android display preset. Specify exactly one of posture or hingeAngle (finite degrees, 0-180 inclusive). Hinge angle is BEST EFFORT, emulator/simulator only, without displayPreset; unsupported returns status: unsupported with a reason and no state change. Android console support is detected at call time; iOS requires a runner advertising set_hinge_angle (#8547). Angle results echo hingeAngle and device posture read-back, or unknown with postureReason. Android strictly parses emu sensor get hinge-angle0 output as hinge-angle0 = <n>; iOS uses the runner angle. Both report observedHingeAngle when available and warn without failing when the resulting angle is unavailable or differs by more than 1 degree.",
     setPostureSchema,
     (device, args, progress, signal) => setPostureHandler(device, args, progress, signal, deps),
-    { defaultEnabled: false, outputSchema: setPostureResultSchema },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setPostureResultSchema },
   );
 
   // Register the clipboard tool
@@ -3249,12 +388,78 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "clipboard",
     "Clipboard operations (copy/paste/clear/get)",
     clipboardSchema,
-    clipboardHandler,
+    createClipboardHandler(deps),
     // get changes no UI: a read (#10965). copy, paste and clear are control.
     {
+      ...PLAN_RELEVANT,
       defaultEnabled: false,
       deviceReadOnly: (args: ClipboardArgs) => args.action === "get",
       deviceReadOnlyArgs: [{ argument: "action", values: ["get"] }],
     },
   );
 }
+export {
+  hitTestSchema,
+  tapAnySchema,
+  tapAtSchema,
+  tapOnSchema,
+} from "./interactionTools/tapSchemas";
+
+export { dragAndDropSchema, pinchOnSchema, swipeOnSchema } from "./interactionTools/gestureSchemas";
+
+export { clipboardSchema, sendKeysSchema } from "./interactionTools/inputSchemas";
+
+export {
+  clearStateSchema,
+  openLinkSchema,
+  setPostureSchema,
+  stopAppSchema,
+  systemTraySchema,
+} from "./interactionTools/deviceSchemas";
+
+export type {
+  AcceptIosAppOpenAlertOptions,
+  DragAndDropLike,
+  InteractionToolDependencies,
+  OpenAlertHierarchyRefresh,
+  OpenAlertResolution,
+  OpenLinkWaitOutcome,
+  PinchOnLike,
+  PressButtonLike,
+  RotateLike,
+  SelectAllTextLike,
+  SendKeysRunnerCommandSource,
+  SendKeysRunnerCommandSourceFactory,
+  SetPostureLike,
+  SwipeOnLike,
+  SystemAlertTap,
+  TapAnyElementLike,
+  TapAtElementLike,
+  TapOnElementLike,
+} from "./interactionTools/dependencies";
+
+export {
+  dragAndDropHandler,
+  formatPinchOnMessage,
+  formatSwipeOnMessage,
+  pinchOnHandler,
+  swipeOnHandler,
+} from "./interactionTools/gestureHandlers";
+
+export {
+  buildTapOnResultMessage,
+  hitTestHandler,
+  isIosAppOpenAlert,
+  tapAnyHandler,
+  tapAtHandler,
+  tapOnHandler,
+} from "./interactionTools/tapHandlers";
+
+export {
+  formatRotateMessage,
+  formatSetPostureMessage,
+  pressButtonHandler,
+  rotateHandler,
+  selectAllTextHandler,
+  setPostureHandler,
+} from "./interactionTools/deviceHandlers";

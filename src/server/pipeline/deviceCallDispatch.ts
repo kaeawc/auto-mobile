@@ -2,10 +2,13 @@ import { runWithToolDispatchReporter } from "../../utils/ToolDispatchContext";
 import type { NavigationToolCallHandle } from "../../utils/interfaces/NavigationGraph";
 import { runSessionDisplayPin } from "../sessionDisplayPin";
 import { toActionableError } from "../../models/ActionableError";
-import { DeviceOutsideBoundSessionError } from "../deviceOutsideBoundSessionRefusal";
+import { DeviceOutsideBoundSessionError } from "../../daemon/deviceOutsideBoundSessionRefusal";
 import { ZodType } from "zod/v4";
-import { DeviceReadiness, type ConnectedPlatformScan } from "../../devices/DeviceReadiness";
-import { ActionableError, BootedDevice, SomePlatform } from "../../models";
+import {
+  DeviceReadiness,
+  type ConnectedPlatformScan,
+} from "../../daemon/readiness/DeviceReadiness";
+import { BootedDevice, SomePlatform } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultDaemonContext, type DevicePoolReads } from "../../daemon/daemonContext";
@@ -36,7 +39,8 @@ import {
   refuseControlOnForeignOwnedSession,
 } from "../foreignOwnedSessionRefusal";
 import { nonBlankSessionUuid } from "../planCallerIdentity";
-import { executionTracker } from "../executionTracker";
+import { executionTracker } from "../../daemon/executionTracker";
+import { deviceActionClock } from "./deviceActionClock";
 import { toAdvertisedJsonSchema } from "./advertisedSchema";
 import type {
   ProgressCallback,
@@ -48,6 +52,23 @@ import type {
 import type { ExecutionTargetContext } from "./executionTarget";
 import type { AuditRunner } from "./audit";
 import type { NavigationToolCallRecorder } from "./navigationRecording";
+import type { DeviceMutationRecording } from "../deviceMutationRecording";
+
+export function journaledDeviceHandler(
+  name: string,
+  handler: DeviceAwareToolHandler,
+  recording: DeviceMutationRecording,
+): DeviceAwareToolHandler {
+  return async (device, args, progress, signal) => {
+    const sessionUuid =
+      typeof args.sessionUuid === "string"
+        ? args.sessionUuid
+        : getToolSelectionContext()?.routingSessionUuid;
+    await recording.beforeToolCall(name, args, device, sessionUuid, signal);
+    signal?.throwIfAborted();
+    return handler(device, args, progress, signal);
+  };
+}
 
 /**
  * Tell the tracker what kind of device call runs under `executionId`. A read is not use of the
@@ -60,6 +81,7 @@ export function markDeviceCallKind(executionId: string, toolName: string, readOn
     executionTracker.markDeviceReadCall(executionId, toolName);
   } else {
     executionTracker.markDeviceControlCall(executionId);
+    deviceActionClock.markControl(executionId);
   }
 }
 
@@ -483,51 +505,27 @@ export function bindingPlatformsFor(
 /**
  * The device `ensureDeviceReady` would select for a call without a deviceId, read from the scan
  * the call already shares and the session manager's selections, without touching a device
- * (#10828). It mirrors readiness selection: the explicit `setActiveDevice` pin, then the current
- * device, then the only candidate on the platform. Undefined when readiness would not settle on a
+ * (#10828). It mirrors readiness selection: this connection's explicit `setActiveDevice` pin,
+ * then the only candidate on the platform. Undefined when readiness would not settle on a
  * connected device; the post-resolution ownership check still covers that call.
  */
 export async function predictReadinessTarget(
   platform: SomePlatform,
-  deviceSessionManager: DeviceReadiness,
+  deviceReadiness: DeviceReadiness,
   getConnectedPlatforms: () => Promise<ConnectedPlatformScan>,
+  connectionId?: string,
 ): Promise<string | undefined> {
   const { devices } = await getConnectedPlatforms();
-  const pin = deviceSessionManager.getExplicitDevicePin();
-  const current = deviceSessionManager.getCurrentDevice();
+  const pin = deviceReadiness.getExplicitDevicePin(connectionId);
   const platforms = new Set(devices.map((device) => device.platform));
   const targetPlatform =
-    platform !== "either"
-      ? platform
-      : platforms.size > 1
-        ? (pin?.platform ?? deviceSessionManager.getCurrentPlatform())
-        : devices[0]?.platform;
+    platform !== "either" ? platform : platforms.size > 1 ? pin?.platform : devices[0]?.platform;
   const candidates = devices.filter((device) => device.platform === targetPlatform);
   const connected = (deviceId: string | undefined) =>
     candidates.find((device) => device.deviceId === deviceId)?.deviceId;
   return (
-    connected(pin?.deviceId) ??
-    connected(current?.deviceId) ??
-    (candidates.length === 1 ? candidates[0]!.deviceId : undefined)
+    connected(pin?.deviceId) ?? (candidates.length === 1 ? candidates[0]!.deviceId : undefined)
   );
-}
-
-export function assertDeviceReadRouting(
-  args: Record<string, unknown>,
-  options: DeviceAwareToolOptions,
-  sessionDeviceId: string | undefined,
-): void {
-  if (
-    options.sessionlessDeviceRead &&
-    typeof args.deviceId === "string" &&
-    typeof args.sessionUuid === "string" &&
-    sessionDeviceId &&
-    args.deviceId !== sessionDeviceId
-  ) {
-    throw new ActionableError(
-      `observe deviceId '${args.deviceId}' does not match session '${args.sessionUuid}' device '${sessionDeviceId}'.`,
-    );
-  }
 }
 
 // Reuse the display capability across registrations and internal dispatch without
@@ -586,6 +584,7 @@ export async function invokeResolvedDeviceHandler(input: {
   signal?: AbortSignal;
   auditRunner: AuditRunner;
   navigationRecorder: NavigationToolCallRecorder;
+  mutationRecording: DeviceMutationRecording;
   traits?: ToolTraits;
   isResponseFailure: (response: unknown) => boolean;
 }): Promise<any> {
@@ -595,6 +594,11 @@ export async function invokeResolvedDeviceHandler(input: {
     // and no audit run on a device the caller may not hold (#10830).
     return handler(target.device, args, progress, signal);
   }
+  deviceActionClock.recordDispatch(
+    args.__executionId,
+    args.__executionStartTime,
+    target.device.deviceId,
+  );
   const withdraw = navigationRecorder.record(name, args, target.device, target.sessionUuid, traits);
   const onAbort = () => withdraw?.();
   signal?.addEventListener("abort", onAbort, { once: true });
@@ -602,6 +606,14 @@ export async function invokeResolvedDeviceHandler(input: {
   try {
     // The dispatch boundary: a call cancelled since admission (for instance because another
     // session acquired its device, #10829) never reaches the device. `finally` withdraws it.
+    signal?.throwIfAborted();
+    await input.mutationRecording.beforeToolCall(
+      name,
+      args,
+      target.device,
+      target.sessionUuid,
+      signal,
+    );
     signal?.throwIfAborted();
     // The action reports when its gesture goes out, so a tool that waited for its target
     // is attributed from the dispatch, not from the start (#10196).

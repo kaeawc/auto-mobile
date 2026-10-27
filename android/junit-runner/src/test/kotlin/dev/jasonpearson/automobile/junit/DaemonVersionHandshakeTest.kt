@@ -35,48 +35,48 @@ class DaemonVersionHandshakeTest {
 
   @Test
   fun `releaseVersion strips git stamp`() {
-    assertEquals("0.0.40", DaemonSocketPaths.releaseVersion("0.0.40+gabc123"))
-    assertEquals("0.0.40", DaemonSocketPaths.releaseVersion("0.0.40"))
-    assertEquals("", DaemonSocketPaths.releaseVersion(""))
+    assertEquals("0.0.40", DaemonIdentityPolicy.releaseVersion("0.0.40+gabc123"))
+    assertEquals("0.0.40", DaemonIdentityPolicy.releaseVersion("0.0.40"))
+    assertEquals("", DaemonIdentityPolicy.releaseVersion(""))
   }
 
   @Test
   fun `requiresVersionSkewRestart is false when release portions match`() {
-    assertFalse(DaemonSocketPaths.requiresVersionSkewRestart("0.0.40", "0.0.40"))
+    assertFalse(DaemonIdentityPolicy.requiresVersionSkewRestart("0.0.40", "0.0.40"))
     // Source-checkout daemon carries a git stamp; runner declares the plain release.
-    assertFalse(DaemonSocketPaths.requiresVersionSkewRestart("0.0.40+gabc123", "0.0.40"))
+    assertFalse(DaemonIdentityPolicy.requiresVersionSkewRestart("0.0.40+gabc123", "0.0.40"))
   }
 
   @Test
   fun `requiresVersionSkewRestart is true when release portions differ`() {
-    assertTrue(DaemonSocketPaths.requiresVersionSkewRestart("0.0.41", "0.0.40"))
-    assertTrue(DaemonSocketPaths.requiresVersionSkewRestart("0.0.39", "0.0.40"))
+    assertTrue(DaemonIdentityPolicy.requiresVersionSkewRestart("0.0.41", "0.0.40"))
+    assertTrue(DaemonIdentityPolicy.requiresVersionSkewRestart("0.0.39", "0.0.40"))
   }
 
   @Test
   fun `requiresVersionSkewRestart is false when either side is unknown`() {
-    assertFalse(DaemonSocketPaths.requiresVersionSkewRestart(null, "0.0.40"))
-    assertFalse(DaemonSocketPaths.requiresVersionSkewRestart("0.0.40", null))
-    assertFalse(DaemonSocketPaths.requiresVersionSkewRestart("", "0.0.40"))
-    assertFalse(DaemonSocketPaths.requiresVersionSkewRestart("  ", "0.0.40"))
+    assertFalse(DaemonIdentityPolicy.requiresVersionSkewRestart(null, "0.0.40"))
+    assertFalse(DaemonIdentityPolicy.requiresVersionSkewRestart("0.0.40", null))
+    assertFalse(DaemonIdentityPolicy.requiresVersionSkewRestart("", "0.0.40"))
+    assertFalse(DaemonIdentityPolicy.requiresVersionSkewRestart("  ", "0.0.40"))
   }
 
   @Test
   fun `requiresAssetVersionPinFailure is true only for explicit mismatched pins`() {
-    assertTrue(DaemonSocketPaths.requiresAssetVersionPinFailure("0.0.18", "0.0.39"))
-    assertFalse(DaemonSocketPaths.requiresAssetVersionPinFailure("0.0.18", "0.0.18"))
-    assertFalse(DaemonSocketPaths.requiresAssetVersionPinFailure("0.0.18", null))
-    assertFalse(DaemonSocketPaths.requiresAssetVersionPinFailure("0.0.18", ""))
-    assertFalse(DaemonSocketPaths.requiresAssetVersionPinFailure("0.0.18", "latest"))
-    assertTrue(DaemonSocketPaths.requiresAssetVersionPinFailure(null, "0.0.18"))
-    assertTrue(DaemonSocketPaths.requiresAssetVersionPinFailure("", "0.0.18"))
-    assertTrue(DaemonSocketPaths.requiresAssetVersionPinFailure("  ", "0.0.18"))
+    assertTrue(DaemonIdentityPolicy.requiresAssetVersionPinFailure("0.0.18", "0.0.39"))
+    assertFalse(DaemonIdentityPolicy.requiresAssetVersionPinFailure("0.0.18", "0.0.18"))
+    assertFalse(DaemonIdentityPolicy.requiresAssetVersionPinFailure("0.0.18", null))
+    assertFalse(DaemonIdentityPolicy.requiresAssetVersionPinFailure("0.0.18", ""))
+    assertFalse(DaemonIdentityPolicy.requiresAssetVersionPinFailure("0.0.18", "latest"))
+    assertTrue(DaemonIdentityPolicy.requiresAssetVersionPinFailure(null, "0.0.18"))
+    assertTrue(DaemonIdentityPolicy.requiresAssetVersionPinFailure("", "0.0.18"))
+    assertTrue(DaemonIdentityPolicy.requiresAssetVersionPinFailure("  ", "0.0.18"))
   }
 
   @Test
   fun `requiresImmediateAssetVersionPinFailure preserves restartable skew paths`() {
     assertTrue(
-      DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
+      DaemonIdentityPolicy.requiresImmediateAssetVersionPinFailure(
         assetVersionSkew = true,
         versionSkew = false,
         buildSkew = false,
@@ -84,7 +84,7 @@ class DaemonVersionHandshakeTest {
       ),
     )
     assertFalse(
-      DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
+      DaemonIdentityPolicy.requiresImmediateAssetVersionPinFailure(
         assetVersionSkew = true,
         versionSkew = true,
         buildSkew = false,
@@ -92,7 +92,7 @@ class DaemonVersionHandshakeTest {
       ),
     )
     assertFalse(
-      DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
+      DaemonIdentityPolicy.requiresImmediateAssetVersionPinFailure(
         assetVersionSkew = true,
         versionSkew = false,
         buildSkew = true,
@@ -100,7 +100,7 @@ class DaemonVersionHandshakeTest {
       ),
     )
     assertFalse(
-      DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
+      DaemonIdentityPolicy.requiresImmediateAssetVersionPinFailure(
         assetVersionSkew = true,
         versionSkew = false,
         buildSkew = false,
@@ -108,7 +108,7 @@ class DaemonVersionHandshakeTest {
       ),
     )
     assertFalse(
-      DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
+      DaemonIdentityPolicy.requiresImmediateAssetVersionPinFailure(
         assetVersionSkew = false,
         versionSkew = false,
         buildSkew = false,
@@ -124,7 +124,7 @@ class DaemonVersionHandshakeTest {
       pidFile.writeText("""{"pid":123,"port":3000,"version":"0.0.40+gabc123"}""")
       assertEquals(
         "0.0.40+gabc123",
-        DaemonSocketPaths.readDaemonVersionFromPidFile(pidFile.absolutePath),
+        DaemonPidFiles.readDaemonVersionFromPidFile(pidFile.absolutePath),
       )
     } finally {
       pidFile.delete()
@@ -138,7 +138,7 @@ class DaemonVersionHandshakeTest {
       pidFile.writeText("""{"pid":123,"port":3000,"assetVersion":"0.0.18"}""")
       assertEquals(
         "0.0.18",
-        DaemonSocketPaths.readDaemonAssetVersionFromPidFile(pidFile.absolutePath),
+        DaemonPidFiles.readDaemonAssetVersionFromPidFile(pidFile.absolutePath),
       )
     } finally {
       pidFile.delete()
@@ -147,12 +147,12 @@ class DaemonVersionHandshakeTest {
 
   @Test
   fun `readDaemonVersionFromPidFile returns null for missing or malformed files`() {
-    assertNull(DaemonSocketPaths.readDaemonVersionFromPidFile("/tmp/does-not-exist-automobile.pid"))
+    assertNull(DaemonPidFiles.readDaemonVersionFromPidFile("/tmp/does-not-exist-automobile.pid"))
 
     val malformed = File.createTempFile("automobile-pid-bad", ".pid")
     try {
       malformed.writeText("not json at all")
-      assertNull(DaemonSocketPaths.readDaemonVersionFromPidFile(malformed.absolutePath))
+      assertNull(DaemonPidFiles.readDaemonVersionFromPidFile(malformed.absolutePath))
     } finally {
       malformed.delete()
     }
@@ -160,7 +160,7 @@ class DaemonVersionHandshakeTest {
     val noVersion = File.createTempFile("automobile-pid-nov", ".pid")
     try {
       noVersion.writeText("""{"pid":123,"port":3000}""")
-      assertNull(DaemonSocketPaths.readDaemonVersionFromPidFile(noVersion.absolutePath))
+      assertNull(DaemonPidFiles.readDaemonVersionFromPidFile(noVersion.absolutePath))
     } finally {
       noVersion.delete()
     }
@@ -184,7 +184,7 @@ class DaemonVersionHandshakeTest {
 
       // The local override starts <local>/dist/src/index.js (version 9.9.9), so the runner must
       // declare 9.9.9 — not the jar Implementation-Version — or the daemon rejects every request.
-      assertEquals("9.9.9", DaemonSocketPaths.resolveClientVersion())
+      assertEquals("9.9.9", DaemonLaunchCommands.resolveClientVersion())
     } finally {
       projectRoot.deleteRecursively()
     }
@@ -205,7 +205,7 @@ class DaemonVersionHandshakeTest {
       System.setProperty("automobile.daemon.local.project.path", projectRoot.absolutePath)
       SystemPropertyCache.clear()
 
-      assertNull(DaemonSocketPaths.resolveClientVersion())
+      assertNull(DaemonLaunchCommands.resolveClientVersion())
     } finally {
       projectRoot.deleteRecursively()
     }
@@ -229,8 +229,8 @@ class DaemonVersionHandshakeTest {
       // Local override is ignored (no built entrypoint) → falls through to the package-version
       // path, whatever that resolves to in this environment — never the local 9.9.9.
       assertEquals(
-        DaemonSocketPaths.resolveDaemonPackageVersion(),
-        DaemonSocketPaths.resolveClientVersion(),
+        DaemonLaunchCommands.resolveDaemonPackageVersion(),
+        DaemonLaunchCommands.resolveClientVersion(),
       )
     } finally {
       projectRoot.deleteRecursively()
@@ -241,18 +241,18 @@ class DaemonVersionHandshakeTest {
   fun `resolveClientVersion returns configured version from system property`() {
     System.setProperty("automobile.daemon.package.version", " 0.0.32 ")
     SystemPropertyCache.clear()
-    assertEquals("0.0.32", DaemonSocketPaths.resolveClientVersion())
+    assertEquals("0.0.32", DaemonLaunchCommands.resolveClientVersion())
   }
 
   @Test
   fun `resolveClientVersion omits ignored alias versions`() {
     System.setProperty("automobile.daemon.package.version", "latest")
     SystemPropertyCache.clear()
-    assertNull("latest is not a real version", DaemonSocketPaths.resolveClientVersion())
+    assertNull("latest is not a real version", DaemonLaunchCommands.resolveClientVersion())
 
     System.setProperty("automobile.daemon.package.version", "UNKNOWN")
     SystemPropertyCache.clear()
-    assertNull("unknown is not a real version", DaemonSocketPaths.resolveClientVersion())
+    assertNull("unknown is not a real version", DaemonLaunchCommands.resolveClientVersion())
   }
 
   @Test
@@ -275,7 +275,7 @@ class DaemonVersionHandshakeTest {
           .digest(entryContent.toByteArray())
           .joinToString("") { "%02x".format(Locale.ROOT, it) }
           .substring(0, 16)
-      assertEquals(expected, DaemonSocketPaths.resolveClientBuildId())
+      assertEquals(expected, DaemonLocalBuild.resolveClientBuildId())
     } finally {
       projectRoot.deleteRecursively()
     }
@@ -283,18 +283,20 @@ class DaemonVersionHandshakeTest {
 
   @Test
   fun `resolveClientBuildId is null without a local override`() {
-    assertNull(DaemonSocketPaths.resolveClientBuildId())
+    assertNull(DaemonLocalBuild.resolveClientBuildId())
   }
 
   @Test
   fun `requiresBuildSkewRestart compares known build ids`() {
     // Both hashes known -> compare hashes (entry scripts irrelevant).
-    assertTrue(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "/d.js", "bbbb2222", "/c.js"))
-    assertFalse(
-      DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "/d.js", "aaaa1111", "/c.js"),
+    assertTrue(
+      DaemonIdentityPolicy.requiresBuildSkewRestart("aaaa1111", "/d.js", "bbbb2222", "/c.js"),
     )
-    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart(null, null, "aaaa1111", "/c.js"))
-    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "/d.js", null, null))
+    assertFalse(
+      DaemonIdentityPolicy.requiresBuildSkewRestart("aaaa1111", "/d.js", "aaaa1111", "/c.js"),
+    )
+    assertFalse(DaemonIdentityPolicy.requiresBuildSkewRestart(null, null, "aaaa1111", "/c.js"))
+    assertFalse(DaemonIdentityPolicy.requiresBuildSkewRestart("aaaa1111", "/d.js", null, null))
   }
 
   @Test
@@ -302,7 +304,7 @@ class DaemonVersionHandshakeTest {
     // Daemon hash unknown but entry scripts recorded on both sides -> compare entry-script paths,
     // mirroring the daemon's buildIdentitiesMatch fallback.
     assertTrue(
-      DaemonSocketPaths.requiresBuildSkewRestart(
+      DaemonIdentityPolicy.requiresBuildSkewRestart(
         "unknown",
         "/other/dist/src/index.js",
         "aaaa1111",
@@ -310,7 +312,7 @@ class DaemonVersionHandshakeTest {
       ),
     )
     assertFalse(
-      DaemonSocketPaths.requiresBuildSkewRestart(
+      DaemonIdentityPolicy.requiresBuildSkewRestart(
         "unknown",
         "/local/dist/src/index.js",
         "aaaa1111",
@@ -319,10 +321,10 @@ class DaemonVersionHandshakeTest {
     )
     // Neither hash nor both entry scripts available -> cannot prove skew, no restart.
     assertFalse(
-      DaemonSocketPaths.requiresBuildSkewRestart("unknown", null, "aaaa1111", "/local.js"),
+      DaemonIdentityPolicy.requiresBuildSkewRestart("unknown", null, "aaaa1111", "/local.js"),
     )
     assertFalse(
-      DaemonSocketPaths.requiresBuildSkewRestart("unknown", "/other.js", "aaaa1111", null),
+      DaemonIdentityPolicy.requiresBuildSkewRestart("unknown", "/other.js", "aaaa1111", null),
     )
   }
 
@@ -335,11 +337,11 @@ class DaemonVersionHandshakeTest {
       )
       assertEquals(
         "abcdef0123456789",
-        DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFile.absolutePath),
+        DaemonPidFiles.readDaemonBuildIdFromPidFile(pidFile.absolutePath),
       )
       assertEquals(
         "/x/dist/src/index.js",
-        DaemonSocketPaths.readDaemonEntryScriptFromPidFile(pidFile.absolutePath),
+        DaemonPidFiles.readDaemonEntryScriptFromPidFile(pidFile.absolutePath),
       )
     } finally {
       pidFile.delete()
@@ -365,26 +367,26 @@ class DaemonVersionHandshakeTest {
 
   @Test
   fun `shouldForceRestart defaults to false outside CI`() {
-    assertFalse(DaemonSocketPaths.shouldForceRestart(null, null, null))
-    assertFalse(DaemonSocketPaths.shouldForceRestart("", "", ""))
+    assertFalse(DaemonRestartPolicy.shouldForceRestart(null, null, null))
+    assertFalse(DaemonRestartPolicy.shouldForceRestart("", "", ""))
   }
 
   @Test
   fun `shouldForceRestart defaults to true in CI when unset`() {
-    assertTrue(DaemonSocketPaths.shouldForceRestart(null, null, "true"))
-    assertTrue(DaemonSocketPaths.shouldForceRestart(null, null, "1"))
+    assertTrue(DaemonRestartPolicy.shouldForceRestart(null, null, "true"))
+    assertTrue(DaemonRestartPolicy.shouldForceRestart(null, null, "1"))
   }
 
   @Test
   fun `shouldForceRestart honors explicit property over CI`() {
-    assertFalse(DaemonSocketPaths.shouldForceRestart("false", null, "true"))
-    assertTrue(DaemonSocketPaths.shouldForceRestart("true", null, "false"))
+    assertFalse(DaemonRestartPolicy.shouldForceRestart("false", null, "true"))
+    assertTrue(DaemonRestartPolicy.shouldForceRestart("true", null, "false"))
   }
 
   @Test
   fun `shouldForceRestart honors env when property unset`() {
-    assertTrue(DaemonSocketPaths.shouldForceRestart(null, "yes", null))
-    assertFalse(DaemonSocketPaths.shouldForceRestart(null, "no", "true"))
+    assertTrue(DaemonRestartPolicy.shouldForceRestart(null, "yes", null))
+    assertFalse(DaemonRestartPolicy.shouldForceRestart(null, "no", "true"))
   }
 
   @Test

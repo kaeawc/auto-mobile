@@ -8,7 +8,7 @@ import {
   type BindingRegistryDatabase,
 } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { RegistryBindingResourceBudget } from "../../../../src/daemon/sessionBroker/provisioning/resourceBudget";
-import { DeviceManagerBindingInventory } from "../../../../src/daemon/sessionBroker/provisioning/reconcilerPorts";
+import { DeviceManagerBindingInventory } from "../../../../src/daemon/sessionBroker/provisioning/DeviceManagerBindingInventory";
 import { MultiPlatformDeviceManager } from "../../../../src/devices/deviceUtils";
 import { AndroidEmulatorUnavailableError } from "../../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { SimctlUnavailableError } from "../../../../src/utils/ios-cmdline-tools/SimCtlClient";

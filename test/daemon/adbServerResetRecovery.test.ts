@@ -25,6 +25,26 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 
+// A child process whose kill outcome is scripted; a delivered signal ends it like the real one.
+class KillStubChildProcess extends FakeChildProcess {
+  constructor(
+    pid: number,
+    private readonly onKill: () => boolean,
+  ) {
+    super();
+    this.pid = pid;
+  }
+
+  override kill(): boolean {
+    const signalled = this.onKill();
+    if (signalled) {
+      this.emit("exit", null, "SIGTERM");
+      this.emit("close", null, "SIGTERM");
+    }
+    return signalled;
+  }
+}
+
 // Recovery must observe disappearance after shutdown, not merely a command ack.
 class StoppedDeviceManager extends FakeDeviceManager {
   override async killDevice(device: BootedDevice): Promise<void> {
@@ -77,7 +97,7 @@ async function idleTrackedCohort(stopSignals: NodeJS.Signals[], onLoss = true) {
       deviceId: booted.deviceId,
       platform: "android",
       sourceImage: image,
-      childProcess: process as unknown as ChildProcess,
+      childProcess: process,
       expectedIdentity: booted,
     });
     await pool.releaseDevice(booted.deviceId, sessionId);
@@ -465,7 +485,9 @@ describe("ADB server reset session recovery", () => {
     const reboot: AndroidDeviceReboot = {
       run: async (_target, attempt) => {
         await attempt();
+        return true;
       },
+      clear: () => {},
     };
     const pool = makePool(sessionManager, "daemon-session", {
       timer,
@@ -746,13 +768,9 @@ describe("ADB server reset session recovery", () => {
       platform: "android",
       sourceImage: image(active),
     });
-    const childProcess = {
-      pid: 123,
-      kill: () => {
-        throw new Error("process did not stop");
-      },
-      once: () => childProcess,
-    } as ChildProcess;
+    const childProcess = new KillStubChildProcess(123, () => {
+      throw new Error("process did not stop");
+    });
     await pool.bindOrReuseDeviceSession({
       sessionId: "session-idle",
       deviceId: idle.deviceId,
@@ -882,7 +900,7 @@ describe("ADB server reset session recovery", () => {
       isRunning: true,
       source: "local",
     };
-    let replacementSession: NonNullable<ReturnType<SessionManager["getSession"]>> | undefined;
+    let replacementSession: NonNullable<ReturnType<SessionManager["getSession"]>> | null = null;
     const pool = makePool(sessionManager, "daemon-session", {
       timer,
       deviceManager: manager,
@@ -896,7 +914,7 @@ describe("ADB server reset session recovery", () => {
           platform: "android",
           sourceImage: image,
         });
-        replacementSession = sessionManager.getSession(sessionId) ?? undefined;
+        replacementSession = sessionManager.getSession(sessionId) ?? null;
         return 1;
       },
     });
@@ -915,7 +933,7 @@ describe("ADB server reset session recovery", () => {
         pool.recoverSessionBoundAndroidDeviceAfterLoss(device.deviceId, undefined, captured),
       ).resolves.toBe("released");
 
-      expect(replacementSession).toBeDefined();
+      expect(replacementSession).not.toBeNull();
       expect(sessionManager.getSession("session-active")).toBe(replacementSession);
       expect(manager.startedDevices).toEqual([]);
       expect(pool.isSessionRecoveryInFlight("session-active")).toBe(false);
@@ -1274,14 +1292,10 @@ describe("ADB server reset session recovery", () => {
       source: "local",
     };
     let killCount = 0;
-    const childProcess = {
-      pid: 123,
-      kill: () => {
-        killCount++;
-        return true;
-      },
-      once: () => childProcess,
-    } as ChildProcess;
+    const childProcess = new KillStubChildProcess(123, () => {
+      killCount++;
+      return true;
+    });
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
     await pool.bindOrReuseDeviceSession({
@@ -1326,14 +1340,10 @@ describe("ADB server reset session recovery", () => {
       source: "local",
     };
     let killCount = 0;
-    const childProcess = {
-      pid: 123,
-      kill: () => {
-        killCount++;
-        return true;
-      },
-      once: () => childProcess,
-    } as ChildProcess;
+    const childProcess = new KillStubChildProcess(123, () => {
+      killCount++;
+      return true;
+    });
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
     await pool.bindOrReuseDeviceSession({
@@ -1389,18 +1399,10 @@ describe("ADB server reset session recovery", () => {
       isRunning: true,
       source: "local",
     };
-    const activeProcess = {
-      pid: 123,
-      kill: () => true,
-      once: () => activeProcess,
-    } as ChildProcess;
-    const failingIdleProcess = {
-      pid: 456,
-      kill: () => {
-        throw new Error("idle emulator stop failed");
-      },
-      once: () => failingIdleProcess,
-    } as ChildProcess;
+    const activeProcess = new KillStubChildProcess(123, () => true);
+    const failingIdleProcess = new KillStubChildProcess(456, () => {
+      throw new Error("idle emulator stop failed");
+    });
     manager.bootedDevices = [active, idle];
     await pool.addDevice(active, activeImage);
     await pool.addDevice(idle, idleImage);
@@ -1603,6 +1605,7 @@ describe("ADB server reset session recovery", () => {
         }
         throw new Error("reboot runner unavailable");
       },
+      clear: () => {},
     };
     const pool = makePool(sessionManager, "daemon-session", {
       timer,
@@ -1687,6 +1690,7 @@ describe("ADB server reset session recovery", () => {
         }
         throw new Error("reboot runner unavailable");
       },
+      clear: () => {},
     };
     const pool = makePool(sessionManager, "daemon-session", {
       timer,

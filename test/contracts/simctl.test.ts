@@ -57,8 +57,7 @@ function scriptedReal(): ScriptedSimctl {
       }
       return execResult(stdouts.get(args.slice(1, 3).join(" ")) ?? "");
     },
-    timer,
-    "darwin",
+    { timer, platform: "darwin" },
   );
   return {
     simctl: client,

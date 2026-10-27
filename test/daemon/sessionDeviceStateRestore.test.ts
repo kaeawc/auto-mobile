@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import {
   SessionDeviceStateRestore,
   type SessionDeviceStateRestoreHost,
@@ -21,6 +21,8 @@ import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+afterEach(() => mock.restore());
 
 const flush = async () => {
   for (let i = 0; i < 30; i++) {

@@ -173,7 +173,7 @@ describe("default Windows namespace owner probe", () => {
       return true;
     });
     spyOn(manager, "status").mockResolvedValue({ running: false });
-    const start = spyOn(manager, "start").mockResolvedValue(undefined);
+    const start = spyOn(manager, "start").mockResolvedValue("started");
     probe.mockClear();
 
     await manager.restart();
@@ -219,7 +219,7 @@ describe("default Windows namespace owner probe", () => {
 
     expect(manager.findOtherDaemonProcesses(undefined)).toEqual([452]);
     spyOn(manager, "status").mockResolvedValue({ running: false });
-    spyOn(manager, "start").mockResolvedValue(undefined);
+    spyOn(manager, "start").mockResolvedValue("started");
     table.script = () =>
       [452, 453].map((pid) => ({
         ...namespaceDaemonProcess(pid, pid === 452 ? socketPath : foreignPath),
@@ -255,7 +255,7 @@ describe("default Windows namespace owner probe", () => {
       (pid) => pid === process.pid || !manager.defaultSignals.some((sent) => sent.pid === pid),
     );
     spyOn(manager, "status").mockResolvedValue({ running: false });
-    const start = spyOn(manager, "start").mockResolvedValue(undefined);
+    const start = spyOn(manager, "start").mockResolvedValue("started");
 
     await manager.restart();
 

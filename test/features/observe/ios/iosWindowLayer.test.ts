@@ -47,8 +47,8 @@ function clip(hierarchy: ViewHierarchyResult, nativeId: string) {
 
 describe("iOS window layers on a captured in-app prototype window", () => {
   test("stamps each window's top-level nodes front to back and leaves descendants unstamped", () => {
-    const roots = convert().hierarchy.node as unknown as { extras?: Record<string, string> };
-    const children = (roots as { node?: { extras?: Record<string, string> }[] }).node ?? [];
+    const roots = convert().hierarchy.node;
+    const children = roots?.node ?? [];
     const layers = children.map((child) => child.extras?.[IOS_WINDOW_LAYER_EXTRA]);
     expect(new Set(layers)).toEqual(new Set(["0", "1"]));
     expect(layers.lastIndexOf("1")).toBeLessThan(layers.indexOf("0"));

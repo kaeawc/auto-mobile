@@ -1,19 +1,26 @@
-import { describe, expect, test, spyOn } from "bun:test";
+import { describe, expect, test, spyOn, afterEach, mock, beforeEach } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import {
   DeviceCleanupInProgressError,
   DeviceShuttingDownError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
-import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
+} from "../../src/models/deviceAcquisitionRefusals";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
+import { readToolEnvelopePayload } from "../../src/daemon/toolEnvelopePayload";
 import type { BackoffInput } from "../../src/utils/Backoff";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
+
+afterEach(() => mock.restore());
+
+let clientSpy: ReturnType<typeof spyOn<typeof DaemonClient, "isAvailable">>;
+beforeEach(() => {
+  clientSpy = spyOn(DaemonClient, "isAvailable");
+});
 
 const refusal = (retryAfterMs: number) =>
   shapeToolCallError(new DeviceCleanupInProgressError("emulator-5554", retryAfterMs), {
@@ -67,7 +74,7 @@ async function setup(
   });
   const manager = new FakeDaemonManager();
   manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
-  const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+  const isAvailableSpy = clientSpy.mockResolvedValue(true);
   const proxy = new DaemonMcpProxy({
     clientFactory: () => client,
     daemonManager: manager,
@@ -76,6 +83,9 @@ async function setup(
     cleanupWaitBudgetMs: options.budgetMs,
     cleanupWaitBackoff: options.backoff,
   });
+  // Connect first: a connection attempt holds its stall watchdog timer (#15019), and the waits
+  // below count pending timers.
+  await proxy.ensureConnected();
   return {
     timer,
     client,

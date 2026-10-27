@@ -1,0 +1,31 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["test"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "test.echo",
+          "args": {
+            "message": {
+              "value": "hi"
+            }
+          },
+          "into": "/platform/test/x"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].into",
+  "expectedMessage": "/platform is read-only: write a platform call result into /data"
+}

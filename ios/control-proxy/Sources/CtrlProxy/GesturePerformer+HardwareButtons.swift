@@ -82,6 +82,23 @@ import os
             )
         }
 
+        /// Action button and Camera Control exist only on some models (#14100); press only when
+        /// XCUITest reports the hardware, so a missing button is a typed refusal, not a silent no-op.
+        private func pressOptionalHardwareButton(
+            _ deviceButton: XCUIDevice.Button,
+            name: String,
+            hardware: String
+        )
+            throws
+        {
+            guard XCUIDevice.shared.hasHardwareButton(deviceButton) else {
+                throw GestureError.notSupported("\(name) button requires a device with \(hardware)")
+            }
+            try catchingObjCException {
+                XCUIDevice.shared.press(deviceButton)
+            }
+        }
+
         public func pressButton(_ button: String) throws {
             switch button.lowercased() {
             case "home":
@@ -111,6 +128,10 @@ import os
                 #endif
             case "power":
                 try pressConsumerKeyViaHID(usage: Self.consumerUsage(for: "power"), button: button)
+            case "action":
+                try pressOptionalHardwareButton(.action, name: "action", hardware: "an Action button")
+            case "camera":
+                try pressOptionalHardwareButton(.camera, name: "camera", hardware: "Camera Control")
             case "menu":
                 throw GestureError.notSupported("iOS has no menu hardware button")
             default:

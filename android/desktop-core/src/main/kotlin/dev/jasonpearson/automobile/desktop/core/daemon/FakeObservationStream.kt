@@ -2,88 +2,8 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.connection.isConnected
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.receiveAsFlow
 
-/**
- * In-memory [ObservationStream] for UI tests: records subscription lifecycle (connect/disconnect/
- * dispose, requested navigation graph) and lets tests emit updates onto each flow, with no socket.
- *
- * When [failConnect] is true, [connect] leaves the stream disconnected (mirroring the real client
- * swallowing a socket-unavailable failure) so tests can exercise the retryable connection-error
- * path.
- */
-class FakeObservationStream(private val failConnect: Boolean = false) : ObservationStream {
-  private fun <T> flow() =
-    MutableSharedFlow<T>(
-      replay = 1,
-      extraBufferCapacity = 16,
-      onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
-
-  private val _hierarchyUpdates = flow<HierarchyStreamUpdate>()
-  override val hierarchyUpdates: SharedFlow<HierarchyStreamUpdate> =
-    _hierarchyUpdates.asSharedFlow()
-  private val _screenshotUpdates = flow<ScreenshotStreamUpdate>()
-  override val screenshotUpdates: SharedFlow<ScreenshotStreamUpdate> =
-    _screenshotUpdates.asSharedFlow()
-  private val _navigationUpdates = flow<NavigationGraphStreamUpdate>()
-  override val navigationUpdates: SharedFlow<NavigationGraphStreamUpdate> =
-    _navigationUpdates.asSharedFlow()
-  private val _buildContextUpdates = flow<BuildContextStreamUpdate>()
-  override val buildContextUpdates: SharedFlow<BuildContextStreamUpdate> =
-    _buildContextUpdates.asSharedFlow()
-  private val _performanceUpdates = flow<PerformanceStreamUpdate>()
-  override val performanceUpdates: SharedFlow<PerformanceStreamUpdate> =
-    _performanceUpdates.asSharedFlow()
-  private val storageUpdateChannel = Channel<StorageStreamUpdate>(Channel.UNLIMITED)
-  override val storageUpdates: Flow<StorageStreamUpdate> = storageUpdateChannel.receiveAsFlow()
-  private val storageSubscriptionResponseChannel =
-    Channel<StorageSubscriptionResponse>(Channel.UNLIMITED)
-  override val storageSubscriptionResponses: Flow<StorageSubscriptionResponse> =
-    storageSubscriptionResponseChannel.receiveAsFlow()
-  private val storageReconciliationRequestChannel =
-    Channel<StorageSubscriptionKey>(Channel.BUFFERED)
-  override val storageReconciliationRequests: Flow<StorageSubscriptionKey> =
-    storageReconciliationRequestChannel.receiveAsFlow()
-  private val _deviceEvents = flow<DeviceStreamEvent>()
-  override val deviceEvents: SharedFlow<DeviceStreamEvent> = _deviceEvents.asSharedFlow()
-
-  private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
-  override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
-
-  var connectCallCount = 0
-    private set
-
-  var disconnectCallCount = 0
-    private set
-
-  var lastConnectedDeviceId: String? = null
-    private set
-
-  var lastConnectedDeviceSessionUuid: String? = null
-    private set
-
-  var navigationRequestCount = 0
-    private set
-
-  var lastNavigationAppId: String? = null
-    private set
-
-  var observationRequestCount = 0
-    private set
-
-  var lastObservationDeviceId: String? = null
-    private set
-
+class FakeObservationStream(private val failConnect: Boolean = false) : FakeObservationState() {
   override fun connect(deviceId: String?, deviceSessionUuid: String?) {
     connectCallCount++
     lastConnectedDeviceId = deviceId
@@ -96,10 +16,6 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
   }
 
   /** Push a connection-state transition onto [connectionState] (e.g. a mid-session drop). */
-  fun emitConnectionState(state: ConnectionState) {
-    _connectionState.value = state
-  }
-
   override fun disconnect() {
     disconnectCallCount++
     _connectionState.value = ConnectionState.Disconnected()
@@ -140,20 +56,6 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
     lastObservationDeviceId = deviceId
   }
 
-  /** Storage files currently subscribed (by [subscribeStorage], minus [unsubscribeStorage]). */
-  val storageSubscriptions: Set<StorageSubscriptionKey>
-    get() = _storageSubscriptions.toSet()
-
-  private val _storageSubscriptions = LinkedHashSet<StorageSubscriptionKey>()
-
-  /**
-   * All storage subscribe/unsubscribe calls in order, for asserting lifecycle (subscribe→release).
-   */
-  val storageSubscriptionCalls: List<Pair<String, StorageSubscriptionKey>>
-    get() = _storageSubscriptionCalls.toList()
-
-  private val _storageSubscriptionCalls = mutableListOf<Pair<String, StorageSubscriptionKey>>()
-
   override fun subscribeStorage(packageName: String, fileName: String) {
     val key = StorageSubscriptionKey(packageName, fileName)
     // Mirror the real client's dedup: a repeated subscribe for the same file is a no-op.
@@ -166,29 +68,4 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
     if (!_storageSubscriptions.remove(key)) return
     _storageSubscriptionCalls.add("unsubscribe_storage" to key)
   }
-
-  // -- Test helpers: push updates onto the flows --
-  fun emitScreenshot(update: ScreenshotStreamUpdate): Boolean = _screenshotUpdates.tryEmit(update)
-
-  fun emitNavigation(update: NavigationGraphStreamUpdate): Boolean =
-    _navigationUpdates.tryEmit(update)
-
-  fun emitBuildContext(update: BuildContextStreamUpdate): Boolean =
-    _buildContextUpdates.tryEmit(update)
-
-  fun emitPerformance(update: PerformanceStreamUpdate): Boolean =
-    _performanceUpdates.tryEmit(update)
-
-  fun emitStorage(update: StorageStreamUpdate): Boolean =
-    storageUpdateChannel.trySend(update).isSuccess
-
-  fun emitStorageSubscriptionResponse(response: StorageSubscriptionResponse): Boolean =
-    storageSubscriptionResponseChannel.trySend(response).isSuccess
-
-  fun emitStorageReconciliationRequest(key: StorageSubscriptionKey): Boolean =
-    storageReconciliationRequestChannel.trySend(key).isSuccess
-
-  fun emitHierarchy(update: HierarchyStreamUpdate): Boolean = _hierarchyUpdates.tryEmit(update)
-
-  fun emitDeviceEvent(event: DeviceStreamEvent): Boolean = _deviceEvents.tryEmit(event)
 }

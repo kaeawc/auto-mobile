@@ -8,6 +8,7 @@ extension AutoMobilePlanExecutor {
         public let daemonRepoRoot: String?
         public let planPath: String
         public let retryCount: Int
+        /// Connection and tool-selection timeout. executePlan uses at least the daemon's 600-second floor.
         public let timeoutSeconds: TimeInterval
         public let retryDelaySeconds: TimeInterval
         public let startStep: Int

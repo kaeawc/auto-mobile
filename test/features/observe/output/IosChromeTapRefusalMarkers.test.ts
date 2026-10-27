@@ -1,6 +1,8 @@
+import { runBlockWithEnvelope } from "../../../helpers/observedInteractionStub";
+import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../../src/features/action/TapOnElement";
 import { recordObservationRead } from "../../../../src/features/observe/observationReadScope";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
@@ -83,44 +85,44 @@ async function tapOn(text: string) {
   const observation = { ...capture, screenSize: { ...capture.screenSize! } };
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
+  const observeScreen = new FakeObserveScreen();
+  observeScreen.setObserveResult(observation);
   const tap = new TapOnElement(
     { name: "ipad", platform: "ios", deviceId: "ipad" },
     new FakeAdbExecutor(),
     {
       timer,
-      tapStrategy: new FakeTapStrategy(),
+      observeScreen,
+      tapStrategy: FakeTapStrategy.ios(),
       visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     },
   );
   const points: Array<{ x: number; y: number }> = [];
-  tap.observedInteraction = async (action) => ({
-    ...(await action(recordObservationRead(observation))),
+  tap.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
     observation,
   });
   tap.refreshViewHierarchy = async () => capture.viewHierarchy!;
-  tap.executeiOSTap = async (_action, x, y) => {
+  tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
     points.push({ x, y });
-  };
+  });
   tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
     observation: current,
+    effect: undefined,
   });
   tap.prepareSelectionCapture = async () => null;
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   // The immutable capture is projected once at module scope, like the collector.
-  const project = SearchableHierarchy.prototype.project;
-  const projection = spyOn(SearchableHierarchy.prototype, "project").mockImplementation(
-    function (hierarchy) {
-      return hierarchy === capture.viewHierarchy ? nodes : project.call(this, hierarchy);
-    },
-  );
+  projection.mockImplementation(function (this: SearchableHierarchy, hierarchy) {
+    return hierarchy === capture.viewHierarchy ? nodes : originalProject.call(this, hierarchy);
+  });
   try {
     const result = await tap.execute({ action: "tap", text, searchUntil: { duration: 100 } });
     return { result, points };
   } finally {
-    projection.mockRestore();
+    projection.mockImplementation(originalProject);
   }
 }
 
@@ -351,3 +353,13 @@ test.each([
     expect(context?.occluded).toBe(true);
   },
 );
+
+let originalProject: typeof SearchableHierarchy.prototype.project;
+let projection: ReturnType<typeof spyOn<typeof SearchableHierarchy.prototype, "project">>;
+beforeEach(() => {
+  originalProject = SearchableHierarchy.prototype.project;
+  projection = spyOn(SearchableHierarchy.prototype, "project");
+});
+afterEach(() => {
+  projection.mockRestore();
+});

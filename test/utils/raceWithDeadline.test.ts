@@ -1,7 +1,11 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { ActionableError } from "../../src/models";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 class TrackingTimer extends FakeTimer {
   scheduled = 0;
@@ -26,9 +30,10 @@ function deferred<T>(): {
   return { promise, resolve, reject };
 }
 
-function trackAbortListeners(signal: AbortSignal): () => void {
-  const add = spyOn(signal, "addEventListener");
-  const remove = spyOn(signal, "removeEventListener");
+function trackAbortListeners(
+  add: ReturnType<typeof spyOn<AbortSignal, "addEventListener">>,
+  remove: ReturnType<typeof spyOn<AbortSignal, "removeEventListener">>,
+): () => void {
   return () => {
     const added = add.mock.calls.filter(([type]) => type === "abort");
     const removed = remove.mock.calls.filter(([type]) => type === "abort");
@@ -161,7 +166,9 @@ describe("raceWithDeadline", () => {
   test("operation resolution clears the deadline and abort listener", async () => {
     const timer = new TrackingTimer();
     const controller = new AbortController();
-    const assertListenersRemoved = trackAbortListeners(controller.signal);
+    const add = spyOn(controller.signal, "addEventListener");
+    const remove = spyOn(controller.signal, "removeEventListener");
+    const assertListenersRemoved = trackAbortListeners(add, remove);
     const work = deferred<string>();
     const raced = raceWithDeadline(work.promise, {
       timer,
@@ -181,7 +188,9 @@ describe("raceWithDeadline", () => {
   test("operation rejection preserves its error and cleans up", async () => {
     const timer = new TrackingTimer();
     const controller = new AbortController();
-    const assertListenersRemoved = trackAbortListeners(controller.signal);
+    const add = spyOn(controller.signal, "addEventListener");
+    const remove = spyOn(controller.signal, "removeEventListener");
+    const assertListenersRemoved = trackAbortListeners(add, remove);
     const work = deferred<string>();
     const error = new Error("failed");
     const raced = raceWithDeadline(work.promise, {
@@ -200,7 +209,9 @@ describe("raceWithDeadline", () => {
   test("deadline rejection is labelled and cleans up", async () => {
     const timer = new TrackingTimer();
     const controller = new AbortController();
-    const assertListenersRemoved = trackAbortListeners(controller.signal);
+    const add = spyOn(controller.signal, "addEventListener");
+    const remove = spyOn(controller.signal, "removeEventListener");
+    const assertListenersRemoved = trackAbortListeners(add, remove);
     const work = deferred<string>();
     const raced = raceWithDeadline(work.promise, {
       timer,
@@ -270,7 +281,9 @@ describe("raceWithDeadline", () => {
   test("default abort reason becomes a labelled ActionableError", async () => {
     const timer = new TrackingTimer();
     const controller = new AbortController();
-    const assertListenersRemoved = trackAbortListeners(controller.signal);
+    const add = spyOn(controller.signal, "addEventListener");
+    const remove = spyOn(controller.signal, "removeEventListener");
+    const assertListenersRemoved = trackAbortListeners(add, remove);
     const raced = raceWithDeadline(deferred<string>().promise, {
       timer,
       timeoutMs: 25,
@@ -325,7 +338,9 @@ describe("raceWithDeadline", () => {
     async (relabelDefaultAbort) => {
       const timer = new TrackingTimer();
       const controller = new AbortController();
-      const assertListenersRemoved = trackAbortListeners(controller.signal);
+      const add = spyOn(controller.signal, "addEventListener");
+      const remove = spyOn(controller.signal, "removeEventListener");
+      const assertListenersRemoved = trackAbortListeners(add, remove);
       const raced = raceWithDeadline(deferred<string>().promise, {
         timer,
         timeoutMs: 25,
@@ -361,7 +376,9 @@ describe("raceWithDeadline", () => {
     const timer = new TrackingTimer();
     const controller = new AbortController();
     controller.abort();
-    const assertListenersRemoved = trackAbortListeners(controller.signal);
+    const add = spyOn(controller.signal, "addEventListener");
+    const remove = spyOn(controller.signal, "removeEventListener");
+    const assertListenersRemoved = trackAbortListeners(add, remove);
 
     const raced = raceWithDeadline(Promise.resolve("late"), {
       timer,
@@ -384,7 +401,9 @@ describe("raceWithDeadline", () => {
     const controller = new AbortController();
     const reason = new Error("custom");
     controller.abort(reason);
-    const assertListenersRemoved = trackAbortListeners(controller.signal);
+    const add = spyOn(controller.signal, "addEventListener");
+    const remove = spyOn(controller.signal, "removeEventListener");
+    const assertListenersRemoved = trackAbortListeners(add, remove);
 
     const raced = raceWithDeadline(Promise.resolve("late"), {
       timer,

@@ -88,6 +88,23 @@ describe("startDevice Android offline-recovery lease classification", () => {
     expect(await captureLeaseOwnership({ platform: "android", name: running.name })).toBe(false);
   });
 
+  arranged(
+    "a foreign unresolved emulator does not suppress cold-boot offline recovery",
+    async () => {
+      deviceUtils.setBootedDevices("android", [
+        {
+          platform: "android",
+          deviceId: "emulator-5556",
+          name: "Unknown (emulator-5556)",
+          foreignOwned: true,
+        },
+      ]);
+      expect(await captureLeaseOwnership({ platform: "android", avdName: running.name })).toBe(
+        true,
+      );
+    },
+  );
+
   arranged("exact AVD cold boot without an adb serial owns offline recovery", async () => {
     deviceUtils.setBootedDevices("android", []);
     expect(await captureLeaseOwnership({ platform: "android", avdName: running.name })).toBe(true);

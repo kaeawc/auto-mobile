@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=parallel-within-file
 
 SCRIPT="scripts/android/boot-emulator.sh"
 

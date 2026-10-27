@@ -169,10 +169,8 @@ function expectationPlan(command: BrokerBatchCommand, deps: BrokerBatchOrchestra
     : undefined;
   const batch = parseBrokerBatch(
     {
+      ...host,
       schemaVersion: 1,
-      limits: host.limits,
-      defaults: host.defaults,
-      reuseCleanDevices: host.reuseCleanDevices,
       clients,
     },
     { maxDevices: command.maxDevices, allowReuse: manifest?.broker?.allowReuse ?? false },
@@ -366,6 +364,7 @@ async function runDown(deps: BrokerBatchOrchestratorDeps): Promise<number> {
         timer: deps.timer,
         devicesView: deps.devicesView,
         budgetMs: deps.cleanupTimeoutMs ?? BROKER_CLEANUP_TIMEOUT_MS,
+        log: deps.log,
       });
     } catch (error) {
       deps.log(`Release/absence: ${errorMessage(error)}`);
@@ -373,6 +372,11 @@ async function runDown(deps: BrokerBatchOrchestratorDeps): Promise<number> {
     }
   }
   const unresolved = grants.filter((row) => !ledger.releaseComplete(row));
+  for (const device of ledger.devices().filter((row) => ledger.hasEvent(row, "pooled"))) {
+    deps.log(
+      `Pooled ${device.client} on ${device.device!.name}: clean idle device retained by the broker pool.`,
+    );
+  }
   deps.log(
     `Leak report: ${unresolved.length} unverified grant(s) of ${grants.length}; ` +
       JSON.stringify(unresolved.map(({ client, sessionUuid }) => ({ client, sessionUuid }))),
@@ -411,6 +415,7 @@ function runReport(deps: BrokerBatchOrchestratorDeps): number {
     devices: ledger.devices().length,
     released: ledger.devices().filter((row) => ledger.hasEvent(row, "released")).length,
     absent: ledger.devices().filter((row) => ledger.hasEvent(row, "absent")).length,
+    pooled: ledger.devices().filter((row) => ledger.hasEvent(row, "pooled")).length,
   };
   writeEvidence(
     "broker-report.json",

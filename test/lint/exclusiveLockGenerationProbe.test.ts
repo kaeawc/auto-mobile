@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
 import { scanExclusiveLockGenerationProbe } from "./exclusiveLockGenerationProbe";
-import { typeScriptFiles, relativePosix } from "./astGuard";
+import { typeScriptFiles, relativePosix, readGuardFile } from "./astGuard";
 
 const ROOT = path.join(import.meta.dir, "../..");
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
@@ -121,9 +121,9 @@ describe("production exclusive locks always supply a generation probe", () => {
   beforeAll(() => {
     calls = typeScriptFiles(path.join(ROOT, "src")).flatMap((file) => {
       const relative = relativePosix(ROOT, file);
-      return relative === "src/utils/fileLock.ts"
+      return relative === "src/utils/fileLock.ts" || relative.startsWith("src/utils/fileLock/")
         ? []
-        : scanExclusiveLockGenerationProbe(relative, readFileSync(file, "utf8")).map((finding) => ({
+        : scanExclusiveLockGenerationProbe(relative, readGuardFile(file)).map((finding) => ({
             file: relative,
             ...finding,
           }));

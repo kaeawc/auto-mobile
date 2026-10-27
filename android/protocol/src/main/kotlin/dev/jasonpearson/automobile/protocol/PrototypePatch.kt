@@ -1,5 +1,13 @@
 package dev.jasonpearson.automobile.protocol
 
+import dev.jasonpearson.automobile.protocol.PrototypePatchNodes.replaceNode
+import dev.jasonpearson.automobile.protocol.PrototypePatchShape.Rejection
+import dev.jasonpearson.automobile.protocol.PrototypePatchShape.invalidSuffix
+import dev.jasonpearson.automobile.protocol.PrototypePatchShape.reject
+import dev.jasonpearson.automobile.protocol.PrototypePatchShape.shape
+import dev.jasonpearson.automobile.protocol.PrototypePatchShape.text
+import dev.jasonpearson.automobile.protocol.PrototypePatchValues.change
+import dev.jasonpearson.automobile.protocol.PrototypePatchValues.member
 import kotlinx.serialization.json.*
 
 /** Pure patch applier; the caller validates the resulting spec separately (#11675). */
@@ -15,15 +23,6 @@ object PrototypePatch {
     data class Failure(val error: PrototypeSpecError) : Result()
   }
 
-  private class Rejection(val error: PrototypeSpecError) : RuntimeException()
-
-  private fun reject(path: String, message: String): Nothing =
-    throw Rejection(PrototypeSpecError(path, message))
-
-  private fun text(value: JsonElement?): String? =
-    (value as? JsonPrimitive)?.takeIf { it.isString }?.content
-
-  /** First error in op order wins. Immutable JSON values rebuild only the changed path. */
   fun apply(
     spec: JsonElement,
     ops: JsonElement,
@@ -51,46 +50,6 @@ object PrototypePatch {
       path == "/state" || path?.startsWith("/state/") == true
     } == true
 
-  private fun shape(value: JsonElement, at: String): JsonObject {
-    val op = value as? JsonObject ?: reject(at, "Expected object")
-    val name = text(op["op"])
-    if (name !in listOf("add", "replace", "remove", "test", "replaceNode")) {
-      reject("$at.op", "Unknown or missing op")
-    }
-    val required =
-      when (name) {
-        "replaceNode" -> listOf("id", "node")
-        "remove" -> listOf("path")
-        else -> listOf("path", "value")
-      }
-    op.keys
-      .filter { it != "op" && it !in required }
-      .sortedWith { a, b ->
-        compareNames(a, b)
-      }
-      .firstOrNull()
-      ?.let { reject("$at.$it", "Unknown property") }
-    required.firstOrNull { it !in op }?.let { reject("$at.$it", "Required property") }
-    checkTypes(op, at, name)
-    return op
-  }
-
-  private fun compareNames(a: String, b: String): Int {
-    val left = a.codePoints().toArray()
-    val right = b.codePoints().toArray()
-    for (index in 0 until minOf(left.size, right.size)) {
-      if (left[index] != right[index]) return left[index].compareTo(right[index])
-    }
-    return left.size.compareTo(right.size)
-  }
-
-  private fun checkTypes(op: JsonObject, at: String, name: String?) {
-    if (name == "replaceNode") {
-      if (text(op["id"]).isNullOrEmpty()) reject("$at.id", "Expected string")
-      if (op["node"] !is JsonObject) reject("$at.node", "Expected object")
-    } else if (text(op["path"]) == null) reject("$at.path", "Expected string")
-  }
-
   private fun applyOp(spec: JsonObject, op: JsonObject, at: String, tests: StateTests): JsonObject {
     if (text(op["op"]) == "replaceNode") return replaceNode(spec, op, at)
     val path = checkNotNull(text(op["path"]))
@@ -102,11 +61,7 @@ object PrototypePatch {
       )
     }
     val suffix = path.drop(if (prefix == "data") "/data".length else "/state".length)
-    if (
-      !path.startsWith('/') ||
-        prefix !in listOf("data", "state") ||
-        (suffix.isNotEmpty() && !PrototypeDataPointer.isValid(suffix))
-    ) {
+    if (!path.startsWith('/') || prefix !in listOf("data", "state") || invalidSuffix(suffix)) {
       reject("$at.path", "Patch paths start with /data or /state")
     }
     val tokens = PrototypeDataPointer.tokens(suffix)
@@ -133,177 +88,5 @@ object PrototypePatch {
     if (name == "test" && tests == StateTests.SKIP) return spec
     val changed = member(state, key, op, at)
     return if (name == "test") spec else JsonObject(spec + ("state" to changed))
-  }
-
-  private fun arrayIndex(token: String, size: Int, add: Boolean): Int? {
-    if (add && token == "-") return size
-    if (
-      token != "0" && !(token.isNotEmpty() && token[0] in '1'..'9' && token.all { it in '0'..'9' })
-    )
-      return null
-    return token.toIntOrNull()?.takeIf { it < size || (add && it == size) }
-  }
-
-  private fun change(
-    parent: JsonElement,
-    tokens: List<String>,
-    op: JsonObject,
-    at: String,
-  ): JsonElement {
-    val key = tokens.first()
-    if (tokens.size == 1)
-      return when (parent) {
-        is JsonObject -> member(parent, key, op, at)
-        is JsonArray -> array(parent, key, op, at)
-        else -> reject("$at.path", "Path does not exist")
-      }
-    return when (parent) {
-      is JsonObject -> {
-        val child = parent[key] ?: reject("$at.path", "Path does not exist")
-        JsonObject(parent + (key to change(child, tokens.drop(1), op, at)))
-      }
-      is JsonArray -> {
-        val index = arrayIndex(key, parent.size, false) ?: reject("$at.path", "Path does not exist")
-        JsonArray(
-          parent.toMutableList().apply {
-            this[index] = change(this[index], tokens.drop(1), op, at)
-          },
-        )
-      }
-      else -> reject("$at.path", "Path does not exist")
-    }
-  }
-
-  private fun member(parent: JsonObject, key: String, op: JsonObject, at: String): JsonObject {
-    val name = text(op["op"])
-    if (name != "add" && key !in parent) reject("$at.path", "Path does not exist")
-    return when (name) {
-      "test" -> {
-        if (!equal(parent[key], op["value"])) reject("$at.value", "Test failed")
-        parent
-      }
-      "remove" -> JsonObject(parent - key)
-      else -> JsonObject(parent + (key to op.getValue("value")))
-    }
-  }
-
-  private fun array(parent: JsonArray, key: String, op: JsonObject, at: String): JsonArray {
-    val name = text(op["op"])
-    val index =
-      arrayIndex(key, parent.size, name == "add") ?: reject("$at.path", "Path does not exist")
-    val items = parent.toMutableList()
-    when (name) {
-      "test" -> if (!equal(items[index], op["value"])) reject("$at.value", "Test failed")
-      "add" -> items.add(index, op.getValue("value"))
-      "remove" -> items.removeAt(index)
-      "replace" -> items[index] = op.getValue("value")
-    }
-    return JsonArray(items)
-  }
-
-  private fun equal(left: JsonElement?, right: JsonElement?): Boolean =
-    when {
-      left == null || right == null -> false
-      left == JsonNull || right == JsonNull -> left == right
-      left is JsonObject && right is JsonObject ->
-        left.keys == right.keys && left.all { (key, value) -> equal(value, right[key]) }
-      left is JsonArray && right is JsonArray ->
-        left.size == right.size && left.indices.all { equal(left[it], right[it]) }
-      left is JsonPrimitive && right is JsonPrimitive -> primitiveEqual(left, right)
-      else -> false
-    }
-
-  private fun primitiveEqual(left: JsonPrimitive, right: JsonPrimitive): Boolean =
-    when {
-      left.isString || right.isString ->
-        left.isString && right.isString && left.content == right.content
-      left.booleanOrNull != null || right.booleanOrNull != null ->
-        left.booleanOrNull == right.booleanOrNull
-      else -> left.doubleOrNull != null && left.doubleOrNull == right.doubleOrNull
-    }
-
-  private data class Entry(
-    val node: JsonObject,
-    val tokens: List<String>,
-    val path: String,
-    val insideRepeat: Boolean,
-  )
-
-  private fun tree(
-    node: JsonObject,
-    tokens: List<String>,
-    path: String,
-    insideRepeat: Boolean = false,
-  ): Sequence<Entry> = sequence {
-    yield(Entry(node, tokens, path, insideRepeat))
-    val repeated = insideRepeat || "repeat" in node
-    (node["child"] as? JsonObject)?.let {
-      yieldAll(tree(it, tokens + "child", "$path.child", repeated))
-    }
-    for ((name, screen) in (node["screens"] as? JsonObject).orEmpty()) {
-      if (screen is JsonObject) {
-        yieldAll(
-          tree(
-            screen,
-            tokens + listOf("screens", name),
-            "$path.screens[${JsonPrimitive(name)}]",
-            repeated,
-          ),
-        )
-      }
-    }
-    val children = (node["children"] as? JsonArray).orEmpty()
-    for ((index, child) in children.withIndex()) {
-      if (child is JsonObject) {
-        yieldAll(
-          tree(
-            child,
-            tokens + listOf("children", index.toString()),
-            "$path.children[$index]",
-            repeated,
-          ),
-        )
-      }
-    }
-  }
-
-  private fun replacement(op: JsonObject, at: String): JsonObject {
-    val node = op.getValue("node") as JsonObject
-    if (text(node["id"]) != text(op["id"]))
-      reject("$at.node.id", "Replacement must keep the same id")
-    for (entry in tree(node, emptyList(), "$at.node")) {
-      if (text(entry.node["type"]) == "use") {
-        reject(
-          "${entry.path}.type",
-          "Components are not expanded in a patch: inline the node or use show",
-        )
-      }
-      if (text((entry.node["anchor"] as? JsonObject)?.get("type")) == "element") {
-        reject(
-          "${entry.path}.anchor.type",
-          "Element anchors are resolved by show: use a bounds anchor or use show",
-        )
-      }
-    }
-    return node
-  }
-
-  private fun replaceNode(spec: JsonObject, op: JsonObject, at: String): JsonObject {
-    val node = replacement(op, at)
-    val matches =
-      (spec["root"] as? JsonObject)
-        ?.let { tree(it, listOf("root"), "root") }
-        .orEmpty()
-        .filter { text(it.node["id"]) == text(op["id"]) }
-        .toList()
-    if (matches.isEmpty()) reject("$at.id", "Unknown node id")
-    if (matches.size > 1) reject("$at.id", "Node id is not unique")
-    val match = matches.first()
-    if (match.tokens.size == 1) reject("$at.id", "The root cannot be replaced: use show")
-    if (match.insideRepeat) {
-      reject("$at.id", "A node inside a repeat cannot be replaced: replace the repeating node")
-    }
-    val replace = JsonObject(mapOf("op" to JsonPrimitive("replace"), "value" to node))
-    return change(spec, match.tokens, replace, at) as JsonObject
   }
 }

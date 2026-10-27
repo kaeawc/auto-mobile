@@ -9,7 +9,7 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { ActionableError } from "../../src/models";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import {
   DeferredReconnectionDiscoveryFakeDeviceManager,

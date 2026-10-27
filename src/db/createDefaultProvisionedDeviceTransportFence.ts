@@ -8,6 +8,7 @@ import {
   type ProvisionedDeviceTransportFence,
 } from "../utils/provisionedDeviceTransportFence";
 import type { Timer } from "../utils/SystemTimer";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 
 interface DefaultFenceOptions {
   isTest?: boolean;
@@ -18,7 +19,7 @@ interface DefaultFenceOptions {
 export function createDefaultProvisionedDeviceTransportFence(
   options: DefaultFenceOptions = {},
 ): ProvisionedDeviceTransportFence {
-  if (options.isTest ?? process.env.NODE_ENV === "test") {
+  if (options.isTest ?? readEnvRaw(AMBIENT_ENV.NODE_ENV) === "test") {
     return new InMemoryProvisionedDeviceTransportFence();
   }
   return new DurableProvisionedDeviceTransportFence({

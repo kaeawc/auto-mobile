@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { afterEach, describe, expect, test } from "bun:test";
 import { getDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
@@ -6,7 +7,7 @@ import {
   type IosTelemetryRecorder,
 } from "../../../src/features/observe/ios/IosSdkEventIngestor";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../../src/daemon/internalToolCall";
 import type { BootedDevice } from "../../../src/models";
 import type { SdkEvent } from "../../../src/features/observe/interfaces/SdkEventIngestor";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
@@ -28,7 +29,7 @@ const noOpTelemetryRecorder: IosTelemetryRecorder = {
   recordOsEvent: async () => {},
   recordNavigationEvent: async () => {},
   recordStorageEvent: async () => {},
-  recordLayoutEvent: async () => {},
+  recordLayoutEvent: async () => true,
 };
 
 describe("iOS navigation-event graph workflow", () => {
@@ -76,7 +77,7 @@ describe("iOS navigation-event graph workflow", () => {
     // Model the iOS back action that returns the user to the learned source screen.
     graph.setCurrentScreenValue("Home");
     let replayArgs: Record<string, unknown> | undefined;
-    ToolRegistry.register("tapOn", "tapOn", {}, async (args) => {
+    ToolRegistry.register("tapOn", "tapOn", z.record(z.string(), z.unknown()), async (args) => {
       replayArgs = args;
       return { success: true };
     });
@@ -85,14 +86,11 @@ describe("iOS navigation-event graph workflow", () => {
     const screenWaiter: ScreenTransitionWaiter = {
       waitForScreen: async (screen) => screen === "Settings",
     };
-    const navigateTo = new NavigateTo(
-      iOSDevice,
-      new FakeAdbClientFactory(),
-      null,
+    const navigateTo = new NavigateTo(iOSDevice, new FakeAdbClientFactory(), {
       screenWaiter,
-      graph,
+      navigationManager: graph,
       timer,
-    );
+    });
 
     const replay = await navigateTo.execute({ targetScreen: "Settings", platform: "ios" });
 

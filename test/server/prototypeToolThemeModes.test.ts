@@ -1,3 +1,4 @@
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
   PROTOTYPE_FLOW_GRID_CAPABILITY,
@@ -99,10 +100,10 @@ describe("prototype show with per-mode spec forms (#11218)", () => {
   async function call(device: BootedDevice, spec: unknown) {
     return callWith(device, { action: "show", spec });
   }
-  async function callWith(device: BootedDevice, input: unknown) {
+  async function callWith(device: BootedDevice, input: Record<string, unknown>) {
     const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
     const response = await handler(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
   const agentShows = () => agent.requests.filter((request) => request.type === "show_prototype");
   test.each([android, ios])(

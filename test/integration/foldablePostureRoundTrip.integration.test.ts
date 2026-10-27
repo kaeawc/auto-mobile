@@ -402,6 +402,9 @@ describeLane("foldable posture round trips through the daemon", () => {
     // Timer.now), comparable to recording startedAt on the same stable host clock.
     // Android freshness.actualTimestamp and updatedAt can use the device clock.
     assertRecordingSpansObservation(metadata, Date.parse(reopened.screenshotCapturedAt ?? ""));
+    if (!stopped) {
+      throw new Error("Expected recording stop result");
+    }
     const containerPath = stopped.recordings[0].outputPath ?? metadata.filePath;
     const containerDurationMs = await probeContainerDurationMs(ffprobeRunner, containerPath);
     if (containerDurationMs !== undefined) {

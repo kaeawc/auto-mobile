@@ -3,6 +3,7 @@ import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeChecksumCalculator } from "../fakes/FakeChecksumCalculator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { createExecResult } from "../../src/utils/execResult";
 
 const device = {
   deviceId: "inspection",
@@ -22,15 +23,15 @@ afterEach(() => {
 });
 
 function installed(sha: string | null) {
-  adb.setCommandResponse("shell pm list packages", {
-    stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-    stderr: "",
-  });
-  adb.setCommandResponse("shell pm path", {
-    stdout: sha === null ? "" : "package:/data/app/base.apk",
-    stderr: "",
-  });
-  adb.setCommandResponse("shell sha256sum", { stdout: `${sha} /data/app/base.apk`, stderr: "" });
+  adb.setCommandResponse(
+    "shell pm list packages",
+    createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+  );
+  adb.setCommandResponse(
+    "shell pm path",
+    createExecResult(sha === null ? "" : "package:/data/app/base.apk", ""),
+  );
+  adb.setCommandResponse("shell sha256sum", createExecResult(`${sha} /data/app/base.apk`, ""));
 }
 
 function expectOnlyReads() {
@@ -51,7 +52,7 @@ test("detached managers leave the registry untouched", () => {
   const live = AndroidCtrlProxyManager.getInstance(device, liveFactory);
   const detached = AndroidCtrlProxyManager.createDetached(device, new FakeAdbExecutor());
   expect(detached).not.toBe(live);
-  expect(AndroidCtrlProxyManager.getExistingInstance(device.deviceId)).toBe(live);
+  expect(AndroidCtrlProxyManager.getExistingInstance(device.deviceId) === live).toBe(true);
   const other = { ...device, deviceId: "other" };
   AndroidCtrlProxyManager.createDetached(other, liveFactory);
   expect(AndroidCtrlProxyManager.getExistingInstance("other")).toBeUndefined();

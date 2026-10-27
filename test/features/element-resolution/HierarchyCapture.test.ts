@@ -1,3 +1,5 @@
+import { wireCapture } from "../../helpers/wireCapture";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import {
   recordObservationRead,
   wasHierarchyReadDuringCall,
@@ -26,10 +28,11 @@ import { serverConfig } from "../../../src/utils/ServerConfig";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
 
-const hierarchy = (left: number): ViewHierarchyResult => ({
-  updatedAt: 100 + left,
-  hierarchy: { node: { text: "Target", clickable: true, bounds: [left, 0, left + 10, 10] } },
-});
+const hierarchy = (left: number): ViewHierarchyResult =>
+  wireCapture({
+    updatedAt: 100 + left,
+    hierarchy: { node: { text: "Target", clickable: true, bounds: [left, 0, left + 10, 10] } },
+  });
 class FakeReader implements HierarchyCaptureReader {
   calls: string[] = [];
   cached = hierarchy(0);
@@ -106,7 +109,7 @@ describe("hierarchy capture freshness policy", () => {
   });
   test("iOS raw mode keeps the same visible candidates and bounds", async () => {
     const reader = new FakeReader();
-    reader.fresh = {
+    reader.fresh = wireCapture({
       screenWidth: 100,
       screenHeight: 100,
       hierarchy: {
@@ -115,7 +118,7 @@ describe("hierarchy capture freshness policy", () => {
           { text: "Hidden", bounds: [10, 500, 30, 520], clickable: true },
         ],
       },
-    };
+    });
     attachRawViewHierarchy(reader.fresh, hierarchy(5000));
     reader.projectVisible = (value) => projectActionableHierarchy("ios", value);
     const capture = new DefaultHierarchyCapture(
@@ -164,13 +167,15 @@ test("settled capture uses the existing poll loop and returns its terminal hiera
   timer.enableAutoAdvance();
   const observe = new FakeObserveScreen();
   observe.setObserveSequence(
-    [0, 50, 50].map((left, index) => ({
-      updatedAt: 10 + index * 10,
-      screenSize: { width: 100, height: 100 },
-      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      activeWindow: { appId: "com.example", activityName: "Main", layoutSeqSum: 1 },
-      viewHierarchy: { ...hierarchy(left), updatedAt: 10 + index * 10 },
-    })),
+    [0, 50, 50].map((left, index) =>
+      buildObserveResult({
+        updatedAt: 10 + index * 10,
+        screenSize: { width: 100, height: 100 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        activeWindow: { appId: "com.example", activityName: "Main", layoutSeqSum: 1 },
+        viewHierarchy: { ...hierarchy(left), updatedAt: 10 + index * 10 },
+      }),
+    ),
   );
   const reader = new ViewHierarchyCaptureReader(
     { getViewHierarchy: async () => hierarchy(0), filterOffscreenNodes: (value) => value },
@@ -291,7 +296,7 @@ describe("observation read provenance", () => {
   test("a read in an earlier call does not authorize a cache hit", async () => {
     const hierarchy = { hierarchy: { node: {} } };
     await withObservationReadScope(async () => {
-      recordObservationRead({ viewHierarchy: hierarchy });
+      recordObservationRead(createObserveResultForTest({ viewHierarchy: hierarchy }));
       expect(wasHierarchyReadDuringCall(hierarchy)).toBe(true);
     });
     await withObservationReadScope(async () => {
@@ -303,7 +308,7 @@ describe("observation read provenance", () => {
     const hierarchy = { hierarchy: { node: {} } };
     await Promise.all([
       withObservationReadScope(async () => {
-        recordObservationRead({ viewHierarchy: hierarchy });
+        recordObservationRead(createObserveResultForTest({ viewHierarchy: hierarchy }));
         await Promise.resolve();
         expect(wasHierarchyReadDuringCall(hierarchy)).toBe(true);
       }),

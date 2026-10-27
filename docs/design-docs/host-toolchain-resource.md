@@ -2,7 +2,14 @@
 
 `automobile:host/toolchain` is a read-only diagnostic MCP resource. It reports
 host-tool availability for `adb`, `emulator`, `sdkmanager`, `avdmanager`,
-`xcodebuild`, `xcode-select`, `xcrun`, `simctl`, and `devicectl`.
+`bundletool`, `xcodebuild`, `xcode-select`, `xcrun`, `simctl`, and `devicectl`.
+
+`bundletool` is optional: only `installApp`'s `.aab` and `.apks` routes need it.
+It is the jar named by `AUTOMOBILE_BUNDLETOOL_JAR` (run with `java`), else a
+`bundletool` on `PATH`. The entry is available when that bundletool answers
+`bundletool version`; its `version` is that answer and its `location` the
+launcher or jar path. A missing bundletool reports `available: false` and the
+reason. AutoMobile never downloads it.
 
 Its JSON content has a `lastUpdated` ISO-8601 timestamp and an `entries` array.
 Each entry has a canonical `name` and `available` boolean. `version` and

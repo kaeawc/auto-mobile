@@ -31,11 +31,15 @@ describe("AndroidCtrlProxyClient dependency options", () => {
   test.each([undefined, {}])("omitted options preserve test-only defaults (%j)", (deps) => {
     const client = AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), deps);
     clients.push(client);
-    expect(client["ctrlProxyForwardLease"]).toBeInstanceOf(NoOpCtrlProxyForwardLease);
-    expect(client["forwardClientProbe"]).toBeInstanceOf(NoForwardClientConnectionProbe);
-    expect(client["loggerInstance"]).toBe(logger);
-    expect(client["transientObserver"]).toBe(false);
-    expect(client["autoReconnectEnabled"]).toBe(true);
+    expect(client.testHooks.injected().ctrlProxyForwardLease).toBeInstanceOf(
+      NoOpCtrlProxyForwardLease,
+    );
+    expect(client.testHooks.injected().forwardClientProbe).toBeInstanceOf(
+      NoForwardClientConnectionProbe,
+    );
+    expect(client.testHooks.injected().loggerInstance).toBe(logger);
+    expect(client.testHooks.injected().transientObserver).toBe(false);
+    expect(client.connectionTestHooks.autoReconnectEnabled).toBe(true);
   });
 
   test("options preserve late dependency slots and injected seams", () => {
@@ -60,18 +64,20 @@ describe("AndroidCtrlProxyClient dependency options", () => {
       screenshotBackoffScheduler,
     });
     clients.push(client);
-    expect(client["timer"]).toBe(timer);
-    expect(client["webSocketFactory"]).toBe(deps.webSocketFactory);
-    expect(client["loggerInstance"]).toBe(deps.logger);
-    expect(client["certificateFileSystem"]).toBe(deps.certificateFileSystem);
-    expect(client["ctrlProxyForwardLease"]).toBe(deps.ctrlProxyForwardLease);
-    expect(client["serviceManagerFactory"]).toBe(deps.serviceManagerFactory);
-    expect(client["idGenerator"]).toBe(deps.idGenerator);
-    expect(client["screenshotBackoffScheduler"]).toBe(screenshotBackoffScheduler);
-    expect(client["forwardClientProbe"]).toBeInstanceOf(NoForwardClientConnectionProbe);
-    expect(client["transientObserver"]).toBe(true);
-    expect(client["autoReconnectEnabled"]).toBe(false);
-    expect(client["portAllocationId"]).toBe("client-deps:observer:observer-id");
+    expect(client.testHooks.injected().timer).toBe(timer);
+    expect(client.testHooks.injected().webSocketFactory).toBe(deps.webSocketFactory);
+    expect(client.testHooks.injected().loggerInstance).toBe(deps.logger);
+    expect(client.testHooks.injected().certificateFileSystem).toBe(deps.certificateFileSystem);
+    expect(client.testHooks.injected().ctrlProxyForwardLease).toBe(deps.ctrlProxyForwardLease);
+    expect(client.testHooks.injected().serviceManagerFactory).toBe(deps.serviceManagerFactory);
+    expect(client.testHooks.injected().idGenerator).toBe(deps.idGenerator);
+    expect(client.testHooks.injected().screenshotBackoffScheduler).toBe(screenshotBackoffScheduler);
+    expect(client.testHooks.injected().forwardClientProbe).toBeInstanceOf(
+      NoForwardClientConnectionProbe,
+    );
+    expect(client.testHooks.injected().transientObserver).toBe(true);
+    expect(client.connectionTestHooks.autoReconnectEnabled).toBe(false);
+    expect(client.testHooks.injected().portAllocationId).toBe("client-deps:observer:observer-id");
   });
 
   test("options without a websocket factory retain the injected timer", () => {
@@ -80,7 +86,7 @@ describe("AndroidCtrlProxyClient dependency options", () => {
       timer,
     });
     clients.push(client);
-    expect(client["timer"]).toBe(timer);
+    expect(client.testHooks.injected().timer).toBe(timer);
   });
 
   test("the file-lease factory retains the production lease default", () => {
@@ -92,6 +98,8 @@ describe("AndroidCtrlProxyClient dependency options", () => {
       timer,
     );
     clients.push(client);
-    expect(client["ctrlProxyForwardLease"]).toBeInstanceOf(FileCtrlProxyForwardLease);
+    expect(client.testHooks.injected().ctrlProxyForwardLease).toBeInstanceOf(
+      FileCtrlProxyForwardLease,
+    );
   });
 });

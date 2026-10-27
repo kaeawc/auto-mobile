@@ -1,13 +1,5 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -16,11 +8,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
@@ -31,7 +18,6 @@ import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScreenshotLoaderRegistry
-import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -50,7 +36,7 @@ private val LOG = LoggerFactory.getLogger("NavigationFacet")
  */
 private const val RESOLVE_TIMEOUT_MS = 10_000L
 
-private sealed interface NavigationFacetState {
+internal sealed interface NavigationFacetState {
   /** No foreground app resolved yet, or the app-scoped pull is in flight. */
   data object Loading : NavigationFacetState
 
@@ -107,74 +93,276 @@ private sealed interface NavigationFacetState {
 @Composable
 fun NavigationFacet(
   column: DeviceColumn,
-  sessionUuidProvider: () -> String? = { null },
-  observationStreamFactory: (String) -> ObservationStream = {
-    ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
-  },
-  navigationDataSourceProvider: ((String) -> NavigationDataSource)? = null,
-  backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
-  socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
-  // The resolution-timeout backstop's wait, injected as a suspend seam so tests can drive it
-  // deterministically (e.g. awaiting a CompletableDeferred) with zero wall time instead of a real
-  // 10s delay under a real-clock test dispatcher. Production uses the real delay.
-  resolveTimeout: suspend () -> Unit = { delay(RESOLVE_TIMEOUT_MS) },
-  // Test seam for gating the facet's own connection collector before it handles an emission.
-  connectionStateCollectorGate: suspend (ConnectionState) -> Unit = {},
-  // Resolves the per-device screenshot loader from a scope that outlives this facet's composition,
-  // so its LRU cache survives facet open/close toggles. Injectable for tests; defaults to a
-  // session-scoped registry.
-  screenshotLoaderProvider: ((String) -> ScreenshotLoader)? = null,
+  options: NavigationFacetOptions = NavigationFacetOptions(),
 ) {
   val graph = LocalAutoMobileGraph.current
 
   val observation =
     rememberReconnectingObservationState(
-      deviceId = column.deviceId,
-      streamFactory = { observationStreamFactory(column.deviceId) },
-      backoffDelay = backoffDelay,
-      socketAvailable = socketAvailable,
+      ReconnectingObservationOptions(
+        deviceId = column.deviceId,
+        streamFactory = { options.observationStreamFactory(column.deviceId) },
+        backoffDelay = options.backoffDelay,
+        socketAvailable = options.socketAvailable,
+      ),
     )
   val stream = observation.stream
 
-  var attempt by remember(column.deviceId) { mutableStateOf(0) }
-  var state by
-    remember(column.deviceId) { mutableStateOf<NavigationFacetState>(NavigationFacetState.Loading) }
-  // The helper retains one stream across reconnects. This local generation invalidates the
-  // screenshot tokens whenever a previously connected stream loses its connection.
-  var resetGeneration by remember(column.deviceId) { mutableStateOf(0) }
-  // A manual retry is still useful for a connected stream that never delivers a payload, or for a
-  // collector that threw. Neither failure changes the connection state watched by the helper.
-  var collectorAttempt by remember(column.deviceId) { mutableStateOf(0) }
-  var navigationCollectorFailed by remember(column.deviceId) { mutableStateOf(false) }
+  val memory = rememberNavigationMemory(column, stream, observation.connectionGeneration)
+  with(memory) {
+    return with(options) {
 
-  // A throw surfaced by either stream-collection flow (socket read error, parse failure) below.
-  // Compose does NOT isolate exceptions thrown inside a LaunchedEffect — an unguarded `collect`
-  // that throws propagates to the Recomposer root and crashes the app. So both collectors funnel
-  // any non-cancellation throw into this state, which the state-gating effect turns into a
-  // retryable ConnectionError instead of a crash. Manual Retry clears it.
-  var streamError by remember(column.deviceId) { mutableStateOf<String?>(null) }
+      // The helper retains one stream across reconnects. This local generation invalidates the
+      // screenshot tokens whenever a previously connected stream loses its connection.
 
-  // Immutable tracker updates trigger recomposition when this device's active build changes.
-  var buildKeys by
+      // A manual retry is still useful for a connected stream that never delivers a payload, or for
+      // a
+      // collector that threw. Neither failure changes the connection state watched by the helper.
+
+      // A throw surfaced by either stream-collection flow (socket read error, parse failure) below.
+      // Compose does NOT isolate exceptions thrown inside a LaunchedEffect — an unguarded `collect`
+      // that throws propagates to the Recomposer root and crashes the app. So both collectors
+      // funnel
+      // any non-cancellation throw into this state, which the state-gating effect turns into a
+      // retryable ConnectionError instead of a crash. Manual Retry clears it.
+
+      // Immutable tracker updates trigger recomposition when this device's active build changes.
+
+      // Foreground app for THIS pane's device. The connection collector clears it on a drop, before
+      // the same stream instance reconnects, so the pre-outage app cannot flash or be re-pulled.
+
+      // The active screen reported alongside the resolved app. Carried into NavigationDashboard so
+      // the
+      // canvas's Fog toggle + auto-focus (both gated on a non-null current screen) work under the
+      // app-scoped-pull path, which otherwise bypasses the dashboard's own stream collector. Reset
+      // on
+      // reconnect alongside foregroundAppId so it can't outlive the app it belonged to.
+
+      // True once the connected stream has reported that no app has navigated yet (appId == null).
+      // Distinguishes the onboarding "no app" case (-> NoApp) from "haven't heard yet" (->
+      // Loading).
+
+      // Incremented on every navigation_update carrying an app so the app-scoped pull re-runs even
+      // when
+      // foregroundAppId is unchanged — otherwise a same-app update (app A discovers a new
+      // screen/transition) would only re-assign the identical appId and the graph would never grow
+      // live until retry/app-switch/reopen. Keyed into the pull effect below alongside appId.
+
+      CollectNavigation(stream)
+
+      CollectBuildContext(stream)
+
+      // Mirror the stream's connection state and reset app resolution on the first loss of each
+      // healthy connection. The helper's generation also catches a reconnect whose intermediate
+      // drop
+      // was conflated away by StateFlow. Do not restart the navigation collector on this
+      // generation:
+      // its SharedFlow replays the last payload, which could restore the stale pre-outage app.
+
+      val latestConnectionGeneration = rememberUpdatedState(observation.connectionGeneration)
+      CollectConnection(memory, stream, latestConnectionGeneration)
+
+      // Resolution-timeout backstop: if the socket is Connected but no navigation payload resolves
+      // within resolveTimeoutMs (no appId, no "no app" signal, no failure), give up and surface a
+      // retryable ConnectionError instead of sitting on "Resolving…" forever. This covers any
+      // "connected but silently no payload" cause; the specific daemon bug (on-demand export throws
+      // and is swallowed to null) is tracked as a daemon-side fix in #4918. The effect is cancelled
+      // (and thus never false-fires) the moment an app resolves, the stream reports "no app",
+      // disconnects/errors, or app resolution resets — all of which change its keys.
+      LaunchedEffect(stream, connectionState, foregroundAppId, noNavigationApp, streamError) {
+        if (streamError != null) return@LaunchedEffect
+        if (foregroundAppId != null || noNavigationApp) return@LaunchedEffect
+        if (connectionState !is ConnectionState.Connected) return@LaunchedEffect
+        resolveTimeout()
+        // Still unresolved after the window (any resolution would have cancelled this effect).
+        streamError = "No navigation data received from the daemon"
+      }
+
+      // Foreground-app-change fog reset for the provided-graph path. NavigationDashboard's stream
+      // collector disables fog on every A -> B foreground switch, but the provided-graph path
+      // bypasses
+      // that collector; and because the switch remounts the dashboard via the Loading transition,
+      // B's
+      // fresh dashboard would otherwise read the persisted fog setting and inherit A's fog focus.
+      // Reset the persisted setting here, where the switch is observed, so B starts with fog
+      // disabled
+      // (full graph). First resolution (null -> A) keeps A's persisted preference.
+
+      LaunchedEffect(foregroundAppId) {
+        val app = foregroundAppId ?: return@LaunchedEffect
+        val previous = fogResetApp
+        if (previous != null && previous != app) {
+          graph.settingsProvider.fogModeEnabled = false
+        }
+        fogResetApp = app
+      }
+
+      val sourceProvider =
+        navigationDataSourceProvider
+          ?: { appId ->
+            RealNavigationDataSource(clientProvider = { graph.autoMobileClient }, appId = appId)
+          }
+
+      // Per-screen screenshot-liveness tokens for the resolved app (#5088). Reset when the app
+      // changes
+      // (a fresh app's nodes start unversioned). Bumped for the screen the device just navigated to
+      // on
+      // a same-app refresh — the node the daemon re-captured a screenshot for — then stamped onto
+      // the
+      // pulled graph so the canvas drops that node's stale cached thumbnail and re-fetches. Read
+      // and
+      // written only from the pull effect below, which runs sequentially on the composition thread,
+      // so
+      // a plain map needs no synchronization.
+      val screenshotVersions =
+        remember(column.deviceId, resetGeneration, foregroundAppId) { mutableMapOf<String, Int>() }
+
+      PullNavigation(memory, column, sourceProvider, screenshotVersions)
+
+      val clientProvider = remember { { graph.autoMobileClient } }
+      // Resolve the loader from a scope that outlives this facet's composition (a session-scoped
+      // registry by default) so its LRU cache survives facet open/close toggles — a body-scoped
+      // `remember` here would drop the cache every time the facet leaves composition. The default
+      // provider is itself remembered so its identity is stable across recompositions, letting the
+      // loader `remember` key on it (re-resolving only on an actual provider swap or device change)
+      // without re-invoking it on every recomposition.
+      val loaderProvider =
+        screenshotLoaderProvider
+          ?: remember(clientProvider) {
+            { deviceId: String ->
+              DefaultNavigationScreenshotLoaderRegistry.forDevice(deviceId, clientProvider)
+            }
+          }
+      val screenshotLoader =
+        remember(column.deviceId, loaderProvider) { loaderProvider(column.deviceId) }
+
+      NavigationContent(memory, stream, clientProvider, screenshotLoader)
+    }
+  }
+}
+
+/**
+ * Stamp each node's accumulated screenshot-liveness token (#5088) onto a freshly pulled [graph].
+ * [versions] maps screen name -> the number of re-captures observed for that node this session; a
+ * node absent from it keeps version 0. Only nodes the daemon actually re-captured therefore change
+ * key, so the canvas drops and re-fetches exactly those thumbnails rather than the whole graph.
+ * Returns [graph] unchanged when nothing has been re-captured yet (the common first-pull case).
+ */
+internal fun stampScreenshotVersions(
+  graph: NavigationGraph,
+  versions: Map<String, Int>,
+): NavigationGraph =
+  if (versions.isEmpty()) {
+    graph
+  } else {
+    graph.copy(screens = graph.screens.map { it.copy(screenshotVersion = versions[it.name] ?: 0) })
+  }
+
+data class NavigationFacetOptions(
+  val sessionUuidProvider: () -> String? = { null },
+  val observationStreamFactory: (String) -> ObservationStream = {
+    ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
+  },
+  val navigationDataSourceProvider: ((String) -> NavigationDataSource)? = null,
+  val backoffDelay: suspend (attempt: Int) -> Unit = { attempt ->
+    delay(reconnectBackoffMs(attempt))
+  },
+  val socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
+  val resolveTimeout: suspend () -> Unit = { delay(RESOLVE_TIMEOUT_MS) },
+  val connectionStateCollectorGate: suspend (ConnectionState) -> Unit = {},
+  val screenshotLoaderProvider: ((String) -> ScreenshotLoader)? = null,
+  val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+)
+
+internal data class NavigationMemory(
+  private val attemptState: androidx.compose.runtime.MutableState<Int>,
+  private val stateState: androidx.compose.runtime.MutableState<NavigationFacetState>,
+  private val resetGenerationState: androidx.compose.runtime.MutableState<Int>,
+  private val collectorAttemptState: androidx.compose.runtime.MutableState<Int>,
+  private val navigationCollectorFailedState: androidx.compose.runtime.MutableState<Boolean>,
+  private val streamErrorState: androidx.compose.runtime.MutableState<String?>,
+  private val buildKeysState: androidx.compose.runtime.MutableState<NavigationBuildKeyTracker>,
+  private val foregroundAppIdState: androidx.compose.runtime.MutableState<String?>,
+  private val currentScreenState: androidx.compose.runtime.MutableState<String?>,
+  private val noNavigationAppState: androidx.compose.runtime.MutableState<Boolean>,
+  private val updateGenerationState: androidx.compose.runtime.MutableState<Int>,
+  private val connectionStateState: androidx.compose.runtime.MutableState<ConnectionState>,
+  private val wasConnectedState: androidx.compose.runtime.MutableState<Boolean>,
+  private val dropHandledState: androidx.compose.runtime.MutableState<Boolean>,
+  private val observedConnectionGenerationState: androidx.compose.runtime.MutableState<Int>,
+  private val fogResetAppState: androidx.compose.runtime.MutableState<String?>,
+) {
+  var attempt by attemptState
+  var state by stateState
+  var resetGeneration by resetGenerationState
+  var collectorAttempt by collectorAttemptState
+  var navigationCollectorFailed by navigationCollectorFailedState
+  var streamError by streamErrorState
+  var buildKeys by buildKeysState
+  var foregroundAppId by foregroundAppIdState
+  var currentScreen by currentScreenState
+  var noNavigationApp by noNavigationAppState
+  var updateGeneration by updateGenerationState
+  var connectionState by connectionStateState
+  var wasConnected by wasConnectedState
+  var dropHandled by dropHandledState
+  var observedConnectionGeneration by observedConnectionGenerationState
+  var fogResetApp by fogResetAppState
+}
+
+@Composable
+private fun rememberNavigationMemory(
+  column: DeviceColumn,
+  stream: ObservationStream?,
+  connectionGeneration: Int,
+): NavigationMemory {
+  val attemptState = remember(column.deviceId) { mutableStateOf(0) }
+  val stateState =
+    remember(column.deviceId) {
+      mutableStateOf<NavigationFacetState>(NavigationFacetState.Loading)
+    }
+  val resetGenerationState = remember(column.deviceId) { mutableStateOf(0) }
+  val collectorAttemptState = remember(column.deviceId) { mutableStateOf(0) }
+  val navigationCollectorFailedState = remember(column.deviceId) { mutableStateOf(false) }
+  val streamErrorState = remember(column.deviceId) { mutableStateOf<String?>(null) }
+  val buildKeysState =
     remember(column.deviceId, stream) {
       mutableStateOf(NavigationBuildKeyTracker(column.deviceId))
     }
-  // Foreground app for THIS pane's device. The connection collector clears it on a drop, before
-  // the same stream instance reconnects, so the pre-outage app cannot flash or be re-pulled.
-  var foregroundAppId by remember(column.deviceId) { mutableStateOf<String?>(null) }
-  // The active screen reported alongside the resolved app. Carried into NavigationDashboard so the
-  // canvas's Fog toggle + auto-focus (both gated on a non-null current screen) work under the
-  // app-scoped-pull path, which otherwise bypasses the dashboard's own stream collector. Reset on
-  // reconnect alongside foregroundAppId so it can't outlive the app it belonged to.
-  var currentScreen by remember(column.deviceId) { mutableStateOf<String?>(null) }
-  // True once the connected stream has reported that no app has navigated yet (appId == null).
-  // Distinguishes the onboarding "no app" case (-> NoApp) from "haven't heard yet" (-> Loading).
-  var noNavigationApp by remember(column.deviceId) { mutableStateOf(false) }
-  // Incremented on every navigation_update carrying an app so the app-scoped pull re-runs even when
-  // foregroundAppId is unchanged — otherwise a same-app update (app A discovers a new
-  // screen/transition) would only re-assign the identical appId and the graph would never grow
-  // live until retry/app-switch/reopen. Keyed into the pull effect below alongside appId.
-  var updateGeneration by remember(column.deviceId) { mutableStateOf(0) }
+  val foregroundAppIdState = remember(column.deviceId) { mutableStateOf<String?>(null) }
+  val currentScreenState = remember(column.deviceId) { mutableStateOf<String?>(null) }
+  val noNavigationAppState = remember(column.deviceId) { mutableStateOf(false) }
+  val updateGenerationState = remember(column.deviceId) { mutableStateOf(0) }
+  val connectionStateState =
+    remember(column.deviceId) {
+      mutableStateOf<ConnectionState>(ConnectionState.Connecting)
+    }
+  val wasConnectedState = remember(stream, collectorAttemptState.value) { mutableStateOf(false) }
+  val dropHandledState = remember(stream, collectorAttemptState.value) { mutableStateOf(false) }
+  val observedConnectionGenerationState = remember(stream) { mutableStateOf(connectionGeneration) }
+  val fogResetAppState = remember(column.deviceId) { mutableStateOf<String?>(null) }
+  return NavigationMemory(
+    attemptState,
+    stateState,
+    resetGenerationState,
+    collectorAttemptState,
+    navigationCollectorFailedState,
+    streamErrorState,
+    buildKeysState,
+    foregroundAppIdState,
+    currentScreenState,
+    noNavigationAppState,
+    updateGenerationState,
+    connectionStateState,
+    wasConnectedState,
+    dropHandledState,
+    observedConnectionGenerationState,
+    fogResetAppState,
+  )
+}
+
+@Composable
+private fun NavigationMemory.CollectNavigation(stream: ObservationStream?) {
   LaunchedEffect(stream, collectorAttempt) {
     val current = stream ?: return@LaunchedEffect
     try {
@@ -202,7 +390,10 @@ fun NavigationFacet(
       streamError = e.message ?: "Navigation stream error"
     }
   }
+}
 
+@Composable
+private fun NavigationMemory.CollectBuildContext(stream: ObservationStream?) {
   LaunchedEffect(stream, collectorAttempt) {
     val current = stream ?: return@LaunchedEffect
     try {
@@ -229,332 +420,199 @@ fun NavigationFacet(
       streamError = e.message ?: "Navigation build context stream error"
     }
   }
+}
 
-  // Mirror the stream's connection state and reset app resolution on the first loss of each
-  // healthy connection. The helper's generation also catches a reconnect whose intermediate drop
-  // was conflated away by StateFlow. Do not restart the navigation collector on this generation:
-  // its SharedFlow replays the last payload, which could restore the stale pre-outage app.
-  var connectionState by
-    remember(column.deviceId) {
-      mutableStateOf<ConnectionState>(ConnectionState.Connecting)
-    }
-  var wasConnected by remember(stream, collectorAttempt) { mutableStateOf(false) }
-  var dropHandled by remember(stream, collectorAttempt) { mutableStateOf(false) }
-  var observedConnectionGeneration by
-    remember(stream) { mutableStateOf(observation.connectionGeneration) }
-  val latestConnectionGeneration = rememberUpdatedState(observation.connectionGeneration)
-  LaunchedEffect(stream, collectorAttempt) {
-    val current = stream ?: return@LaunchedEffect
-    fun clearOldApp() {
-      buildKeys = buildKeys.reset(current.buildContextUpdates.replayCache.lastOrNull())
-      foregroundAppId = null
-      currentScreen = null
-      noNavigationApp = false
-      updateGeneration = 0
-      resetGeneration++
-      state = NavigationFacetState.Loading
-    }
-    try {
-      coroutineScope {
-        launch {
-          snapshotFlow { latestConnectionGeneration.value }
-            .collect { generation ->
-              if (observedConnectionGeneration != generation) {
-                if (dropHandled) {
-                  // The connection collector already cleared the old app for this outage.
-                  dropHandled = false
-                } else if (wasConnected) {
-                  clearOldApp()
-                  // A fast drop and reconnect can leave StateFlow value-equal to the prior
-                  // Connected state, so the connection collector has no new value to request from.
-                  if (current.connectionState.value is ConnectionState.Connected) {
-                    current.requestNavigationGraph()
-                  }
-                }
-                observedConnectionGeneration = generation
-              }
-            }
-        }
-        current.connectionState.collect { next ->
-          connectionStateCollectorGate(next)
-          if (next !is ConnectionState.Connected) {
-            if (wasConnected) clearOldApp()
-            // A failed first connect is also an observed drop: its later successful
-            // connection must not clear a fresh app update a second time.
-            if (
-              wasConnected || next is ConnectionState.Disconnected || next is ConnectionState.Error
-            ) {
-              dropHandled = true
-            }
-          }
-          if (next is ConnectionState.Connected && !wasConnected) {
-            // Every new connection needs a fresh foreground-app payload, including after EOF.
-            current.requestNavigationGraph()
-          }
-          wasConnected = next is ConnectionState.Connected
-          connectionState = next
-        }
-      }
-    } catch (c: CancellationException) {
-      throw c
-    } catch (e: Exception) {
-      LOG.warn("Connection-state collection failed: ${e.message}", e)
-      streamError = e.message ?: "Connection-state stream error"
-    }
-  }
+@Composable
+private fun NavigationFacetOptions.CollectConnection(
+  memory: NavigationMemory,
+  stream: ObservationStream?,
+  latestConnectionGeneration: androidx.compose.runtime.State<Int>,
+) {
+  with(memory) {
+    LaunchedEffect(stream, collectorAttempt) {
+      val current = stream ?: return@LaunchedEffect
 
-  // Resolution-timeout backstop: if the socket is Connected but no navigation payload resolves
-  // within resolveTimeoutMs (no appId, no "no app" signal, no failure), give up and surface a
-  // retryable ConnectionError instead of sitting on "Resolving…" forever. This covers any
-  // "connected but silently no payload" cause; the specific daemon bug (on-demand export throws
-  // and is swallowed to null) is tracked as a daemon-side fix in #4918. The effect is cancelled
-  // (and thus never false-fires) the moment an app resolves, the stream reports "no app",
-  // disconnects/errors, or app resolution resets — all of which change its keys.
-  LaunchedEffect(stream, connectionState, foregroundAppId, noNavigationApp, streamError) {
-    if (streamError != null) return@LaunchedEffect
-    if (foregroundAppId != null || noNavigationApp) return@LaunchedEffect
-    if (connectionState !is ConnectionState.Connected) return@LaunchedEffect
-    resolveTimeout()
-    // Still unresolved after the window (any resolution would have cancelled this effect).
-    streamError = "No navigation data received from the daemon"
-  }
-
-  // Foreground-app-change fog reset for the provided-graph path. NavigationDashboard's stream
-  // collector disables fog on every A -> B foreground switch, but the provided-graph path bypasses
-  // that collector; and because the switch remounts the dashboard via the Loading transition, B's
-  // fresh dashboard would otherwise read the persisted fog setting and inherit A's fog focus.
-  // Reset the persisted setting here, where the switch is observed, so B starts with fog disabled
-  // (full graph). First resolution (null -> A) keeps A's persisted preference.
-  var fogResetApp by remember(column.deviceId) { mutableStateOf<String?>(null) }
-  LaunchedEffect(foregroundAppId) {
-    val app = foregroundAppId ?: return@LaunchedEffect
-    val previous = fogResetApp
-    if (previous != null && previous != app) {
-      graph.settingsProvider.fogModeEnabled = false
-    }
-    fogResetApp = app
-  }
-
-  val sourceProvider =
-    navigationDataSourceProvider
-      ?: { appId ->
-        RealNavigationDataSource(clientProvider = { graph.autoMobileClient }, appId = appId)
-      }
-
-  // Per-screen screenshot-liveness tokens for the resolved app (#5088). Reset when the app changes
-  // (a fresh app's nodes start unversioned). Bumped for the screen the device just navigated to on
-  // a same-app refresh — the node the daemon re-captured a screenshot for — then stamped onto the
-  // pulled graph so the canvas drops that node's stale cached thumbnail and re-fetches. Read and
-  // written only from the pull effect below, which runs sequentially on the composition thread, so
-  // a plain map needs no synchronization.
-  val screenshotVersions =
-    remember(column.deviceId, resetGeneration, foregroundAppId) { mutableMapOf<String, Int>() }
-
-  LaunchedEffect(
-    column.deviceId,
-    foregroundAppId,
-    attempt,
-    connectionState,
-    streamError,
-    noNavigationApp,
-    updateGeneration,
-    resetGeneration,
-  ) {
-    // A stream failure is retryable *regardless of whether an app already resolved*. Handling it
-    // only when foregroundAppId == null would let a socket EOF after resolution
-    // (Disconnected("Stream ended")) silently retain a dead stream and miss later foreground-app
-    // changes. So surface the retryable ConnectionError on any Disconnected/Error (or a
-    // mid-collect throw captured in streamError). The shared lifecycle reconnects transport
-    // failures automatically; transient Connecting/Reconnecting are not failures.
-    val failureMessage =
-      streamError
-        ?: when (val cs = connectionState) {
-          is ConnectionState.Disconnected -> cs.reason ?: "Not connected to the AutoMobile daemon"
-          is ConnectionState.Error -> cs.message
-          else -> null
-        }
-    if (failureMessage != null) {
-      state =
-        NavigationFacetState.ConnectionError(failureMessage, manualRetry = streamError != null)
-      return@LaunchedEffect
-    }
-
-    val appId = foregroundAppId
-    if (appId == null) {
-      // Stream is healthy but no foreground app resolved yet. We resolve the appId *from* the
-      // stream, so never pull with a null app id (that would surface the wrong/global graph). If
-      // the stream has explicitly reported "no current app" show the NoApp guidance; otherwise
-      // we simply haven't heard yet, so stay in Loading.
-      state = if (noNavigationApp) NavigationFacetState.NoApp else NavigationFacetState.Loading
-      return@LaunchedEffect
-    }
-    // Retain the on-screen graph during a pull ONLY for a same-app refresh (a new
-    // updateGeneration for the already-displayed app): the graph then grows in place rather than
-    // blanking on every navigation step. For the FIRST pull of an app OR an in-place app switch
-    // (A -> B, appId changed) we must hide the old graph and show Loading until the new snapshot
-    // arrives — otherwise B would render stale A while getNavigationGraph(B) runs. A superseded
-    // in-flight pull is cancelled by LaunchedEffect when the keys change (its CancellationException
-    // propagates, so it never writes stale state).
-    val displayed = state
-    val sameAppRefresh = displayed is NavigationFacetState.Resolved && displayed.appId == appId
-    if (!sameAppRefresh) {
-      state = NavigationFacetState.Loading
-    }
-    // Read off the UI thread: the resource read hits the daemon and would otherwise block
-    // recomposition. Injected test data sources run inline (deterministic). The pull is wrapped so
-    // a throwing data source becomes a retryable Error state rather than crashing the Recomposer.
-    state =
       try {
-        when (
-          val result = withContext(Dispatchers.IO) { sourceProvider(appId).getNavigationGraph() }
-        ) {
-          is Result.Success ->
-            if (result.data.screens.isEmpty()) NavigationFacetState.Empty
-            else {
-              // A live same-app refresh means the device just navigated; the daemon re-captured a
-              // screenshot for the destination screen under its existing stable URI. Bump that
-              // node's liveness token so the canvas invalidates its cached thumbnail (#5088). The
-              // first pull of an app (sameAppRefresh == false) carries no re-capture, so its nodes
-              // keep version 0 and load normally.
-              if (sameAppRefresh) {
-                val recaptured = currentScreen
-                if (recaptured != null) {
-                  screenshotVersions[recaptured] = (screenshotVersions[recaptured] ?: 0) + 1
+        coroutineScope {
+          launch {
+            snapshotFlow { latestConnectionGeneration.value }
+              .collect { generation ->
+                if (observedConnectionGeneration != generation) {
+                  if (dropHandled) {
+                    // The connection collector already cleared the old app for this outage.
+                    dropHandled = false
+                  } else if (wasConnected) {
+                    clearOldApp(current)
+                    // A fast drop and reconnect can leave StateFlow value-equal to the prior
+                    // Connected state, so the connection collector has no new value to request
+                    // from.
+                    if (current.connectionState.value is ConnectionState.Connected) {
+                      current.requestNavigationGraph()
+                    }
+                  }
+                  observedConnectionGeneration = generation
                 }
               }
-              NavigationFacetState.Resolved(
-                appId,
-                stampScreenshotVersions(result.data, screenshotVersions),
-              )
-            }
-          is Result.Error ->
-            NavigationFacetState.Error(result.message ?: "Failed to load navigation graph")
-          // A one-shot read resolves to Success/Error; treat a stray Loading as retryable.
-          Result.Loading -> NavigationFacetState.Error("Navigation graph is still loading")
+          }
+          current.connectionState.collect { next ->
+            connectionStateCollectorGate(next)
+            applyConnectionState(current, next)
+          }
         }
       } catch (c: CancellationException) {
         throw c
       } catch (e: Exception) {
-        LOG.warn("Navigation graph pull failed: ${e.message}", e)
-        NavigationFacetState.Error(e.message ?: "Failed to load navigation graph")
-      }
-  }
-
-  val clientProvider = remember { { graph.autoMobileClient } }
-  // Resolve the loader from a scope that outlives this facet's composition (a session-scoped
-  // registry by default) so its LRU cache survives facet open/close toggles — a body-scoped
-  // `remember` here would drop the cache every time the facet leaves composition. The default
-  // provider is itself remembered so its identity is stable across recompositions, letting the
-  // loader `remember` key on it (re-resolving only on an actual provider swap or device change)
-  // without re-invoking it on every recomposition.
-  val loaderProvider =
-    screenshotLoaderProvider
-      ?: remember(clientProvider) {
-        { deviceId: String ->
-          DefaultNavigationScreenshotLoaderRegistry.forDevice(deviceId, clientProvider)
-        }
-      }
-  val screenshotLoader =
-    remember(column.deviceId, loaderProvider) { loaderProvider(column.deviceId) }
-
-  when (val current = state) {
-    NavigationFacetState.Loading -> NavigationFacetNote("Resolving navigation graph…")
-    NavigationFacetState.NoApp ->
-      NavigationFacetNote("Open an app on this device to build its navigation graph")
-    NavigationFacetState.Empty ->
-      NavigationFacetNote(
-        "No navigation graph recorded for this app yet",
-        "Interact with the app to record its navigation graph.",
-      )
-    is NavigationFacetState.ConnectionError ->
-      if (current.manualRetry) {
-        NavigationFacetError(
-          message = current.message,
-          retryContentDescription = "Retry resolving navigation graph",
-        ) {
-          val restartCollector = navigationCollectorFailed
-          navigationCollectorFailed = false
-          streamError = null
-          if (restartCollector) collectorAttempt++ else stream?.requestNavigationGraph()
-        }
-      } else {
-        NavigationFacetNote(current.message, "Reconnecting to the AutoMobile daemon…")
-      }
-    is NavigationFacetState.Error ->
-      NavigationFacetError(
-        message = current.message,
-        retryContentDescription = "Retry loading navigation graph",
-      ) {
-        attempt++
-      }
-    is NavigationFacetState.Resolved ->
-      NavigationDashboard(
-        providedGraph = current.graph,
-        providedCurrentScreen = currentScreen,
-        clientProvider = clientProvider,
-        settingsProvider = graph.settingsProvider,
-        selectedAppId = foregroundAppId,
-        screenshotLoader = screenshotLoader,
-        streamOnly = true,
-        // Stream build identity tightens provenance to device + package + version + content hash.
-        // No known key keeps the existing device+package fallback.
-        activeContext = buildKeys.activeContext(current.appId),
-      )
-  }
-}
-
-/**
- * Stamp each node's accumulated screenshot-liveness token (#5088) onto a freshly pulled [graph].
- * [versions] maps screen name -> the number of re-captures observed for that node this session; a
- * node absent from it keeps version 0. Only nodes the daemon actually re-captured therefore change
- * key, so the canvas drops and re-fetches exactly those thumbnails rather than the whole graph.
- * Returns [graph] unchanged when nothing has been re-captured yet (the common first-pull case).
- */
-internal fun stampScreenshotVersions(
-  graph: NavigationGraph,
-  versions: Map<String, Int>,
-): NavigationGraph =
-  if (versions.isEmpty()) {
-    graph
-  } else {
-    graph.copy(screens = graph.screens.map { it.copy(screenshotVersion = versions[it.name] ?: 0) })
-  }
-
-/** Centered note for the facet's transient (loading) or empty states. */
-@Composable
-private fun NavigationFacetNote(text: String, hint: String? = null) {
-  Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-      Text(text, color = MaterialTheme.colorScheme.outline)
-      hint?.let {
-        Text(it, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
+        LOG.warn("Connection-state collection failed: ${e.message}", e)
+        streamError = e.message ?: "Connection-state stream error"
       }
     }
   }
 }
 
-/**
- * Error state with a Retry affordance; [retryContentDescription] names what the retry re-attempts.
- */
+private fun NavigationMemory.clearOldApp(current: ObservationStream) {
+
+  buildKeys = buildKeys.reset(current.buildContextUpdates.replayCache.lastOrNull())
+  foregroundAppId = null
+  currentScreen = null
+  noNavigationApp = false
+  updateGeneration = 0
+  resetGeneration++
+  state = NavigationFacetState.Loading
+}
+
 @Composable
-private fun NavigationFacetError(
-  message: String,
-  retryContentDescription: String,
-  onRetry: () -> Unit,
+private fun NavigationFacetOptions.PullNavigation(
+  memory: NavigationMemory,
+  column: DeviceColumn,
+  sourceProvider: (String) -> NavigationDataSource,
+  screenshotVersions: MutableMap<String, Int>,
 ) {
-  Column(
-    Modifier.fillMaxSize(),
-    verticalArrangement = Arrangement.Center,
-    horizontalAlignment = Alignment.CenterHorizontally,
-  ) {
-    Text(message, color = MaterialTheme.colorScheme.error)
-    Text(
-      "Retry",
-      color = MaterialTheme.colorScheme.primary,
-      modifier =
-        Modifier.padding(top = 8.dp).clickable(onClick = onRetry).semantics {
-          contentDescription = retryContentDescription
-        },
+  with(memory) {
+    LaunchedEffect(
+      column.deviceId,
+      foregroundAppId,
+      attempt,
+      connectionState,
+      streamError,
+      noNavigationApp,
+      updateGeneration,
+      resetGeneration,
+    ) {
+      // A stream failure is retryable *regardless of whether an app already resolved*. Handling it
+      // only when foregroundAppId == null would let a socket EOF after resolution
+      // (Disconnected("Stream ended")) silently retain a dead stream and miss later foreground-app
+      // changes. So surface the retryable ConnectionError on any Disconnected/Error (or a
+      // mid-collect throw captured in streamError). The shared lifecycle reconnects transport
+      // failures automatically; transient Connecting/Reconnecting are not failures.
+      val appId = appIdForPull() ?: return@LaunchedEffect
+      // Retain the on-screen graph during a pull ONLY for a same-app refresh (a new
+      // updateGeneration for the already-displayed app): the graph then grows in place rather than
+      // blanking on every navigation step. For the FIRST pull of an app OR an in-place app switch
+      // (A -> B, appId changed) we must hide the old graph and show Loading until the new snapshot
+      // arrives — otherwise B would render stale A while getNavigationGraph(B) runs. A superseded
+      // in-flight pull is cancelled by LaunchedEffect when the keys change (its
+      // CancellationException
+      // propagates, so it never writes stale state).
+      val displayed = state
+      val sameAppRefresh = displayed is NavigationFacetState.Resolved && displayed.appId == appId
+      if (!sameAppRefresh) {
+        state = NavigationFacetState.Loading
+      }
+      // Read off the UI thread: the resource read hits the daemon and would otherwise block
+      // recomposition. Injected test data sources run inline (deterministic). The pull is wrapped
+      // so
+      // a throwing data source becomes a retryable Error state rather than crashing the Recomposer.
+      state =
+        try {
+          when (
+            val result = withContext(ioDispatcher) { sourceProvider(appId).getNavigationGraph() }
+          ) {
+            is Result.Success ->
+              resolvedNavigationGraph(appId, result.data, sameAppRefresh, screenshotVersions)
+            is Result.Error ->
+              NavigationFacetState.Error(result.message ?: "Failed to load navigation graph")
+            // A one-shot read resolves to Success/Error; treat a stray Loading as retryable.
+            Result.Loading -> NavigationFacetState.Error("Navigation graph is still loading")
+          }
+        } catch (c: CancellationException) {
+          throw c
+        } catch (e: Exception) {
+          LOG.warn("Navigation graph pull failed: ${e.message}", e)
+          NavigationFacetState.Error(e.message ?: "Failed to load navigation graph")
+        }
+    }
+  }
+}
+
+private fun NavigationMemory.applyConnectionState(
+  current: ObservationStream,
+  next: ConnectionState,
+) {
+  if (next !is ConnectionState.Connected) {
+    if (wasConnected) clearOldApp(current)
+    // A failed first connect is also an observed drop: its later successful
+    // connection must not clear a fresh app update a second time.
+    if (wasConnected || next is ConnectionState.Disconnected || next is ConnectionState.Error) {
+      dropHandled = true
+    }
+  }
+  if (next is ConnectionState.Connected && !wasConnected) {
+    // Every new connection needs a fresh foreground-app payload, including after EOF.
+    current.requestNavigationGraph()
+  }
+  wasConnected = next is ConnectionState.Connected
+  connectionState = next
+}
+
+private fun NavigationMemory.appIdForPull(): String? {
+  val failureMessage =
+    streamError
+      ?: when (val cs = connectionState) {
+        is ConnectionState.Disconnected -> cs.reason ?: "Not connected to the AutoMobile daemon"
+        is ConnectionState.Error -> cs.message
+        else -> null
+      }
+  if (failureMessage != null) {
+    state = NavigationFacetState.ConnectionError(failureMessage, manualRetry = streamError != null)
+    return null
+  }
+
+  val appId = foregroundAppId
+  if (appId == null) {
+    // Stream is healthy but no foreground app resolved yet. We resolve the appId *from* the
+    // stream, so never pull with a null app id (that would surface the wrong/global graph). If
+    // the stream has explicitly reported "no current app" show the NoApp guidance; otherwise
+    // we simply haven't heard yet, so stay in Loading.
+    state = if (noNavigationApp) NavigationFacetState.NoApp else NavigationFacetState.Loading
+    return null
+  }
+
+  return appId
+}
+
+private fun NavigationMemory.resolvedNavigationGraph(
+  appId: String,
+  data: NavigationGraph,
+  sameAppRefresh: Boolean,
+  screenshotVersions: MutableMap<String, Int>,
+): NavigationFacetState {
+  return if (data.screens.isEmpty()) NavigationFacetState.Empty
+  else {
+    // A live same-app refresh means the device just navigated; the daemon re-captured a
+    // screenshot for the destination screen under its existing stable URI. Bump that
+    // node's liveness token so the canvas invalidates its cached thumbnail (#5088). The
+    // first pull of an app (sameAppRefresh == false) carries no re-capture, so its
+    // nodes
+    // keep version 0 and load normally.
+    if (sameAppRefresh) {
+      val recaptured = currentScreen
+      if (recaptured != null) {
+        screenshotVersions[recaptured] = (screenshotVersions[recaptured] ?: 0) + 1
+      }
+    }
+    NavigationFacetState.Resolved(
+      appId,
+      stampScreenshotVersions(data, screenshotVersions),
     )
   }
 }

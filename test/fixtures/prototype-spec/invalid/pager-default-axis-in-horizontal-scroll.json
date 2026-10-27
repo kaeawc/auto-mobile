@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "scroll",
+      "axis": "horizontal",
+      "child": {
+        "type": "column",
+        "children": [
+          {
+            "type": "pager",
+            "id": "p",
+            "children": [
+              {
+                "type": "text",
+                "text": "A"
+              },
+              {
+                "type": "text",
+                "text": "B"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.child.children[0]",
+  "expectedMessage": "A horizontal pager cannot appear inside a horizontal scroll"
+}

@@ -1,6 +1,6 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import * as releaseBudgets from "../../src/daemon/sessionManager";
-import { SESSION_RELEASE_DRAIN_TIMEOUT_MS } from "../../src/daemon/constants";
+import { SESSION_RELEASE_DRAIN_TIMEOUT_MS } from "../../src/daemon/wire/constants";
 import { SCREEN_READER_RESTORE_TIMEOUT_MS } from "../../src/features/accessibility/ScreenReaderRestore";
 import { defaultDeviceClockRestoreRegistry } from "../../src/features/utility/DeviceClock";
 import {
@@ -11,9 +11,9 @@ import {
   type SessionCacheData,
 } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
-import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
-import { NetworkState } from "../../src/server/NetworkState";
+import { DeviceCleanupInProgressError } from "../../src/models/deviceAcquisitionRefusals";
+import { registerNetworkStateSessionCleanup } from "../../src/daemon/networkStateSessionCleanup";
+import { NetworkState } from "../../src/utils/NetworkState";
 import { MockLocationClearRegistry } from "../../src/features/utility/MockLocationClear";
 import {
   LocationRouteRegistry,
@@ -21,6 +21,9 @@ import {
 } from "../../src/features/utility/LocationRoutePlayer";
 import { createSessionLocationAppliedCallback } from "../../src/server/sessionLocation";
 import { logger } from "../../src/utils/logger";
+import type { DeviceClockRestoreState } from "../../src/features/utility/DeviceClock";
+import type { ExecResult } from "../../src/models/ExecResult";
+import { createExecResult } from "../../src/utils/execResult";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -35,10 +38,9 @@ import {
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   getSessionHeartbeatCheckIntervalMs,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { forceStuckSessionRelease } from "../../src/daemon/releaseSessionAndDevice";
-import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettledExecutionVeto";
 import type { DeferredRebindCleanup } from "../../src/daemon/acquisitionReceipt";
@@ -469,8 +471,12 @@ test("the stuck deadline derives from first attempts and two shutdown-safe write
 });
 
 test("each own-budget restore adds exactly its first-attempt deadline", () => {
-  const clock = { initialAutomaticTime: 1, clockChangedByUs: true, rootedByUs: true };
-  const rotation = { accelerometerRotation: 1, userRotation: 0 };
+  const clock: DeviceClockRestoreState = {
+    initialAutomaticTime: 1,
+    clockChangedByUs: true,
+    rootedByUs: true,
+  };
+  const rotation = { accelerometerRotation: 1 as const, userRotation: 0 };
   const screenReader = { platform: "android" as const, previousEnabled: false };
   const base = releaseBudgets.SESSION_RELEASE_STUCK_DEADLINE_MS;
   expect(releaseBudgets.getSessionReleaseStuckDeadlineMs()).toBe(base);
@@ -546,7 +552,11 @@ test("a clock restore retains its recorded budget after clearing its cache mid-r
   });
   dispose.push(() => defaultDeviceClockRestoreRegistry.retire(android.deviceId));
   const session = await h.manager.createSession("old", android.deviceId, "android");
-  const clock = { initialAutomaticTime: 1, clockChangedByUs: true, rootedByUs: true };
+  const clock: DeviceClockRestoreState = {
+    initialAutomaticTime: 1,
+    clockChangedByUs: true,
+    rootedByUs: true,
+  };
   h.manager.setClock(session, clock);
   const row = Promise.withResolvers<void>();
   const write = spyOn(persistence, "markReleased").mockImplementation(() => row.promise);
@@ -746,7 +756,9 @@ for (const late of [false, true]) {
         executeCommandArgs: (_args, _timeout, abort) => {
           calls++;
           signal = abort;
-          return hung ? new Promise<string>(() => {}) : Promise.resolve("");
+          return hung
+            ? new Promise<ExecResult>(() => {})
+            : Promise.resolve(createExecResult("", ""));
         },
       }),
     });
@@ -887,7 +899,7 @@ for (const reason of [undefined, "heartbeat-timeout"] as const) {
         executeCommandArgs: (args, _timeout, abort) => {
           commands.push(args);
           signal = abort;
-          return new Promise<string>(() => {});
+          return new Promise<ExecResult>(() => {});
         },
       }),
     });
@@ -955,7 +967,7 @@ for (const marked of [false, true]) {
       simctlFactory: () => ({
         executeCommandArgs: async () => {
           calls++;
-          return "";
+          return createExecResult("", "");
         },
       }),
     });
@@ -996,7 +1008,7 @@ test("a late set from a same-UUID replacement's old object preserves the held ma
     simctlFactory: () => ({
       executeCommandArgs: async (args) => {
         commands.push(args);
-        return "";
+        return createExecResult("", "");
       },
     }),
   });
@@ -1041,9 +1053,11 @@ for (const interval of [3_000, 7_000]) {
     process.env[key] = String(interval);
     class ParkedPersistence extends FakeDeviceSessionPersistence {
       gate: Promise<void> | undefined;
-      override async upsertActiveSession(record: DeviceSessionRecord) {
+      override async upsertActiveSession(
+        ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+      ): Promise<number> {
         await this.gate;
-        await super.upsertActiveSession(record);
+        return super.upsertActiveSession(...args);
       }
     }
     const persistence = new ParkedPersistence();
@@ -1122,9 +1136,11 @@ test("a monitor reap joining after an execution veto still meets the advertised 
   const step = () => drainMicrotasks(20);
   class ParkedPersistence extends FakeDeviceSessionPersistence {
     gate: Promise<void> | undefined;
-    override async upsertActiveSession(record: DeviceSessionRecord) {
+    override async upsertActiveSession(
+      ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+    ): Promise<number> {
       await this.gate;
-      await super.upsertActiveSession(record);
+      return super.upsertActiveSession(...args);
     }
   }
   const persistence = new ParkedPersistence();
@@ -1184,9 +1200,11 @@ test("a monitor reap joining after an execution veto still meets the advertised 
 test("a monitor-tracked wedged release advertises the whole forced-release worst case", async () => {
   class ParkedPersistence extends FakeDeviceSessionPersistence {
     gate: Promise<void> | undefined;
-    override async upsertActiveSession(record: DeviceSessionRecord) {
+    override async upsertActiveSession(
+      ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+    ): Promise<number> {
       await this.gate;
-      await super.upsertActiveSession(record);
+      return super.upsertActiveSession(...args);
     }
   }
   const persistence = new ParkedPersistence();
@@ -1282,7 +1300,7 @@ test("internal hung setup transfer stays uncapped with the default polling hint"
   const gate = Promise.withResolvers<void>();
   const setup = h.manager.trackSessionSetup(session, () => gate.promise);
   await flush();
-  const release = h.manager.releaseSession("old", "released", { allowExpired: true });
+  const release = h.manager.releaseSession("old", "explicit-release", { allowExpired: true });
   await flush();
   await h.timer.advanceTimeAsync(1_000, flush);
   await release;
@@ -1313,9 +1331,11 @@ test("the env-resolved monitor interval is shared by the manager release bound",
   expect(getSessionHeartbeatCheckIntervalMs()).toBe(7_000);
   class ParkedPersistence extends FakeDeviceSessionPersistence {
     gate: Promise<void> | undefined;
-    override async upsertActiveSession(record: DeviceSessionRecord) {
+    override async upsertActiveSession(
+      ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+    ): Promise<number> {
       await this.gate;
-      await super.upsertActiveSession(record);
+      return super.upsertActiveSession(...args);
     }
   }
   const persistence = new ParkedPersistence();
@@ -1349,9 +1369,11 @@ test("an explicit release with a live owner meets the advertised cleanup bound w
   const step = () => drainMicrotasks(20);
   class ParkedPersistence extends FakeDeviceSessionPersistence {
     gate: Promise<void> | undefined;
-    override async upsertActiveSession(record: DeviceSessionRecord) {
+    override async upsertActiveSession(
+      ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+    ): Promise<number> {
       await this.gate;
-      await super.upsertActiveSession(record);
+      return super.upsertActiveSession(...args);
     }
   }
   const persistence = new ParkedPersistence();
@@ -1507,9 +1529,10 @@ test("declined final commit fence cannot force a parked live-row rewrite", async
     heartbeatTimeoutMs: 600_000,
   });
   const rewrite = Promise.withResolvers<void>();
-  const upsert = spyOn(persistence, "upsertActiveSession").mockImplementation(
-    () => rewrite.promise,
-  );
+  const upsert = spyOn(persistence, "upsertActiveSession").mockImplementation(async () => {
+    await rewrite.promise;
+    return 0;
+  });
   const force = spyOn(h.manager, "forceStuckRelease");
   dispose.push(() => {
     upsert.mockRestore();

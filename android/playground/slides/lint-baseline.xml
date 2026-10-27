@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.4.1" type="baseline" client="gradle" dependencies="false" name="AGP (9.4.1)" variant="all" version="9.4.1">
+
+    <issue
+        id="SetJavaScriptEnabled"
+        message="Using `setJavaScriptEnabled` can introduce XSS vulnerabilities into your application, review carefully"
+        errorLine1="          settings.javaScriptEnabled = true"
+        errorLine2="          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/slides/components/CodeSampleSlideItem.kt"
+            line="56"
+            column="11"/>
+    </issue>
+
+    <issue
+        id="SetJavaScriptEnabled"
+        message="Using `setJavaScriptEnabled` can introduce XSS vulnerabilities into your application, review carefully"
+        errorLine1="    settings.javaScriptEnabled = true"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/slides/components/MermaidDiagramSlideItem.kt"
+            line="198"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="IconLocation"
+        message="Found bitmap drawable `res/drawable/auto_mobile_qr_code.png` in densityless folder">
+        <location
+            file="src/main/res/drawable/auto_mobile_qr_code.png"/>
+    </issue>
+
+    <issue
+        id="IconLocation"
+        message="Found bitmap drawable `res/drawable/firebender_auto_mobile_hot_reload.png` in densityless folder">
+        <location
+            file="src/main/res/drawable/firebender_auto_mobile_hot_reload.png"/>
+    </issue>
+
+    <issue
+        id="ClickableViewAccessibility"
+        message="Custom view ``WebView`` has `setOnTouchListener` called on it but does not override `performClick`"
+        errorLine1="  setOnTouchListener { view, event ->"
+        errorLine2="  ^">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/slides/components/MermaidDiagramSlideItem.kt"
+            line="280"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="ClickableViewAccessibility"
+        message="`onTouch` lambda should call `View#performClick` when a click is detected"
+        errorLine1="  setOnTouchListener { view, event ->"
+        errorLine2="                     ^">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/slides/components/MermaidDiagramSlideItem.kt"
+            line="280"
+            column="22"/>
+    </issue>
+
+</issues>

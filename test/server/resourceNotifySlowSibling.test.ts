@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
-import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
+import { ListChangedBroadcaster } from "../../src/daemon/listChangedBroadcast";
 
 const URI = "automobile:devices/booted";
 

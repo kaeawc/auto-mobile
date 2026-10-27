@@ -1,3 +1,12 @@
+import type {
+  SwipeGestureRequest,
+  BoomerangGestureRequest,
+  AnnounceSwipeableRequest,
+  AndroidAccessibilitySwipeRequest,
+  GestureExecutor,
+  BoomerangConfig,
+  TalkBackSwipeRunner,
+} from "./types";
 import {
   nodeActionTargetError,
   requiresNodeSelector,
@@ -7,7 +16,7 @@ import { runBoomerangReturnLeg } from "./boomerangReturnLeg";
 import { withEpilogueWarning } from "../../../utils/bestEffortEpilogue";
 import { StaleDisplayError } from "../../observe/StaleDisplayError";
 import type { FencedGestureOptions } from "../ExecuteGesture";
-import { ActionableError, BootedDevice, Element, SwipeDirection } from "../../../models";
+import { ActionableError, BootedDevice, SwipeDirection } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { AndroidCtrlProxyClient } from "../../observe/android";
@@ -15,10 +24,9 @@ import type { AccessibilityNodeSelector } from "../../observe/android/types";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
   type AccessibilityDetector,
-} from "../../accessibility/interfaces/AccessibilityDetector";
+} from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SwipeResult } from "../../../models/SwipeResult";
-import { GestureExecutor, BoomerangConfig, TalkBackSwipeRunner } from "./types";
 import {
   getReturnDuration,
   resolveBoomerangConfig,
@@ -62,29 +70,55 @@ export type TalkBackSwipeCtrlProxy = Pick<
   | "getAccessibilityHierarchy"
 >;
 
-export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
-  constructor(
-    private readonly device: BootedDevice,
-    private readonly executeGesture: GestureExecutor,
-    private readonly accessibilityService: TalkBackSwipeCtrlProxy,
-    private readonly accessibilityDetector: AccessibilityDetector,
-    private readonly adb: AdbExecutor,
-    private readonly timer: Timer,
-    private readonly featureFlags?: FeatureFlagReader,
-  ) {}
+export type TalkBackSwipeExecutorDependencies = {
+  device: BootedDevice;
+  executeGesture: GestureExecutor;
+  accessibilityService: TalkBackSwipeCtrlProxy;
+  accessibilityDetector: AccessibilityDetector;
+  adb: AdbExecutor;
+  timer: Timer;
+  featureFlags?: FeatureFlagReader;
+};
 
-  async executeSwipeGesture(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    direction: SwipeDirection,
-    containerElement: Element | null,
-    gestureOptions?: FencedGestureOptions,
-    perf?: PerformanceTracker,
-    boomerang?: BoomerangConfig,
-    signal?: AbortSignal,
-  ): Promise<SwipeResult> {
+export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
+  private readonly device: BootedDevice;
+  private readonly executeGesture: GestureExecutor;
+  private readonly accessibilityService: TalkBackSwipeCtrlProxy;
+  private readonly accessibilityDetector: AccessibilityDetector;
+  private readonly adb: AdbExecutor;
+  private readonly timer: Timer;
+  private readonly featureFlags?: FeatureFlagReader;
+
+  constructor({
+    device,
+    executeGesture,
+    accessibilityService,
+    accessibilityDetector,
+    adb,
+    timer,
+    featureFlags,
+  }: TalkBackSwipeExecutorDependencies) {
+    this.device = device;
+    this.executeGesture = executeGesture;
+    this.accessibilityService = accessibilityService;
+    this.accessibilityDetector = accessibilityDetector;
+    this.adb = adb;
+    this.timer = timer;
+    this.featureFlags = featureFlags;
+  }
+
+  async executeSwipeGesture({
+    x1,
+    y1,
+    x2,
+    y2,
+    direction,
+    containerElement,
+    gestureOptions,
+    perf,
+    boomerang,
+    signal,
+  }: SwipeGestureRequest): Promise<SwipeResult> {
     throwIfAborted(signal);
     const boomerangEnabled = Boolean(boomerang);
     logger.info(
@@ -94,16 +128,16 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     // Only check TalkBack for Android platform
     if (this.device.platform !== "android") {
       if (boomerangEnabled) {
-        return this.executeBoomerangGesture(
+        return this.executeBoomerangGesture({
           x1,
           y1,
           x2,
           y2,
           gestureOptions,
-          boomerang!,
+          boomerang: boomerang!,
           perf,
           signal,
-        );
+        });
       }
       return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, { perf, signal });
     }
@@ -132,7 +166,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
         logger.info(
           "[SwipeOn] TalkBack enabled, boomerang requested; announcing swipeable element",
         );
-        return this.announceSwipeable(
+        return this.announceSwipeable({
           x1,
           y1,
           x2,
@@ -141,11 +175,11 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
           gestureOptions,
           perf,
           signal,
-        );
+        });
       }
 
       logger.info("[SwipeOn] TalkBack enabled, using accessibility-aware swipe");
-      return this.executeAndroidSwipeWithAccessibility(
+      return this.executeAndroidSwipeWithAccessibility({
         x1,
         y1,
         x2,
@@ -155,20 +189,20 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
         gestureOptions,
         perf,
         signal,
-      );
+      });
     } else {
       if (boomerangEnabled) {
         logger.debug("[SwipeOn] TalkBack disabled, using boomerang swipe");
-        const result = await this.executeBoomerangGesture(
+        const result = await this.executeBoomerangGesture({
           x1,
           y1,
           x2,
           y2,
           gestureOptions,
-          boomerang!,
+          boomerang: boomerang!,
           perf,
           signal,
-        );
+        });
         return withEpilogueWarning(result, warning);
       }
 
@@ -182,16 +216,16 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     }
   }
 
-  async executeBoomerangGesture(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    gestureOptions: FencedGestureOptions | undefined,
-    boomerang: BoomerangConfig,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-  ): Promise<SwipeResult> {
+  async executeBoomerangGesture({
+    x1,
+    y1,
+    x2,
+    y2,
+    gestureOptions,
+    boomerang,
+    perf = new NoOpPerformanceTracker(),
+    signal,
+  }: BoomerangGestureRequest): Promise<SwipeResult> {
     const forwardDuration = gestureOptions?.duration ?? 300;
     const timingError = validateSwipeTimingOptions(
       {
@@ -256,16 +290,16 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     };
   }
 
-  async announceSwipeable(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    containerElement: Element | null,
-    gestureOptions?: FencedGestureOptions,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-  ): Promise<SwipeResult> {
+  async announceSwipeable({
+    x1,
+    y1,
+    x2,
+    y2,
+    containerElement,
+    gestureOptions,
+    perf = new NoOpPerformanceTracker(),
+    signal,
+  }: AnnounceSwipeableRequest): Promise<SwipeResult> {
     const duration = gestureOptions?.duration ?? 0;
     const resourceId = containerElement?.["resource-id"];
 
@@ -312,17 +346,17 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     };
   }
 
-  async executeAndroidSwipeWithAccessibility(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    direction: SwipeDirection,
-    containerElement: Element | null,
-    gestureOptions?: FencedGestureOptions,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<SwipeResult> {
+  async executeAndroidSwipeWithAccessibility({
+    x1,
+    y1,
+    x2,
+    y2,
+    direction,
+    containerElement,
+    gestureOptions,
+    perf,
+    signal,
+  }: AndroidAccessibilitySwipeRequest): Promise<SwipeResult> {
     const selector = containerElement && stableNodeSelectorForElement(containerElement);
     if (selector) {
       const scrollResult = await this.attemptAccessibilityScroll({
@@ -351,16 +385,16 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     throwIfAborted(signal);
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     gestureOptions?.displayFence?.assertCurrent();
-    const a11yResult = await this.accessibilityService.requestTwoFingerSwipe(
+    const a11yResult = await this.accessibilityService.requestTwoFingerSwipe({
       x1,
       y1,
       x2,
       y2,
       duration,
       offset,
-      5000,
-      perf || new NoOpPerformanceTracker(),
-    );
+      timeoutMs: 5000,
+      perf: perf || new NoOpPerformanceTracker(),
+    });
     throwIfAborted(signal);
 
     if (a11yResult.success) {

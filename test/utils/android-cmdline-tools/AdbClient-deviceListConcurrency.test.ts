@@ -35,10 +35,7 @@ describe("AdbClient concurrent device-list snapshots", () => {
       }
       return resultFor("emulator-5556");
     };
-    const clients = Array.from(
-      { length: 8 },
-      () => new AdbClient(null, execute, null, undefined, timer),
-    );
+    const clients = Array.from({ length: 8 }, () => new AdbClient(null, execute, { timer }));
     const cancelled = new AbortController();
     const cancellation = new Error("client one disconnected");
 
@@ -84,9 +81,7 @@ describe("AdbClient concurrent device-list snapshots", () => {
         childSignal?.throwIfAborted();
         return resultFor("emulator-5554");
       },
-      null,
-      undefined,
-      timer,
+      { timer },
     );
     const leader = new AbortController();
     const first = runWithAbortSignal(leader.signal, () => client.getBootedAndroidDevices());
@@ -115,7 +110,7 @@ describe("AdbClient concurrent device-list snapshots", () => {
       }
       return resultFor("emulator-5556");
     };
-    const client = new AdbClient(null, execute, null, undefined, timer);
+    const client = new AdbClient(null, execute, { timer });
 
     const coalescedRead = client.getBootedAndroidDevices();
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -142,7 +137,7 @@ describe("AdbClient concurrent device-list snapshots", () => {
       }
       return resultFor("emulator-5556");
     };
-    const client = new AdbClient(null, execute, null, undefined, timer);
+    const client = new AdbClient(null, execute, { timer });
 
     const olderRead = client.getBootedAndroidDevices();
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -168,7 +163,7 @@ describe("AdbClient concurrent device-list snapshots", () => {
       }
       return resultFor("emulator-5556");
     };
-    const client = new AdbClient(null, execute, null, undefined, timer);
+    const client = new AdbClient(null, execute, { timer });
 
     const preResetRead = client.getBootedAndroidDevices();
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -197,9 +192,7 @@ describe("AdbClient concurrent device-list snapshots", () => {
         await timer.sleep(5_000);
         return resultFor("emulator-5554");
       },
-      null,
-      undefined,
-      timer,
+      { timer },
     );
     const inventory = client.getBootedAndroidDevices({ timeoutMs: 2_000 }).then(
       () => "resolved",
@@ -227,20 +220,12 @@ describe("AdbClient concurrent device-list snapshots", () => {
   test("a client on another timer never reads a device list cached on a different timer (#11614)", async () => {
     // Leak class: the list used to be cached on the first timer that touched it, so a later
     // test's client (own FakeTimer) saw the earlier test's frozen entry and its in-flight read.
-    const earlier = new AdbClient(
-      null,
-      async () => resultFor("emulator-5554"),
-      null,
-      undefined,
-      new FakeTimer(),
-    );
-    const later = new AdbClient(
-      null,
-      async () => resultFor("emulator-5556"),
-      null,
-      undefined,
-      new FakeTimer(),
-    );
+    const earlier = new AdbClient(null, async () => resultFor("emulator-5554"), {
+      timer: new FakeTimer(),
+    });
+    const later = new AdbClient(null, async () => resultFor("emulator-5556"), {
+      timer: new FakeTimer(),
+    });
 
     expect(await earlier.getBootedAndroidDevices()).toMatchObject([{ deviceId: "emulator-5554" }]);
     expect(await later.getBootedAndroidDevices()).toMatchObject([{ deviceId: "emulator-5556" }]);

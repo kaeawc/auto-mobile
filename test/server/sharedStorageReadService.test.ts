@@ -1,8 +1,7 @@
-import {
-  SimctlIosFilesFixtureContainer,
-  nodeAppFileFileSystem,
-  IOS_FILES_FIXTURE_BUNDLE_ID,
-} from "../../src/server/appFileService";
+import { simulatorOwnership, simulatorDataContainer } from "../helpers/simulatorContainerFixture";
+import { SimctlIosFilesFixtureContainer } from "../../src/server/SimctlIosFilesFixtureContainer";
+import { nodeAppFileFileSystem } from "../../src/server/appFileSupport";
+import { IOS_FILES_FIXTURE_BUNDLE_ID } from "../../src/server/IosSimulatorUserFilesProvider";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
@@ -529,6 +528,7 @@ describe("bounded storage-domain readers", () => {
 });
 
 describe("iOS Simulator bounded fixture reads", () => {
+  const fixtureRoot = simulatorDataContainer("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE");
   function harness() {
     const device: BootedDevice = {
       deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
@@ -536,42 +536,46 @@ describe("iOS Simulator bounded fixture reads", () => {
       name: "Simulator",
     };
     const simctl = new FakeSimctl();
-    simctl.setContainerPath(IOS_FILES_FIXTURE_BUNDLE_ID, "/fixture");
+    simctl.setContainerPath(IOS_FILES_FIXTURE_BUNDLE_ID, fixtureRoot);
     const files = new Map<string, Buffer>([
-      ["/fixture/Documents/automobile/run/note.txt", Buffer.from("hello")],
-      ["/fixture/Documents/automobile/run/photo.png", Buffer.from([0, 1, 255])],
+      [`${fixtureRoot}/Documents/automobile/run/note.txt`, Buffer.from("hello")],
+      [`${fixtureRoot}/Documents/automobile/run/photo.png`, Buffer.from([0, 1, 255])],
     ]);
     const symlinks = new Set<string>();
     const reads: string[] = [];
     const directories = new Set([
-      "/fixture/Documents",
-      "/fixture/Documents/automobile",
-      "/fixture/Documents/automobile/run",
+      `${fixtureRoot}/Documents`,
+      `${fixtureRoot}/Documents/automobile`,
+      `${fixtureRoot}/Documents/automobile/run`,
     ]);
-    const reader = new SimctlIosFilesFixtureContainer(() => simctl, {
-      ...nodeAppFileFileSystem,
-      lstat: async (path) => {
-        if (!files.has(path) && !directories.has(path) && !symlinks.has(path)) {
-          throw Object.assign(new Error("missing namespace/file"), { code: "ENOENT" });
-        }
-        return {
-          size: files.get(path)?.length ?? 0,
-          mtime: new Date(0),
-          isFile: () => files.has(path) && !symlinks.has(path),
-          isDirectory: () => directories.has(path) && !symlinks.has(path),
-        };
+    const reader = new SimctlIosFilesFixtureContainer(
+      () => simctl,
+      {
+        ...nodeAppFileFileSystem,
+        lstat: async (path) => {
+          if (!files.has(path) && !directories.has(path) && !symlinks.has(path)) {
+            throw Object.assign(new Error("missing namespace/file"), { code: "ENOENT" });
+          }
+          return {
+            size: files.get(path)?.length ?? 0,
+            mtime: new Date(0),
+            isFile: () => files.has(path) && !symlinks.has(path),
+            isDirectory: () => directories.has(path) && !symlinks.has(path),
+          };
+        },
+        readdir: async (path) =>
+          [...new Set([...files.keys(), ...directories, ...symlinks])]
+            .filter(
+              (file) => file.startsWith(`${path}/`) && !file.slice(path.length + 1).includes("/"),
+            )
+            .map((file) => ({ name: file.slice(path.length + 1) })),
+        readFileBuffer: async (path) => {
+          reads.push(path);
+          return files.get(path)!;
+        },
       },
-      readdir: async (path) =>
-        [...new Set([...files.keys(), ...directories, ...symlinks])]
-          .filter(
-            (file) => file.startsWith(`${path}/`) && !file.slice(path.length + 1).includes("/"),
-          )
-          .map((file) => ({ name: file.slice(path.length + 1) })),
-      readFileBuffer: async (path) => {
-        reads.push(path);
-        return files.get(path)!;
-      },
-    });
+      simulatorOwnership,
+    );
     const service = createSharedStorageReadServiceForTesting({
       deviceResolver: async () => device,
       iosFixtureReader: reader,
@@ -599,7 +603,10 @@ describe("iOS Simulator bounded fixture reads", () => {
     expect(binary.blob).toBe("AAH/");
     expect(binary.text).toBeUndefined();
     expect(binary.mimeType).toBe("image/png");
-    expect(reads.every((path) => path.startsWith("/fixture/Documents/automobile/run/"))).toBe(true);
+    expect(reads).not.toHaveLength(0);
+    expect(reads.every((path) => path.startsWith(`${fixtureRoot}/Documents/automobile/run/`))).toBe(
+      true,
+    );
   });
 
   test("keeps Simulator paths POSIX when host path functions use Windows semantics", async () => {
@@ -610,10 +617,12 @@ describe("iOS Simulator bounded fixture reads", () => {
       spyOn(hostPath, "isAbsolute").mockImplementation(hostPath.win32.isAbsolute),
     ];
     try {
-      expect(hostPath.join("/fixture", "Documents")).toBe("\\fixture\\Documents");
+      expect(hostPath.join(fixtureRoot, "Documents")).toBe(
+        hostPath.win32.join(fixtureRoot, "Documents"),
+      );
       const { service, request, files, directories, symlinks, reads } = harness();
-      directories.add("/fixture/Documents/automobile/run/nested");
-      files.set("/fixture/Documents/automobile/run/nested/note.txt", Buffer.from("nested"));
+      directories.add(`${fixtureRoot}/Documents/automobile/run/nested`);
+      files.set(`${fixtureRoot}/Documents/automobile/run/nested/note.txt`, Buffer.from("nested"));
       const listing = await service.list(request);
       expect(listing.observation).toBe("complete");
       expect(listing.files.map((file) => file.path)).toEqual([
@@ -622,16 +631,16 @@ describe("iOS Simulator bounded fixture reads", () => {
         "nested/note.txt",
       ]);
       expect((await service.read({ ...request, path: "nested/note.txt" })).text).toBe("nested");
-      expect(reads).toEqual(["/fixture/Documents/automobile/run/nested/note.txt"]);
+      expect(reads).toEqual([`${fixtureRoot}/Documents/automobile/run/nested/note.txt`]);
       reads.length = 0;
       for (const path of ["../secret", "..\\secret", "/secret", "\\\\host\\share\\secret"]) {
         await expect(service.read({ ...request, path })).rejects.toThrow();
       }
-      symlinks.add("/fixture/Documents/automobile/run/nested");
+      symlinks.add(`${fixtureRoot}/Documents/automobile/run/nested`);
       expect((await service.read({ ...request, path: "nested/note.txt" })).observation).toBe(
         "unavailable",
       );
-      symlinks.add("/fixture/Documents/automobile/run");
+      symlinks.add(`${fixtureRoot}/Documents/automobile/run`);
       expect((await service.list(request)).observation).toBe("unavailable");
       expect(reads).toEqual([]);
     } finally {
@@ -654,7 +663,7 @@ describe("iOS Simulator bounded fixture reads", () => {
     const { service, request, symlinks, reads } = harness();
     await expect(service.read({ ...request, path: "../../secret" })).rejects.toThrow();
     await expect(service.list({ ...request, namespace: "../secret" })).rejects.toThrow();
-    symlinks.add("/fixture/Documents/automobile/run");
+    symlinks.add(`${fixtureRoot}/Documents/automobile/run`);
     expect((await service.read({ ...request, path: "note.txt" })).observation).toBe("unavailable");
     expect((await service.list(request)).observation).toBe("unavailable");
     expect(reads).toEqual([]);

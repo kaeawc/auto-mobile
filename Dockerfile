@@ -22,7 +22,7 @@
 
 ARG ZULU_VERSION=21.0.2
 ARG PLATFORM=linux/amd64
-ARG BUN_VERSION=1.3.14
+ARG BUN_VERSION=1.4.4
 ARG KTFMT_VERSION=0.65
 # Keep in sync with scripts/ktfmt/ktfmt_version.sh (KTFMT_VERSION), the repo's canonical pin.
 # Computed locally from the downloaded GitHub Releases asset on 2026-10-08:
@@ -68,9 +68,13 @@ ENV ANDROID_BUILD_TOOLS_VERSION=${ANDROID_BUILD_TOOLS_VERSION}
 ENV PATH=${PATH}:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${ANDROID_HOME}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}
 
 # Install runtime dependencies only (no build tools)
-RUN apk add --no-cache \
+# ca-certificates 20261020 (NSS 3.131.1) drops the emSign ECC Root CA - G3, Root CA - C1 and
+# ECC Root CA - C3 roots that Mozilla removed after the eMudhra key compromise (Oct 2026).
+# --upgrade also replaces an older ca-certificates-bundle shipped in the base image.
+RUN apk add --no-cache --upgrade \
     bash \
-    ca-certificates \
+    'ca-certificates>=20261020' \
+    'ca-certificates-bundle>=20261020' \
     gcompat \
     jemalloc \
     libstdc++ \
@@ -83,6 +87,29 @@ RUN apk add --no-cache \
 
 # Now that bash is installed, set it as the default shell
 SHELL ["/bin/bash", "-exo", "pipefail", "-c"]
+
+# Distrust emSign roots removed from Mozilla NSS (eMudhra key compromise, Oct 2026).
+# Upstream OpenJDK cacerts (and so every Zulu build) still list emsigneccrootcag3, emsignrootcag1
+# and emsignrootcag2, so delete every emSign alias from the JDK trust store used by Gradle and
+# java, then fail the build if any emSign root is still trusted by the JDK or by the OS bundle.
+# grep reads to EOF (no -q) so pipefail cannot turn an early-exit SIGPIPE into a silent pass.
+# Runs in the base stage so the builder and runtime stages both inherit it.
+# test/bats/dockerfile-emsign-distrust.bats runs this block against a stub keytool.
+# BEGIN emsign-distrust
+RUN keytool -list -cacerts -storepass changeit \
+      | awk -F', ' 'tolower($1) ~ /emsign/ { print $1 }' > /tmp/emsign-aliases \
+    && while IFS= read -r alias; do \
+         keytool -delete -cacerts -storepass changeit -alias "${alias}"; \
+       done < /tmp/emsign-aliases \
+    && rm -f /tmp/emsign-aliases \
+    && if keytool -list -cacerts -storepass changeit | grep -i 'emsign' > /dev/null; then \
+         echo "emSign roots are still present in the JDK cacerts" >&2; exit 1; \
+       fi \
+    && if keytool -printcert -file /etc/ssl/certs/ca-certificates.crt \
+         | grep -E 'CN=emSign (ECC Root CA - G3|Root CA - C1|ECC Root CA - C3)' > /dev/null; then \
+         echo "emSign roots removed from Mozilla NSS are still in the OS CA bundle" >&2; exit 1; \
+       fi
+# END emsign-distrust
 
 # ==============================================================================
 # BUILDER STAGE - Contains all build-time dependencies

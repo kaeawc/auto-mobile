@@ -234,7 +234,7 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
 
       // An autolock session is the connection's active session (implicit binding
       // via the mcp session id), not an explicit SessionToolBinding.
-      const autolockSessionId = await pool.autolockDevice("emulator-5554", "android", "conn-1");
+      const autolockSessionId = (await pool.autolockDevice("emulator-5554", "android", "conn-1"))!;
       expect(sessionManager.getSession(autolockSessionId)?.assignedDevice).toBe("emulator-5554");
 
       let rejected = false;
@@ -281,11 +281,11 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
 
         // An autolock session is the connection's active session (implicit binding
         // via the mcp session id), not an explicit SessionToolBinding.
-        const autolockSessionId = await pool.autolockDevice(
+        const autolockSessionId = (await pool.autolockDevice(
           "emulator-5554",
           "android",
           connectionId,
-        );
+        ))!;
         expect(sessionManager.getSession(autolockSessionId)?.assignedDevice).toBe("emulator-5554");
 
         await sessionManager.createSession("F1", "emulator-5556", "android");

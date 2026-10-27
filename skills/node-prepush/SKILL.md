@@ -24,12 +24,30 @@ Use this workflow before pushing a Node or TypeScript change.
 ## What the gate reproduces, and what stays CI-only
 
 `prepush-node.sh` runs: stale-base guard, `format:check`, `typecheck`, `lint`
-(oxlint, ratchet, `check-boundaries.sh`), the test as-any ratchet, tool
+(oxlint, ratchet, `check-boundaries.sh`), `typecheck:test`, tool
 definitions drift, the static Fast Validation subset (`yaml`, `runtime-pins`,
 `stdlib-first`, `shared-process-allowlist`, `docs-assets`, `env-var-docs`,
 `lfs-pointers`, `lychee-offline`, and the other tool-free checks named in
-`FAST_VALIDATION_CHECKS`), `test/lint/`, the image smoke, the unit lane, the
+`FAST_VALIDATION_CHECKS`), repository lint tests, the image smoke, the unit lane, the
 `test/db` fast path, and the 100 ms timing budget on Linux.
+
+Repository lint tests run only `test/lint/*.integration.test.ts` in full mode;
+the unit files already run in the unit lane. In `--changed` mode, early affected-test
+selection supplies branch, worktree, and untracked paths; the whole `test/lint/`
+directory runs only for changes under `src/`, `test/`, `scripts/`, `oxlint-plugins/`,
+`android/`, `ios/`, `docs/`, `skills/`, `schemas/`, `.claude/`, `.github/`, or root
+`.oxlintrc.json`, `package.json`, `bun.lock`, `bunfig.toml`, `turbo.json`, or
+`tsconfig*.json`. After that directory runs, affected unit and integration extras
+omit `test/lint/` files already covered. Always-run unit extras still run when
+repository lint tests skip.
+A unit cap fallback replaces the changed lane with the full unit lane and skips
+unit extras; always-run bats and affected safe integration lanes still run afterward.
+The timing gate measures the unit lane's JUnit reports when source or runtime
+inputs changed; changed test files alone are still re-run individually. Changed
+mode without reports uses the timing validator's own affected-test selection.
+Typecheck and lint stay strictly serial and separate because oxlint 1.88's experimental
+`--type-check` and tsgolint diagnostics do not replace the fail-closed typecheck parser,
+TS2688/`@types/bun` guard, or separate src/test tsconfig projects.
 
 CI-only by design: the Windows and macOS unit/integration legs (path
 separators, `test/lint/pathSeparatorAssertions.test.ts` is the static proxy),

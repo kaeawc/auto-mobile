@@ -1,6 +1,6 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
-import { markDeviceError } from "../../src/daemon/deviceBinding";
+import { bindDevice, markDeviceError, unbindDevice } from "../../src/daemon/deviceBinding";
 import { expect, test } from "bun:test";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
@@ -28,8 +28,7 @@ const rows: PredicateRow[] = [
   {
     name: "available",
     prepare: ({ device, session }) => {
-      device.status = "idle";
-      device.sessionId = null;
+      unbindDevice(device);
       session.assignedDevice = "";
     },
     expected: [false, true, false, false],
@@ -40,7 +39,7 @@ const rows: PredicateRow[] = [
     prepare: ({ pool, device, session }) => {
       device.adbServerResetSession = session;
       device.adbServerResetSessionId = session.sessionId;
-      pool["devices"].delete(device.id);
+      pool.testHooks.devices.delete(device.id);
     },
     expected: [true, false, false, false],
   },
@@ -75,7 +74,7 @@ const rows: PredicateRow[] = [
   {
     name: "same-id replacement entry",
     prepare: ({ pool, device }) => {
-      pool["devices"].set(device.id, { ...device, incarnation: device.incarnation + 1 });
+      pool.testHooks.devices.set(device.id, { ...device, incarnation: device.incarnation + 1 });
     },
     expected: [true, false, false, false],
   },
@@ -103,8 +102,7 @@ const rows: PredicateRow[] = [
   {
     name: "idle identity quarantine",
     prepare: ({ device, session }) => {
-      device.status = "idle";
-      device.sessionId = null;
+      unbindDevice(device);
       device.identityUnresolved = true;
       session.assignedDevice = "";
     },
@@ -147,11 +145,11 @@ for (const autolock of [false, true]) {
     try {
       await row.prepare?.(context);
       expect([
-        pool["isPreservedSessionCurrent"](session, device.id),
-        pool["isCurrentIdleDeviceAssignable"](device),
-        pool["isSessionAssignmentCurrent"](device, session),
-        pool["isCapturedReleaseCurrent"](device, session.sessionId, assignmentCount),
-      ]).toEqual(row.expected);
+        pool.testHooks.isPreservedSessionCurrent(session, device.id),
+        pool.testHooks.isCurrentIdleDeviceAssignable(device),
+        pool.testHooks.isSessionAssignmentCurrent(device, session),
+        pool.testHooks.isCapturedReleaseCurrent(device, session.sessionId, assignmentCount),
+      ]).toEqual([...row.expected]);
     } finally {
       manager.stopCleanupTimer();
     }
@@ -164,11 +162,13 @@ test("captured release is refused when another session holds the device", async 
   const { pool, manager, device, session } = await createContext(false);
   try {
     const assignmentCount = device.assignmentCount;
-    device.sessionId = "other-session";
-    expect(pool["isCapturedReleaseCurrent"](device, session.sessionId, assignmentCount)).toBe(
-      false,
+    bindDevice(device, "other-session");
+    expect(
+      pool.testHooks.isCapturedReleaseCurrent(device, session.sessionId, assignmentCount),
+    ).toBe(false);
+    expect(pool.testHooks.isCapturedReleaseCurrent(device, "other-session", assignmentCount)).toBe(
+      true,
     );
-    expect(pool["isCapturedReleaseCurrent"](device, "other-session", assignmentCount)).toBe(true);
   } finally {
     manager.stopCleanupTimer();
   }

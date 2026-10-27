@@ -4,12 +4,6 @@ import Foundation
 // role or a `{light, dark}` pair, and the on-device check of every per-mode value. Resolution
 // itself is `PrototypeModeValue.value(dark:)` and `PrototypePalette.resolve`.
 
-/// One gradient stop: a colour slot and an optional position in 0...1.
-struct PrototypeGradientStop: Decodable, Equatable {
-    let color: PrototypeModeValue
-    let position: Double?
-}
-
 /// A resolved gradient stop: the colour for the palette's mode and its location in 0...1.
 struct PrototypeGradientColorStop: Equatable {
     let color: PrototypeRGBA
@@ -96,12 +90,12 @@ enum PrototypeGradient: Decodable, Equatable {
         start: PrototypeUnitPoint, end: PrototypeUnitPoint
     ) {
         let radians = angle * .pi / 180
-        let dx = cos(radians)
-        let dy = sin(radians)
-        let half = (abs(width * dx) + abs(height * dy)) / 2
+        let horizontalDelta = cos(radians)
+        let verticalDelta = sin(radians)
+        let half = (abs(width * horizontalDelta) + abs(height * verticalDelta)) / 2
         // An empty box draws nothing; keep the line finite.
-        let x = width > 0 ? dx * half / width : 0
-        let y = height > 0 ? dy * half / height : 0
+        let x = width > 0 ? horizontalDelta * half / width : 0
+        let y = height > 0 ? verticalDelta * half / height : 0
         return (PrototypeUnitPoint(x: 0.5 - x, y: 0.5 - y), PrototypeUnitPoint(x: 0.5 + x, y: 0.5 + y))
     }
 
@@ -120,7 +114,7 @@ enum PrototypeNavVisual: Equatable {
     case icon(String)
     /// An image was named but is not uploaded, and there is no icon to fall back to.
     case placeholder
-    case none
+    case absent
 }
 
 extension NavItem {
@@ -132,7 +126,7 @@ extension NavItem {
         if let icon {
             return PrototypeIconSymbolTable.shared.resolve(icon) == .unknown ? .placeholder : .icon(icon)
         }
-        return id == nil ? .none : .placeholder
+        return id == nil ? .absent : .placeholder
     }
 }
 
@@ -169,6 +163,7 @@ enum PrototypeThemeModes {
             try style(entry.style, "\(path).styleWhen[\(index)].style")
         }
         try color(node.scrim, "\(path).scrim", checksSingle: true)
+        try color(node.filter?.tint, "\(path).filter.tint", checksSingle: false)
         try asset(node.asset, "\(path).asset")
         for (index, item) in (node.items ?? []).enumerated() {
             try asset(item.image, "\(path).items[\(index)].image")
@@ -189,6 +184,12 @@ enum PrototypeThemeModes {
         try color(style.background, "\(path).background", checksSingle: false)
         try color(style.color, "\(path).color", checksSingle: false)
         try color(style.shadowColor, "\(path).shadowColor", checksSingle: false)
+        for (index, shadow) in (style.shadows ?? []).enumerated() {
+            try color(shadow.color, "\(path).shadows[\(index)].color", checksSingle: false)
+        }
+        for (index, stop) in (style.border?.gradient?.stops ?? []).enumerated() {
+            try color(stop.color, "\(path).border.gradient.stops[\(index)].color", checksSingle: true)
+        }
         try color(style.border?.color, "\(path).border.color", checksSingle: false)
         for (index, stop) in (style.gradient?.stops ?? []).enumerated() {
             try color(stop.color, "\(path).gradient.stops[\(index)].color", checksSingle: true)

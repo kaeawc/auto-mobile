@@ -11,6 +11,7 @@ import {
   resolveAutoMobileLogsDir,
   getTempDir,
   getSharedAutoMobileDir,
+  getHostGlobalAutoMobileDir,
   assertUnitTestLogsDirIsolated,
   ensureSecureLogsDirSync,
   ensureSecureTempDirSync,
@@ -467,4 +468,23 @@ describe("assertUnitTestLogsDirIsolated", () => {
     expect(() => assertUnitTestLogsDirIsolated({})).not.toThrow();
     expect(() => assertUnitTestLogsDirIsolated({ NODE_ENV: "production" })).not.toThrow();
   });
+});
+
+test("host-global storage ignores coordination overrides and requires a home", () => {
+  const previous = process.env.AUTOMOBILE_COORDINATION_DIR;
+  try {
+    for (const directory of ["/daemon-a", "/daemon-b"]) {
+      process.env.AUTOMOBILE_COORDINATION_DIR = directory;
+      expect(getHostGlobalAutoMobileDir("templates", "/home/u")).toBe(
+        path.resolve("/home/u", ".auto-mobile", "templates"),
+      );
+    }
+    expect(() => getHostGlobalAutoMobileDir("templates", "")).toThrow("home directory");
+  } finally {
+    if (previous === undefined) {
+      delete process.env.AUTOMOBILE_COORDINATION_DIR;
+    } else {
+      process.env.AUTOMOBILE_COORDINATION_DIR = previous;
+    }
+  }
 });

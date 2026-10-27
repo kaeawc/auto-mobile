@@ -1,10 +1,10 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
-import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.Transient
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -21,9 +21,22 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 
-interface AutoMobileClient {
+interface AutoMobileClient :
+  AutoMobileDeviceOperations,
+  AutoMobileTestOperations,
+  AutoMobileInputOperations,
+  AutoMobileStorageOperations,
+  AutoMobileFeatureOperations {
   val transportName: String
   val connectionDescription: String
+
+  /**
+   * The daemon session a device-targeted tool call through this client names, or null when it names
+   * none. A caller that must address the call's result later, such as the owner of a started
+   * recording, reads it here rather than from a registration-gated provider (#11366).
+   */
+  val actingSessionUuid: String?
+    get() = null
 
   fun ping()
 
@@ -34,160 +47,6 @@ interface AutoMobileClient {
   fun listTools(): List<McpTool>
 
   fun readResource(uri: String): List<McpResourceContent>
-
-  fun getNavigationGraph(platform: String = "android"): JsonElement
-
-  fun listFeatureFlags(): List<FeatureFlagState>
-
-  fun setFeatureFlag(key: String, enabled: Boolean, config: JsonObject? = null): FeatureFlagState
-
-  fun listPerformanceAuditResults(
-    startTime: String? = null,
-    endTime: String? = null,
-    limit: Int? = null,
-    offset: Int? = null,
-    deviceId: String? = null,
-  ): PerformanceAuditHistoryResult
-
-  fun getTestTimings(query: TestTimingQuery = TestTimingQuery()): TestTimingSummary
-
-  fun getTestRuns(query: TestRunQuery = TestRunQuery()): TestRunSummary
-
-  fun startDeviceGestureRecording(platform: String = "android"): DeviceGestureRecordingStartResult
-
-  fun stopDeviceGestureRecording(
-    recordingId: String? = null,
-    planName: String? = null,
-  ): DeviceGestureRecordingStopResult
-
-  fun executePlan(
-    planContent: String,
-    platform: String = "android",
-    startStep: Int? = null,
-    sessionUuid: String? = null,
-  ): ExecutePlanResult
-
-  fun startDevice(
-    name: String,
-    platform: String,
-    deviceId: String? = null,
-  ): StartDeviceResult
-
-  fun setActiveDevice(deviceId: String, platform: String): SetActiveDeviceResult
-
-  fun observe(platform: String = "android"): ObserveResult
-
-  /**
-   * Stops a device.
-   *
-   * @param force skips the emulator-console AVD-name confirmation and acts on the serial as given
-   *   (auto-mobile #6864). Only meaningful for a wedged Android emulator; accepted and ignored for
-   *   iOS and physical devices. It does not override the conflict check, it removes it.
-   */
-  fun killDevice(
-    name: String,
-    deviceId: String,
-    platform: String,
-    force: Boolean = false,
-  ): KillDeviceResult
-
-  fun getDaemonStatus(): dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse
-
-  fun updateService(deviceId: String, platform: String): UpdateServiceResult
-
-  fun inputTap(
-    x: Double,
-    y: Double,
-    platform: String = "android",
-    deviceId: String? = null,
-    duration: Int? = null,
-    frameContext: String? = null,
-  ): InputActionResult
-
-  fun inputSwipe(
-    startX: Double,
-    startY: Double,
-    endX: Double,
-    endY: Double,
-    platform: String = "android",
-    deviceId: String? = null,
-    durationMs: Int? = null,
-    frameContext: String? = null,
-  ): InputActionResult
-
-  fun inputPressButton(
-    button: String,
-    platform: String = "android",
-    deviceId: String? = null,
-    frameContext: String? = null,
-  ): InputActionResult
-
-  /**
-   * @param append when true, requests the daemon's non-destructive append mode: the text is added
-   *   to the focused field with real key events instead of REPLACING its contents via
-   *   `ACTION_SET_TEXT`. Required by any client mirroring a keyboard one keystroke at a time, which
-   *   would otherwise leave only the last character typed. Android-only; the daemon rejects it on
-   *   iOS (issue #3351).
-   */
-  fun inputTypeText(
-    text: String,
-    platform: String = "android",
-    deviceId: String? = null,
-    submit: Boolean? = null,
-    append: Boolean = false,
-    frameContext: String? = null,
-  ): InputActionResult
-
-  fun inputKey(
-    key: String,
-    platform: String = "android",
-    deviceId: String? = null,
-    frameContext: String? = null,
-  ): InputActionResult
-
-  /**
-   * Open a persistent connection for one streamed (real-time) gesture — a drag delivered as a down,
-   * incremental moves, and an up over a single held connection, so the device tracks the pointer
-   * live instead of receiving one atomic `input/swipe` on release.
-   *
-   * Returns null when streaming is unavailable — the transport can't hold a connection open (HTTP /
-   * stdio), the daemon does not advertise `input/gestureStream`, or the platform is not Android —
-   * in which case the caller falls back to [inputSwipe]. The default is null so only the
-   * Unix-socket client implements it; every other transport degrades cleanly (issue: streaming
-   * gesture input).
-   */
-  fun openGestureStream(
-    platform: String = "android",
-    deviceId: String? = null,
-  ): GestureInputStream? = null
-
-  fun setKeyValue(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-    platform: String = "android",
-    sessionUuid: String? = null,
-  ): SetKeyValueResult
-
-  fun removeKeyValue(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    key: String,
-    platform: String = "android",
-    sessionUuid: String? = null,
-  ): RemoveKeyValueResult
-
-  fun clearKeyValueFile(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    platform: String = "android",
-    sessionUuid: String? = null,
-  ): ClearKeyValueResult
 
   fun callTool(name: String, arguments: JsonObject): JsonElement
 
@@ -237,7 +96,7 @@ internal fun checkToolResponse(responseElement: JsonElement, json: Json): JsonEl
   val payload =
     try {
       json.decodeFromString<JsonElement>(text)
-    } catch (error: Exception) {
+    } catch (error: SerializationException) {
       if (envelopeError) {
         throw toolError(json, text, error)
       }
@@ -250,39 +109,6 @@ internal fun checkToolResponse(responseElement: JsonElement, json: Json): JsonEl
   }
   return payload
 }
-
-@Serializable
-data class KillDeviceResult(
-  val success: Boolean = true,
-  val message: String? = null,
-  /**
-   * The daemon's structured error code for a failed kill, e.g.
-   * [DEVICE_OWNED_BY_OTHER_SESSION_CODE].
-   */
-  @Transient val code: String? = null,
-)
-
-/**
- * Decodes a `killDevice` tool response; a failure becomes an unsuccessful result that keeps the
- * daemon's error code, so a held-device refusal (#10785) stays distinguishable from other errors.
- */
-internal fun decodeKillDeviceResponse(json: Json, response: JsonElement): KillDeviceResult =
-  try {
-    decodeToolResponse(json, response, serializer<KillDeviceResult>())
-  } catch (e: Exception) {
-    if (e is CancellationException) throw e
-    KillDeviceResult(
-      success = false,
-      message = e.message ?: "Failed to kill device",
-      code = (e as? McpToolErrorException)?.code,
-    )
-  }
-
-@Serializable
-data class UpdateServiceResult(
-  val success: Boolean = true,
-  val message: String? = null,
-)
 
 @Serializable
 data class SetKeyValueResult(
@@ -322,14 +148,6 @@ data class StartDeviceResult(
   val resolvedDeviceId: String?
     get() = runtime?.deviceId ?: deviceId
 }
-
-/** The failed [StartDeviceResult] for [error], keeping a cleanup refusal's retry hint. */
-internal fun startDeviceFailure(error: Exception): StartDeviceResult =
-  StartDeviceResult(
-    success = false,
-    message = error.message ?: "Failed to start device",
-    cleanupRetryAfterMs = error.deviceCleanupRetryAfterMs(),
-  )
 
 @Serializable
 data class SetActiveDeviceResult(
@@ -626,9 +444,12 @@ private fun toolError(json: Json, text: String, cause: Throwable? = null): McpTo
     code = code,
     deviceId = payloadObject?.let { refusalString(it, "deviceId") },
     cause = cause,
-    retryAfterMs = payloadObject?.let { refusalPrimitive(it, "retryAfterMs")?.longOrNull },
-    retryable = payloadObject?.let { refusalPrimitive(it, "retryable")?.booleanOrNull },
-    nextAction = payloadObject?.let { refusalString(it, "nextAction") },
+    details =
+      McpRefusalDetails(
+        retryAfterMs = payloadObject?.let { refusalPrimitive(it, "retryAfterMs")?.longOrNull },
+        retryable = payloadObject?.let { refusalPrimitive(it, "retryable")?.booleanOrNull },
+        nextAction = payloadObject?.let { refusalString(it, "nextAction") },
+      ),
   )
 }
 
@@ -661,21 +482,3 @@ internal fun <T> decodeResourceResponse(
  * drift apart. The tool defaults `force` to false, so only a forced kill puts the field on the wire
  * (auto-mobile #6864).
  */
-internal fun killDeviceArguments(
-  name: String,
-  deviceId: String,
-  platform: String,
-  force: Boolean,
-): JsonObject = buildJsonObject {
-  put(
-    "device",
-    buildJsonObject {
-      put("name", JsonPrimitive(name))
-      put("deviceId", JsonPrimitive(deviceId))
-      put("platform", JsonPrimitive(platform))
-    },
-  )
-  if (force) {
-    put("force", JsonPrimitive(true))
-  }
-}

@@ -1,3 +1,4 @@
+import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import { isStrictlyScoped } from "../utility/ScopedSelection";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { inputDurationArgument } from "./touchscreenInput";
@@ -28,7 +29,7 @@ import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { DRAG_INTENT } from "../utility/SelectionPolicy";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
-import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
+import { type AndroidCtrlProxy } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import {
   createGlobalPerformanceTracker,
@@ -132,6 +133,26 @@ interface DragAndDropDeps extends DisplayFenceDependencies {
   visionAnalyzer?: VisionAnalyzer;
 }
 
+/** One resolved drag dispatch handed to the platform client. */
+export interface DragDispatchRequest {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  pressDurationMs: number;
+  dragDurationMs: number;
+  holdDurationMs: number;
+  signal?: AbortSignal;
+}
+
+/** Result of a drag dispatch. */
+export interface DragDispatchOutcome {
+  success: boolean;
+  error?: string;
+  a11yTotalTimeMs?: number;
+  a11yGestureTimeMs?: number;
+}
+
 export class DragAndDrop extends BaseVisualChange {
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private selector: ElementSelector;
@@ -160,7 +181,7 @@ export class DragAndDrop extends BaseVisualChange {
       deps.hierarchyCapture ??
       createDeviceHierarchyCapture(device, { timer, adbFactory: this.adbFactory });
     this.geometry = new DefaultElementGeometry();
-    this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
+    this.accessibilityService = androidCtrlProxyClientForPlatform(device, this.adbFactory);
     this.visionConfig = deps.visionConfig ?? DEFAULT_VISION_CONFIG;
     this.screenshotCapturer =
       deps.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
@@ -380,16 +401,16 @@ export class DragAndDrop extends BaseVisualChange {
 
           // Once beforeSend lands, also pass this as the dispatch's beforeSend.
           fence?.assertCurrent();
-          const dragResult = await this.executeDrag(
-            sourcePoint.x,
-            sourcePoint.y,
-            targetPoint.x,
-            targetPoint.y,
+          const dragResult = await this.dispatchDrag({
+            startX: sourcePoint.x,
+            startY: sourcePoint.y,
+            endX: targetPoint.x,
+            endY: targetPoint.y,
             pressDurationMs,
             dragDurationMs,
             holdDurationMs,
             signal,
-          );
+          });
 
           if (this.device.platform === "ios" && dragResult.success) {
             iosDispatchTimestamp = this.timer.now();
@@ -467,8 +488,7 @@ export class DragAndDrop extends BaseVisualChange {
             searchCriteria,
             this.visionConfig,
             finalErrorMessage,
-            signal,
-            this.visionAnalyzer,
+            { signal, visionAnalyzer: this.visionAnalyzer },
           );
         }
       }
@@ -690,21 +710,27 @@ export class DragAndDrop extends BaseVisualChange {
     return value >= min && value <= max;
   }
 
-  private async executeDrag(
-    startX: number,
-    startY: number,
-    endX: number,
-    endY: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    signal?: AbortSignal,
-  ): Promise<{
-    success: boolean;
-    error?: string;
-    a11yTotalTimeMs?: number;
-    a11yGestureTimeMs?: number;
-  }> {
+  private dispatchDrag: (request: DragDispatchRequest) => Promise<DragDispatchOutcome> = (
+    request,
+  ) => this.executeDrag(request);
+
+  /** Replaces the platform dispatch so tests can observe the resolved drag request. */
+  setDragDispatchForTesting(
+    dispatch: (request: DragDispatchRequest) => Promise<DragDispatchOutcome>,
+  ): void {
+    this.dispatchDrag = dispatch;
+  }
+
+  private async executeDrag({
+    startX,
+    startY,
+    endX,
+    endY,
+    pressDurationMs,
+    dragDurationMs,
+    holdDurationMs,
+    signal,
+  }: DragDispatchRequest): Promise<DragDispatchOutcome> {
     throwIfAborted(signal);
 
     const timeoutMs = getIosDragTimeoutMs(pressDurationMs, dragDurationMs, holdDurationMs);

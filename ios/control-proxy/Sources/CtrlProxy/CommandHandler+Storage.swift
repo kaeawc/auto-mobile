@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 
 extension CommandHandler {
@@ -11,7 +12,7 @@ extension CommandHandler {
         guard let appId = normalizedBundleId(requested) else {
             throw CommandError.missingParameter("appId")
         }
-        guard normalizedBundleId(await elementLocator.refreshForegroundBundleId()) == appId else {
+        guard await refreshTrackedForegroundBundleId() == appId else {
             throw CommandError.executionFailed("iOS key-value storage requires \(appId) to be the foreground app")
         }
         guard normalizedBundleId(await sdkHierarchyClient?.fetchServerInfo()?.bundleId) == appId else {
@@ -27,6 +28,43 @@ extension CommandHandler {
             )
         }
         return (appId, client)
+    }
+
+    func handleDeleteKeychainItem(
+        _ request: RequestDeleteKeychainItem,
+        startTime: Date
+    )
+        async -> DeleteKeychainItemResponse
+    {
+        func response(_ outcome: KeychainDeleteOutcome, error: String? = nil) -> DeleteKeychainItemResponse {
+            DeleteKeychainItemResponse(
+                requestId: request.requestId,
+                outcome: outcome,
+                totalTimeMs: totalTimeMs(from: startTime),
+                error: error
+            )
+        }
+        guard let appId = normalizedBundleId(request.appId),
+              await refreshTrackedForegroundBundleId() == appId
+        else {
+            return response(KeychainDeleteOutcome(outcome: "app_id_mismatch"))
+        }
+        guard let sdkBundle = normalizedBundleId(await sdkHierarchyClient?.fetchServerInfo()?.bundleId) else {
+            return response(KeychainDeleteOutcome(outcome: "sdk_unavailable"))
+        }
+        guard sdkBundle == appId else { return response(KeychainDeleteOutcome(outcome: "app_id_mismatch")) }
+        guard let client = sdkKeychainClient else { return response(KeychainDeleteOutcome(outcome: "sdk_unavailable")) }
+        do {
+            return try await response(client.deleteKeychainItem(
+                appId: appId,
+                sessionId: request.sessionId,
+                mutationToken: request.mutationToken,
+                confirm: request.confirm,
+                selector: request.selector
+            ))
+        } catch {
+            return response(KeychainDeleteOutcome(outcome: "sdk_unavailable"), error: error.localizedDescription)
+        }
     }
 
     func handleListPreferenceFiles(_ request: RequestEnvelope, startTime: Date) async -> StorageFilesResponse {

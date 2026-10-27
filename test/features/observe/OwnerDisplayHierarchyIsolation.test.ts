@@ -1,3 +1,8 @@
+import {
+  DeviceDataStreamSocketServer,
+  installDeviceDataStreamSocketServerForTesting,
+} from "../../../src/daemon/deviceDataStreamSocketServer";
+import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
@@ -104,7 +109,11 @@ async function connectedClient(deviceId: string, adb = new FakeAdbExecutor()) {
       timer,
     },
   );
-  const stream = spyOn(client, "pushHierarchyToObservationStream");
+  const streamServer = new DeviceDataStreamSocketServer("/unused-observation-test", timer, {
+    authorize: () => {},
+  });
+  installDeviceDataStreamSocketServerForTesting(streamServer);
+  const stream = spyOn(streamServer, "pushHierarchyUpdate").mockReturnValue(null);
   const backoff = spyOn(client, "startScreenshotBackoff").mockImplementation(() => {});
   expect(await client.ensureConnected()).toBe(true);
   expect((Reflect.get(client, "requestManager") as RequestManager).getPendingCount()).toBe(0);
@@ -119,6 +128,7 @@ async function connectedClient(deviceId: string, adb = new FakeAdbExecutor()) {
 }
 
 afterEach(() => {
+  installDeviceDataStreamSocketServerForTesting(null);
   AndroidCtrlProxyClient.resetInstances();
   PortManager.setPortAvailabilityCheckerForTesting(null);
 });
@@ -359,6 +369,8 @@ test("a raw read of another display leaves the default display's cache and geome
       adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
       timer: new FakeTimer(),
       androidRawClient: () => client,
+      viewHierarchy: new FakeViewHierarchy(),
+      adb: new FakeAdbExecutor(),
     });
     const observed = { viewHierarchy: { hierarchy: {} } } as ObserveResult;
 
@@ -375,6 +387,9 @@ test("a raw read of another display leaves the default display's cache and geome
     expect(client.screenGeometry.bind()).toEqual(geometryBefore);
     expect(client.getScreenScaleMetadata()).toEqual(scaleBefore);
     const action = await client.getLatestHierarchy(false);
+    if (!action.hierarchy) {
+      throw new Error("Expected cached hierarchy");
+    }
     expect(action.hierarchy.hierarchy.text).toBe("default");
     expect(socket.sent.filter((wire) => wire.includes("request_hierarchy"))).toHaveLength(1);
   } finally {

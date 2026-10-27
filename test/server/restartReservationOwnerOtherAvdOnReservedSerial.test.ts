@@ -2,7 +2,6 @@ import { describe, expect } from "bun:test";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
-import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -15,7 +14,7 @@ import {
 import { restartResumeSessionForDevice } from "../../src/server/deviceToolsStartDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -32,15 +31,6 @@ isolateToolRegistry();
 // Fixture follows test/server/restartReservationStartAdmission.test.ts.
 const HOLDER = "restart-holder";
 const CONNECTION = "holder-connection";
-interface Internals {
-  releaseDisconnectedRecoverySessionWithRetry(
-    id: string,
-    deviceId: string,
-    reason: SessionReleaseReason,
-  ): Promise<void>;
-  rehydrationReservations: Map<string, { restartHandoff?: boolean; deviceId: string }>;
-}
-
 class RestartDeviceManager extends FakeDeviceUtils {
   /** A stopped AVD has no serial; the emulator takes the lowest free console port at boot. */
   override async startDevice(...args: Parameters<FakeDeviceUtils["startDevice"]>) {
@@ -112,9 +102,9 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
       displayInventory: new FakeDisplayInventoryProvider(),
     });
     const previousCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    const deviceSessions = new FakeDeviceSessionManager();
+    const deviceSessions = new FakeDeviceReadiness();
     deviceSessions.setConnectedDevices([device]);
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessions });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: deviceSessions });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { recordToolCall: async () => {} },
     });
@@ -151,7 +141,7 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     const liveRow = (await persistence.getSession!(HOLDER))!;
     liveRow.expires_at_ms = live.expiresAt;
     liveRow.session_timeout_ms = live.sessionTimeoutMs;
-    const internals = pool as unknown as Internals;
+    const internals = pool.testHooks;
     // restart-phone's emulator dies: HOLDER is handed off with the 180 s restart hold and the
     // serial emulator-5554 leaves the pool (its console port is now free).
     await internals.releaseDisconnectedRecoverySessionWithRetry(
@@ -161,8 +151,8 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     );
     await pool.releaseDevice(device.deviceId, HOLDER);
     manager.setBootedDevices("android", []);
-    await pool.removeDevice(device.deviceId, true, pool.getDevice(device.deviceId));
-    await drainMicrotasks();
+    await pool.removeDevice(device.deviceId, true, pool.getDevice(device.deviceId) ?? undefined);
+    await drainMicrotasks(40);
     registerDeviceTools();
     manager.clearHistory();
     // A second, stopped AVD. The emulator takes the lowest free console port, so its boot lands
@@ -252,7 +242,9 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     const f = await fixture();
     f.manager.setBootedDevices("android", [f.device]);
     await f.pool.refreshDevices();
-    expect(restartResumeSessionForDevice({ __mcpSessionId: CONNECTION }, f.device)).toBe(HOLDER);
+    expect(
+      restartResumeSessionForDevice({ platform: "android", __mcpSessionId: CONNECTION }, f.device),
+    ).toBe(HOLDER);
   });
 
   test("a binding taking the device keeps priority over the fallback hold", async () => {
@@ -265,7 +257,7 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
           ? {
               platform: "android",
               stableDeviceId: "restart-phone",
-              holder: "free",
+              holder: "session_broker",
               scopeKey: "managed-scope",
               bindingIndex: null,
               scopeState: null,
@@ -276,7 +268,9 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     f.manager.setBootedDevices("android", [f.device]);
     await f.pool.refreshDevices();
     managed = true;
-    expect(restartResumeSessionForDevice({ __mcpSessionId: CONNECTION }, f.device)).toBeUndefined();
+    expect(
+      restartResumeSessionForDevice({ platform: "android", __mcpSessionId: CONNECTION }, f.device),
+    ).toBeUndefined();
     expect(f.internals.rehydrationReservations.get(HOLDER)?.restartHandoff).toBe(true);
   });
 });

@@ -5,7 +5,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { withAdmittedSessionEcho } from "../../src/server/routedSessionEcho";
 import { sessionRenderedObservation } from "../../src/features/action/TargetDisplayAction";
 import { getDeviceLabelMap, planLifecycleSessionUuid } from "../../src/server/deviceLabelMapping";
-import { resolveAppearanceSessionKey } from "../../src/server/appearanceSessionKey";
+import { resolveAppearanceSessionKey } from "../../src/daemon/appearanceSessionKey";
 import { sessionRenderedDisplayGeneration } from "../../src/features/action/BaseVisualChange";
 
 function contextWith(reads: ReturnType<DaemonContext["renderedDisplaySessions"]>): DaemonContext {
@@ -18,9 +18,15 @@ function contextWith(reads: ReturnType<DaemonContext["renderedDisplaySessions"]>
     requireFullDevicePool: () => {
       throw new Error("DaemonState not initialized");
     },
+    requireDeviceSessionRegistry: () => {
+      throw new Error("DaemonState not initialized");
+    },
     requireDevicePoolWrites: () => {
       throw new Error("DaemonState not initialized");
     },
+    daemonState: () => DaemonState.getInstance(),
+    isSessionBrokerMode: () => false,
+    sessionBrokerService: () => undefined,
     isInitialized: () => false,
     fullDevicePool: () => undefined,
     devicePool: () => undefined,
@@ -43,7 +49,7 @@ describe("DaemonContext", () => {
 
   test("injected context feeds rendered-display reads without DaemonState", () => {
     const ctx = contextWith({
-      getSessionForDevice: (deviceId) => (deviceId === "d1" ? "s1" : undefined),
+      getSessionForDevice: (deviceId) => (deviceId === "d1" ? "s1" : null),
       getLastRenderedDisplayKey: () => "panel-a",
       getLastRenderedDisplayGeneration: () => 3,
       getLastRenderedDisplayRevision: () => 7,
@@ -78,19 +84,11 @@ describe("DaemonContext", () => {
       getDeviceLabels: () => ({ a: "base" }),
       getBaseSessionOfDerivedLabel: (uuid: string) => (uuid === "base:b" ? "base" : undefined),
     });
-    const ctx: DaemonContext = {
-      renderedDisplaySessions: () => undefined,
-      sessionManager: () => manager,
-      devicePool: () => undefined,
-    };
+    const ctx: DaemonContext = { ...contextWith(undefined), sessionManager: () => manager };
     expect(getDeviceLabelMap("base", ctx)).toEqual({ a: "base" });
     expect(planLifecycleSessionUuid("base:b", ctx)).toBe("base");
     expect(planLifecycleSessionUuid("other", ctx)).toBe("other");
-    const none: DaemonContext = {
-      renderedDisplaySessions: () => undefined,
-      sessionManager: () => undefined,
-      devicePool: () => undefined,
-    };
+    const none = contextWith(undefined);
     expect(getDeviceLabelMap("base", none)).toBeNull();
     expect(resolveAppearanceSessionKey(" s1 ", none)).toBe("s1");
   });

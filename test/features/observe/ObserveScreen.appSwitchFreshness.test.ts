@@ -160,11 +160,7 @@ describe("observe app-switch cache recovery", () => {
       const result = await waitForObservation(
         h.screen,
         { text: "App content", timeoutMs: 500 },
-        undefined,
-        true,
-        h.timer,
-        "android",
-        "none",
+        { skipBackStack: true, timer: h.timer, platform: "android", screenshot: "none" },
       );
       expect(result.observation.freshness?.category).toBe("window_identity");
       expect(h.reads).toHaveLength(1);

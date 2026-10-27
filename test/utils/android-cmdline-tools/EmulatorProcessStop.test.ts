@@ -1,6 +1,6 @@
-import { expect, test, spyOn } from "bun:test";
+import { expect, test, spyOn, afterEach, mock } from "bun:test";
 import { readFileSync } from "node:fs";
-import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
+import { parsePsSnapshot } from "../../../src/devices/bootAdmission/psSnapshot";
 import {
   EMULATOR_TERM_GRACE_MS,
   EMULATOR_MIN_TERM_GRACE_MS,
@@ -9,12 +9,17 @@ import {
   ProcessTableEmulatorProcessStopper,
 } from "../../../src/utils/android-cmdline-tools/EmulatorProcessStop";
 import {
+  FakeEmulatorProcessStopper,
   FakeEmulatorProcessSignaler,
   FakeEmulatorProcessTableSource,
 } from "../../fakes/FakeEmulatorProcessStopper";
+import { ProcessTableReader } from "../../../src/devices/bootAdmission/processTableRetry";
+import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
 import { FakeLockOwnerGenerationProbe } from "../../fakes/FakeLockOwnerGenerationProbe";
+
+afterEach(() => mock.restore());
 
 const rows = parsePsSnapshot(
   readFileSync(
@@ -35,6 +40,69 @@ function fixture() {
   const stopper = new ProcessTableEmulatorProcessStopper(table, signaler, timer);
   return { table, signaler, timer, stopper, options: { deadlineMs: 30_000 } };
 }
+
+test("AVD deletion probe finds qemu without a serial or port and fails closed on unreadable tables", async () => {
+  const f = fixture();
+  f.table.rows = [
+    { pid: 4242, ppid: 1, command: "qemu-system-aarch64 -avd wanted" },
+    { pid: 4243, ppid: 1, command: "qemu-system-aarch64 -avd other -port 5556" },
+    { pid: 4244, ppid: 1, command: "editor -avd wanted" },
+  ];
+  expect(await f.stopper.describeAvd("wanted", f.options)).toEqual({
+    kind: "read",
+    candidates: [{ pid: 4242, command: "qemu-system-aarch64 -avd wanted" }],
+  });
+  expect(await f.stopper.describeAvd("stopped", f.options)).toEqual({
+    kind: "read",
+    candidates: [],
+  });
+  f.table.results.push({ error: "ps unavailable" });
+  expect(await f.stopper.describeAvd("wanted", f.options)).toMatchObject({ kind: "unreadable" });
+  expect(f.signaler.signals).toHaveLength(0);
+});
+
+test("unsupported platform is distinct only for the AVD deletion fence", async () => {
+  const executor = new FakeHostCommandExecutor();
+  const timer = new FakeTimer();
+  const stopper = new ProcessTableEmulatorProcessStopper(
+    new ProcessTableReader(executor, { timer, processTableSupported: false }),
+    new FakeEmulatorProcessSignaler(),
+    timer,
+  );
+  const options = { deadlineMs: 30_000 };
+  expect(await stopper.describeAvd("wanted", options)).toMatchObject({ kind: "unsupported" });
+  expect(await stopper.describeSerial("emulator-5556", options)).toMatchObject({
+    kind: "unreadable",
+  });
+  expect(await stopper.identify(target, options)).toMatchObject({ kind: "unreadable" });
+  expect(executor.getExecutedCommands()).toHaveLength(0);
+});
+
+test("fake AVD probe filters exact names, records calls, and scripts independently of serials", async () => {
+  const stopper = new FakeEmulatorProcessStopper();
+  const options = { deadlineMs: 30_000 };
+  stopper.avdCandidates = [
+    { pid: 42, command: "qemu-system-aarch64 -avd wanted -port 5556" },
+    { pid: 43, command: "qemu-system-aarch64 @wanted" },
+    { pid: 44, command: "qemu-system-aarch64 -avd wanted-other" },
+    { pid: 45, command: "editor -avd wanted" },
+  ];
+  expect(await stopper.describeAvd("wanted", options)).toEqual({
+    kind: "read",
+    candidates: stopper.avdCandidates.slice(0, 2),
+  });
+  expect(await stopper.describeAvd("emulator-5556", options)).toEqual({
+    kind: "read",
+    candidates: [],
+  });
+  expect(stopper.describeAvdCalls.map(([name]) => name)).toEqual(["wanted", "emulator-5556"]);
+  stopper.describeUnreadable = "serial-only failure";
+  expect(await stopper.describeAvd("wanted", options)).toMatchObject({ kind: "read" });
+  stopper.avdDescription = { kind: "unsupported", detail: "platform" };
+  expect(await stopper.describeAvd("wanted", options)).toMatchObject({ kind: "unsupported" });
+  stopper.avdDescription = { kind: "unreadable", detail: "ps failed" };
+  expect(await stopper.describeAvd("wanted", options)).toMatchObject({ kind: "unreadable" });
+});
 
 test.each([
   "after-term",

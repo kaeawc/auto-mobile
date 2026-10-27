@@ -2,17 +2,17 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { ActionableError } from "../../models/ActionableError";
-import { isTruthyEnvValue } from "../../utils/ctrlProxyDownloadControl";
 import { logger } from "../../utils/logger";
 import { VideoServerJarProvider } from "./VideoServerJarProvider";
 import { WEBRTC_ENV } from "./webrtcStreamingConfig";
+import { ENV, readEnvBool } from "../../config/env";
 
 /**
  * Env override pointing at an explicit, already-built `automobile-video.jar`.
  * Highest resolution precedence; never verified against a checksum (it is a
  * developer's own local artifact).
  */
-export const VIDEO_SERVER_JAR_ENV = "AUTOMOBILE_VIDEO_SERVER_JAR";
+export const VIDEO_SERVER_JAR_ENV = ENV.VIDEO_SERVER_JAR.name;
 
 /**
  * When set (`1`/`true`), any degrade-to-`screenrecord` case (no verifiable jar
@@ -20,7 +20,7 @@ export const VIDEO_SERVER_JAR_ENV = "AUTOMOBILE_VIDEO_SERVER_JAR";
  * `assertPinnedVersionVerifiable` fail-closed pattern. A checksum MISMATCH is
  * always fatal regardless of this flag.
  */
-export const REQUIRE_VIDEO_SERVER_ENV = "AUTOMOBILE_REQUIRE_VIDEO_SERVER";
+export const REQUIRE_VIDEO_SERVER_ENV = ENV.REQUIRE_VIDEO_SERVER.name;
 
 /**
  * When set (`1`/`true`), never touch the network: resolve from the local
@@ -28,7 +28,7 @@ export const REQUIRE_VIDEO_SERVER_ENV = "AUTOMOBILE_REQUIRE_VIDEO_SERVER";
  * `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD`, whose CtrlProxy APK is mandatory
  * (different semantics; the jar is optional and degrades to `screenrecord`).
  */
-export const SKIP_VIDEO_SERVER_DOWNLOAD_ENV = "AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD";
+export const SKIP_VIDEO_SERVER_DOWNLOAD_ENV = ENV.SKIP_VIDEO_SERVER_DOWNLOAD.name;
 
 /** Resolve the explicit env override iff it points at an existing file. */
 function resolveOverride(env: NodeJS.ProcessEnv): string | null {
@@ -106,8 +106,8 @@ export async function resolveVideoServerJar(
     return override;
   }
 
-  const skip = isTruthyEnvValue(env[SKIP_VIDEO_SERVER_DOWNLOAD_ENV]);
-  const requireJar = isTruthyEnvValue(env[REQUIRE_VIDEO_SERVER_ENV]);
+  const skip = readEnvBool(ENV.SKIP_VIDEO_SERVER_DOWNLOAD, env);
+  const requireJar = readEnvBool(ENV.REQUIRE_VIDEO_SERVER, env);
 
   // 2 & 3. Cached-or-downloaded, verified jar — unless downloads are skipped.
   // A checksum mismatch/corruption throws here and is intentionally NOT caught:
@@ -176,7 +176,7 @@ export async function prefetchVideoServerJar(deps: PrefetchVideoServerJarDeps = 
   // Prefetch warms the DOWNLOAD cache specifically, so it re-derives the two
   // download-relevant gates from resolveVideoServerJar's precedence: an override
   // or SKIP means the download is never used, so there is nothing to warm.
-  if (isTruthyEnvValue(env[SKIP_VIDEO_SERVER_DOWNLOAD_ENV])) {
+  if (readEnvBool(ENV.SKIP_VIDEO_SERVER_DOWNLOAD, env)) {
     logger.debug(
       `[VIDEO_JAR] ${SKIP_VIDEO_SERVER_DOWNLOAD_ENV} set; skipping background jar prefetch`,
     );

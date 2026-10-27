@@ -19,9 +19,9 @@ import {
   DAEMON_VERSION,
   getCliSessionIdleTimeoutMs,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
+import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { logger } from "../../src/utils/logger";

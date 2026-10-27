@@ -1,7 +1,25 @@
+import type { DeviceProfileSelector } from "../../models/ManufacturerProfileIds";
 import type { SessionDeviceProfile } from "../../devices/sessionRequirements";
 import type { BrokerResourceRecord } from "./store";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionBrokerFailure } from "../../devices/sessionBrokerResult";
+import type { SessionBrokerResetMode } from "../../devices/sessionBrokerResult";
+
+export interface ResetOutcome {
+  outcome: "clean" | "pending" | `fallback:${Exclude<SessionBrokerResetMode, "none">}`;
+  mode: SessionBrokerResetMode;
+  phases: Record<string, number>;
+  fallbackReason?: string;
+}
+
+export type ResetResult = "clean" | "pending" | ResetOutcome;
+export type ResetBootRunner = <Result>(operation: () => Promise<Result>) => Promise<Result>;
+
+export interface SessionPreparationTiming {
+  createMs?: number;
+  bootMs?: number;
+  automationReadyMs?: number;
+}
 
 export class SessionBrokerFailureError extends ActionableError {
   constructor(readonly failure: SessionBrokerFailure) {
@@ -15,6 +33,8 @@ export interface SessionDevicePreparationOptions {
   preparationTimeoutMs?: number;
   idleTimeoutMs?: number;
   executionOwnerPid?: number;
+  /** Applied to the prepared Android session's device after readiness (#14058). */
+  deviceProfile?: DeviceProfileSelector;
 }
 
 /**
@@ -23,17 +43,27 @@ export interface SessionDevicePreparationOptions {
  * These private resource records never cross the daemon's consumer protocol.
  */
 export interface SessionBrokerDevicePort {
+  managesResetBootSlots?: boolean;
   prepare(
     resource: BrokerResourceRecord,
     options: SessionDevicePreparationOptions,
-  ): Promise<{ sessionId: string; profile: SessionDeviceProfile }>;
+  ): Promise<{
+    sessionId: string;
+    profile: SessionDeviceProfile;
+    timing?: SessionPreparationTiming;
+  }>;
   /** True only when all prior session work and restoration have settled. */
   release(sessionId: string): Promise<{ settled: boolean }>;
   /**
    * Drives the existing durable deletion journal. "absent" requires authoritative absence, not
-   * delete-command success. Pending work remains counted and discoverable on the next pass.
+   * delete-command success. Shutdown cancellation must settle this call and fence later work.
+   * Pending work remains counted and discoverable on the next pass.
    */
-  destroy(resource: BrokerResourceRecord): Promise<"absent" | "pending">;
+  destroy(resource: BrokerResourceRecord, signal?: AbortSignal): Promise<"absent" | "pending">;
   /** Optional until the clean baseline is qualified; absence means zero pooling. */
-  reset?(resource: BrokerResourceRecord): Promise<"clean" | "pending">;
+  reset?(
+    resource: BrokerResourceRecord,
+    signal?: AbortSignal,
+    runResetBoot?: ResetBootRunner,
+  ): Promise<ResetResult>;
 }

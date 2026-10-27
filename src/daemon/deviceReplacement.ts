@@ -4,7 +4,7 @@ import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } fr
 import { logger } from "../utils/logger";
 import type { DeviceCriteriaMatcher } from "./DeviceCriteriaMatcher";
 import type { ConnectionOwnership } from "./connectionOwnership";
-import { DeviceOwnedByOtherDaemonError } from "./deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
 import type {
   DevicePool,
   DeviceAutolockChildProcess as ChildProcess,
@@ -59,7 +59,7 @@ export interface DeviceReplacementPort extends Pick<DevicePool, "removeDevice" |
   releaseDeviceClaim(deviceId: string): void;
   readonly sessionManager: Pick<
     SessionManager,
-    "getSession" | "releaseSessionIfOwned" | "rebindSessionForTerminalReleaseRecovery"
+    "getSession" | "releaseSession" | "rebindSessionForTerminalReleaseRecovery"
   >;
   retrySessionRelease<T>(
     sessionId: string,
@@ -256,11 +256,15 @@ export class DeviceReplacement {
         preservedSession.sessionId,
         preservedSession.assignedDevice,
         () =>
-          this.port.sessionManager.releaseSessionIfOwned(
+          this.port.sessionManager.releaseSession(
             preservedSession.sessionId,
-            preservedSession,
-            preservedSession.assignedDevice,
             deviceLossCancellationReason(replacementDevice?.id ?? preservedSession.assignedDevice),
+            {
+              expectedOwner: {
+                session: preservedSession,
+                deviceId: preservedSession.assignedDevice,
+              },
+            },
           ),
       );
     }

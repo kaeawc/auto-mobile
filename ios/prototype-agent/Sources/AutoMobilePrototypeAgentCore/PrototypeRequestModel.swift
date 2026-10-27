@@ -52,6 +52,7 @@ enum PrototypeRequestErrorCode: String, CaseIterable, Sendable {
     case invalidURL = "invalid_url"
     case invalidRequest = "invalid_request"
     case network
+    case blockedDestination = "blocked_destination"
     case tooManyInFlight = "too_many_in_flight"
     case httpError = "http_error"
     case invalidResponse = "invalid_response"

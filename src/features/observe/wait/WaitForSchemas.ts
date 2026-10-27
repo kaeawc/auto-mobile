@@ -6,11 +6,11 @@ import { MAX_WAIT_FOR_TIMEOUT_MS } from "../waitForTimeout";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ActionableError } from "../../../models/ActionableError";
-import { JsonSchemaOverride } from "../../../server/toolSchemaHelpers";
+import { JsonSchemaOverride } from "../../../utils/schemaHelpers";
 import {
   nestedElementContainerSchema,
   resolverSelectionStrategySchema,
-} from "../../../server/elementSelectorSchemas";
+} from "../../../models/elementSelectorSchemas";
 import type { HierarchyLayer } from "../../../models/HierarchyLayer";
 import { logger } from "../../../utils/logger";
 import { hasElementPredicate } from "./WaitEvaluation";

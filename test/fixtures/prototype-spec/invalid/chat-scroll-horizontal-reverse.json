@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "scroll",
+      "child": {
+        "type": "spacer"
+      },
+      "axis": "horizontal",
+      "reverse": true
+    }
+  },
+  "expectedPath": "root.reverse",
+  "expectedMessage": "Chat scroll options need a vertical scroll"
+}

@@ -1,3 +1,4 @@
+import { toolField } from "../helpers/toolResponse";
 import { describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -9,7 +10,7 @@ import {
   type PlanLifecycleInput,
 } from "../../src/server/toolRegistry";
 import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
-import { createStructuredToolResponse, getStructuredField } from "../../src/utils/toolUtils";
+import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -95,7 +96,7 @@ describe("PlanExecutor nested lifecycle", () => {
     try {
       // Internal calls without an enclosing plan still own their lifecycle.
       const response = await registry.callInternal("executePlan", { sessionUuid: "outer-session" });
-      expect(getStructuredField(response, "success")).toBe(true);
+      expect(toolField(response, "success")).toBe(true);
       expect(events).toEqual(["first", "nested", "third", "release"]);
       expect(lifecycleInputs.map(({ name, nestedInPlan }) => ({ name, nestedInPlan }))).toEqual([
         { name: "firstStep", nestedInPlan: true },

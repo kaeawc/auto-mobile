@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../../../fakes/FakeEmulatorProcessStopper";
 import { afterAll, afterEach, beforeEach, describe, expect } from "bun:test";
 import { createDaemonBrokerDeviceAcquisition } from "../../../../src/daemon/sessionBroker/provisioning/daemonDeviceAcquisition";
 import type { BrokerDeviceAcquisitionSessions } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
@@ -6,7 +7,10 @@ import { DaemonState } from "../../../../src/daemon/daemonState";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../../../src/devices/virtualDeviceLifecycleCoordinator";
 import { AndroidBootAdmissionGate } from "../../../../src/features/bootAdmission/AndroidBootAdmissionGate";
 import type { AndroidCapacitySample } from "../../../../src/features/bootAdmission/AndroidCapacitySource";
-import { assertBootCapacityAvailable } from "../../../../src/features/bootAdmission/sharedBootAdmissionGates";
+import {
+  assertBootCapacityAvailable,
+  reserveBootCapacity,
+} from "../../../../src/features/bootAdmission/sharedBootAdmissionGates";
 import type { DeviceInfo } from "../../../../src/models/index";
 import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import type { Platform } from "../../../../src/models/Platform";
@@ -19,7 +23,7 @@ import { ToolRegistry } from "../../../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../../../src/server/videoRecordingManager";
+} from "../../../../src/daemon/videoRecordingManager";
 import { classifyDisplayCutout } from "../../../../src/utils/displayCutout";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../../../src/utils/provisionedDeviceTransportFence";
 import { FakeDeviceResourceObserver } from "../../../fakes/FakeDeviceResourceObserver";
@@ -77,7 +81,9 @@ describe("daemon binding wiring: replacing a binding's device against boot capac
   let registry: FakeBindingRegistry;
   let sample: AndroidCapacitySample;
   let created: string[];
+  let reserveCapacity: typeof reserveBootCapacity;
   let checkBootCapacity: (platform: Platform, signal?: AbortSignal) => Promise<void>;
+  let capacityChecks: number;
   let restorePipelineOverrides: (() => void) | undefined;
 
   const setup = async () => {
@@ -101,14 +107,20 @@ describe("daemon binding wiring: replacing a binding's device against boot capac
     deviceManager.setDeviceImages("android", [stoppedAvd(OLD_AVD, "pixel_8")]);
     sample = AT_LIMIT;
     created = [];
+    capacityChecks = 0;
     // The process-wide gate the provision path and the reconciler both consult in production.
     const gate = new AndroidBootAdmissionGate({ sample: async () => sample }, timer, {
       env: { AUTOMOBILE_ANDROID_MAX_BOOTED: "1" },
     });
-    checkBootCapacity = (platform, signal) =>
-      assertBootCapacityAvailable(platform, { signal }, { android: gate, ios: undefined });
+    reserveCapacity = (platform, options) =>
+      reserveBootCapacity(platform, options, { android: gate });
+    checkBootCapacity = async (platform, signal) => {
+      capacityChecks++;
+      await assertBootCapacityAvailable(platform, { signal }, { android: gate, ios: undefined });
+    };
     const resourceObserver = new FakeDeviceResourceObserver();
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env,
       timer,
       lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
@@ -190,9 +202,16 @@ describe("daemon binding wiring: replacing a binding's device against boot capac
   afterAll(cleanup);
 
   /** Acquire binding 0 with a spec its stopped device (a pixel_8) does not satisfy. */
-  async function acquireReplacement() {
+  async function acquireReplacement(
+    fresh = false,
+    preparationTimeoutMs?: number,
+    registryDelayMs = 0,
+  ) {
     const { acquisition } = createDaemonBrokerDeviceAcquisition({
-      registry: async () => registry,
+      registry: async () => {
+        timer.advanceTime(registryDelayMs);
+        return registry;
+      },
       sessions: new NoSessions(),
       pool: {
         getAllDevices: () => [],
@@ -208,7 +227,7 @@ describe("daemon binding wiring: replacing a binding's device against boot capac
       owner: () => ({ daemonId: "daemon-1", pid: 1 }),
       timer,
       journal: {
-        owner: { daemonId: "daemon-1", pid: 1, processGeneration: "gen-1" },
+        owner: { daemonId: "daemon-1", pid: 1, processGenerationToken: "gen-1" },
         inFlight: new BindingJournalInFlight(),
       },
       tooling: {
@@ -222,11 +241,14 @@ describe("daemon binding wiring: replacing a binding's device against boot capac
         androidImageCatalog: { listInstalledPackages: async () => [RUNTIME] },
         androidProfileCatalog: { listProfileIds: async () => ["pixel_8", "pixel_9"] },
         checkBootCapacity,
+        reserveBootCapacity: reserveCapacity,
       },
     });
     const config = buildBrokerProvisionRequest({
       contractVersion: 1,
       ...SCOPE,
+      ...(fresh ? { runnerNamespace: "fresh-create" } : {}),
+      ...(preparationTimeoutMs === undefined ? {} : { preparationTimeoutMs }),
       localBindingCapacity: 1,
       requests: [
         {
@@ -237,7 +259,10 @@ describe("daemon binding wiring: replacing a binding's device against boot capac
         },
       ],
     });
-    const result = await acquisition.acquire(config, { livenessOwnerToken: "token" });
+    const result = await acquisition.acquire(config, {
+      livenessOwnerToken: "token",
+      signal: new AbortController().signal,
+    });
     const scopeKey = result.scope.scopeKey!;
     return {
       result,
@@ -258,6 +283,38 @@ describe("daemon binding wiring: replacing a binding's device against boot capac
     expect(avds).toEqual([OLD_AVD]);
     expect(created).toEqual([]);
     expect(assignment).toMatchObject({ stableDeviceId: OLD_AVD, generation: 1, state: "ready" });
+  });
+
+  test("a fresh create shares its available preflight with the real provision handler exactly once", async () => {
+    sample = { emulatorSerials: [], emulatorProcessRssBytes: [], host: HOST, errors: [] };
+
+    const { result } = await acquireReplacement(true);
+
+    expect(result.outcome).toBe("ready");
+    expect(result.bindings[0]).toMatchObject({ disposition: "created" });
+    expect(created).toHaveLength(1);
+    expect(capacityChecks).toBe(1);
+  });
+
+  test("a 4 s preparation deadline aborts the pending probe and keeps discovery_incomplete", async () => {
+    const probeStarted = Promise.withResolvers<AbortSignal | undefined>();
+    checkBootCapacity = async (_platform, signal) => {
+      probeStarted.resolve(signal);
+      await new Promise<void>(() => {});
+    };
+    const startedAt = timer.now();
+    const pending = acquireReplacement(true, 4_000, 1_000);
+    const probeSignal = await probeStarted.promise;
+    expect(timer.now() - startedAt).toBe(1_000);
+    await timer.advanceTimersByTimeAsync(2_999);
+    expect(probeSignal).toBeDefined();
+    expect(probeSignal?.aborted).toBe(false);
+    await timer.advanceTimersByTimeAsync(1);
+    expect(probeSignal?.aborted).toBe(true);
+    const { result } = await pending;
+    expect(timer.now() - startedAt).toBe(4_000);
+    expect(result.failure).toMatchObject({ code: "discovery_incomplete", retryable: true });
+    expect(created).toEqual([]);
   });
 
   test("with a free boot binding the old device is deleted and its replacement created", async () => {

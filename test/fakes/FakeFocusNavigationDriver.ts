@@ -40,7 +40,7 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
   private traversalOverrides: TraversalOrderResult[] = [];
   private currentFocusOverrides: CurrentFocusResult[] = [];
 
-  setElements(elements: Element[], focusedIndex: number | null): void {
+  setElements(elements: Element[], focusedIndex: number | null = null): void {
     this.elements = elements;
     this.focusedIndex = focusedIndex;
   }
@@ -81,7 +81,7 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
     if (!this.exposeHierarchy) {
       return null;
     }
-    return { hierarchy: { node: this.elements.map((element) => ({ $: element })) } };
+    return { hierarchy: { node: { node: this.elements.map((element) => ({ $: element })) } } };
   }
 
   async requestTraversalOrder(): Promise<TraversalOrderResult> {

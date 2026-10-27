@@ -1,4 +1,8 @@
-import { describe, expect, test, spyOn } from "bun:test";
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { flatHierarchyFromFixture } from "../../helpers/flatHierarchyFixture";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { beforeEach, afterEach, describe, expect, test, spyOn } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
@@ -6,6 +10,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { Element, ViewHierarchyResult } from "../../../src/models";
+import type { TapOnElementDependencies } from "../../../src/features/action/TapOnElement";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
@@ -28,7 +33,7 @@ const createTapOnElement = (selector: FakeElementSelector) => {
       name: "test-device",
       platform: "android",
       deviceId: "emulator-5554",
-    } as any,
+    },
     new FakeAdbClient(),
     {
       timer: new FakeTimer(),
@@ -37,16 +42,20 @@ const createTapOnElement = (selector: FakeElementSelector) => {
   );
 };
 
-const createDefaultTapOnElement = () => {
+const createDefaultTapOnElement = (
+  adb: FakeAdbClient = new FakeAdbClient(),
+  extraOptions: Pick<TapOnElementDependencies, "tapStrategy" | "selectionStateTracker"> = {},
+) => {
   return new TapOnElement(
     {
       name: "test-device",
       platform: "android",
       deviceId: "emulator-5554",
-    } as any,
-    new FakeAdbClient(),
+    },
+    adb,
     {
       timer: new FakeTimer(),
+      ...extraOptions,
     },
   );
 };
@@ -58,23 +67,24 @@ const longClickResult = (success: boolean, error?: string) => ({
   error,
 });
 
-const makeElement = (bounds = { left: 0, top: 0, right: 100, bottom: 50 }) =>
-  ({
-    bounds,
-    text: "Item",
-    clickable: "true",
-  }) as any;
+const makeElement = (bounds = { left: 0, top: 0, right: 100, bottom: 50 }): Element => ({
+  bounds,
+  text: "Item",
+  clickable: "true",
+});
 
 describe("TapOnElement extended selectors", () => {
   test("budgets both Android long-press swipe forms from the requested duration", async () => {
-    const tapOn = createDefaultTapOnElement();
-    const adb = (tapOn as any).adb as FakeAdbClient;
+    const adb = new FakeAdbClient();
+    const tapOn = createDefaultTapOnElement(adb);
     adb.setCommandError(
       "shell input touchscreen swipe 50 25 50 25 20000",
       new Error("touchscreen input unavailable"),
     );
 
-    await (tapOn as any).executeAndroidLongPress(50, 25, 20_000, makeElement(), undefined, true);
+    await tapOn.testHooks.executeAndroidLongPress(50, 25, 20_000, makeElement(), {
+      skipSemanticAction: true,
+    });
 
     expect(
       adb
@@ -88,14 +98,14 @@ describe("TapOnElement extended selectors", () => {
     test("rejects when no selector provided", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({ action: "tap" });
+      const error = tapOn.testHooks.validateOptions({ action: "tap" });
       expect(error).toContain("requires exactly one");
     });
 
     test("rejects when both selectors provided", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         text: "Login",
         elementId: "com.app:id/btn",
@@ -106,7 +116,7 @@ describe("TapOnElement extended selectors", () => {
     test("accepts text as sole selector", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         text: "Login",
       });
@@ -116,7 +126,7 @@ describe("TapOnElement extended selectors", () => {
     test("accepts elementId as sole selector", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         elementId: "com.app:id/btn",
       });
@@ -126,7 +136,7 @@ describe("TapOnElement extended selectors", () => {
     test("accepts testTag as sole selector", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         testTag: "message_row_42",
       });
@@ -136,7 +146,7 @@ describe("TapOnElement extended selectors", () => {
     test("accepts textAny as sole selector", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         textAny: ["Done", "Add"],
       });
@@ -146,7 +156,7 @@ describe("TapOnElement extended selectors", () => {
     test("rejects empty textAny selector", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         textAny: [],
       });
@@ -156,7 +166,7 @@ describe("TapOnElement extended selectors", () => {
     test("accepts text with sibling flag", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         text: "Accept Terms",
         sibling: true,
@@ -167,7 +177,7 @@ describe("TapOnElement extended selectors", () => {
     test("accepts elementId with sibling flag", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         elementId: "com.app:id/label",
         sibling: true,
@@ -183,7 +193,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { text: "Login", action: "tap" },
-        { hierarchy: { node: {} } },
+        { hierarchy: { node: createFlatNodeForTest({}) } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -196,7 +206,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { elementId: "com.app:id/btn", action: "tap" },
-        { hierarchy: { node: {} } },
+        { hierarchy: { node: createFlatNodeForTest({}) } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -209,7 +219,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { testTag: "message_row_42", action: "tap" },
-        { hierarchy: { node: {} } },
+        { hierarchy: { node: createFlatNodeForTest({}) } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -222,7 +232,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { text: "Accept Terms", sibling: true, action: "tap" },
-        { hierarchy: { node: {} } },
+        { hierarchy: { node: createFlatNodeForTest({}) } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -235,7 +245,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { elementId: "com.app:id/label", sibling: true, action: "tap" },
-        { hierarchy: { node: {} } },
+        { hierarchy: { node: createFlatNodeForTest({}) } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -254,7 +264,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { textAny: ["Done", "Add"], action: "tap" },
-        { hierarchy: { node: {} } },
+        { hierarchy: { node: createFlatNodeForTest({}) } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -276,7 +286,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { textAny: ["Done", "Add"], action: "tap" },
-        { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 },
+        { hierarchy: { node: createFlatNodeForTest({}) }, screenWidth: 200, screenHeight: 200 },
       );
 
       expect(result.selection.element).toBe(visibleElement);
@@ -298,7 +308,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { textAny: ["Done", "Add"], action: "tap" },
-        { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 },
+        { hierarchy: { node: createFlatNodeForTest({}) }, screenWidth: 200, screenHeight: 200 },
       );
 
       expect(result.selection.element).toBeNull();
@@ -313,7 +323,7 @@ describe("TapOnElement extended selectors", () => {
         { textAny: ["Done", "Add"], action: "tap" },
         {
           hierarchy: {
-            node: {
+            node: createFlatNodeForTest({
               $: { bounds: { left: 0, top: 0, right: 200, bottom: 200 } },
               node: [
                 {
@@ -338,7 +348,7 @@ describe("TapOnElement extended selectors", () => {
                   },
                 },
               ],
-            },
+            }),
           },
           screenWidth: 200,
           screenHeight: 200,
@@ -360,7 +370,7 @@ describe("TapOnElement extended selectors", () => {
 
       tapOn.findElementInHierarchy(
         { text: "Email", sibling: true, action: "tap", selectionStrategy: "random" },
-        { hierarchy: { node: {} } },
+        { hierarchy: { node: createFlatNodeForTest({}) } },
       );
 
       expect(selector.lastStrategy).toBe("random");
@@ -368,32 +378,32 @@ describe("TapOnElement extended selectors", () => {
   });
 
   describe("Android long press node selectors", () => {
+    let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+    beforeEach(() => {
+      clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+    });
+    afterEach(() => {
+      clientSpy.mockRestore();
+    });
     const testTagElement: Element = {
       ...makeElement(),
       "test-tag": "message_row_42",
       actions: ["long_click"],
     };
 
-    function setup() {
+    function setup(extraOptions: Parameters<typeof createDefaultTapOnElement>[1] = {}) {
       const proxy = new FakeCtrlProxy();
       proxy.setHierarchyData({ updatedAt: 1, packageName: "com.android.systemui", hierarchy: {} });
       proxy.setViewHierarchyResult(notificationHierarchy);
-      const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(proxy);
+      clientSpy.mockReturnValue(proxy);
+      const adb = new FakeAdbClient();
       let tapOn: TapOnElement;
       try {
-        tapOn = createDefaultTapOnElement();
+        tapOn = createDefaultTapOnElement(adb, extraOptions);
       } finally {
         clientSpy.mockRestore();
       }
-      const internals = tapOn as unknown as {
-        adb: FakeAdbClient;
-        executeAndroidLongPress(
-          x: number,
-          y: number,
-          duration: number,
-          element: Element,
-        ): Promise<void>;
-      };
+      const internals = { adb, executeAndroidLongPress: tapOn.testHooks.executeAndroidLongPress };
       return { proxy, internals, tapOn };
     }
 
@@ -405,7 +415,10 @@ describe("TapOnElement extended selectors", () => {
     const repeatedIdElement: Element = { ...notificationRows[1], actions: ["long_click"] };
     const coordinateCommand = "shell input touchscreen swipe 50 25 50 25 1000";
 
-    function expectCoordinateFallback({ proxy, internals }: ReturnType<typeof setup>) {
+    function expectCoordinateFallback({
+      proxy,
+      internals,
+    }: Pick<ReturnType<typeof setup>, "proxy" | "internals">) {
       expect(proxy.getActionHistory()).toEqual([]);
       expect(proxy.getNodeActionHistory()).toEqual([]);
       expect(internals.adb.getAllCommands()).toEqual([coordinateCommand]);
@@ -416,16 +429,10 @@ describe("TapOnElement extended selectors", () => {
       const options = { action: "longPress" as const, resolvedHierarchy: notificationHierarchy };
       const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(false);
       try {
-        await tapOn.executeAndroidTap(
-          "longPress",
-          50,
-          25,
-          1000,
-          uniqueIdElement,
-          undefined,
-          options,
-          false,
-        );
+        await tapOn.executeAndroidTap("longPress", 50, 25, 1000, uniqueIdElement, {
+          options: options,
+          isTalkBackEnabled: false,
+        });
         expect(proxy.getHierarchyRequestCount()).toBe(0);
         expect(proxy.getActionHistory()).toMatchObject([
           { action: "long_click", resourceId: uniqueIdElement["resource-id"] },
@@ -451,16 +458,10 @@ describe("TapOnElement extended selectors", () => {
         const options = { action: "longPress" as const, resolvedHierarchy };
         const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(false);
         try {
-          await harness.tapOn.executeAndroidTap(
-            "longPress",
-            50,
-            25,
-            1000,
-            element,
-            undefined,
-            options,
-            false,
-          );
+          await harness.tapOn.executeAndroidTap("longPress", 50, 25, 1000, element, {
+            options: options,
+            isTalkBackEnabled: false,
+          });
           expect(harness.proxy.getHierarchyRequestCount()).toBe(0);
           expectCoordinateFallback(harness);
         } finally {
@@ -481,16 +482,11 @@ describe("TapOnElement extended selectors", () => {
         const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(raw);
         const read = spyOn(proxy, "getAccessibilityHierarchy");
         try {
-          await tapOn.executeAndroidTap(
-            "longPress",
-            50,
-            25,
-            1000,
-            uniqueIdElement,
-            controller.signal,
-            options,
-            false,
-          );
+          await tapOn.executeAndroidTap("longPress", 50, 25, 1000, uniqueIdElement, {
+            signal: controller.signal,
+            options: options,
+            isTalkBackEnabled: false,
+          });
           expect(read).toHaveBeenCalledTimes(raw ? 0 : 1);
           if (!raw) {
             expect(read).toHaveBeenCalledWith(undefined, {
@@ -517,16 +513,10 @@ describe("TapOnElement extended selectors", () => {
       });
       try {
         await expect(
-          tapOn.executeAndroidTap(
-            "longPress",
-            50,
-            25,
-            1000,
-            uniqueIdElement,
-            controller.signal,
-            undefined,
-            false,
-          ),
+          tapOn.executeAndroidTap("longPress", 50, 25, 1000, uniqueIdElement, {
+            signal: controller.signal,
+            isTalkBackEnabled: false,
+          }),
         ).rejects.toThrow("Operation cancelled");
         expect(proxy.getActionHistory()).toEqual([]);
         expect(proxy.getNodeActionHistory()).toEqual([]);
@@ -542,19 +532,24 @@ describe("TapOnElement extended selectors", () => {
     ] satisfies [string, Element][])(
       "tapOn threads the hierarchy selected after the stability refresh (%s id)",
       async (kind, element) => {
-        const { tapOn, proxy, internals } = setup();
-        // The initial tree has one match; the refreshed capture may introduce another.
-        const initialHierarchy: ViewHierarchyResult = { hierarchy: { node: { $: element } } };
         const strategy = new FakeTapStrategy();
         strategy.setShouldRunPreTapStability(true);
-        const flow = tapOn as unknown as {
-          strategy: FakeTapStrategy;
-          selectionStateTracker: { prepare(): Promise<null>; finalize(): Promise<[]> };
+        const { tapOn, proxy, internals } = setup({
+          tapStrategy: strategy,
+          selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+        });
+        // The initial tree has one match; the refreshed capture may introduce another.
+        const initialHierarchy: ViewHierarchyResult = {
+          hierarchy: { node: createFlatNodeForTest({ $: element }) },
         };
-        flow.strategy = strategy;
-        flow.selectionStateTracker = { prepare: async () => null, finalize: async () => [] };
-        tapOn.observedInteraction = (callback) =>
-          callback({ viewHierarchy: initialHierarchy, screenSize: { width: 1080, height: 2400 } });
+        tapOn.observedInteraction = runBlockWith(() =>
+          buildObserveResult({
+            updatedAt: 0,
+            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+            viewHierarchy: initialHierarchy,
+            screenSize: { width: 1080, height: 2400 },
+          }),
+        );
         const stable = spyOn(
           tapOn,
           "resolveAndroidStableTapTargetAfterRefreshes",
@@ -580,10 +575,12 @@ describe("TapOnElement extended selectors", () => {
           });
           expect(result.success).toBe(true);
           expect(stable).toHaveBeenCalledTimes(1);
-          expect(dispatch.mock.calls[0]?.[6]).toMatchObject({
+          expect(dispatch.mock.calls[0]?.[5]?.options).toMatchObject({
             resolvedHierarchy: notificationHierarchy,
           });
-          expect(dispatch.mock.calls[0]?.[6]?.resolvedHierarchy).toBe(notificationHierarchy);
+          expect(dispatch.mock.calls[0]?.[5]?.options?.resolvedHierarchy).toBe(
+            notificationHierarchy,
+          );
           expect(proxy.getHierarchyRequestCount()).toBe(0);
           expect(proxy.getNodeActionHistory()).toEqual([]);
           if (kind === "unique") {
@@ -873,7 +870,7 @@ describe("TapOnElement extended selectors", () => {
 
 describe("capture-local synthetic element ids", () => {
   test("a sibling leaving the capture makes the old id stale and requires re-observe", async () => {
-    const before = structuredClone(scrollCapture.viewHierarchy);
+    const before = flatHierarchyFromFixture(structuredClone(scrollCapture.viewHierarchy));
     const mapping = assignStableViewIds(before.hierarchy);
     const oldId = "s2-3340048129449c01-2";
     const removedUuid = [...mapping].find(([, id]) => id === "s2-3340048129449c01-1")?.[0];
@@ -881,7 +878,7 @@ describe("capture-local synthetic element ids", () => {
 
     // No captured pair has this suffix disappearance. Remove only a sibling
     // subtree from the real scroll capture, then run the unchanged generator.
-    const after = structuredClone(scrollCapture.viewHierarchy);
+    const after = flatHierarchyFromFixture(structuredClone(scrollCapture.viewHierarchy));
     const removeSibling = (node: Record<string, unknown>): void => {
       if (Array.isArray(node.node)) {
         node.node = node.node.filter((child) => child["view-id"] !== removedUuid);

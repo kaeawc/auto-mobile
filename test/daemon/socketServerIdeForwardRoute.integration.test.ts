@@ -1,4 +1,4 @@
-import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
+import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -10,57 +10,14 @@ import {
 } from "./helpers/UnixSocketServerHarness";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest } from "../../src/daemon/types";
-import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
-
-function createFakeSession(
-  sessionId: string,
-  assignedDevice: string,
-  deviceLabels?: DeviceLabelMap,
-): Session {
-  return {
-    sessionId,
-    assignedDevice,
-    platform: "android",
-    createdAt: 0,
-    lastUsedAt: 0,
-    expiresAt: 60_000,
-    cacheData: { deviceLabels },
-    lastHeartbeat: 0,
-    sessionTimeoutMs: 60_000,
-    heartbeatTimeoutMs: 10_000,
-    heartbeatTimeoutSource: "default",
-    hasReceivedHeartbeat: false,
-  };
-}
-
-function createFakeDaemonState(sessionDevices: Map<string, string>) {
-  return {
-    isInitialized: () => true,
-    getSessionManager: () => ({
-      getSession: (sessionId: string) => {
-        const assignedDevice = sessionDevices.get(sessionId);
-        return assignedDevice ? createFakeSession(sessionId, assignedDevice) : null;
-      },
-      getDeviceLabels: () => undefined,
-      releaseSession: async () => null,
-    }),
-    getDevicePool: () => ({
-      refreshDevices: async () => 0,
-      getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
-      releaseDevice: async () => {},
-      resolveAutolockSessionForMcpSession: () => undefined,
-    }),
-  };
-}
+import { createFakeDaemonState, createFakeSession } from "./helpers/inputSocketHarness";
 
 function createServer(): UnixSocketServerHarness {
-  const sessionDevices = new Map<string, string>();
-  // session-a is a live daemon session; session-b exists but is unbound to a device.
-  sessionDevices.set("session-a", "device-1");
-  sessionDevices.set("session-b", "");
+  // session-a is a live daemon session; session-b is not known to the daemon session manager.
+  const sessions = new Map([["session-a", createFakeSession("session-a", "device-1", "android")]]);
   return createHarnessServer(
     join(tmpdir(), `ide-route-${randomUUID()}.sock`),
-    createFakeDaemonState(sessionDevices),
+    createFakeDaemonState(sessions),
     new FakeTimer(),
   );
 }
@@ -90,6 +47,7 @@ describe("UnixSocketServer ide/getNavigationGraph cross-session routing", () => 
 
     const request: DaemonRequest = {
       id: "1",
+      type: "mcp_request",
       method: "ide/getNavigationGraph",
       params: { sessionUuid: "session-b" },
     };
@@ -109,6 +67,7 @@ describe("UnixSocketServer ide/getNavigationGraph cross-session routing", () => 
 
     const request: DaemonRequest = {
       id: "2",
+      type: "mcp_request",
       method: "ide/getNavigationGraph",
       params: {},
     };
@@ -125,6 +84,7 @@ describe("UnixSocketServer ide/getNavigationGraph cross-session routing", () => 
 
     const request: DaemonRequest = {
       id: "3",
+      type: "mcp_request",
       method: "ide/getNavigationGraph",
       params: { sessionUuid: "session-a" },
     };
@@ -143,7 +103,12 @@ describe("tools/call selector forwarding", () => {
       bindSocketToSessionA(server, "socket-A");
       const resolved = await route(
         server,
-        { id: "selector", method: "tools/call", params: { name: "observe", arguments: args } },
+        {
+          id: "selector",
+          type: "mcp_request",
+          method: "tools/call",
+          params: { name: "observe", arguments: args },
+        },
         "socket-A",
       );
       expect(resolved.sessionUuid).toBeUndefined();
@@ -164,7 +129,12 @@ describe("tools/call selector forwarding", () => {
     };
     const resolved = await route(
       server,
-      { id: "pinned", method: "tools/call", params: { name: "observe", arguments: args } },
+      {
+        id: "pinned",
+        type: "mcp_request",
+        method: "tools/call",
+        params: { name: "observe", arguments: args },
+      },
       "socket-A",
     );
     expect(resolved.sessionUuid).toBe("session-a");
@@ -184,7 +154,12 @@ describe("tools/call selector forwarding", () => {
     const args = { sessionUuid: "session-a", platform: "ios" };
     const resolved = await route(
       server,
-      { id: "explicit", method: "tools/call", params: { name: "observe", arguments: args } },
+      {
+        id: "explicit",
+        type: "mcp_request",
+        method: "tools/call",
+        params: { name: "observe", arguments: args },
+      },
       "socket-A",
     );
     const forwarded = server.withAutolockKey(args, "socket-A", 1000);

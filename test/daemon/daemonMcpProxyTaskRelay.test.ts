@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import {
   DaemonConnectionSessionReleasedError,
   DaemonMcpProxy,
 } from "../../src/daemon/daemonMcpProxy";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -72,7 +72,8 @@ describe("DaemonMcpProxy task relay (#4668)", () => {
     await proxy.relayTaskMethod("tasks/get", { taskId: "t-1" }, true);
     await proxy.relayTaskMethod("tasks/cancel", { taskId: "t-1" }, true);
 
-    const ownerKey = client.callToolOptions[0]?.tasks?.ownerKey;
+    // An absent key becomes "", which the prefix assertion rejects.
+    const ownerKey = client.callToolOptions[0]?.tasks?.ownerKey ?? "";
     expect(ownerKey).toStartWith("proxy-tasks:");
     expect(client.relayTaskCalls.map((call) => call.tasks)).toEqual([
       { ownerKey, declared: true },
@@ -164,7 +165,6 @@ describe("DaemonMcpProxy binds a device-binding task from its completed result (
 
   function settle(status: string, extra: Record<string, unknown> = {}): void {
     taskAnswers.set("boot-1", {
-      resultType: "complete",
       ...startDeviceTask("boot-1"),
       status,
       ...extra,

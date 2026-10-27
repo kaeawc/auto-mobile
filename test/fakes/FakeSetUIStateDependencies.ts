@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../helpers/observeFixture";
 import { Element, ObserveResult, ViewHierarchyResult } from "../../src/models";
 import { TapOnElementResult } from "../../src/models/TapOnElementResult";
 import { SendTextResult } from "../../src/models/SendTextResult";
@@ -5,6 +6,7 @@ import { ClearTextResult } from "../../src/models/ClearTextResult";
 import { SwipeOnResult } from "../../src/models/SwipeOnResult";
 import { FieldType } from "../../src/models/SetUIStateResult";
 import type { ActionCall } from "../../src/features/action/ActionCall";
+import type { InputTextOptions } from "../../src/features/action/InputText";
 import {
   FieldTypeDetector,
   type FieldTypeDetection,
@@ -28,7 +30,7 @@ interface TapOnElementLike {
  * Interface for InputText dependency
  */
 interface InputTextLike {
-  execute(text: string, imeAction?: string): Promise<SendTextResult>;
+  execute(text: string, options?: InputTextOptions): Promise<SendTextResult>;
 }
 
 /**
@@ -130,8 +132,8 @@ export class FakeInputText implements InputTextLike {
   private result: SendTextResult = { success: true, text: "" };
   private resultsByText = new Map<string, SendTextResult>();
 
-  async execute(text: string, imeAction?: string): Promise<SendTextResult> {
-    this.calls.push({ text, imeAction });
+  async execute(text: string, options?: InputTextOptions): Promise<SendTextResult> {
+    this.calls.push({ text, imeAction: options?.imeAction });
     return { ...(this.resultsByText.get(text) ?? this.result), text };
   }
 
@@ -275,12 +277,12 @@ export class FakeObserveScreenForSetUIState implements ObserveScreen {
   }
 
   private createDefaultResult(): ObserveResult {
-    return {
+    return buildObserveResult({
       observationId: "fake-observation",
       updatedAt: Date.now(),
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    };
+    });
   }
 
   async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {

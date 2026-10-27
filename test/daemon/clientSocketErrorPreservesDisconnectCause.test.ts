@@ -2,6 +2,7 @@ import { FakeSocket } from "../fakes/FakeNetServer";
 import * as net from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { connectionListenerOf } from "../helpers/netConnectionListener";
 import { logger } from "../../src/utils/logger";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
@@ -10,10 +11,10 @@ let createConnectionSpy: ReturnType<typeof spyOn<typeof net, "createConnection">
 
 beforeEach(() => {
   createdSocket = undefined;
-  createConnectionSpy = spyOn(net, "createConnection").mockImplementation((_path, onConnect) => {
+  createConnectionSpy = spyOn(net, "createConnection").mockImplementation((...args: unknown[]) => {
     createdSocket = new FakeSocket();
-    queueMicrotask(onConnect!);
-    return createdSocket as unknown as net.Socket;
+    queueMicrotask(connectionListenerOf(args)!);
+    return createdSocket;
   });
 });
 
@@ -33,8 +34,7 @@ describe("DaemonClient socket error disconnect cause", () => {
       new FakeTimer(),
       ISOLATED_DAEMON_RECOVERY,
       null,
-      undefined,
-      "win32",
+      { platformOverride: "win32" },
     );
     await client.connect();
 
@@ -61,8 +61,7 @@ describe("DaemonClient socket error disconnect cause", () => {
       new FakeTimer(),
       ISOLATED_DAEMON_RECOVERY,
       null,
-      undefined,
-      "win32",
+      { platformOverride: "win32" },
     );
     await client.connect();
     const response = client.callDaemonMethod("tools/list", {}, { timeoutMs: 250 });
@@ -85,8 +84,7 @@ describe("DaemonClient socket error disconnect cause", () => {
       new FakeTimer(),
       ISOLATED_DAEMON_RECOVERY,
       null,
-      undefined,
-      "win32",
+      { platformOverride: "win32" },
     );
     await client.connect();
     const response = client.callDaemonMethod("tools/list", {}, { timeoutMs: 250 });
@@ -114,8 +112,7 @@ describe("DaemonClient socket error disconnect cause", () => {
       new FakeTimer(),
       ISOLATED_DAEMON_RECOVERY,
       null,
-      undefined,
-      "win32",
+      { platformOverride: "win32" },
     );
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {
@@ -166,8 +163,7 @@ describe("DaemonClient socket error disconnect cause", () => {
       new FakeTimer(),
       ISOLATED_DAEMON_RECOVERY,
       null,
-      undefined,
-      "win32",
+      { platformOverride: "win32" },
     );
     await client.connect();
     createdSocket!.emit("data", Buffer.from('{"id":"stale"'));

@@ -6,10 +6,9 @@ import { ManagedExecutionReowner } from "../../../helpers/deferredProvisioningFi
 import { BindingOwnershipUnconfirmedError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
 import type { BindingAssignmentRecord } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import type { ManagedExecutionReownRegistry } from "../../../helpers/deferredProvisioningFixtures";
-import { DeviceSessionManager } from "../../../../src/devices/DeviceSessionManager";
 import { IosCtrlProxyBuilder } from "../../../../src/ctrlProxy/IosCtrlProxyBuilder";
 import { resetDbWriteBarrier } from "../../../../src/db/dbWriteBarrier";
-import { executionTracker } from "../../../../src/server/executionTracker";
+import { executionTracker } from "../../../../src/daemon/executionTracker";
 import { logger } from "../../../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../../../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceSessionRepository } from "../../../fakes/FakeDeviceSessionRepository";
@@ -148,7 +147,9 @@ describe("managed execution recovery is gated before publication", () => {
         const assignment = Promise.withResolvers<void>();
         const controller = new AbortController();
         const calls: string[] = [];
-        let signal: "pending" | "fulfilled" | "rejected" = "pending";
+        const recoverySignal: { state: "pending" | "fulfilled" | "rejected" } = {
+          state: "pending",
+        };
         const record: BindingAssignmentRecord = {
           scopeKey: "scope",
           bindingIndex: 0,
@@ -190,10 +191,10 @@ describe("managed execution recovery is gated before publication", () => {
           reowner.noteRecovering(id, recovered);
           void recovered.then(
             () => {
-              signal = "fulfilled";
+              recoverySignal.state = "fulfilled";
             },
             () => {
-              signal = "rejected";
+              recoverySignal.state = "rejected";
             },
           );
         });
@@ -225,7 +226,7 @@ describe("managed execution recovery is gated before publication", () => {
         );
         await drainUntil(() => sessions.getSession(ID) !== null, { description: "publication" });
         await drainMicrotasks(80);
-        expect(signal).toBe("pending");
+        expect(recoverySignal.state).toBe("pending");
         expect(reowner.ownershipState(ID)).toBe("unconfirmed");
         await reowner.reown([ID], { rehydrated: true });
         expect(calls).toEqual([]);
@@ -241,11 +242,11 @@ describe("managed execution recovery is gated before publication", () => {
         await reowner.whenIdle();
         expect(Reflect.get(sessions, "managedExecutionRecoveries").size).toBe(0);
         if (outcome === "complete") {
-          expect(signal).toBe("fulfilled");
+          expect(recoverySignal.state).toBe("fulfilled");
           expect(calls).toEqual(["registry", "lookup", "claim"]);
           expect(record.execOwner?.daemonId).toBe("current");
         } else {
-          expect(signal).toBe("rejected");
+          expect(recoverySignal.state).toBe("rejected");
           expect(sessions.getSession(ID)).toBeNull();
           expect(reowner.ownershipState(ID)).toBeUndefined();
           expect(calls).toEqual([]);
@@ -395,7 +396,7 @@ describe("managed execution recovery is gated before publication", () => {
     Reflect.set(daemon, "sessionManager", sessions);
     sessions.setManagedExecutionRecoveryListener(installed);
     const registryWait = Promise.withResolvers<ManagedExecutionReownRegistry>();
-    Reflect.set(daemon, "bindingRegistry", registryWait.promise);
+    Reflect.set(daemon["runtime"], "bindingRegistry", registryWait.promise);
     const reowner = DaemonState.getInstance().getBrokerExecutionReowner()!;
     reowners.push(reowner);
     await sessions.getOrCreateSession(ID, assigner(sessions), "ios", undefined, true);
@@ -429,7 +430,7 @@ describe("managed execution recovery is gated before publication", () => {
     sessions.setReleaseDeviceHold(Reflect.get(original, "releaseDeviceHold"));
     Reflect.set(daemon, "sessionManager", sessions);
     const registryWait = Promise.withResolvers<ManagedExecutionReownRegistry>();
-    Reflect.set(daemon, "bindingRegistry", registryWait.promise);
+    Reflect.set(daemon["runtime"], "bindingRegistry", registryWait.promise);
     const reowner = DaemonState.getInstance().getBrokerExecutionReowner()!;
     reowners.push(reowner);
     const originalRelease = Reflect.get(daemon, "cancelAndReleaseSession");
@@ -477,12 +478,11 @@ describe("managed execution recovery is gated before publication", () => {
       Reflect.set(daemon, "sessionManager", sessions);
       sessions.setManagedExecutionRecoveryListener(installed);
       const warm: string[] = [];
-      const verify = spyOn(
-        DeviceSessionManager.getInstance(),
-        "verifyIosDevice",
-      ).mockImplementation(async (id) => {
-        warm.push(id);
-      });
+      const verify = spyOn(daemon.getDeviceReadiness(), "verifyIosDevice").mockImplementation(
+        async (id) => {
+          warm.push(id);
+        },
+      );
       const prefetch = spyOn(IosCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
       restores.push(
         () => verify.mockRestore(),
@@ -493,7 +493,7 @@ describe("managed execution recovery is gated before publication", () => {
           Awaited<ReturnType<ManagedExecutionReownRegistry["findExecutionAssignments"]>>
         >();
       Reflect.set(
-        daemon,
+        daemon["runtime"],
         "bindingRegistry",
         Promise.resolve({
           findExecutionAssignments: () => lookup.promise,
@@ -515,6 +515,7 @@ describe("managed execution recovery is gated before publication", () => {
           lastUsedAt: timer.now(),
           assignmentCount: 1,
           errorCount: 0,
+          incarnation: 1,
         },
       ]);
       restores.push(() => devices.mockRestore());
@@ -527,7 +528,7 @@ describe("managed execution recovery is gated before publication", () => {
         sessions.getSession(ID)!.assignedDevice = "other-ios";
       }
       if (outcome === "shutdown") {
-        Reflect.set(daemon, "shutdownInProgress", true);
+        Reflect.set(Reflect.get(daemon, "shutdownState"), "inProgress", true);
       }
       const owner = Reflect.get(daemon, "bindingJournalOwner").call(daemon);
       const assignment: BindingAssignmentRecord = {

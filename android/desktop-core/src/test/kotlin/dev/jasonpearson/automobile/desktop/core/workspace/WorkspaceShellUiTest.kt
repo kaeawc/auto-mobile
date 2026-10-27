@@ -25,11 +25,30 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
-class WorkspaceShellUiTest {
+internal abstract class WorkspaceShellUiFixture {
 
-  private fun col(id: String, name: String, platform: Platform = Platform.Android) =
+  protected fun col(id: String, name: String, platform: Platform = Platform.Android) =
     DeviceColumn(deviceId = id, name = name, platform = platform)
 
+  protected val availableUpdate =
+    UpdateStatus.UpdateAvailable(
+      version = "0.0.53",
+      asset = ReleaseAsset("AutoMobile-0.0.53-macos.dmg", "https://x/dmg", 1),
+      releaseNotesUrl = "https://notes",
+    )
+
+  // #4846: full-window overlays must be modal to keyboard/screen-reader focus — the dimmed
+  // workspace behind the scrim must leave the accessibility/focus tree so a Tab or a screen-reader
+  // swipe cannot reach the visually-dimmed controls behind the overlay.
+
+  // #6035: the health sheet gains a daemon recovery affordance ("Start daemon" parity with the
+  // device picker), shown only for a Red status (daemon down) and driving the hoisted
+  // onRecoverDaemon (the host wires it to DaemonBootstrap.ensureReady()).
+
+}
+
+@OptIn(ExperimentalTestApi::class)
+internal class WorkspaceShellUiTest : WorkspaceShellUiFixture() {
   @Test
   fun `top bar exposes a command-palette trigger`() = runComposeUiTest {
     var opened = false
@@ -38,21 +57,17 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          onOpenPalette = { opened = true },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              onOpenPalette = { opened = true },
+            ),
         )
       }
     }
     onNodeWithContentDescription("Open command palette").performClick()
     assertTrue(opened)
   }
-
-  private val availableUpdate =
-    UpdateStatus.UpdateAvailable(
-      version = "0.0.53",
-      asset = ReleaseAsset("AutoMobile-0.0.53-macos.dmg", "https://x/dmg", 1),
-      releaseNotesUrl = "https://notes",
-    )
 
   @Test
   fun `top bar shows the update pill only when an update is available`() = runComposeUiTest {
@@ -61,8 +76,11 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          updateStatus = availableUpdate,
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              updateStatus = availableUpdate,
+            ),
         )
       }
     }
@@ -84,8 +102,11 @@ class WorkspaceShellUiTest {
             WorkspaceShell(
               state = WorkspaceUiState.Empty,
               onAction = {},
-              onOpenPicker = {},
-              updateStatus = hidden,
+              options =
+                WorkspaceShellOptions(
+                  onOpenPicker = {},
+                  updateStatus = hidden,
+                ),
             )
           }
         }
@@ -102,9 +123,12 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          updateStatus = availableUpdate,
-          onUpdateClick = { clicks++ },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              updateStatus = availableUpdate,
+              onUpdateClick = { clicks++ },
+            ),
         )
       }
     }
@@ -116,7 +140,14 @@ class WorkspaceShellUiTest {
   fun `empty state prompts to open Devices`() = runComposeUiTest {
     setContent {
       MaterialTheme {
-        WorkspaceShell(state = WorkspaceUiState.Empty, onAction = {}, onOpenPicker = {})
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
       }
     }
     onNodeWithText("No devices observed", substring = true).assertIsDisplayed()
@@ -131,7 +162,10 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = { opened = true },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = { opened = true },
+            ),
         )
       }
     }
@@ -143,7 +177,18 @@ class WorkspaceShellUiTest {
   fun `content renders the device chip header with tools and close`() = runComposeUiTest {
     val state =
       WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
-    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
+    }
     onNodeWithText("Pixel 8").assertIsDisplayed()
     onNodeWithContentDescription("Input mode").assertIsDisplayed()
     onNodeWithContentDescription("Inspect mode").assertIsDisplayed()
@@ -159,7 +204,16 @@ class WorkspaceShellUiTest {
     val state =
       WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
     setContent {
-      MaterialTheme { WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {}) }
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = { action = it },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
     }
     onNodeWithContentDescription("Close Pixel 8").performClick()
     assertEquals(WorkspaceAction.CloseDevice("a"), action)
@@ -178,7 +232,14 @@ class WorkspaceShellUiTest {
       )
     setContent {
       MaterialTheme {
-        WorkspaceShell(state = state, onAction = { actions += it }, onOpenPicker = {})
+        WorkspaceShell(
+          state = state,
+          onAction = { actions += it },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
       }
     }
     onNodeWithText("iPhone 15").performClick()
@@ -192,7 +253,18 @@ class WorkspaceShellUiTest {
         columns = listOf(col("a", "Pixel 8"), col("b", "iPhone 15", Platform.Ios)),
         focusedDeviceId = "a",
       )
-    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
+    }
     onNodeWithText("Pixel 8").assertIsDisplayed()
     onNodeWithText("iPhone 15").assertIsDisplayed()
   }
@@ -201,7 +273,18 @@ class WorkspaceShellUiTest {
   fun `pane renders rotate screenshot and snapshot controls`() = runComposeUiTest {
     val state =
       WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
-    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
+    }
     onNodeWithContentDescription("Rotate Pixel 8").assertIsDisplayed()
     onNodeWithContentDescription("Screenshot Pixel 8").assertIsDisplayed()
     onNodeWithContentDescription("Snapshot Pixel 8").assertIsDisplayed()
@@ -214,7 +297,18 @@ class WorkspaceShellUiTest {
         columns = listOf(col("a", "Pixel 8").copy(locked = true)),
         focusedDeviceId = "a",
       )
-    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
+    }
     onNodeWithContentDescription("Unlock Pixel 8").assertIsDisplayed()
   }
 
@@ -222,7 +316,18 @@ class WorkspaceShellUiTest {
   fun `Unlock control is absent when the device is unlocked`() = runComposeUiTest {
     val state =
       WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
-    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
+    }
     onNodeWithContentDescription("Unlock Pixel 8").assertDoesNotExist()
   }
 
@@ -234,7 +339,14 @@ class WorkspaceShellUiTest {
         WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
       setContent {
         MaterialTheme {
-          WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {})
+          WorkspaceShell(
+            state = state,
+            onAction = { action = it },
+            options =
+              WorkspaceShellOptions(
+                onOpenPicker = {},
+              ),
+          )
         }
       }
       onNodeWithContentDescription("Snapshot Pixel 8").performClick()
@@ -261,14 +373,17 @@ class WorkspaceShellUiTest {
           WorkspaceShell(
             state = state,
             onAction = { dispatched = it },
-            onOpenPicker = {},
-            observationStreamFactory = { fake },
-            screenshotSaver =
-              ScreenshotSaver { name, bytes ->
-                savedDeviceName = name
-                savedBytes = bytes
-                "/tmp/shots/$name.png"
-              },
+            options =
+              WorkspaceShellOptions(
+                onOpenPicker = {},
+                observationStreamFactory = { fake },
+                screenshotSaver =
+                  ScreenshotSaver { name, bytes ->
+                    savedDeviceName = name
+                    savedBytes = bytes
+                    "/tmp/shots/$name.png"
+                  },
+              ),
           )
         }
       }
@@ -307,15 +422,18 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = state,
           onAction = {},
-          onOpenPicker = {},
-          inspectContent = { Text("inspect-slot") },
-          externalCaptureRequest = request.value,
-          observationStreamFactory = { if (it == "a") first else second },
-          screenshotSaver =
-            ScreenshotSaver { name, _ ->
-              savedName = name
-              "/tmp/shots/$name.png"
-            },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              inspectContent = { Text("inspect-slot") },
+              externalCaptureRequest = request.value,
+              observationStreamFactory = { if (it == "a") first else second },
+              screenshotSaver =
+                ScreenshotSaver { name, _ ->
+                  savedName = name
+                  "/tmp/shots/$name.png"
+                },
+            ),
         )
       }
     }
@@ -361,15 +479,18 @@ class WorkspaceShellUiTest {
               focusedDeviceId = "a",
             ),
           onAction = {},
-          onOpenPicker = {},
-          inspectContent = { Text("inspect-slot") },
-          externalCaptureRequest = request.value,
-          observationStreamFactory = { fake },
-          screenshotSaver =
-            ScreenshotSaver { name, _ ->
-              savedName = name
-              "/tmp/shots/$name.png"
-            },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              inspectContent = { Text("inspect-slot") },
+              externalCaptureRequest = request.value,
+              observationStreamFactory = { fake },
+              screenshotSaver =
+                ScreenshotSaver { name, _ ->
+                  savedName = name
+                  "/tmp/shots/$name.png"
+                },
+            ),
         )
       }
     }
@@ -398,7 +519,14 @@ class WorkspaceShellUiTest {
         WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
       setContent {
         MaterialTheme {
-          WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {})
+          WorkspaceShell(
+            state = state,
+            onAction = { action = it },
+            options =
+              WorkspaceShellOptions(
+                onOpenPicker = {},
+              ),
+          )
         }
       }
       onNodeWithContentDescription("Locale Pixel 8").performClick()
@@ -413,7 +541,14 @@ class WorkspaceShellUiTest {
       WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
     setContent {
       MaterialTheme {
-        WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {})
+        WorkspaceShell(
+          state = state,
+          onAction = { action = it },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
       }
     }
     // Buttons are surfaced directly in the command bar now (no More overflow menu).
@@ -432,7 +567,16 @@ class WorkspaceShellUiTest {
           focusedDeviceId = "a",
         )
       setContent {
-        MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) }
+        MaterialTheme {
+          WorkspaceShell(
+            state = state,
+            onAction = {},
+            options =
+              WorkspaceShellOptions(
+                onOpenPicker = {},
+              ),
+          )
+        }
       }
       // Home/Back/Recent route through CtrlProxy on iOS; Power is physical-device-only.
       onNodeWithContentDescription("Home iPhone 15").assertIsDisplayed()
@@ -449,13 +593,25 @@ class WorkspaceShellUiTest {
         focusedDeviceId = "a",
       )
     setContent {
-      MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) }
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
     }
 
     onNodeWithContentDescription("Locale iPhone 15").assertDoesNotExist()
     onNodeWithContentDescription("Power iPhone 15").assertIsDisplayed()
   }
+}
 
+@OptIn(ExperimentalTestApi::class)
+internal class WorkspaceShellFacetsUiTest : WorkspaceShellUiFixture() {
   @Test
   fun `iOS simulator offers Locale and hides Power`() = runComposeUiTest {
     val state =
@@ -464,7 +620,16 @@ class WorkspaceShellUiTest {
         focusedDeviceId = "a",
       )
     setContent {
-      MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) }
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
     }
 
     onNodeWithContentDescription("Locale iPhone 15").assertIsDisplayed()
@@ -478,7 +643,18 @@ class WorkspaceShellUiTest {
         columns = listOf(col("a", "Pixel 8").copy(activeTool = Tool.Logs)),
         focusedDeviceId = "a",
       )
-    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
+    }
     onNodeWithContentDescription("Close Logs facet on Pixel 8").assertIsDisplayed()
   }
 
@@ -486,7 +662,18 @@ class WorkspaceShellUiTest {
   fun `no active tool renders no facet`() = runComposeUiTest {
     val state =
       WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
-    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
+    }
     onNodeWithContentDescription("Close Logs facet on Pixel 8").assertDoesNotExist()
   }
 
@@ -499,8 +686,19 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Content(columns = listOf(column.value), focusedDeviceId = "a"),
           onAction = {},
-          onOpenPicker = {},
-          streamContent = { DeviceStreamView(it, sourceFactory = { _, _ -> source }) },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              streamContent = {
+                DeviceStreamView(
+                  options =
+                    DeviceStreamOptions(
+                      column = it,
+                      sourceFactory = { _, _ -> source },
+                    ),
+                )
+              },
+            ),
         )
       }
     }
@@ -539,7 +737,16 @@ class WorkspaceShellUiTest {
         focusedDeviceId = "a",
       )
     setContent {
-      MaterialTheme { WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {}) }
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = { action = it },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
     }
     onNodeWithContentDescription("Close Logs facet on Pixel 8").performClick()
     assertEquals(WorkspaceAction.SelectTool("a", null), action)
@@ -554,7 +761,16 @@ class WorkspaceShellUiTest {
         focusedDeviceId = "a",
       )
     setContent {
-      MaterialTheme { WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {}) }
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = { action = it },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
     }
     onNodeWithContentDescription("Logs Pixel 8").performClick()
     assertEquals(WorkspaceAction.SelectTool("a", null), action)
@@ -566,7 +782,16 @@ class WorkspaceShellUiTest {
     val state =
       WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
     setContent {
-      MaterialTheme { WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {}) }
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = { action = it },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
     }
     onNodeWithContentDescription("Storage Pixel 8").performClick()
     assertEquals(WorkspaceAction.SelectTool("a", Tool.Storage), action)
@@ -585,11 +810,14 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = state,
           onAction = {},
-          onOpenPicker = {},
-          facetContent = { column, tool ->
-            received = column.deviceId to tool
-            Text("facet-slot:${tool.label}")
-          },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              facetContent = { column, tool ->
+                received = column.deviceId to tool
+                Text("facet-slot:${tool.label}")
+              },
+            ),
         )
       }
     }
@@ -608,7 +836,18 @@ class WorkspaceShellUiTest {
           ),
         focusedDeviceId = "a",
       )
-    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
+    }
     onNodeWithContentDescription("Open Logs on all devices").assertIsDisplayed()
   }
 
@@ -619,7 +858,18 @@ class WorkspaceShellUiTest {
         columns = listOf(col("a", "Pixel 8").copy(activeTool = Tool.Logs)),
         focusedDeviceId = "a",
       )
-    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
+    }
     onNodeWithContentDescription("Open Logs on all devices").assertDoesNotExist()
   }
 
@@ -636,7 +886,16 @@ class WorkspaceShellUiTest {
         focusedDeviceId = "a",
       )
     setContent {
-      MaterialTheme { WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {}) }
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = { action = it },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
     }
     onNodeWithContentDescription("Open Logs on all devices").performClick()
     assertEquals(WorkspaceAction.DiffTool(Tool.Logs), action)
@@ -649,7 +908,18 @@ class WorkspaceShellUiTest {
         columns = listOf(col("a", "Pixel 8").copy(activeTool = Tool.Performance)),
         focusedDeviceId = "a",
       )
-    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
+    }
     onNodeWithText("Performance — coming soon", substring = true).assertIsDisplayed()
   }
 
@@ -666,8 +936,11 @@ class WorkspaceShellUiTest {
           WorkspaceShell(
             state = state,
             onAction = {},
-            onOpenPicker = {},
-            inspectContent = { column -> Text("inspect-slot:${column.deviceId}") },
+            options =
+              WorkspaceShellOptions(
+                onOpenPicker = {},
+                inspectContent = { column -> Text("inspect-slot:${column.deviceId}") },
+              ),
           )
         }
       }
@@ -688,8 +961,11 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = state,
           onAction = {},
-          onOpenPicker = {},
-          streamContent = { column -> Text("stream-slot:${column.deviceId}") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              streamContent = { column -> Text("stream-slot:${column.deviceId}") },
+            ),
         )
       }
     }
@@ -711,9 +987,12 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = state,
           onAction = {},
-          onOpenPicker = {},
-          inspectContent = { Text("inspect-slot") },
-          streamContent = { Text("stream-slot") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              inspectContent = { Text("inspect-slot") },
+              streamContent = { Text("stream-slot") },
+            ),
         )
       }
     }
@@ -730,8 +1009,11 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = state,
           onAction = {},
-          onOpenPicker = {},
-          inspectContent = { Text("inspect-slot") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              inspectContent = { Text("inspect-slot") },
+            ),
         )
       }
     }
@@ -752,8 +1034,11 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = state,
           onAction = {},
-          onOpenPicker = {},
-          inspectContent = { Text("inspect-slot") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              inspectContent = { Text("inspect-slot") },
+            ),
         )
       }
     }
@@ -771,9 +1056,12 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          status = WorkspaceStatus.Green,
-          statusDetail = "Daemon reconnecting",
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              status = WorkspaceStatus.Green,
+              statusDetail = "Daemon reconnecting",
+            ),
         )
       }
     }
@@ -788,9 +1076,12 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          status = WorkspaceStatus.Yellow,
-          statusDetail = "Daemon reconnecting",
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              status = WorkspaceStatus.Yellow,
+              statusDetail = "Daemon reconnecting",
+            ),
         )
       }
     }
@@ -804,9 +1095,12 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          status = WorkspaceStatus.Green,
-          healthSheetContent = { Text("fake-health-body") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              status = WorkspaceStatus.Green,
+              healthSheetContent = { Text("fake-health-body") },
+            ),
         )
       }
     }
@@ -823,10 +1117,13 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          status = WorkspaceStatus.Red,
-          statusDetail = "Device offline",
-          healthSheetContent = { Text("fake-health-body") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              status = WorkspaceStatus.Red,
+              statusDetail = "Device offline",
+              healthSheetContent = { Text("fake-health-body") },
+            ),
         )
       }
     }
@@ -843,10 +1140,13 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          status = WorkspaceStatus.Yellow,
-          statusDetail = "Daemon reconnecting",
-          healthSheetContent = { Text("fake-health-body") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              status = WorkspaceStatus.Yellow,
+              statusDetail = "Daemon reconnecting",
+              healthSheetContent = { Text("fake-health-body") },
+            ),
         )
       }
     }
@@ -858,12 +1158,22 @@ class WorkspaceShellUiTest {
   fun `empty state offers a Browse navigation history affordance`() = runComposeUiTest {
     setContent {
       MaterialTheme {
-        WorkspaceShell(state = WorkspaceUiState.Empty, onAction = {}, onOpenPicker = {})
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
       }
     }
     onNodeWithContentDescription("Browse navigation history").assertIsDisplayed()
   }
+}
 
+@OptIn(ExperimentalTestApi::class)
+internal class WorkspaceShellRecoveryUiTest : WorkspaceShellUiFixture() {
   @Test
   fun `Browse navigation history opens the offline browse overlay`() = runComposeUiTest {
     setContent {
@@ -871,8 +1181,11 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          offlineBrowseContent = { Text("offline-browse-body") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              offlineBrowseContent = { Text("offline-browse-body") },
+            ),
         )
       }
     }
@@ -880,10 +1193,6 @@ class WorkspaceShellUiTest {
     onNodeWithContentDescription("Browse navigation history").performClick()
     onNodeWithText("offline-browse-body").assertIsDisplayed()
   }
-
-  // #4846: full-window overlays must be modal to keyboard/screen-reader focus — the dimmed
-  // workspace behind the scrim must leave the accessibility/focus tree so a Tab or a screen-reader
-  // swipe cannot reach the visually-dimmed controls behind the overlay.
 
   @Test
   fun `opening the health sheet isolates the workspace background from accessibility`() =
@@ -893,9 +1202,12 @@ class WorkspaceShellUiTest {
           WorkspaceShell(
             state = WorkspaceUiState.Empty,
             onAction = {},
-            onOpenPicker = {},
-            status = WorkspaceStatus.Green,
-            healthSheetContent = { Text("fake-health-body") },
+            options =
+              WorkspaceShellOptions(
+                onOpenPicker = {},
+                status = WorkspaceStatus.Green,
+                healthSheetContent = { Text("fake-health-body") },
+              ),
           )
         }
       }
@@ -920,9 +1232,12 @@ class WorkspaceShellUiTest {
           WorkspaceShell(
             state = WorkspaceUiState.Empty,
             onAction = {},
-            onOpenPicker = {},
-            status = WorkspaceStatus.Green,
-            healthSheetContent = { Text("fake-health-body") },
+            options =
+              WorkspaceShellOptions(
+                onOpenPicker = {},
+                status = WorkspaceStatus.Green,
+                healthSheetContent = { Text("fake-health-body") },
+              ),
           )
         }
       }
@@ -940,8 +1255,11 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          offlineBrowseContent = { Text("offline-browse-body") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              offlineBrowseContent = { Text("offline-browse-body") },
+            ),
         )
       }
     }
@@ -963,8 +1281,11 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = state,
           onAction = {},
-          onOpenPicker = {},
-          compareContent = { _, _ -> Text("compare-body") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              compareContent = { _, _ -> Text("compare-body") },
+            ),
         )
       }
     }
@@ -976,10 +1297,6 @@ class WorkspaceShellUiTest {
     onNodeWithContentDescription("Close Pixel").assertDoesNotExist()
   }
 
-  // #6035: the health sheet gains a daemon recovery affordance ("Start daemon" parity with the
-  // device picker), shown only for a Red status (daemon down) and driving the hoisted
-  // onRecoverDaemon (the host wires it to DaemonBootstrap.ensureReady()).
-
   @Test
   fun `red status health sheet shows the daemon recovery affordance`() = runComposeUiTest {
     setContent {
@@ -987,12 +1304,15 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          status = WorkspaceStatus.Red,
-          statusDetail = "Daemon unreachable",
-          // A local daemon that has not reported Ready — not Inactive, so recovery is offered.
-          bootstrapState = DaemonBootstrapState.Unknown,
-          healthSheetContent = { Text("fake-health-body") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              status = WorkspaceStatus.Red,
+              statusDetail = "Daemon unreachable",
+              // A local daemon that has not reported Ready — not Inactive, so recovery is offered.
+              bootstrapState = DaemonBootstrapState.Unknown,
+              healthSheetContent = { Text("fake-health-body") },
+            ),
         )
       }
     }
@@ -1009,13 +1329,16 @@ class WorkspaceShellUiTest {
           WorkspaceShell(
             state = WorkspaceUiState.Empty,
             onAction = {},
-            onOpenPicker = {},
-            status = WorkspaceStatus.Red,
-            statusDetail = "Connection lost",
-            // HTTP/STDIO transport: bootstrap is Inactive and ensureReady() is a no-op, so a
-            // "Start daemon" button would silently do nothing — it must not be offered (#6080).
-            bootstrapState = DaemonBootstrapState.Inactive,
-            healthSheetContent = { Text("fake-health-body") },
+            options =
+              WorkspaceShellOptions(
+                onOpenPicker = {},
+                status = WorkspaceStatus.Red,
+                statusDetail = "Connection lost",
+                // HTTP/STDIO transport: bootstrap is Inactive and ensureReady() is a no-op, so a
+                // "Start daemon" button would silently do nothing — it must not be offered (#6080).
+                bootstrapState = DaemonBootstrapState.Inactive,
+                healthSheetContent = { Text("fake-health-body") },
+              ),
           )
         }
       }
@@ -1033,9 +1356,12 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          status = WorkspaceStatus.Green,
-          healthSheetContent = { Text("fake-health-body") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              status = WorkspaceStatus.Green,
+              healthSheetContent = { Text("fake-health-body") },
+            ),
         )
       }
     }
@@ -1053,10 +1379,13 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          status = WorkspaceStatus.Yellow,
-          statusDetail = "Daemon reconnecting",
-          healthSheetContent = { Text("fake-health-body") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              status = WorkspaceStatus.Yellow,
+              statusDetail = "Daemon reconnecting",
+              healthSheetContent = { Text("fake-health-body") },
+            ),
         )
       }
     }
@@ -1074,12 +1403,15 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          status = WorkspaceStatus.Red,
-          statusDetail = "Daemon unreachable",
-          bootstrapState = DaemonBootstrapState.Unknown,
-          onRecoverDaemon = { recoveries++ },
-          healthSheetContent = { Text("fake-health-body") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              status = WorkspaceStatus.Red,
+              statusDetail = "Daemon unreachable",
+              bootstrapState = DaemonBootstrapState.Unknown,
+              onRecoverDaemon = { recoveries++ },
+              healthSheetContent = { Text("fake-health-body") },
+            ),
         )
       }
     }
@@ -1095,14 +1427,17 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          status = WorkspaceStatus.Red,
-          statusDetail = "Daemon unreachable",
-          bootstrapState = DaemonBootstrapState.Unknown,
-          // The host's synchronous claim before bootstrapState has reported its first Working
-          // phase.
-          recovering = true,
-          healthSheetContent = { Text("fake-health-body") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              status = WorkspaceStatus.Red,
+              statusDetail = "Daemon unreachable",
+              bootstrapState = DaemonBootstrapState.Unknown,
+              // The host's synchronous claim before bootstrapState has reported its first Working
+              // phase.
+              recovering = true,
+              healthSheetContent = { Text("fake-health-body") },
+            ),
         )
       }
     }
@@ -1123,16 +1458,19 @@ class WorkspaceShellUiTest {
           WorkspaceShell(
             state = WorkspaceUiState.Empty,
             onAction = {},
-            onOpenPicker = {},
-            status = WorkspaceStatus.Red,
-            statusDetail = "Daemon unreachable",
-            bootstrapState = DaemonBootstrapState.Unknown,
-            recovering = recovering.value,
-            onRecoverDaemon = {
-              dispatches++
-              recovering.value = true
-            },
-            healthSheetContent = { Text("fake-health-body") },
+            options =
+              WorkspaceShellOptions(
+                onOpenPicker = {},
+                status = WorkspaceStatus.Red,
+                statusDetail = "Daemon unreachable",
+                bootstrapState = DaemonBootstrapState.Unknown,
+                recovering = recovering.value,
+                onRecoverDaemon = {
+                  dispatches++
+                  recovering.value = true
+                },
+                healthSheetContent = { Text("fake-health-body") },
+              ),
           )
         }
       }
@@ -1150,14 +1488,17 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          status = WorkspaceStatus.Red,
-          statusDetail = "Daemon unreachable",
-          bootstrapState =
-            DaemonBootstrapState.Working(
-              DaemonLifecyclePhase.LaunchingDaemon(action = "start", version = "0.0.67"),
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              status = WorkspaceStatus.Red,
+              statusDetail = "Daemon unreachable",
+              bootstrapState =
+                DaemonBootstrapState.Working(
+                  DaemonLifecyclePhase.LaunchingDaemon(action = "start", version = "0.0.67"),
+                ),
+              healthSheetContent = { Text("fake-health-body") },
             ),
-          healthSheetContent = { Text("fake-health-body") },
         )
       }
     }
@@ -1175,11 +1516,14 @@ class WorkspaceShellUiTest {
         WorkspaceShell(
           state = WorkspaceUiState.Empty,
           onAction = {},
-          onOpenPicker = {},
-          status = WorkspaceStatus.Red,
-          statusDetail = "Daemon unreachable",
-          bootstrapState = DaemonBootstrapState.Failed("Bun install failed: offline"),
-          healthSheetContent = { Text("fake-health-body") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              status = WorkspaceStatus.Red,
+              statusDetail = "Daemon unreachable",
+              bootstrapState = DaemonBootstrapState.Failed("Bun install failed: offline"),
+              healthSheetContent = { Text("fake-health-body") },
+            ),
         )
       }
     }

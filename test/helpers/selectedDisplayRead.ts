@@ -10,6 +10,7 @@ import { FakeObserveCacheStore } from "../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import { FakeViewHierarchy } from "../fakes/FakeViewHierarchy";
+import { createExecResult } from "../../src/utils/execResult";
 
 export const transientFailures = [
   ["connect-failed", "Failed to establish CtrlProxy WebSocket connection"],
@@ -75,11 +76,13 @@ export function selectedDisplayHarness(options: {
   const timer = options.timer ?? new FakeTimer();
   timer.enableAutoAdvance();
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("cmd display get-displays", {
-    stdout:
+  adb.setCommandResponse(
+    "cmd display get-displays",
+    createExecResult(
       'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
-    stderr: "",
-  });
+      "",
+    ),
+  );
   const capture = new FakeHierarchyCapture(options.read);
   const viewHierarchy = new FakeViewHierarchy();
   viewHierarchy.configureHierarchy(selectedHierarchy());

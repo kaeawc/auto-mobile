@@ -1,10 +1,11 @@
 import { ActionableError } from "../models/ActionableError";
-import { resolveDaemonStatePath } from "./constants";
+import { resolveDaemonStatePath } from "./wire/constants";
+import { ENV } from "../config/env";
 
 /** CLI opt-in to act on the shared (resident) daemon despite a private state environment. */
 export const ALLOW_SHARED_NAMESPACE_FLAG = "--allow-shared-namespace";
 /** Env opt-in for the same, for hosts whose only daemon uses relocated state (e.g. containers). */
-export const ALLOW_SHARED_NAMESPACE_ENV = "AUTOMOBILE_ALLOW_SHARED_DAEMON_NAMESPACE";
+export const ALLOW_SHARED_NAMESPACE_ENV = ENV.ALLOW_SHARED_DAEMON_NAMESPACE.name;
 /** Typed refusal code for a lifecycle action blocked by {@link assertDaemonNamespaceMatchesState}. */
 export const SHARED_DAEMON_NAMESPACE_CODE = "shared_daemon_namespace";
 

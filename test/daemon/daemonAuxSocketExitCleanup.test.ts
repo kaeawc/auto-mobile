@@ -2,14 +2,15 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import { existsSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Daemon } from "../../src/daemon/daemon";
-import { DaemonState } from "../../src/daemon/daemonState";
+import {
+  DaemonIdentity,
+  type DaemonIdentityHost,
+} from "../../src/daemon/daemonCore/DaemonIdentity";
 import { cleanupDaemonFilesSync } from "../../src/daemon/daemonFiles";
-import { SOCKET_PATH } from "../../src/daemon/constants";
+import { SOCKET_PATH } from "../../src/daemon/wire/constants";
 import { getDaemonSocketPathsByName } from "../../src/daemon/socketPaths";
 import type { AuxiliaryDaemonSocketName } from "../../src/daemon/types";
 import { testOverrides } from "../../src/utils/testOverrides";
-import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("daemon auxiliary socket exit cleanup", () => {
   const previousAuxDir = testOverrides.auxSocketDir;
@@ -17,26 +18,42 @@ describe("daemon auxiliary socket exit cleanup", () => {
   const scratch = useScratchRoot("daemon-aux-exit-");
 
   afterEach(() => {
-    // Constructing a Daemon initializes the process-wide DaemonState; do not leak it to later files.
-    DaemonState.getInstance().reset();
     testOverrides.auxSocketDir = previousAuxDir;
   });
 
-  function makeDaemon(): { daemon: Daemon; pidFilePath: string } {
+  function makeDaemon(): { daemon: DaemonIdentity; pidFilePath: string } {
     directory = scratch.next();
     testOverrides.auxSocketDir = directory;
-    const daemon = new Daemon({}, { timer: new FakeTimer() });
-    daemon["socketBindCommitted"] = true;
-    daemon["pidFileWritten"] = true;
+    const host: DaemonIdentityHost = {
+      pidFileWritten: () => true,
+      setPidFileWritten: () => {},
+      services: { options: () => ({}) },
+      identity: {
+        port: () => 3000,
+        completeIdentityPublished: () => true,
+        socketBindCommitted: () => true,
+        incumbentOwnerGuard: () => {
+          throw new Error("unused");
+        },
+        daemonSessionId: () => "test",
+        generationStartedAt: () => 1,
+        processStartedAt: () => 1,
+        processGenerationToken: () => undefined,
+      },
+      cleanupDaemonFilesForShutdown: async () => {},
+      writeEarlyOwnerRecord: async () => {},
+      persistPidFileData: async () => {},
+    };
+    const daemon = new DaemonIdentity(host);
     const pidFilePath = join(directory, "contender.pid");
     writeFileSync(pidFilePath, JSON.stringify({ pid: process.pid, socketPath: SOCKET_PATH }));
     return { daemon, pidFilePath };
   }
 
-  function exitCleanup(daemon: Daemon, pidFilePath: string): void {
-    const options = daemon["getDaemonFileCleanupOptions"]();
-    // The control socket belongs to the test runner's ambient namespace.
-    // Exercise exactly the aux subset from the exit handler's options.
+  function exitCleanup(daemon: DaemonIdentity, pidFilePath: string): void {
+    const options = daemon.getDaemonFileCleanupOptions();
+    // This fixture binds only auxiliary paths; the ambient control socket was
+    // never recorded and cannot join destructive exit cleanup.
     cleanupDaemonFilesSync({
       ...options,
       pidFilePath,
@@ -61,10 +78,10 @@ describe("daemon auxiliary socket exit cleanup", () => {
     writeFileSync(ownerPath, "owner socket");
     writeFileSync(otherOwnerPath, "owner socket");
 
-    await expect(daemon["startAuxiliarySocket"]("video-recording", refusedBind)).rejects.toThrow(
+    await expect(daemon.startAuxiliarySocket("video-recording", refusedBind)).rejects.toThrow(
       "another daemon is listening",
     );
-    expect(daemon["getDaemonFileCleanupOptions"]().socketPaths).toEqual([SOCKET_PATH]);
+    expect(daemon.getDaemonFileCleanupOptions().socketPaths).toEqual([]);
 
     exitCleanup(daemon, pidFilePath);
 
@@ -75,8 +92,8 @@ describe("daemon auxiliary socket exit cleanup", () => {
   test("owner exit unlinks its bound aux socket", async () => {
     const { daemon, pidFilePath } = makeDaemon();
     const ownedPath = getDaemonSocketPathsByName()["video-recording"];
-    await daemon["startAuxiliarySocket"]("video-recording", fakeSuccessfulBind(ownedPath));
-    expect(daemon["getDaemonFileCleanupOptions"]().socketPaths).toEqual([SOCKET_PATH, ownedPath]);
+    await daemon.startAuxiliarySocket("video-recording", fakeSuccessfulBind(ownedPath));
+    expect(daemon.getDaemonFileCleanupOptions().socketPaths).toEqual([ownedPath]);
 
     exitCleanup(daemon, pidFilePath);
 
@@ -90,9 +107,9 @@ describe("daemon auxiliary socket exit cleanup", () => {
     const refusedName: AuxiliaryDaemonSocketName = "device-gesture-recording";
     const ownedPath = paths[ownedName];
     const refusedPath = paths[refusedName];
-    await daemon["startAuxiliarySocket"](ownedName, fakeSuccessfulBind(ownedPath));
+    await daemon.startAuxiliarySocket(ownedName, fakeSuccessfulBind(ownedPath));
     writeFileSync(refusedPath, "peer socket");
-    await expect(daemon["startAuxiliarySocket"](refusedName, refusedBind)).rejects.toThrow();
+    await expect(daemon.startAuxiliarySocket(refusedName, refusedBind)).rejects.toThrow();
 
     exitCleanup(daemon, pidFilePath);
 
@@ -103,7 +120,7 @@ describe("daemon auxiliary socket exit cleanup", () => {
   test("exit preserves a replacement at a previously bound path", async () => {
     const { daemon, pidFilePath } = makeDaemon();
     const socketPath = getDaemonSocketPathsByName()["video-recording"];
-    await daemon["startAuxiliarySocket"]("video-recording", fakeSuccessfulBind(socketPath));
+    await daemon.startAuxiliarySocket("video-recording", fakeSuccessfulBind(socketPath));
     renameSync(socketPath, join(directory, "old.sock"));
     writeFileSync(socketPath, "replacement socket");
 
@@ -115,9 +132,9 @@ describe("daemon auxiliary socket exit cleanup", () => {
   test("a successful rebind refreshes the owned socket identity", async () => {
     const { daemon, pidFilePath } = makeDaemon();
     const socketPath = getDaemonSocketPathsByName()["observation-stream"];
-    await daemon["startAuxiliarySocket"]("observation-stream", fakeSuccessfulBind(socketPath));
+    await daemon.startAuxiliarySocket("observation-stream", fakeSuccessfulBind(socketPath));
     renameSync(socketPath, join(directory, "old.sock"));
-    await daemon["startAuxiliarySocket"]("observation-stream", fakeSuccessfulBind(socketPath));
+    await daemon.startAuxiliarySocket("observation-stream", fakeSuccessfulBind(socketPath));
 
     exitCleanup(daemon, pidFilePath);
 

@@ -14,8 +14,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { spyOn } from "bun:test";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { crashAppResultSchema } from "../../src/server/appToolOutputSchemas";
 import {
-  crashAppResultSchema,
   describeListAppsResult,
   registerAppTools,
   resetInstalledAppResourceRefresh,
@@ -238,7 +238,7 @@ describe("listApps tool", () => {
 test("listApps only requires booted-device readiness, not full CtrlProxy automation setup (#6216 review)", () => {
   // Mirrors the interception pattern in videoRecordingReadiness.test.ts: capture
   // the options object passed to registerDeviceAware without driving the real
-  // resolveExecutionTarget/DeviceSessionManager pipeline.
+  // resolveExecutionTarget/DeviceReadiness pipeline.
   ToolRegistry.clearTools();
   const registry = ToolRegistry;
   const originalRegister = registry.registerDeviceAware;

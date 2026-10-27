@@ -20,7 +20,7 @@ import {
   DEVICE_STATE_WRITABLE_FIELDS,
 } from "../../../src/features/utility/DeviceState";
 import { setDeviceStateSchema } from "../../../src/server/utilityTools";
-import { addDeviceTargetingToSchema } from "../../../src/server/toolSchemaHelpers";
+import { addDeviceTargetingToSchema } from "../../../src/utils/schemaHelpers";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 
@@ -581,8 +581,12 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
     const deviceTargetingFields = new Set(
       Object.keys(addDeviceTargetingToSchema(z.object({})).shape),
     );
+    // deviceCondition is a setDeviceState schema field but NOT a DeviceState.setState
+    // input: it is handled by the session-scoped device-condition registry before
+    // setState, so it is deliberately absent from the writable-field contract (#14050).
+    const schemaOnlyFields = new Set(["deviceCondition"]);
     const advertisedWritableFields = Object.keys(setDeviceStateSchema.shape).filter(
-      (field) => !deviceTargetingFields.has(field),
+      (field) => !deviceTargetingFields.has(field) && !schemaOnlyFields.has(field),
     );
 
     expect(advertisedWritableFields.toSorted()).toEqual(

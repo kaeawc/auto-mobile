@@ -62,6 +62,10 @@ internal class HingeFallbackPostureSource(
   private val warn: (String, Throwable?) -> Unit,
 ) : PostureSource {
   override fun observe(onPostures: (List<FoldPosture>) -> Unit): AutoCloseable {
+    return register(Observation(onPostures))
+  }
+
+  private class Observation(val onPostures: (List<FoldPosture>) -> Unit) {
     val closed = AtomicBoolean(false)
     // Once a folding feature activates primary, it stays active permanently.
     val primaryActive = AtomicBoolean(false)
@@ -70,112 +74,126 @@ internal class HingeFallbackPostureSource(
     val firstLayout = AtomicBoolean(true)
     val initialEmptyLogged = AtomicBoolean(false)
     val fallbackLogged = AtomicBoolean(false)
+  }
 
-    fun closeRegistration(name: String, registration: AutoCloseable?) {
-      try {
-        registration?.close()
-      } catch (e: CancellationException) {
-        throw e
-      } catch (e: Exception) {
-        warn("fold-posture $name source close failed", e)
-      } catch (e: LinkageError) {
-        warn("fold-posture $name source close failed", e)
-      }
+  private fun closeRegistration(name: String, registration: AutoCloseable?) {
+    try {
+      registration?.close()
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      warn("fold-posture $name source close failed", e)
+    } catch (e: LinkageError) {
+      warn("fold-posture $name source close failed", e)
     }
+  }
 
-    val primaryRegistration: AutoCloseable? =
-      try {
-        primary.observe { postures ->
-          if (!closed.get()) {
-            if (firstLayout.compareAndSet(true, false)) {
-              info("WindowManager first layout: ${postures.size} folding feature(s)")
-            }
-            if (postures.isNotEmpty()) {
-              if (primaryActive.compareAndSet(false, true)) {
-                info("WindowManager reported a folding feature; hinge-angle fallback disabled")
-              }
-              onPostures(postures)
-            } else if (primaryActive.get()) {
-              onPostures(postures)
-            } else {
-              if (initialEmptyLogged.compareAndSet(false, true)) {
-                info(
-                  "WindowManager reported no folding feature (initial layout); hinge-angle fallback stays armed",
-                )
-              }
-              if (hingeUnavailable.get()) {
-                onPostures(postures)
-              } else {
-                pendingEmpty.set(true)
-                if (
-                  hingeUnavailable.get() && pendingEmpty.getAndSet(false) && !primaryActive.get()
-                ) {
-                  onPostures(emptyList())
-                }
-              }
-            }
-          }
-        }
-      } catch (e: CancellationException) {
-        closed.set(true)
-        throw e
-      } catch (e: Exception) {
-        warn("fold-posture primary source failed; relying on hinge-angle fallback", e)
-        null
-      } catch (e: LinkageError) {
-        warn("fold-posture primary source failed; relying on hinge-angle fallback", e)
-        null
-      }
-
-    val hingeRegistration: AutoCloseable? =
-      try {
-        hinge
-          .observe { angle ->
-            if (!closed.get() && !primaryActive.get()) {
-              hingeAnglePostures(angle)?.let { postures ->
-                if (fallbackLogged.compareAndSet(false, true)) {
-                  info("WindowManager silent; using hinge-angle fallback (angle=$angle)")
-                }
-                try {
-                  onPostures(postures)
-                } catch (e: CancellationException) {
-                  throw e
-                } catch (e: Exception) {
-                  warn("fold-posture hinge-angle listener failed", e)
-                }
-              }
-            }
-          }
-          .also {
-            if (it == null) {
-              info("no hinge-angle sensor; fold posture depends on WindowManager only")
-            }
-          }
-      } catch (e: CancellationException) {
-        closed.set(true)
-        closeRegistration("primary", primaryRegistration)
-        throw e
-      } catch (e: Exception) {
-        warn("fold-posture hinge-angle source failed; relying on WindowManager only", e)
-        null
-      } catch (e: LinkageError) {
-        warn("fold-posture hinge-angle source failed; relying on WindowManager only", e)
-        null
-      }
+  private fun register(state: Observation): AutoCloseable {
+    val primaryRegistration = registerPrimary(state)
+    val hingeRegistration = registerHinge(state, primaryRegistration)
 
     if (hingeRegistration == null) {
-      hingeUnavailable.set(true)
-      if (pendingEmpty.getAndSet(false) && !primaryActive.get()) {
-        onPostures(emptyList())
+      state.hingeUnavailable.set(true)
+      if (state.pendingEmpty.getAndSet(false) && !state.primaryActive.get()) {
+        state.onPostures(emptyList())
       }
     }
 
     return AutoCloseable {
-      if (closed.compareAndSet(false, true)) {
+      if (state.closed.compareAndSet(false, true)) {
         try {
           closeRegistration("primary", primaryRegistration)
         } finally {
           closeRegistration("hinge-angle", hingeRegistration)
+        }
+      }
+    }
+  }
+
+  private fun registerPrimary(state: Observation): AutoCloseable? {
+    return try {
+      primary.observe { receivePrimary(state, it) }
+    } catch (e: CancellationException) {
+      state.closed.set(true)
+      throw e
+    } catch (e: Exception) {
+      warn("fold-posture primary source failed; relying on hinge-angle fallback", e)
+      null
+    } catch (e: LinkageError) {
+      warn("fold-posture primary source failed; relying on hinge-angle fallback", e)
+      null
+    }
+  }
+
+  private fun registerHinge(
+    state: Observation,
+    primaryRegistration: AutoCloseable?,
+  ): AutoCloseable? {
+    return try {
+      hinge
+        .observe { angle ->
+          if (!state.closed.get() && !state.primaryActive.get()) {
+            hingeAnglePostures(angle)?.let { postures ->
+              if (state.fallbackLogged.compareAndSet(false, true)) {
+                info("WindowManager silent; using hinge-angle fallback (angle=$angle)")
+              }
+              try {
+                state.onPostures(postures)
+              } catch (e: CancellationException) {
+                throw e
+              } catch (e: Exception) {
+                warn("fold-posture hinge-angle listener failed", e)
+              }
+            }
+          }
+        }
+        .also {
+          if (it == null) {
+            info("no hinge-angle sensor; fold posture depends on WindowManager only")
+          }
+        }
+    } catch (e: CancellationException) {
+      state.closed.set(true)
+      closeRegistration("primary", primaryRegistration)
+      throw e
+    } catch (e: Exception) {
+      warn("fold-posture hinge-angle source failed; relying on WindowManager only", e)
+      null
+    } catch (e: LinkageError) {
+      warn("fold-posture hinge-angle source failed; relying on WindowManager only", e)
+      null
+    }
+  }
+
+  private fun receivePrimary(state: Observation, postures: List<FoldPosture>) {
+    if (!state.closed.get()) {
+      if (state.firstLayout.compareAndSet(true, false)) {
+        info("WindowManager first layout: ${postures.size} folding feature(s)")
+      }
+      if (postures.isNotEmpty()) {
+        if (state.primaryActive.compareAndSet(false, true)) {
+          info("WindowManager reported a folding feature; hinge-angle fallback disabled")
+        }
+        state.onPostures(postures)
+      } else if (state.primaryActive.get()) {
+        state.onPostures(postures)
+      } else {
+        if (state.initialEmptyLogged.compareAndSet(false, true)) {
+          info(
+            "WindowManager reported no folding feature (initial layout); hinge-angle fallback stays armed",
+          )
+        }
+        if (state.hingeUnavailable.get()) {
+          state.onPostures(postures)
+        } else {
+          state.pendingEmpty.set(true)
+          if (
+            state.hingeUnavailable.get() &&
+              state.pendingEmpty.getAndSet(false) &&
+              !state.primaryActive.get()
+          ) {
+            state.onPostures(emptyList())
+          }
         }
       }
     }

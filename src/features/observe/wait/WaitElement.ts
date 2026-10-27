@@ -16,7 +16,7 @@ import {
 } from "../../utility/ElementGeometry";
 import type { ScreenSize } from "../../../models/ScreenSize";
 import { normalizeQuotes } from "../../utility/TextMatcher";
-import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
+import type { ResolverSelector } from "../../../models/elementSelectorSchemas";
 import type { ConditionResolver } from "../ConditionPredicates";
 import type { ObserveWaitForOptions } from "./WaitForSchemas";
 
@@ -284,7 +284,7 @@ export const findWaitForElement = (
   };
   if (waitFor.textAny) {
     for (const text of waitFor.textAny) {
-      const candidate = resolve({ text, match: waitFor.textMatch })[0];
+      const candidate = resolve({ text })[0];
       if (candidate) {
         return candidate.element!;
       }

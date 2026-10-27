@@ -16,8 +16,8 @@ import {
 import {
   CommandFleetHostSource,
   parseMemoryPressureLevel,
-  readHostProcessTable,
 } from "../../../src/features/iosSimFleet/FleetHostSource";
+import { readHostProcessTable } from "../../../src/devices/bootAdmission/readHostProcessTable";
 import {
   IOS_SIM_MAX_BOOTED_ENV,
   estimatePerSimulatorBytes,
@@ -28,7 +28,7 @@ import {
   PS_SNAPSHOT_MAX_BUFFER_BYTES,
   attributeSimulatorProcesses,
   parsePsSnapshot,
-} from "../../../src/features/iosSimFleet/psSnapshot";
+} from "../../../src/devices/bootAdmission/psSnapshot";
 import { parseSimctlInventory } from "../../../src/features/iosSimFleet/simctlInventory";
 import { formatFleetReport } from "../../../src/features/iosSimFleet/fleetReport";
 import type { HostResources, HostSnapshot } from "../../../src/features/iosSimFleet/types";
@@ -250,19 +250,23 @@ describe("fleet cost collector", () => {
     const { collector } = setup([IOS27]);
     const lines = formatFleetReport(await collector.collect());
     expect(lines[0]).toContain("iPhone 18 Pro");
-    expect(lines[0]).toContain("GiB RSS");
+    // The synthetic ps fixture has no footprint column: unmeasured, never an RSS stand-in (#15288).
+    expect(lines[0]).toContain("memory unmeasured");
+    expect(lines[0]).not.toContain("RSS");
     expect(lines.at(-1)).toContain("shutdown simulator(s)");
   });
 });
 
 describe("capacity policy", () => {
-  test("derives the limit from the smaller of memory and cores", () => {
+  test("derives the limit from the smaller of memory and settled CPU", () => {
     expect(resolveCapacityLimits({}, { totalMemoryBytes: 128 * GIB, cpuCount: 16 })).toEqual({
-      maxBooted: 8,
+      maxBooted: 30,
       source: "derived",
+      bootConcurrency: 2,
+      bootConcurrencySource: "derived",
     });
     expect(resolveCapacityLimits({}, { totalMemoryBytes: 16 * GIB, cpuCount: 16 }).maxBooted).toBe(
-      2,
+      3,
     );
     expect(resolveCapacityLimits({}, { totalMemoryBytes: 2 * GIB, cpuCount: 2 }).maxBooted).toBe(1);
   });
@@ -272,17 +276,22 @@ describe("capacity policy", () => {
     expect(resolveCapacityLimits({ [IOS_SIM_MAX_BOOTED_ENV]: "5" }, resources)).toEqual({
       maxBooted: 5,
       source: "env",
+      bootConcurrency: 2,
+      bootConcurrencySource: "derived",
     });
     const bad = resolveCapacityLimits({ [IOS_SIM_MAX_BOOTED_ENV]: "0" }, resources);
     expect(bad.source).toBe("derived");
     expect(bad.warning).toContain(IOS_SIM_MAX_BOOTED_ENV);
   });
 
-  test("uses measured memory to budget per simulator, clamped", async () => {
+  test("an unmeasured footprint is never replaced by summed RSS", async () => {
     const { collector } = setup([IOS27]);
     const report = await collector.collect();
-    expect(estimatePerSimulatorBytes(report)).toBe((410112 + 220480 + 903168 + 150000) * 1024);
-    expect(estimatePerSimulatorBytes(undefined)).toBe(3 * GIB);
+    expect(report.simulators.find((sim) => sim.udid === IOS27)?.process?.rssBytes).toBeGreaterThan(
+      1.5 * GIB,
+    );
+    expect(estimatePerSimulatorBytes(report)).toBe(2.5 * GIB);
+    expect(estimatePerSimulatorBytes(undefined)).toBe(2.5 * GIB);
   });
 
   test("pressure thresholds", () => {
@@ -557,7 +566,7 @@ describe("capacity gate boot target and external devices (#11282)", () => {
     expect((error as BootCapacityExhaustedError).details.externalDevices?.sort()).toEqual(
       [IOS27, IOS18].sort(),
     );
-    expect((error as Error).message).toContain("not started by AutoMobile");
+    expect((error as Error).message).toContain("have no AutoMobile owner");
   });
 
   test("simulators this gate started are not named external", async () => {
@@ -626,6 +635,10 @@ describe("command-backed host source", () => {
     const executor = new FakeHostCommandExecutor();
     executor.setCommandResponse("ps -axo", { stdout: PS, stderr: "" } as never);
     executor.setCommandResponse("sysctl", { stdout: "2\n", stderr: "" } as never);
+    executor.setCommandResponse("top -l 1", {
+      stdout: "Processes: 2 total\n\nPID    MEM  \n1      26M  \n114    3424K\n",
+      stderr: "",
+    } as never);
     const simctl = new FakeSimctl();
     simctl.setCommandArgsResult(["list", "devices", "--json"], SIMCTL);
     const source = new CommandFleetHostSource(
@@ -645,10 +658,13 @@ describe("command-backed host source", () => {
       loadAverage1m: null,
       memoryPressure: "warn",
     });
+    expect(host.processes.find((row) => row.pid === 114)?.footprintBytes).toBe(3424 * 1024);
+    expect(host.processes.find((row) => row.pid === 347)?.footprintBytes).toBeUndefined();
     expect(await source.readInventory()).toHaveLength(21);
     expect(executor.getExecutedCommands().sort()).toEqual([
       "ps -axo pid=,ppid=,rss=,pcpu=,command=",
       "sysctl -n kern.memorystatus_vm_pressure_level",
+      "top -l 1 -stats pid,mem",
     ]);
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
       { args: ["list", "devices", "--json"], timeoutMs: undefined },

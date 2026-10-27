@@ -1,3 +1,4 @@
+import { readToolEnvelopePayload } from "../../../src/utils/toolEnvelopePayload";
 import { beforeAll, describe, expect, test } from "bun:test";
 import {
   prototypeSpecSchema,
@@ -36,7 +37,7 @@ import { preserveToolRegistry } from "../../helpers/withTemporaryTool";
 
 const spec = (root: unknown) => ({
   id: "rich",
-  window: { placement: { type: "fullscreen" } },
+  window: { placement: { type: "fullscreen" }, opacity: 1 },
   root,
 });
 const rich = spec({
@@ -273,7 +274,7 @@ test.each(["android", "ios"] as const)(
         action: "show",
         spec: value,
       });
-      return prototypeOutputSchema.parse(response.structuredContent);
+      return prototypeOutputSchema.parse(readToolEnvelopePayload(response)?.payload);
     }
     try {
       const refused = await show(rich);

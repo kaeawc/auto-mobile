@@ -6,7 +6,7 @@ import {
   appIdFieldAliases,
   withAppIdAliases,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 import type { Platform } from "../models";
 import { getRequestedResourceUri } from "./resourceRegistry";
 import { decodeSegmentOrThrow } from "./resourceUriSegments";

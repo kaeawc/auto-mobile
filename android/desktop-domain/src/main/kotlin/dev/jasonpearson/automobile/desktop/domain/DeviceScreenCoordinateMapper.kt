@@ -137,7 +137,9 @@ public object DeviceScreenCoordinateMapper {
     rootWidth: Int,
     rootHeight: Int,
   ): Int {
-    if (imageWidth <= 0 || imageHeight <= 0 || rootWidth <= 0 || rootHeight <= 0) return 0
+    val imageMissing = imageWidth <= 0 || imageHeight <= 0
+    val rootMissing = rootWidth <= 0 || rootHeight <= 0
+    if (imageMissing || rootMissing) return 0
     val imageIsPortrait = imageHeight > imageWidth
     val boundsIsPortrait = rootHeight > rootWidth
     return when {

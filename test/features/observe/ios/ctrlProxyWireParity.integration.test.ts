@@ -69,7 +69,9 @@ const SWIFT_REQUEST_TYPES = [
   "request_activate_accessibility_link",
   "request_launch_app",
   "request_rotate",
+  "request_location",
   "set_hinge_angle",
+  "request_appearance",
   "request_clipboard",
   "get_current_focus",
   "get_traversal_order",
@@ -78,12 +80,14 @@ const SWIFT_REQUEST_TYPES = [
   "request_sdk_trigger",
   "get_voiceover_state",
   "set_voiceover_state",
+  "request_accessibility_audit",
   "list_preference_files",
   "get_preferences",
   "get_preference",
   "set_preference",
   "remove_preference",
   "clear_preferences",
+  "delete_keychain_item",
   "set_network_mock_rules",
   "set_network_fault_rules",
   "set_network_error_simulation",
@@ -174,7 +178,7 @@ function readSwiftRequestTypeRawValues(): string[] {
 
 describe("iOS control-proxy — RequestType contract coverage", () => {
   test("IOS_KNOWN_REQUEST_TYPES matches the transcribed Swift rawValue list", () => {
-    expect([...IOS_KNOWN_REQUEST_TYPES].sort()).toEqual([...SWIFT_REQUEST_TYPES].sort());
+    expect<unknown>([...IOS_KNOWN_REQUEST_TYPES].sort()).toEqual([...SWIFT_REQUEST_TYPES].sort());
   });
 
   test("no duplicate discriminators", () => {

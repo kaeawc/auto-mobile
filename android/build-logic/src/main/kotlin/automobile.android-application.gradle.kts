@@ -5,9 +5,9 @@ import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.getByType
 
 // Shared Android application defaults for control-proxy and playground/app, replacing the
-// duplicated per-module DSL. Namespace, applicationId, versionCode, versionName, minification,
-// Compose, lint, packaging and test options stay in each module (versionName is rewritten
-// in place by scripts/versioning/bump-versions.sh, so its literal must stay in the module).
+// duplicated per-module DSL. Namespace, applicationId, versionCode, minification, Compose, lint
+// disables, packaging and test options stay in each module. versionName comes from VERSION_NAME
+// in android/gradle.properties, the one Android version scripts/versioning/bump-versions.sh writes.
 pluginManager.apply("automobile.kotlin-common")
 
 pluginManager.apply("com.android.application")
@@ -18,6 +18,7 @@ val androidBuildTools = libs.findVersion("build-android-buildTools").get().requi
 val androidMinSdk = libs.findVersion("build-android-minSdk").get().requiredVersion.toInt()
 val androidTargetSdk = libs.findVersion("build-android-targetSdk").get().requiredVersion.toInt()
 val javaTarget = libs.findVersion("build-java-target").get().requiredVersion
+val appVersionName = providers.gradleProperty("VERSION_NAME").get()
 
 extensions.configure<ApplicationExtension> {
   compileSdk = androidCompileSdk
@@ -26,6 +27,7 @@ extensions.configure<ApplicationExtension> {
   defaultConfig {
     minSdk = androidMinSdk
     targetSdk = androidTargetSdk
+    versionName = appVersionName
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
@@ -33,6 +35,28 @@ extensions.configure<ApplicationExtension> {
     getByName("release") {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
+  }
+
+  lint {
+    // AGP creates even empty missing baselines and aborts. Only attach a missing
+    // path during explicit generation; clean modules keep no baseline file.
+    baseline =
+      file("lint-baseline.xml").takeIf {
+        it.isFile || System.getProperty("lint.baselines.continue") == "true"
+      }
+    abortOnError = true
+    warningsAsErrors = true
+    checkDependencies = false
+    // These checks compare against what is published upstream today (newer Gradle/AGP/library
+    // versions, current target API), so their findings change over time and can never be
+    // baselined stably. Dependabot owns version freshness.
+    disable +=
+      setOf(
+        "AndroidGradlePluginVersion",
+        "GradleDependency",
+        "NewerVersionAvailable",
+        "OldTargetApi",
+      )
   }
 
   compileOptions {

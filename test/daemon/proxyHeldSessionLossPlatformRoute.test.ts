@@ -8,12 +8,12 @@ import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_VERSION,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import type { LivenessHandover } from "../../src/daemon/proxyLivenessRecovery";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
+import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -21,11 +21,12 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 
-interface Device {
+// A type alias (not an interface) so a device passes directly as tool-call arguments.
+type Device = {
   sessionUuid: string;
   deviceId: string;
   platform?: "android" | "ios";
-}
+};
 const IOS: Device = { sessionUuid: "ios-session", deviceId: "SIM-1", platform: "ios" };
 const ANDROID: Device = {
   sessionUuid: "android-session",

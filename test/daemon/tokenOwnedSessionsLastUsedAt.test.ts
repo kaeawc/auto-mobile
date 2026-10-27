@@ -8,7 +8,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import {
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -28,6 +28,7 @@ describe("daemon/tokenOwnedSessions lastUsedAt", () => {
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
@@ -47,9 +48,17 @@ describe("daemon/tokenOwnedSessions lastUsedAt", () => {
       const response = await call(DAEMON_TOKEN_OWNED_SESSIONS_METHOD, {
         livenessOwnerToken: TOKEN,
       });
-      const { sessions } = (response as { result: { sessions: Array<{ lastUsedAt: number }> } })
-        .result;
-      const lastUsedAt = sessions[0].lastUsedAt;
+      const sessions = response.result?.sessions;
+      const first: unknown = Array.isArray(sessions) ? sessions[0] : undefined;
+      if (
+        typeof first !== "object" ||
+        first === null ||
+        !("lastUsedAt" in first) ||
+        typeof first.lastUsedAt !== "number"
+      ) {
+        throw new Error("Expected the token-owned sessions answer to report lastUsedAt");
+      }
+      const lastUsedAt = first.lastUsedAt;
 
       const stamp = sessionManager.getSession(SESSION)!.lastUsedAt;
       expect(lastUsedAt).toBe(sessionManager.sessionClockToWall(stamp));

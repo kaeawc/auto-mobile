@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test, mock } from "bun:test";
 import {
   formatTimelineBucketLabel,
   timelineBucketMs,
@@ -101,22 +101,6 @@ describe("failureTimelineBuckets (#10120)", () => {
       "toDateString",
       "toTimeString",
     ] as const;
-    let restores: Array<() => void> = [];
-
-    function forbidLocalAccessors(): void {
-      restores = localAccessors.map((name) => {
-        const spy = spyOn(Date.prototype, name).mockImplementation(() => {
-          throw new Error(`Date.prototype.${name} reads the host time zone`);
-        });
-        return () => spy.mockRestore();
-      });
-    }
-
-    afterEach(() => {
-      restores.forEach((restore) => restore());
-      restores = [];
-    });
-
     function expectedClock(utcHours: number, utcMinutes: number | null): string {
       const hour12 = utcHours % 12 || 12;
       const suffix = utcHours < 12 ? "AM" : "PM";
@@ -126,7 +110,11 @@ describe("failureTimelineBuckets (#10120)", () => {
     }
 
     test("no aggregation reads a local-time Date accessor", () => {
-      forbidLocalAccessors();
+      for (const name of localAccessors) {
+        spyOn(Date.prototype, name).mockImplementation(() => {
+          throw new Error(`Date.prototype.${name} reads the host time zone`);
+        });
+      }
       const at = MONDAY_OCT_5 + 17 * 3_600_000 + 5 * 60_000;
       expect(formatTimelineBucketLabel(at, "day")).toBe("Oct 5");
       expect(formatTimelineBucketLabel(at, "week")).toBe("Oct 5");
@@ -181,4 +169,8 @@ describe("failureTimelineBuckets (#10120)", () => {
       ).toBe("Oct 26");
     });
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

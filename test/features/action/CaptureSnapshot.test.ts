@@ -1,3 +1,7 @@
+import {
+  simulatorOwnership,
+  simulatorDataContainer,
+} from "../../helpers/simulatorContainerFixture";
 import { describe, it, test, expect, beforeEach, afterEach } from "bun:test";
 import { useScratchRoot } from "../../helpers/scratchRoot";
 import {
@@ -35,7 +39,6 @@ describe("CaptureSnapshot", () => {
       deviceId: "emulator-5554",
       name: "Pixel_5",
       platform: "android",
-      isEmulator: true,
     };
 
     // Create fakes
@@ -49,7 +52,11 @@ describe("CaptureSnapshot", () => {
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
 
     // Create CaptureSnapshot instance with fakes
-    captureSnapshot = new CaptureSnapshot(device, fakeAdbFactory, undefined, fakeTimer, store);
+    captureSnapshot = new CaptureSnapshot(device, {
+      adbFactory: fakeAdbFactory,
+      timer: fakeTimer,
+      store,
+    });
 
     // Setup default command results
     fakeAdb.setCommandResult("shell settings list global", "airplane_mode_on=0");
@@ -88,15 +95,12 @@ describe("CaptureSnapshot", () => {
     it("holds the injected console-busy marker for a VM save", async () => {
       const snapshotName = "console-fenced";
       const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
-      const capture = new CaptureSnapshot(
-        device,
-        fakeAdbFactory,
-        undefined,
-        fakeTimer,
+      const capture = new CaptureSnapshot(device, {
+        adbFactory: fakeAdbFactory,
+        timer: fakeTimer,
         store,
-        undefined,
-        consoleBusy,
-      );
+        consoleBusyRegistry: consoleBusy,
+      });
       fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "OK");
 
       await capture.execute({ snapshotName, includeSettings: false, useVmSnapshot: true });
@@ -307,16 +311,13 @@ describe("CaptureSnapshot", () => {
         deviceId: "ABC123DEF",
         name: "Pixel_5_Physical",
         platform: "android",
-        isEmulator: false,
       };
 
-      const capturePhysical = new CaptureSnapshot(
-        physicalDevice,
-        fakeAdbFactory,
-        undefined,
-        fakeTimer,
+      const capturePhysical = new CaptureSnapshot(physicalDevice, {
+        adbFactory: fakeAdbFactory,
+        timer: fakeTimer,
         store,
-      );
+      });
       fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       const result = await capturePhysical.execute({
@@ -406,15 +407,12 @@ describe("CaptureSnapshot", () => {
         deviceId: "ABC123DEF",
         name: "Pixel_5_Physical",
         platform: "android",
-        isEmulator: false,
       };
-      const capturePhysical = new CaptureSnapshot(
-        physicalDevice,
-        fakeAdbFactory,
-        undefined,
-        fakeTimer,
+      const capturePhysical = new CaptureSnapshot(physicalDevice, {
+        adbFactory: fakeAdbFactory,
+        timer: fakeTimer,
         store,
-      );
+      });
       fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       const result = await capturePhysical.execute({
@@ -593,21 +591,39 @@ describe("CaptureSnapshot (iOS)", () => {
   let store: DeviceSnapshotStore;
   const scratch = useScratchRoot("snapshot-test-");
   let testBasePath: string;
+  let containerFiles: Map<string, string>;
 
   beforeEach(async () => {
     device = {
-      deviceId: "ios-device-1",
+      deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
       name: "iPhone 15",
       platform: "ios",
     };
 
     simctl = new FakeSimctl();
+    containerFiles = new Map();
     testBasePath = scratch.next();
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
   });
 
   function makeCapture(): CaptureSnapshot {
-    return new CaptureSnapshot(device, undefined, undefined, undefined, store, simctl);
+    return new CaptureSnapshot(device, {
+      store,
+      simctl,
+      containerOwnership: simulatorOwnership,
+      iosCaptureContainerFiles: {
+        mkdir: async () => {},
+        pathExists: async (source) =>
+          [...containerFiles.keys()].some((file) => file.startsWith(`${source}${path.sep}`)),
+        cp: async (source, destination) => {
+          for (const [file, content] of [...containerFiles]) {
+            if (file.startsWith(`${source}${path.sep}`)) {
+              containerFiles.set(path.join(destination, path.relative(source, file)), content);
+            }
+          }
+        },
+      },
+    });
   }
 
   test("returns installed bundle IDs through strict simctl listing", async () => {
@@ -617,14 +633,11 @@ describe("CaptureSnapshot (iOS)", () => {
       { CFBundleIdentifier: "com.apple.Preferences" },
       { CFBundleIdentifier: "com.example.app" },
     ]);
-    const capture = new CaptureSnapshot(
-      device,
-      undefined,
-      undefined,
-      new FakeTimer(),
+    const capture = new CaptureSnapshot(device, {
+      timer: new FakeTimer(),
       store,
-      transport,
-    );
+      simctl: transport,
+    });
     expect(await capture["getInstalledIosBundleIds"]()).toEqual(
       new Set(["com.example.app", "com.apple.Preferences"]),
     );
@@ -635,14 +648,11 @@ describe("CaptureSnapshot (iOS)", () => {
   test("wraps a strict simctl listing failure with the existing actionable context", async () => {
     const transport = new FakeSimctl();
     transport.setListAppsError(new Error("listing unavailable"));
-    const capture = new CaptureSnapshot(
-      device,
-      undefined,
-      undefined,
-      new FakeTimer(),
+    const capture = new CaptureSnapshot(device, {
+      timer: new FakeTimer(),
       store,
-      transport,
-    );
+      simctl: transport,
+    });
     await expect(capture["getInstalledIosBundleIds"]()).rejects.toThrow(
       "Failed to list installed iOS apps to validate appBundleIds",
     );
@@ -666,10 +676,9 @@ describe("CaptureSnapshot (iOS)", () => {
   it("captures app data and writes metadata", async () => {
     const snapshotName = "ios-snapshot";
     const bundleId = "com.example.app";
-    const containerRoot = path.join(testBasePath, "containers", bundleId);
+    const containerRoot = simulatorDataContainer(device.deviceId);
     const documentsPath = path.join(containerRoot, "Documents");
-    await fs.mkdir(documentsPath, { recursive: true });
-    await fs.writeFile(path.join(documentsPath, "data.txt"), "hello");
+    containerFiles.set(path.join(documentsPath, "data.txt"), "hello");
 
     simctl.setContainerPath(bundleId, containerRoot);
     // Installed apps: the user app (with a container) and a system app that is
@@ -716,9 +725,8 @@ describe("CaptureSnapshot (iOS)", () => {
     ]);
 
     const appDataPath = store.getAppDataPath(snapshotName, pathOptions);
-    const copiedFile = await fs.readFile(
+    const copiedFile = containerFiles.get(
       path.join(appDataPath, bundleId, "Documents", "data.txt"),
-      "utf-8",
     );
     expect(copiedFile).toBe("hello");
   });
@@ -777,9 +785,8 @@ describe("CaptureSnapshot (iOS)", () => {
     const noContainer = "com.example.nocontainer";
     const notInstalled = "com.example.missing";
 
-    const containerRoot = path.join(testBasePath, "containers", captured);
-    await fs.mkdir(path.join(containerRoot, "Documents"), { recursive: true });
-    await fs.writeFile(path.join(containerRoot, "Documents", "data.txt"), "hello");
+    const containerRoot = simulatorDataContainer(device.deviceId);
+    containerFiles.set(path.join(containerRoot, "Documents", "data.txt"), "hello");
 
     simctl.setContainerPath(captured, containerRoot);
     // `noContainer` is installed but has no data container (empty path).
@@ -828,9 +835,8 @@ describe("CaptureSnapshot (iOS)", () => {
     const captured = "com.example.captured";
     const noContainer = "com.example.nocontainer";
 
-    const containerRoot = path.join(testBasePath, "containers", captured);
-    await fs.mkdir(path.join(containerRoot, "Documents"), { recursive: true });
-    await fs.writeFile(path.join(containerRoot, "Documents", "data.txt"), "hello");
+    const containerRoot = simulatorDataContainer(device.deviceId);
+    containerFiles.set(path.join(containerRoot, "Documents", "data.txt"), "hello");
 
     simctl.setContainerPath(captured, containerRoot);
     simctl.setInstalledApps([
@@ -859,9 +865,8 @@ describe("CaptureSnapshot (iOS)", () => {
     const captured = "com.example.captured";
     const notInstalled = "com.example.missing";
 
-    const containerRoot = path.join(testBasePath, "containers", captured);
-    await fs.mkdir(path.join(containerRoot, "Documents"), { recursive: true });
-    await fs.writeFile(path.join(containerRoot, "Documents", "data.txt"), "hello");
+    const containerRoot = simulatorDataContainer(device.deviceId);
+    containerFiles.set(path.join(containerRoot, "Documents", "data.txt"), "hello");
 
     simctl.setContainerPath(captured, containerRoot);
     simctl.setInstalledApps([{ CFBundleIdentifier: captured }]);
@@ -961,9 +966,8 @@ describe("CaptureSnapshot (iOS)", () => {
     const noContainer = "com.example.nocontainer";
     const notInstalled = "com.example.missing";
 
-    const containerRoot = path.join(testBasePath, "containers", captured);
-    await fs.mkdir(path.join(containerRoot, "Documents"), { recursive: true });
-    await fs.writeFile(path.join(containerRoot, "Documents", "data.txt"), "hello");
+    const containerRoot = simulatorDataContainer(device.deviceId);
+    containerFiles.set(path.join(containerRoot, "Documents", "data.txt"), "hello");
 
     simctl.setContainerPath(captured, containerRoot);
     simctl.setInstalledApps([
@@ -1061,7 +1065,6 @@ describe("CaptureSnapshot snapshotName path-traversal rejection (#5705)", () => 
       deviceId: "emulator-5554",
       name: "Pixel_5",
       platform: "android",
-      isEmulator: true,
     };
     fakeAdb = new FakeAdbClient();
     fakeAdbFactory = { create: () => fakeAdb };
@@ -1077,7 +1080,11 @@ describe("CaptureSnapshot snapshotName path-traversal rejection (#5705)", () => 
 
   for (const badName of ["../traversal_x", "a/b", "/etc/passwd"]) {
     it(`rejects '${badName}' before any adb snapshot-save command`, async () => {
-      const capture = new CaptureSnapshot(device, fakeAdbFactory, undefined, fakeTimer, store);
+      const capture = new CaptureSnapshot(device, {
+        adbFactory: fakeAdbFactory,
+        timer: fakeTimer,
+        store,
+      });
       await expect(capture.execute({ snapshotName: badName, useVmSnapshot: true })).rejects.toThrow(
         /invalid snapshot name/i,
       );

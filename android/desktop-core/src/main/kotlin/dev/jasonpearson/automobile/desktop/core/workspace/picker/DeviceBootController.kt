@@ -110,7 +110,7 @@ class RealDeviceBootController(
       } catch (c: CancellationException) {
         // Never swallow structured-concurrency cancellation — let it propagate.
         throw c
-      } catch (e: Exception) {
+      } catch (e: dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException) {
         LOG.warn("startDevice threw for ${device.name}: ${e.message}", e)
         Result.failure(e)
       }

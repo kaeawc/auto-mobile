@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { spyOnDatabasePrepare } from "../../../helpers/sqlitePrepareSpy";
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { Kysely } from "kysely";
@@ -9,7 +10,10 @@ import {
   type SqliteBindingRegistry,
 } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { BEGIN_TRANSACTION_SQL, BunSqliteDialect } from "../../../../src/db/bunSqliteDialect";
-import { bindingRegistryMigrationProvider } from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
+import {
+  bindingRegistryMigrationProvider,
+  BROKER_TIMING_MIGRATION,
+} from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
 import { classifySqliteError } from "../../../../src/db/databaseFailureClassification";
 import { defaultTimer } from "../../../../src/utils/SystemTimer";
 import { logger } from "../../../../src/utils/logger";
@@ -43,15 +47,8 @@ describe("registry busy bound (real SQLite)", () => {
     const peerDb = new Kysely<unknown>({ dialect: new BunSqliteDialect({ database: peer }) });
     await new Migrator({ db: peerDb, provider: bindingRegistryMigrationProvider }).getMigrations();
     peer.exec("BEGIN IMMEDIATE");
-    const prepare = Database.prototype.prepare;
     const statements: string[] = [];
-    const query = spyOn(Database.prototype, "prepare").mockImplementation(function (
-      this: Database,
-      sql: string,
-    ) {
-      statements.push(sql);
-      return prepare.call(this, sql);
-    });
+    const query = spyOnDatabasePrepare({ beforePrepare: (sql) => statements.push(sql) });
     const exec = spyOn(Database.prototype, "exec");
     const close = spyOn(Database.prototype, "close");
     let locked = true;
@@ -87,6 +84,10 @@ describe("registry busy bound (real SQLite)", () => {
         "2026_10_15_007_session_broker_failure_retryable",
         "2026_10_16_008_retire_slot_features",
         "2026_10_16_009_session_broker_receipt_retention",
+        "2026_10_19_010_session_broker_exports",
+        "2026_10_20_011_session_broker_resource_indexes",
+        "2026_10_21_012_device_mutation_journal",
+        BROKER_TIMING_MIGRATION,
       ]);
       peer.exec("COMMIT");
       locked = false;
@@ -117,17 +118,14 @@ describe("registry busy bound (real SQLite)", () => {
 
   test("a busy migration rolls back partial ALTERs and the next open succeeds", async () => {
     const dbPath = join(scratch.next(), "slots.sqlite");
-    const prepare = Database.prototype.prepare;
     let refused = false;
-    const query = spyOn(Database.prototype, "prepare").mockImplementation(function (
-      this: Database,
-      sql: string,
-    ) {
-      if (!refused && sql.includes("ADD COLUMN") && sql.includes("deletion_owner_pid")) {
-        refused = true;
-        throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
-      }
-      return prepare.call(this, sql);
+    const query = spyOnDatabasePrepare({
+      beforePrepare: (sql) => {
+        if (!refused && sql.includes("ADD COLUMN") && sql.includes("deletion_owner_pid")) {
+          refused = true;
+          throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+        }
+      },
     });
     try {
       await expect(openSqliteBindingRegistry({ dbPath })).rejects.toMatchObject({
@@ -153,27 +151,23 @@ describe("registry busy bound (real SQLite)", () => {
     const peer = new Database(dbPath);
     peer.exec("BEGIN IMMEDIATE");
     let registry: SqliteBindingRegistry | undefined;
-    const prepare = Database.prototype.prepare;
     const runs: Array<ReturnType<typeof spyOn>> = [];
     let attempts = 0;
-    const query = spyOn(Database.prototype, "prepare").mockImplementation(function (
-      this: Database,
-      sql: string,
-    ) {
-      const statement = prepare.call(this, sql);
-      if (sql === BEGIN_TRANSACTION_SQL) {
-        const run = statement.run;
-        runs.push(
-          spyOn(statement, "run").mockImplementation(function (
-            this: typeof statement,
-            ...args: Parameters<typeof run>
-          ) {
-            attempts++;
-            return run.apply(this, args);
-          }),
-        );
-      }
-      return statement;
+    const query = spyOnDatabasePrepare({
+      afterPrepare: (sql, statement) => {
+        if (sql === BEGIN_TRANSACTION_SQL) {
+          const run = statement.run;
+          runs.push(
+            spyOn(statement, "run").mockImplementation(function (
+              this: typeof statement,
+              ...args: Parameters<typeof run>
+            ) {
+              attempts++;
+              return run.apply(this, args);
+            }),
+          );
+        }
+      },
     });
     const sleep = spyOn(defaultTimer, "sleep");
     const warn = spyOn(logger, "warn");
@@ -230,15 +224,8 @@ describe("migrated registry open (real SQLite file)", () => {
       const dbPath = join(await getHarness().makeTempDbDir("am-bindings-"), "slots.sqlite");
       const migrated = await openSqliteBindingRegistry({ dbPath });
       await migrated.close();
-      const prepare = Database.prototype.prepare;
       const statements: string[] = [];
-      const query = spyOn(Database.prototype, "prepare").mockImplementation(function (
-        this: Database,
-        sql: string,
-      ) {
-        statements.push(sql);
-        return prepare.call(this, sql);
-      });
+      const query = spyOnDatabasePrepare({ beforePrepare: (sql) => statements.push(sql) });
       const exec = spyOn(Database.prototype, "exec");
       const close = spyOn(Database.prototype, "close");
       try {

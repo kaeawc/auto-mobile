@@ -1,4 +1,8 @@
 import type { ReadResourceResult } from "@modelcontextprotocol/server";
+import {
+  resetBootedDevicesResourceCache as invalidateBootedResourceViaDaemon,
+  notifyBootedDeviceResourcesUpdated as notifyBootedResourceViaDaemon,
+} from "../../../src/daemon/deviceResourceInvalidation";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { createExecResult } from "../../../src/utils/execResult";
 import { listBootedDevicesForResource } from "../../../src/server/resourceDeviceResolver";
@@ -54,7 +58,7 @@ import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
-import { describeDevice, listDevicesEntrySchema } from "../../../src/server/deviceDescription";
+import { describeDevice, listDevicesEntrySchema } from "../../../src/daemon/deviceDescription";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { getAndroidAppMetadataViaAdb } from "../../../src/features/observe/GetAppMetadata";
 import {
@@ -65,6 +69,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { resolveApkChecksum, resolveIpaChecksum } from "../../../src/constants/release";
 import { z } from "zod/v4";
 import { FakeOrientationReader } from "../../fakes/FakeOrientationReader";
+import { FakeDeviceTraits, androidDeviceTraits } from "../../fakes/FakeDeviceTraits";
 import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenanceCache";
 import { notifyDeviceImageResourcesUpdated } from "../../../src/server/deviceImageResources";
 import type { IosLockStateProbe } from "../../../src/features/observe/ios/IosLockStateProbe";
@@ -87,6 +92,11 @@ function useOrientationReaderFactory(
   value: BootedDeviceResourceDependencies["injectedOrientationReaderFactory"] | null,
 ): void {
   deps = { ...deps, injectedOrientationReaderFactory: value ?? undefined };
+  registerBootedDeviceResources(deps);
+}
+
+function useDeviceTraits(value: BootedDeviceResourceDependencies["injectedDeviceTraits"]): void {
+  deps = { ...deps, injectedDeviceTraits: value ?? undefined };
   registerBootedDeviceResources(deps);
 }
 
@@ -156,6 +166,7 @@ describe("MCP Booted Device Resources", () => {
     setDeviceLockProbe(null);
     setIosLockStateProbe(null);
     useOrientationReaderFactory(null);
+    useDeviceTraits(null);
     resetBootedDevicesResourceCache();
   });
 
@@ -292,7 +303,7 @@ describe("MCP Booted Device Resources", () => {
     await getBootedDevicesForPlatforms(["android"], timer, deps);
     expect(fakeDeviceUtils.getCallCount("getBootedDevices:android")).toBe(2);
 
-    resetBootedDevicesResourceCache();
+    invalidateBootedResourceViaDaemon();
     await getBootedDevicesForPlatforms(["android"], timer, deps);
     expect(fakeDeviceUtils.getCallCount("getBootedDevices:android")).toBe(3);
   });
@@ -938,6 +949,31 @@ describe("MCP Booted Device Resources", () => {
       expect(data.devices[0].runtime.orientation).toBe("landscape");
     });
 
+    test("includes manufacturer and brand from the injected DeviceTraits", async function () {
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+      const traits = new FakeDeviceTraits(
+        androidDeviceTraits({ manufacturer: "samsung", brand: "samsung", model: "SM-S921B" }),
+      );
+      useDeviceTraits(traits);
+
+      const { client } = fixture.getContext();
+      const result = await client.request(
+        { method: "resources/read", params: { uri: "automobile:devices/booted/android" } },
+        z.object({ contents: z.array(z.object({ text: z.string() })) }),
+      );
+      const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text);
+
+      expect(data.devices[0].traits).toEqual({
+        manufacturer: "samsung",
+        brand: "samsung",
+        model: "SM-S921B",
+        sdk: 35,
+        abi: "arm64-v8a",
+        formFactor: null,
+      });
+      expect(traits.reads.map((read) => read.deviceId)).toEqual([mockAndroidDevice1.deviceId]);
+    });
+
     test("omits lock state for a device the probe cannot read", async function () {
       fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
       // iOS (and any unreadable device) yields undefined — the field is then omitted entirely.
@@ -993,8 +1029,11 @@ describe("MCP Booted Device Resources", () => {
               throw new Error("fake iOS lock failure");
             }
             return scenario.locked === undefined
-              ? undefined
-              : { locked: scenario.locked, keyguardShowing: scenario.locked };
+              ? { kind: "unknown", reason: "error" }
+              : {
+                  kind: "known",
+                  lock: { locked: scenario.locked, keyguardShowing: scenario.locked },
+                };
           },
         };
         const read = spyOn(probe, "read");
@@ -1289,7 +1328,7 @@ describe("MCP Booted Device Resources", () => {
         },
       );
       try {
-        await notifyBootedDeviceResourcesUpdated();
+        await notifyBootedResourceViaDaemon();
         expect(notify).toHaveBeenCalledTimes(1);
         expect(fakeDeviceUtils.getCallCount("getBootedDevices:ios")).toBe(2);
       } finally {

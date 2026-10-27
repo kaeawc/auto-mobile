@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { ToolSelectionProfileProvenanceRepository } from "../../src/db/toolSelectionProfileProvenanceRepository";
-import { PersistentToolSelectionProfileRegistry } from "../../src/server/toolSelectionProfileRegistry";
+import { PersistentToolSelectionProfileRegistry } from "../../src/daemon/toolSelectionProfileRegistry";
 import { bindFileBackedDbHarness } from "./withFileBackedDb";
 import { WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./fileBackedDbTestTimeout";
 

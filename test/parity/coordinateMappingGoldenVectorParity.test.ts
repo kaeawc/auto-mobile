@@ -293,15 +293,25 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function () {
     // iosPointToPixel are consumed directly by the daemon tests, where JS coercion hides
     // corruption: `"375" * 2 === 750`, so a string-typed pointWidth would pass BOTH the reference
     // recalculation and the real daemon path. The loader must reject it with the location named.
-    const corrupted = structuredClone(canonical);
-    (corrupted.iosPointToPixel[0] as Record<string, unknown>).pointWidth = "375";
+    const corrupted: unknown = {
+      ...canonical,
+      iosPointToPixel: canonical.iosPointToPixel.map((row, index) =>
+        index === 0 ? { ...row, pointWidth: "375" } : row,
+      ),
+    };
     expect(() => validateCoordinateMappingVectors(corrupted, "fixture.json")).toThrow(
       /fixture\.json: section iosPointToPixel row 0 field pointWidth: missing or non-numeric value \("375"\)/,
     );
     // A deleted expected field in a daemon-only section must also fail (no silent unmatch).
-    const missing = structuredClone(canonical);
-    delete (missing.geometryPairing[2] as Partial<(typeof missing.geometryPairing)[number]>)
-      .expectedMatch;
+    const missing: unknown = {
+      ...canonical,
+      geometryPairing: canonical.geometryPairing.map((row, index) => {
+        if (index !== 2) {
+          return row;
+        }
+        return Object.fromEntries(Object.entries(row).filter(([key]) => key !== "expectedMatch"));
+      }),
+    };
     expect(() => validateCoordinateMappingVectors(missing, "fixture.json")).toThrow(
       /section geometryPairing row 2 field expectedMatch/,
     );

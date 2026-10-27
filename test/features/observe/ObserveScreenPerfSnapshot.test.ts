@@ -1,7 +1,11 @@
+import * as performanceMonitorModule from "../../../src/features/performance/PerformanceMonitor";
+import { PerformanceMonitor } from "../../../src/features/performance/PerformanceMonitor";
+import { SdkFrameMetricsStore } from "../../../src/features/performance/SdkFrameMetricsStore";
+import { drainUntilQuiescent } from "../../helpers/fakeTimerStepping";
 import { FakeHierarchyCollector } from "../../fakes/FakeHierarchyCollector";
 import { FakeDeviceStateCollector } from "../../fakes/FakeDeviceStateCollector";
 import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -46,11 +50,27 @@ function createObserveScreen(): RealObserveScreen {
 
 describe("ObserveScreen perf snapshot", () => {
   let savedEnable: string | undefined;
+  let timer: FakeTimer;
+  let monitor: PerformanceMonitor;
+  let restoreMonitorGetter: () => void;
 
   beforeEach(() => {
     savedEnable = process.env[ENABLE_ENV];
     delete process.env[ENABLE_ENV];
     getPerfWindowBuffer().clear(DEVICE_ID);
+    timer = new FakeTimer();
+    monitor = new PerformanceMonitor(timer, {
+      adbClientFactory: new FakeAdbClientFactory(),
+      demandProbe: { hasDemand: (_deviceId, _packageName, _platform) => false },
+      serverGetter: () => ({ pushPerformanceData: () => {} }),
+      perfWindowBuffer: getPerfWindowBuffer(),
+      frameMetricsStore: new SdkFrameMetricsStore(),
+      getTelemetryEmitter: () => ({ setContext: () => {}, recordPerformanceEvent: () => {} }),
+    });
+    const getter = spyOn(performanceMonitorModule, "getPerformanceMonitor").mockReturnValue(
+      monitor,
+    );
+    restoreMonitorGetter = () => getter.mockRestore();
   });
 
   afterEach(() => {
@@ -60,7 +80,8 @@ describe("ObserveScreen perf snapshot", () => {
       process.env[ENABLE_ENV] = savedEnable;
     }
     getPerfWindowBuffer().clear(DEVICE_ID);
-    getPerformanceMonitor().stop(); // stop the real sampling interval an enabled observe started
+    monitor.stop();
+    restoreMonitorGetter();
     _resetPerformanceMonitor();
     resetObserveCacheStore();
     resetScreenshotStateStore();
@@ -125,12 +146,11 @@ describe("ObserveScreen perf snapshot", () => {
 
   test("first enabled observe registers the device for sampling", async () => {
     process.env[ENABLE_ENV] = "1";
-    // Fresh monitor, empty buffer: the observe itself must set up future
-    // sampling (start + startMonitoring), or the window would never fill.
     expect(getPerformanceMonitor().isMonitoring(DEVICE_ID)).toBe(false);
-
     await createObserveScreen().execute();
-
     expect(getPerformanceMonitor().isMonitoring(DEVICE_ID)).toBe(true);
+    // With no subscribers, this sample proves the observe acquired an active lease.
+    await timer.advanceTimeAsync(500, () => drainUntilQuiescent(timer));
+    expect(getPerfWindowBuffer().snapshot(DEVICE_ID, timer.now(), 60000).sampleCount).toBe(1);
   });
 });

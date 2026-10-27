@@ -6,9 +6,9 @@ import type {
 import { HybridVideoCaptureBackend } from "../../src/features/video/HybridVideoCaptureBackend";
 import { FfmpegVideoProcessingBackend } from "../../src/features/video/FfmpegVideoProcessingBackend";
 import { FakeHostRecorderProcessControl } from "../fakes/FakeHostRecorderProcessControl";
-import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
-import * as videoManager from "../../src/server/videoRecordingManager";
-import { redriveUnconfirmedCaptureTeardowns } from "../../src/server/recordingTeardownRedrive";
+import { OrphanRecorderActiveError } from "../../src/daemon/orphanRecorderRefusal";
+import * as videoManager from "../../src/daemon/videoRecordingManager";
+import { redriveUnconfirmedCaptureTeardowns } from "../../src/daemon/recordingTeardownRedrive";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -23,7 +23,7 @@ import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { VideoRecorderService } from "../../src/features/video";
 import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -31,10 +31,11 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
 import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
+import { toolText } from "../helpers/toolResponse";
 
 const videoRecording = createVideoRecordingToolsHarness();
 
@@ -68,7 +69,7 @@ let repository: FakeVideoRecordingRepository;
 let service: VideoRecorderService;
 let spies: Array<{ mockRestore(): void }>;
 let deviceHeld: boolean;
-let sessions: FakeDeviceSessionManager;
+let sessions: FakeDeviceReadiness;
 const originalStat = fsPromises.stat;
 const originalWarn = logger.warn;
 let owningConnection: string | undefined;
@@ -98,7 +99,7 @@ beforeEach(async () => {
     spyOn(fsPromises, "stat").mockRejectedValue(new Error("fake file has no disk stat")),
     spyOn(logger, "warn").mockImplementation(() => {}),
   ];
-  sessions = new FakeDeviceSessionManager();
+  sessions = new FakeDeviceReadiness();
   sessions.setConnectedDevices([device]);
   videoRecording.configure({ deviceDetector: sessions });
   service = new VideoRecorderService({
@@ -218,7 +219,7 @@ test("owner stops the only startup orphan without an id exactly once", async () 
   });
   const { error, response } = await outcome({ action: "stop", sessionUuid: OWNER });
   expect(error).toBeUndefined();
-  const payload = JSON.parse(response!.content[0].text);
+  const payload = JSON.parse(toolText(response));
   expect(payload.count).toBe(1);
   expect(payload.recordings).toHaveLength(1);
   expect(payload.recordings[0]).toMatchObject({
@@ -281,7 +282,7 @@ test("latest in-memory capture retains the existing id-less stop response", asyn
   });
   const { error, response } = await outcome({ action: "stop", sessionUuid: OWNER });
   expect(error).toBeUndefined();
-  const payload = JSON.parse(response!.content[0].text);
+  const payload = JSON.parse(toolText(response));
   expect(payload.count).toBe(1);
   expect(payload.recordings[0].recordingId).toBe(active.recordingId);
   expect(payload.recordings[0].status).toBeUndefined();
@@ -299,7 +300,7 @@ test("an interrupted orphan without active rows is stopped", async () => {
   });
   const { error, response } = await outcome({ action: "stop", sessionUuid: OWNER });
   expect(error).toBeUndefined();
-  expect(JSON.parse(response!.content[0].text).recordings[0].status).toBe("interrupted");
+  expect(JSON.parse(toolText(response)).recordings[0].status).toBe("interrupted");
   expect(stops).toBe(1);
 });
 
@@ -313,7 +314,7 @@ test("id-less stop stops every owned orphan and reports each foreign orphan", as
   });
   const { error, response } = await outcome({ action: "stop", sessionUuid: OWNER });
   expect(error).toBeUndefined();
-  const payload = JSON.parse(response!.content[0].text);
+  const payload = JSON.parse(toolText(response));
   expect(payload.count).toBe(2);
   expect(payload.recordings.map((entry: { recordingId: string }) => entry.recordingId)).toEqual([
     "startup-orphan",
@@ -343,7 +344,7 @@ test("the acquiring MCP connection may stop the startup orphan without an id", a
     __mcpSessionId: owningConnection,
   });
   expect(error).toBeUndefined();
-  expect(JSON.parse(response!.content[0].text).count).toBe(1);
+  expect(JSON.parse(toolText(response)).count).toBe(1);
   expect(stops).toBe(1);
 });
 
@@ -362,7 +363,7 @@ test("multi-device stop reports an unconfirmed orphan and stops the other device
   });
   const { error, response } = await outcome({ action: "stop" });
   expect(error).toBeUndefined();
-  const payload = JSON.parse(response!.content[0].text);
+  const payload = JSON.parse(toolText(response));
   expect(payload.count).toBe(1);
   expect(payload.recordings[0]).toMatchObject({
     recordingId: "second-orphan",
@@ -390,19 +391,11 @@ test("iOS host startup orphan is stopped without an id through redrive and permi
   control.onSignal = () => {
     control.running = false;
   };
-  const ffmpeg = new FfmpegVideoProcessingBackend(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+  const ffmpeg = new FfmpegVideoProcessingBackend(undefined, {
     timer,
-    undefined,
-    undefined,
-    undefined,
-    () => "generation-a",
-    control,
-  );
+    readHostStartToken: () => "generation-a",
+    hostRecorderControl: control,
+  });
   const hybrid = new HybridVideoCaptureBackend(ffmpeg, backend);
   await retainStartupOrphan(async (target, descriptor, options) => {
     expect(target).toBeUndefined();
@@ -412,7 +405,7 @@ test("iOS host startup orphan is stopped without an id through redrive and permi
   }, host);
   const stopped = await outcome({ action: "stop", sessionUuid: OWNER }, iosDevice);
   expect(stopped.error).toBeUndefined();
-  const payload = JSON.parse(stopped.response!.content[0].text);
+  const payload = JSON.parse(toolText(stopped.response));
   expect(payload.recordings[0]).toMatchObject({
     recordingId: "startup-orphan",
     status: "interrupted",
@@ -434,19 +427,11 @@ async function retainRawHostOrphan(capturePath = "/kept/raw.mov") {
   control.onSignal = () => {
     control.running = false;
   };
-  const ffmpeg = new FfmpegVideoProcessingBackend(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+  const ffmpeg = new FfmpegVideoProcessingBackend(undefined, {
     timer,
-    undefined,
-    undefined,
-    undefined,
-    () => "generation-a",
-    control,
-  );
+    readHostStartToken: () => "generation-a",
+    hostRecorderControl: control,
+  });
   await retainStartupOrphan(
     (target, descriptor, options) => ffmpeg.forceStopOrphanedCapture(target, descriptor, options),
     {
@@ -472,7 +457,7 @@ test.each([undefined, "startup-orphan"])(
       { ...device, platform: "ios" },
     );
     expect(stopped.error).toBeUndefined();
-    const entry = JSON.parse(stopped.response!.content[0].text).recordings[0];
+    const entry = JSON.parse(toolText(stopped.response)).recordings[0];
     expect(entry).toMatchObject({
       filePath: "/kept/raw.mov",
       sizeBytes: 321,
@@ -507,7 +492,7 @@ test("iOS startup orphan with neither file warns and preserves its planned artif
     { ...device, platform: "ios" },
   );
   expect(stopped.error).toBeUndefined();
-  const entry = JSON.parse(stopped.response!.content[0].text).recordings[0];
+  const entry = JSON.parse(toolText(stopped.response)).recordings[0];
   expect(entry.sizeBytes).toBe(0);
   expect(entry.warning).toContain(
     "The capture was interrupted by a daemon restart and its recorder was stopped.",
@@ -535,14 +520,14 @@ test("raw orphan capture without a probeable codec is not adopted", async () => 
     { ...device, platform: "ios" },
   );
   expect(stopped.error).toBeUndefined();
-  const entry = JSON.parse(stopped.response!.content[0].text).recordings[0];
+  const entry = JSON.parse(toolText(stopped.response)).recordings[0];
   expect(entry.filePath).toBe(before!.filePath);
   expect(entry.sizeBytes).toBe(0);
   expect(entry.codec).toBe("unknown");
   expect(entry.videoDurationMs).toBeUndefined();
   expect(entry.warning).toContain("No recording file was found");
   expect(await repository.getRecording("startup-orphan")).toEqual({
-    ...before,
+    ...before!,
     status: "interrupted",
     captureTeardown: undefined,
     endedAt: new Date(timer.now()).toISOString(),
@@ -566,12 +551,12 @@ test("raw orphan capture with an unsupported container warns without adoption", 
     { ...device, platform: "ios" },
   );
   expect(stopped.error).toBeUndefined();
-  const entry = JSON.parse(stopped.response!.content[0].text).recordings[0];
+  const entry = JSON.parse(toolText(stopped.response)).recordings[0];
   expect(entry.filePath).toBe(before!.filePath);
   expect(entry.sizeBytes).toBe(0);
   expect(entry.warning).toContain("No recording file was found");
   expect(await repository.getRecording("startup-orphan")).toEqual({
-    ...before,
+    ...before!,
     status: "interrupted",
     captureTeardown: undefined,
     endedAt: new Date(timer.now()).toISOString(),
@@ -591,7 +576,7 @@ test("an existing planned iOS artifact is preserved without probing the raw capt
     { ...device, platform: "ios" },
   );
   expect(stopped.error).toBeUndefined();
-  const entry = JSON.parse(stopped.response!.content[0].text).recordings[0];
+  const entry = JSON.parse(toolText(stopped.response)).recordings[0];
   expect(entry.filePath).toBe("/unused/orphan.mp4");
   expect(entry.sizeBytes).toBe(9);
   expect(entry.warning).toBe(

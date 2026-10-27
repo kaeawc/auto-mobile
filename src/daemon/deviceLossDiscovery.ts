@@ -1,12 +1,17 @@
+import { didSourceSucceedForDevice, discoverySourceFor } from "../utils/discoverySource";
 import type { BootedDevice } from "../models";
-import type { BootedDeviceDiscovery, MultiPlatformDeviceManager } from "../devices/deviceUtils";
-import { transitionalHeldSimulators } from "../server/adbOfflineHeldDevices";
+import type {
+  BootedDeviceDiscovery,
+  BootedDeviceDiscoveryOptions,
+  MultiPlatformDeviceManager,
+} from "../devices/deviceUtils";
+import { transitionalHeldSimulators } from "./adbOfflineHeldDevices";
 import type { Session } from "./sessionManager";
 import {
   interruptVideoRecording,
   type listActiveVideoRecordings,
   stopVideoRecordingUnattended,
-} from "../server/videoRecordingManager";
+} from "./videoRecordingManager";
 import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -29,6 +34,10 @@ import { MISSING_DEVICE_MISS_THRESHOLD } from "./missingDeviceLiveness";
  * recording stop at disconnect. Every function reads the daemon only through the narrow port types
  * below, so each is unit-testable with fakes; the miss maps and the tick itself stay on `Daemon`.
  */
+
+// Reuse pool refresh snapshots to reduce simctl cost; held simulator loss can wait up to 15 seconds.
+// Missing devices still require a fresh confirmation before their absence counts.
+export const MONITOR_IOS_LIST_MAX_AGE_MS = 15_000;
 
 export const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
 // Retain plan-time evidence while requiring two inactive observations before cleanup.
@@ -56,27 +65,91 @@ export type DeviceLossDiscoveryPool = Pick<
   | "reconcileDiscoveryObservation"
 >;
 
+function needsFreshTransitionalSimulatorRead(
+  discovery: BootedDeviceDiscovery,
+  iosDeviceListMaxAgeMs: number | undefined,
+): boolean {
+  return iosDeviceListMaxAgeMs !== undefined && (discovery.transitionalSimulators?.length ?? 0) > 0;
+}
+
 export async function discoverAndReconcile(
   devicePool: DeviceLossDiscoveryPool,
   deviceManager: Pick<MultiPlatformDeviceManager, "getBootedDevicesDetailed">,
   {
-    planActive,
+    isPlanDevice = () => false,
     platform = "either",
     bypassAndroidDeviceListCache = false,
+    heldDevices = [],
+    iosDeviceListMaxAgeMs,
   }: {
-    planActive: boolean;
+    iosDeviceListMaxAgeMs?: number;
+    isPlanDevice?: (deviceId: string) => boolean;
+    heldDevices?: readonly { platform: "android" | "ios"; assignedDevice: string }[];
     platform?: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0];
     bypassAndroidDeviceListCache?: boolean;
   },
 ) {
-  const discovery = await deviceManager.getBootedDevicesDetailed(platform, {
+  const trackedDevices = [
+    ...devicePool.getAllDevices().map((device) => ({ platform: device.platform, id: device.id })),
+    ...heldDevices.map((device) => ({ platform: device.platform, id: device.assignedDevice })),
+  ];
+  const options = {
     bypassAndroidDeviceListCache,
+    skipAndroidProfileEnrichment: true,
+    // An unpooled held device still needs liveness evidence from its own source.
+    skipPhysicalIosDiscovery: !trackedDevices.some(
+      (device) => discoverySourceFor(device.platform, device.id) === "ios-physical",
+    ),
+  };
+  const read = async (readOptions: BootedDeviceDiscoveryOptions) => {
+    const observation = await deviceManager.getBootedDevicesDetailed(platform, readOptions);
+    observation.devices = await mapMonitorAndroidDiscovery(devicePool, observation.devices);
+    return observation;
+  };
+  let discovery = await read({
+    ...options,
+    ...(iosDeviceListMaxAgeMs === undefined ? {} : { iosDeviceListMaxAgeMs }),
   });
-  discovery.devices = await mapMonitorAndroidDiscovery(devicePool, discovery.devices);
-  // Reconciliation can quarantine identity and cancel in-flight work. During
-  // allocation, discovery supplies only presence evidence for miss counting.
-  if (!planActive) {
-    await devicePool.reconcileDiscoveryObservation(discovery.devices, "disconnect-monitor", {
+  const refreshTransitionalSimulators = needsFreshTransitionalSimulatorRead(
+    discovery,
+    iosDeviceListMaxAgeMs,
+  );
+  const present = new Set(discovery.devices.map((device) => device.deviceId));
+  const missingDevices = trackedDevices.filter(
+    (device) => !isPlanDevice(device.id) && !present.has(device.id),
+  );
+  if (
+    refreshTransitionalSimulators ||
+    missingDevices.some(
+      (device) =>
+        didSourceSucceedForDevice(discovery, device.platform, device.id) &&
+        (device.platform === "ios" || !bypassAndroidDeviceListCache),
+    )
+  ) {
+    // Plan-time misses are capped below confirmation; its own loss check already reads fresh.
+    // Transitional snapshots read with an extended max age also need fresh state.
+    // Otherwise only the fresh confirmation reaches reconciliation and miss counting. Healthy/
+    // idle sweeps keep the cheap cached path; a failed confirmation supplies no absence evidence.
+    discovery = await read({
+      ...options,
+      bypassAndroidDeviceListCache:
+        bypassAndroidDeviceListCache ||
+        missingDevices.some((device) => device.platform === "android"),
+      bypassIosDeviceListCache:
+        refreshTransitionalSimulators ||
+        missingDevices.some(
+          (device) => discoverySourceFor(device.platform, device.id) === "ios-simulator",
+        ),
+      bypassPhysicalIosDeviceListCache: missingDevices.some(
+        (device) => discoverySourceFor(device.platform, device.id) === "ios-physical",
+      ),
+    });
+  }
+  // Reconciliation can quarantine identity and cancel in-flight work. Only
+  // plan-owned observations stay presence-only during allocation/restarts.
+  const observations = discovery.devices.filter((device) => !isPlanDevice(device.deviceId));
+  if (observations.length > 0 || trackedDevices.some((device) => !isPlanDevice(device.id))) {
+    await devicePool.reconcileDiscoveryObservation(observations, "disconnect-monitor", {
       settleMembership: true,
     });
   }
@@ -323,10 +396,11 @@ export function collectDisconnectedRecordings<Device extends { id: string }>(
 export function logDisconnectMisses(
   deviceDisconnectMisses: Map<string, number>,
   disconnectResult: Pick<DisconnectMonitorEvaluation, "missed" | "transitional">,
-  planActive: boolean,
+  planDeviceIds: ReadonlySet<string>,
   bootedDeviceIds: Set<string>,
 ): void {
   for (const { deviceId, misses: evaluatedMisses, budgetExhausted } of disconnectResult.missed) {
+    const planActive = planDeviceIds.has(deviceId);
     const misses = planActive
       ? Math.min(evaluatedMisses, PLAN_DEVICE_DISCONNECT_MISS_CAP)
       : evaluatedMisses;
@@ -334,7 +408,7 @@ export function logDisconnectMisses(
       // Also lower pre-plan misses so a plan-driven restart gets the same grace.
       deviceDisconnectMisses.set(deviceId, misses);
     }
-    const missState = budgetExhausted ? "transitional, budget exhausted" : "absent";
+    const missState = budgetExhausted ? "budget exhausted" : "absent";
     const message = `[DisconnectMonitor] Device ${deviceId} not in booted list (${missState}, miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`;
     if (planActive && evaluatedMisses > PLAN_DEVICE_DISCONNECT_MISS_CAP) {
       logger.debug(message);

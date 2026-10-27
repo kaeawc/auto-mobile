@@ -1,10 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { DaemonHandshakeMismatchError } from "../../src/daemon/DaemonHandshakeMismatchError";
 import { Duplex } from "node:stream";
-import {
-  DaemonClient,
-  DaemonHandshakeMismatchError,
-  DaemonUnavailableError,
-} from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DaemonMcpProxy, DaemonVersionMismatchError } from "../../src/daemon/daemonMcpProxy";
 import type { DaemonStatus, DaemonResponse } from "../../src/daemon/types";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -296,9 +293,9 @@ describe("socket-owner daemon preflight", () => {
       const closed = spyOn(DaemonClient.prototype, "close").mockResolvedValue();
       let declaredIdentity: unknown = "unset";
       const method = spyOn(DaemonClient.prototype, "callDaemonMethod").mockImplementation(
-        async function (name) {
+        async function (this: DaemonClient, name: string) {
           expect(name).toBe("ide/status");
-          declaredIdentity = (this as unknown as { clientIdentity: unknown }).clientIdentity;
+          declaredIdentity = this.testHooks.declaredIdentity();
           return {
             version: "0.0.68",
             ...(structuredSessionNotFound === undefined ? {} : { structuredSessionNotFound }),
@@ -366,26 +363,23 @@ describe("socket-owner daemon preflight", () => {
       client: { clientVersion: "0.0.70" },
     } as const;
     const client = new DaemonClient("/fake.sock", 1000, new FakeTimer());
-    const internals = client as unknown as {
-      connected: boolean;
-      socket: Duplex;
-      handleResponse(response: DaemonResponse): void;
-    };
-    internals.connected = true;
-    internals.socket = new Duplex({
-      read() {},
-      write(chunk, _encoding, done) {
-        const request = JSON.parse(chunk.toString());
-        internals.handleResponse({
-          id: request.id,
-          type: "mcp_response",
-          success: false,
-          error: "daemon=0.0.68, client=0.0.70",
-          handshakeFailure: failure,
-        });
-        done();
-      },
-    });
+    client.testHooks.attachSocket(
+      new Duplex({
+        read() {},
+        write(chunk, _encoding, done) {
+          const request = JSON.parse(chunk.toString());
+          const response: DaemonResponse = {
+            id: request.id,
+            type: "mcp_response",
+            success: false,
+            error: "daemon=0.0.68, client=0.0.70",
+            handshakeFailure: failure,
+          };
+          client.testHooks.simulateIncomingData(Buffer.from(JSON.stringify(response) + "\n"));
+          done();
+        },
+      }),
+    );
     try {
       await client.callTool("provisionDevice", {});
       expect.unreachable("Expected rejection");

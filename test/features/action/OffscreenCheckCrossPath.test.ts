@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { expect, test } from "bun:test";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -6,7 +7,7 @@ import { SearchableHierarchy } from "../../../src/features/utility/SearchableNod
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { screenSizeForOffscreenCheck } from "../../../src/features/utility/ElementGeometry";
-import type { Element, ElementSelectionResult, ViewHierarchyResult } from "../../../src/models";
+import type { ElementSelectionResult, ViewHierarchyResult } from "../../../src/models";
 import type {
   ScreenSize,
   ScreenSizeForOffscreenCheckOptions,
@@ -159,7 +160,7 @@ const rows: Row[] = [
 // No action execution, device transport, real timer, or navigation DB is needed.
 test.each(rows)("cross-path off-screen agreement: $name", (row) => {
   const [x, y] = row.center;
-  const target: Element = {
+  const target = {
     bounds: { left: x - 5, right: x + 5, top: y - 5, bottom: y + 5 },
     text: "Cross-path target",
     clickable: true,
@@ -170,7 +171,9 @@ test.each(rows)("cross-path off-screen agreement: $name", (row) => {
     : { hierarchy: {} };
   // Preserve the stamped tree identity while replacing its candidates with one
   // hand-built target. This tests geometry, not device-text parsing/projection.
-  hierarchy.hierarchy.node = [{ ...target }];
+  hierarchy.hierarchy.node = createFlatNodeForTest({
+    node: [createFlatNodeForTest({ ...target })],
+  });
   hierarchy.screenWidth = row.captureSize?.width;
   hierarchy.screenHeight = row.captureSize?.height;
   Object.assign(hierarchy, row.captureDisplay);

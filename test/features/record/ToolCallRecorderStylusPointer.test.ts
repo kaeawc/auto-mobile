@@ -1,10 +1,11 @@
+import { recordPlanCall } from "../../helpers/recordPlanCall";
 import { describe, expect, test } from "bun:test";
 import { ToolCallRecorder } from "../../../src/features/record/ToolCallRecorder";
 
 function record(tool: string, args: Record<string, unknown>) {
   const recorder = new ToolCallRecorder();
   recorder.start();
-  recorder.record(tool, args);
+  recordPlanCall(recorder, tool, args);
   return recorder.stopWithWarnings();
 }
 

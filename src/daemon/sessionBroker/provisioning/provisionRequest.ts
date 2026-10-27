@@ -2,7 +2,8 @@ import type {
   AndroidDeviceSpecification,
   IosDeviceSpecification,
 } from "../../../devices/exactDeviceProvisioning";
-import { MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS } from "../../sessionLivenessWindows";
+import { MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS } from "../../wire/sessionLivenessWindows";
+import type { BindingDeviceFamily } from "../../../utils/provisionDeviceSpecSchemas";
 import { ActionableError } from "../../../models/ActionableError";
 export type BrokerDeviceRequest = {
   bindingIndex: number;
@@ -13,14 +14,14 @@ export type BrokerDeviceRequest = {
       platform: "android";
       requestedSpec: Omit<AndroidDeviceSpecification, "deviceType"> & {
         deviceType?: string;
-        deviceFamily?: "phone" | "tablet" | "foldable";
+        deviceFamily?: BindingDeviceFamily;
       };
     }
   | {
       platform: "ios";
       requestedSpec: Omit<IosDeviceSpecification, "deviceType"> & {
         deviceType?: string;
-        deviceFamily?: "phone" | "tablet" | "foldable";
+        deviceFamily?: BindingDeviceFamily;
       };
     }
 );
@@ -34,6 +35,11 @@ export interface BrokerProvisionRequest {
   localBindingCapacity: number;
   requests: BrokerDeviceRequest[];
   preparationTimeoutMs?: number;
+  /**
+   * Milliseconds an empty binding's create path holds back from `preparationTimeoutMs` so the
+   * caller keeps one warm readiness retry window. Adoption and reuse keep the full deadline.
+   */
+  createRetryReserveMs?: number;
   idleTimeoutMs?: number;
   executionOwnerPid?: number;
   executionOwnerStartIdentity?: string;

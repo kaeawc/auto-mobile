@@ -1,3 +1,5 @@
+import { PushSubscriberOutbox } from "./PushSubscriberOutbox";
+import { BroadcastFrame } from "./BroadcastFrame";
 import { streamAuthRefusalFields } from "../streamSocketAuth";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { Socket } from "node:net";
@@ -42,6 +44,8 @@ interface BackfillState<T> {
 interface ConnectionState {
   lastActivity: number;
   drainPending: boolean;
+  outbox: PushSubscriberOutbox;
+  endAfterDrain?: boolean;
 }
 
 /**
@@ -238,13 +242,14 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
       lastActivity: this.timer.now(),
       filter,
       backfilling: false,
-      drainPending: false,
+      drainPending: this.connections.get(socket)?.drainPending ?? false,
     });
     this.connections.set(
       socket,
       this.connections.get(socket) ?? {
         lastActivity: this.timer.now(),
         drainPending: false,
+        outbox: new PushSubscriberOutbox(socket),
       },
     );
 
@@ -330,6 +335,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
   protected pushToSubscribers(data: TPushData): number {
     let sentCount = 0;
     const deadSockets = new Set<Socket>();
+    const frame = new BroadcastFrame((id) => this.createPushMessage(data, id));
 
     for (const [subscriptionId, subscriber] of this.subscribers) {
       if (deadSockets.has(subscriber.socket)) {
@@ -355,8 +361,10 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
       }
 
       try {
-        const json = JSON.stringify(this.createPushMessage(data, subscriptionId)) + "\n";
-        const result = subscriber.socket.write(json);
+        const message = this.createPushMessage(data, subscriptionId);
+        const result = this.sendOutbound(subscriber.socket, message, () =>
+          frame.lineFor(subscriptionId, message),
+        );
         if (!result) {
           // write()=false is not a death signal — wait for drain; truly dead peers get reaped by timeoutMs.
           this.armDrainListener(subscriber.socket);
@@ -415,7 +423,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
       this.removeSubscription(subscriptionId);
       if (this.getSubscribersForSocket(subscriber.socket).length === 0) {
         try {
-          subscriber.socket.end();
+          this.endAfterPendingWrites(subscriber.socket);
         } catch (error) {
           logger.warn(
             `[${this.serverName}] Failed to close overflowing subscriber: ${errorMessage(error)}`,
@@ -430,6 +438,15 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
       state.pendingKeys.add(key);
     }
     return true;
+  }
+
+  private endAfterPendingWrites(socket: Socket): void {
+    const connection = this.connections.get(socket);
+    if (connection?.drainPending) {
+      connection.endAfterDrain = true;
+    } else {
+      socket.end();
+    }
   }
 
   /** Override for events with a stable persisted identity shared by backfill and live delivery. */
@@ -531,8 +548,42 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     return state;
   }
 
+  /** All push and control writes share the connection FIFO while backpressured. */
+  protected override sendJson(socket: Socket, data: unknown): boolean {
+    return this.sendOutbound(socket, data);
+  }
+
+  private sendOutbound(socket: Socket, data: unknown, line?: string | (() => string)): boolean {
+    if (socket.destroyed) {
+      return false;
+    }
+    if (!this.connections.has(socket)) {
+      this.ensureConnectionStates();
+    }
+    const connection = this.connections.get(socket);
+    // Malformed commands can be answered before the first subscription exists.
+    if (!connection) {
+      this.connections.set(socket, {
+        lastActivity: this.timer.now(),
+        drainPending: false,
+        outbox: new PushSubscriberOutbox(socket),
+      });
+    }
+    const current = this.connections.get(socket)!;
+    const ok = current.outbox.send(data, current.drainPending, line);
+    if (!ok) {
+      this.armDrainListener(socket);
+    } else if (!connection) {
+      // An immediate reply before subscribing needs no persistent connection state.
+      this.connections.delete(socket);
+    }
+    return ok;
+  }
+
   private armDrainListener(socket: Socket): void {
-    this.ensureConnectionStates();
+    if (!this.connections.has(socket)) {
+      this.ensureConnectionStates();
+    }
     const connection = this.connections.get(socket);
     if (!connection || connection.drainPending) {
       return;
@@ -551,6 +602,26 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
       currentConnection.drainPending = false;
       currentConnection.lastActivity = now;
       this.setDrainPending(socket, false);
+      try {
+        if (!currentConnection.outbox.flush()) {
+          this.armDrainListener(socket);
+        } else if (this.getSubscribersForSocket(socket).length === 0) {
+          this.connections.delete(socket);
+          if (currentConnection.endAfterDrain) {
+            socket.end();
+          }
+        }
+      } catch (error) {
+        logger.warn(`[${this.serverName}] Failed to flush push outbox: ${errorMessage(error)}`);
+        this.removeSubscribersForSocket(socket);
+        try {
+          socket.destroy();
+        } catch (error) {
+          // The failed peer is retired even if its socket has already closed.
+          logger.debug(`Push socket failed-peer cleanup failed: ${errorMessage(error)}`);
+        }
+        return;
+      }
       for (const subscriber of this.getSubscribersForSocket(socket)) {
         subscriber.lastActivity = now;
       }
@@ -587,9 +658,14 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     if (!subscriber) {
       return undefined;
     }
+    this.connections.get(subscriber.socket)?.outbox.removeSubscription(subscriptionId);
     this.subscribers.delete(subscriptionId);
     this.backfills.delete(subscriptionId);
-    if (this.getSubscribersForSocket(subscriber.socket).length === 0) {
+    // Keep a stalled connection FIFO through its final acknowledgement/error.
+    if (
+      this.getSubscribersForSocket(subscriber.socket).length === 0 &&
+      !this.connections.get(subscriber.socket)?.drainPending
+    ) {
       this.connections.delete(subscriber.socket);
     }
     return subscriber;
@@ -602,6 +678,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         this.connections.set(subscriber.socket, {
           lastActivity: subscriber.lastActivity,
           drainPending: subscriber.drainPending,
+          outbox: new PushSubscriberOutbox(subscriber.socket),
         });
       } else if (subscriber.lastActivity > connection.lastActivity) {
         connection.lastActivity = subscriber.lastActivity;

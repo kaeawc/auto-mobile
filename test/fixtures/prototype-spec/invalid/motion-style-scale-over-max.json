@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "style": {
+        "scale": 5
+      }
+    }
+  },
+  "expectedPath": "root.style.scale",
+  "expectedMessage": "Invalid number value"
+}

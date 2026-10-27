@@ -4,16 +4,16 @@ import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../../src/models";
-import { executionTracker } from "../../../src/server/executionTracker";
-import { ExecutionTrackerPlanExecutionLock } from "../../../src/server/PlanExecutionLock";
+import { executionTracker } from "../../../src/daemon/executionTracker";
+import { ExecutionTrackerPlanExecutionLock } from "../../../src/server/ExecutionTrackerPlanExecutionLock";
 import { registerPlanTools } from "../../../src/server/planTools";
 import type {
   TaskLeaseHoldRequest,
   TaskLeaseKeepalive,
-} from "../../../src/server/tasks/taskLeaseKeepalive";
-import { TASK_ELIGIBLE_TOOLS } from "../../../src/server/tasks/toolCallTasks";
+} from "../../../src/daemon/tasks/taskLeaseKeepalive";
+import { TASK_ELIGIBILITY } from "../../../src/server/tasks/toolCallTasks";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import * as videoRecordingManager from "../../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../../src/daemon/videoRecordingManager";
 import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
@@ -105,7 +105,7 @@ describe("executePlan as an MCP task (#13088)", () => {
         recorder.stopVideoRecording,
       ),
       spyOn(videoRecordingManager, "rollbackVideoRecordingStart").mockResolvedValue(undefined),
-      spyOn(videoRecordingManager, "getVideoRecordingStatus").mockResolvedValue(null),
+      spyOn(videoRecordingManager, "getVideoRecordingStatus").mockResolvedValue(undefined),
       spyOn(videoRecordingManager, "getVideoRecordingMetadata").mockResolvedValue(null),
     ];
     restores.push(() => spies.forEach((spy) => spy.mockRestore()));
@@ -193,7 +193,7 @@ describe("executePlan as an MCP task (#13088)", () => {
   afterEach(teardown);
 
   test("executePlan is task-eligible beside startDevice", () => {
-    expect([...TASK_ELIGIBLE_TOOLS].sort()).toEqual(["executePlan", "installApp", "startDevice"]);
+    expect(TASK_ELIGIBILITY({ name: "executePlan", args: {} })).toEqual({ onCancel: "abort" });
   });
 
   test("a non-declaring call blocks for the plan result and creates no task", async () => {

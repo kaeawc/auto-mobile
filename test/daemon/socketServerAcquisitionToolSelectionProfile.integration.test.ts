@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DAEMON_TOOL_SELECTION_PROFILE_PARAM } from "../../src/daemon/constants";
+import { DAEMON_TOOL_SELECTION_PROFILE_PARAM } from "../../src/daemon/wire/constants";
 import {
   createHarnessServer,
   type UnixSocketServerHarness,
@@ -14,10 +14,12 @@ function createFakeDaemonState() {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -45,6 +47,7 @@ async function route(
   };
   const request: DaemonRequest = {
     id: randomUUID(),
+    type: "mcp_request",
     method: "tools/call",
     params: { name: "provisionDevice", arguments: arguments_ },
   };
@@ -58,6 +61,7 @@ describe("UnixSocketServer sessionless acquisition tool-selection forwarding", (
       const socketSessionId = `socket-${name}`;
       const request: DaemonRequest = {
         id: name,
+        type: "mcp_request",
         method: "tools/call",
         params: { name, arguments: { sessionUuid: "expired-session" } },
       };
@@ -73,6 +77,7 @@ describe("UnixSocketServer sessionless acquisition tool-selection forwarding", (
     const profileUuid = "profile-enabled";
     const enableRequest: DaemonRequest = {
       id: "enable",
+      type: "mcp_request",
       method: "tools/call",
       params: { name: "setToolEnabled", arguments: { toolName: "provisionDevice", enabled: true } },
     };

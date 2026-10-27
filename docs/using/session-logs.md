@@ -19,11 +19,11 @@ Each source is optional and selected by its query parameters. At least one
 source is required. Unknown parameters, path traversal, and out-of-range bounds
 are rejected before any device is touched.
 
-| Source             | Parameters                     | Android                                                    | iOS Simulator                                                 |
-| ------------------ | ------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------- |
-| App-container logs | `pathsJson` (+ `container`)    | `run-as` for private containers; shell for `externalFiles` | Files under the app's data container                          |
-| App Group files    | `groupId` (+ `groupPathsJson`) | `unavailable`                                              | Lists the group container; `groupPathsJson` reads named files |
-| Unified-log window | `lastSeconds` (+ `level`)      | `unavailable`                                              | `log show --last N --predicate <subsystem == appId …>`        |
+| Source             | Parameters                     | Android                                                    | iOS Simulator                                                 | Physical iOS                                      |
+| ------------------ | ------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------- |
+| App-container logs | `pathsJson` (+ `container`)    | `run-as` for private containers; shell for `externalFiles` | Files under the app's data container                          | `unavailable`                                     |
+| App Group files    | `groupId` (+ `groupPathsJson`) | `unavailable`                                              | Lists the group container; `groupPathsJson` reads named files | `unavailable`                                     |
+| Unified-log window | `lastSeconds` (+ `level`)      | `unavailable`                                              | `log show --last N --predicate <subsystem == appId …>`        | Host `log collect --device-udid`, then `log show` |
 
 - `container` defaults to `documents`; the same logical containers as
   `putAppFile` apply (`documents`, `library`, `cache`, `tmp`, `externalFiles`).
@@ -42,6 +42,32 @@ are rejected before any device is touched.
   entry reports `byteCount` (the full size) and `truncated`.
 - The unified-log call is also bounded by a wall-clock timeout; expiry aborts
   `log show` and reports `status: "timedOut"` for that source only.
+- Every unified-log result reports `mechanism` (`simctl-log-show` or
+  `log-collect`) and `collectionMs`, the wall-clock time the read took.
+
+### Physical iOS devices
+
+On a physical device the unified-log window runs on the macOS host:
+`log collect --device-udid <udid> --last N --output <tmp>.logarchive` copies
+the device's recent log store, then `log show` filters that archive with the
+same predicate, `level` flags, and `maxBytes` bound as the Simulator path. The
+archive is deleted after every read. Collection copies data from the device, so
+it is slower than a Simulator read; the timeout for `log collect` plus
+`log show` is 60 s. Keep `lastSeconds` short.
+
+Known failures report a `code` beside the `reason`:
+
+| `code`                 | `status`      | Meaning                                                 |
+| ---------------------- | ------------- | ------------------------------------------------------- |
+| `HOST_UNSUPPORTED`     | `unavailable` | The host is not macOS, so `log collect` does not exist. |
+| `HOST_NOT_ADMIN`       | `failed`      | `log collect` must run from an administrator account.   |
+| `DEVICE_NOT_CONNECTED` | `unavailable` | The device is not reachable over USB or the network.    |
+| `DEVICE_NOT_PAIRED`    | `unavailable` | The device has not paired with and trusted this Mac.    |
+| `DEVICE_LOCKED`        | `failed`      | The device is locked; unlock it and retry.              |
+
+These codes are derived from the text of `log collect` errors and have not been
+checked on real hardware.
+Unrecognised failures report `failed` with the full command output.
 
 Every source reports its own outcome, so a failed or unavailable source never
 blocks the others:
@@ -76,6 +102,8 @@ blocks the others:
     "lastSeconds": 120,
     "level": "info",
     "predicate": "subsystem == \"com.example.app\" OR subsystem BEGINSWITH \"com.example.app.\"",
+    "mechanism": "simctl-log-show",
+    "collectionMs": 840,
     "timeoutMs": 20000,
     "byteCount": 48211,
     "truncated": false,
@@ -123,5 +151,5 @@ reporting a per-path outcome. It is disabled by default; enable it with
 ```
 
 Android private containers require a debuggable build (the reset runs under
-`run-as`); a denied path reports `failed` with the reason. iOS is supported on
-simulators only.
+`run-as`); a denied path reports `failed` with the reason. iOS reset is supported
+on simulators only.

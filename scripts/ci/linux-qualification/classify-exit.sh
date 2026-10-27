@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pure evidence classifier. Markers contain epoch seconds; kill-sent: "time signal".
 set -euo pipefail
-# shellcheck source=scripts/ci/linux-qualification/lib.sh disable=SC1091
+# shellcheck source=scripts/ci/linux-qualification/lib.sh
 source "$(dirname "$0")/lib.sh"
 dir="${1:?evidence directory}"
 outcome=unknown-exit

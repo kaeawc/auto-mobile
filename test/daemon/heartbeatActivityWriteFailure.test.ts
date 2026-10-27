@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { effectiveLastHeartbeat } from "../../src/daemon/livenessOwnerLease";
-import { PROXY_HEARTBEAT_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
+import { PROXY_HEARTBEAT_INTERVAL_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import type { DeviceSessionActivityUpdate } from "../../src/db/deviceSessionRepository";
 import { getDbWriteBarrier, InMemoryDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { logger } from "../../src/utils/logger";
@@ -45,7 +45,7 @@ describe("heartbeat activity writes (#11079)", () => {
   let manager: SessionManager;
   let monitor: SessionHeartbeatMonitor;
   let released: string[];
-  let warn: ReturnType<typeof spyOn>;
+  let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
 
   beforeEach(async () => {
     timer = new FakeTimer();

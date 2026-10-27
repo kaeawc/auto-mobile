@@ -1,6 +1,9 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import java.io.File
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -10,11 +13,13 @@ import org.junit.Test
  * test passed) but threw `PatternSyntaxException` on Android, whose `java.util.regex` is backed by
  * ICU and rejects a lone `}`.
  *
- * What this proves: no regex *literal* in `control-proxy/src/main` or `protocol/src/main` contains
- * a construct from [IcuRegexSyntax.problems] (unescaped `{`/`}`/`]` literals, a `]` opening a
- * character class, `&&` class intersection, lookbehind, named groups, `\h \H \R \X \N`), and no
- * pattern is built from a non-literal or templated string that this scan could not inspect, except
- * the explicitly reviewed parser-validated compilation in PrototypeCheckPattern.
+ * What this proves: no regex *literal* in `control-proxy/src/main`, `prototype-compose/src/main`,
+ * `prototype-saved/src/main` or `protocol/src/main` contains a construct from
+ * [IcuRegexSyntax.problems] (unescaped `{`/`}`/`]` literals, a `]` opening a character class, `&&`
+ * class intersection, lookbehind, named groups, `\h \H \R \X \N`), and no pattern is built from a
+ * non-literal or templated string that this scan could not inspect, except the explicitly reviewed
+ * parser-validated compilation in PrototypeCheckPattern and the contract-driven patterns in
+ * PrototypeSpecContract, whose actual strings are checked by the contract test below.
  *
  * What this does NOT prove: JVM tests cannot run ICU. The checker is a hand-written approximation
  * of the known JVM-vs-ICU divergences, not ICU itself, so a pattern it accepts could still fail on
@@ -113,6 +118,38 @@ class IcuRegexCompatibilityTest {
   }
 
   @Test
+  fun `every pattern in the prototype spec contract is icu safe`() {
+    val text =
+      checkNotNull(javaClass.getResourceAsStream("/prototype-spec-contract.json")) {
+          "prototype-spec-contract.json missing from the test classpath"
+        }
+        .bufferedReader()
+        .use { it.readText() }
+    val patterns = Json.parseToJsonElement(text).jsonObject.getValue("patterns").jsonObject
+    assertTrue(
+      "contract defines no patterns; the guard would pass vacuously",
+      patterns.isNotEmpty(),
+    )
+    val violations = patterns.flatMap { (name, value) ->
+      IcuRegexSyntax.problems(value.jsonPrimitive.content).map { "$name: $it" }
+    }
+    assertTrue(
+      "Contract patterns that Android's ICU engine may reject:\n" + violations.joinToString("\n"),
+      violations.isEmpty(),
+    )
+  }
+
+  @Test
+  fun `scanner exempts only the contract driven pattern compilation`() {
+    val path =
+      "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecContract.kt"
+    val call = "mapValues { Regex(it.value.jsonPrimitive.content) }"
+    assertTrue(RegexLiteralScanner.scan(call, path).isEmpty())
+    assertEquals(1, RegexLiteralScanner.scan(call, "Other.kt").size)
+    assertEquals(1, RegexLiteralScanner.scan("Regex(other.value)", path).size)
+  }
+
+  @Test
   fun `scanner extracts literal and dynamic regex construction`() {
     val source =
       """
@@ -148,7 +185,8 @@ class IcuRegexCompatibilityTest {
 
   private fun mainSourceFiles(): List<File> {
     val android = locateAndroidDir()
-    return listOf("control-proxy", "protocol").flatMap { module ->
+    return listOf("control-proxy", "prototype-compose", "prototype-saved", "protocol").flatMap {
+      module ->
       File(android, "$module/src/main").walkTopDown().filter { it.extension == "kt" }.toList()
     }
   }
@@ -183,6 +221,10 @@ data class RegexSite(val location: String, val line: Int, val pattern: String?, 
  */
 object RegexLiteralScanner {
   private val constructors = listOf("Regex(", "Pattern.compile(")
+  private const val CHECK_PATTERN_PATH =
+    "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeCheckPattern.kt"
+  private const val CONTRACT_PATH =
+    "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecContract.kt"
 
   fun scan(source: String, path: String): List<RegexSite> {
     val sites = mutableListOf<RegexSite>()
@@ -214,21 +256,12 @@ object RegexLiteralScanner {
     path: String,
     sites: MutableList<RegexSite>,
   ): Int? {
-    val call = constructors.firstOrNull {
-      s.startsWith(it, i) && !isIdentifierPart(s.getOrNull(i - 1))
-    }
-    val afterParen = call?.let { i + it.length }
-    val next = afterParen?.let { p -> s.indexOfFirst(p) { c -> !c.isWhitespace() } }
-    val isLiteralArg = next != null && next >= 0 && s[next] == '"'
-    val validatedPortablePattern =
-      call == "Pattern.compile(" &&
-        path.endsWith(
-          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeCheckPattern.kt",
-        ) &&
-        next != null &&
-        s.startsWith("source(pattern))", next) &&
-        s.substring(0, i).trimEnd().endsWith("if (!parse(pattern).ok) return false\n    return")
-    if (call != null && !isLiteralArg && !validatedPortablePattern) {
+    val call =
+      constructors.firstOrNull { s.startsWith(it, i) && !isIdentifierPart(s.getOrNull(i - 1)) }
+        ?: return null
+    val afterParen = i + call.length
+    val next = s.indexOfFirst(afterParen) { c -> !c.isWhitespace() }
+    if (!isReviewedCall(s, i, path, call, next)) {
       sites +=
         RegexSite(
           "$path:${lineOf(s, i)}",
@@ -239,6 +272,32 @@ object RegexLiteralScanner {
     }
     return afterParen
   }
+
+  /** True for a literal argument or one of the two explicitly reviewed dynamic compilations. */
+  private fun isReviewedCall(s: String, i: Int, path: String, call: String, next: Int): Boolean =
+    isLiteralArg(s, next) ||
+      isValidatedPortablePattern(s, i, path, call, next) ||
+      isContractPattern(s, path, call, next)
+
+  private fun isLiteralArg(s: String, next: Int): Boolean = next >= 0 && s[next] == '"'
+
+  private fun isValidatedPortablePattern(
+    s: String,
+    i: Int,
+    path: String,
+    call: String,
+    next: Int,
+  ): Boolean {
+    if (call != "Pattern.compile(" || !path.endsWith(CHECK_PATTERN_PATH)) return false
+    return s.startsWith("source(pattern))", next) &&
+      s.substring(0, i).trimEnd().endsWith("if (!parse(pattern).ok) return false\n    return")
+  }
+
+  /** Contract JSON patterns are checked as strings by the contract test, not as source. */
+  private fun isContractPattern(s: String, path: String, call: String, next: Int): Boolean =
+    call == "Regex(" &&
+      path.endsWith(CONTRACT_PATH) &&
+      s.startsWith("it.value.jsonPrimitive.content)", next)
 
   private fun String.indexOfFirst(from: Int, predicate: (Char) -> Boolean): Int {
     var i = from

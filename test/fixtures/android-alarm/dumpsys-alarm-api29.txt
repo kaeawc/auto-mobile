@@ -1,0 +1,31 @@
+Current Alarm Manager state:
+
+  nowRTC=1700000000000=2023-11-14 22:13:20.000 nowELAPSED=3600000 mLastTimeChangeClockTime=1699990000000 mLastTimeChangeRealtime=1000
+  Settings:
+    min_futurity=+5s0ms
+
+  Next alarm clock: none
+
+  Pending alarm batches: 2
+Batch{3d4e5f6 num=1 start=3900000 end=3900000 flgs=0x1}:
+    RTC_WAKEUP #0: Alarm{a1b2c3d type 0 when 1700000300000 dev.example.playground}
+      tag=*walarm*:dev.example.playground.SYNC_ALARM
+      type=0 whenElapsed=+5m0s0ms when=2023-11-14 22:18:20 window=0 repeatInterval=0 count=0 flags=0x1
+      operation=PendingIntent{9f8e7d6: PendingIntentRecord{5c4b3a2 dev.example.playground broadcastIntent}}
+Batch{7a8b9c0 num=2 start=7200000 end=8100000 flgs=0x0}:
+    ELAPSED #0: Alarm{e4f5a6b type 3 when 7200000 dev.example.playground}
+      tag=*alarm*:dev.example.playground.CLEANUP
+      type=3 whenElapsed=+1h0m0s0ms when=+1h0m0s0ms window=900000 repeatInterval=86400000 count=0 flags=0x0
+      operation=PendingIntent{1c2d3e4: PendingIntentRecord{5f6a7b8 dev.example.playground startService}}
+    RTC_WAKEUP #1: Alarm{0c1d2e3 type 0 when 1700003600000 dev.example.other}
+      tag=*walarm*:dev.example.other.PING
+      type=0 whenElapsed=+1h0m0s0ms when=2023-11-14 23:13:20 window=0 repeatInterval=0 count=0 flags=0x1
+      operation=PendingIntent{4a5b6c7: PendingIntentRecord{8d9e0f1 dev.example.other broadcastIntent}}
+
+  Pending user blocked background alarms: 
+  None
+
+  Alarm Stats:
+  dev.example.playground +12ms running, 3 wakeups:
+    +12ms 3 wakes 4 alarms, last -2m:
+      *walarm*:dev.example.playground.SYNC_ALARM

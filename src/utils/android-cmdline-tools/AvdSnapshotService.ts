@@ -1,6 +1,7 @@
 import * as path from "path";
 import { combineWithAmbientAbort } from "../AbortContext";
 import { errorMessage } from "../describeUnknownError";
+import { isBrokerBaselineSnapshot } from "../snapshotNameValidation";
 import { logger } from "../logger";
 import type { AdbClientFactory } from "./AdbClientFactory";
 import { defaultAdbClientFactory } from "./AdbClientFactory";
@@ -93,13 +94,16 @@ const AVD_REGISTRY_SUFFIX = ".ini";
 export class AvdSnapshotService implements AvdSnapshotOperations {
   private readonly directories: SnapshotDirectoryMeasurer;
   private readonly avdDirectories: AvdDirectoryResolver;
-  private readonly emulator: AndroidEmulator;
+  private readonly emulator: Pick<AndroidEmulator, "getBootedDevices" | "resolveAvdNameForSerial">;
   private readonly adbFactory: AdbClientFactory;
 
   constructor(
     directories: SnapshotDirectoryMeasurer = new DeviceSnapshotStore(),
     avdDirectories: AvdDirectoryResolver = new FileAvdConfigReader(),
-    emulator: AndroidEmulator = new AndroidEmulatorClient(),
+    emulator: Pick<
+      AndroidEmulator,
+      "getBootedDevices" | "resolveAvdNameForSerial"
+    > = new AndroidEmulatorClient(),
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
   ) {
@@ -129,6 +133,9 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
 
     const entries: AvdSnapshotDirectoryEntry[] = [];
     for (const snapshotName of names) {
+      if (isBrokerBaselineSnapshot(snapshotName)) {
+        continue;
+      }
       const directoryPath = path.join(snapshotsRoot, snapshotName);
       entries.push({
         snapshotName,
@@ -187,6 +194,9 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
     timeoutMs: number,
     expectedAvdName?: string,
   ): Promise<VmSnapshotReclaimOutcome> {
+    if (isBrokerBaselineSnapshot(snapshotName)) {
+      return { reclaimed: false, reason: "Broker baseline snapshot is reserved" };
+    }
     const adb = this.adbFactory.create({ deviceId, name: deviceId, platform: "android" });
     let command: string;
     try {
@@ -216,6 +226,7 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
                   const actualAvdName = await this.emulator.resolveAvdNameForSerial(deviceId, {
                     signal: identitySignal,
                     timeoutMs: remainingTimeoutMs ?? timeoutMs,
+                    consoleExclusiveOwner: true,
                   });
                   if (actualAvdName !== expectedAvdName) {
                     const actualAvdNameLabel = actualAvdName ?? "no longer live";

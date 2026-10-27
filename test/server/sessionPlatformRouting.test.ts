@@ -3,8 +3,8 @@ import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import {
   DEVICE_OUTSIDE_BOUND_SESSION_CODE,
   DeviceOutsideBoundSessionError,
-} from "../../src/server/deviceOutsideBoundSessionRefusal";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+} from "../../src/daemon/deviceOutsideBoundSessionRefusal";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 
 const devices = new Map([
   ["android-a", { deviceId: "emulator-5554", platform: "android" }],

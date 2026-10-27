@@ -4,12 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import {
   FileTerminalReleaseJournal,
-  NoopTerminalReleaseJournal,
   nodeTerminalReleaseJournalFileSystem,
   createDaemonTerminalReleaseJournal,
   TERMINAL_RELEASE_JOURNAL_FILE_NAME,
   terminalReleaseJournalPath,
 } from "../../src/daemon/terminalReleaseJournal";
+import { NoopTerminalReleaseJournal } from "../../src/daemon/NoopTerminalReleaseJournal";
 import { logger } from "../../src/utils/logger";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
 

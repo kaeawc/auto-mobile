@@ -136,7 +136,7 @@ export async function transportAliasHarness(
   tools.install();
   // The real session manager's scan is already mapped onto pooled ids by the pool (#11133).
   const readinessScan = (rows: BootedDevice[]) =>
-    tools.deviceSessionManager.setConnectedDevices([
+    tools.deviceReadiness.setConnectedDevices([
       ...pool.mapAndroidReadinessDiscovery(rows),
       ...(options.iosRows ?? []),
     ]);

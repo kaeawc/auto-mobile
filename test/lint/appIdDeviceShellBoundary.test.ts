@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
 import ts from "typescript";
 
@@ -11,12 +12,13 @@ const GUARDED_FILES = [
   "src/features/action/TerminateApp.ts",
   "src/features/action/UninstallApp.ts",
   "src/features/action/InstallApp.ts",
+  "src/features/action/IosAppInstaller.ts",
   "src/features/action/RestoreSnapshot.ts",
   "src/features/database/DatabaseInspector.ts",
   "src/utils/ContentHashProvider.ts",
   "src/ctrlProxy/CtrlProxyManager.ts",
   "src/features/utility/DeepLinkManager.ts",
-  "src/features/systemTray/systemTrayHelpers.ts",
+  "src/features/systemTray/helpers/dependencies.ts",
   "src/features/utility/PostNotification.ts",
   "src/features/memory/MemoryMetricsCollector.ts",
   "src/features/performance/PerformanceAudit.ts",
@@ -88,7 +90,7 @@ function templateLiteralText(node: ts.TemplateExpression): string {
   return [node.head.text, ...node.templateSpans.map((span) => span.literal.text)].join("");
 }
 
-function findOffenses(file: string, sourceText = readFileSync(join(ROOT, file), "utf8")): string[] {
+function findOffenses(file: string, sourceText = readGuardFile(join(ROOT, file))): string[] {
   const sourceFile = ts.createSourceFile(
     file,
     sourceText,

@@ -1,7 +1,9 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { CaptureSnapshot } from "../../../src/features/action/CaptureSnapshot";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { SettingsNamespace } from "../../../src/features/observe/android";
+import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -18,7 +20,7 @@ describe("CaptureSnapshot settings characterization", () => {
     "preserves namespace order and exact settings for %s",
     async (mode) => {
       const adb = new FakeAdbExecutor();
-      adb.setDefaultResponse({ stdout: "key=value=tail\n blank= \ninvalid\n", stderr: "" });
+      adb.setDefaultResponse(createExecResult("key=value=tail\n blank= \ninvalid\n", ""));
       if (mode === "adb-failure") {
         adb.setCommandError("secure", new Error("secure unavailable"));
       }
@@ -29,21 +31,22 @@ describe("CaptureSnapshot settings characterization", () => {
         events.push(command);
         return originalExecute(command);
       });
-      const client = {
-        requestSettingsList: async (namespace: SettingsNamespace) => {
+      const client = new FakeCtrlProxy();
+      spyOn(client, "requestSettingsList").mockImplementation(
+        async (namespace: SettingsNamespace): ReturnType<FakeCtrlProxy["requestSettingsList"]> => {
           events.push(`a11y ${namespace}`);
           if (mode === "throw") {
             throw new Error("optional service unavailable");
           }
           if (mode === "entries") {
-            return { success: true, entries: { namespace } };
+            return { totalTimeMs: 0, success: true, entries: { namespace } };
           }
           if (mode === "empty") {
-            return { success: true, entries: {} };
+            return { totalTimeMs: 0, success: true, entries: {} };
           }
-          return { success: mode === "missing" };
+          return { totalTimeMs: 0, success: mode === "missing" };
         },
-      };
+      );
       const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
       restores.push(
         () => execute.mockRestore(),
@@ -51,9 +54,7 @@ describe("CaptureSnapshot settings characterization", () => {
       );
       const capture = new CaptureSnapshot(
         { deviceId: "settings-fake", name: "Fake", platform: "android" },
-        { create: () => adb },
-        undefined,
-        new FakeTimer(),
+        { adbFactory: { create: () => adb }, timer: new FakeTimer() },
       );
       const result = await capture["captureSettings"]();
       const fallback = { key: "value=tail", blank: "" };

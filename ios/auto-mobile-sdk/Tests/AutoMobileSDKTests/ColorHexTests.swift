@@ -75,7 +75,7 @@ final class ColorHexTests: XCTestCase {
         }
     }
 
-    private func legacyHex(_ r: Double, _ g: Double, _ b: Double, _ a: Double) -> String {
-        String(format: "#%02X%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255), Int(a * 255))
+    private func legacyHex(_ red: Double, _ green: Double, _ blue: Double, _ alpha: Double) -> String {
+        String(format: "#%02X%02X%02X%02X", Int(red * 255), Int(green * 255), Int(blue * 255), Int(alpha * 255))
     }
 }

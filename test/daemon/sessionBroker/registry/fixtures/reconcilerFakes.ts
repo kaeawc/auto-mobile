@@ -1,3 +1,7 @@
+import type {
+  BindingBootReservation,
+  BindingBootReservationOptions,
+} from "../../../../../src/daemon/sessionBroker/provisioning/reconcilerContracts";
 import {
   deviceStableId,
   type BindingBootCapacity,
@@ -26,6 +30,16 @@ import type { DeviceInfo } from "../../../../../src/models/index";
 
 // Port fakes shared by the reconciler and journal-redrive suites (#11175, #11179).
 export class FakeInventory implements BindingInventory {
+  runtimeDeviceId: NonNullable<BindingInventory["runtimeDeviceId"]> = async (device) =>
+    device.deviceId;
+  /** Names the one-shot power probe was asked about, in call order. */
+  readonly probedRunning: string[] = [];
+  /** Names the probe proves running; any other name is not provably running. */
+  readonly provablyRunning = new Set<string>();
+  probeRunning: BindingInventory["probeRunning"] = async (device) => {
+    this.probedRunning.push(device.name);
+    return this.provablyRunning.has(device.name);
+  };
   complete = true;
   devices: DeviceInfo[] = [];
   beforeList:
@@ -144,6 +158,8 @@ export class FakeProvisioner implements BindingDeviceProvisioner {
 export class FakeDeleter implements BindingDeviceDeleter {
   readonly calls: BindingDeletionTarget[] = [];
   failWith: string | undefined;
+  /** Fail as the workflow does once its process-level escalation ran and the device stayed (#14018). */
+  failWithEscalationExhausted: string | undefined;
   /** Crash injection around the destructive step. */
   beforeDelete: ((target: BindingDeletionTarget) => Promise<void>) | undefined;
   afterDelete: ((target: BindingDeletionTarget) => Promise<void>) | undefined;
@@ -151,6 +167,13 @@ export class FakeDeleter implements BindingDeviceDeleter {
   async deleteAndVerifyAbsence(target: BindingDeletionTarget): Promise<BindingDeletionResult> {
     this.calls.push(target);
     await this.beforeDelete?.(target);
+    if (this.failWithEscalationExhausted) {
+      return {
+        kind: "failed",
+        message: this.failWithEscalationExhausted,
+        escalationExhausted: true,
+      };
+    }
     if (this.failWith) {
       return { kind: "failed", message: this.failWith };
     }
@@ -186,6 +209,29 @@ export class FakeClaims implements BindingDeviceClaims {
 export class FakeCapacity implements BindingBootCapacity {
   result: BindingCapacityCheck = { kind: "available" };
   checks = 0;
+  async reserve(
+    _platform: BindingPlatform,
+    options: BindingBootReservationOptions,
+  ): Promise<BindingBootReservation> {
+    const replacingDeviceId = options.resolveReplacingDeviceId
+      ? await options.resolveReplacingDeviceId({ signal: options.signal })
+      : options.replacingDeviceId;
+    const result = await this.check();
+    if (
+      result.kind === "unknown" ||
+      (result.kind === "exhausted" && result.booted - (replacingDeviceId ? 1 : 0) >= result.limit)
+    ) {
+      return result;
+    }
+    return {
+      kind: "available",
+      reservation: {
+        run: (operation) => operation(),
+        release: () => {},
+        markReplacedDeviceGone: () => {},
+      },
+    };
+  }
   async check(): Promise<BindingCapacityCheck> {
     this.checks += 1;
     return this.result;

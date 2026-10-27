@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ActionableError, BootedDevice } from "../../models";
 import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
@@ -29,6 +30,14 @@ export function createNotificationUIDetector(
 ): NotificationUIDetector {
   if (device.platform === "ios") {
     const deps: IosNotificationUIDetectorDeps = {
+      pressHome: () => {
+        throwIfAborted(signal);
+        const { pressHomeFactory } = getDependencies();
+        if (!pressHomeFactory) {
+          throw new ActionableError("Failed to close Notification Center: home press unavailable");
+        }
+        return awaitWhileRequestIsLive(pressHomeFactory(device, signal), signal);
+      },
       requestSwipe: (x1, y1, x2, y2, duration) => {
         throwIfAborted(signal);
         return awaitWhileRequestIsLive(
@@ -36,18 +45,12 @@ export function createNotificationUIDetector(
           signal,
         );
       },
-      requestTapCoordinates: (x, y) => {
+      requestTapCoordinates: (request: TapCoordinatesRequest) => {
+        const { x, y } = request;
+
         throwIfAborted(signal);
         return awaitWhileRequestIsLive(
-          getIosClient(device, getDependencies).requestTapCoordinates(
-            x,
-            y,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            signal,
-          ),
+          getIosClient(device, getDependencies).requestTapCoordinates({ x, y, signal }),
           signal,
         );
       },

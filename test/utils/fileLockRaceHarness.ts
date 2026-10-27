@@ -116,7 +116,7 @@ export function exactHolder(fs: FakeLockFileSystem, pid: number): void {
 export function prefix(fs: FakeLockFileSystem): string {
   const { ino, mtimeMs } = fs.stat(PATH);
   const hash = createHash("sha256").update(fs.readText(PATH)).digest("hex").slice(0, 32);
-  return `${PATH}.reclaim.${ino}.${mtimeMs}.${hash}`;
+  return `${PATH}.reclaim.${Number(ino)}.${mtimeMs}.${hash}`;
 }
 
 export interface Actor {
@@ -445,7 +445,7 @@ export function checkMutation(
     f.fs.failure = failure;
   }
   const operations = f.fs.operations.slice(start);
-  if (sampledMarker && !failedOperations.has(`readText:${pending.value?.path}`)) {
+  if (sampledMarker && !pending.done && !failedOperations.has(`readText:${pending.value.path}`)) {
     actor.restoreOwner = actors.findLast(
       (other) =>
         other.publicationIno === sampledMarker.ino ||

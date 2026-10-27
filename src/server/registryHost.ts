@@ -4,6 +4,7 @@ import type {
   Server,
   ServerContext,
   StandardSchemaWithJSON,
+  ToolAnnotations,
 } from "@modelcontextprotocol/server";
 
 /** Request methods `ResourceRegistry` installs handlers for. */
@@ -44,6 +45,8 @@ export interface ToolRegistryHost {
   registerTool(
     name: string,
     config: {
+      title?: string;
+      annotations?: ToolAnnotations;
       description?: string;
       inputSchema?: ToolRegistrySchema;
       _meta?: Record<string, unknown>;

@@ -22,11 +22,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${ROOT}/scripts/lib/spotlight-exclude.sh"
 cd "$ROOT"
 
 tier_file="${AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE:-$ROOT/test/integration-safe-tier.txt}"
 
-# shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
+# shellcheck source=scripts/lib/bun-unit-test.sh
 source "$ROOT/scripts/lib/bun-unit-test.sh"
 
 ISOLATION_VARS=(
@@ -83,7 +85,7 @@ if [[ ! -f "$tier_file" ]]; then
   exit 2
 fi
 
-# shellcheck source=scripts/lib/integration-safe-tier.sh disable=SC1091
+# shellcheck source=scripts/lib/integration-safe-tier.sh
 source "$ROOT/scripts/lib/integration-safe-tier.sh"
 safe_files=()
 while IFS= read -r path; do
@@ -123,11 +125,7 @@ tmp_base="${tmp_base%/}"
 refuse_shared_location TMPDIR "$tmp_base"
 
 work_dir="$(mktemp -d "${tmp_base}/am-int-safe.XXXXXX")"
-# shellcheck disable=SC2317,SC2329 # invoked via the EXIT trap
-cleanup() {
-  rm -rf "$work_dir"
-}
-trap cleanup EXIT
+trap 'rm -rf "$work_dir"' EXIT
 
 # Variables that would override or bypass the isolation above (the DB path wins
 # over DB_DIR; the AUTO_MOBILE_ aliases are read as fallbacks) or point at other
@@ -183,7 +181,7 @@ if [[ -n "$failures" ]]; then
 else
   tail -20 "$log_file" >&2
 fi
-mkdir -p scratch
+mkdir_spotlight_excluded scratch
 cp "$log_file" scratch/prepush-integration-safe.log
 echo "Full log: scratch/prepush-integration-safe.log" >&2
 exit "$status"

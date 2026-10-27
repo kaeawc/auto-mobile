@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.protocol.RequestGestureEnd
+import dev.jasonpearson.automobile.protocol.RequestGestureStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -49,8 +51,8 @@ class GestureTeardownTest {
         },
         onResult = { id, success, error -> acks.add(Ack(id, success, error)) },
       )
-    router.start("start", "gesture", 1f, 2f)
-    router.end("end", "gesture", 3f, 4f, cancel = false)
+    router.start(RequestGestureStart("start", "gesture", 1.0, 2.0))
+    router.end(RequestGestureEnd("end", "gesture", 3.0, 4.0, cancel = false))
     var quits = 0
     val quitThread = {
       assertEquals(2, dispatcher.strokes.size)

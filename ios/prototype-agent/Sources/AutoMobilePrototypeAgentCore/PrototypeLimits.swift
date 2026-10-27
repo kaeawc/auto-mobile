@@ -44,6 +44,14 @@ enum PrototypeLimits {
         try visitData(.object(data), path: "data", depth: 1)
     }
 
+    private static func visitDataArray(_ items: [JSONValue], path: String, depth: Int) throws {
+        if depth > maxDataDepth { throw violation(path, "Data depth limit exceeded") }
+        if items.count > maxDataArrayItems { throw violation(path, "Data array limit exceeded") }
+        for (index, member) in items.enumerated() {
+            try visitData(member, path: "\(path)[\(index)]", depth: depth + 1)
+        }
+    }
+
     private static func visitData(_ value: JSONValue, path: String, depth: Int) throws {
         switch value {
         case let .object(fields):
@@ -54,11 +62,7 @@ enum PrototypeLimits {
                 }
             }
         case let .array(items):
-            if depth > maxDataDepth { throw violation(path, "Data depth limit exceeded") }
-            if items.count > maxDataArrayItems { throw violation(path, "Data array limit exceeded") }
-            for (index, member) in items.enumerated() {
-                try visitData(member, path: "\(path)[\(index)]", depth: depth + 1)
-            }
+            try visitDataArray(items, path: path, depth: depth)
         case let .number(number):
             if !number.isFinite { throw violation(path, "Invalid data value") }
         case .null: throw violation(path, "Invalid data value")
@@ -103,19 +107,13 @@ enum PrototypeLimits {
     }
 
     static func dataMemberPath(_ path: String, key: String) -> String {
-        let scalars = key.unicodeScalars
-        func initial(_ scalar: Unicode.Scalar) -> Bool {
-            ("A" ... "Z").contains(scalar) || ("a" ... "z").contains(scalar) || scalar == "_"
-        }
-        if let first = scalars.first, initial(first),
-           scalars.allSatisfy({ initial($0) || ("0" ... "9").contains($0) })
-        {
+        if PrototypeContractValidator.matches("pathKey", key) {
             return "\(path).\(key)"
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = .withoutEscapingSlashes
         // Encoding a Swift string cannot fail; retaining a fallback keeps this path total.
-        let encoded = (try? encoder.encode(key)).map { String(decoding: $0, as: UTF8.self) } ?? "\"\""
+        let encoded = (try? encoder.encode(key)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
         return "\(path)[\(encoded)]"
     }
 
@@ -194,6 +192,30 @@ enum PrototypeLimits {
         }
     }
 
+    private static func visitScreens(
+        _ fields: [String: JSONValue],
+        path: String,
+        depth: Int,
+        authored: Bool,
+        count: inout Int
+    )
+        throws
+    {
+        if case let .object(screens)? = fields["screens"] {
+            for name in screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
+                if let screen = screens[name] {
+                    try visit(
+                        screen,
+                        path: PrototypeStacks.screenPath(path, name: name),
+                        depth: depth + 1,
+                        authored: authored,
+                        count: &count
+                    )
+                }
+            }
+        }
+    }
+
     private static func visit(
         _ node: JSONValue, path: String, depth: Int, authored: Bool, count: inout Int
     )
@@ -222,19 +244,7 @@ enum PrototypeLimits {
         if let child = fields["child"] {
             try visit(child, path: "\(path).child", depth: depth + 1, authored: authored, count: &count)
         }
-        if case let .object(screens)? = fields["screens"] {
-            for name in screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
-                if let screen = screens[name] {
-                    try visit(
-                        screen,
-                        path: PrototypeStacks.screenPath(path, name: name),
-                        depth: depth + 1,
-                        authored: authored,
-                        count: &count
-                    )
-                }
-            }
-        }
+        try visitScreens(fields, path: path, depth: depth, authored: authored, count: &count)
     }
 
     private static func visitLiteralChildren(
@@ -262,6 +272,28 @@ enum PrototypeLimits {
         guard case let .object(spec)? = fields["repeat"] else { return false }
         guard case let .array(items)? = spec["items"] else { return true }
         return items.isEmpty
+    }
+
+    private static func visitAuthoredScreens(
+        _ fields: [String: JSONValue],
+        path: String,
+        depth: Int,
+        childTemplate: Bool,
+        count: inout Int,
+        insideRepeat: Bool
+    )
+        throws
+    {
+        if case let .object(screens)? = fields["screens"] {
+            for name in screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
+                if let screen = screens[name] {
+                    try visitAuthoredTemplates(
+                        screen, path: PrototypeStacks.screenPath(path, name: name), depth: depth + 1,
+                        template: childTemplate, count: &count, insideRepeat: insideRepeat || fields["repeat"] != nil
+                    )
+                }
+            }
+        }
     }
 
     /// Structural traversal, never instance expansion: all descendants of an uncounted template
@@ -297,16 +329,14 @@ enum PrototypeLimits {
                 insideRepeat: insideRepeat || fields["repeat"] != nil
             )
         }
-        if case let .object(screens)? = fields["screens"] {
-            for name in screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
-                if let screen = screens[name] {
-                    try visitAuthoredTemplates(
-                        screen, path: PrototypeStacks.screenPath(path, name: name), depth: depth + 1,
-                        template: childTemplate, count: &count, insideRepeat: insideRepeat || fields["repeat"] != nil
-                    )
-                }
-            }
-        }
+        try visitAuthoredScreens(
+            fields,
+            path: path,
+            depth: depth,
+            childTemplate: childTemplate,
+            count: &count,
+            insideRepeat: insideRepeat
+        )
     }
 
     /// Validate authored spans before data/repeat substitution (which may legitimately yield empty text).

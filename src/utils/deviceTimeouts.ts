@@ -8,6 +8,8 @@ export const DEFAULT_START_DEVICE_TIMEOUT_MS =
 // A full resource request may verify dozens of native services sequentially.
 export const DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS = 300_000;
 export const DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS = 60_000;
+// Failed/cancelled simulator boots share this budget across lease, command and verification.
+export const SIMULATOR_BOOT_CLEANUP_TIMEOUT_MS = DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
 // Exact virtual-device provisioning can spend up to five minutes in
 // `avdmanager create avd` before the regular boot/readiness phases begin.
 export const DEFAULT_PROVISION_DEVICE_TIMEOUT_MS = 8 * 60 * 1000;

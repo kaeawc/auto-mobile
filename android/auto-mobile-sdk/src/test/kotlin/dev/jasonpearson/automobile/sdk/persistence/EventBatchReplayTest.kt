@@ -45,7 +45,7 @@ class EventBatchReplayTest {
     }
   }
 
-  private class FakePersistence(count: Int) : EventPersistence {
+  private class FakePersistence(count: Int) : NoOpEventPersistence() {
     val pending =
       (1..count)
         .map { index ->
@@ -79,8 +79,6 @@ class EventBatchReplayTest {
       failures.add(batchId)
       return true
     }
-
-    override fun cleanup(maxAgeDays: Int) {}
   }
 
   @Test

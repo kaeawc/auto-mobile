@@ -1,5 +1,6 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
+import { SessionBrokerStoppingError } from "../../../src/daemon/sessionBroker/SessionBrokerStoppingError";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
 import {
   openSqliteBindingRegistry,
@@ -10,6 +11,10 @@ import { SESSION_REQUEST_ABANDONED_CODE } from "../../../src/daemon/sessionBroke
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 import { FAKE_BROKER_OWNER, FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
+
+afterEach(() => {
+  mock.restore();
+});
 
 function config(requestId: string): SessionConfig {
   return {
@@ -78,12 +83,108 @@ describe("broker result receipts", () => {
     expect(await broker.prepare(config("late-capacity"), "owner-token")).toEqual(first);
   });
 
+  test.each([
+    ["client", "pre-admission"],
+    ["client", "post-admission"],
+    ["shutdown", "pre-admission"],
+    ["shutdown", "post-admission"],
+  ] as const)(
+    "%s cancellation %s preserves its admission and replay contract",
+    async (source, phase) => {
+      const controller = new AbortController();
+      const cancel = async (signal?: AbortSignal) => {
+        if (source === "client") {
+          controller.abort(new Error("Client RPC cancelled"));
+        } else {
+          await broker.markRestartHandoff();
+        }
+        signal?.throwIfAborted();
+      };
+      if (phase === "pre-admission") {
+        options.catalog = async (_platform, signal) => {
+          await cancel(signal);
+          return iosCatalog();
+        };
+      } else {
+        devices.prepareHook = async ({ signal }) => cancel(signal);
+      }
+
+      const request = config("cancelled-request");
+      const preparing = broker.prepare(request, "owner-token", controller.signal);
+      if (source === "shutdown" && phase === "pre-admission") {
+        await expect(preparing).rejects.toBeInstanceOf(SessionBrokerStoppingError);
+        expect(await options.store.getRequest(request.requestId)).toBeUndefined();
+        await broker.close();
+        options.catalog = async () => iosCatalog();
+        broker = new SessionBroker(options);
+        expect(await broker.prepare(request, "owner-token")).toMatchObject({ outcome: "ready" });
+        expect(devices.prepared).toHaveLength(1);
+        return;
+      }
+      const first = await preparing;
+      if (source === "shutdown") {
+        await broker.close();
+        broker = new SessionBroker(options);
+      }
+      const replay = await broker.prepare(request, "owner-token");
+      const expected = {
+        outcome: "failed",
+        cleanupPending: false,
+        failure: {
+          code: source === "shutdown" ? "session_broker_stopping" : "cancelled",
+          retryable: true,
+          retryRequires: "new_request_id",
+          ...(source === "shutdown" ? { retryAfterMs: 5_000 } : {}),
+        },
+      };
+      expect(first).toMatchObject(expected);
+      expect(replay).toMatchObject(expected);
+      expect(replay).toEqual(first);
+      expect(devices.prepared).toHaveLength(phase === "pre-admission" ? 0 : 1);
+    },
+  );
+
+  test.each([true, false])(
+    "managed cleanup_pending replays without an eviction delay with confirmed cleanup=%s",
+    async (cleanupConfirmed) => {
+      devices.prepareError = new SessionBrokerFailureError({
+        code: "cleanup_pending",
+        message: "Managed device deletion is pending",
+        retryable: true,
+      });
+      devices.canDestroy = cleanupConfirmed;
+      const request = config("managed-cleanup");
+      const first = await broker.prepare(request, "owner-token");
+      expect(first).toMatchObject({ outcome: "failed", cleanupPending: !cleanupConfirmed });
+      expect(first.failure).toEqual({
+        code: "cleanup_pending",
+        message: "Managed device deletion is pending",
+        retryable: cleanupConfirmed,
+      });
+      const scopeKey = (await options.store.listResources())[0].scopeKey;
+      const reopened = new SessionBroker({
+        ...options,
+        store: registry.sessionBrokerStore(scopeKey),
+      });
+      expect(await reopened.ownedStatus(request.requestId, "owner-token")).toEqual(first);
+      expect(await reopened.prepare(request, "owner-token")).toEqual(first);
+      devices.canDestroy = true;
+      await reopened.recover();
+      expect((await reopened.status(request.requestId))?.failure).toEqual({
+        code: "cleanup_pending",
+        message: "Managed device deletion is pending",
+        retryable: true,
+      });
+    },
+  );
+
   test("an abandonment committed while the ready receipt is assembled is not reported ready", async () => {
     const activate = options.store.activate.bind(options.store);
     const listResources = options.store.listResources.bind(options.store);
+    const listResourcesSpy = spyOn(options.store, "listResources");
     spyOn(options.store, "activate").mockImplementationOnce(async (...args) => {
       const request = await activate(...args);
-      spyOn(options.store, "listResources").mockImplementationOnce(async () => {
+      listResourcesSpy.mockImplementationOnce(async () => {
         await options.store.abandon("raced", options.owner, "owner-token");
         return listResources();
       });

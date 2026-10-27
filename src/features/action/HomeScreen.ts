@@ -14,7 +14,7 @@ import {
   ViewHierarchyResult,
 } from "../../models";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -28,6 +28,7 @@ import {
 } from "../../utils/ios-cmdline-tools/IosHomeBackend";
 import { SimctlCommandTimeoutError } from "../../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { IosHomeLaunchTimeoutError } from "../../models/IosHomeLaunchTimeoutError";
+import { IosHomeNotForegroundError } from "../../models/IosHomeNotForegroundError";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { sequenceBackoff, type BackoffPolicy } from "../../utils/Backoff";
@@ -59,6 +60,11 @@ const ANDROID_LAUNCHER_OVERLAY_MARKERS = [
  * (issue #6147) rather than trusting either dispatch method's self-reported
  * result.
  */
+const SPOTLIGHT_BUNDLE_ID = "com.apple.Spotlight";
+
+/** The runner's one-shot foreground check failure; keep in sync with CommandHandler+TextInput.swift. */
+const RUNNER_HOME_NOT_FOREGROUND_ERROR = "Home press did not bring SpringBoard to the foreground";
+
 export class HomeScreen extends BaseVisualChange {
   /**
    * Deadline for the ADB `KEYCODE_HOME` fallback keyevent. Without a bound a
@@ -77,15 +83,21 @@ export class HomeScreen extends BaseVisualChange {
   // SpringBoard launch is idempotent; retry timeouts briefly within the Home budget (#11946).
   private static readonly IOS_SIMCTL_LAUNCH_RETRY_DELAYS_MS: readonly number[] = [100, 200, 400];
 
+  private readonly globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
+
   constructor(
     device: BootedDevice,
     adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
     private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(device),
-    collaborators: DisplayFenceDependencies = {},
+    collaborators: DisplayFenceDependencies & {
+      /** Defaults to the device's real CtrlProxy client. */
+      globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
+    } = {},
   ) {
     super(device, adb, timer, undefined, collaborators);
     this.device = device;
+    this.globalActionClient = collaborators.globalActionClient;
   }
 
   async execute(call?: ActionCall): Promise<HomeScreenResult>;
@@ -238,15 +250,11 @@ export class HomeScreen extends BaseVisualChange {
       return false;
     }
     if (
-      !(await isForegroundLauncher(
-        launcherPackage,
-        this.adb,
-        this.device.deviceId,
-        this.timer,
-        deviceIncarnationToken(this.device.deviceId),
+      !(await isForegroundLauncher(launcherPackage, this.adb, this.device.deviceId, this.timer, {
+        incarnationToken: deviceIncarnationToken(this.device.deviceId),
         signal,
-        5000,
-      ))
+        timeoutMs: 5000,
+      }))
     ) {
       return false;
     }
@@ -292,7 +300,8 @@ export class HomeScreen extends BaseVisualChange {
 
     let globalActionSucceeded = false;
     try {
-      const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+      const client =
+        this.globalActionClient ?? AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
       const result = await client.requestGlobalAction("home", 3000);
       globalActionSucceeded = result.success;
       if (!globalActionSucceeded) {
@@ -340,7 +349,7 @@ export class HomeScreen extends BaseVisualChange {
     throwIfAborted(signal);
     const backend = resolveIosHomeBackend(this.device.deviceId, { simctl: this.simctl });
     if (backend.kind === "physical") {
-      const client = IOSCtrlProxyClient.getInstance(this.device);
+      const client = this.iosClient();
       const pressError = await awaitWhileRequestIsLive(
         this.tryIosRunnerHome(client, 5000, perf, frameContext, { signal, onDispatch }),
         signal,
@@ -369,15 +378,27 @@ export class HomeScreen extends BaseVisualChange {
     }
 
     try {
-      const client = IOSCtrlProxyClient.getInstance(this.device);
-      await this.verifyIosHomeForeground(
-        client,
-        perf,
-        HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
-        this.iosHomeRemainingMs(deadline),
-        HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
-        { pollUntilDeadline: true, signal },
-      );
+      const client = this.iosClient();
+      try {
+        await this.verifyIosHomeForeground(
+          client,
+          perf,
+          HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
+          this.iosHomeRemainingMs(deadline),
+          HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
+          { pollUntilDeadline: true, signal },
+        );
+      } catch (error) {
+        // simctl's SpringBoard launch does not dismiss Spotlight on iOS 27 (#14827); the runner's
+        // hardware Home press does, so retry once through it and verify again.
+        if (
+          !(error instanceof IosHomeNotForegroundError) ||
+          error.foregroundApp !== SPOTLIGHT_BUNDLE_ID
+        ) {
+          throw error;
+        }
+        await this.pressRunnerHomeThenVerify(client, perf, signal, onDispatch);
+      }
     } catch (error) {
       throwIfAborted(signal);
       throw new ActionableError(
@@ -385,6 +406,37 @@ export class HomeScreen extends BaseVisualChange {
         { cause: error },
       );
     }
+  }
+
+  private async pressRunnerHomeThenVerify(
+    client: IosCtrlProxy,
+    perf: PerformanceTracker | undefined,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<void> {
+    const pressError = await awaitWhileRequestIsLive(
+      this.tryIosRunnerHome(client, 5000, perf, undefined, { signal, onDispatch }),
+      signal,
+    );
+    // The runner checks the foreground once, right after the press, and SpringBoard can take
+    // about a second to settle after Spotlight (#14827). That error means "sent, unverified", so
+    // fall through to the polling check instead of failing before it runs.
+    if (pressError && pressError !== RUNNER_HOME_NOT_FOREGROUND_ERROR) {
+      throw new ActionableError(pressError);
+    }
+    await this.verifyIosHomeForeground(
+      client,
+      perf,
+      HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
+      undefined,
+      HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
+      { pollUntilDeadline: true, signal },
+    );
+  }
+
+  /** The device's runner client, resolved at each use so a retired client is never reused. */
+  private iosClient(): IosCtrlProxy {
+    return IOSCtrlProxyClient.getInstance(this.device);
   }
 
   private async launchIosSpringboard(
@@ -438,7 +490,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async tryIosRunnerHome(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     timeoutMs: number,
     perf: PerformanceTracker | undefined,
     frameContext: string | undefined,
@@ -473,7 +525,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async verifyIosHomeForeground(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     perf?: PerformanceTracker,
     retryDelaysMs: readonly number[] = HomeScreen.IOS_HOME_RETRY_DELAYS_MS,
     timeoutMs: number = HomeScreen.IOS_HOME_VERIFICATION_TIMEOUT_MS,
@@ -548,7 +600,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async readIosHomeForeground(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     perf: PerformanceTracker | undefined,
     remainingMs: number,
     signal?: AbortSignal,
@@ -573,7 +625,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private throwIosHomeNotForeground(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     lastHierarchy: CtrlProxyHierarchy | undefined,
   ): never {
     const foregroundApp = lastHierarchy?.packageName ?? "unknown app";
@@ -586,6 +638,9 @@ export class HomeScreen extends BaseVisualChange {
     if (foregroundApp === "unknown app") {
       throw new ActionableError("Home press did not bring SpringBoard to the foreground");
     }
-    throw new ActionableError(`Home press did not background ${foregroundApp}${alert}`);
+    throw new IosHomeNotForegroundError(
+      `Home press did not background ${foregroundApp}${alert}`,
+      foregroundApp,
+    );
   }
 }

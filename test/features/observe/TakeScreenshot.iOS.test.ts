@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { readFileSync } from "node:fs";
@@ -18,7 +18,16 @@ import {
 } from "../../../src/daemon/deviceDataStreamSocketServer";
 import { loadSharp } from "../../../src/utils/image/loadSharp";
 
+const defaultGetInstance = IOSCtrlProxyClient.getInstance;
+
 describe("TakeScreenshot iOS cancellation", function () {
+  // Backstop registered before any test body: a failure before a test's own try/finally still
+  // restores the process-wide singleton accessor and stream server for later shared files.
+  afterEach(() => {
+    IOSCtrlProxyClient.getInstance = defaultGetInstance;
+    installDeviceDataStreamSocketServerForTesting(null);
+  });
+
   let encodedScreenshots: { jpeg: Buffer; webp: Buffer };
 
   beforeAll(async () => {
@@ -48,26 +57,28 @@ describe("TakeScreenshot iOS cancellation", function () {
     const streamServer = new DeviceDataStreamSocketServer("/fake/path/test.sock", new FakeTimer());
     const pushSpy = spyOn(streamServer, "pushScreenshotUpdate");
     const fromSpy = spyOn(Buffer, "from");
-    IOSCtrlProxyClient.getInstance = (() => ({
-      ensureConnected: async () => true,
-      requestScreenshot: fakeCtrlProxy.requestScreenshot.bind(fakeCtrlProxy),
-    })) as typeof IOSCtrlProxyClient.getInstance;
+    IOSCtrlProxyClient.getInstance = () =>
+      screenshotClient({
+        ensureConnected: async () => true,
+        requestScreenshot: fakeCtrlProxy.requestScreenshot.bind(fakeCtrlProxy),
+      });
     installDeviceDataStreamSocketServerForTesting(streamServer);
 
     try {
-      const screenshot = new TakeScreenshot(
-        iosDevice("ios-single-decode"),
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-        new FakeTimer(),
-        new CountingIdGenerator("capture"),
-        new FakeScreenshotFileWriter(),
-      );
+      const screenshot = new TakeScreenshot(iosDevice("ios-single-decode"), {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("capture"),
+        fileWriter: new FakeScreenshotFileWriter(),
+      });
       const result = await screenshot.execute({ format: "png" });
 
       expect(result.success).toBe(true);
       expect(
         fromSpy.mock.calls.filter(
-          ([value, encoding]) => value === screenshotBase64 && encoding === "base64",
+          (args) =>
+            Array.from<unknown>(args)[0] === screenshotBase64 &&
+            Array.from<unknown>(args)[1] === "base64",
         ),
       ).toHaveLength(1);
       expect(pushSpy).toHaveBeenCalledTimes(1);
@@ -94,17 +105,17 @@ describe("TakeScreenshot iOS cancellation", function () {
       const frames = [encodedScreenshots.jpeg, encodedScreenshots.webp, Buffer.from("garbage")];
       for (const frame of frames) {
         const data = frame.toString("base64");
-        IOSCtrlProxyClient.getInstance = (() => ({
-          ensureConnected: async () => true,
-          requestScreenshot: async () => ({ success: true, data }),
-        })) as typeof IOSCtrlProxyClient.getInstance;
-        const screenshot = new TakeScreenshot(
-          iosDevice("ios-image-dimensions"),
-          new FakeAdbClientFactory(new FakeAdbExecutor()),
-          new FakeTimer(),
-          new CountingIdGenerator("capture"),
-          new FakeScreenshotFileWriter(),
-        );
+        IOSCtrlProxyClient.getInstance = () =>
+          screenshotClient({
+            ensureConnected: async () => true,
+            requestScreenshot: async () => ({ success: true, data }),
+          });
+        const screenshot = new TakeScreenshot(iosDevice("ios-image-dimensions"), {
+          adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+          timer: new FakeTimer(),
+          idGenerator: new CountingIdGenerator("capture"),
+          fileWriter: new FakeScreenshotFileWriter(),
+        });
         expect((await screenshot.execute({ format: "png" })).success).toBe(true);
       }
 
@@ -131,21 +142,21 @@ describe("TakeScreenshot iOS cancellation", function () {
     const originalGetInstance = IOSCtrlProxyClient.getInstance;
     let requestScreenshotCalls = 0;
     let finishReconnect: (() => void) | undefined;
-    IOSCtrlProxyClient.getInstance = (() => ({
-      ensureConnected: () =>
-        new Promise<boolean>((resolve) => {
-          finishReconnect = () => resolve(true);
-        }),
-      requestScreenshot: async () => {
-        requestScreenshotCalls++;
-        return { success: false, error: "unexpected screenshot request" };
-      },
-    })) as typeof IOSCtrlProxyClient.getInstance;
+    IOSCtrlProxyClient.getInstance = () =>
+      screenshotClient({
+        ensureConnected: () =>
+          new Promise<boolean>((resolve) => {
+            finishReconnect = () => resolve(true);
+          }),
+        requestScreenshot: async () => {
+          requestScreenshotCalls++;
+          return { success: false, error: "unexpected screenshot request" };
+        },
+      });
     try {
-      const screenshot = new TakeScreenshot(
-        iosDevice("ios-device-id"),
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-      );
+      const screenshot = new TakeScreenshot(iosDevice("ios-device-id"), {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      });
       const resultPromise = screenshot.execute({ format: "png" }, controller.signal);
       controller.abort();
       const result = await resultPromise;
@@ -161,19 +172,19 @@ describe("TakeScreenshot iOS cancellation", function () {
     const controller = new AbortController();
     const originalGetInstance = IOSCtrlProxyClient.getInstance;
     let requestScreenshotCalls = 0;
-    IOSCtrlProxyClient.getInstance = (() => ({
-      ensureConnected: async () => true,
-      requestScreenshot: async () => {
-        requestScreenshotCalls++;
-        controller.abort();
-        return { success: true, data: Buffer.from("image").toString("base64") };
-      },
-    })) as typeof IOSCtrlProxyClient.getInstance;
+    IOSCtrlProxyClient.getInstance = () =>
+      screenshotClient({
+        ensureConnected: async () => true,
+        requestScreenshot: async () => {
+          requestScreenshotCalls++;
+          controller.abort();
+          return { success: true, data: Buffer.from("image").toString("base64") };
+        },
+      });
     try {
-      const screenshot = new TakeScreenshot(
-        iosDevice("ios-device-id"),
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-      );
+      const screenshot = new TakeScreenshot(iosDevice("ios-device-id"), {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      });
       const result = await screenshot.execute({ format: "png" }, controller.signal);
       expect(requestScreenshotCalls).toBe(1);
       expect(result).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
@@ -189,19 +200,19 @@ describe("TakeScreenshot iOS cancellation", function () {
       readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
     );
     const originalGetInstance = IOSCtrlProxyClient.getInstance;
-    IOSCtrlProxyClient.getInstance = (() => ({
-      ensureConnected: async () => true,
-      requestScreenshot: fakeCtrlProxy.requestScreenshot.bind(fakeCtrlProxy),
-    })) as typeof IOSCtrlProxyClient.getInstance;
+    IOSCtrlProxyClient.getInstance = () =>
+      screenshotClient({
+        ensureConnected: async () => true,
+        requestScreenshot: fakeCtrlProxy.requestScreenshot.bind(fakeCtrlProxy),
+      });
     const writer = new FakeScreenshotFileWriter(() => controller.abort());
     try {
-      const screenshot = new TakeScreenshot(
-        iosDevice("ios-late-cancel"),
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-        new FakeTimer(),
-        new CountingIdGenerator("capture"),
-        writer,
-      );
+      const screenshot = new TakeScreenshot(iosDevice("ios-late-cancel"), {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("capture"),
+        fileWriter: writer,
+      });
       const result = await screenshot.execute({ format: "png" }, controller.signal);
       expect(result).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
       expect(writer.written).toHaveLength(1);
@@ -219,22 +230,22 @@ describe("TakeScreenshot iOS cancellation", function () {
     );
     fakeCtrlProxy.abortScreenshotOnRequest(controller);
     const originalGetInstance = IOSCtrlProxyClient.getInstance;
-    IOSCtrlProxyClient.getInstance = (() => ({
-      ensureConnected: async () => true,
-      requestScreenshot: fakeCtrlProxy.requestScreenshot.bind(fakeCtrlProxy),
-    })) as typeof IOSCtrlProxyClient.getInstance;
+    IOSCtrlProxyClient.getInstance = () =>
+      screenshotClient({
+        ensureConnected: async () => true,
+        requestScreenshot: fakeCtrlProxy.requestScreenshot.bind(fakeCtrlProxy),
+      });
     const writer = new FakeScreenshotFileWriter();
     const streamServer = new DeviceDataStreamSocketServer("/fake/path/test.sock", new FakeTimer());
     const pushSpy = spyOn(streamServer, "pushScreenshotUpdate");
     installDeviceDataStreamSocketServerForTesting(streamServer);
     try {
-      const screenshot = new TakeScreenshot(
-        iosDevice("ios-pre-cancel"),
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-        new FakeTimer(),
-        new CountingIdGenerator("capture"),
-        writer,
-      );
+      const screenshot = new TakeScreenshot(iosDevice("ios-pre-cancel"), {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("capture"),
+        fileWriter: writer,
+      });
       const result = await screenshot.testHooks.ios(
         path.join(os.tmpdir(), "ios-pre-cancel.png"),
         { format: "png" },
@@ -251,3 +262,19 @@ describe("TakeScreenshot iOS cancellation", function () {
     }
   });
 });
+
+function screenshotClient(
+  stub: Pick<IOSCtrlProxyClient, "ensureConnected" | "requestScreenshot">,
+): IOSCtrlProxyClient {
+  const client = IOSCtrlProxyClient.createForTesting(
+    { deviceId: "screenshot-stub", name: "iPhone", platform: "ios" },
+    8765,
+    () => {
+      throw new Error("Unexpected socket connection");
+    },
+    new FakeTimer(),
+  );
+  client.ensureConnected = stub.ensureConnected;
+  client.requestScreenshot = stub.requestScreenshot;
+  return client;
+}

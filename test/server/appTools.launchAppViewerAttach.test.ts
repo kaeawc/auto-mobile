@@ -5,7 +5,7 @@ import {
   setInstalledAppResourceRefresh,
 } from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 import { PrototypeViewerConnections } from "../../src/features/prototype/ios/prototypeViewerAttach";
@@ -159,7 +159,7 @@ test.each(["typed", "thrown"])("%s launch failure skips viewer attach", async (f
         if (failure === "thrown") {
           throw new Error("launch failed");
         }
-        return { success: false, error: "launch failed" };
+        return { success: false, error: "launch failed", packageName: APP };
       },
     }),
   });
@@ -184,7 +184,9 @@ test("successful termination of another bundle leaves the viewer connected", asy
 test("failed termination keeps the viewer connected", async () => {
   const client = recordViewer();
   appTools.configure("terminateApp", {
-    createTerminateApp: () => ({ execute: async () => ({ success: false, error: "failed" }) }),
+    createTerminateApp: () => ({
+      execute: async () => ({ success: false, error: "failed", packageName: APP }),
+    }),
   });
   await expect(
     ToolRegistry.getTool("terminateApp")!.deviceAwareHandler!(SIMULATOR, { appId: APP }),

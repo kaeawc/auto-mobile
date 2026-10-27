@@ -18,18 +18,13 @@ function makeManager(
   executor: FakeProcessExecutor,
   processClient?: IosCtrlProxyProcessClient,
 ): IOSCtrlProxyManager {
-  return IOSCtrlProxyManager.createForTestingWithDeps(
+  return IOSCtrlProxyManager.createForTestingWithOptions({
     device,
-    new FakeTimer(),
-    undefined,
-    executor,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+    timer: new FakeTimer(),
+    processExecutor: executor,
     processClient,
-  );
+    steps: { isOwnRunnerProcessAlive: async () => true },
+  });
 }
 
 describe("IOSCtrlProxyManager stopTrackedService cleanup (#11154)", () => {
@@ -66,15 +61,9 @@ describe("IOSCtrlProxyManager stopTrackedService cleanup (#11154)", () => {
         expect(generation.currentCalls).toEqual([child.pid!]);
         generation.token = "later-token";
         const terminate = spyOn(client, "terminateProcessTree").mockResolvedValue(undefined);
-        const alive = spyOn(manager, "isOwnRunnerProcessAlive").mockResolvedValue(true);
-        const local = spyOn(manager, "useRemoteRunner").mockReturnValue(false);
-        const owned = spyOn(manager, "isRunnerStillOwnedWithinShutdownDeadline").mockResolvedValue(
-          true,
-        );
+        const owned = spyOn(client, "checkRunnerOwnership").mockResolvedValue("owned");
         restores.push(
           () => terminate.mockRestore(),
-          () => alive.mockRestore(),
-          () => local.mockRestore(),
           () => owned.mockRestore(),
         );
 
@@ -122,8 +111,9 @@ describe("IOSCtrlProxyManager stopTrackedService cleanup (#11154)", () => {
         const manager = makeManager(executor, client);
         const remote = manager.diagnostics.remoteRunner;
         const mocks = [
-          spyOn(manager, "useRemoteRunner").mockReturnValue(true),
-          spyOn(manager, "isRemoteRunnerAvailable").mockResolvedValue(true),
+          spyOn(remote, "isEnabled").mockReturnValue(true),
+          spyOn(remote, "isRunningInDocker").mockReturnValue(true),
+          spyOn(remote, "isAvailable").mockResolvedValue(true),
           spyOn(manager, "ensureRemoteServicePortAvailable").mockResolvedValue(undefined),
           spyOn(manager.diagnostics.builder, "getXctestrunPath").mockResolvedValue(null),
           spyOn(remote, "status").mockResolvedValue({

@@ -1,3 +1,4 @@
+import type { PrototypeSpec } from "../../../../src/features/prototype/prototypeSpec";
 import {
   CtrlProxyPrototypes,
   decodePrototypeEvent,
@@ -42,7 +43,7 @@ const spec = {
   window: { placement: { type: "fullscreen" as const }, opacity: 90 },
   root: { type: "text" as const, text: "Hello" },
 };
-const event = {
+const event: PrototypeEvent = {
   type: "prototype_event",
   timestamp: 42,
   id: "panel",
@@ -68,7 +69,7 @@ async function harness(
   const timer = new FakeTimer();
   const socket = new FakeWebSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "prototype-test", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "prototype-test", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
       webSocketFactory: () => socket,
@@ -77,16 +78,14 @@ async function harness(
     },
   );
   clients.push(client);
-  const extraContext = client["extraDelegateContextFields"].bind(client);
-  client["extraDelegateContextFields"] = () => ({
-    ...extraContext(),
+  client.testHooks.extendDelegateContextFields(() => ({
     savedPrototypeMirror: mirror ? { serial: "prototype-test", mirror } : undefined,
     prototypeAssetCache: cache ? { serial: "prototype-test", cache } : undefined,
-  });
+  }));
   await Promise.resolve();
   client.connectionTestHooks.socket = socket;
   spyOn(client, "ensureConnected").mockResolvedValue(true);
-  const receive = (frame: object) => client["handleWebSocketMessage"](JSON.stringify(frame));
+  const receive = (frame: object) => client.testHooks.handleWebSocketMessage(JSON.stringify(frame));
   if (commands !== null) {
     await receive({ type: "connected", supportedCommands: commands });
   }
@@ -125,11 +124,11 @@ describe("saved prototype host recorder", () => {
       mirror,
       cache,
     );
-    const delegate = new CtrlProxyPrototypes(client["createDelegateContext"]());
+    const delegate = new CtrlProxyPrototypes(client.testHooks.createDelegateContext());
     let reply: PrototypeResult = { success: true, error: null };
     const send = spyOn(socket, "send").mockImplementation((data) => {
       const message: { requestId: string } = JSON.parse(String(data));
-      client["requestManager"].resolve(message.requestId, reply);
+      client.connectionTestHooks.requestManager.resolve(message.requestId, reply);
     });
     return {
       delegate,
@@ -188,7 +187,7 @@ describe("saved prototype host recorder", () => {
   test("throwing cache root still records explicit assets as missing", async () => {
     const mirror = new FakeSavedPrototypeMirror();
     const { client, send, reply } = await recorder(mirror);
-    const context = client["createDelegateContext"]();
+    const context = client.testHooks.createDelegateContext();
     const error = new Error("root unavailable");
     context.prototypeAssetCache = {
       serial: "prototype-test",
@@ -264,28 +263,35 @@ describe("saved prototype host recorder", () => {
       stateKey: "tab",
       items: [{ label: "Photo", image: { light: "photo", dark: "dark" } }],
     },
-  ])("new delegate retains cached references after restart: %j", async (root) => {
-    const mirror = new FakeSavedPrototypeMirror();
-    const cache = new FakePrototypeAssetCache();
-    const first = await recorder(mirror, cache);
-    const second = await recorder(mirror, cache);
-    try {
-      await first.delegate.requestPutPrototypeAsset(asset);
-      await first.delegate.requestPutPrototypeAsset({ ...asset, id: "dark" });
-      await second.delegate.requestSavePrototype({
-        spec: { ...spec, state: { tab: 0 }, root },
-        label: "Panel",
-      });
-      const assets = (await mirror.list("prototype-test"))[0].assets;
-      expect(assets).toContainEqual(asset);
-      if (typeof root === "object" && "items" in root && typeof root.items[0].image === "object") {
-        expect(assets).toContainEqual({ ...asset, id: "dark" });
+  ] satisfies PrototypeSpec["root"][])(
+    "new delegate retains cached references after restart: %j",
+    async (root) => {
+      const mirror = new FakeSavedPrototypeMirror();
+      const cache = new FakePrototypeAssetCache();
+      const first = await recorder(mirror, cache);
+      const second = await recorder(mirror, cache);
+      try {
+        await first.delegate.requestPutPrototypeAsset(asset);
+        await first.delegate.requestPutPrototypeAsset({ ...asset, id: "dark" });
+        await second.delegate.requestSavePrototype({
+          spec: { ...spec, state: { tab: 0 }, root },
+          label: "Panel",
+        });
+        const assets = (await mirror.list("prototype-test"))[0].assets;
+        expect(assets).toContainEqual(asset);
+        if (
+          typeof root === "object" &&
+          "items" in root &&
+          typeof root.items?.[0]?.image === "object"
+        ) {
+          expect(assets).toContainEqual({ ...asset, id: "dark" });
+        }
+      } finally {
+        first.send.mockRestore();
+        second.send.mockRestore();
       }
-    } finally {
-      first.send.mockRestore();
-      second.send.mockRestore();
-    }
-  });
+    },
+  );
   test("unknown image is recorded missing and warned with saved id", async () => {
     const mirror = new FakeSavedPrototypeMirror();
     const { delegate, send, reply } = await recorder(mirror);
@@ -315,7 +321,7 @@ describe("saved prototype host recorder", () => {
   test("absent cache records all explicit references as missing after upload", async () => {
     const mirror = new FakeSavedPrototypeMirror();
     const { delegate, client, send } = await recorder(mirror);
-    const context = client["createDelegateContext"]();
+    const context = client.testHooks.createDelegateContext();
     delete context.prototypeAssetCache;
     const withoutCache = new CtrlProxyPrototypes(context);
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
@@ -494,6 +500,9 @@ describe("CtrlProxy prototypes", () => {
             ? client.requestShowPrototype(spec)
             : client.requestDismissPrototype({ all: true });
         const message = await sent;
+        if (typeof message.requestId !== "string") {
+          throw new Error("Expected request ID");
+        }
         expect(message.type).toBe(type);
         expect(message.requestId).toBeString();
         if (type === "show_prototype") {
@@ -527,7 +536,7 @@ describe("CtrlProxy prototypes", () => {
           success: false,
           error: "prototype host not wired",
         });
-        expect(client["requestManager"].getPendingCount()).toBe(0);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
       } finally {
         send.mockRestore();
       }
@@ -547,7 +556,7 @@ describe("CtrlProxy prototypes", () => {
       commands: string[] | null,
       displayId: number | undefined,
     ): Promise<Record<string, unknown> | undefined> {
-      const { client, socket } = await harness(commands);
+      const { client, socket } = await harness(commands ? [...commands] : null);
       const sent: Record<string, unknown>[] = [];
       const send = spyOn(socket, "send").mockImplementation((data) => {
         sent.push(JSON.parse(String(data)));
@@ -583,7 +592,7 @@ describe("CtrlProxy prototypes", () => {
       ["with only the gesture flag", [...withoutFlag, "gesture_display_id_v1"]],
       ["on a legacy handshake without the flag", ["show_prototype", "gesture_display_id_v1"]],
     ])("%s refuses before sending rather than defaulting", async (_name, commands) => {
-      const { client, socket } = await harness(commands);
+      const { client, socket } = await harness(commands ? [...commands] : null);
       const send = spyOn(socket, "send");
       try {
         await expect(client.requestShowPrototype(spec, 5000, undefined, 2)).rejects.toBeInstanceOf(
@@ -619,6 +628,9 @@ describe("CtrlProxy prototypes", () => {
       try {
         const pending = client.requestInspectPrototypes();
         const message = await sent;
+        if (typeof message.requestId !== "string") {
+          throw new Error("Expected request ID");
+        }
         expect(message.type).toBe("inspect_prototypes");
         const entry = {
           id: "proto",
@@ -649,7 +661,7 @@ describe("CtrlProxy prototypes", () => {
       ["without the flag", ["full_command_set_v1", "inspect_prototypes"]],
       ["on a legacy handshake", ["inspect_prototypes"]],
     ])("%s refuses before sending", async (_name, commands) => {
-      const { client, socket } = await harness(commands);
+      const { client, socket } = await harness(commands ? [...commands] : null);
       const send = spyOn(socket, "send");
       try {
         await expect(client.requestInspectPrototypes()).rejects.toThrow(
@@ -676,6 +688,9 @@ describe("CtrlProxy prototypes", () => {
       try {
         const pending = client.requestShowPrototype(spec);
         const message = await sent;
+        if (typeof message.requestId !== "string") {
+          throw new Error("Expected request ID");
+        }
         await receive({
           type: "prototype_result",
           timestamp: 42,
@@ -709,6 +724,9 @@ describe("CtrlProxy prototypes", () => {
     try {
       const pending = client.requestShowPrototype(spec);
       const message = await sent;
+      if (typeof message.requestId !== "string") {
+        throw new Error("Expected request ID");
+      }
       await receive({
         type: "prototype_result",
         timestamp: 42,
@@ -727,7 +745,7 @@ describe("CtrlProxy prototypes", () => {
       commands,
     })),
   )("old capabilities $commands throw before sending", async ({ commands }) => {
-    const { client, socket } = await harness(commands);
+    const { client, socket } = await harness(commands ? [...commands] : null);
     const send = spyOn(socket, "send");
     try {
       await expect(client.requestShowPrototype(spec)).rejects.toBeInstanceOf(ActionableError);
@@ -767,7 +785,7 @@ describe("CtrlProxy prototypes", () => {
       }
       expect(result).toMatchObject({ success: false, error, totalTimeMs: 0 });
       await pending;
-      expect(client["requestManager"].getPendingCount()).toBe(0);
+      expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
       if (!unknown) {
         send.mockImplementation((data) => {
           void receive({
@@ -905,7 +923,7 @@ describe("CtrlProxy prototypes", () => {
   test.each([null, ["full_command_set_v1", "request_id_echo_v1", "show_prototype"]])(
     "replaceOthers false without the flag refuses before a device request (%j)",
     async (commands) => {
-      const { client, socket } = await harness(commands);
+      const { client, socket } = await harness(commands ? [...commands] : null);
       const send = spyOn(socket, "send");
       try {
         await expectRefusal(
@@ -1116,7 +1134,7 @@ describe("CtrlProxy prototypes", () => {
         success: false,
         error: "prototype_result timed out after 50ms",
       });
-      expect(client["requestManager"].getPendingCount()).toBe(0);
+      expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
     } finally {
       send.mockRestore();
     }
@@ -1168,7 +1186,7 @@ describe("CtrlProxy patch transport", () => {
           timer.advanceTime(50);
         }
         if (outcome === "close") {
-          client["requestManager"].cancelAll(new Error("socket closed"));
+          client.connectionTestHooks.requestManager.cancelAll(new Error("socket closed"));
         }
         expect(await pending).toMatchObject({
           success: false,
@@ -1177,7 +1195,7 @@ describe("CtrlProxy patch transport", () => {
         if (outcome === "notConnected") {
           expect(send).not.toHaveBeenCalled();
         }
-        expect(client["requestManager"].getPendingCount()).toBe(0);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
       } finally {
         send.mockRestore();
       }
@@ -1384,7 +1402,7 @@ describe("CtrlProxy saved prototype transport", () => {
     test.each(savedRequests)(
       `$type refuses before send with ${commands === null ? "unknown" : "missing"} capability`,
       async ({ type, run }) => {
-        const { client, socket } = await harness(commands);
+        const { client, socket } = await harness(commands ? [...commands] : null);
         const send = spyOn(socket, "send");
         try {
           await expect(run(client)).rejects.toBeInstanceOf(ActionableError);
@@ -1526,7 +1544,11 @@ describe("saved shortcut reply validation", () => {
     expect(prototypeSavedReplyFields({ saved: { ...savedInfo, shortcut } })).toEqual({
       saved: { ...savedInfo, shortcut },
     });
-    const pin = { id: "panel", status: "already_pinned", shortcut };
+    const pin: NonNullable<ReturnType<typeof prototypeSavedReplyFields>["pin"]> = {
+      id: "panel",
+      status: "already_pinned",
+      shortcut,
+    };
     expect(prototypeSavedReplyFields({ pin })).toEqual({ pin });
   });
   test.each([null, "future", 3, { status: "requested" }, { id: "panel", status: "future" }])(
@@ -1541,7 +1563,10 @@ describe("saved shortcut reply validation", () => {
       expect(prototypeSavedReplyFields({ saved: { ...savedInfo, shortcut } })).toEqual({
         saved: savedInfo,
       });
-      const pin = { id: "panel", status: "already_pinned" };
+      const pin: NonNullable<ReturnType<typeof prototypeSavedReplyFields>["pin"]> = {
+        id: "panel",
+        status: "already_pinned",
+      };
       expect(prototypeSavedReplyFields({ pin: { ...pin, shortcut } })).toEqual({ pin });
     },
   );

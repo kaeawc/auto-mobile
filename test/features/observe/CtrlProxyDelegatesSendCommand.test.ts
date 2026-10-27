@@ -30,7 +30,7 @@ async function harness() {
   const timer = new FakeTimer();
   const socket = new RecordingSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "delegates-send-command", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "delegates-send-command", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
       webSocketFactory: () => socket,
@@ -42,7 +42,7 @@ async function harness() {
   await Promise.resolve();
   timer.advanceTime(123);
   client.connectionTestHooks.socket = socket;
-  const manager = client["requestManager"];
+  const manager = client.connectionTestHooks.requestManager;
   const ids = new CountingIdGenerator("wire");
   manager.generateId = (prefix) => `${prefix}_${ids.next()}`;
   let connects = 0;
@@ -51,9 +51,9 @@ async function harness() {
     connects++;
     return true;
   };
-  client["cancelScreenshotBackoff"] = () => {
+  client.testHooks.overrideCancelScreenshotBackoff(() => {
     cancels++;
-  };
+  });
   return { client, timer, socket, manager, connects: () => connects, cancels: () => cancels };
 }
 
@@ -82,7 +82,7 @@ const methods: Method[] = [
   {
     name: "requestInstallCaCertificate",
     autoConnect: true,
-    invoke: (h) => h.client["certificates"].requestInstallCaCertificate(" PEM ", 50),
+    invoke: (h) => h.client.testHooks.certificates().requestInstallCaCertificate(" PEM ", 50),
     frame: (requestId) => ctrlProxyRequests.installCaCert({ requestId, certificate: "PEM" }),
     literal: '{"type":"install_ca_cert","requestId":"caCertInstall_wire-1","certificate":"PEM"}',
     response: certResponse,
@@ -93,9 +93,12 @@ const methods: Method[] = [
     name: "requestInstallCaCertificateFromFile",
     autoConnect: true,
     invoke: (h) => {
-      const certs = new CtrlProxyCertificates(h.client["createCertificatesDelegateContext"](), {
-        stat: async () => ({ size: 1, isFile: () => true }),
-      });
+      const certs = new CtrlProxyCertificates(
+        h.client.testHooks.createCertificatesDelegateContext(),
+        {
+          stat: async () => ({ size: 1, isFile: () => true }),
+        },
+      );
       certs["pushCertificateToDevice"] = async () => "/sdcard/ca.pem";
       return certs.requestInstallCaCertificateFromFile("/tmp/ca.pem", 50);
     },
@@ -110,7 +113,7 @@ const methods: Method[] = [
   {
     name: "requestRemoveCaCertificate",
     autoConnect: true,
-    invoke: (h) => h.client["certificates"].requestRemoveCaCertificate(" alias ", 50),
+    invoke: (h) => h.client.testHooks.certificates().requestRemoveCaCertificate(" alias ", 50),
     frame: (requestId) => ctrlProxyRequests.removeCaCert({ requestId, alias: "alias" }),
     literal: '{"type":"remove_ca_cert","requestId":"caCertRemove_wire-1","alias":"alias"}',
     response: { type: "ca_cert_result", action: "remove" },
@@ -120,7 +123,7 @@ const methods: Method[] = [
   {
     name: "requestDeviceOwnerStatus",
     autoConnect: true,
-    invoke: (h) => h.client["certificates"].requestDeviceOwnerStatus(50),
+    invoke: (h) => h.client.testHooks.certificates().requestDeviceOwnerStatus(50),
     frame: (requestId) => ctrlProxyRequests.getDeviceOwnerStatus({ requestId }),
     literal: '{"type":"get_device_owner_status","requestId":"deviceOwnerStatus_wire-1"}',
     response: { type: "device_owner_status_result", isDeviceOwner: false, isAdminActive: false },
@@ -130,7 +133,7 @@ const methods: Method[] = [
   {
     name: "requestPermission",
     autoConnect: true,
-    invoke: (h) => h.client["certificates"].requestPermission(" perm ", false, 50),
+    invoke: (h) => h.client.testHooks.certificates().requestPermission(" perm ", false, 50),
     frame: (requestId) =>
       ctrlProxyRequests.getPermission({ requestId, permission: "perm", requestPermission: false }),
     literal:
@@ -143,7 +146,7 @@ const methods: Method[] = [
     name: "focus sendAction",
     autoConnect: true,
     invoke: (h) =>
-      h.client["focus"]["sendAction"]("focus", "res/id", 50, new NoOpPerformanceTracker()),
+      h.client.testHooks.focus()["sendAction"]("focus", "res/id", 50, new NoOpPerformanceTracker()),
     frame: (requestId) =>
       ctrlProxyRequests.requestAction({ requestId, action: "focus", resourceId: "res/id" }),
     literal:
@@ -155,7 +158,7 @@ const methods: Method[] = [
   {
     name: "requestCurrentFocus",
     autoConnect: true,
-    invoke: (h) => h.client["focus"].requestCurrentFocus(50),
+    invoke: (h) => h.client.testHooks.focus().requestCurrentFocus(50),
     frame: (requestId) => ctrlProxyRequests.getCurrentFocus({ requestId }),
     literal: '{"type":"get_current_focus","requestId":"currentFocus_wire-1"}',
     response: { type: "current_focus_result" },
@@ -165,7 +168,7 @@ const methods: Method[] = [
   {
     name: "requestTraversalOrder",
     autoConnect: true,
-    invoke: (h) => h.client["focus"].requestTraversalOrder(50),
+    invoke: (h) => h.client.testHooks.focus().requestTraversalOrder(50),
     frame: (requestId) => ctrlProxyRequests.getTraversalOrder({ requestId }),
     literal: '{"type":"get_traversal_order","requestId":"traversalOrder_wire-1"}',
     response: {
@@ -178,7 +181,7 @@ const methods: Method[] = [
   {
     name: "requestInstalledPackages",
     autoConnect: false,
-    invoke: (h) => h.client["packages"].requestInstalledPackages(false, 3, 50),
+    invoke: (h) => h.client.testHooks.packages().requestInstalledPackages(false, 3, 50),
     frame: (requestId) =>
       ctrlProxyRequests.requestInstalledPackages({ requestId, includeSystem: false, userId: 3 }),
     literal:
@@ -190,7 +193,7 @@ const methods: Method[] = [
   {
     name: "requestPackageInfo",
     autoConnect: false,
-    invoke: (h) => h.client["packages"].requestPackageInfo("pkg", {}, 50),
+    invoke: (h) => h.client.testHooks.packages().requestPackageInfo("pkg", {}, 50),
     frame: (requestId) =>
       ctrlProxyRequests.requestPackageInfo({
         requestId,
@@ -206,7 +209,7 @@ const methods: Method[] = [
   {
     name: "requestLaunchIntent",
     autoConnect: false,
-    invoke: (h) => h.client["packages"].requestLaunchIntent("pkg", 50),
+    invoke: (h) => h.client.testHooks.packages().requestLaunchIntent("pkg", 50),
     frame: (requestId) => ctrlProxyRequests.requestLaunchIntent({ requestId, packageName: "pkg" }),
     literal:
       '{"type":"request_launch_intent","requestId":"launch_intent_123_delegate-1","packageName":"pkg"}',
@@ -218,7 +221,7 @@ const methods: Method[] = [
     name: "requestAddHighlight",
     autoConnect: true,
     invoke: (h) =>
-      h.client["highlights"].requestAddHighlight(
+      h.client.testHooks.highlights().requestAddHighlight(
         "h1",
         {
           type: "box",
@@ -249,14 +252,14 @@ for (const method of methods) {
 
     test("sends the literal and builder frame and correlates the reply", async () => {
       const h = await harness();
-      h.client["rejectedCommands"].add(JSON.parse(method.literal).type);
+      h.client.testHooks.rejectedCommands.add(JSON.parse(method.literal).type);
       const pending = method.invoke(h);
       await flushDispatch();
       expect(h.socket.frames).toEqual([method.literal]);
       expect(h.socket.frames[0]).toBe(serializeCtrlProxyRequest(method.frame(id)));
       expect(h.connects()).toBe(method.autoConnect ? 1 : 0);
       expect(h.cancels()).toBe(0);
-      await h.client["handleWebSocketMessage"](
+      await h.client.testHooks.handleWebSocketMessage(
         JSON.stringify({ ...method.response, requestId: id, success: true, totalTimeMs: 7 }),
       );
       await pending;
@@ -309,7 +312,7 @@ for (const method of methods) {
       const pending = runWithAbortSignal(controller.signal, () => method.invoke(h));
       await flushDispatch();
       expect(h.socket.frames).toEqual([method.literal]);
-      await h.client["handleWebSocketMessage"](
+      await h.client.testHooks.handleWebSocketMessage(
         JSON.stringify({ ...method.response, requestId: id, success: true, totalTimeMs: 7 }),
       );
       await pending;

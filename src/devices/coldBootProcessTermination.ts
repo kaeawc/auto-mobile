@@ -16,7 +16,7 @@ type TerminationTimer = Pick<Timer, "setTimeout" | "clearTimeout">;
 export interface ColdBootTermination {
   /** Resolves when the process emits `exit`; already resolved for a settled or non-observable handle. */
   exited: Promise<void>;
-  /** True once the process is confirmed gone; false when it survived SIGTERM and SIGKILL. */
+  /** True once termination is confirmed; false for a surviving process or failed simulator cleanup. */
   confirmed: Promise<boolean>;
 }
 
@@ -26,6 +26,8 @@ export interface ColdBootTermination {
  * more bounded wait. `kill()` only requests signal delivery, so the emulator is
  * still holding its AVD lock files until it emits `exit`; callers must not
  * release the AVD's lifecycle lease before `confirmed` resolves true.
+ * A simulator handle owns its bounded shutdown instead: wait for its
+ * exit event and confirm only a successful cleanup exit code.
  *
  * The first signal is sent synchronously, before this returns.
  */
@@ -50,9 +52,11 @@ export function terminateColdBootProcess(
   }
   return {
     exited,
-    confirmed: alreadySettled
-      ? Promise.resolve(true)
-      : awaitColdBootSettlement(exited, processHandle, label, timer),
+    confirmed:
+      processHandle.terminationConfirmed ??
+      (alreadySettled
+        ? Promise.resolve(true)
+        : awaitColdBootSettlement(exited, processHandle, label, timer)),
   };
 }
 
@@ -196,10 +200,13 @@ export function watchSurvivingProcess(
  * `gone` promise that settles once the process is finally absent; the AVD's
  * lifecycle lease must be held until then. `unobservable` means the exit could
  * not even be observed, so nothing can be held on.
+ * `cleanup-unconfirmed` is a failed synthetic resource shutdown, without a
+ * surviving process or an AVD hold to apply to queued lifecycle requests.
  */
 export type OwnedTermination =
   | { state: "confirmed" }
   | { state: "survived"; gone: Promise<void> }
+  | { state: "cleanup-unconfirmed" }
   | { state: "unobservable" };
 
 export interface OwnedEmulatorTerminationOptions {
@@ -229,6 +236,13 @@ export async function terminateOwnedEmulatorProcess(
       return { state: "confirmed" };
     }
   } catch (error) {
+    if (handle.terminationConfirmed !== undefined) {
+      logger.warn(
+        `[startDevice] Resource cleanup for ${label} was unconfirmed: ${errorMessage(error)}`,
+        error,
+      );
+      return { state: "cleanup-unconfirmed" };
+    }
     // The exit could not even be observed, so nothing can be held on: the lease is
     // released at once and the owner's own failure stays the one surfaced.
     logger.warn(
@@ -236,6 +250,10 @@ export async function terminateOwnedEmulatorProcess(
       error,
     );
     return { state: "unobservable" };
+  }
+  if (handle.terminationConfirmed !== undefined) {
+    logger.warn(`[startDevice] Resource cleanup for ${label} was unconfirmed`);
+    return { state: "cleanup-unconfirmed" };
   }
   logger.warn(
     `[startDevice] Emulator process ${handle.pid ?? "unknown"} for ${label} survived ` +

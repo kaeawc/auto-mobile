@@ -112,24 +112,55 @@ final class DaemonRefusalTests: XCTestCase {
         XCTAssertNil(nearlySpent.nextDelayMs(retryAfterMs: nil))
     }
 
+    private struct FinalizeWaitCase {
+        let code: String
+        let finalizes: Bool
+        let finalizeAtMs: Int?
+        let total: Int
+    }
+
     /// #11538: the finalize wait ends when the daemon finishes and is bounded by the remaining-time
     /// hint (clamped to 150 s) for the two finalize codes only; every other code keeps 30 s.
     func testFinalizeWaitEndsWhenTheDaemonFinishesAndIsBoundedForFinalizeCodesOnly() {
-        let cases: [(String, Bool, Int?, Int)] = [
-            ("device_cleanup_in_progress", true, nil, 30000),
-            ("device_cleanup_in_progress", true, 1000, 1500),
-            ("device_cleanup_in_progress", true, 125_000, 125_000),
-            ("device_cleanup_in_progress", true, 600_000, 150_000),
-            ("device_shutting_down", true, nil, 30000),
-            ("device_shutting_down", true, 1000, 1500),
-            ("device_shutting_down", true, 125_000, 125_000),
-            ("device_shutting_down", true, 600_000, 150_000),
-            ("device_owned_by_other_session", false, 125_000, 30000),
-            ("device_owned_by_other_daemon", false, 125_000, 30000),
-            ("capacity_exhausted", false, 125_000, 30000),
-            ("discovery_incomplete", false, 125_000, 30000),
+        let cases: [FinalizeWaitCase] = [
+            FinalizeWaitCase(code: "device_cleanup_in_progress", finalizes: true, finalizeAtMs: nil, total: 30000),
+            FinalizeWaitCase(code: "device_cleanup_in_progress", finalizes: true, finalizeAtMs: 1000, total: 1500),
+            FinalizeWaitCase(
+                code: "device_cleanup_in_progress",
+                finalizes: true,
+                finalizeAtMs: 125_000,
+                total: 125_000
+            ),
+            FinalizeWaitCase(
+                code: "device_cleanup_in_progress",
+                finalizes: true,
+                finalizeAtMs: 600_000,
+                total: 150_000
+            ),
+            FinalizeWaitCase(code: "device_shutting_down", finalizes: true, finalizeAtMs: nil, total: 30000),
+            FinalizeWaitCase(code: "device_shutting_down", finalizes: true, finalizeAtMs: 1000, total: 1500),
+            FinalizeWaitCase(code: "device_shutting_down", finalizes: true, finalizeAtMs: 125_000, total: 125_000),
+            FinalizeWaitCase(code: "device_shutting_down", finalizes: true, finalizeAtMs: 600_000, total: 150_000),
+            FinalizeWaitCase(
+                code: "device_owned_by_other_session",
+                finalizes: false,
+                finalizeAtMs: 125_000,
+                total: 30000
+            ),
+            FinalizeWaitCase(
+                code: "device_owned_by_other_daemon",
+                finalizes: false,
+                finalizeAtMs: 125_000,
+                total: 30000
+            ),
+            FinalizeWaitCase(code: "capacity_exhausted", finalizes: false, finalizeAtMs: 125_000, total: 30000),
+            FinalizeWaitCase(code: "discovery_incomplete", finalizes: false, finalizeAtMs: 125_000, total: 30000),
         ]
-        for (code, finalizes, finalizeAtMs, total) in cases {
+        for testCase in cases {
+            let code = testCase.code
+            let finalizes = testCase.finalizes
+            let finalizeAtMs = testCase.finalizeAtMs
+            let total = testCase.total
             var backoff = AutoMobilePlanExecutor.DeviceWaitBackoff()
             while !(finalizes && finalizeAtMs.map { backoff.waitedMs >= $0 } == true) {
                 // For the finalize codes the daemon's retryAfterMs is the finalize time remaining.

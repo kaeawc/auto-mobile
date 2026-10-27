@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 # Shared colors + command_exists + detect_os (issue #2822).
-# shellcheck source=scripts/lib/tool-install.sh disable=SC1091
+# shellcheck source=scripts/lib/tool-install.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
-# shellcheck source=scripts/shellcheck/shfmt_version.sh disable=SC1091
+# shellcheck source=scripts/shellcheck/shfmt_version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/shfmt_version.sh"
 
 # shfmt's GitHub release assets use Go's GOARCH tokens (amd64/arm/386), which

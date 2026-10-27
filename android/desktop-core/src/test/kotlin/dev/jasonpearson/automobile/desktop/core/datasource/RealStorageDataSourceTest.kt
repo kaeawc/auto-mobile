@@ -18,7 +18,93 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class RealStorageDataSourceTest {
+internal abstract class RealStorageDataSourceFixture(
+  private val testDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default,
+) {
+
+  // --- setKeyValue tests ---
+
+  protected fun assertMutationCancellation(
+    mutation: suspend RealStorageDataSource.() -> Result<StorageMutationResult>,
+  ) = runBlocking {
+    val entered = CountDownLatch(1)
+    val release = CountDownLatch(1)
+    val client = FakeAutoMobileClient()
+    client.onKeyValueMutation = {
+      entered.countDown()
+      assertTrue("Blocking call was not released", release.await(5, TimeUnit.SECONDS))
+    }
+    val source = RealStorageDataSource({ client }, "emulator-5554", "com.example.app")
+    var result: Result<StorageMutationResult>? = null
+    val job = launch(testDispatcher) { result = source.mutation() }
+    try {
+      assertTrue("Blocking call was not entered", entered.await(5, TimeUnit.SECONDS))
+    } finally {
+      job.cancel()
+      release.countDown()
+    }
+    job.join()
+
+    assertTrue(job.isCancelled)
+    assertNull(result)
+  }
+
+  // --- removeKeyValue tests ---
+
+  // --- clearKeyValueFile tests ---
+
+  protected fun configuredDatabaseClient(): FakeAutoMobileClient {
+    val client = FakeAutoMobileClient()
+
+    val dbsUri = "automobile:devices/emulator-5554/databases?appId=com.example.app"
+    client.setResourceResponseWithText(
+      dbsUri,
+      """
+      {
+          "deviceId": "emulator-5554",
+          "appId": "com.example.app",
+          "databases": [
+              {"name": "sessions.db", "path": "/data/data/com.example.app/databases/sessions.db"}
+          ],
+          "totalCount": 1
+      }
+      """
+        .trimIndent(),
+    )
+
+    val tablesUri =
+      "automobile:devices/emulator-5554/databases/%2Fdata%2Fdata%2Fcom.example.app%2Fdatabases%2Fsessions.db/tables?appId=com.example.app"
+    client.setResourceResponseWithText(
+      tablesUri,
+      """
+      {
+          "tables": ["sessions"],
+          "totalCount": 1
+      }
+      """
+        .trimIndent(),
+    )
+
+    val structUri =
+      "automobile:devices/emulator-5554/databases/%2Fdata%2Fdata%2Fcom.example.app%2Fdatabases%2Fsessions.db/tables/sessions/structure?appId=com.example.app"
+    client.setResourceResponseWithText(
+      structUri,
+      """
+      {
+          "columns": [
+              {"name": "id", "type": "INTEGER", "nullable": false, "primaryKey": true, "defaultValue": null},
+              {"name": "session_id", "type": "TEXT", "nullable": false, "primaryKey": false, "defaultValue": null}
+          ]
+      }
+      """
+        .trimIndent(),
+    )
+
+    return client
+  }
+}
+
+internal class RealStorageDataSourceTest : RealStorageDataSourceFixture() {
   @Test
   fun `database provider failure preserves structured fields`() = runBlocking {
     val client = FakeAutoMobileClient()
@@ -363,51 +449,7 @@ class RealStorageDataSourceTest {
 
   @Test
   fun `getDatabases successfully parses MCP databases response`() = runBlocking {
-    val client = FakeAutoMobileClient()
-
-    val dbsUri = "automobile:devices/emulator-5554/databases?appId=com.example.app"
-    client.setResourceResponseWithText(
-      dbsUri,
-      """
-      {
-          "deviceId": "emulator-5554",
-          "appId": "com.example.app",
-          "databases": [
-              {"name": "sessions.db", "path": "/data/data/com.example.app/databases/sessions.db"}
-          ],
-          "totalCount": 1
-      }
-      """
-        .trimIndent(),
-    )
-
-    val tablesUri =
-      "automobile:devices/emulator-5554/databases/%2Fdata%2Fdata%2Fcom.example.app%2Fdatabases%2Fsessions.db/tables?appId=com.example.app"
-    client.setResourceResponseWithText(
-      tablesUri,
-      """
-      {
-          "tables": ["sessions"],
-          "totalCount": 1
-      }
-      """
-        .trimIndent(),
-    )
-
-    val structUri =
-      "automobile:devices/emulator-5554/databases/%2Fdata%2Fdata%2Fcom.example.app%2Fdatabases%2Fsessions.db/tables/sessions/structure?appId=com.example.app"
-    client.setResourceResponseWithText(
-      structUri,
-      """
-      {
-          "columns": [
-              {"name": "id", "type": "INTEGER", "nullable": false, "primaryKey": true, "defaultValue": null},
-              {"name": "session_id", "type": "TEXT", "nullable": false, "primaryKey": false, "defaultValue": null}
-          ]
-      }
-      """
-        .trimIndent(),
-    )
+    val client = configuredDatabaseClient()
 
     val dataSource =
       RealStorageDataSource(
@@ -432,9 +474,9 @@ class RealStorageDataSourceTest {
     assertEquals("INTEGER", idCol.type)
     assertTrue(idCol.isPrimaryKey)
   }
+}
 
-  // --- setKeyValue tests ---
-
+internal class RealStorageMutationTest : RealStorageDataSourceFixture() {
   @Test
   fun `setKeyValue propagates caller cancellation`() {
     assertMutationCancellation { setKeyValue("prefs", "key", "value", KeyValueType.String) }
@@ -448,31 +490,6 @@ class RealStorageDataSourceTest {
   @Test
   fun `clearKeyValueFile propagates caller cancellation`() {
     assertMutationCancellation { clearKeyValueFile("prefs") }
-  }
-
-  private fun assertMutationCancellation(
-    mutation: suspend RealStorageDataSource.() -> Result<StorageMutationResult>,
-  ) = runBlocking {
-    val entered = CountDownLatch(1)
-    val release = CountDownLatch(1)
-    val client = FakeAutoMobileClient()
-    client.onKeyValueMutation = {
-      entered.countDown()
-      assertTrue("Blocking call was not released", release.await(5, TimeUnit.SECONDS))
-    }
-    val source = RealStorageDataSource({ client }, "emulator-5554", "com.example.app")
-    var result: Result<StorageMutationResult>? = null
-    val job = launch(Dispatchers.Default) { result = source.mutation() }
-    try {
-      assertTrue("Blocking call was not entered", entered.await(5, TimeUnit.SECONDS))
-    } finally {
-      job.cancel()
-      release.countDown()
-    }
-    job.join()
-
-    assertTrue(job.isCancelled)
-    assertNull(result)
   }
 
   @Test
@@ -637,8 +654,6 @@ class RealStorageDataSourceTest {
     assertTrue((result as Result.Error).message!!.contains("Write failed"))
   }
 
-  // --- removeKeyValue tests ---
-
   @Test
   fun `removeKeyValue returns error when no clientProvider`() = runBlocking {
     val dataSource = RealStorageDataSource()
@@ -691,8 +706,6 @@ class RealStorageDataSourceTest {
     assertTrue(result is Result.Error)
     assertTrue((result as Result.Error).message!!.contains("Key not found"))
   }
-
-  // --- clearKeyValueFile tests ---
 
   @Test
   fun `clearKeyValueFile returns error when no clientProvider`() = runBlocking {

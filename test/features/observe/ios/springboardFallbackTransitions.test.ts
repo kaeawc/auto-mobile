@@ -37,14 +37,16 @@ function client(deviceId = "device-a") {
     8765,
     createSuccessWebSocketFactory(timer),
     timer,
-    undefined,
-    undefined,
-    { onDeviceConnectionLost() {} },
-    new FakeIosSdkEventIngestor(),
+    {
+      serviceManagerFactory: undefined,
+      bootedDeviceLister: undefined,
+      deviceConnectionLostNotifier: { onDeviceConnectionLost() {} },
+      sdkEventIngestor: new FakeIosSdkEventIngestor(),
+    },
   );
 }
 function push(target: IOSCtrlProxyClient, hierarchy: XCTestHierarchy) {
-  target["processMessage"]({ type: "hierarchy_update", data: hierarchy });
+  target.getInboundMessageTestHooks().processMessage({ type: "hierarchy_update", data: hierarchy });
 }
 
 describe("SpringBoard fallback transition logs", () => {

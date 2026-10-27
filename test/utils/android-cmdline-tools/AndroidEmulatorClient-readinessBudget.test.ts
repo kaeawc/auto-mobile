@@ -87,6 +87,34 @@ function clientWith(adb: SnapshotAdb, timer: FakeTimer): AndroidEmulatorClient {
 }
 
 describe("emulator readiness ADB work budget", () => {
+  for (const probeMs of [0, 100, 200, 400]) {
+    test(`releases the caller at poller readiness after a ${probeMs}ms probe`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const adb = new SnapshotAdb(timer, [{ deviceId: "emulator-5554", state: "device" }]);
+      adb.snapshotAdvanceMs = 20;
+      adb.slowPackageManagerMs = [probeMs];
+
+      const device = await clientWith(adb, timer).waitForEmulatorReady(
+        "Pixel_9_Pro",
+        5_000,
+        null,
+        "emulator-5554",
+        undefined,
+        { skipWakeAndUnlock: true },
+      );
+
+      console.log(
+        `probe ${probeMs}ms: poller ready at ${20 + probeMs}ms, caller released at ${timer.now()}ms`,
+      );
+      expect(device.deviceId).toBe("emulator-5554");
+      expect(timer.now()).toBe(20 + probeMs);
+      expect(timer.getPendingSleepCount()).toBe(0);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(timer.getPendingIntervalCount()).toBe(0);
+    });
+  }
+
   test("a known target costs the same number of commands with one or many attached emulators", async () => {
     const counts: number[] = [];
     for (const count of [1, 40]) {

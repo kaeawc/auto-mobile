@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { createExecResult } from "../../../src/utils/execResult";
 import { toolJson } from "../../helpers/toolResponse";
 import { warmedTests } from "../../helpers/warmedTests";
@@ -29,6 +30,7 @@ import {
   resolveNotificationGroupExpansionState,
   resolveNotificationSwipeElement,
   resolveNotificationTapElement,
+  clearMatchingSystemTrayNotifications,
 } from "../../../src/features/systemTray/systemTrayHelpers";
 import type { SystemTrayIosClient } from "../../../src/features/systemTray/systemTrayHelpers";
 import type { SwipeRequest } from "../../../src/utils/interfaces/SwipeRequest";
@@ -46,11 +48,14 @@ import type {
 } from "../../../src/models";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+import { wireCapture } from "../../helpers/wireCapture";
+import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
+import { springBoardPhotosIcon } from "../../fixtures/observe/iosSpringBoardIcon";
 
 isolateToolRegistry();
 
 const POLL_INTERVAL_MS = 250;
-// Mirrors the private SYSTEM_TRAY_REEXPAND_INTERVAL_MS in systemTrayHelpers.ts.
+// Mirrors SYSTEM_TRAY_REEXPAND_INTERVAL_MS in helpers/runtime.ts.
 const REEXPAND_INTERVAL_MS = 1000;
 const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
 const mockInstalledApps = (packageNames: string[]) =>
@@ -1032,6 +1037,23 @@ describe("Android systemTray open", () => {
 
 const IOS_SPRINGBOARD_PACKAGE = "com.apple.springboard";
 
+const ios27NotificationCenterHierarchy = wireCapture(
+  JSON.parse(
+    readFileSync(
+      new URL(
+        "../../fixtures/ios-notification-center/ios27-notification-center-hierarchy.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ),
+);
+const capturedIosHomeIconHierarchy = convertIosHierarchy({
+  packageName: IOS_SPRINGBOARD_PACKAGE,
+  updatedAt: 0,
+  hierarchy: springBoardPhotosIcon,
+});
+
 class FakeIosClient implements SystemTrayIosClient {
   swipeCalls: Array<{ x1: number; y1: number; x2: number; y2: number; duration?: number }> = [];
   tapCalls: Array<{ x: number; y: number }> = [];
@@ -1045,7 +1067,9 @@ class FakeIosClient implements SystemTrayIosClient {
     return { success: this.swipeSuccess, error: this.swipeError };
   }
 
-  async requestTapCoordinates(x: number, y: number) {
+  async requestTapCoordinates(request: TapCoordinatesRequest) {
+    const { x, y } = request;
+
     this.tapCalls.push({ x, y });
     return { success: this.tapSuccess, error: this.tapError };
   }
@@ -4289,9 +4313,89 @@ describe("systemTray automatic terminal evidence", () => {
   });
 });
 
-describe("iOS systemTray open", () => {
+describe("iOS systemTray open/close", () => {
   afterEach(() => {
     resetSystemTrayDependencies();
+  });
+
+  describe("captured iOS 27 Notification Center", () => {
+    const test = warmedTests(() => {
+      resetSystemTrayDependencies();
+      ToolRegistry.clearTools();
+    });
+    test.each([true, false])(
+      "closes the captured cover sheet only when HOME clears it (%s)",
+      async (homeClearsSheet) => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const client = new FakeIosClient();
+        const observer = new FakeObserveScreen();
+        let homeCalls = 0;
+        observer.setObserveResult(() =>
+          createIosObservation(
+            homeClearsSheet && homeCalls > 0
+              ? capturedIosHomeIconHierarchy
+              : ios27NotificationCenterHierarchy,
+          ),
+        );
+        setSystemTrayDependencies({
+          timer,
+          iosClientFactory: () => client,
+          pressHomeFactory: async () => {
+            homeCalls++;
+            return { success: true };
+          },
+          observeScreenFactory: () => observer,
+        });
+        registerInteractionTools();
+        const response = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(iosDevice, {
+          action: "close",
+          platform: "ios",
+          awaitTimeoutMs: 500,
+        });
+        const payload = toolJson(response);
+        expect(payload.success).toBe(homeClearsSheet);
+        expect(payload.skipped).toBe(false);
+        expect(homeCalls).toBe(1);
+        expect(client.swipeCalls).toHaveLength(0);
+        expect(payload.message).toBe(
+          homeClearsSheet
+            ? "Closed system tray (collapsed notification shade)"
+            : "Failed to close system tray: the tray remained open",
+        );
+      },
+    );
+
+    test("opens the captured iOS 27 Notification Center after the swipe", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = new FakeIosClient();
+      const observer = new FakeObserveScreen();
+      observer.setObserveResult(() =>
+        createIosObservation(
+          client.swipeCalls.length === 0
+            ? capturedIosHomeIconHierarchy
+            : ios27NotificationCenterHierarchy,
+        ),
+      );
+      setSystemTrayDependencies({
+        timer,
+        iosClientFactory: () => client,
+        observeScreenFactory: () => observer,
+      });
+      registerInteractionTools();
+      const response = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(iosDevice, {
+        action: "open",
+        platform: "ios",
+        awaitTimeoutMs: 2000,
+      });
+      const payload = toolJson(response);
+      expect(payload.success).toBe(true);
+      expect(payload.message).toBe("Opened system tray");
+      expect(payload.skipped).toBe(false);
+      expect(client.swipeCalls).toHaveLength(1);
+      expect(client.swipeCalls[0].y1).toBe(5);
+    });
   });
 
   test("opens notification center via swipe down", async () => {
@@ -4589,6 +4693,398 @@ describe("exact notification classifier IDs", () => {
   });
 });
 
+describe("Android systemTray clearAll post-swipe recovery", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+    ToolRegistry.clearTools();
+  });
+
+  const setup = () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const observer = new FakeObserveScreen();
+    const swipes = () =>
+      adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe"));
+    const reopenTimes: number[] = [];
+    const executeCommand = adb.executeCommand.bind(adb);
+    spyOn(adb, "executeCommand").mockImplementation((command, options) => {
+      if (command.endsWith("expand-notifications") && swipes().length > 0) {
+        reopenTimes.push(timer.now());
+      }
+      return executeCommand(command, options);
+    });
+    observer.setObserveResult(() =>
+      createObservation(
+        adb.getExecutedCommands().some((command) => command.startsWith("shell input tap"))
+          ? headerlessTwoNotificationGroups.expanded
+          : headerlessTwoNotificationGroups.collapsed,
+      ),
+    );
+    setSystemTrayDependencies({
+      timer,
+      adbFactory: () => adb,
+      observeScreenFactory: () => observer,
+    });
+    const drain = (signal?: AbortSignal) =>
+      clearMatchingSystemTrayNotifications(
+        device,
+        { appId: "com.android.shell" },
+        ["Delta", "Gamma"],
+        3125,
+        { maxSwipes: 1, signal },
+      );
+    return { timer, adb, observer, swipes, reopenTimes, drain };
+  };
+
+  test("reopens a grouped app's shade after one closed post-swipe observation", async () => {
+    const { observer, adb, swipes, reopenTimes, drain } = setup();
+    const execute = observer.execute.bind(observer);
+    let postSwipeReads = 0;
+    spyOn(observer, "execute").mockImplementation((options) => {
+      if (swipes().length === 0) {
+        return execute(options);
+      }
+      return Promise.resolve(
+        postSwipeReads++ === 0 ? createObservation() : createEmptyTrayObservation(),
+      );
+    });
+
+    expect(await drain()).toMatchObject({ swipeCount: 1, dismissedCount: 1, stalled: false });
+    expect(reopenTimes).toHaveLength(1);
+    const commands = adb.getExecutedCommands();
+    expect(commands.findIndex((command) => command.startsWith("shell input tap"))).toBeLessThan(
+      commands.findIndex((command) => command.startsWith("shell input swipe")),
+    );
+  });
+
+  test("returns a stalled partial result when the post-swipe shade stays unreadable", async () => {
+    const { observer, swipes, reopenTimes, timer, drain } = setup();
+    const execute = observer.execute.bind(observer);
+    spyOn(observer, "execute").mockImplementation((options) =>
+      swipes().length > 0 ? Promise.resolve(createObservation()) : execute(options),
+    );
+
+    expect(await drain()).toMatchObject({ swipeCount: 1, dismissedCount: 0, stalled: true });
+    expect(swipes()).toHaveLength(1);
+    // Verification gets its full window after the group expansion settle.
+    expect(timer.now()).toBe(EXPAND_GROUP_SETTLE_MS + 3125);
+    expect(reopenTimes.length).toBeGreaterThan(0);
+    for (let index = 1; index < reopenTimes.length; index++) {
+      expect(reopenTimes[index] - reopenTimes[index - 1]).toBeGreaterThanOrEqual(
+        REEXPAND_INTERVAL_MS,
+      );
+    }
+  });
+
+  test("returns a stalled partial result when the verified post-swipe read times out", async () => {
+    const { observer, swipes, timer, drain } = setup();
+    const execute = observer.execute.bind(observer);
+    spyOn(observer, "execute").mockImplementation((options) =>
+      swipes().length > 0 ? new Promise<ObserveResult>(() => {}) : execute(options),
+    );
+
+    expect(await drain()).toMatchObject({ swipeCount: 1, dismissedCount: 0, stalled: true });
+    expect(swipes()).toHaveLength(1);
+    // Verification gets its full window after the group expansion settle.
+    expect(timer.now()).toBe(EXPAND_GROUP_SETTLE_MS + 3125);
+  });
+
+  test("propagates cancellation during a post-swipe read", async () => {
+    const { observer, swipes, timer, drain } = setup();
+    const controller = new AbortController();
+    const execute = observer.execute.bind(observer);
+    spyOn(observer, "execute").mockImplementation((options) => {
+      if (swipes().length === 0) {
+        return execute(options);
+      }
+      timer.setTimeout(() => controller.abort(), 125);
+      return new Promise<ObserveResult>(() => {});
+    });
+
+    await expect(drain(controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(swipes()).toHaveLength(1);
+    expect(timer.now()).toBeLessThan(3125);
+  });
+
+  test("bounds a hung reopen and its follow-up reads by the post-swipe deadline", async () => {
+    const { observer, swipes, timer, reopenTimes, drain } = setup();
+    const execute = observer.execute.bind(observer);
+    let reopenSignal: AbortSignal | undefined;
+    spyOn(observer, "execute").mockImplementation((options) => {
+      if (swipes().length === 0) {
+        return execute(options);
+      }
+      if (reopenTimes.length > 0) {
+        reopenSignal = options?.signal;
+        return new Promise<ObserveResult>(() => {});
+      }
+      return Promise.resolve(createObservation());
+    });
+
+    expect(await drain()).toMatchObject({ swipeCount: 1, dismissedCount: 0, stalled: true });
+    // Verification gets its full window after the group expansion settle.
+    expect(timer.now()).toBe(EXPAND_GROUP_SETTLE_MS + 3125);
+    expect(reopenTimes).toHaveLength(1);
+    expect(reopenSignal?.aborted).toBe(true);
+  });
+
+  test("caps a hung reopen at its attempt budget and keeps recovering (#14532)", async () => {
+    const { observer, swipes, timer, reopenTimes, drain } = setup();
+    const execute = observer.execute.bind(observer);
+    let hungSignal: AbortSignal | undefined;
+    spyOn(observer, "execute").mockImplementation((options) => {
+      if (swipes().length === 0) {
+        return execute(options);
+      }
+      if (reopenTimes.length === 0) {
+        return Promise.resolve(createObservation());
+      }
+      if (!hungSignal) {
+        // The reopen's first post-expand observation never resolves.
+        hungSignal = options?.signal;
+        return new Promise<ObserveResult>(() => {});
+      }
+      return Promise.resolve(createEmptyTrayObservation());
+    });
+
+    expect(await drain()).toMatchObject({ swipeCount: 1, dismissedCount: 1, stalled: false });
+    expect(reopenTimes).toHaveLength(1);
+    expect(hungSignal?.aborted).toBe(true);
+    expect(timer.now() - reopenTimes[0]).toBeLessThanOrEqual(500);
+  });
+
+  test("propagates cancellation while reopening the post-swipe shade", async () => {
+    const { observer, swipes, timer, reopenTimes, drain } = setup();
+    const controller = new AbortController();
+    const execute = observer.execute.bind(observer);
+    spyOn(observer, "execute").mockImplementation((options) => {
+      if (swipes().length === 0) {
+        return execute(options);
+      }
+      if (reopenTimes.length > 0) {
+        timer.setTimeout(() => controller.abort(), 125);
+        return new Promise<ObserveResult>(() => {});
+      }
+      return Promise.resolve(createObservation());
+    });
+
+    await expect(drain(controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(timer.now()).toBeLessThan(3125);
+    expect(reopenTimes).toHaveLength(1);
+  });
+
+  test("does not convert an unrelated post-swipe read error into partial success", async () => {
+    const { observer, swipes, drain } = setup();
+    const execute = observer.execute.bind(observer);
+    const readError = new Error("observer failed");
+    spyOn(observer, "execute").mockImplementation((options) =>
+      swipes().length > 0 ? Promise.reject(readError) : execute(options),
+    );
+
+    await expect(drain()).rejects.toBe(readError);
+  });
+});
+
+describe("Android systemTray clearAll progress budget", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+    ToolRegistry.clearTools();
+  });
+
+  // Repeat a captured child row within its group. Identical rows exercise
+  // signature counts as siblings leave, without inventing parser input.
+  const groupedObservation = (state: "collapsed" | "expanded", remaining: number) => {
+    const captured = headerlessTwoNotificationGroups[state];
+    const root: TestHierarchyNode = captured.hierarchy.node ?? {};
+    const group = root.node?.[0];
+    const container = group?.node?.find(
+      (node) => node["resource-id"] === "com.android.systemui:id/notification_children_container",
+    );
+    const row = container?.node?.find(
+      (node) => node["resource-id"] === "com.android.systemui:id/expandableNotificationRow",
+    );
+    if (!group || !container || !row) {
+      throw new Error("Captured notification group is missing its child row");
+    }
+    return createObservation(
+      createHierarchyForTest({
+        ...captured,
+        hierarchy: {
+          node: {
+            ...root,
+            node:
+              remaining === 0
+                ? []
+                : [
+                    {
+                      ...group,
+                      node: group.node?.map((node) =>
+                        node === container
+                          ? {
+                              ...container,
+                              node: [
+                                ...(container.node ?? []).filter(
+                                  (child) =>
+                                    child["resource-id"] !==
+                                    "com.android.systemui:id/expandableNotificationRow",
+                                ),
+                                ...Array.from({ length: remaining }, () => structuredClone(row)),
+                              ],
+                            }
+                          : node,
+                      ),
+                    },
+                  ],
+          },
+        },
+      }),
+    );
+  };
+
+  // `missedSwipe` is the 1-based swipe that changes nothing (the swipe lands on a moving row).
+  const setup = (stuckAfter = 3, missedSwipe = Number.POSITIVE_INFINITY) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const observer = new FakeObserveScreen();
+    const swipes = () =>
+      adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe"));
+    const executeCommand = adb.executeCommand.bind(adb);
+    spyOn(adb, "executeCommand").mockImplementation((command, options) => {
+      if (command.startsWith("shell input swipe")) {
+        timer.advanceTime(2600);
+      }
+      return executeCommand(command, options);
+    });
+
+    const observations = [3, 2, 1].map((remaining) => groupedObservation("expanded", remaining));
+    observations.push(createEmptyTrayObservation());
+    let verifiedSwipes = 0;
+    observer.setObserveResult(() => {
+      const swipeCount = swipes().length;
+      if (swipeCount > verifiedSwipes) {
+        timer.advanceTime(400);
+        verifiedSwipes = swipeCount;
+      }
+      const effective = swipeCount >= missedSwipe ? swipeCount - 1 : swipeCount;
+      return observations[Math.min(effective, stuckAfter)];
+    });
+    setSystemTrayDependencies({
+      timer,
+      adbFactory: () => adb,
+      observeScreenFactory: () => observer,
+    });
+    const drain = (maxSwipes?: number) =>
+      clearMatchingSystemTrayNotifications(
+        device,
+        { appId: "com.android.shell" },
+        ["Delta"],
+        5000,
+        {
+          maxSwipes,
+        },
+      );
+    return { timer, swipes, drain };
+  };
+
+  test.each([2, 3])(
+    "drains %i re-collapsing grouped rows after slow shade readiness and reads",
+    async (rows) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const adb = new FakeAdbExecutor();
+      const observer = new FakeObserveScreen();
+      const gestures: string[] = [];
+      let expanded = false;
+      let swipeCount = 0;
+      const executeCommand = adb.executeCommand.bind(adb);
+      spyOn(adb, "executeCommand").mockImplementation((command, options) => {
+        if (command.startsWith("shell input tap")) {
+          expanded = true;
+          gestures.push("expand");
+        } else if (command.startsWith("shell input swipe")) {
+          expect(expanded).toBe(true);
+          expanded = false;
+          swipeCount++;
+          gestures.push("swipe");
+        }
+        return executeCommand(command, options);
+      });
+      observer.setObserveResult((index) => {
+        // Readiness uses almost its entire 5s window. Expansion then needs its
+        // 500ms settle and a real-device-like 1.5s read, as does verification.
+        timer.advanceTime(index === 0 ? 4500 : 1500);
+        return groupedObservation(expanded ? "expanded" : "collapsed", rows - swipeCount);
+      });
+      setSystemTrayDependencies({
+        timer,
+        adbFactory: () => adb,
+        observeScreenFactory: () => observer,
+      });
+
+      const {
+        swipeCount: actualSwipes,
+        dismissedCount,
+        stalled,
+      } = await clearMatchingSystemTrayNotifications(
+        device,
+        { appId: "com.android.shell" },
+        ["Delta"],
+        5000,
+      );
+      expect({ swipeCount: actualSwipes, dismissedCount, stalled }).toEqual({
+        swipeCount: rows,
+        dismissedCount: rows,
+        stalled: false,
+      });
+      expect(gestures).toEqual(Array.from({ length: rows }, () => ["expand", "swipe"]).flat());
+      expect(timer.now()).toBe(4500 + rows * (500 + 1500 + 1500));
+    },
+  );
+
+  test("drains three grouped notifications across multiple awaitTimeout budgets", async () => {
+    const { timer, swipes, drain } = setup();
+
+    expect(await drain()).toMatchObject({ swipeCount: 3, dismissedCount: 3, stalled: false });
+    expect(swipes()).toHaveLength(3);
+    expect(timer.now()).toBe(9000);
+    expect(timer.now()).toBeGreaterThan(5000);
+  });
+
+  test("retries a missed swipe once, then stalls with partial progress", async () => {
+    const { timer, swipes, drain } = setup(1);
+
+    expect(await drain()).toMatchObject({ swipeCount: 3, dismissedCount: 1, stalled: true });
+    expect(swipes()).toHaveLength(3);
+    // First dismissal takes 3000ms; each of the next two swipes takes 2600ms, then gets 5000ms.
+    expect(timer.now()).toBe(18200);
+  });
+
+  test("a swipe that missed a moving row is retried and the drain still empties the group (#13810)", async () => {
+    const { swipes, drain } = setup(3, 2);
+
+    expect(await drain()).toMatchObject({ swipeCount: 4, dismissedCount: 3, stalled: false });
+    expect(swipes()).toHaveLength(4);
+  });
+
+  test("a retried swipe does not spend the inventory cap, so the last row is not left behind (#13810)", async () => {
+    // clearAll passes the notification inventory (3 here) as maxSwipes: the retry is a 4th swipe.
+    const { swipes, drain } = setup(3, 2);
+
+    expect(await drain(3)).toMatchObject({ swipeCount: 4, dismissedCount: 3, stalled: false });
+    expect(swipes()).toHaveLength(4);
+  });
+
+  test("respects maxSwipes even while dismissals keep making progress", async () => {
+    const { timer, swipes, drain } = setup();
+
+    expect(await drain(2)).toMatchObject({ swipeCount: 2, dismissedCount: 2, stalled: true });
+    expect(swipes()).toHaveLength(2);
+    expect(timer.now()).toBe(6000);
+  });
+});
+
 describe("Android systemTray clearAll initial shade readiness", () => {
   afterEach(() => {
     resetSystemTrayDependencies();
@@ -4633,7 +5129,8 @@ describe("Android systemTray clearAll initial shade readiness", () => {
   for (const [readyAfterMs, awaitTimeout, expectedSwipes] of [
     [1000, undefined, 1],
     [1000, 2000, 1],
-    [1000, 500, 0],
+    // Three 500ms attempts with 250ms and 500ms backoffs end at 2250ms, before the shade is ready.
+    [3000, 500, 0],
     [0, 2000, 1],
   ] as const) {
     test(`shade ready at ${readyAfterMs}ms with timeout ${awaitTimeout ?? "default"}: ${expectedSwipes} swipe`, async () => {
@@ -4672,7 +5169,11 @@ describe("Android systemTray clearAll initial shade readiness", () => {
       expect(swipes()).toHaveLength(expectedSwipes);
       // Later no-match iterations retain the short drain budget rather than
       // paying the full caller timeout after the notification has gone.
-      expect(timer.now()).toBeLessThan(2000);
+      if (expectedSwipes === 0) {
+        expect(timer.now()).toBe(3 * 500 + 250 + 500);
+      } else {
+        expect(timer.now()).toBeLessThan(2000);
+      }
     });
   }
   test("clearAll forces a device capture because a floor-meeting cached tree is served unverified (#10296)", async () => {

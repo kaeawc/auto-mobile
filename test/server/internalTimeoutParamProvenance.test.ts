@@ -13,18 +13,19 @@ import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { DefaultAfterToolCallHandler, ToolRegistry } from "../../src/server/toolRegistry";
 import { stripInternalToolParams } from "../../src/server/index";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { logger } from "../../src/utils/logger";
 import { TelemetryRecorder } from "../../src/features/telemetry/TelemetryRecorder";
 import { stripInternalParams } from "../../src/features/record/ToolCallRecorder";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createStructuredToolResponse, getStructuredField } from "../../src/utils/toolUtils";
+import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { toolField } from "../helpers/toolResponse";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   INTERNAL_TOOL_PARAM_NAMES,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 
 const TOOL = "__internal_timeout_provenance_probe_6222__";
 const STRICT_TOOL = "__internal_strip_strict_probe_6917__";
@@ -118,7 +119,7 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
         arguments: { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 1 },
       });
 
-      expect(getStructuredField(result, "receivedTimeoutMs")).toBeNull();
+      expect(toolField(result, "receivedTimeoutMs")).toBeNull();
     });
 
     test("a caller-supplied __mcpRequestDeadlineMs is IGNORED, never reattached", async () => {
@@ -128,7 +129,7 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
         arguments: { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 1 },
       });
 
-      expect(getStructuredField(result, "receivedDeadlineMs")).toBeNull();
+      expect(toolField(result, "receivedDeadlineMs")).toBeNull();
     });
 
     test("live deadline metadata is removed before a direct strict tool handler", async () => {
@@ -166,7 +167,7 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
         arguments: { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 12_345 },
       });
 
-      expect(getStructuredField(result, "receivedTimeoutMs")).toBe(12_345);
+      expect(toolField(result, "receivedTimeoutMs")).toBe(12_345);
     });
 
     test("a legitimate __mcpRequestDeadlineMs is honored and reattached", async () => {
@@ -176,7 +177,7 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
         arguments: { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 98_765 },
       });
 
-      expect(getStructuredField(result, "receivedDeadlineMs")).toBe(98_765);
+      expect(toolField(result, "receivedDeadlineMs")).toBe(98_765);
     });
 
     // Each of these is forwarded alone by at least one daemon route --
@@ -198,7 +199,7 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
         });
 
         expect(result.isError ?? false).toBe(false);
-        expect(getStructuredField(result, "success")).toBe(true);
+        expect(toolField(result, "success")).toBe(true);
       });
     }
 
@@ -212,7 +213,7 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
       const result = await client.callTool({ name: STRICT_TOOL, arguments: args });
 
       expect(result.isError ?? false).toBe(false);
-      expect(getStructuredField(result, "success")).toBe(true);
+      expect(toolField(result, "success")).toBe(true);
     });
 
     test("live deadline metadata stays out of strict public arguments, results, logs, telemetry and validation errors", async () => {
@@ -242,6 +243,7 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
           response: result,
           internalCall: true,
           device: undefined,
+          outputSchema: undefined,
           sessionUuid: undefined,
           shouldResolveDevice: false,
           timer,

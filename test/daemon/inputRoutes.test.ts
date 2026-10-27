@@ -5,6 +5,7 @@ import {
   GESTURE_FRAME_METHODS,
   INPUT_ROUTES,
   inputRouteFor,
+  type InputRouteMethod,
 } from "../../src/daemon/inputRoutes";
 
 /** #11813: the control socket's `input/*` routes are declared once, in a table. */
@@ -21,7 +22,7 @@ describe("input/* route table", () => {
 
   test("only stroke frames go to the gesture handler, each with its kind", () => {
     const gestures = INPUT_ROUTES.filter((route) => route.handler === "gesture");
-    expect(gestures.map((route) => route.method).sort()).toEqual(
+    expect<InputRouteMethod[]>(gestures.map((route) => route.method).sort()).toEqual(
       Object.values(GESTURE_FRAME_METHODS).sort(),
     );
     for (const route of INPUT_ROUTES) {

@@ -1,3 +1,4 @@
+import type { ActionCall } from "../../../src/features/action/ActionCall";
 import {
   beforeEach as beforeOutputSchema,
   afterEach as afterOutputSchema,
@@ -20,7 +21,10 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice, DeviceLockState } from "../../../src/models";
 import { ActionableError } from "../../../src/models";
-import type { IosLockStateProbe } from "../../../src/features/observe/ios/IosLockStateProbe";
+import type {
+  IosLockStateProbe,
+  IosLockStateReading,
+} from "../../../src/features/observe/ios/IosLockStateProbe";
 import {
   IosLockScreenUnlocker,
   type IosUnlockActions,
@@ -79,13 +83,13 @@ class FakeIosLockProbe implements IosLockStateProbe {
   reads = 0;
   states: Array<DeviceLockState | undefined | Error> = [];
   state: DeviceLockState | undefined = LOCKED_SWIPE;
-  async read(): Promise<DeviceLockState | undefined> {
+  async read(): Promise<IosLockStateReading> {
     this.reads++;
     const state = this.states.length > 0 ? this.states.shift() : this.state;
     if (state instanceof Error) {
       throw state;
     }
-    return state;
+    return state ? { kind: "known", lock: state } : { kind: "unknown", reason: "error" };
   }
 }
 
@@ -94,8 +98,8 @@ class TimedLockProbe implements IosLockStateProbe {
     private readonly timer: FakeTimer,
     private readonly unlockAtMs: number,
   ) {}
-  async read(): Promise<DeviceLockState> {
-    return this.timer.now() >= this.unlockAtMs ? UNLOCKED : LOCKED_SWIPE;
+  async read(): Promise<IosLockStateReading> {
+    return { kind: "known", lock: this.timer.now() >= this.unlockAtMs ? UNLOCKED : LOCKED_SWIPE };
   }
 }
 
@@ -209,6 +213,9 @@ describe("WakeAndUnlock", () => {
         expect(result).toMatchObject({ success: true, unlocked: true, wasLocked: true });
         expect(result).toHaveProperty("warning");
         const warning = result.warning;
+        if (warning === undefined) {
+          throw new Error("Expected recovery warning");
+        }
         expect(warning).toContain(`runner recovery ${outcome}`);
         expect(warning).toContain("next observe");
         expect(warn).toHaveBeenCalledWith(expect.stringContaining(warning));
@@ -272,7 +279,7 @@ describe("WakeAndUnlock", () => {
       let reads = 0;
       const read = spyOn(lock, "read").mockImplementation(async () => {
         reads++;
-        return reads === 1 ? LOCKED_SWIPE : new Promise(() => {});
+        return reads === 1 ? { kind: "known", lock: LOCKED_SWIPE } : new Promise(() => {});
       });
       try {
         // Sample the clock as the action rejects: auto-advance then keeps firing the
@@ -339,10 +346,10 @@ describe("WakeAndUnlock", () => {
       let reads = 0;
       const read = spyOn(lock, "read").mockImplementation(async () => {
         if (++reads === 1) {
-          return LOCKED_SWIPE;
+          return { kind: "known", lock: LOCKED_SWIPE };
         }
         controller.abort();
-        return UNLOCKED;
+        return { kind: "known", lock: UNLOCKED };
       });
       try {
         await expect(action.execute(undefined, { signal: controller.signal })).rejects.toThrow(
@@ -876,7 +883,7 @@ describe("WakeAndUnlock", () => {
     const late = Promise.withResolvers<DeviceLockState>();
     const lock: IosLockStateProbe = {
       async read() {
-        return ++reads === 2 ? late.promise : LOCKED_SWIPE;
+        return { kind: "known", lock: ++reads === 2 ? await late.promise : LOCKED_SWIPE };
       },
     };
     let swipes = 0;
@@ -1359,7 +1366,7 @@ describe("iOS two-stage unlock", () => {
         if (++probes === 3) {
           await timer.sleep(5000);
         }
-        return LOCKED_SWIPE;
+        return { kind: "known", lock: LOCKED_SWIPE };
       },
     };
     let swipes = 0;
@@ -1500,8 +1507,16 @@ const executeForOutputSchema = WakeAndUnlock.prototype.execute;
 let executeOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
 beforeOutputSchema(() => {
   executeOutputSchemaSpy = spyOnOutputSchema(WakeAndUnlock.prototype, "execute").mockImplementation(
-    async function (this: WakeAndUnlock, ...args: Parameters<WakeAndUnlock["execute"]>) {
-      const result = await executeForOutputSchema.apply(this, args);
+    async function (
+      this: WakeAndUnlock,
+      pin?: string,
+      callOrDeadline?: ActionCall | number,
+      signal?: AbortSignal,
+    ) {
+      const result =
+        typeof callOrDeadline === "object"
+          ? await executeForOutputSchema.bind(this)(pin, callOrDeadline)
+          : await executeForOutputSchema.call(this, pin, callOrDeadline, signal);
       const payload = { message: "Result", ...result };
       expect(wakeAndUnlockResultSchema.parse(payload)).toBeDefined();
       const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
@@ -1515,3 +1530,32 @@ beforeOutputSchema(() => {
   );
 });
 afterOutputSchema(() => executeOutputSchemaSpy.mockRestore());
+
+for (const platform of ["ios", "android"] as const) {
+  test(`${platform} unlock invalidates the iOS cache at start and completion only for iOS`, async () => {
+    const invalidated: string[] = [];
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const probe = new FakeIosLockProbe();
+    probe.state = UNLOCKED;
+    const action = new WakeAndUnlock(
+      { platform, deviceId: "1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E", name: "fake" },
+      adb,
+      {
+        timer,
+        iosLockStateProbe: probe,
+        iosUnlocker: new FakeIosUnlocker(),
+        iosLockStateInvalidator: {
+          invalidate: (id) => {
+            invalidated.push(id);
+          },
+        },
+      },
+    );
+    await action.execute();
+    expect(invalidated).toEqual(
+      platform === "ios" ? Array(2).fill("1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E") : [],
+    );
+  });
+}

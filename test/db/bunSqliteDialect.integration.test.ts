@@ -520,7 +520,7 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
       // A second direct-mode process shares the same SQLite file and removes a
       // column. The very next hit must use the new column names.
       external.exec("ALTER TABLE widgets DROP COLUMN name");
-      const result = await state.executeQuery<{ id: number }>(
+      const result = await state.executeQuery<{ id: number; retained: string }>(
         rawQuery("select * from widgets"),
         owner,
       );

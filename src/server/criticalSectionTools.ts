@@ -4,7 +4,12 @@ import { defaultDaemonContext } from "../daemon/daemonContext";
 import { ToolRegistry, type RegisteredTool } from "./toolRegistry";
 import { ActionableError, BootedDevice, toActionableError } from "../models/index";
 import { logger } from "../utils/logger";
-import { abortErrorFromSignal, createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
+import {
+  abortErrorFromSignal,
+  createStructuredToolResponse,
+  throwIfAborted,
+} from "../utils/toolUtils";
+import { criticalSectionResultSchema } from "./criticalSectionToolOutputSchemas";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 import { migratePlanStep } from "../utils/plan/PlanMigrator";
@@ -15,8 +20,8 @@ import {
   PlanStepError as CriticalSectionStepError,
 } from "../utils/plan/PlanStepExecutor";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
-import { isDeviceLostError } from "./deviceLossOutcome";
+import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
+import { isDeviceLostError } from "../utils/deviceLossOutcome";
 import type { PlanStep } from "../models/Plan";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 
@@ -77,8 +82,8 @@ function criticalSectionSuccess(
   executedSteps: number,
   totalSteps: number,
   warnings: string[],
-): ReturnType<typeof createJSONToolResponse> {
-  return createJSONToolResponse({
+) {
+  return createStructuredToolResponse({
     success: true,
     lock,
     deviceId,
@@ -356,7 +361,13 @@ export function registerCriticalSectionTools(timer: Timer = defaultTimer): void 
     // Plan-only: a multi-device coordination primitive that only makes sense as
     // a plan step (a single direct call would just block). Hidden from tools/list
     // discovery, still runnable in plans via getToolForPlan.
-    { defaultEnabled: false, planOnly: true, planExecutable: true, acceptsPlanLockNamespace: true },
+    {
+      defaultEnabled: false,
+      planOnly: true,
+      planExecutable: true,
+      acceptsPlanLockNamespace: true,
+      outputSchema: criticalSectionResultSchema,
+    },
   );
 
   logger.info("Critical section tools registered");

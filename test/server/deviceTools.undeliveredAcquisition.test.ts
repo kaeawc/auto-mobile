@@ -1,18 +1,20 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { ChildProcess } from "child_process";
-import { EventEmitter } from "node:events";
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
+import { bindDevice } from "../../src/daemon/deviceBinding";
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { afterEach, describe, expect, test } from "bun:test";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -25,7 +27,7 @@ import {
   type VirtualDeviceLifecycleCoordinator,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
 import { combineRequestAbortSignals, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
@@ -91,21 +93,17 @@ const ANDROID_SPEC = {
 };
 
 /** The boot's process handle: `kill` is what stops the cold-booted device. */
-class RecordingBootHandle extends EventEmitter {
-  readonly pid = 4242;
-  exitCode: number | null = null;
-  readonly signalCode: NodeJS.Signals | null = null;
-  killed = false;
-
+class RecordingBootHandle extends FakeChildProcess {
   /** A stopped device is no longer listed as booted. */
   constructor(private readonly onKill: () => void) {
     super();
+    this.pid = 4242;
   }
 
   /** A device that ignores every signal: it keeps running until `exit` is called. */
   ignoresSignals = false;
 
-  kill(): boolean {
+  override kill(): boolean {
     this.killed = true;
     if (!this.ignoresSignals) {
       this.exit();
@@ -116,7 +114,10 @@ class RecordingBootHandle extends EventEmitter {
   exit(): void {
     this.onKill();
     this.exitCode = 0;
-    queueMicrotask(() => this.emit("exit", 0, null));
+    queueMicrotask(() => {
+      this.emit("exit", 0, null);
+      this.emit("close", 0, null);
+    });
   }
 }
 
@@ -225,14 +226,17 @@ describe.each([
   /** Runs where the request is to be cancelled; each hook is cleared once it fires. */
   let beforeBind: (() => void) | undefined;
   let afterBind: (() => void) | undefined;
+  /** The heartbeat a sibling acquisition delivers from the `afterBind` hook, then cancels. */
+  let siblingHeartbeat: Promise<void> | undefined;
 
-  beforeEach(() => {
+  function arrangeHarness(): void {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
     clearDirectSessionDevices();
     resetProvisionedDeviceTransportFenceForTests();
     beforeBind = undefined;
     afterBind = undefined;
+    siblingHeartbeat = undefined;
     heldLeases = new Set();
     timer = new FakeTimer();
     devices = new FakeDeviceUtils();
@@ -244,8 +248,8 @@ describe.each([
       devices.setBootedDevices("android", []);
       devices.setBootedDevices("ios", []);
     });
-    devices.setMockChildProcess(avd.name, bootHandle as unknown as ChildProcess);
-    devices.setMockChildProcess(simulator.name, bootHandle as unknown as ChildProcess);
+    devices.setMockChildProcess(avd.name, bootHandle);
+    devices.setMockChildProcess(simulator.name, bootHandle);
     // Every boot below is admitted through the real gates, at a limit of one device a platform.
     gates = new RealBootGatesOverFakeFleet(devices, timer, 1);
     ownership = new ClaimOwnership();
@@ -260,6 +264,7 @@ describe.each([
       },
     };
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env,
       deviceManagerFactory: () => devices,
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
@@ -309,7 +314,32 @@ describe.each([
       new DeviceSessionRegistry(timer, idGenerator),
     );
     registerDeviceTools();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
+
+  function arrangedEach<T>(table: readonly T[]) {
+    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+      test.each(table.map((row) => [row] as const))(
+        name,
+        async (row: T) => {
+          await arrangeHarness();
+          await fn(row);
+        },
+        timeout,
+      );
+    };
+  }
 
   afterEach(() => {
     resetDeviceToolsDependencies();
@@ -399,7 +429,7 @@ describe.each([
     ),
   );
 
-  test.each(cases)(
+  arrangedEach(cases)(
     "$tool $args cancelled $point, device $origin: nothing stays bound and only this call's boot is stopped",
     async ({ tool, args, deviceId, point, origin }) => {
       if (origin === "already running") {
@@ -478,7 +508,7 @@ describe.each([
       expect(sessions.getAllSessions()).toEqual([]);
     };
 
-    test.each(BOOTING_TOOLS)(
+    arrangedEach(BOOTING_TOOLS)(
       "$tool $args: a device still running after the stop timed out is still counted, and frees its slot once when it exits",
       async ({ tool, args, deviceId }) => {
         const platform = deviceId === AVD_SERIAL ? "android" : "ios";
@@ -495,48 +525,54 @@ describe.each([
       },
     );
 
-    test("an emulator that will not stop and that adb no longer lists is counted by its process", async () => {
-      await undoAgainstDeviceThatWillNotStop("startDevice", {
-        platform: "android",
-        name: avd.name,
-      });
-      devices.setBootedDevices("android", []);
-
-      expect(await gates.capacity("android")).toMatchObject({ booted: 1 });
-      expect(await gates.admitsOneMoreBoot("android")).toBe(false);
-    });
-
-    test("with no process table either, its admission still holds the slot until the process exits", async () => {
-      // Cancelled before adb ever listed the emulator, so no listing has ended its admission.
-      bootHandle.ignoresSignals = true;
-      gates.processTableReadable = false;
-      const controller = new AbortController();
-      beforeBind = () => {
+    arranged(
+      "an emulator that will not stop and that adb no longer lists is counted by its process",
+      async () => {
+        await undoAgainstDeviceThatWillNotStop("startDevice", {
+          platform: "android",
+          name: avd.name,
+        });
         devices.setBootedDevices("android", []);
-        controller.abort(new Error("client cancelled"));
-      };
-      expect(
-        await deliveredSession(
-          "startDevice",
-          { platform: "android", name: avd.name },
-          controller.signal,
-        ),
-      ).toBeUndefined();
-      await drain();
-      devices.setBootedDevices("android", []);
 
-      expect(bootHandle.killed).toBe(true);
-      expect(await gates.capacity("android")).toEqual({ booted: 0, inFlight: 1 });
-      expect(await gates.admitsOneMoreBoot("android")).toBe(false);
+        expect(await gates.capacity("android")).toMatchObject({ booted: 1 });
+        expect(await gates.admitsOneMoreBoot("android")).toBe(false);
+      },
+    );
 
-      bootHandle.exit();
-      await drain();
+    arranged(
+      "with no process table either, its admission still holds the slot until the process exits",
+      async () => {
+        // Cancelled before adb ever listed the emulator, so no listing has ended its admission.
+        bootHandle.ignoresSignals = true;
+        gates.processTableReadable = false;
+        const controller = new AbortController();
+        beforeBind = () => {
+          devices.setBootedDevices("android", []);
+          controller.abort(new Error("client cancelled"));
+        };
+        expect(
+          await deliveredSession(
+            "startDevice",
+            { platform: "android", name: avd.name },
+            controller.signal,
+          ),
+        ).toBeUndefined();
+        await drain();
+        devices.setBootedDevices("android", []);
 
-      await expectBootSlotFreedExactlyOnce("android");
-    });
+        expect(bootHandle.killed).toBe(true);
+        expect(await gates.capacity("android")).toEqual({ booted: 0, inFlight: 1 });
+        expect(await gates.admitsOneMoreBoot("android")).toBe(false);
+
+        bootHandle.exit();
+        await drain();
+
+        await expectBootSlotFreedExactlyOnce("android");
+      },
+    );
   });
 
-  test.each(ACQUIRING_TOOLS)(
+  arrangedEach(ACQUIRING_TOOLS)(
     "control: an uncancelled $tool $args keeps its session, its claim and the device it booted",
     async ({ tool, args, deviceId }) => {
       const sessionUuid = await deliveredSession(tool, args, new AbortController().signal);
@@ -549,22 +585,25 @@ describe.each([
     },
   );
 
-  test("an abort the daemon raised itself still delivers the result and undoes nothing", async () => {
-    await startRunning(bootedSimulator);
-    const daemonSide = new AbortController();
-    const signal = combineRequestAbortSignals(daemonSide.signal, new AbortController().signal);
-    afterBind = () => daemonSide.abort(new Error("device lost"));
+  arranged(
+    "an abort the daemon raised itself still delivers the result and undoes nothing",
+    async () => {
+      await startRunning(bootedSimulator);
+      const daemonSide = new AbortController();
+      const signal = combineRequestAbortSignals(daemonSide.signal, new AbortController().signal);
+      afterBind = () => daemonSide.abort(new Error("device lost"));
 
-    const sessionUuid = await deliveredSession("getApple", { udid: SIM_UDID }, signal);
-    await drain();
+      const sessionUuid = await deliveredSession("getApple", { udid: SIM_UDID }, signal);
+      await drain();
 
-    expect(signal?.aborted).toBe(true);
-    expect(sessionUuid).toBeTruthy();
-    expect(pool.getDevice(SIM_UDID)?.sessionId).toBe(sessionUuid!);
-    expect([...ownership.held]).toEqual([SIM_UDID]);
-  });
+      expect(signal?.aborted).toBe(true);
+      expect(sessionUuid).toBeTruthy();
+      expect(pool.getDevice(SIM_UDID)?.sessionId).toBe(sessionUuid!);
+      expect([...ownership.held]).toEqual([SIM_UDID]);
+    },
+  );
 
-  test("a session another call is already driving is not released under it", async () => {
+  arranged("a session another call is already driving is not released under it", async () => {
     await startRunning(bootedSimulator);
     const controller = new AbortController();
     let sibling: { id: string } | undefined;
@@ -588,17 +627,20 @@ describe.each([
     expect([...ownership.held]).toEqual([SIM_UDID]);
   });
 
-  test("a session its client reached through another call is not released", async () => {
+  arranged("a session its client reached through another call is not released", async () => {
     await startRunning(bootedSimulator);
     const controller = new AbortController();
     afterBind = () => {
       // A sibling acquisition on the connection reused the minted session and returned it, so
       // its keeper heartbeats the id the cancelled call never delivered.
-      sessions.recordHeartbeat(pool.getDevice(SIM_UDID)!.sessionId!);
-      controller.abort(new Error("client cancelled"));
+      siblingHeartbeat = deliverDaemonHeartbeat(
+        sessions,
+        pool.getDevice(SIM_UDID)!.sessionId!,
+      ).then(() => controller.abort(new Error("client cancelled")));
     };
 
     const sessionUuid = await deliveredSession("getApple", { udid: SIM_UDID }, controller.signal);
+    await siblingHeartbeat;
     await drain();
 
     expect(sessionUuid).toBeUndefined();
@@ -610,7 +652,7 @@ describe.each([
     expect([...ownership.held]).toEqual([SIM_UDID]);
   });
 
-  test.each(CANCEL_POINTS)(
+  arrangedEach(CANCEL_POINTS)(
     "provisionDevice cancelled %s reports that it leaves no device of its own behind",
     async (point) => {
       const controller = new AbortController();
@@ -673,90 +715,96 @@ describe.each([
       };
     };
 
-    test("startDevice createIfMissing cancelled after the bind deletes the AVD it created", async () => {
-      devices.setDeviceImages("android", []);
-      devices.setMockChildProcess(created.name, bootHandle as unknown as ChildProcess);
-      setDeviceToolsDependencies({
-        deviceCreationGateFactory: () => new FakeDeviceCreationGate(true),
-        deviceProvisionerFactory: () => ({
-          provision: async (_criteria, _signal, identityHooks) => {
-            await identityHooks?.reserveBeforeCreate(created);
-            devices.setDeviceImages("android", [
-              { name: created.name, platform: "android", isRunning: false },
-            ]);
-            await identityHooks?.bindAfterCreate(created);
-            return created;
-          },
-        }),
-      });
-      await useFakeTeardown();
-      const controller = new AbortController();
-      afterBind = () => controller.abort(new Error("client cancelled"));
-
-      const pendingSession = deliveredSession(
-        "startDevice",
-        { platform: "android", createIfMissing: true },
-        controller.signal,
-      );
-      await drain();
-      const sessionUuid = await pendingSession;
-      await drain();
-
-      expect(sessionUuid).toBeUndefined();
-      expect(sessions.getAllSessions()).toEqual([]);
-      expect([...ownership.held]).toEqual([]);
-      expect(bootHandle.killed).toBe(true);
-      expect(
-        devices
-          .getExecutedOperations()
-          .filter((operation) => operation.startsWith("destroyDevice:")),
-      ).toHaveLength(1);
-      expect(await devices.listDeviceImages("android")).toEqual([]);
-      expect(heldLeases.size).toBe(0);
-    });
-
-    test("provisionDevice cancelled after the bind deletes the AVD it created and reports it", async () => {
-      setDeviceToolsDependencies({
-        exactDeviceProvisionerFactory: () => ({
-          provision: async () => ({
-            created: true,
-            device: { name: avd.name, platform: "android", isRunning: false, ...ANDROID_SPEC },
-            resolvedSpec: {
-              ...ANDROID_SPEC,
-              displayCutout: classifyDisplayCutout("android", ANDROID_SPEC.deviceType),
+    arranged(
+      "startDevice createIfMissing cancelled after the bind deletes the AVD it created",
+      async () => {
+        devices.setDeviceImages("android", []);
+        devices.setMockChildProcess(created.name, bootHandle);
+        setDeviceToolsDependencies({
+          deviceCreationGateFactory: () => new FakeDeviceCreationGate(true),
+          deviceProvisionerFactory: () => ({
+            provision: async (_criteria, _signal, identityHooks) => {
+              await identityHooks?.reserveBeforeCreate(created);
+              devices.setDeviceImages("android", [
+                { name: created.name, platform: "android", isRunning: false },
+              ]);
+              await identityHooks?.bindAfterCreate(created);
+              return created;
             },
           }),
-        }),
-      });
-      await useFakeTeardown();
-      const controller = new AbortController();
-      afterBind = () => controller.abort(new Error("client cancelled"));
+        });
+        await useFakeTeardown();
+        const controller = new AbortController();
+        afterBind = () => controller.abort(new Error("client cancelled"));
 
-      const response = (await ToolRegistry.getTool("provisionDevice")!.handler(
-        {
-          device: { platform: "android", name: avd.name, spec: ANDROID_SPEC },
-          boot: true,
-          readiness: "automation",
-          __mcpSessionId: "mcp-client",
-        },
-        undefined,
-        controller.signal,
-      )) as { isError?: boolean; content: Array<{ text: string }> };
-      await drain();
+        const pendingSession = deliveredSession(
+          "startDevice",
+          { platform: "android", createIfMissing: true },
+          controller.signal,
+        );
+        await drain();
+        const sessionUuid = await pendingSession;
+        await drain();
 
-      expect(response.isError).toBe(true);
-      expect(JSON.parse(response.content[0].text)).toMatchObject({
-        error: { code: "request_cancelled" },
-      });
-      expect(sessions.getAllSessions()).toEqual([]);
-      expect([...ownership.held]).toEqual([]);
-      expect(
-        devices
-          .getExecutedOperations()
-          .filter((operation) => operation.startsWith("destroyDevice:")),
-      ).toHaveLength(1);
-      expect(heldLeases.size).toBe(0);
-    });
+        expect(sessionUuid).toBeUndefined();
+        expect(sessions.getAllSessions()).toEqual([]);
+        expect([...ownership.held]).toEqual([]);
+        expect(bootHandle.killed).toBe(true);
+        expect(
+          devices
+            .getExecutedOperations()
+            .filter((operation) => operation.startsWith("destroyDevice:")),
+        ).toHaveLength(1);
+        expect(await devices.listDeviceImages("android")).toEqual([]);
+        expect(heldLeases.size).toBe(0);
+      },
+    );
+
+    arranged(
+      "provisionDevice cancelled after the bind deletes the AVD it created and reports it",
+      async () => {
+        setDeviceToolsDependencies({
+          exactDeviceProvisionerFactory: () => ({
+            provision: async () => ({
+              created: true,
+              device: { name: avd.name, platform: "android", isRunning: false, ...ANDROID_SPEC },
+              resolvedSpec: {
+                ...ANDROID_SPEC,
+                displayCutout: classifyDisplayCutout("android", ANDROID_SPEC.deviceType),
+              },
+            }),
+          }),
+        });
+        await useFakeTeardown();
+        const controller = new AbortController();
+        afterBind = () => controller.abort(new Error("client cancelled"));
+
+        const response = (await ToolRegistry.getTool("provisionDevice")!.handler(
+          {
+            device: { platform: "android", name: avd.name, spec: ANDROID_SPEC },
+            boot: true,
+            readiness: "automation",
+            __mcpSessionId: "mcp-client",
+          },
+          undefined,
+          controller.signal,
+        )) as { isError?: boolean; content: Array<{ text: string }> };
+        await drain();
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text)).toMatchObject({
+          error: { code: "request_cancelled" },
+        });
+        expect(sessions.getAllSessions()).toEqual([]);
+        expect([...ownership.held]).toEqual([]);
+        expect(
+          devices
+            .getExecutedOperations()
+            .filter((operation) => operation.startsWith("destroyDevice:")),
+        ).toHaveLength(1);
+        expect(heldLeases.size).toBe(0);
+      },
+    );
   });
 
   describe("setActiveDevice", () => {
@@ -803,7 +851,7 @@ describe.each([
       return cancelAt(point, cancel);
     };
 
-    test.each(CANCEL_POINTS)(
+    arrangedEach(CANCEL_POINTS)(
       "a rebind cancelled %s leaves the session on the device it held",
       async (point) => {
         await startRunning(bootedSimulator, otherBootedSimulator);
@@ -867,7 +915,7 @@ describe.each([
       },
     );
 
-    test.each(CANCEL_POINTS)(
+    arrangedEach(CANCEL_POINTS)(
       "a selection cancelled %s releases the session it minted",
       async (point) => {
         await startRunning(bootedSimulator);
@@ -890,7 +938,7 @@ describe.each([
       },
     );
 
-    test("the id a cancelled selection minted can be named again by its client", async () => {
+    arranged("the id a cancelled selection minted can be named again by its client", async () => {
       await startRunning(bootedSimulator);
       const controller = new AbortController();
       cancelAfterRebind(() => controller.abort(new Error("client cancelled")));
@@ -911,64 +959,70 @@ describe.each([
       expect(pool.getDevice(SIM_UDID)).toMatchObject({ sessionId: "client-chosen-session" });
     });
 
-    test("a selection cancelled while its session is persisted leaves the client's id free to retry", async () => {
-      await startRunning(bootedSimulator);
-      const controller = new AbortController();
-      const upsert = persistence.upsertActiveSession.bind(persistence);
-      persistence.upsertActiveSession = async (...write) => {
-        const generation = await upsert(...write);
-        // The write landed; the client gives up while the mint is still finishing.
-        controller.abort(new Error("client cancelled"));
-        return generation;
-      };
-      const selection = {
-        deviceId: SIM_UDID,
-        platform: "ios",
-        sessionUuid: "client-chosen-session",
-      };
+    arranged(
+      "a selection cancelled while its session is persisted leaves the client's id free to retry",
+      async () => {
+        await startRunning(bootedSimulator);
+        const controller = new AbortController();
+        const upsert = persistence.upsertActiveSession.bind(persistence);
+        persistence.upsertActiveSession = async (...write) => {
+          const generation = await upsert(...write);
+          // The write landed; the client gives up while the mint is still finishing.
+          controller.abort(new Error("client cancelled"));
+          return generation;
+        };
+        const selection = {
+          deviceId: SIM_UDID,
+          platform: "ios",
+          sessionUuid: "client-chosen-session",
+        };
 
-      expect(await setActiveDevice(selection, controller.signal)).toBe(false);
-      await drain();
+        expect(await setActiveDevice(selection, controller.signal)).toBe(false);
+        await drain();
 
-      expect(controller.signal.aborted).toBe(true);
-      expect(sessions.getAllSessions()).toEqual([]);
-      expect(sessions.getTerminalReleaseSnapshot("client-chosen-session")).toBeUndefined();
-      expect(pool.getDevice(SIM_UDID)).toMatchObject({ sessionId: null, status: "idle" });
-      expect([...ownership.held]).toEqual([]);
-      expect((await persistence.getSession!("client-chosen-session"))?.status).not.toBe("active");
+        expect(controller.signal.aborted).toBe(true);
+        expect(sessions.getAllSessions()).toEqual([]);
+        expect(sessions.getTerminalReleaseSnapshot("client-chosen-session")).toBeUndefined();
+        expect(pool.getDevice(SIM_UDID)).toMatchObject({ sessionId: null, status: "idle" });
+        expect([...ownership.held]).toEqual([]);
+        expect((await persistence.getSession!("client-chosen-session"))?.status).not.toBe("active");
 
-      persistence.upsertActiveSession = upsert;
-      const retried = await setActiveDevice(selection, new AbortController().signal);
+        persistence.upsertActiveSession = upsert;
+        const retried = await setActiveDevice(selection, new AbortController().signal);
 
-      expect(retried).toBe(true);
-      expect(sessions.getSession("client-chosen-session")?.assignedDevice).toBe(SIM_UDID);
-      expect(pool.getDevice(SIM_UDID)).toMatchObject({ sessionId: "client-chosen-session" });
-    });
+        expect(retried).toBe(true);
+        expect(sessions.getSession("client-chosen-session")?.assignedDevice).toBe(SIM_UDID);
+        expect(pool.getDevice(SIM_UDID)).toMatchObject({ sessionId: "client-chosen-session" });
+      },
+    );
 
-    test("a selection that only re-pins the display, cancelled, leaves the pin it replaced", async () => {
-      await startRunning(bootedSimulator);
-      const sessionUuid = await deliveredSession("getApple", { udid: SIM_UDID });
-      sessions.setDisplayPin(sessionUuid!, "cover");
-      const before = structuredClone(sessions.getSession(sessionUuid!));
-      const controller = new AbortController();
-      const setDisplayPin = sessions.setDisplayPin.bind(sessions);
-      sessions.setDisplayPin = (...pin) => {
-        setDisplayPin(...pin);
-        sessions.setDisplayPin = setDisplayPin;
-        controller.abort(new Error("client cancelled"));
-      };
+    arranged(
+      "a selection that only re-pins the display, cancelled, leaves the pin it replaced",
+      async () => {
+        await startRunning(bootedSimulator);
+        const sessionUuid = await deliveredSession("getApple", { udid: SIM_UDID });
+        sessions.setDisplayPin(sessionUuid!, "cover");
+        const before = structuredClone(sessions.getSession(sessionUuid!));
+        const controller = new AbortController();
+        const setDisplayPin = sessions.setDisplayPin.bind(sessions);
+        sessions.setDisplayPin = (...pin) => {
+          setDisplayPin(...pin);
+          sessions.setDisplayPin = setDisplayPin;
+          controller.abort(new Error("client cancelled"));
+        };
 
-      const answered = await setActiveDevice(
-        { deviceId: SIM_UDID, platform: "ios", sessionUuid, display: "inner" },
-        controller.signal,
-      );
-      await drain();
+        const answered = await setActiveDevice(
+          { deviceId: SIM_UDID, platform: "ios", sessionUuid, display: "inner" },
+          controller.signal,
+        );
+        await drain();
 
-      expect(answered).toBe(false);
-      expect(structuredClone(sessions.getSession(sessionUuid!))).toEqual(before);
-    });
+        expect(answered).toBe(false);
+        expect(structuredClone(sessions.getSession(sessionUuid!))).toEqual(before);
+      },
+    );
 
-    test("control: an uncancelled rebind moves the session and its claim", async () => {
+    arranged("control: an uncancelled rebind moves the session and its claim", async () => {
       await startRunning(bootedSimulator, otherBootedSimulator);
       const sessionUuid = await deliveredSession("getApple", { udid: SIM_UDID });
 
@@ -984,29 +1038,31 @@ describe.each([
       expect([...ownership.held]).toEqual([OTHER_SIM_UDID]);
     });
 
-    test("a cancelled rebind whose previous device was taken meanwhile stays whole on the new device", async () => {
-      await startRunning(bootedSimulator, otherBootedSimulator);
-      const sessionUuid = await deliveredSession("getApple", { udid: SIM_UDID });
-      const controller = new AbortController();
-      await sessions.createSession("other-session", SIM_UDID, "ios");
-      cancelAfterRebind(() => {
-        // Another session takes the freed device before the cancelled call can move back.
-        const freed = pool.getDevice(SIM_UDID)!;
-        freed.sessionId = "other-session";
-        freed.status = "busy";
-        controller.abort(new Error("client cancelled"));
-      });
+    arranged(
+      "a cancelled rebind whose previous device was taken meanwhile stays whole on the new device",
+      async () => {
+        await startRunning(bootedSimulator, otherBootedSimulator);
+        const sessionUuid = await deliveredSession("getApple", { udid: SIM_UDID });
+        const controller = new AbortController();
+        await sessions.createSession("other-session", SIM_UDID, "ios");
+        cancelAfterRebind(() => {
+          // Another session takes the freed device before the cancelled call can move back.
+          const freed = pool.getDevice(SIM_UDID)!;
+          bindDevice(freed, "other-session");
+          controller.abort(new Error("client cancelled"));
+        });
 
-      const answered = await setActiveDevice(
-        { deviceId: OTHER_SIM_UDID, platform: "ios", sessionUuid },
-        controller.signal,
-      );
-      await drain();
+        const answered = await setActiveDevice(
+          { deviceId: OTHER_SIM_UDID, platform: "ios", sessionUuid },
+          controller.signal,
+        );
+        await drain();
 
-      expect(answered).toBe(false);
-      expect(sessions.getSession(sessionUuid!)?.assignedDevice).toBe(OTHER_SIM_UDID);
-      expect(pool.getDevice(OTHER_SIM_UDID)).toMatchObject({ sessionId: sessionUuid });
-      expect(pool.getDevice(SIM_UDID)?.sessionId).toBe("other-session");
-    });
+        expect(answered).toBe(false);
+        expect(sessions.getSession(sessionUuid!)?.assignedDevice).toBe(OTHER_SIM_UDID);
+        expect(pool.getDevice(OTHER_SIM_UDID)).toMatchObject({ sessionId: sessionUuid });
+        expect(pool.getDevice(SIM_UDID)?.sessionId).toBe("other-session");
+      },
+    );
   });
 });

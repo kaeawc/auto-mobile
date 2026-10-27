@@ -17,13 +17,10 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -49,17 +46,21 @@ class TextInputControllerTest {
 
   /**
    * A focused editable field. SET_TEXT replaces the text and leaves the caret at the end (as an
-   * EditText does); SET_SELECTION moves the caret unless [acceptsSelection] is false.
+   * EditText does); SET_SELECTION moves the caret unless [FieldBehavior.acceptsSelection] is false.
    */
-  private class FakeField(
-    var content: String,
-    var selectionStart: Int = content.length,
-    var selectionEnd: Int = selectionStart,
+  private data class FieldBehavior(
     val password: Boolean = false,
     val acceptsSetText: Boolean = true,
     val acceptsSelection: Boolean = true,
     val supportedActions: List<AccessibilityAction> =
       listOf(AccessibilityAction.ACTION_SET_TEXT, AccessibilityAction.ACTION_SET_SELECTION),
+  )
+
+  private class FakeField(
+    var content: String,
+    var selectionStart: Int = content.length,
+    var selectionEnd: Int = selectionStart,
+    val behavior: FieldBehavior = FieldBehavior(),
   ) {
     private val performed = mutableListOf<Int>()
     val node: AccessibilityNodeInfo = mockk(relaxed = true)
@@ -70,12 +71,12 @@ class TextInputControllerTest {
       every { node.textSelectionEnd } answers { selectionEnd }
       every { node.isEditable } returns true
       every { node.isFocused } returns true
-      every { node.isPassword } returns password
+      every { node.isPassword } returns behavior.password
       every { node.windowId } returns 7
       every { node.packageName } returns "com.example"
       every { node.className } returns "android.widget.EditText"
       every { node.viewIdResourceName } returns "com.example:id/field"
-      every { node.actionList } returns supportedActions
+      every { node.actionList } returns behavior.supportedActions
       every { node.refresh() } returns true
       every { node.performAction(any<Int>()) } answers
         {
@@ -89,7 +90,7 @@ class TextInputControllerTest {
       performed += action
       return when (action) {
         AccessibilityNodeInfo.ACTION_SET_TEXT -> {
-          if (acceptsSetText) {
+          if (behavior.acceptsSetText) {
             content =
               requireNotNull(args)
                 .getCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE)
@@ -97,16 +98,16 @@ class TextInputControllerTest {
             selectionStart = content.length
             selectionEnd = content.length
           }
-          acceptsSetText
+          behavior.acceptsSetText
         }
         AccessibilityNodeInfo.ACTION_SET_SELECTION -> {
-          if (acceptsSelection) {
+          if (behavior.acceptsSelection) {
             val bundle = requireNotNull(args)
             selectionStart =
               bundle.getInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT)
             selectionEnd = bundle.getInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT)
           }
-          acceptsSelection
+          behavior.acceptsSelection
         }
         else -> true
       }
@@ -157,46 +158,15 @@ class TextInputControllerTest {
     }
   }
 
-  private class FakeSender(private val events: MutableList<String>) :
-    TextInputController.ResponseSender {
-    var running = true
+  private class FakeSender(private val events: MutableList<String>) : FakeResultTransport() {
     val frames = mutableListOf<Pair<String, JsonObject>>()
-    val syncTypes = mutableListOf<String>()
 
-    override fun isRunning() = running
-
-    override suspend fun broadcastWithPerf(
-      type: String,
-      requestId: String?,
-      buildContent: JsonObjectBuilder.() -> Unit,
-    ) {
-      record(type, requestId, buildContent)
-    }
-
-    override suspend fun broadcastWithPerfSync(
-      type: String,
-      requestId: String?,
-      buildContent: JsonObjectBuilder.() -> Unit,
-    ) {
-      syncTypes += type
-      record(type, requestId, buildContent)
-    }
-
-    private fun record(
-      type: String,
-      requestId: String?,
-      buildContent: JsonObjectBuilder.() -> Unit,
-    ) {
+    override suspend fun sendFrame(frame: String) {
+      val parsed = Json.parseToJsonElement(frame).jsonObject
+      val type = parsed.getValue("type").jsonPrimitive.content
       events += "frame:$type"
-      frames +=
-        type to
-          buildJsonObject {
-            if (requestId != null) put("requestId", requestId)
-            buildContent()
-          }
+      frames += type to JsonObject(parsed - setOf("type", "timestamp", "perfTiming"))
     }
-
-    override fun connectionCount() = 1
   }
 
   private class Harness(
@@ -219,13 +189,21 @@ class TextInputControllerTest {
         serviceScope = this,
         perfProvider = PerfProvider.createForTesting(timer),
         timeProvider = timer,
-        resultBroadcaster =
-          ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
-        jsonCompact = Json { encodeDefaults = true },
-        responseSender = sender,
-        uptimeMillis = { uptimeMs },
-        pause = { ms -> uptimeMs += ms },
-        sdkInt = sdkInt,
+        responses =
+          TextInputResponseDependencies(
+            jsonCompact = Json { encodeDefaults = true },
+            resultSender =
+              guardedResultSender(
+                sender,
+                ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
+              ),
+          ),
+        config =
+          TextInputConfig(
+            uptimeMillis = { uptimeMs },
+            pause = { ms -> uptimeMs += ms },
+            sdkInt = sdkInt,
+          ),
       )
     return Harness(controller, host, sender)
   }
@@ -260,7 +238,6 @@ class TextInputControllerTest {
       assertEquals("r1", frame.str("requestId"))
       assertNull(frame["error"])
       assertTrue(h.host.keyboardHidden)
-      assertEquals(listOf("set_text_result"), h.sender.syncTypes)
       assertEquals(listOf("frame:set_text_result", "publishHierarchy"), events)
     }
 
@@ -280,7 +257,10 @@ class TextInputControllerTest {
   @Test
   fun `a rejected set text reports the action failure and skips the hierarchy refresh`() = runTest {
     val h = harness()
-    val field = FakeField("old", acceptsSetText = false).also { h.host.focused = it }
+    val field =
+      FakeField("old", behavior = FieldBehavior(acceptsSetText = false)).also {
+        h.host.focused = it
+      }
 
     h.controller.performSetText("r1", "new", resourceId = null, dismissKeyboard = true)
     advanceUntilIdle()
@@ -333,7 +313,6 @@ class TextInputControllerTest {
       val frame = h.sender.only("insert_text_result")
       assertTrue(frame.bool("success"))
       assertNull(frame["partialApplication"])
-      assertEquals(listOf("insert_text_result"), h.sender.syncTypes)
       assertEquals(listOf("frame:insert_text_result", "publishHierarchy"), events)
       assertNull(h.controller.remembered())
     }
@@ -341,7 +320,8 @@ class TextInputControllerTest {
   @Test
   fun `insert text refuses a password field without reading or writing it`() = runTest {
     val h = harness()
-    val field = FakeField("secret", password = true).also { h.host.focused = it }
+    val field =
+      FakeField("secret", behavior = FieldBehavior(password = true)).also { h.host.focused = it }
 
     h.controller.performInsertText("r1", "x", expectedSuffix = null, acceptsCaretNotPlaced = false)
     advanceUntilIdle()
@@ -372,9 +352,13 @@ class TextInputControllerTest {
   fun `insert text checks selection support before mutating the field`() = runTest {
     val h = harness()
     val field =
-      FakeField("abc", supportedActions = listOf(AccessibilityAction.ACTION_SET_TEXT)).also {
-        h.host.focused = it
-      }
+      FakeField(
+          "abc",
+          behavior = FieldBehavior(supportedActions = listOf(AccessibilityAction.ACTION_SET_TEXT)),
+        )
+        .also {
+          h.host.focused = it
+        }
 
     h.controller.performInsertText("r1", "x", expectedSuffix = null, acceptsCaretNotPlaced = false)
     advanceUntilIdle()
@@ -391,7 +375,8 @@ class TextInputControllerTest {
     runTest {
       val h = harness()
       val field =
-        FakeField("ab", selectionStart = 1, acceptsSelection = false).also { h.host.focused = it }
+        FakeField("ab", selectionStart = 1, behavior = FieldBehavior(acceptsSelection = false))
+          .also { h.host.focused = it }
 
       h.controller.performInsertText(
         "r1",
@@ -419,7 +404,9 @@ class TextInputControllerTest {
     val h = harness()
     // Compose-like: the caret stays at the end after SET_TEXT and SET_SELECTION is ignored.
     val field =
-      FakeField("ab", selectionStart = 1, acceptsSelection = false).also { h.host.focused = it }
+      FakeField("ab", selectionStart = 1, behavior = FieldBehavior(acceptsSelection = false)).also {
+        h.host.focused = it
+      }
 
     h.controller.performInsertText("r1", "X", expectedSuffix = null, acceptsCaretNotPlaced = true)
     advanceUntilIdle()
@@ -440,7 +427,8 @@ class TextInputControllerTest {
   @Test
   fun `a selection change away from the remembered caret forgets it`() = runTest {
     val h = harness()
-    h.host.focused = FakeField("ab", selectionStart = 1, acceptsSelection = false)
+    h.host.focused =
+      FakeField("ab", selectionStart = 1, behavior = FieldBehavior(acceptsSelection = false))
     h.controller.performInsertText("r1", "X", expectedSuffix = null, acceptsCaretNotPlaced = true)
     advanceUntilIdle()
     assertNotNull(h.controller.remembered())
@@ -489,13 +477,12 @@ class TextInputControllerTest {
     assertTrue(frame.bool("success"))
     val state = frame.getValue("state").jsonObject
     assertEquals("hello", state.str("text"))
-    assertEquals(listOf("insert_text_state_result"), h.sender.syncTypes)
   }
 
   @Test
   fun `insert text state omits the snapshot for a password field`() = runTest {
     val h = harness()
-    h.host.focused = FakeField("secret", password = true)
+    h.host.focused = FakeField("secret", behavior = FieldBehavior(password = true))
 
     h.controller.handleInsertTextState("r1")
     advanceUntilIdle()
@@ -521,9 +508,8 @@ class TextInputControllerTest {
     assertTrue(frame.bool("success"))
     assertEquals("next", frame.str("action"))
     assertNull(frame["approximated"])
-    // IME actions settle the hierarchy before acknowledging, on the asynchronous socket path.
+    // IME actions settle the hierarchy before acknowledging.
     assertEquals(listOf("publishHierarchy", "frame:ime_action_result"), events)
-    assertTrue(h.sender.syncTypes.isEmpty())
   }
 
   @Test
@@ -568,6 +554,7 @@ class TextInputControllerTest {
   }
 
   @Test
+  @Config(sdk = [24, 29])
   fun `done falls back to KEYCODE_ENTER before API 30`() = runTest {
     val h = harness(sdkInt = 29)
     h.host.focused = FakeField("abc")
@@ -611,7 +598,8 @@ class TextInputControllerTest {
   @Test
   fun `a rejected select all that did not select the text fails`() = runTest {
     val h = harness()
-    h.host.focused = FakeField("hello", selectionStart = 2, acceptsSelection = false)
+    h.host.focused =
+      FakeField("hello", selectionStart = 2, behavior = FieldBehavior(acceptsSelection = false))
 
     h.controller.performSelectAll("r1")
 

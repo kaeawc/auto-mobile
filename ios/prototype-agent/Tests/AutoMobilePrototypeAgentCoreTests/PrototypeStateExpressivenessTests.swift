@@ -131,7 +131,9 @@ final class PrototypeStateExpressivenessTests: XCTestCase {
         XCTAssertEqual(rows.map { $0[1].onTap?.first?.key }, ["liked_a", "liked_b"])
         XCTAssertEqual(rows.map { $0[3].stateKey }, ["notify_a", "notify_b"])
         XCTAssertEqual(rows.map { $0[4].onTap?.map(\.key) }, [["count_a", "last_0"], ["count_b", "last_1"]])
-        XCTAssertEqual(rows.map { $0[5].trailing?.stateKey }, ["saved_a", "saved_b"])
+        XCTAssertEqual(rows.map { $0[5].toggleKey }, ["saved_a", "saved_b"])
+        // #14585: a list item's headline interpolates per item.
+        XCTAssertEqual(rows.map { $0[5].headline }, ["Save Alexey", "Save Bea"])
         XCTAssertEqual(rows.map { $0[6].confirm?.onTap?.first?.key }, ["open_a", "open_b"])
         var session = PrototypeSession()
         session.show(spec)
@@ -230,7 +232,7 @@ final class PrototypeStateExpressivenessTests: XCTestCase {
     // scans UTF-16 code units: only an ASCII `{` / `}` delimits, whatever follows or precedes it.
 
     private func boundTexts(_ template: String) throws -> [String?] {
-        let encoded = try String(decoding: JSONEncoder().encode(template), as: UTF8.self)
+        let encoded = try XCTUnwrap(String(data: JSONEncoder().encode(template), encoding: .utf8))
         let json = """
         {"id":"a","window":{"placement":{"type":"fullscreen"}},
          "root":{"type":"column","repeat":{"as":"item","items":[{"n":"x"}]},

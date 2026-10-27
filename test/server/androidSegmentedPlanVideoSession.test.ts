@@ -11,6 +11,10 @@ import {
 import { logger } from "../../src/utils/logger";
 
 /** Drain all pending microtasks (setImmediate runs after the microtask queue). */
+type StartRecording = NonNullable<
+  ConstructorParameters<typeof AndroidSegmentedPlanVideoSession>[0]["startVideoRecording"]
+>;
+
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 const androidDevice: BootedDevice = {
@@ -522,9 +526,8 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
       shape: { type: "circle" as const, bounds: { x: 5, y: 6, width: 7, height: 8 } },
       timing: { startTimeMs: 1250 },
     };
-    const start = mock(
-      async (request: { outputName?: string; highlights?: (typeof firstHighlight)[] }) =>
-        makeActiveRecording(`id-${request.outputName}`, `/tmp/${request.outputName}.mp4`),
+    const start = mock(async (request: Parameters<NonNullable<StartRecording>>[0]) =>
+      makeActiveRecording(`id-${request.outputName}`, `/tmp/${request.outputName}.mp4`),
     );
     const stop = mock(async (recordingId: string | undefined) => {
       const id = recordingId ?? "missing";
@@ -918,7 +921,7 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
         }
         rotationSignal = request.abortSignal;
         await new Promise<void>((resolve) => {
-          request.abortSignal?.addEventListener("abort", resolve, { once: true });
+          request.abortSignal?.addEventListener("abort", () => resolve(), { once: true });
         });
         request.abortSignal?.throwIfAborted();
         throw new Error("replacement start unexpectedly continued");
@@ -1181,9 +1184,16 @@ describe("review regressions", () => {
     const timer = new FakeTimer();
     let starts = 0;
     const start = mock(async () => makeActiveRecording(`r${++starts}`, `/tmp/r${starts}.mp4`));
-    const stop = mock(async (_id?: string) => {
-      throw new Error("device pull failed");
-    });
+    const stop = mock(
+      async (
+        _id?: string,
+      ): Promise<{
+        metadata: ReturnType<typeof makeStopMetadata>;
+        evictedRecordingIds: string[];
+      }> => {
+        throw new Error("device pull failed");
+      },
+    );
     const rollback = mock(async (_id: string) => {});
     const lookup = mock(async (id: string) => ({
       ...makeStopMetadata(id, `/tmp/${id}.mp4`),

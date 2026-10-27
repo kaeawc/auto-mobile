@@ -1,4 +1,4 @@
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
+import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import * as planUtils from "../../src/server/planExecutorFactory";
 import {

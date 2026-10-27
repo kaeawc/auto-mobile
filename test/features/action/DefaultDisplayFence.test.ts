@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { hierarchyFingerprint } from "../../../src/utils/hierarchyFingerprint";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
@@ -5,7 +6,7 @@ import type { Element } from "../../../src/models";
 import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
 import { ExecuteGesture } from "../../../src/features/action/ExecuteGesture";
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test, mock, beforeEach } from "bun:test";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
@@ -33,18 +34,43 @@ import { observation } from "../../helpers/tapAtCoordinate";
 
 const modes = ["transition", "unchanged", "single-absent", "single-panel"] as const;
 type Mode = (typeof modes)[number];
-const restores: Array<() => void> = [];
-afterEach(() => {
-  restores
-    .splice(0)
-    .reverse()
-    .forEach((restore) => restore());
+let androidTap: ReturnType<
+  typeof spyOn<typeof AndroidCtrlProxyClient.prototype, "requestTapCoordinates">
+>;
+let androidDoubleTap: ReturnType<
+  typeof spyOn<typeof AndroidCtrlProxyClient.prototype, "requestDoubleTapCoordinates">
+>;
+let androidSwipe: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient.prototype, "requestSwipe">>;
+let androidDrag: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient.prototype, "requestDrag">>;
+let androidPinch: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient.prototype, "requestPinch">>;
+let iosTap: ReturnType<typeof spyOn<typeof IOSCtrlProxyClient.prototype, "requestTapCoordinates">>;
+let iosDoubleTap: ReturnType<
+  typeof spyOn<typeof IOSCtrlProxyClient.prototype, "requestDoubleTapCoordinates">
+>;
+let iosMultiFingerSwipe: ReturnType<
+  typeof spyOn<typeof IOSCtrlProxyClient.prototype, "requestMultiFingerSwipe">
+>;
+let iosSwipe: ReturnType<typeof spyOn<typeof IOSCtrlProxyClient.prototype, "requestSwipe">>;
+let iosDrag: ReturnType<typeof spyOn<typeof IOSCtrlProxyClient.prototype, "requestDrag">>;
+let iosPinch: ReturnType<typeof spyOn<typeof IOSCtrlProxyClient.prototype, "requestPinch">>;
+let androidAvailable: ReturnType<
+  typeof spyOn<typeof AndroidCtrlProxyManager.prototype, "isAvailable">
+>;
+beforeEach(() => {
+  androidTap = spyOn(AndroidCtrlProxyClient.prototype, "requestTapCoordinates");
+  androidDoubleTap = spyOn(AndroidCtrlProxyClient.prototype, "requestDoubleTapCoordinates");
+  androidSwipe = spyOn(AndroidCtrlProxyClient.prototype, "requestSwipe");
+  androidDrag = spyOn(AndroidCtrlProxyClient.prototype, "requestDrag");
+  androidPinch = spyOn(AndroidCtrlProxyClient.prototype, "requestPinch");
+  iosTap = spyOn(IOSCtrlProxyClient.prototype, "requestTapCoordinates");
+  iosDoubleTap = spyOn(IOSCtrlProxyClient.prototype, "requestDoubleTapCoordinates");
+  iosMultiFingerSwipe = spyOn(IOSCtrlProxyClient.prototype, "requestMultiFingerSwipe");
+  iosSwipe = spyOn(IOSCtrlProxyClient.prototype, "requestSwipe");
+  iosDrag = spyOn(IOSCtrlProxyClient.prototype, "requestDrag");
+  iosPinch = spyOn(IOSCtrlProxyClient.prototype, "requestPinch");
+  androidAvailable = spyOn(AndroidCtrlProxyManager.prototype, "isAvailable");
 });
-function watch<T extends object, K extends keyof T>(target: T, key: K) {
-  const spy = spyOn(target, key);
-  restores.push(() => spy.mockRestore());
-  return spy;
-}
+
 function harness(platform: "android" | "ios", mode: Mode) {
   const device: BootedDevice = {
     deviceId: `default-fence-${platform}`,
@@ -91,48 +117,30 @@ function harness(platform: "android" | "ios", mode: Mode) {
   const observe = Object.assign(new FakeObserveScreen(), { captureCacheGeneration: () => 0 });
   observe.setObserveResult(screen);
   // Start these dispatch-fence tests with this call's observer read.
-  watch(observe, "getMostRecentCachedObserveResult").mockResolvedValue({
+  observe.getMostRecentCachedObserveResult = async () => ({
     ...screen,
     freshness: { isFresh: false },
   });
   const android = new FakeCtrlProxy();
   const ios = new FakeIOSCtrlProxy(timer);
-  watch(AndroidCtrlProxyClient.prototype, "requestTapCoordinates").mockImplementation(
-    android.requestTapCoordinates.bind(android),
-  );
+  androidTap.mockImplementation(android.requestTapCoordinates.bind(android));
   // The real method opens a localhost WebSocket (a host emulator's adb forward can answer it), so
   // keep the sequential two-tap path under test deterministic and off the network.
-  watch(AndroidCtrlProxyClient.prototype, "requestDoubleTapCoordinates").mockResolvedValue({
+  androidDoubleTap.mockResolvedValue({
     success: false,
     totalTimeMs: 0,
     error: "tap_double_v1 is not confirmed by the connected device service",
   });
-  watch(AndroidCtrlProxyClient.prototype, "requestSwipe").mockImplementation(
-    android.requestSwipe.bind(android),
-  );
-  watch(AndroidCtrlProxyClient.prototype, "requestDrag").mockImplementation(
-    android.requestDrag.bind(android),
-  );
-  watch(AndroidCtrlProxyClient.prototype, "requestPinch").mockImplementation(
-    android.requestPinch.bind(android),
-  );
-  watch(IOSCtrlProxyClient.prototype, "requestTapCoordinates").mockImplementation(
-    ios.requestTapCoordinates.bind(ios),
-  );
-  watch(IOSCtrlProxyClient.prototype, "requestDoubleTapCoordinates").mockImplementation(
-    ios.requestDoubleTapCoordinates.bind(ios),
-  );
-  watch(IOSCtrlProxyClient.prototype, "requestMultiFingerSwipe").mockImplementation(
-    ios.requestMultiFingerSwipe.bind(ios),
-  );
-  watch(IOSCtrlProxyClient.prototype, "requestSwipe").mockImplementation(
-    ios.requestSwipe.bind(ios),
-  );
-  watch(IOSCtrlProxyClient.prototype, "requestDrag").mockImplementation(ios.requestDrag.bind(ios));
-  watch(IOSCtrlProxyClient.prototype, "requestPinch").mockImplementation(
-    ios.requestPinch.bind(ios),
-  );
-  watch(AndroidCtrlProxyManager.prototype, "isAvailable").mockResolvedValue(true);
+  androidSwipe.mockImplementation(android.requestSwipe.bind(android));
+  androidDrag.mockImplementation(android.requestDrag.bind(android));
+  androidPinch.mockImplementation(android.requestPinch.bind(android));
+  iosTap.mockImplementation(ios.requestTapCoordinates.bind(ios));
+  iosDoubleTap.mockImplementation(ios.requestDoubleTapCoordinates.bind(ios));
+  iosMultiFingerSwipe.mockImplementation(ios.requestMultiFingerSwipe.bind(ios));
+  iosSwipe.mockImplementation(ios.requestSwipe.bind(ios));
+  iosDrag.mockImplementation(ios.requestDrag.bind(ios));
+  iosPinch.mockImplementation(ios.requestPinch.bind(ios));
+  androidAvailable.mockResolvedValue(true);
   const detector = new FakeAccessibilityDetector();
   const voiceOver = new FakeIosVoiceOverDetector();
   const bump = async () => {
@@ -203,7 +211,7 @@ describe("default-display dispatch fences", () => {
           ? (["preparation", "double-unchanged"] as const)
           : (["preparation", "double-second", "double-unchanged"] as const);
       for (const site of sites) {
-        test.each(modes)(`${tool} ${platform} ${site}: %s`, async (mode: Mode) => {
+        test.each([...modes])(`${tool} ${platform} ${site}: %s`, async (mode: Mode) => {
           const h = harness(platform, mode);
           const actionName = site === "preparation" ? "tap" : "doubleTap";
           let run: () => Promise<BaseActionResult>;
@@ -237,11 +245,11 @@ describe("default-display dispatch fences", () => {
             run = () => action.execute({ text: "Target", action: actionName });
           } else {
             if (site === "preparation") {
-              watch(h.detector, "detectMethod").mockImplementation(async () => {
+              spyOn(h.detector, "detectMethod").mockImplementation(async () => {
                 await h.bump();
                 return "unknown";
               });
-              watch(h.voiceOver, "isVoiceOverActiveOrUnknown").mockImplementation(async () => {
+              spyOn(h.voiceOver, "isVoiceOverActiveOrUnknown").mockImplementation(async () => {
                 await h.bump();
                 return false;
               });
@@ -252,7 +260,7 @@ describe("default-display dispatch fences", () => {
           }
           if (site === "double-second") {
             const sleep = h.timer.sleep.bind(h.timer);
-            watch(h.timer, "sleep").mockImplementation(async (ms: number) => {
+            spyOn(h.timer, "sleep").mockImplementation(async (ms: number) => {
               if (h.taps().length === 1) {
                 await h.bump();
               }
@@ -290,7 +298,7 @@ describe("default-display dispatch fences", () => {
       }
     }
     for (const tool of ["pinch", "drag"] as const) {
-      test.each(modes)(`${tool} ${platform} target capture: %s`, async (mode: Mode) => {
+      test.each([...modes])(`${tool} ${platform} target capture: %s`, async (mode: Mode) => {
         const h = harness(platform, mode);
         const capture = new FakeHierarchyCapture(async () => {
           await h.bump();
@@ -334,21 +342,21 @@ describe("default-display dispatch fences", () => {
       "a11y-fallback",
       "a11y-exception",
     ] as const) {
-      test.each(modes)(`swipe ${platform} ${site}: %s`, async (mode: Mode) => {
+      test.each([...modes])(`swipe ${platform} ${site}: %s`, async (mode: Mode) => {
         const h = harness(platform, mode);
         if (site === "screen" || site === "element") {
-          watch(h.detector, "detectMethod").mockImplementation(async () => {
+          spyOn(h.detector, "detectMethod").mockImplementation(async () => {
             await h.bump();
             return "unknown";
           });
-          watch(h.voiceOver, "resolveState").mockImplementation(async () => {
+          spyOn(h.voiceOver, "resolveState").mockImplementation(async () => {
             await h.bump();
             return false;
           });
         }
         if (site === "boomerang-return") {
           const sleep = h.timer.sleep.bind(h.timer);
-          watch(h.timer, "sleep").mockImplementation(async (ms: number) => {
+          spyOn(h.timer, "sleep").mockImplementation(async (ms: number) => {
             if (ms === 123) {
               await h.bump();
             }
@@ -356,12 +364,12 @@ describe("default-display dispatch fences", () => {
           });
         }
         if ((site === "a11y-fallback" || site === "a11y-exception") && platform === "android") {
-          watch(AndroidCtrlProxyClient.prototype, "requestSwipe").mockImplementation(async () => {
+          spyOn(AndroidCtrlProxyClient.prototype, "requestSwipe").mockImplementation(async () => {
             await h.bump();
             if (site === "a11y-exception") {
               throw new Error("not sent");
             }
-            return { success: false, error: "not sent" };
+            return { totalTimeMs: 0, success: false, error: "not sent" };
           });
         }
         const action = h.attach(
@@ -404,7 +412,7 @@ describe("default-display dispatch fences", () => {
       });
     }
   }
-  test.each(modes)("tapOn retry after post-tap probe: %s", async (mode: Mode) => {
+  test.each([...modes])("tapOn retry after post-tap probe: %s", async (mode: Mode) => {
     const h = harness("android", mode);
     const strategy = new FakeTapStrategy();
     strategy.retryTapIfNoChange = true;
@@ -425,7 +433,7 @@ describe("default-display dispatch fences", () => {
         selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
       }),
     );
-    watch(action, "refreshViewHierarchy").mockImplementation(async () => {
+    spyOn(action, "refreshViewHierarchy").mockImplementation(async () => {
       await h.bump();
       return h.screen.viewHierarchy!;
     });
@@ -452,14 +460,14 @@ describe("TalkBack waits retain the action fence", () => {
       "double-dispatch",
       "longPress-fallback",
     ] as const) {
-      test.each(modes)(`${tool} ${site}: %s`, async (mode: Mode) => {
+      test.each([...modes])(`${tool} ${site}: %s`, async (mode: Mode) => {
         const h = harness("android", mode);
         const driver = new FakeTalkBackNavigationDriver();
         const factory = { createDriver: () => driver };
         const strategy = new TalkBackTapStrategy({ timer: h.timer, driverFactory: factory });
         h.detector.setTalkBackEnabled(true);
         if (site === "direct-fallback") {
-          watch(strategy, "executeDirectActivation").mockImplementation(async () => {
+          spyOn(strategy, "executeDirectActivation").mockImplementation(async () => {
             await h.bump();
             return { success: false, method: "accessibility-action" };
           });
@@ -478,14 +486,14 @@ describe("TalkBack waits retain the action fence", () => {
               },
             }),
           });
-          watch(driver, "requestAction").mockImplementation(async () => {
+          spyOn(driver, "requestAction").mockImplementation(async () => {
             await h.bump();
-            return { success: false, action: "long_click" };
+            return { totalTimeMs: 0, success: false, action: "long_click" };
           });
         }
         if (site === "precise-activation") {
           const sleep = h.timer.sleep.bind(h.timer);
-          watch(h.timer, "sleep").mockImplementation(async (ms: number) => {
+          spyOn(h.timer, "sleep").mockImplementation(async (ms: number) => {
             if (ms === 500 && driver.tapHistory.length === 1) {
               await h.bump();
             }
@@ -494,7 +502,7 @@ describe("TalkBack waits retain the action fence", () => {
         }
         if (site === "double-dispatch") {
           const fallback = strategy.executeCoordinateFallback.bind(strategy);
-          watch(strategy, "executeCoordinateFallback").mockImplementation(async (...args) => {
+          spyOn(strategy, "executeCoordinateFallback").mockImplementation(async (...args) => {
             await h.bump();
             return fallback(...args);
           });
@@ -586,7 +594,7 @@ describe("TalkBack waits retain the action fence", () => {
 // Exercise the path executor independently; SwipeOn uses swipe(), not execute().
 describe("ExecuteGesture path fences", () => {
   for (const site of ["android", "ios-single", "ios-multi"] as const) {
-    test.each(modes)(`${site}: %s`, async (mode: Mode) => {
+    test.each([...modes])(`${site}: %s`, async (mode: Mode) => {
       const h = harness(site === "android" ? "android" : "ios", mode);
       const base = h.attach(new BaseVisualChange(h.device, h.adb, h.timer, undefined, h.deps));
       const gesture = new ExecuteGesture(h.device, h.adb, h.timer);
@@ -653,7 +661,7 @@ describe("ExecuteGesture path fences", () => {
 describe("default-display recovery dispatches", () => {
   for (const tool of ["tapOn", "tapAny"] as const) {
     for (const site of ["longPress", "longPress-adb-fallback"] as const) {
-      test.each(modes)(`${tool} ${site}: %s`, async (mode: Mode) => {
+      test.each([...modes])(`${tool} ${site}: %s`, async (mode: Mode) => {
         const h = harness("android", mode);
         const element = {
           text: "Target",
@@ -664,17 +672,17 @@ describe("default-display recovery dispatches", () => {
         const selector = new FakeElementSelector(element);
         const tapStrategy = new FakeTapStrategy();
         if (site === "longPress") {
-          watch(tapStrategy, "isAccessibilityServiceEnabled").mockImplementation(async () => {
+          spyOn(tapStrategy, "isAccessibilityServiceEnabled").mockImplementation(async () => {
             await h.bump();
             return false;
           });
-          watch(h.detector, "detectMethod").mockImplementation(async () => {
+          spyOn(h.detector, "detectMethod").mockImplementation(async () => {
             await h.bump();
             return "unknown";
           });
         } else {
           const execute = h.adb.executeCommand.bind(h.adb);
-          watch(h.adb, "executeCommand").mockImplementation(
+          spyOn(h.adb, "executeCommand").mockImplementation(
             async (...args: Parameters<typeof h.adb.executeCommand>) => {
               if (args[0].includes("input touchscreen swipe")) {
                 await execute(...args);
@@ -737,7 +745,7 @@ describe("default-display recovery dispatches", () => {
       });
     }
   }
-  test.each(modes)("DocumentsUI semantic recovery: %s", async (mode: Mode) => {
+  test.each([...modes])("DocumentsUI semantic recovery: %s", async (mode: Mode) => {
     const h = harness("android", mode);
     const selector = new FakeElementSelector({
       text: "Target",
@@ -747,10 +755,10 @@ describe("default-display recovery dispatches", () => {
       clickable: true,
       bounds: { left: 40, top: 60, right: 80, bottom: 100 },
     } as Element);
-    watch(AndroidCtrlProxyClient.prototype, "supportsNodeActionSelectors").mockResolvedValue(true);
-    watch(AndroidCtrlProxyClient.prototype, "requestNodeAction").mockImplementation(async () => {
+    spyOn(AndroidCtrlProxyClient.prototype, "supportsNodeActionSelectors").mockResolvedValue(true);
+    spyOn(AndroidCtrlProxyClient.prototype, "requestNodeAction").mockImplementation(async () => {
       await h.bump();
-      return { success: false, action: "click" };
+      return { totalTimeMs: 0, success: false, action: "click" };
     });
     const result = await h
       .attach(
@@ -780,43 +788,48 @@ describe("default-display recovery dispatches", () => {
     expect(h.inputs()).toEqual(mode === "transition" ? [] : ["shell input touchscreen tap 60 80"]);
     expect(h.taps()).toEqual([]);
   });
-  test.each(modes)("VoiceOver failed activation coordinate fallback: %s", async (mode: Mode) => {
-    const h = harness("ios", mode);
-    const tapStrategy = new FakeTapStrategy();
-    tapStrategy.setAccessibilityServiceEnabled(true);
-    watch(IOSCtrlProxyClient.prototype, "requestVoiceOverActivate").mockImplementation(async () => {
-      await h.bump();
-      return { success: false, error: "activation unavailable" };
-    });
-    const result = await h
-      .attach(
-        new TapOnElement(h.device, h.adb, {
-          ...h.deps,
-          tapStrategy,
-          selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
-          waitForCondition: {
-            execute: async () => ({
-              matched: false,
-              candidates: [],
-              observation: h.screen,
-              polls: 1,
-              waitMs: 0,
-              timedOut: true,
-            }),
-          },
-        }),
-      )
-      .execute({ action: "tap", text: "Target" });
-    if (mode === "transition") {
-      assertResult(result);
-    } else {
-      expect(result).toMatchObject({ success: true });
-    }
-    expect(h.taps()).toEqual(mode === "transition" ? [] : [{ x: 60, y: 80, duration: 50 }]);
-    expect(h.inputs()).toEqual([]);
-  });
+  test.each([...modes])(
+    "VoiceOver failed activation coordinate fallback: %s",
+    async (mode: Mode) => {
+      const h = harness("ios", mode);
+      const tapStrategy = new FakeTapStrategy();
+      tapStrategy.setAccessibilityServiceEnabled(true);
+      spyOn(IOSCtrlProxyClient.prototype, "requestVoiceOverActivate").mockImplementation(
+        async () => {
+          await h.bump();
+          return { success: false, error: "activation unavailable" };
+        },
+      );
+      const result = await h
+        .attach(
+          new TapOnElement(h.device, h.adb, {
+            ...h.deps,
+            tapStrategy,
+            selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+            waitForCondition: {
+              execute: async () => ({
+                matched: false,
+                candidates: [],
+                observation: h.screen,
+                polls: 1,
+                waitMs: 0,
+                timedOut: true,
+              }),
+            },
+          }),
+        )
+        .execute({ action: "tap", text: "Target" });
+      if (mode === "transition") {
+        assertResult(result);
+      } else {
+        expect(result).toMatchObject({ success: true });
+      }
+      expect(h.taps()).toEqual(mode === "transition" ? [] : [{ x: 60, y: 80, duration: 50 }]);
+      expect(h.inputs()).toEqual([]);
+    },
+  );
   for (const site of ["detection", "semantic-fallback"] as const) {
-    test.each(modes)(`TalkBack two-finger swipe ${site}: %s`, async (mode: Mode) => {
+    test.each([...modes])(`TalkBack two-finger swipe ${site}: %s`, async (mode: Mode) => {
       const h = harness("android", mode);
       if (site === "semantic-fallback") {
         h.screen.viewHierarchy!.hierarchy = {
@@ -833,23 +846,23 @@ describe("default-display recovery dispatches", () => {
             ],
           },
         };
-        watch(AndroidCtrlProxyClient.prototype, "getAccessibilityHierarchy").mockResolvedValue(
+        spyOn(AndroidCtrlProxyClient.prototype, "getAccessibilityHierarchy").mockResolvedValue(
           h.screen.viewHierarchy!,
         );
       }
-      watch(h.detector, "detectMethod").mockImplementation(async () => {
+      spyOn(h.detector, "detectMethod").mockImplementation(async () => {
         if (site === "detection") {
           await h.bump();
         }
         return "talkback";
       });
-      watch(AndroidCtrlProxyClient.prototype, "requestAction").mockImplementation(async () => {
+      spyOn(AndroidCtrlProxyClient.prototype, "requestAction").mockImplementation(async () => {
         if (site === "semantic-fallback") {
           await h.bump();
         }
-        return { success: false, action: "scroll_forward" };
+        return { totalTimeMs: 0, success: false, action: "scroll_forward" };
       });
-      watch(AndroidCtrlProxyClient.prototype, "requestTwoFingerSwipe").mockImplementation(
+      spyOn(AndroidCtrlProxyClient.prototype, "requestTwoFingerSwipe").mockImplementation(
         h.android.requestTwoFingerSwipe.bind(h.android),
       );
       const result = await h
@@ -869,23 +882,23 @@ describe("default-display recovery dispatches", () => {
     });
   }
   for (const platform of ["android", "ios"] as const) {
-    test.each(modes)(
+    test.each([...modes])(
       `scroll-until-visible ${platform} retains earlier observation: %s`,
       async (mode: Mode) => {
         const h = harness(platform, mode);
-        watch(AndroidCtrlProxyClient.prototype, "requestDeviceInfo").mockResolvedValue({
+        spyOn(AndroidCtrlProxyClient.prototype, "requestDeviceInfo").mockResolvedValue({
           success: true,
           sdkInt: 36,
           totalTimeMs: 0,
         });
         let detections = 0;
-        watch(h.detector, "detectMethod").mockImplementation(async () => {
+        spyOn(h.detector, "detectMethod").mockImplementation(async () => {
           if (++detections === 1) {
             await h.bump();
           }
           return "unknown";
         });
-        watch(h.voiceOver, "resolveState").mockImplementation(async () => {
+        spyOn(h.voiceOver, "resolveState").mockImplementation(async () => {
           await h.bump();
           return false;
         });
@@ -972,13 +985,13 @@ describe("display fence options preserve public call shapes", () => {
         events.push("dispatch");
         return { success: true, totalTimeMs: 1 };
       };
-      watch(AndroidCtrlProxyClient.prototype, "requestTapCoordinates").mockImplementation(dispatch);
-      watch(h.adb, "executeCommand").mockImplementation(async () => {
+      spyOn(AndroidCtrlProxyClient.prototype, "requestTapCoordinates").mockImplementation(dispatch);
+      spyOn(h.adb, "executeCommand").mockImplementation(async () => {
         events.push("dispatch");
-        return { stdout: "", stderr: "", toString: () => "", valueOf: () => "" };
+        return createExecResult("", "");
       });
       const driver = new FakeTalkBackNavigationDriver();
-      watch(driver, "requestTapCoordinates").mockImplementation(dispatch);
+      spyOn(driver, "requestTapCoordinates").mockImplementation(dispatch);
       const strategy = new TalkBackTapStrategy({ timer: h.timer });
       const tap = h.attach(new TapOnElement(h.device, h.adb, h.deps));
       const path = [
@@ -1007,24 +1020,16 @@ describe("display fence options preserve public call shapes", () => {
                     70,
                     50,
                     element,
-                    undefined,
-                    undefined,
-                    false,
+                    { isTalkBackEnabled: false },
                     [],
                   ])
               : shape === "legacy"
                 ? () => tap.executeAndroidTap("tap", 50, 70, 50, element)
                 : () =>
-                    tap.executeAndroidTap(
-                      "tap",
-                      50,
-                      70,
-                      50,
-                      element,
-                      undefined,
-                      { action: "tap", ...options },
-                      false,
-                    );
+                    tap.executeAndroidTap("tap", 50, 70, 50, element, {
+                      options: { action: "tap", ...options },
+                      isTalkBackEnabled: false,
+                    });
           break;
         case "retry": {
           const args: Parameters<TapOnElement["retryTapIfNoChange"]> = [
@@ -1033,14 +1038,15 @@ describe("display fence options preserve public call shapes", () => {
             "tap",
             50,
             element,
-            { action: "tap", ...options },
-            false,
-            h.screen.screenSize,
+            {
+              options: { action: "tap", ...options },
+              isTalkBackEnabled: false,
+              screenSize: h.screen.screenSize,
+            },
           ];
           invoke =
             shape === "extra"
-              ? () =>
-                  Reflect.apply(tap.retryTapIfNoChange, tap, [...args, undefined, undefined, []])
+              ? () => Reflect.apply(tap.retryTapIfNoChange, tap, [...args, []])
               : () => tap.retryTapIfNoChange(...args);
           break;
         }
@@ -1099,7 +1105,7 @@ describe("display fence options preserve public call shapes", () => {
 
 test("review: explicit adb search preserves the default-display dispatch fence", async () => {
   const h = harness("android", "unchanged");
-  watch(AndroidCtrlProxyClient.prototype, "requestDeviceInfo").mockResolvedValue({
+  spyOn(AndroidCtrlProxyClient.prototype, "requestDeviceInfo").mockResolvedValue({
     success: true,
     sdkInt: 36,
     totalTimeMs: 0,
@@ -1129,7 +1135,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
     `review cache-hit ${tool} revalidation preserves default-display fence: %s`,
     async (mode) => {
       const h = harness("android", mode);
-      watch(h.observe, "getMostRecentCachedObserveResult").mockResolvedValue({
+      spyOn(h.observe, "getMostRecentCachedObserveResult").mockResolvedValue({
         ...h.screen,
         freshness: { isFresh: true },
       });
@@ -1177,3 +1183,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
     },
   );
 }
+
+afterEach(() => {
+  mock.restore();
+});

@@ -79,10 +79,8 @@ function lineForBunSetup(content: string, occurrence: number): number {
 // Deliberately advisory canaries that run a newer Bun than the repo pin. Keyed by
 // workflow path (relative to the repo root) + job id, and by the exact version the
 // job may use, so any other job or any other version in that job still fails.
-const ADVISORY_BUN_CANARIES: ReadonlyArray<{ workflow: string; job: string; version: string }> = [
-  // Bun 1.4 upgrade canary (#10854): continue-on-error, no downstream dependents.
-  { workflow: ".github/workflows/nightly.yml", job: "node-bun-14-canary", version: "1.4.2" },
-];
+// Empty while no upgrade canary runs; the Bun 1.4 canary (#10854) retired with the 1.4.4 pin (#14979).
+const ADVISORY_BUN_CANARIES: ReadonlyArray<{ workflow: string; job: string; version: string }> = [];
 
 function allowedCanarySteps(document: unknown, relativePath: string): Map<WorkflowNode, string> {
   const jobs = (document as { jobs?: Record<string, unknown> } | null)?.jobs ?? {};

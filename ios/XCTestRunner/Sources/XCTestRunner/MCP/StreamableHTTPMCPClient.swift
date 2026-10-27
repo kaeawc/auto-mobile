@@ -14,6 +14,8 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
     struct Options: Sendable {
         var logger: any AutoMobileLogger = StdoutLogger()
         var scheduler: any DeadlineScheduler = SystemDeadlineScheduler()
+        var tokenProvider: any DaemonHTTPTokenProviding = DaemonHTTPTokenProvider()
+        var portDiscovery: any DaemonHTTPPortDiscovering = DaemonPidFilePortDiscovery()
     }
 
     private let state = OSAllocatedUnfairLock<State>(initialState: State())
@@ -32,7 +34,11 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
         try self.init(
             endpoint: endpoint,
             performer: URLSessionRequestPerformer(session: session),
-            options: Options(logger: logger)
+            options: Options(
+                logger: logger,
+                tokenProvider: DaemonHTTPTokenProvider(logger: logger),
+                portDiscovery: DaemonPidFilePortDiscovery(logger: logger)
+            )
         )
     }
 
@@ -40,7 +46,14 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
         guard endpoint.scheme != nil else { throw MCPClientError.invalidEndpoint(endpoint.absoluteString) }
         self.endpoint = endpoint
         logger = options.logger
-        self.performer = performer
+        self.performer = AuthenticatedDaemonHTTPRequestPerformer.isDaemonEndpointShape(endpoint)
+            ? AuthenticatedDaemonHTTPRequestPerformer(
+                performer: performer,
+                tokenProvider: options.tokenProvider,
+                scheduler: options.scheduler,
+                portDiscovery: options.portDiscovery
+            )
+            : performer
         scheduler = options.scheduler
     }
 
@@ -285,6 +298,7 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
             throw MCPClientError.invalidResponse("Missing HTTP response")
         }
         if httpResponse.statusCode == 404 { throw MCPClientError.sessionExpired }
+        if httpResponse.statusCode == 401 { throw MCPClientError.requestFailed("HTTP 401") }
         // This runs only for the winning response, never inside the deadline child. A reset also
         // invalidates the snapshot, so an older in-flight response cannot restore a cleared session.
         if let sessionHeader = Self.extractSessionId(from: httpResponse) {

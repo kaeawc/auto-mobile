@@ -46,6 +46,7 @@ function harness() {
     tickLateness: {
       note: (now) => {
         log.push(`note:${now}`);
+        return 0;
       },
       reset: () => {
         log.push("reset");
@@ -262,7 +263,7 @@ describe("LatestBindingKeeper.runLatestBindingHeartbeatTick", () => {
       timer: h.timer,
       state: h.state,
       keeper: { start() {}, stop: async () => true, run: async () => {} },
-      tickLateness: { note() {}, reset() {} },
+      tickLateness: { note: () => 0, reset() {} },
       boundHeartbeat: {
         sendBoundSessionHeartbeat: async (isCurrent) => {
           h.log.push(`send:${isCurrent === undefined ? "default" : "given"}`);
@@ -293,7 +294,7 @@ describe("LatestBindingKeeper.runLatestBindingHeartbeatTick", () => {
       timer: h.timer,
       state: h.state,
       keeper: { start() {}, stop: async () => true, run: async () => {} },
-      tickLateness: { note() {}, reset() {} },
+      tickLateness: { note: () => 0, reset() {} },
       boundHeartbeat: { sendBoundSessionHeartbeat: send },
       heartbeatIntervalMs: INTERVAL_MS,
       heartbeatLeashMs: LEASH_MS,

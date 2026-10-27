@@ -493,6 +493,29 @@ describe("DevicectlDeviceLister", () => {
     expect(executions).toBe(2);
   });
 
+  test("a cache bypass re-lists physical devices and propagates an incomplete result", async () => {
+    let executions = 0;
+    let failed = false;
+    const lister = makeLister({
+      execute: async () => {
+        executions++;
+        if (failed) {
+          throw new Error("devicectl blipped");
+        }
+        return okExec;
+      },
+      readFile: async () => JSON.stringify(devicectlPayload([])),
+    });
+    expect((await lister.listConnectedDevices()).complete).toBe(true);
+    await lister.listConnectedDevices();
+    expect(executions).toBe(1);
+    expect((await lister.listConnectedDevices({ bypassCache: true })).complete).toBe(true);
+    expect(executions).toBe(2);
+    failed = true;
+    expect((await lister.listConnectedDevices({ bypassCache: true })).complete).toBe(false);
+    expect(executions).toBe(3);
+  });
+
   test("preserves an observation stamp for cached and retained physical devices", async () => {
     const timer = new FakeTimer();
     let shouldFail = false;

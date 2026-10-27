@@ -36,7 +36,7 @@ class StorageDashboardUiTest {
   fun `shows database tab by default`() = runComposeUiTest {
     setContent {
       MaterialTheme {
-        StorageDashboard(dataSourceMode = DataSourceMode.Fake)
+        StorageDashboard(StorageDashboardOptions(dataSourceMode = DataSourceMode.Fake))
       }
     }
     onNodeWithText("Databases").assertIsDisplayed()
@@ -47,7 +47,7 @@ class StorageDashboardUiTest {
   fun `shows both tab icons`() = runComposeUiTest {
     setContent {
       MaterialTheme {
-        StorageDashboard(dataSourceMode = DataSourceMode.Fake)
+        StorageDashboard(StorageDashboardOptions(dataSourceMode = DataSourceMode.Fake))
       }
     }
     onNodeWithText(StorageTab.Database.icon).assertIsDisplayed()
@@ -59,8 +59,10 @@ class StorageDashboardUiTest {
     setContent {
       MaterialTheme {
         StorageDashboard(
-          dataSourceMode = DataSourceMode.Fake,
-          platform = StoragePlatform.Android,
+          StorageDashboardOptions(
+            dataSourceMode = DataSourceMode.Fake,
+            platform = StoragePlatform.Android,
+          ),
         )
       }
     }
@@ -72,8 +74,10 @@ class StorageDashboardUiTest {
     setContent {
       MaterialTheme {
         StorageDashboard(
-          dataSourceMode = DataSourceMode.Fake,
-          platform = StoragePlatform.iOS,
+          StorageDashboardOptions(
+            dataSourceMode = DataSourceMode.Fake,
+            platform = StoragePlatform.iOS,
+          ),
         )
       }
     }
@@ -85,9 +89,11 @@ class StorageDashboardUiTest {
     setContent {
       MaterialTheme {
         StorageDashboard(
-          dataSourceMode = DataSourceMode.Fake,
-          deviceId = "emulator-5554",
-          packageName = "com.example.app",
+          StorageDashboardOptions(
+            dataSourceMode = DataSourceMode.Fake,
+            deviceId = "emulator-5554",
+            packageName = "com.example.app",
+          ),
         )
       }
     }
@@ -102,10 +108,12 @@ class StorageDashboardUiTest {
       setContent {
         MaterialTheme {
           StorageDashboard(
-            dataSourceMode = DataSourceMode.Fake,
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-            observationStreamClient = stream,
+            StorageDashboardOptions(
+              dataSourceMode = DataSourceMode.Fake,
+              deviceId = "emulator-5554",
+              packageName = "com.example.app",
+              observationStreamClient = stream,
+            ),
           )
         }
       }
@@ -129,10 +137,12 @@ class StorageDashboardUiTest {
     setContent {
       MaterialTheme {
         StorageDashboard(
-          dataSourceMode = DataSourceMode.Fake,
-          deviceId = "emulator-5554",
-          packageName = "com.example.app",
-          observationStreamClient = stream,
+          StorageDashboardOptions(
+            dataSourceMode = DataSourceMode.Fake,
+            deviceId = "emulator-5554",
+            packageName = "com.example.app",
+            observationStreamClient = stream,
+          ),
         )
       }
     }
@@ -155,10 +165,12 @@ class StorageDashboardUiTest {
     setContent {
       MaterialTheme {
         StorageDashboard(
-          dataSourceMode = DataSourceMode.Fake,
-          deviceId = "emulator-5554",
-          packageName = "com.example.app",
-          observationStreamClient = stream,
+          StorageDashboardOptions(
+            dataSourceMode = DataSourceMode.Fake,
+            deviceId = "emulator-5554",
+            packageName = "com.example.app",
+            observationStreamClient = stream,
+          ),
         )
       }
     }
@@ -184,10 +196,12 @@ class StorageDashboardUiTest {
         MaterialTheme {
           if (show) {
             StorageDashboard(
-              dataSourceMode = DataSourceMode.Fake,
-              deviceId = "emulator-5554",
-              packageName = "com.example.app",
-              observationStreamClient = stream,
+              StorageDashboardOptions(
+                dataSourceMode = DataSourceMode.Fake,
+                deviceId = "emulator-5554",
+                packageName = "com.example.app",
+                observationStreamClient = stream,
+              ),
             )
           }
         }
@@ -212,11 +226,13 @@ class StorageDashboardUiTest {
     setContent {
       MaterialTheme {
         StorageDashboard(
-          dataSourceMode = DataSourceMode.Fake,
-          deviceId = "ios-device",
-          packageName = "com.example.app",
-          platform = StoragePlatform.iOS,
-          observationStreamClient = stream,
+          StorageDashboardOptions(
+            dataSourceMode = DataSourceMode.Fake,
+            deviceId = "ios-device",
+            packageName = "com.example.app",
+            platform = StoragePlatform.iOS,
+            observationStreamClient = stream,
+          ),
         )
       }
     }
@@ -235,10 +251,12 @@ class StorageDashboardUiTest {
       setContent {
         MaterialTheme {
           StorageDashboard(
-            dataSourceMode = DataSourceMode.Fake,
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-            observationStreamClient = stream,
+            StorageDashboardOptions(
+              dataSourceMode = DataSourceMode.Fake,
+              deviceId = "emulator-5554",
+              packageName = "com.example.app",
+              observationStreamClient = stream,
+            ),
           )
         }
       }

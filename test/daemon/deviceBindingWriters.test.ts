@@ -57,6 +57,7 @@ describe("device binding writers current behavior (#11802)", () => {
   let utils: FakeDeviceUtils;
   let pool: DevicePool;
   let liveness: MissingDeviceLiveness;
+  let rebootOverride: boolean | undefined;
   let changes: StateChange[];
   let autolockEnv: string | undefined;
 
@@ -69,6 +70,7 @@ describe("device binding writers current behavior (#11802)", () => {
     utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", [original, bystander]);
     changes = [];
+    rebootOverride = undefined;
     pool = makePool(manager, "binding-characterization", {
       timer,
       deviceManager: utils,
@@ -76,7 +78,11 @@ describe("device binding writers current behavior (#11802)", () => {
       recoveryPolicy: { onLoss: false, maxAttempts: 0 },
       deviceSessionContinuityEnabled: false,
       missingDeviceLivenessFactory: (port) => {
-        liveness = new MissingDeviceLiveness(port);
+        liveness = new MissingDeviceLiveness({
+          ...port,
+          shouldRebootDisconnectedAndroidDevice: (device) =>
+            rebootOverride ?? port.shouldRebootDisconnectedAndroidDevice(device),
+        });
         return liveness;
       },
       onDeviceStateChanged: (deviceId, platform) => {
@@ -424,11 +430,11 @@ describe("device binding writers current behavior (#11802)", () => {
       }
       markDeviceError(device);
       const before = binding(device);
-      const snapshot = pool["snapshotSessionAssignment"](device);
+      const snapshot = pool.testHooks.snapshotSessionAssignment(device);
       expect(snapshot).toMatchObject({ status, health: "error", sessionId: device.sessionId });
       bindDevice(device, "tentative");
       device.errorCount = 17;
-      pool["restoreSessionAssignment"](device, snapshot);
+      pool.testHooks.restoreSessionAssignment(device, snapshot);
       expect(binding(device)).toEqual(before);
       expect(statusOf(device)).toBe("error");
     },
@@ -522,7 +528,7 @@ describe("device binding writers current behavior (#11802)", () => {
       pool.recordDeviceError(original.deviceId);
       changes.length = 0;
       const session = manager.getSession("owner")!;
-      expect(pool["detachSessionForAndroidRecovery"](captured, "owner", session)).toBe(true);
+      expect(pool.testHooks.detachSessionForAndroidRecovery(captured, "owner", session)).toBe(true);
       const detached = {
         ...owned,
         sessionId: null,
@@ -542,7 +548,7 @@ describe("device binding writers current behavior (#11802)", () => {
     const session = manager.getSession("owner")!;
     const stale: Session = { ...session };
     changes.length = 0;
-    expect(pool["detachSessionForAndroidRecovery"](captured, "owner", stale)).toBe(false);
+    expect(pool.testHooks.detachSessionForAndroidRecovery(captured, "owner", stale)).toBe(false);
     expect(binding(captured)).toEqual(owned);
     expect(changes).toEqual([]);
     assertAgreement();
@@ -556,7 +562,7 @@ describe("device binding writers current behavior (#11802)", () => {
       const captured = await bindOwner();
       pool.recordDeviceError(original.deviceId);
       changes.length = 0;
-      await pool["releaseCapturedDevice"](captured, "owner", 0);
+      await pool.testHooks.releaseCapturedDevice(captured, "owner", 0);
       expect(binding(captured)).toEqual({ ...owned, errorCount: 1 });
       expect(changes).toEqual([]);
       assertAgreement();
@@ -603,9 +609,7 @@ describe("device binding writers current behavior (#11802)", () => {
           incidentStarted.resolve();
           return await incident.promise;
         });
-        const reboot = spyOn(pool, "shouldRebootDisconnectedAndroidDevice").mockReturnValue(
-          detached,
-        );
+        rebootOverride = detached;
         const disconnect = spyOn(pool, "removeDisconnectedDevice").mockResolvedValue();
         utils.setBootedDevices("android", [bystander]);
         const checking = liveness.ensurePooledDevicePresent(captured, detached, false, !detached);
@@ -634,7 +638,7 @@ describe("device binding writers current behavior (#11802)", () => {
             );
           } finally {
             record.mockRestore();
-            reboot.mockRestore();
+            rebootOverride = undefined;
             disconnect.mockRestore();
           }
         }

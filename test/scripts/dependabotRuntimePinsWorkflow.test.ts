@@ -170,7 +170,8 @@ describe("Dependabot runtime pin refresh contract", () => {
     ]) {
       expect(script).not.toContain(key);
     }
-    expect(script).toContain("package_filter='delpaths($keys | map([.]))'");
+    // Double-quoted with an escaped dollar so shellcheck needs no SC2016 suppression.
+    expect(script).toContain('package_filter="delpaths(\\$keys | map([.]))"');
     expect(script.match(/--argjson keys "\$package_keys" "\$package_filter"/g)).toHaveLength(2);
     expect(script).toContain("jq -S -c");
     expect(script.indexOf('run_git show "$HEAD_SHA:package.json"')).toBeLessThan(

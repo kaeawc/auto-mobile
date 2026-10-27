@@ -73,7 +73,7 @@ export async function checkDevicectlAvailability(
  * attached hardware degrades to an empty list.
  */
 export interface IosPhysicalDeviceLister {
-  listConnectedDevices(): Promise<PhysicalIosDeviceDiscovery>;
+  listConnectedDevices(options?: { bypassCache?: boolean }): Promise<PhysicalIosDeviceDiscovery>;
 }
 
 export type DevicectlListingErrorCode = "unavailable" | "failed" | "timeout";
@@ -529,14 +529,21 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
     this.deps = { ...defaultDependencies, ...dependencies };
   }
 
-  async listConnectedDevices(): Promise<PhysicalIosDeviceDiscovery> {
+  async listConnectedDevices(
+    options: { bypassCache?: boolean } = {},
+  ): Promise<PhysicalIosDeviceDiscovery> {
     if (this.deps.platform() !== "darwin") {
       return { devices: [], complete: true };
     }
     const now = this.deps.timer.now();
     // A backward wall-clock adjustment makes cached freshness unknowable.
     // Re-list immediately rather than retaining a stale physical-device name.
-    if (this.cache && now >= this.cache.observedAt && now < this.cache.expiresAt) {
+    if (
+      !options.bypassCache &&
+      this.cache &&
+      now >= this.cache.observedAt &&
+      now < this.cache.expiresAt
+    ) {
       return this.cache.discovery;
     }
     // Concurrent sweeps share one devicectl process rather than racing two.

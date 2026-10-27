@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeAll, expect, spyOn, test } from "bun:test";
@@ -29,7 +30,7 @@ const remove = (row: number): TapOnElementOptions => ({
   action: "tap",
   elementId: "remove",
   container: { elementId: `item_${row}`, container: { elementId: "cart_B" } },
-  strategy: "unique",
+  selectionStrategy: "unique",
   searchUntil: { duration: 100 },
 });
 const save: TapOnElementOptions = {
@@ -46,29 +47,29 @@ function harness(observation: ObserveResult, platform: "ios" | "android" = "ios"
     new FakeAdbExecutor(),
     {
       timer,
-      tapStrategy: new FakeTapStrategy(),
+      tapStrategy: platform === "ios" ? FakeTapStrategy.ios() : new FakeTapStrategy(),
       visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     },
   );
   const points: Array<{ x: number; y: number }> = [];
-  tap.observedInteraction = async (action) => ({
-    ...(await action(recordObservationRead(observation))),
+  tap.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
     observation,
   });
   tap.refreshViewHierarchy = async () => observation.viewHierarchy!;
-  tap.executeiOSTap = async (_action, x, y) => {
+  tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
     points.push({ x, y });
-  };
+  });
   tap.executeAndroidTap = async (_action, x, y) => {
     points.push({ x, y });
   };
   tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
+    effect: undefined,
     observation: current,
   });
   tap.prepareSelectionCapture = async () => null;
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   return { tap, points };
 }
@@ -177,7 +178,12 @@ const assistantVariants = (
   const observation = structuredClone(forms);
   const nodes = new SearchableHierarchy().project(observation.viewHierarchy!);
   // Only the captured SystemInputAssistantView frame changes for width/abutment boundaries.
-  nodes.find((node) => node.nativeId === "SystemInputAssistantView")!.source.bounds = [...frame];
+  const assistant = nodes.find((node) => node.nativeId === "SystemInputAssistantView");
+  if (!assistant) {
+    throw new Error("Expected input assistant");
+  }
+  const [left, frameTop, right, bottom] = frame;
+  assistant.source.bounds = { left, top: frameTop, right, bottom };
   return {
     name,
     top,

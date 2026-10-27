@@ -16,7 +16,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -32,20 +31,25 @@ import dev.jasonpearson.automobile.desktop.core.daemon.ActiveRecordingTracker
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSyncMode
+import dev.jasonpearson.automobile.desktop.core.daemon.SessionReleaseReason
 import dev.jasonpearson.automobile.desktop.core.daemon.TrackedRecording
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingActions
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingArtifact
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingConfigClient
+import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingStartResult
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamDescriptor
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 private val LOG = LoggerFactory.getLogger("DeviceControlsDashboard")
+
+/**
+ * The device the session released, and why (#11366): selecting another device is such a release.
+ */
+data class DeviceRelease(val deviceId: String, val reason: SessionReleaseReason? = null)
 
 /**
  * Device appearance, video recording, and screen sharing.
@@ -63,120 +67,126 @@ private val LOG = LoggerFactory.getLogger("DeviceControlsDashboard")
  */
 @Composable
 fun DeviceControlsDashboard(
-  appearanceClient: AppearanceClient?,
-  recordingActions: VideoRecordingActions?,
-  recordingConfigClient: VideoRecordingConfigClient?,
-  streamClient: WebRtcStreamClient?,
   activeDeviceId: String?,
   modifier: Modifier = Modifier,
-  /** The recording this dashboard started, shared with the session so a hidden host keeps it. */
   activeRecordings: ActiveRecordingTracker = remember { ActiveRecordingTracker() },
-  /** The daemon session the recording would be started under, to scope its artifact lookup. */
-  sessionUuidProvider: () -> String? = { null },
-  /** The device the session just stopped holding (idle, hidden, daemon), if any (#10978). */
-  releasedDeviceId: String? = null,
+  release: DeviceRelease? = null,
+  options: DeviceControlsClients,
+) {
+  val memory = rememberDeviceControlsMemory()
+  with(memory) {
+    return with(options) {
+      val colors = SharedTheme.globalColors
+      val scope = rememberCoroutineScope()
+
+      val recording = activeRecordings.current
+
+      LoadStreams(memory)
+
+      LoadDeviceConfiguration(memory)
+
+      val run: (String, suspend () -> String?) -> Unit = { label, block ->
+        runDeviceAction(memory, scope, label, block)
+      }
+
+      // Stops by recording id, which needs no device, so it never allocates one and still works
+      // after
+      // the device was released or the selection moved. The tracker is cleared whatever the
+      // outcome:
+      // a failed stop must not leave the button stuck on "Stop" (#10978).
+      val finishRecording: suspend (TrackedRecording, String) -> String = { tracked, outcome ->
+        finishDeviceRecording(memory, activeRecordings, tracked, outcome)
+      }
+
+      // The session released the recorded device: the daemon already stopped and finalized the
+      // recording, so show it as stopped by the release and offer its artifact. Selecting another
+      // device is such a release too (owner decision 2026-10-10, #11366).
+      LaunchedEffect(release) {
+        val tracked = activeRecordings.current
+        if (release != null && tracked != null && tracked.deviceId == release.deviceId) {
+          val outcome =
+            if (release.reason == SessionReleaseReason.DEVICE_SWITCH) "Stopped by device switch"
+            else "Stopped by release"
+          run("Fetch recording") { finishRecording(tracked, outcome) }
+        }
+      }
+
+      Column(
+        modifier = modifier.fillMaxSize().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        AppearanceControls(memory, run)
+        RecordingControls(memory, activeDeviceId, activeRecordings, run, finishRecording)
+        notice?.let { Hint(it, Color(0xFF4CAF50)) }
+        error?.let { Hint(it, Color(0xFFE53935)) }
+        SharingControls(memory, activeDeviceId, run)
+        manifestPath?.let {
+          Hint("Segment manifest: $it", colors.text.normal.copy(alpha = 0.6f))
+        }
+
+        RecordingArtifacts()
+      }
+    }
+  }
+}
+
+@Composable
+private fun Chip(label: String, accent: Color, enabled: Boolean = true, onClick: () -> Unit) {
+  val alpha = if (enabled) 1f else 0.4f
+  Box(
+    modifier =
+      Modifier.background(accent.copy(alpha = 0.15f * alpha), RoundedCornerShape(4.dp))
+        .let {
+          if (enabled) it.clickable(onClick = onClick).pointerHoverIcon(PointerIcon.Hand) else it
+        }
+        .padding(horizontal = 8.dp, vertical = 3.dp),
+  ) {
+    Text(label, fontSize = 9.sp, softWrap = false, color = accent.copy(alpha = alpha))
+  }
+}
+
+@Composable
+private fun Hint(text: String, color: Color) {
+  Text(text, fontSize = 10.sp, color = color.copy(alpha = 0.8f))
+}
+
+data class DeviceControlsClients(
+  val appearanceClient: AppearanceClient?,
+  val recordingActions: VideoRecordingActions?,
+  val recordingConfigClient: VideoRecordingConfigClient?,
+  val streamClient: WebRtcStreamClient?,
+  val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+)
+
+internal data class DeviceControlsMemory(
+  private val appearanceState: androidx.compose.runtime.MutableState<AppearanceConfig?>,
+  private val appliedModeState: androidx.compose.runtime.MutableState<AppearanceSyncMode?>,
+  private val recordingConfigState: androidx.compose.runtime.MutableState<VideoRecordingConfig?>,
+  private val artifactsState: androidx.compose.runtime.MutableState<List<VideoRecordingArtifact>>,
+  private val manifestPathState: androidx.compose.runtime.MutableState<String?>,
+  private val busyState: androidx.compose.runtime.MutableState<Boolean>,
+  private val noticeState: androidx.compose.runtime.MutableState<String?>,
+  private val errorState: androidx.compose.runtime.MutableState<String?>,
+  private val streamsState: androidx.compose.runtime.MutableState<List<WebRtcStreamDescriptor>>,
+) {
+  var appearance by appearanceState
+  var appliedMode by appliedModeState
+  var recordingConfig by recordingConfigState
+  var artifacts by artifactsState
+  var manifestPath by manifestPathState
+  var busy by busyState
+  var notice by noticeState
+  var error by errorState
+  var streams by streamsState
+}
+
+@Composable
+private fun DeviceControlsClients.AppearanceControls(
+  memory: DeviceControlsMemory,
+  run: (String, suspend () -> String?) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
-  val scope = rememberCoroutineScope()
-
-  var appearance by remember { mutableStateOf<AppearanceConfig?>(null) }
-  var appliedMode by remember { mutableStateOf<AppearanceSyncMode?>(null) }
-  var recordingConfig by remember { mutableStateOf<VideoRecordingConfig?>(null) }
-  var artifacts by remember { mutableStateOf<List<VideoRecordingArtifact>>(emptyList()) }
-  var manifestPath by remember { mutableStateOf<String?>(null) }
-  val recording = activeRecordings.current
-  var busy by remember { mutableStateOf(false) }
-  var notice by remember { mutableStateOf<String?>(null) }
-  var error by remember { mutableStateOf<String?>(null) }
-  var streams by remember { mutableStateOf<List<WebRtcStreamDescriptor>>(emptyList()) }
-
-  LaunchedEffect(streamClient) {
-    if (streamClient?.isAvailable() != true) return@LaunchedEffect
-    streams =
-      try {
-        withContext(Dispatchers.IO) { streamClient.listStreams() }
-      } catch (e: Exception) {
-        LOG.warn("Could not list WebRTC streams: ${e.message}", e)
-        emptyList()
-      }
-  }
-
-  LaunchedEffect(appearanceClient, recordingConfigClient) {
-    withContext(Dispatchers.IO) {
-      appearance =
-        try {
-          if (appearanceClient?.isAvailable() == true) appearanceClient.getConfig().config else null
-        } catch (e: Exception) {
-          LOG.warn("Appearance config unavailable: ${e.message}", e)
-          null
-        }
-      recordingConfig =
-        try {
-          if (recordingConfigClient?.isAvailable() == true) {
-            recordingConfigClient.getConfig().config
-          } else {
-            null
-          }
-        } catch (e: Exception) {
-          LOG.warn("Recording config unavailable: ${e.message}", e)
-          null
-        }
-    }
-  }
-
-  fun run(label: String, block: suspend () -> String?) {
-    busy = true
-    notice = null
-    error = null
-    scope.launch {
-      try {
-        notice = withContext(Dispatchers.IO) { block() }
-      } catch (e: Exception) {
-        LOG.warn("$label failed: ${e.message}", e)
-        error = e.message ?: "$label failed"
-      } finally {
-        busy = false
-      }
-    }
-  }
-
-  // Stops by recording id, which needs no device, so it never allocates one and still works after
-  // the device was released or the selection moved. The tracker is cleared whatever the outcome:
-  // a failed stop must not leave the button stuck on "Stop" (#10978).
-  suspend fun finishRecording(tracked: TrackedRecording, outcome: String): String {
-    try {
-      val result =
-        recordingActions?.stopRecording(
-          tracked.deviceId,
-          tracked.recordingId,
-          tracked.ownerSessionUuid,
-        )
-      artifacts = result?.recordings.orEmpty()
-      manifestPath = result?.manifestPath
-      val count = artifacts.size
-      return if (result?.segmented == true) {
-        "$outcome — $count segment(s) across ${result.sessions.size} session(s)"
-      } else {
-        "$outcome — $count recording(s)"
-      }
-    } finally {
-      activeRecordings.clear()
-    }
-  }
-
-  // The session released the recorded device: the daemon already stopped and finalized the
-  // recording, so show it as stopped by the release and offer its artifact.
-  LaunchedEffect(releasedDeviceId) {
-    val tracked = activeRecordings.current
-    if (releasedDeviceId != null && tracked != null && tracked.deviceId == releasedDeviceId) {
-      run("Fetch recording") { finishRecording(tracked, "Stopped by release") }
-    }
-  }
-
-  Column(
-    modifier = modifier.fillMaxSize().padding(12.dp),
-    verticalArrangement = Arrangement.spacedBy(10.dp),
-  ) {
+  with(memory) {
     // -- Appearance --
     Text(
       "Appearance",
@@ -234,7 +244,20 @@ fun DeviceControlsDashboard(
         }
       }
     }
+  }
+}
 
+@Composable
+private fun DeviceControlsClients.RecordingControls(
+  memory: DeviceControlsMemory,
+  activeDeviceId: String?,
+  activeRecordings: ActiveRecordingTracker,
+  run: (String, suspend () -> String?) -> Unit,
+  finishRecording: suspend (TrackedRecording, String) -> String,
+) {
+  val colors = SharedTheme.globalColors
+  val recording = activeRecordings.current
+  with(memory) {
     // -- Recording --
     Text(
       "Video recording",
@@ -254,19 +277,12 @@ fun DeviceControlsDashboard(
         enabled =
           recordingActions != null && (recording != null || activeDeviceId != null) && !busy,
       ) {
-        if (recording != null) {
-          run("Stop recording") { finishRecording(recording, "Stopped") }
-        } else {
-          val deviceId = activeDeviceId ?: return@Chip
-          val ownerSessionUuid = sessionUuidProvider()
-          run("Start recording") {
-            val started = recordingActions?.startRecording(deviceId).orEmpty()
-            started.firstOrNull()?.let {
-              activeRecordings.begin(TrackedRecording(deviceId, it.recordingId, ownerSessionUuid))
-            }
-            "Recording…"
-          }
-        }
+        toggleRecording(
+          recording,
+          activeDeviceId,
+          activeRecordings,
+          RecordingControlActions(run, finishRecording),
+        )
       }
     }
 
@@ -287,9 +303,17 @@ fun DeviceControlsDashboard(
         color = colors.text.normal.copy(alpha = 0.6f),
       )
     }
+  }
+}
 
-    notice?.let { Hint(it, Color(0xFF4CAF50)) }
-    error?.let { Hint(it, Color(0xFFE53935)) }
+@Composable
+private fun DeviceControlsClients.SharingControls(
+  memory: DeviceControlsMemory,
+  activeDeviceId: String?,
+  run: (String, suspend () -> String?) -> Unit,
+) {
+  val colors = SharedTheme.globalColors
+  with(memory) {
     // -- Remote viewing --
     Text(
       "Remote viewing",
@@ -343,38 +367,37 @@ fun DeviceControlsDashboard(
         )
       }
     }
+  }
+}
 
-    manifestPath?.let {
-      Hint("Segment manifest: $it", colors.text.normal.copy(alpha = 0.6f))
-    }
-
-    if (artifacts.isNotEmpty()) {
-      LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-      ) {
-        items(artifacts.sortedBy { it.segmentIndex }) { artifact ->
-          Row(
-            modifier =
-              Modifier.fillMaxWidth()
-                .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(4.dp))
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            Column(modifier = Modifier.weight(1f)) {
-              Text(
-                // A lone recording has no meaningful segment number to show.
-                if (artifacts.size > 1) "Segment ${artifact.segmentIndex}"
-                else artifact.recordingId,
-                fontSize = 11.sp,
-                color = colors.text.normal,
-              )
-              Text(
-                artifact.filePath,
-                fontSize = 9.sp,
-                color = colors.text.normal.copy(alpha = 0.5f),
-              )
-            }
+@Composable
+private fun DeviceControlsMemory.RecordingArtifacts() {
+  val colors = SharedTheme.globalColors
+  if (artifacts.isNotEmpty()) {
+    LazyColumn(
+      modifier = Modifier.fillMaxSize(),
+      verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+      items(artifacts.sortedBy { it.segmentIndex }) { artifact ->
+        Row(
+          modifier =
+            Modifier.fillMaxWidth()
+              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(4.dp))
+              .padding(horizontal = 10.dp, vertical = 6.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text(
+              // A lone recording has no meaningful segment number to show.
+              if (artifacts.size > 1) "Segment ${artifact.segmentIndex}" else artifact.recordingId,
+              fontSize = 11.sp,
+              color = colors.text.normal,
+            )
+            Text(
+              artifact.filePath,
+              fontSize = 9.sp,
+              color = colors.text.normal.copy(alpha = 0.5f),
+            )
           }
         }
       }
@@ -382,22 +405,33 @@ fun DeviceControlsDashboard(
   }
 }
 
-@Composable
-private fun Chip(label: String, accent: Color, enabled: Boolean = true, onClick: () -> Unit) {
-  val alpha = if (enabled) 1f else 0.4f
-  Box(
-    modifier =
-      Modifier.background(accent.copy(alpha = 0.15f * alpha), RoundedCornerShape(4.dp))
-        .let {
-          if (enabled) it.clickable(onClick = onClick).pointerHoverIcon(PointerIcon.Hand) else it
-        }
-        .padding(horizontal = 8.dp, vertical = 3.dp),
-  ) {
-    Text(label, fontSize = 9.sp, softWrap = false, color = accent.copy(alpha = alpha))
-  }
-}
+private data class RecordingControlActions(
+  val run: (String, suspend () -> String?) -> Unit,
+  val finishRecording: suspend (TrackedRecording, String) -> String,
+)
 
-@Composable
-private fun Hint(text: String, color: Color) {
-  Text(text, fontSize = 10.sp, color = color.copy(alpha = 0.8f))
+private fun DeviceControlsClients.toggleRecording(
+  recording: TrackedRecording?,
+  activeDeviceId: String?,
+  activeRecordings: ActiveRecordingTracker,
+  actions: RecordingControlActions,
+) {
+  with(actions) {
+    if (recording != null) {
+      run("Stop recording") { finishRecording(recording, "Stopped") }
+    } else {
+      val deviceId = activeDeviceId ?: return
+      run("Start recording") {
+        // The owner is the session the start named, not a registration-gated read here: a stop
+        // after a rotation must still name it (#11366).
+        val started = recordingActions?.startRecording(deviceId) ?: VideoRecordingStartResult()
+        started.recordings.firstOrNull()?.let {
+          activeRecordings.begin(
+            TrackedRecording(deviceId, it.recordingId, started.ownerSessionUuid),
+          )
+        }
+        "Recording…"
+      }
+    }
+  }
 }

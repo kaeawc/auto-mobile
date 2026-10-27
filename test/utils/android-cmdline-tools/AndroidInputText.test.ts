@@ -1,4 +1,6 @@
-import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { createExecResult } from "../../../src/utils/execResult";
+import type { ExecResult } from "../../../src/models";
+import { afterEach, beforeEach, mock, describe, expect, spyOn, test } from "bun:test";
 import {
   executeAndroidInputText,
   INPUT_TEXT_CONSUME_MARGIN_MS,
@@ -25,9 +27,13 @@ const drainMs = (chars: number) =>
 
 describe("tracked Android input text", () => {
   const settlementMs = INPUT_TEXT_SETTLEMENT_BASE_MS + 5 * INPUT_TEXT_SETTLEMENT_PER_CHAR_MS;
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  afterEach(() => warn.mockClear());
-  afterAll(() => warn.mockRestore());
+  let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+  beforeEach(() => {
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    mock.restore();
+  });
 
   function start(
     chunks?: string[],
@@ -210,7 +216,7 @@ describe("tracked Android input text", () => {
     );
     await adb.entered.promise;
     expect(adb.ambientSignals).toEqual([undefined]);
-    adb.host.resolve({ stdout: "", stderr: "" });
+    adb.host.resolve(createExecResult("", ""));
     await drainMicrotasks(50);
     timer.advanceTime(3 * INPUT_TEXT_CONSUME_PER_CHAR_MS);
     await done;
@@ -309,7 +315,7 @@ describe("tracked Android input text", () => {
   test("a probe rejecting after deadline is debug-logged and preserves cancellation", async () => {
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     const h = start();
-    const probe = Promise.withResolvers<{ stdout: string; stderr: string }>();
+    const probe = Promise.withResolvers<ExecResult>();
     h.adb.cleanupResult = probe.promise;
     try {
       await h.adb.entered.promise;
@@ -337,7 +343,7 @@ describe("tracked Android input text", () => {
   test.each([30, 31, 34])("API %s selects its dispatch on the host", async (apiLevel) => {
     const h = start(undefined, apiLevel);
     await h.adb.entered.promise;
-    h.adb.host.resolve({ stdout: "", stderr: "" });
+    h.adb.host.resolve(createExecResult("", ""));
     await drainMicrotasks(50);
     h.timer.advanceTime(5 * INPUT_TEXT_CONSUME_PER_CHAR_MS);
     await h.result;
@@ -432,7 +438,7 @@ describe("tracked Android input text", () => {
   test("success costs no guard round trip and keeps result, quoting and redaction", async () => {
     const h = start();
     await h.adb.entered.promise;
-    const result = { stdout: "4242\n", stderr: "" };
+    const result = createExecResult("4242\n", "");
     h.adb.host.resolve(result);
     expect(await h.result).toBe(result);
     expect(h.adb.cleanupCalls).toEqual([]);
@@ -477,20 +483,20 @@ describe("tracked Android input text", () => {
 
   test("password dispatch keeps the wrapper and payload out of real AdbClient logs/errors", async () => {
     const timer = new FakeTimer();
-    const spies = (["debug", "info", "error"] as const).map((level) =>
-      spyOn(logger, level).mockImplementation(() => {}),
-    );
+    const spies = [
+      spyOn(logger, "debug").mockImplementation(() => {}),
+      spyOn(logger, "info").mockImplementation(() => {}),
+      spyOn(logger, "error").mockImplementation(() => {}),
+    ];
     const secret = "private-payload'$";
     const adb = new AdbClient(
       null,
-      async (_file, args) => {
+      async (_file: string, args: string[]) => {
         throw Object.assign(new Error(`Command failed: adb ${args.join(" ")}`), {
           cmd: args.join(" "),
         });
       },
-      null,
-      defaultRetryExecutor,
-      timer,
+      { retryExecutor: defaultRetryExecutor, timer },
     );
     try {
       const result = await executeAndroidInputText(

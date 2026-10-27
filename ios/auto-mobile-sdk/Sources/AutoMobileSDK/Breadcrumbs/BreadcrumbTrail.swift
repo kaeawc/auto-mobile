@@ -93,7 +93,9 @@ public final class BreadcrumbTrail: BreadcrumbTracking, Sendable {
 
     private static func defaultDirectory() -> URL {
         // The caches directory always exists in userDomainMask on iOS.
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
-            .first! // swiftlint:disable:this force_unwrapping
+        guard let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            preconditionFailure("The user caches directory must be available")
+        }
+        return directory
     }
 }

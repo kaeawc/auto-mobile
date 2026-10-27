@@ -1,3 +1,4 @@
+import type { ViewHierarchyNode } from "../../models";
 /**
  * Shared pure helpers used by both the Android and iOS notification UI
  * detectors. Extracted from `systemTrayHelpers.ts` so the detectors do
@@ -152,7 +153,32 @@ export const nodeHasSystemTrayHint = (node: any): boolean => {
   return matchesResourceId || matchesClassName;
 };
 
-export const nodeHasIosNotificationCenterHint = (node: any): boolean => {
+/** The captured iOS 27 cover sheet must contain its notification list. */
+export const nodeIsIosCoverSheetNotificationCenter = (node: ViewHierarchyNode | null): boolean => {
+  const props = getNodeProperties(node);
+  if (!props) {
+    return false;
+  }
+  // Require the notification list INSIDE its cover-sheet window: the date/clock,
+  // a generic ListCell, or a cover sheet without the list is insufficient.
+  // Evidence: fixtures/ios-notification-center/ios27-notification-center-hierarchy.json.
+  return (
+    String(props.className ?? props.class ?? "") === "UIWindow" &&
+    rawResourceId(props, ["identifier"]) === "SBCoverSheetWindow" &&
+    traverseForHint(
+      node,
+      (descendant: ViewHierarchyNode) =>
+        rawResourceId(getNodeProperties(descendant)) === "combined-list-view",
+    )
+  );
+};
+
+export const hasIosCoverSheetNotificationCenter = (viewHierarchy: ViewHierarchyResult): boolean =>
+  getHierarchyRoots(viewHierarchy).some((root) =>
+    traverseForHint(root, nodeIsIosCoverSheetNotificationCenter),
+  );
+
+export const nodeHasIosNotificationCenterHint = (node: ViewHierarchyNode | null): boolean => {
   const props = getNodeProperties(node);
   if (!props) {
     return false;
@@ -160,7 +186,29 @@ export const nodeHasIosNotificationCenterHint = (node: any): boolean => {
   const className = String(props.className ?? props.class ?? "");
   const contentDesc = rawNodeString(props, ["content-desc", "ios-accessibility-label"]);
   const identifier = rawResourceId(props, ["identifier"]);
-  return IOS_NOTIFICATION_CENTER_CLASS_HINTS.some(
-    (hint) => className.includes(hint) || contentDesc.includes(hint) || identifier.includes(hint),
+  return (
+    nodeIsIosCoverSheetNotificationCenter(node) ||
+    IOS_NOTIFICATION_CENTER_CLASS_HINTS.some(
+      (hint) => className.includes(hint) || contentDesc.includes(hint) || identifier.includes(hint),
+    )
   );
 };
+
+/** Resource identity for notification inventory diagnostics (never selector matching). */
+export const notificationResourceId = (node: ViewHierarchyNode): string =>
+  rawResourceId(getNodeProperties(node));
+
+// A tray scroll keeps animating after `input swipe` returns. Poll until two
+// consecutive observations match instead of trusting the first frame, bounded
+// so a tray whose content never quiets (progress text, chronometers) still
+// makes progress.
+export const SYSTEM_TRAY_SCROLL_IDLE_TIMEOUT_MS = 1500;
+
+export const SYSTEM_TRAY_SCROLL_IDLE_POLL_MS = 150;
+
+export const NOTIFICATION_TITLE_FIELD_IDS = [
+  "title",
+  "title_big",
+  "conversation_text",
+  "notification_title",
+];

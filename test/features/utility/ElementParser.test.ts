@@ -1,3 +1,4 @@
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
 import { describe, expect, test } from "bun:test";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../src/models";
@@ -37,7 +38,7 @@ describe("DefaultElementParser", () => {
       const props = parser.extractNodeProperties(node);
       expect(props).toEqual({ text: "hello" });
       expect(props).not.toBe(node);
-      expect(node).toEqual({
+      expect<unknown>(node).toEqual({
         text: "hello",
         bounds: bounds(0, 0, 100, 100),
         node: [],
@@ -46,10 +47,12 @@ describe("DefaultElementParser", () => {
     });
 
     test("returns a copy for null $", () => {
-      const node = { $: null } as ViewHierarchyNode;
-      const props = parser.extractNodeProperties(node);
-      expect(props).toEqual({ $: null });
-      expect(props).not.toBe(node);
+      const node = { $: null };
+      parser.traverseNode(node, (raw) => {
+        const props = parser.extractNodeProperties(raw);
+        expect(props).toEqual({ $: null });
+        expect(props).not.toBe(node);
+      });
     });
   });
 
@@ -216,27 +219,27 @@ describe("DefaultElementParser", () => {
     });
 
     test("returns empty array for hierarchy with error", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: { error: "Failed to capture" },
-      };
+      });
       expect(parser.extractRootNodes(viewHierarchy)).toEqual([]);
     });
 
     test("extracts single root node", () => {
       const rootNode: ViewHierarchyNode = { $: { text: "root" } };
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: { node: rootNode },
-      };
+      });
       const roots = parser.extractRootNodes(viewHierarchy);
       expect(roots).toHaveLength(1);
     });
 
     test("extracts array of root nodes", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: [{ $: { text: "root1" } }, { $: { text: "root2" } }],
         },
-      };
+      });
       const roots = parser.extractRootNodes(viewHierarchy);
       expect(roots).toHaveLength(2);
     });
@@ -244,37 +247,37 @@ describe("DefaultElementParser", () => {
 
   describe("extractWindowRootGroups", () => {
     test("returns empty for hierarchy without windows", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: { node: { $: {} } },
-      };
+      });
       expect(parser.extractWindowRootGroups(viewHierarchy)).toEqual([]);
     });
 
     test("returns empty for empty windows array", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: { node: { $: {} } },
         windows: [],
-      };
+      });
       expect(parser.extractWindowRootGroups(viewHierarchy)).toEqual([]);
     });
 
     test("extracts root groups from windows", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: { node: { $: {} } },
         windows: [
           { windowLayer: 0, hierarchy: { $: { text: "win0" } } },
           { windowLayer: 1, hierarchy: { $: { text: "win1" } } },
         ],
-      };
+      });
       const groups = parser.extractWindowRootGroups(viewHierarchy);
       expect(groups).toHaveLength(2);
     });
 
     test("filters out windows without hierarchy", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: { node: { $: {} } },
         windows: [{ windowLayer: 0, hierarchy: { $: { text: "win0" } } }, { windowLayer: 1 }],
-      };
+      });
       const groups = parser.extractWindowRootGroups(viewHierarchy);
       expect(groups).toHaveLength(1);
     });
@@ -286,11 +289,11 @@ describe("DefaultElementParser", () => {
     });
 
     test("flattens single element", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: { $: { text: "button", bounds: bounds(0, 0, 100, 50) } },
         },
-      };
+      });
       const result = parser.flattenViewHierarchy(viewHierarchy);
       expect(result).toHaveLength(1);
       expect(result[0].index).toBe(0);
@@ -299,7 +302,7 @@ describe("DefaultElementParser", () => {
     });
 
     test("assigns sequential indices", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: { text: "parent", bounds: bounds(0, 0, 100, 100) },
@@ -309,7 +312,7 @@ describe("DefaultElementParser", () => {
             ],
           },
         },
-      };
+      });
       const result = parser.flattenViewHierarchy(viewHierarchy);
       expect(result).toHaveLength(3);
       expect(result[0].index).toBe(0);
@@ -318,7 +321,7 @@ describe("DefaultElementParser", () => {
     });
 
     test("skips nodes without valid bounds", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: { text: "parent", bounds: bounds(0, 0, 100, 100) },
@@ -328,13 +331,13 @@ describe("DefaultElementParser", () => {
             ],
           },
         },
-      };
+      });
       const result = parser.flattenViewHierarchy(viewHierarchy);
       expect(result).toHaveLength(2); // parent + valid child
     });
 
     test("extracts content-desc as text", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {
@@ -343,7 +346,7 @@ describe("DefaultElementParser", () => {
             },
           },
         },
-      };
+      });
       const result = parser.flattenViewHierarchy(viewHierarchy);
       expect(result[0].text).toBe("Close button");
     });

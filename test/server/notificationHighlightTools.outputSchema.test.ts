@@ -69,8 +69,10 @@ describe("notification and highlight output schemas (#11830)", () => {
   );
 
   describe.each(["getNotificationPolicy", "setNotificationPolicy"] as const)("%s", (name) => {
-    let restore = (): void => {};
-    afterEach(() => restore());
+    let policy: ReturnType<
+      typeof spyOn<typeof NotificationPolicy.prototype, "getPolicy" | "setPolicy">
+    >;
+    afterEach(() => policy.mockRestore());
 
     test.each([true, false])("success=%s validates structuredContent", async (ok) => {
       const result = {
@@ -86,8 +88,7 @@ describe("notification and highlight output schemas (#11830)", () => {
         ...(ok ? {} : { error: "Policy lookup failed" }),
       };
       const method = name === "getNotificationPolicy" ? "getPolicy" : "setPolicy";
-      const spy = spyOn(NotificationPolicy.prototype, method).mockResolvedValue(result);
-      restore = () => spy.mockRestore();
+      policy = spyOn(NotificationPolicy.prototype, method).mockResolvedValue(result);
       registerNotificationTools();
       const tool = ToolRegistry.getTool(name)!;
       const response = (await tool.deviceAwareHandler!(device, {

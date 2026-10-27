@@ -610,8 +610,8 @@ describe("FailureAnalyticsRepository", () => {
       const rows = Array.from({ length: count }, (_v, i) => ({
         occurrence_id: `occ-${i}`,
         group_id: `grp-${i}`,
-        type: "crash",
-        severity: "critical",
+        type: "crash" as const,
+        severity: "critical" as const,
         title: `Failure ${i}`,
         timestamp: 1000 + i,
         acknowledged: 0,

@@ -68,13 +68,8 @@ internal object RecompositionTracker {
     }
     val entry = entries.computeIfAbsent(id) { Entry(id) }
     entry.record(
-      composableName,
-      resourceId,
-      testTag,
-      parentChain,
-      stableAnnotated,
-      rememberedCount,
-      likelyCause,
+      RecompositionIdentity(composableName, resourceId, testTag, parentChain),
+      RecompositionDiagnostics(stableAnnotated, rememberedCount, likelyCause),
     )
     enforceEntryCap()
   }
@@ -164,6 +159,19 @@ internal object RecompositionTracker {
     }
   }
 
+  private data class RecompositionIdentity(
+    val composableName: String?,
+    val resourceId: String?,
+    val testTag: String?,
+    val parentChain: List<String>?,
+  )
+
+  private data class RecompositionDiagnostics(
+    val stableAnnotated: Boolean?,
+    val rememberedCount: Int?,
+    val likelyCause: String?,
+  )
+
   private class Entry(val id: String) {
     /** LRU tick of the last record; read during eviction without the entry lock. */
     @Volatile var lastTouch: Long = 0
@@ -183,14 +191,11 @@ internal object RecompositionTracker {
 
     @Synchronized
     fun record(
-      composableName: String?,
-      resourceId: String?,
-      testTag: String?,
-      parentChain: List<String>?,
-      stableAnnotated: Boolean?,
-      rememberedCount: Int?,
-      likelyCause: String?,
+      identity: RecompositionIdentity,
+      diagnostics: RecompositionDiagnostics,
     ) {
+      val (composableName, resourceId, testTag, parentChain) = identity
+      val (stableAnnotated, rememberedCount, likelyCause) = diagnostics
       totalCount += 1
       lastTouch = touchSequence.incrementAndGet()
       rollingAverage.record()

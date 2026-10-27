@@ -4,7 +4,11 @@ import { boundsNearlyEqual } from "../../utils/bounds";
 import type { AccessibilityNodeSelector } from "../observe/android/types";
 import { isCompleteHierarchy } from "../talkback/resourceIdActionError";
 import { requiresNodeSelector } from "../talkback/TalkBackTapStrategy";
-import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
+import {
+  SearchableHierarchy,
+  matchesCtrlProxyNodeSelector,
+  type SearchableEntry,
+} from "../utility/SearchableNode";
 import { ANDROID_INPUT_CLASSES, isTruthyFlag } from "../utility/elementProperties";
 
 /**
@@ -27,7 +31,7 @@ export async function keyboardNodeClickTargetError(
   }
   const matches = new SearchableHierarchy()
     .project(hierarchy)
-    .filter((entry) => matchesSelector(entry.properties, selector));
+    .filter((entry) => matchesCtrlProxyNodeSelector(entry.properties, selector));
   const distinct = new Set(matches.map((entry) => entry.source)).size;
   if (distinct !== 1) {
     return distinct > 1
@@ -37,20 +41,6 @@ export async function keyboardNodeClickTargetError(
   return isFocusedEditableAt(matches[0], focused)
     ? undefined
     : "Node selector does not resolve to the focused text input";
-}
-
-function matchesSelector(properties: Element, selector: AccessibilityNodeSelector): boolean {
-  const { resourceId, testTag, uniqueId, collectionRow, collectionColumn } = selector;
-  const nativeId = properties["resource-id"];
-  return (
-    (resourceId === undefined ||
-      nativeId === resourceId ||
-      (typeof nativeId === "string" && nativeId.endsWith(`:id/${resourceId}`))) &&
-    (testTag === undefined || properties["test-tag"] === testTag) &&
-    (uniqueId === undefined || properties["unique-id"] === uniqueId) &&
-    (collectionRow === undefined || properties["collection-row-index"] === collectionRow) &&
-    (collectionColumn === undefined || properties["collection-column-index"] === collectionColumn)
-  );
 }
 
 function isFocusedEditableAt(entry: SearchableEntry, focused: Element): boolean {

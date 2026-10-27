@@ -25,19 +25,23 @@ export function imeOcclusionHierarchy(withIme = true): ViewHierarchyResult {
       ? [
           {
             hierarchy: {
-              node: {
-                $: { extras: { "automobile:imePackage": "com.google.android.inputmethod.latin" } },
-                node: [
-                  {
-                    $: {
-                      text: "Q",
-                      clickable: true,
-                      "resource-id": "com.google.android.inputmethod.latin:id/key_pos_q",
-                      bounds: { left: 0, top: 150, right: 400, bottom: 230 },
-                    },
+              node: [
+                {
+                  $: {
+                    extras: { "automobile:imePackage": "com.google.android.inputmethod.latin" },
                   },
-                ],
-              },
+                  node: [
+                    {
+                      $: {
+                        text: "Q",
+                        clickable: true,
+                        "resource-id": "com.google.android.inputmethod.latin:id/key_pos_q",
+                        bounds: { left: 0, top: 150, right: 400, bottom: 230 },
+                      },
+                    },
+                  ],
+                },
+              ],
             },
           },
         ]
@@ -58,10 +62,12 @@ export function sharedBoundsImeHierarchy(): ViewHierarchyResult {
     windows: [
       {
         hierarchy: {
-          node: {
-            $: { extras: { "automobile:imePackage": "com.example.keyboard" } },
-            node: [{ $: { text: "Q", clickable: true, bounds } }],
-          },
+          node: [
+            {
+              $: { extras: { "automobile:imePackage": "com.example.keyboard" } },
+              node: [{ $: { text: "Q", clickable: true, bounds } }],
+            },
+          ],
         },
       },
     ],

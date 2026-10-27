@@ -83,6 +83,81 @@ wiring_requires_yq() {
   [ "$status" -eq 0 ]
   [[ $'\n'"$output"$'\n' == *$'\n''test/fixtures/ios-contract/**'$'\n'* ]]
   [[ $'\n'"$output"$'\n' == *$'\n''test/fixtures/ios-ctrlproxy-request-snapshots.json'$'\n'* ]]
+  local path
+  for path in \
+    'test/fixtures/prototype-capabilities/**' \
+    'test/fixtures/prototype-embedded-routing/**' \
+    'test/fixtures/prototype-spec/**' \
+    'test/fixtures/prototype/**' \
+    'test/fixtures/prototype-saved-layout/**' \
+    'test/fixtures/desktop-wire/**' \
+    'test/fixtures/refusal-wire/**' \
+    'test/fixtures/refusal-wire-hints/**' \
+    'test/fixtures/daemon-http-endpoints.json' \
+    'test/fixtures/daemon-isolation-paths.json' \
+    'test/fixtures/ios/**' \
+    'test/fixtures/observe-output/ios-prototype-sheet/**' \
+    'test/fixtures/network-filter-controller/**' \
+    'test/fixtures/h264-level42-scale-golden-vectors.json' \
+    'test/fixtures/encoded-h264-golden-vectors.json'; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
+  done
+}
+
+@test "Android fixture changes trigger native contract tests" {
+  wiring_requires_yq
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-android")
+    | (.with.filters | from_yaml | .android[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  local path
+  for path in \
+    'test/fixtures/prototype-capabilities/**' \
+    'test/fixtures/prototype-embedded-routing/**' \
+    'test/fixtures/prototype-spec/**' \
+    'test/fixtures/prototype/**' \
+    'test/fixtures/refusal-wire/**' \
+    'test/fixtures/refusal-wire-hints/**' \
+    'test/fixtures/daemon-http-endpoints.json' \
+    'test/fixtures/daemon-isolation-paths.json' \
+    'test/fixtures/ime-commit-contract.json' \
+    'test/fixtures/plan-schedule-feasibility/**'; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
+  done
+}
+
+@test "required CtrlProxy job runs prototype-compose tests and coverage" {
+  wiring_requires_yq
+  [ "$(yq -r '.jobs."kotlin-code-coverage".name' "$WF")" = 'Run CtrlProxy Unit Tests' ]
+  [ "$(yq -r '.jobs."kotlin-code-coverage".if' "$WF")" = "needs.detect-changes.outputs.android_should_run == 'true'" ]
+  run yq -r '.jobs."kotlin-code-coverage".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$WF"
+  [ "$status" -eq 0 ]
+  [[ " $output " == *' :prototype-compose:testDebugUnitTest '* ]]
+  [[ " $output " == *' :prototype-compose:createDebugUnitTestCoverageReport '* ]]
+}
+
+@test "merge Kotlin coverage runs prototype-compose tests and coverage" {
+  wiring_requires_yq
+  run yq -r '.jobs."kotlin-code-coverage".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' .github/workflows/merge.yml
+  [ "$status" -eq 0 ]
+  [[ " $output " == *' :prototype-compose:testDebugUnitTest '* ]]
+  [[ " $output " == *' :prototype-compose:createDebugUnitTestCoverageReport '* ]]
+}
+
+@test "Kotlin badge includes the prototype-compose Android debug coverage report" {
+  local root="$BATS_TEST_TMPDIR/repo"
+  local report_dir="$root/android/prototype-compose/build/reports/coverage/test/debug"
+  mkdir -p "$root/scripts/coverage" "$report_dir"
+  cp scripts/coverage/generate-kotlin-badge.sh "$root/scripts/coverage/"
+  printf '%s\n' '<report><counter type="LINE" missed="1" covered="3"/></report>' > "$report_dir/report.xml"
+
+  run bash "$root/scripts/coverage/generate-kotlin-badge.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Found prototype-compose report:'* ]]
+  [[ "$output" == *'75% (yellow) from 1 report(s)'* ]]
+  grep -Fq '"message": "75%"' "$root/coverage/kotlin-coverage-badge.json"
 }
 
 @test "ios-build-gate EXCLUDES the simulator-flaky job (keeps the required check deterministic)" {
@@ -238,9 +313,9 @@ wiring_requires_yq() {
   [ "$dependencies" = $'detect-changes\nfast-validation' ]
 }
 
-@test "merge TypeScript coverage has setup headroom beyond the 12 minute wall budget" {
+@test "merge TypeScript coverage has headroom for infra retry and timing rechecks" {
   wiring_requires_yq
-  run yq -r '.jobs."ts-code-coverage"."timeout-minutes" >= 20' .github/workflows/merge.yml
+  run yq -r '.jobs."ts-code-coverage"."timeout-minutes" == 45' .github/workflows/merge.yml
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
 }
@@ -273,8 +348,8 @@ wiring_requires_yq() {
   [ "$status" -eq 0 ]
   [[ "$output" == $'always()\tts-coverage-diagnostics\t'* ]]
   [[ "$output" == *"ci-logs/ts-coverage.log"* ]]
-  [[ "$output" == *"coverage/shards/*.ndjson"* ]]
-  [[ "$output" == *"coverage/shards/*.log"* ]]
+  [[ "$output" == *"coverage/shards/**"* ]]
+  [[ "$output" == *"scratch/bun-test-report.recheck.d/**"* ]]
   [[ "$output" == *$'\tignore\t7' ]]
 }
 
@@ -287,7 +362,10 @@ wiring_requires_yq() {
 
 @test "merge workflow preserves the same four lane boundaries" {
   local workflow=".github/workflows/merge.yml"
+  [[ "$(yq -r '.jobs."node-unit-tests".strategy.matrix.os | join(",")' "$workflow")" = windows-latest ]]
   [[ "$(job_block node-unit-tests "$workflow")" == *"bash scripts/test-ts.sh unit"* ]]
+  [[ "$(job_block ts-code-coverage "$workflow")" == *"run-ts-coverage.sh"* ]]
+  [[ "$(job_block ts-code-coverage "$workflow")" == *"validate-bun-test-timings.sh"* ]]
   [[ "$(job_block node-host-integration-tests "$workflow")" == *"bash scripts/test-ts.sh integration"* ]]
   [[ "$(job_block node-host-integration-tests "$workflow")" == *"bash scripts/test-ts.sh stress"* ]]
   [[ "$(job_block bats-tests "$workflow")" == *"scripts/ci/run-bats.sh unit"* ]]
@@ -488,11 +566,14 @@ wiring_requires_yq() {
   [[ "$checks" == *":junitRunner:assemble"* ]]
   [[ "$checks" == *"validate-sdk-debug-inspector-consumer.sh"* ]]
   [[ "$checks" == *"validate-junit-runner-kotlin-consumer.sh"* ]]
+  # The prototype renderer's publication, API check and minified consumer (#13727).
+  [[ "$checks" == *":prototype-compose:publishToMavenLocal :prototype-compose:apiCheck"* ]]
+  [[ "$checks" == *"validate-prototype-compose-consumer.sh --skip-publish"* ]]
   # A failed check must not skip the checks after it.
   run yq -r '.jobs."node-checks".steps[] | select(.name == "Run Memory Leak Detection" or .name == "Run MCP Benchmarks" or .name == "Verify pinned runtime dependency graph (#5421)") | .if' "$WF"
   [ "$(grep -c '!cancelled()' <<< "$output")" -eq 3 ]
-  run yq -r '.jobs."jvm-consumer-checks".steps[] | select(.name == "Validate Kotlin 2.2 consumer compatibility" or .name == "Publish SDK and check its public API") | .if' "$WF"
-  [ "$(grep -c '!cancelled()' <<< "$output")" -eq 2 ]
+  run yq -r '.jobs."jvm-consumer-checks".steps[] | select(.name == "Validate Kotlin 2.2 consumer compatibility" or .name == "Publish SDK and check its public API" or .name == "Publish prototype renderer and check its public API" or .name == "Verify the published prototype renderer from a minified consumer") | .if' "$WF"
+  [ "$(grep -c '!cancelled()' <<< "$output")" -eq 4 ]
   run yq -r '.jobs."mcp-build-and-test".steps[] | select(.name == "Run complete unit lane" or .name == "Run host integration lane" or .name == "Run stress lane") | .if' "$WF"
   [ "$(grep -c "!cancelled() && steps.mcp-build.outcome == 'success'" <<< "$output")" -eq 3 ]
 }
@@ -690,4 +771,22 @@ wiring_requires_yq() {
   done < <(yq -r '.jobs."android-emulator-tests".needs | [.] | flatten | .[]' "$WF")
   tasks="$(yq -r '.jobs."jvm-consumer-checks".steps[] | select(.uses == "./.github/actions/gradle-task-run" and .with."release-keystore-base64" != null) | .with."gradle-tasks"' "$WF")"
   [[ "$tasks" == *":control-proxy:assembleRelease"* ]]
+}
+
+@test "Android lint selection retains both paths of renames" {
+  wiring_requires_yq
+  run yq -r '.jobs.detekt.steps[] | select(.name == "Select Android lint modules") | .run' "$WF"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'git diff --no-renames --name-only "${BASE_SHA}...HEAD"'* ]]
+}
+
+@test "Android baseline guard fetches and compares the actual PR base through env" {
+  wiring_requires_yq
+  local step='.jobs.detekt.steps[] | select(.name == "Check Android lint baselines only shrink")'
+  [ "$(yq -r "$step | .env.BASE_REF" "$WF")" = '${{ github.base_ref }}' ]
+  run yq -r "$step | .run" "$WF"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'git fetch origin "${BASE_REF}"'* ]]
+  [[ "$output" == *'--base-ref "origin/${BASE_REF}"'* ]]
+  [[ "$output" != *'${{ github.'* ]]
 }

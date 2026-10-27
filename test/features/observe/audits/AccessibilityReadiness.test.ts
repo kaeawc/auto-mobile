@@ -1,8 +1,9 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { loggerCallsWithPrefix } from "../../../helpers/loggerCallsWithPrefix";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT } from "../../../../src/ctrlProxy/constants";
-import { DefaultAccessibilityDetector } from "../../../../src/features/accessibility/AccessibilityDetector";
+import { DefaultAccessibilityDetector } from "../../../../src/ctrlProxy/accessibility/AccessibilityDetector";
 import type { FeatureFlagReader } from "../../../../src/features/featureFlags/FeatureFlagService";
 import { AccessibilityStateDetector } from "../../../../src/features/observe/audits/AccessibilityStateDetector";
 import type { BootedDevice, ObserveResult } from "../../../../src/models";
@@ -45,7 +46,7 @@ function harness(featureFlags = flags) {
       calls.push(`invalidate:${session}:${reason}`),
   };
   const setOutput = (stdout: string) =>
-    adb.setCommandResponse("enabled_accessibility_services", { stdout, stderr: "" });
+    adb.setCommandResponse("enabled_accessibility_services", createExecResult(stdout, ""));
   const observe = async () => {
     const result = {} as ObserveResult;
     await audit.run(result, new NoOpPerformanceTracker());
@@ -157,10 +158,10 @@ describe("observe CtrlProxy readiness regression", () => {
   test("a returned adb error is unknown, even with empty stdout", async () => {
     spyOn(logger, "warn").mockImplementation(() => {});
     const h = harness();
-    h.adb.setCommandResponse("enabled_accessibility_services", {
-      stdout: "",
-      stderr: "ADB read failed",
-    });
+    h.adb.setCommandResponse(
+      "enabled_accessibility_services",
+      createExecResult("", "ADB read failed"),
+    );
     const execute = h.adb.executeCommand.bind(h.adb);
     const command = spyOn(h.adb, "executeCommand").mockImplementation(async (...args) => ({
       ...(await execute(...args)),

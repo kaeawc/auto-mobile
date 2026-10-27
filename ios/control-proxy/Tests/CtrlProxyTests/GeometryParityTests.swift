@@ -164,11 +164,11 @@ final class GeometryParityTests: XCTestCase {
             (100, 200, 0.3), (200, 100, 0.3), (100, 100, 0.3), (0, 200, 0.3),
             (100, 0, 0.3), (100, 200, 0), (1, 100_000, 0.5), (100_000, 1, 0.5),
         ]
-        for c in cases {
-            let p = Geometry.pinchParameters(start: c.0, end: c.1, duration: c.2)
-            XCTAssertTrue(p.scale.isFinite && p.scale > 0, "scale finite/positive for \(c)")
+        for testCase in cases {
+            let parameters = Geometry.pinchParameters(start: testCase.0, end: testCase.1, duration: testCase.2)
+            XCTAssertTrue(parameters.scale.isFinite && parameters.scale > 0, "scale finite/positive for \(testCase)")
             // Velocity is signed (negative for zoom-out); only require it be finite.
-            XCTAssertTrue(p.velocity.isFinite, "velocity finite for \(c)")
+            XCTAssertTrue(parameters.velocity.isFinite, "velocity finite for \(testCase)")
         }
         // Extreme zoom clamps to a bounded scale (does not run away).
         let clampUp = Geometry.pinchParameters(start: 1, end: 100_000, duration: 0.5)
@@ -296,10 +296,10 @@ final class GeometryParityTests: XCTestCase {
         // Nest owner_b under owner_a to also exercise parent-before-child order.
         let ownerB = owner("owner_b", links: [link(0, x: 50), link(1, x: 60)])
         let tree = hierarchy([owner("owner_a", links: [link(0, x: 10), link(1, x: 20)], children: [ownerB])])
-        for (id, xs) in [("owner_a", [10.0, 20.0]), ("owner_b", [50.0, 60.0])] {
-            for occurrence in xs.indices {
+        for (id, xCoordinates) in [("owner_a", [10.0, 20.0]), ("owner_b", [50.0, 60.0])] {
+            for occurrence in xCoordinates.indices {
                 let result = try XCTUnwrap(resolve(tree, owner: id, occurrence: occurrence))
-                XCTAssertEqual(result.coordinate, .init(x: xs[occurrence], y: xs[occurrence] + 10))
+                XCTAssertEqual(result.coordinate, .init(x: xCoordinates[occurrence], y: xCoordinates[occurrence] + 10))
                 XCTAssertNil(result.ownerNote)
             }
         }

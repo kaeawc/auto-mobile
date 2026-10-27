@@ -43,12 +43,12 @@ test.each(["InputText", "SendKeys eventAll", "SendKeys plan"] as const)(
     // dispatch seam directly. SendKeys eventAll also exercises the public batched path.
     const result = runWithTextRequestContext(
       { getDeadlineMs: () => undefined, textState: state },
-      () =>
-        path === "InputText"
+      async () =>
+        await (path === "InputText"
           ? input.testHooks.executeKeyEventPlan(plan, undefined, true, undefined, controller.signal)
           : path === "SendKeys plan"
             ? executor.testHooks.executeKeyEventPlan(plan, controller.signal)
-            : executor.type({ action: "type", text: "abcd", mode: "eventAll" }, controller.signal),
+            : executor.type({ action: "type", text: "abcd", mode: "eventAll" }, controller.signal)),
     );
     let settled = false;
     const outcome = result.then(

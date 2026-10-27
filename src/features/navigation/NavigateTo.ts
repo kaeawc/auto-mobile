@@ -1,7 +1,7 @@
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-} from "../../daemon/constants";
+} from "../../daemon/wire/constants";
 import { stripNavigationToolParams } from "../../models/navigationToolParams";
 import { ActionableError, BootedDevice, NavigateToResult } from "../../models";
 import {
@@ -11,8 +11,8 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { ToolRegistry } from "../../server/toolRegistry";
-import { throwIfInternalToolFailed } from "../../server/internalToolCall";
+import { registeredInternalToolCaller, type InternalToolCaller } from "./InternalToolCaller";
+import { throwIfInternalToolFailed } from "../../daemon/internalToolCall";
 import {
   NavigationGraphManager,
   type NavigationEdge,
@@ -20,7 +20,7 @@ import {
 } from "./NavigationGraphManager";
 import type { PathResult, ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
 import { edgeReplayKey } from "../../db/edgeReplayKey";
-import { ProgressCallback } from "../../server/toolRegistry";
+import type { ProgressCallback } from "../action/BaseVisualChange";
 import { SmartNavigationHelper } from "./SmartNavigationHelper";
 import type { PathOptimizer } from "./interfaces/PathOptimizer";
 import { UIStateSetup } from "./interfaces/UIStateSetup";
@@ -51,6 +51,7 @@ import {
   type ForegroundObservation,
   type ForegroundObserver,
 } from "./foregroundOverlay";
+import { ReplayBlockedError } from "./ReplayBlockedError";
 
 // Back presses need time to update the screen before the next press.
 const NAVIGATION_BACK_PRESS_SETTLE_MS = 300;
@@ -88,22 +89,9 @@ interface PathStepsOutcome {
 }
 
 /** Why a fallback edge must not be dispatched: where the device actually is. */
-interface RetryBlocker {
+export interface RetryBlocker {
   reason: string;
   screen: string | null;
-}
-
-/**
- * A replay failure that was observed with a blocker already found (the pre-search
- * check), so the step outcome reuses it instead of observing the device a second time.
- */
-class ReplayBlockedError extends ActionableError {
-  constructor(
-    message: string,
-    readonly blocker: RetryBlocker,
-  ) {
-    super(message);
-  }
 }
 
 /** What a failed step needs to know about how its replay failed (#10154). */
@@ -137,6 +125,20 @@ export type UIStateSetupFactory = (context: UIStateSetupContext) => UIStateSetup
 const defaultUIStateSetupFactory: UIStateSetupFactory = ({ device, adb, timer, sessionUuid }) =>
   new DefaultUIStateSetup(device, adb, undefined, timer, sessionUuid);
 
+/** Optional collaborators for {@link NavigateTo}; each defaults to the production implementation. */
+export interface NavigateToDependencies {
+  uiStateSetup?: UIStateSetup | null;
+  screenWaiter?: ScreenTransitionWaiter | null;
+  navigationManager?: NavigationGraphService;
+  timer?: Timer;
+  pathOptimizer?: PathOptimizer;
+  sessionUuid?: string;
+  foregroundObserverProvider?: () => ForegroundObserver;
+  scrollSearcher?: ReplayScrollSearcher;
+  uiStateSetupFactory?: UIStateSetupFactory;
+  internalToolCaller?: InternalToolCaller;
+}
+
 /**
  * NavigateTo feature class that uses the navigation graph to traverse an app
  * to reach a target screen.
@@ -148,6 +150,7 @@ export class NavigateTo {
   private uiStateSetup: UIStateSetup | null;
   private screenWaiter: ScreenTransitionWaiter;
   private timer: Timer;
+  private readonly internalTools: InternalToolCaller;
   private pathOptimizer: PathOptimizer | undefined;
   private sessionUuid?: string;
   private foregroundObserverProvider: () => ForegroundObserver;
@@ -167,17 +170,20 @@ export class NavigateTo {
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    uiStateSetup: UIStateSetup | null = null,
-    screenWaiter: ScreenTransitionWaiter | null = null,
-    navigationManager?: NavigationGraphService,
-    timer: Timer = defaultTimer,
-    pathOptimizer?: PathOptimizer,
-    sessionUuid?: string,
-    foregroundObserverProvider?: () => ForegroundObserver,
-    scrollSearcher?: ReplayScrollSearcher,
-    uiStateSetupFactory: UIStateSetupFactory = defaultUIStateSetupFactory,
+    dependencies: NavigateToDependencies = {},
   ) {
-    this.uiStateSetupFactory = uiStateSetupFactory;
+    this.uiStateSetupFactory = dependencies.uiStateSetupFactory ?? defaultUIStateSetupFactory;
+    this.internalTools = dependencies.internalToolCaller ?? registeredInternalToolCaller;
+    const {
+      uiStateSetup = null,
+      screenWaiter = null,
+      navigationManager,
+      timer = defaultTimer,
+      pathOptimizer,
+      sessionUuid,
+      foregroundObserverProvider,
+      scrollSearcher,
+    } = dependencies;
     this.device = device;
     this.adb = adbFactory.create(device);
     this.navigationManager = navigationManager ?? NavigationGraphManager.getInstance();
@@ -404,12 +410,11 @@ export class NavigateTo {
       }
 
       // Report progress
-      if (progress) {
-        await awaitWhileRequestIsLive(
-          progress(i, path.length, `Navigating: ${edge.from} → ${edge.to}`),
-          signal,
-        );
-      }
+      await this.reportProgress(
+        progress,
+        [i, path.length, `Navigating: ${edge.from} → ${edge.to}`],
+        signal,
+      );
 
       logger.info(`[NAVIGATE_TO] Step ${i + 1}/${path.length}: ${edge.from} → ${edge.to}`);
 
@@ -435,20 +440,7 @@ export class NavigateTo {
       }
 
       // Wait for screen transition
-      throwIfAborted(signal);
-      let stepReached = await this.screenWaiter.waitForScreen(
-        edge.to,
-        NavigateTo.STEP_TIMEOUT_MS,
-        signal,
-      );
-      throwIfAborted(signal);
-      let observedScreen: string | null = null;
-      if (!stepReached) {
-        throwIfAborted(signal);
-        observedScreen = this.navigationManager.getCurrentScreen();
-        throwIfAborted(signal);
-        stepReached = observedScreen === edge.to;
-      }
+      const { stepReached, observedScreen } = await this.awaitStepArrival(edge, signal);
       arrivalScreen = observedScreen === targetScreen ? observedScreen : undefined;
       reached = stepReached && edge.to === targetScreen;
       if (!stepReached && arrivalScreen !== undefined) {
@@ -468,19 +460,49 @@ export class NavigateTo {
     }
 
     // Final progress update
-    if (progress) {
-      await awaitWhileRequestIsLive(
-        progress(
-          path.length,
-          path.length,
-          reached ? `Arrived at ${targetScreen}` : `Waiting for ${targetScreen}`,
-        ),
-        signal,
-      );
-    }
+    await this.reportProgress(
+      progress,
+      [
+        path.length,
+        path.length,
+        reached ? `Arrived at ${targetScreen}` : `Waiting for ${targetScreen}`,
+      ],
+      signal,
+    );
 
     throwIfAborted(signal);
     return { result: this.completedNavigationResult(arrivalScreen, reached, resultContext) };
+  }
+
+  private async reportProgress(
+    progress: ProgressCallback | undefined,
+    update: [current: number, total: number, message: string],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (progress) {
+      await awaitWhileRequestIsLive(progress(...update), signal);
+    }
+  }
+
+  /** Waits for a step's target screen, falling back to the observed screen when the wait times out. */
+  private async awaitStepArrival(
+    edge: NavigationEdge,
+    signal?: AbortSignal,
+  ): Promise<{ stepReached: boolean; observedScreen: string | null }> {
+    throwIfAborted(signal);
+    const waited = await this.screenWaiter.waitForScreen(
+      edge.to,
+      NavigateTo.STEP_TIMEOUT_MS,
+      signal,
+    );
+    throwIfAborted(signal);
+    if (waited) {
+      return { stepReached: true, observedScreen: null };
+    }
+    throwIfAborted(signal);
+    const observedScreen = this.navigationManager.getCurrentScreen();
+    throwIfAborted(signal);
+    return { stepReached: observedScreen === edge.to, observedScreen };
   }
 
   /**
@@ -744,7 +766,7 @@ export class NavigateTo {
     // `interaction.args` is never mutated. Under `--actions-diff-observe` this
     // replay neither diffs its observation nor advances the agent-facing diff
     // baseline. Throws ActionableError if the tool is not registered.
-    const response = await ToolRegistry.callInternal(
+    const response = await this.internalTools.callInternal(
       interaction.toolName,
       {
         ...stripNavigationToolParams(interaction.args),
@@ -790,7 +812,7 @@ export class NavigateTo {
 
     // iOS has no injected host transport, so retain its internal tool routing
     // for the selected device and no-diff behavior.
-    const response = await ToolRegistry.callInternal(
+    const response = await this.internalTools.callInternal(
       "pressButton",
       {
         button: "back",

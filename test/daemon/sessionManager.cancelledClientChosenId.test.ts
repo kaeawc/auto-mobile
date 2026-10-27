@@ -91,7 +91,7 @@ async function mintCancelledDuring(
   const reached = persistence.park(step);
   const minting = runWithAbortSignal(controller.signal, () =>
     runWithAcquisitionReceipt(clientChosen ? { clientChosenSessionId: SESSION_ID } : {}, () =>
-      manager.createSession(SESSION_ID, DEVICE_ID, "android"),
+      manager.createSession(SESSION_ID, DEVICE_ID, "android", { signal: controller.signal }),
     ),
   ).then(
     () => undefined,
@@ -156,7 +156,7 @@ describe("a mint cancelled while its session is persisted", () => {
       const reached = persistence.park("active-row upsert");
       const minting = runWithAbortSignal(controller.signal, () =>
         runWithAcquisitionReceipt({ clientChosenSessionId: "some-other-session" }, () =>
-          manager.createSession(SESSION_ID, DEVICE_ID, "android"),
+          manager.createSession(SESSION_ID, DEVICE_ID, "android", { signal: controller.signal }),
         ),
       ).catch((error: unknown) => error);
       await reached;

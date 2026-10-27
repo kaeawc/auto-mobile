@@ -65,14 +65,6 @@ export function callsTo(root: ts.Node, callee: string, firstArg?: string): ts.Ca
   );
 }
 
-export function newExpressions(root: ts.Node, className: string): ts.NewExpression[] {
-  return findAll(
-    root,
-    (node): node is ts.NewExpression =>
-      ts.isNewExpression(node) && node.expression.getText() === className,
-  );
-}
-
 /** `if (<condition text>)` statements, matched on the exact condition text. */
 export function ifStatements(root: ts.Node, condition: string): ts.IfStatement[] {
   return findAll(

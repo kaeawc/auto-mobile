@@ -2,12 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:DeepLinkManager.kt:DeepLinkManager$fun getDestinationName: String?</ID>
-    <ID>CyclomaticComplexMethod:DeepLinkManager.kt:DeepLinkManager$fun parseDeepLink: AppDestination?</ID>
-    <ID>LongMethod:AppNavigation.kt:@Composable fun AppNavigation</ID>
-    <ID>LongMethod:AppNavigation.kt:fun determineStartDestinationWithDeepLink: AppDestination</ID>
-    <ID>LongMethod:DeepLinkManager.kt:DeepLinkManager$fun parseDeepLink: AppDestination?</ID>
     <ID>TooGenericExceptionCaught:DeepLinkManager.kt:DeepLinkManager$e: Exception</ID>
-    <ID>TooManyFunctions:DeepLinkManager.kt:DeepLinkManager</ID>
   </CurrentIssues>
 </SmellBaseline>

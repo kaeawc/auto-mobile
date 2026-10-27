@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "@ana",
+      "linkify": {
+        "kinds": ["url"]
+      }
+    }
+  },
+  "expectedPath": "root.linkify.onTap",
+  "expectedMessage": "Required property"
+}

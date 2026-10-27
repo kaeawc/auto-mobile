@@ -5,7 +5,7 @@ import {
   AppearanceSocketServer,
   type AppearanceSocketServerDependencies,
 } from "../../src/daemon/appearanceSocketServer";
-import type { AppearanceSocketRequest } from "../../src/daemon/appearanceSocketTypes";
+import type { AppearanceSocketRequest } from "../../src/daemon/wire/appearanceSocketTypes";
 import type { AppearanceConfig, BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -37,7 +37,7 @@ class RequestOnlyAppearanceServer extends AppearanceSocketServer {
       },
       {
         getPooledDevices: () => [device],
-        getCurrentDevice: () => undefined,
+        getSessionDevice: () => undefined,
         getSessionForDevice: () => null,
       },
       dependencies,

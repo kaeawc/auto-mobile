@@ -47,8 +47,8 @@ describe("per-platform booted resource pool summary", () => {
     resetBootedDevicesResourceCache();
     utils = new FakeDeviceUtils();
     setDeviceManager(utils);
-    setDeviceLockProbe(async () => ({ locked: false, keyguardShowing: false }));
-    setIosLockStateProbe(async () => undefined);
+    setDeviceLockProbe(async () => false);
+    setIosLockStateProbe({ read: async () => ({ kind: "unknown", reason: "error" }) });
     useOrientationReaderFactory(() => new FakeOrientationReader());
   });
 

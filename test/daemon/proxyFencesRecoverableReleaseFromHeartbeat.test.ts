@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import {
   handleDaemonRequest,
@@ -10,7 +10,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { isRecoverableDaemonReleaseReason } from "../../src/daemon/releaseReasons";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -54,6 +54,7 @@ describe("a keeper heartbeat answered not-found for a recoverable release", () =
         getSessionManager: () => sessionManager,
         getDevicePool: () => ({
           refreshDevices: async () => 0,
+          releaseDevice: async () => {},
           getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
         }),
         getDeviceSessionRegistry: () => new DeviceSessionRegistry(),

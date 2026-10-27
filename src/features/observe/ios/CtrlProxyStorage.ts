@@ -9,7 +9,7 @@
 import { WEBSOCKET_NOT_CONNECTED_MESSAGE, sendCommand } from "../DeviceServiceUtils";
 import { getAbortSignal } from "../../../utils/AbortContext";
 import { logger } from "../../../utils/logger";
-import { mapStorageSdkError } from "../../../server/storageSdkErrors";
+import { mapStorageSdkError } from "../../../utils/storageSdkErrors";
 import { ActionableError } from "../../../models/ActionableError";
 import type { DelegateContext } from "./types";
 import { normalizeStorageWriteOptions } from "../../storage/storageTypes";
@@ -26,6 +26,23 @@ import type {
   RemovePreferenceResult,
   ClearPreferencesResult,
 } from "../../storage/storageTypes";
+
+export interface KeychainItemSelector {
+  itemClass: string;
+  service: string;
+  account: string;
+  accessGroup: string;
+}
+
+export interface KeychainDeleteOutcome {
+  outcome: string;
+  deletedScope: KeychainItemSelector | null;
+}
+
+interface KeychainDeleteResult extends KeychainDeleteOutcome {
+  success: boolean;
+  totalTimeMs: number;
+}
 
 /**
  * Delegate class for handling iOS UserDefaults storage operations.
@@ -59,6 +76,40 @@ export class CtrlProxyStorage {
             : {}),
         }
       : undefined;
+  }
+
+  async deleteKeychainItemForIos(
+    appId: string,
+    selector: KeychainItemSelector,
+    confirm: boolean,
+    timeoutMs: number = 5000,
+  ): Promise<KeychainDeleteOutcome> {
+    if (!(await this.context.ensureConnected())) {
+      return { outcome: "sdk_unavailable", deletedScope: null };
+    }
+    getAbortSignal()?.throwIfAborted();
+    const requestId = this.context.requestManager.generateId("delete_keychain_item");
+    const sessionId = this.sessionId?.();
+    const mutationToken = this.mutationToken?.(appId);
+    const unavailable = (): KeychainDeleteResult => ({
+      success: false,
+      totalTimeMs: 0,
+      outcome: "sdk_unavailable",
+      deletedScope: null,
+    });
+    const result = await this.sendStorageCommand<KeychainDeleteResult>(
+      "delete_keychain_item",
+      requestId,
+      {
+        appId,
+        selector,
+        confirm,
+        ...(sessionId ? { sessionId } : {}),
+        ...(mutationToken ? { mutationToken } : {}),
+      },
+      { timeoutMs, timeoutError: unavailable, responseError: unavailable },
+    );
+    return { outcome: result.outcome, deletedScope: result.deletedScope ?? null };
   }
 
   /**

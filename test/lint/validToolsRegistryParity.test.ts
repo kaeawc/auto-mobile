@@ -1,5 +1,5 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 
 const validToolsPath =
   "android/test-plan-validation/src/main/kotlin/dev/jasonpearson/automobile/validation/ValidTools.kt";
@@ -11,7 +11,7 @@ export function kotlinStringLiterals(source: string): string[] {
 }
 
 function registryNames(): string[] {
-  const defs = JSON.parse(readFileSync("schemas/tool-definitions.json", "utf8")) as {
+  const defs = JSON.parse(readGuardFile("schemas/tool-definitions.json")) as {
     name: string;
   }[];
   return defs.map((d) => d.name);
@@ -19,7 +19,7 @@ function registryNames(): string[] {
 
 describe("ValidTools.kt parity with the tool registry", () => {
   test("accepts every tool in schemas/tool-definitions.json", () => {
-    const accepted = new Set(kotlinStringLiterals(readFileSync(validToolsPath, "utf8")));
+    const accepted = new Set(kotlinStringLiterals(readGuardFile(validToolsPath)));
     const missing = registryNames().filter((name) => !accepted.has(name));
     // A new tool must be added to ValidTools.TOOLS or ValidToolsTest fails in the Kotlin Code Coverage job.
     expect(missing).toEqual([]);

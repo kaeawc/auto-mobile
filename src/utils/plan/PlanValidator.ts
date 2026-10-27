@@ -1,3 +1,4 @@
+import { effectiveStepField } from "./effectiveStepField";
 import { Plan, PlanStep, PlanDeviceDefinition } from "../../models/Plan";
 import { ActionableError } from "../../models";
 import { normalizePlanDevices } from "./PlanDevices";
@@ -266,7 +267,7 @@ export class PlanValidator {
     deviceSet: Set<string>,
     labelErrors: DeviceLabelErrors,
   ): void {
-    const device = this.effectiveField(step, "device");
+    const device = effectiveStepField(step, "device");
     if (device === undefined || device === null || device === "") {
       labelErrors.missingLabels.push({ index: i, tool: step.tool });
     } else if (typeof device !== "string" || !deviceSet.has(device)) {
@@ -284,7 +285,7 @@ export class PlanValidator {
     if (!Array.isArray(subSteps)) {
       return;
     }
-    const effectiveOwner = this.effectiveField(step, "device");
+    const effectiveOwner = effectiveStepField(step, "device");
     const ownerDevice =
       typeof effectiveOwner === "string" && deviceSet.has(effectiveOwner)
         ? effectiveOwner
@@ -334,34 +335,6 @@ export class PlanValidator {
         `step ${i}.steps[${j}] (${subTool}): device="${subDevice}" differs from criticalSection owner device="${ownerDevice}". Put it in its own step for that device or use a separate criticalSection step.`,
       );
     }
-  }
-
-  /**
-   * Resolves the effective value of a coordination field (`lock`/`device`/
-   * `deviceCount`) for a step, honoring PlanNormalizer's params-wins
-   * precedence: when a field is present under `params`, that value wins even
-   * if a different value also sits inline on the step — PlanNormalizer's
-   * `{ ...inlineParams, ...paramsFromStep }` merge discards the inline one at
-   * normalization, the same precedence the #6090/#6107 networkCondition/
-   * doNotDisturb inline-vs-params handling established. Falling back to the
-   * inline value only when `params` doesn't declare the field also keeps this
-   * correct for a step that reaches this validator before normalization.
-   */
-  private static effectiveField(step: PlanStep, field: string): unknown {
-    const params = step.params;
-    if (
-      params &&
-      typeof params === "object" &&
-      Object.prototype.hasOwnProperty.call(params, field)
-    ) {
-      return (params as Record<string, unknown>)[field];
-    }
-    // A step reaching this validator before PlanNormalizer runs may carry
-    // coordination fields as plain siblings of `tool`/`params` -- outside
-    // PlanStep's declared shape, but present on the underlying object.
-    // oxlint-disable-next-line auto-mobile/no-unknown-cast
-    const inlineFields = step as unknown as Record<string, unknown>;
-    return inlineFields[field];
   }
 
   /**
@@ -442,9 +415,9 @@ export class PlanValidator {
     step: PlanStep,
     stepIndex: number,
   ): { device: string; event: CoordinationEvent } | null {
-    const device = this.effectiveField(step, "device");
-    const lock = this.effectiveField(step, "lock");
-    const deviceCount = this.effectiveField(step, "deviceCount");
+    const device = effectiveStepField(step, "device");
+    const lock = effectiveStepField(step, "lock");
+    const deviceCount = effectiveStepField(step, "deviceCount");
     if (!isNonEmptyString(device) || !isNonEmptyString(lock) || !isPositiveInteger(deviceCount)) {
       return null;
     }
@@ -453,7 +426,7 @@ export class PlanValidator {
   }
 
   private static hasNestedCoordination(step: PlanStep): boolean {
-    const subSteps = this.effectiveField(step, "steps");
+    const subSteps = effectiveStepField(step, "steps");
     if (!Array.isArray(subSteps)) {
       return false;
     }
@@ -486,7 +459,7 @@ export class PlanValidator {
       if (step.tool !== "criticalSection" && step.tool !== "barrier") {
         continue;
       }
-      const timeout = this.effectiveField(step, "timeout");
+      const timeout = effectiveStepField(step, "timeout");
       if (timeout === undefined) {
         continue;
       }
@@ -523,7 +496,7 @@ export class PlanValidator {
 
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i];
-      if (this.effectiveField(step, "__lockNamespace") !== undefined) {
+      if (effectiveStepField(step, "__lockNamespace") !== undefined) {
         errors.push(
           `step ${i} (${step.tool}) sets '__lockNamespace', which is a reserved field injected internally by the plan executor. Authored plans must not set it.`,
         );
@@ -553,7 +526,7 @@ export class PlanValidator {
       if (step.tool !== "criticalSection" && step.tool !== "barrier") {
         continue;
       }
-      const lock = this.effectiveField(step, "lock");
+      const lock = effectiveStepField(step, "lock");
       if (typeof lock !== "string" || lock.length === 0) {
         continue;
       }
@@ -606,7 +579,7 @@ export class PlanValidator {
       if (step.tool !== "criticalSection") {
         continue;
       }
-      const lock = this.effectiveField(step, "lock");
+      const lock = effectiveStepField(step, "lock");
       if (typeof lock !== "string" || lock.length === 0) {
         // Schema-level requirements are validated elsewhere; skip silently.
         continue;
@@ -614,8 +587,8 @@ export class PlanValidator {
       const occurrences = lockUsage.get(lock) ?? [];
       occurrences.push({
         stepIndex: i,
-        device: this.effectiveField(step, "device"),
-        deviceCount: this.effectiveField(step, "deviceCount"),
+        device: effectiveStepField(step, "device"),
+        deviceCount: effectiveStepField(step, "deviceCount"),
       });
       lockUsage.set(lock, occurrences);
     }
@@ -726,12 +699,12 @@ export class PlanValidator {
         continue;
       }
 
-      const lock = this.effectiveField(step, "lock");
+      const lock = effectiveStepField(step, "lock");
       if (typeof lock !== "string" || lock.length === 0) {
         errors.push(`barrier step ${i} is missing a non-empty 'lock' parameter.`);
       }
 
-      const deviceCount = this.effectiveField(step, "deviceCount");
+      const deviceCount = effectiveStepField(step, "deviceCount");
       if (typeof deviceCount !== "number" || !Number.isInteger(deviceCount) || deviceCount < 1) {
         errors.push(
           `barrier step ${i} must declare a positive integer 'deviceCount', got ${JSON.stringify(deviceCount)}.`,
@@ -913,7 +886,7 @@ export class PlanValidator {
     usageByLock: Map<string, BarrierLockUsage>,
     step: PlanStep,
   ): void {
-    const lock = this.effectiveField(step, "lock");
+    const lock = effectiveStepField(step, "lock");
     if (typeof lock !== "string" || lock.length === 0) {
       return;
     }
@@ -926,13 +899,13 @@ export class PlanValidator {
     };
     usage.arrivals += 1;
 
-    const device = this.effectiveField(step, "device");
+    const device = effectiveStepField(step, "device");
     if (typeof device === "string" && device.length > 0) {
       usage.devices.add(device);
       usage.deviceOccurrences.set(device, (usage.deviceOccurrences.get(device) ?? 0) + 1);
     }
 
-    const deviceCount = this.effectiveField(step, "deviceCount");
+    const deviceCount = effectiveStepField(step, "deviceCount");
     if (typeof deviceCount === "number" && Number.isInteger(deviceCount) && deviceCount >= 1) {
       usage.deviceCounts.add(deviceCount);
     }

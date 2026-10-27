@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import {
   IosCtrlProxyHealthClient,
   isValidCtrlProxyPort,
@@ -7,6 +7,10 @@ import {
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { ExecResult } from "../../../src/models";
+
+afterEach(() => {
+  mock.restore();
+});
 
 function execResult(stdout: string): ExecResult {
   return {

@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
-import { Daemon } from "../../src/daemon/daemon";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/wire/constants";
+import { DaemonLifecycleHarness } from "./helpers/DaemonLifecycleHarness";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {
   OWNER_DISCONNECT_GRACE_MS,
@@ -10,7 +10,7 @@ import {
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
@@ -34,17 +34,11 @@ const SESSION = "read-end-rearm-session";
 const OWNER_CONNECTION = "read-end-rearm-owner";
 const INVENTORY_READ = "__inventory_read_probe__";
 
-/** The daemon's own subscription and its teardown, which `start()` and `stop()` run. */
-interface DaemonToolCallEndWiring {
-  subscribeToolCallEndActivity(): void;
-  stopSessionTimers(): void;
-}
-
 describe("an in-flight inventory read never holds owner-disconnect release (#11381)", () => {
   let restoreHermeticServer: () => void;
   let fixture: McpTestFixture;
   let timer: FakeTimer;
-  let daemon: Daemon;
+  let daemon: DaemonLifecycleHarness;
   let releaseReasons: string[];
   let ends: Array<{ uuids: readonly string[]; admitted: boolean }>;
   let unsubscribeEnds: () => void;
@@ -72,7 +66,7 @@ describe("an in-flight inventory read never holds owner-disconnect release (#113
     resetDbWriteBarrier();
     restoreHermeticServer = installHermeticServerFixture();
     timer = new FakeTimer();
-    daemon = new Daemon(
+    daemon = new DaemonLifecycleHarness(
       {},
       {
         installedAppsRepository: new FakeInstalledAppsRepository(),
@@ -87,7 +81,7 @@ describe("an in-flight inventory read never holds owner-disconnect release (#113
     sessionManager.onSessionRelease((_sessionId, _deviceId, reason) => {
       releaseReasons.push(reason);
     });
-    (daemon as unknown as DaemonToolCallEndWiring).subscribeToolCallEndActivity();
+    daemon.subscribeToolCallEnd();
     ends = [];
     unsubscribeEnds = executionTracker.onSessionExecutionEnded((uuids, { admitted }) =>
       ends.push({ uuids, admitted }),
@@ -96,7 +90,7 @@ describe("an in-flight inventory read never holds owner-disconnect release (#113
     const devicePool = daemon.getDevicePool();
     const deviceManager = new FakeDeviceManager();
     deviceManager.bootedDevices = [DEVICE];
-    Object.assign(devicePool, { deviceManager });
+    devicePool.testHooks.deviceManager = deviceManager;
     await devicePool.initializeWithDevices([DEVICE]);
     await devicePool.bindOrReuseDeviceSession({
       sessionId: SESSION,
@@ -126,7 +120,7 @@ describe("an in-flight inventory read never holds owner-disconnect release (#113
   async function dismantle(): Promise<void> {
     await fixture.teardown();
     unsubscribeEnds();
-    (daemon as unknown as DaemonToolCallEndWiring).stopSessionTimers();
+    daemon.stopTimers();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }

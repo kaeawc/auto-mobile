@@ -10,12 +10,12 @@ import SwiftUI
 
 /// Deterministic hash noise in [-1, 1) from a seed and index.
 func crayonNoise(_ seed: UInt64, _ i: Int) -> CGFloat {
-    var h = seed ^ (UInt64(i) &* 0x9E37_79B9_7F4A_7C15)
-    h = (h ^ (h >> 33)) &* 0xFF51_AFD7_ED55_8CCD
-    h = (h ^ (h >> 33)) &* 0xC4CE_B9FE_1A85_EC53
-    h ^= (h >> 33)
-    let u = Double(h >> 11) / Double(UInt64(1) << 53) // [0, 1)
-    return CGFloat(u * 2 - 1)
+    var hash = seed ^ (UInt64(i) &* 0x9E37_79B9_7F4A_7C15)
+    hash = (hash ^ (hash >> 33)) &* 0xFF51_AFD7_ED55_8CCD
+    hash = (hash ^ (hash >> 33)) &* 0xC4CE_B9FE_1A85_EC53
+    hash ^= (hash >> 33)
+    let unit = Double(hash >> 11) / Double(UInt64(1) << 53) // [0, 1)
+    return CGFloat(unit * 2 - 1)
 }
 
 /// Base rounded-rectangle perimeter, sampled clockwise from the top edge and
@@ -25,36 +25,36 @@ private func roundedRectPerimeter(
 )
     -> [CGPoint]
 {
-    let r = min(max(corner, 0), min(width, height) / 2)
+    let radius = min(max(corner, 0), min(width, height) / 2)
     // At least one straight-edge sample: a zero count skips every edge point and a
     // negative one is a `0..<n` range precondition failure.
     let segs = max(1, segmentsPerEdge)
     var pts: [CGPoint] = []
-    func edge(_ x0: CGFloat, _ y0: CGFloat, _ x1: CGFloat, _ y1: CGFloat) {
-        for s in 0 ..< segs {
-            let t = CGFloat(s) / CGFloat(segs)
-            pts.append(CGPoint(x: x0 + (x1 - x0) * t, y: y0 + (y1 - y0) * t))
+    func edge(_ startX: CGFloat, _ startY: CGFloat, _ x1: CGFloat, _ y1: CGFloat) {
+        for step in 0 ..< segs {
+            let fraction = CGFloat(step) / CGFloat(segs)
+            pts.append(CGPoint(x: startX + (x1 - startX) * fraction, y: startY + (y1 - startY) * fraction))
         }
     }
     // Half-open like `edge`: emit the arc's start but not its end, so the arc's last
     // point never duplicates the following edge's first point. A duplicated seam
     // point gets its own jitter and shows as a knot; the dropped corner point is
     // supplied by the next segment's start (and the final one by the closing append).
-    func arc(_ cx: CGFloat, _ cy: CGFloat, _ startDeg: CGFloat) {
+    func arc(_ centerX: CGFloat, _ centerY: CGFloat, _ startDeg: CGFloat) {
         let steps = 3
-        for s in 0 ..< steps {
-            let ang = (startDeg + 90 * CGFloat(s) / CGFloat(steps)) * .pi / 180
-            pts.append(CGPoint(x: cx + r * cos(ang), y: cy + r * sin(ang)))
+        for step in 0 ..< steps {
+            let ang = (startDeg + 90 * CGFloat(step) / CGFloat(steps)) * .pi / 180
+            pts.append(CGPoint(x: centerX + radius * cos(ang), y: centerY + radius * sin(ang)))
         }
     }
-    edge(r, 0, width - r, 0)
-    arc(width - r, r, -90)
-    edge(width, r, width, height - r)
-    arc(width - r, height - r, 0)
-    edge(width - r, height, r, height)
-    arc(r, height - r, 90)
-    edge(0, height - r, 0, r)
-    arc(r, r, 180)
+    edge(radius, 0, width - radius, 0)
+    arc(width - radius, radius, -90)
+    edge(width, radius, width, height - radius)
+    arc(width - radius, height - radius, 0)
+    edge(width - radius, height, radius, height)
+    arc(radius, height - radius, 90)
+    edge(0, height - radius, 0, radius)
+    arc(radius, radius, 180)
     if let first = pts.first { pts.append(first) }
     return pts
 }
@@ -73,10 +73,10 @@ func crayonOutlineOffsets(
     -> [CGPoint]
 {
     let base = roundedRectPerimeter(width, height, cornerRadius, segmentsPerEdge)
-    var jittered = base.enumerated().map { i, p in
+    var jittered = base.enumerated().map { i, point in
         CGPoint(
-            x: p.x + crayonNoise(seed, i * 2) * roughness,
-            y: p.y + crayonNoise(seed, i * 2 + 1) * roughness
+            x: point.x + crayonNoise(seed, i * 2) * roughness,
+            y: point.y + crayonNoise(seed, i * 2 + 1) * roughness
         )
     }
     // Close the loop exactly rather than letting the closing point drift.
@@ -100,8 +100,8 @@ struct CrayonOutline: Shape {
         var path = Path()
         guard let first = offsets.first else { return path }
         path.move(to: CGPoint(x: rect.minX + first.x, y: rect.minY + first.y))
-        for p in offsets.dropFirst() {
-            path.addLine(to: CGPoint(x: rect.minX + p.x, y: rect.minY + p.y))
+        for point in offsets.dropFirst() {
+            path.addLine(to: CGPoint(x: rect.minX + point.x, y: rect.minY + point.y))
         }
         path.closeSubpath()
         return path

@@ -90,12 +90,15 @@ class DeviceKeyboardEventTranslatorTest {
     isAltGraphDown: Boolean = false,
   ): Boolean =
     DeviceKeyboardEventTranslator.translate(
-        Key.A,
-        'x'.code,
-        modifiers,
-        isMac,
-        isLinux,
-        isAltGraphDown,
+        key = Key.A,
+        utf16CodePoint = 'x'.code,
+        modifiers = modifiers,
+        host =
+          KeyboardHost(
+            isMac = isMac,
+            isLinux = isLinux,
+            isAltGraphDown = isAltGraphDown,
+          ),
       )
       .altComposesText
 
@@ -211,12 +214,15 @@ class DeviceKeyboardEventTranslatorTest {
   ): DeviceKeyboardDecision {
     val stroke: DeviceKeyStroke =
       DeviceKeyboardEventTranslator.translate(
-        Key.A,
-        codePoint,
-        modifiers,
-        isMac,
-        isLinux,
-        isAltGraphDown,
+        key = Key.A,
+        utf16CodePoint = codePoint,
+        modifiers = modifiers,
+        host =
+          KeyboardHost(
+            isMac = isMac,
+            isLinux = isLinux,
+            isAltGraphDown = isAltGraphDown,
+          ),
       )
     return DeviceKeyboardInputPolicy.evaluate(stroke)
   }

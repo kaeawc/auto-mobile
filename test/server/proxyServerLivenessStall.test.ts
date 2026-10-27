@@ -1,7 +1,15 @@
+import type {
+  CallToolRequest,
+  ReadResourceRequest,
+  CallToolResult,
+  ReadResourceResult,
+  ServerContext,
+} from "@modelcontextprotocol/server";
+import { readToolResponse, toolText } from "../helpers/toolResponse";
 import { fakeServerContext } from "../helpers/fakeServerContext";
 import { Client } from "@modelcontextprotocol/client";
 import { Server, type LoggingLevel, InMemoryTransport } from "@modelcontextprotocol/server";
-import { McpError } from "../../src/server/mcpError";
+import { McpError } from "../../src/daemon/mcpError";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonSessionStalledError } from "../../src/daemon/daemonMcpProxy";
@@ -9,9 +17,8 @@ import {
   livenessHandoverPayload,
   type LivenessHandover,
 } from "../../src/daemon/proxyLivenessRecovery";
-import type { BindingsResult } from "../../src/daemon/sessionBroker/provisioning/acquisitionResult";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -34,17 +41,25 @@ const extra = fakeServerContext({ signal: new AbortController().signal, id: 1 })
 
 /** Exercise the registered handlers without a daemon connection or host process. */
 async function stalledHandlerAnswer(
-  bindings: BindingsResult | undefined,
+  _bindings: undefined,
   surface: "tool" | "resource",
   handover = stalled,
   sessionUuid = SESSION,
 ) {
-  const registration = spyOn(Server.prototype, "setRequestHandler");
+  const registrationTarget: {
+    setRequestHandler(
+      method: "tools/call" | "resources/read",
+      handler: (
+        request: CallToolRequest | ReadResourceRequest,
+        context: ServerContext,
+      ) => CallToolResult | ReadResourceResult | Promise<CallToolResult | ReadResourceResult>,
+    ): void;
+  } = Server.prototype;
+  const registration = spyOn(registrationTarget, "setRequestHandler");
   let harness: ReturnType<typeof createProxyMcpServer>;
   let registrations: typeof registration.mock.calls;
   try {
     harness = createProxyMcpServer({
-      bindings,
       proxyConfig: {
         timer: new FakeTimer(),
         clientFactory: () => new FakeDaemonClient(),
@@ -65,13 +80,13 @@ async function stalledHandlerAnswer(
   try {
     const schema = surface === "tool" ? "tools/call" : "resources/read";
     const handler = registrations.findLast(([registered]) => registered === schema)?.[1];
-    if (!handler) {
+    if (typeof handler !== "function") {
       throw new Error("Missing handler");
     }
     if (surface === "tool") {
       const result = await handler({ method: "tools/call", params: { name: "tapOn" } }, extra);
-      expect(result.isError).toBe(true);
-      return (result.content[0] as { text: string }).text;
+      expect(readToolResponse(result).isError).toBe(true);
+      return toolText(result);
     }
     try {
       await handler({ method: "resources/read", params: { uri: "automobile:hierarchy" } }, extra);
@@ -239,7 +254,7 @@ describe("proxy server liveness stall reporting", () => {
           arguments: { sessionUuid: "session-1" },
         }),
       );
-      expect(result.isError).toBe(true);
+      expect(readToolResponse(result).isError).toBe(true);
       const text = (result.content as Array<{ type: string; text: string }>)[0].text;
       expect(JSON.parse(text)).toEqual(
         (notifications[0] as { data: unknown }).data as Record<string, unknown>,
@@ -270,7 +285,7 @@ describe("proxy server liveness stall reporting", () => {
           arguments: { sessionUuid: "session-1" },
         }),
       );
-      expect(result.isError).toBe(true);
+      expect(readToolResponse(result).isError).toBe(true);
       const text = (result.content as Array<{ type: string; text: string }>)[0].text;
       expect(JSON.parse(text).error.code).toBe("daemon_stalled");
     } finally {

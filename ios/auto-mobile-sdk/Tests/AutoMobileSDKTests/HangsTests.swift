@@ -58,7 +58,7 @@ final class HangsTests: XCTestCase {
         // recovery report reads once → duration is deterministic regardless of
         // how many probes the hang spans.
         var clock = 0.0
-        hangs.monotonicNowMs = { let v = clock; clock += 1000; return v }
+        hangs.monotonicNowMs = { let value = clock; clock += 1000; return value }
 
         // hung, hung, hung, then recovered.
         let results = [false, false, false, true]

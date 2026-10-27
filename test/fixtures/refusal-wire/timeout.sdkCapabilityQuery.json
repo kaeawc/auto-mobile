@@ -1,0 +1,13 @@
+{
+  "code": "timeout.sdkCapabilityQuery",
+  "builder": "SdkCapabilityQueryError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"SDK capability query timed out\",\"code\":\"timeout\",\"retryable\":true}"
+      }
+    ],
+    "isError": true
+  }
+}

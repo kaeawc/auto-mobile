@@ -20,6 +20,25 @@ function setup(env: NodeJS.ProcessEnv = { [ANDROID_MAX_BOOTED_ENV]: "2" }) {
   return { timer, source, gate };
 }
 
+test("replacement credit affects admission comparison but preserves raw refusal diagnostics", async () => {
+  const { gate, source } = setup();
+  source.emulatorSerials = ["emulator-5554", "emulator-5556", "emulator-5558"];
+  const error = await rejection(
+    gate.reserveBoot({ replacingDeviceId: "emulator-5554", timeoutMs: 60_000 }),
+  );
+  expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+  if (error instanceof BootCapacityExhaustedError) {
+    expect(error.booted).toBe(3);
+    expect(error.message).toContain("3 emulator(s) booted; limit is 2");
+    expect(error.details).toMatchObject({
+      booted: 3,
+      code: "capacity_exhausted",
+      retryable: true,
+      retryAfterMs: 5_000,
+    });
+  }
+});
+
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
   try {
     await promise;

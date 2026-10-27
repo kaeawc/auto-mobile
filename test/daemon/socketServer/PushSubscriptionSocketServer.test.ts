@@ -1,5 +1,5 @@
 import { InputDeviceOwnedError } from "../../../src/daemon/inputDeviceOwnership";
-import { SessionNoLongerOwnsDeviceError } from "../../../src/daemon/sessionNoLongerOwnsDevice";
+import { SessionNoLongerOwnsDeviceError } from "../../../src/models/sessionNoLongerOwnsDevice";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { PushSubscriptionSocketServer } from "../../../src/daemon/socketServer/PushSubscriptionSocketServer";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -12,11 +12,11 @@ interface TestFilter {
   packageName: string | null;
 }
 
-interface TestPushData {
+type TestPushData = {
   deviceId: string;
   packageName: string;
   value: number;
-}
+};
 
 interface TestPushMessage {
   type: "test_push";

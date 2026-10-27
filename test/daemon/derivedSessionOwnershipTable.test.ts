@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test, beforeEach } from "bun:test";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -41,15 +41,18 @@ interface World {
 }
 
 const worlds: World[] = [];
-const spies: Array<{ mockRestore(): void }> = [];
+let spies: Array<ReturnType<typeof spyOn>>;
+beforeEach(() => {
+  spies = [
+    spyOn(logger, "info").mockImplementation(() => {}),
+    spyOn(logger, "warn").mockImplementation(() => {}),
+    spyOn(logger, "error").mockImplementation(() => {}),
+    spyOn(logger, "debug").mockImplementation(() => {}),
+  ];
+});
 
 /** A daemon's session manager and pool over `devices`, holding no session yet. */
 async function emptyWorld(devices: BootedDevice[]): Promise<World> {
-  if (spies.length === 0) {
-    for (const level of ["info", "warn", "error", "debug"] as const) {
-      spies.push(spyOn(logger, level).mockImplementation(() => {}));
-    }
-  }
   const timer = new FakeTimer();
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
     barrier: () => new FakeDbWriteBarrier(),
@@ -169,6 +172,7 @@ async function heartbeat(w: World, sessionId: string, token: string, claim: bool
       getSessionManager: () => w.manager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(w.timer),
@@ -281,7 +285,9 @@ afterEach(() => {
   for (const w of worlds.splice(0)) {
     w.manager.stopCleanupTimer();
   }
-  spies.splice(0).forEach((spy) => spy.mockRestore());
+  for (const spy of spies) {
+    spy.mockRestore();
+  }
 });
 
 describe("a derived label session is judged and recorded as its base", () => {

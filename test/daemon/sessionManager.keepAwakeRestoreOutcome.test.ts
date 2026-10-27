@@ -10,6 +10,7 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
+import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 
 const device = { platform: "android" as const, deviceId: "fake-device", name: "Fake device" };
 const cleanups: Array<() => void> = [];
@@ -83,7 +84,7 @@ async function harness(failures: number, baseline = false, mixedFailure = false)
     await timer.advanceTimeAsync(ms, () => drainUntilQuiescent(timer));
     await drainUntilQuiescent(timer);
   };
-  const release = async (reason = "explicit-release") => {
+  const release = async (reason: SessionReleaseReason = "explicit-release") => {
     await manager.releaseSession("old", reason);
     await pool.releaseDevice(device.deviceId, "old");
     await step(0);
@@ -129,7 +130,7 @@ test.each([1, 2])(
     expect(h.calls).toBe(1);
     expect(h.timer.getPendingSleepCount()).toBeGreaterThan(0);
     expect(h.manager.getKeepAwakeRestoreReport("old")).toEqual({
-      status: "failed",
+      status: "failed" as const,
       settings: [
         { setting: "screen_off_timeout", error: "restore unavailable" },
         { setting: "stay_on_while_plugged_in", error: "write rejected" },
@@ -161,7 +162,7 @@ test("bounded failed outcomes mark the slot unhealthy until recovery restores it
   await h.step(250);
   expect(h.calls).toBe(3);
   expect(h.manager.getKeepAwakeRestoreReport("old")).toEqual({
-    status: "failed",
+    status: "failed" as const,
     settings: [
       { setting: "screen_off_timeout", error: "restore unavailable" },
       { setting: "stay_on_while_plugged_in", error: "write rejected" },
@@ -232,7 +233,7 @@ test("final mixed failure includes both errors and successful baseline writes", 
   const h = fixtures.get("mixed-final")!;
   await h.release();
   const failedReport = {
-    status: "failed",
+    status: "failed" as const,
     settings: [
       { setting: "screen_off_timeout", error: "restore unavailable" },
       { setting: "stay_on_while_plugged_in", value: "0" },
@@ -243,7 +244,7 @@ test("final mixed failure includes both errors and successful baseline writes", 
   expect(h.manager.getKeepAwakeRestoreReport("old")).toEqual(failedReport);
   await h.step(250);
   expect(h.manager.getKeepAwakeRestoreReport("old")).toEqual({
-    status: "failed",
+    status: "failed" as const,
     settings: [
       { setting: "screen_off_timeout", error: "restore unavailable" },
       { setting: "stay_on_while_plugged_in", value: "0" },

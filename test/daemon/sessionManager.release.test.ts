@@ -1,6 +1,6 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
+import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import { describe, expect, test } from "bun:test";
 import { SessionManager, type KeepScreenAwakeRestorer } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -18,6 +18,7 @@ import {
   makeSessionManager,
   quietPersistence,
 } from "../helpers/sessionManagerSuite";
+import { unbindDevice } from "../../src/daemon/deviceBinding";
 
 describe("SessionManager", () => {
   let sessionManager: SessionManager;
@@ -76,7 +77,7 @@ describe("SessionManager", () => {
       manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
       manager.onSessionRelease((sessionId) => callbacks.push(sessionId));
 
-      const first = manager.releaseSession("s1", "heartbeat");
+      const first = manager.releaseSession("s1", "heartbeat-timeout");
       await restoreStarted;
       const second = manager.releaseSession("s1", "daemon-shutdown");
       finishRestore();
@@ -267,7 +268,7 @@ describe("SessionManager", () => {
           reason: string,
         ): Promise<void> {
           releases.push(reason);
-          if (reason === "first") {
+          if (reason === "superseded") {
             firstPersistenceStarted();
             await firstPersistence;
           }
@@ -280,7 +281,7 @@ describe("SessionManager", () => {
       });
 
       await manager.createSession("s1", "device-1", "android");
-      const first = manager.releaseSession("s1", "first");
+      const first = manager.releaseSession("s1", "superseded");
       await firstPersistenceStartedPromise;
       const replacement = manager.createSession("s1", "device-2", "android");
 
@@ -289,8 +290,8 @@ describe("SessionManager", () => {
       await expect(first).resolves.toBe("device-1");
       await expect(replacement).resolves.toMatchObject({ assignedDevice: "device-2" });
       expect(manager.getSession("s1")).toMatchObject({ assignedDevice: "device-2" });
-      await expect(manager.releaseSession("s1", "second")).resolves.toBe("device-2");
-      expect(releases).toEqual(["first", "second"]);
+      await expect(manager.releaseSession("s1", "plan-auto-release")).resolves.toBe("device-2");
+      expect(releases).toEqual(["superseded", "plan-auto-release"]);
     });
 
     test("persists terminal state when keep-awake restoration times out", async () => {
@@ -374,8 +375,7 @@ describe("SessionManager", () => {
 
       // A same-serial replacement must not be released by the old deferred callback.
       const oldDevice = pool.getDevice("device-1")!;
-      oldDevice.sessionId = null;
-      oldDevice.status = "idle";
+      unbindDevice(oldDevice);
       await pool.removeDevice("device-1");
       await pool.initializeWithDevices([
         { name: "device-1", deviceId: "device-1", platform: "android" },
@@ -418,7 +418,7 @@ describe("SessionManager", () => {
       await manager.createSession("s1", "device-1", "android");
       manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
 
-      const first = manager.releaseSession("s1", "heartbeat");
+      const first = manager.releaseSession("s1", "heartbeat-timeout");
       const joined = manager.releaseSession("s1", "daemon-shutdown", { allowExpired: true });
       rejectRestore(new Error("restore failed"));
 

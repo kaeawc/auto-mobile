@@ -8,9 +8,9 @@ import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory"
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { preserveToolRegistry, unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
-import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
-import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 
 interface CapturedCall {
   params: Record<string, unknown>;

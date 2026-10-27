@@ -1,10 +1,14 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { Rotate } from "../../../src/features/action/Rotate";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { ROTATION_READ_FLOOR_MS } from "../../../src/features/observe/Idle";
+import {
+  ROTATION_READ_FLOOR_MS,
+  ROTATION_WAIT_TIMEOUT_MS,
+} from "../../../src/features/observe/Idle";
 import type { BootedDevice } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -70,7 +74,11 @@ describe("Rotate non-default display read-back (#10362)", () => {
     const { adb, rotate, timer } = setup();
     adb.setCommandResponseSequence(DUMPSYS, [
       createExecResult(mirrorLandscape, ""),
-      createExecResult(mirrorLandscape.replace("    mRotation=0 ", "    mRotation=1 "), ""),
+      createExecResult(
+        // Change display 3's applied config; its requested policy alone is insufficient (#15024).
+        mirrorLandscape.replace("mDisplayRotation=ROTATION_0", "mDisplayRotation=ROTATION_90"),
+        "",
+      ),
     ]);
     const result = await rotate.execute("landscape", { lockOrientation: true, display: 3 });
     expect(result.success).toBe(true);
@@ -159,12 +167,14 @@ describe("Rotate on a default display that ignores user_rotation (am-flip-6p7 O1
     const rotate = new Rotate(device, adb, timer);
     const observe = new FakeObserveScreen();
     observe.enableAutoVaryHierarchy();
-    observe.setObserveResult(() => ({
-      timestamp: timer.now(),
-      screenSize: { width: 1080, height: 1920 },
-      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      viewHierarchy: { node: {} },
-    }));
+    observe.setObserveResult(() =>
+      buildObserveResult({
+        updatedAt: timer.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: { hierarchy: { node: {} } },
+      }),
+    );
     const window = new FakeWindow();
     window.configureCachedActiveWindow(null);
     window.configureActiveWindow({ appId: "com.test.app", activityName: "Main", layoutSeqSum: 1 });
@@ -176,10 +186,12 @@ describe("Rotate on a default display that ignores user_rotation (am-flip-6p7 O1
     const start = timer.now();
     const result = await rotate.execute("landscape");
     expect(result.success).toBe(false);
-    expect(result.error).toContain("Timeout waiting for rotation to 1 after 500ms");
+    expect(result.error).toContain(
+      `Timeout waiting for rotation to 1 after ${ROTATION_WAIT_TIMEOUT_MS}ms`,
+    );
     expect(result.currentOrientation).toBe("portrait");
     expect(adb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(true);
-    // waitForRotation (500ms) plus the 1000ms cleanup/confirmation deadlines bound the call.
-    expect(timer.now() - start).toBeLessThan(5000);
+    // The rotation wait plus the 1000ms cleanup/confirmation deadlines bound the call.
+    expect(timer.now() - start).toBeLessThan(ROTATION_WAIT_TIMEOUT_MS + 5000);
   });
 });

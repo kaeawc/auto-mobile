@@ -4,6 +4,7 @@ import {
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
+import { createFakeDaemonState } from "../daemon/helpers/inputSocketHarness";
 import type { SessionManager } from "../../src/daemon/sessionManager";
 
 /**
@@ -17,10 +18,11 @@ import type { SessionManager } from "../../src/daemon/sessionManager";
 export function daemonHeartbeatHandler(
   sessionManager: SessionManager,
 ): (method: string, params: Record<string, unknown>) => Promise<unknown> {
-  const state = {
+  const state: DaemonStateAccess = {
+    ...createFakeDaemonState(),
     isInitialized: () => true,
     getSessionManager: () => sessionManager,
-  } as unknown as DaemonStateAccess;
+  };
   return async (method, params) => {
     if (method !== "daemon/heartbeat") {
       return undefined;
@@ -30,7 +32,7 @@ export function daemonHeartbeatHandler(
       state,
     );
     if (!response.success) {
-      throw daemonResponseError({ id: method, type: "daemon_response", ...response });
+      throw daemonResponseError({ id: method, type: "mcp_response", ...response });
     }
     return response.result;
   };

@@ -7,7 +7,7 @@ import {
   type ProgressCallback,
 } from "./toolRegistry";
 import { erased } from "./toolRegistryErasure";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
 
 /**
  * Typed tool definitions (#11824). The handler's `args` are inferred from the
@@ -25,10 +25,9 @@ type ObjectSchema = z.ZodObject<z.ZodRawShape, z.core.$ZodObjectConfig>;
 type StrictInput<I extends ObjectSchema> = ReturnType<I["strict"]>;
 
 /** The schema a device-aware tool advertises and parses: strict, plus device targeting. */
-export type DeviceToolSchema<I extends ObjectSchema> =
-  StrictInput<I> extends z.ZodObject<infer S, infer C>
-    ? ReturnType<typeof addDeviceTargetingToSchema<S, C>>
-    : never;
+export type DeviceToolSchema<I extends ObjectSchema> = ReturnType<
+  typeof addDeviceTargetingToSchema<I["shape"], z.core.$strict>
+>;
 
 /** The handler of a device tool defined with {@link defineDeviceTool}. */
 export type DeviceToolHandler<I extends ObjectSchema> = (
@@ -89,9 +88,8 @@ function requireHandler<H>(name: string, handler: H | undefined): H {
 export function defineDeviceTool<I extends ObjectSchema>(
   definition: DeviceToolDefinition<I>,
 ): DefinedTool<DeviceToolSchema<I>, DeviceToolHandler<I>> {
-  const strict: z.ZodObject<z.ZodRawShape, z.core.$ZodObjectConfig> = definition.input.strict();
-  // oxlint-disable-next-line auto-mobile/no-unknown-cast -- TypeScript cannot resolve the conditional DeviceToolSchema<I> for a generic I; the runtime value is exactly addDeviceTargetingToSchema(strict).
-  const schema = addDeviceTargetingToSchema(strict) as unknown as DeviceToolSchema<I>;
+  const strict: z.ZodObject<I["shape"], z.core.$strict> = definition.input.strict();
+  const schema = addDeviceTargetingToSchema(strict);
   return {
     name: definition.name,
     schema,

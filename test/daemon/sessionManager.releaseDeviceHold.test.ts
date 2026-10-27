@@ -8,7 +8,7 @@ import {
   MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS,
 } from "../../src/daemon/sessionBroker/provisioning/executionReowner";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceCleanupInProgressError } from "../../src/models/deviceAcquisitionRefusals";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { logger } from "../../src/utils/logger";
@@ -17,8 +17,8 @@ import {
   LocationRouteRegistry,
   registerLocationRouteSessionCleanup,
 } from "../../src/features/utility/LocationRoutePlayer";
-import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
-import { NetworkState } from "../../src/server/NetworkState";
+import { registerNetworkStateSessionCleanup } from "../../src/daemon/networkStateSessionCleanup";
+import { NetworkState } from "../../src/utils/NetworkState";
 import {
   deferHeldPlanAppCleanup,
   takeHeldPlanAppCleanup,
@@ -48,12 +48,20 @@ async function harness() {
     restore: async () => {
       await behavior.gate;
       writes.push(kind);
-      return { status: "restored" as const };
     },
   });
+  const recordKeepAwake = (kind: string) => () => {
+    const restorer = record(kind)();
+    return {
+      restore: async () => {
+        await restorer.restore();
+        return { status: "restored" as const };
+      },
+    };
+  };
   const manager = new SessionManager(timer, persistence, {
     barrier: () => new FakeDbWriteBarrier(),
-    keepScreenAwakeRestorer: record("keep-awake"),
+    keepScreenAwakeRestorer: recordKeepAwake("keep-awake"),
     biometricEnrollmentRestorer: record("biometric"),
     restorers: {
       networkCondition: record("network"),
@@ -98,6 +106,7 @@ describe("session release device ownership hold", () => {
       registry,
       mockLocationClears: {
         markSet: () => {},
+        abandonClear: () => {},
         clearLateSet: () => null,
         retireDevice: (device) => {
           retired.push(device);

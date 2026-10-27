@@ -1,0 +1,121 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "show": true
+    },
+    "root": {
+      "type": "column",
+      "stagger": {
+        "ms": 60,
+        "order": "center"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "Header",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "transition": {
+            "type": "blurReplace",
+            "delayMs": 0
+          }
+        },
+        {
+          "type": "text",
+          "text": "Row 1",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "transition": {
+            "type": "fade",
+            "delayMs": 120
+          }
+        },
+        {
+          "type": "text",
+          "text": "Row 2",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "transition": "blurReplace"
+        },
+        {
+          "type": "text",
+          "text": "Row 3",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "transition": {
+            "type": "slideStart"
+          }
+        },
+        {
+          "type": "box",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "stagger": {
+            "ms": 0
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "Row 4",
+              "visibleWhen": {
+                "key": "show",
+                "equals": true
+              }
+            }
+          ]
+        },
+        {
+          "type": "row",
+          "stagger": {
+            "ms": 40,
+            "order": "reverse"
+          },
+          "repeat": {
+            "items": [
+              {
+                "n": "a"
+              },
+              {
+                "n": "b"
+              },
+              {
+                "n": "c"
+              }
+            ],
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "Row 5",
+              "visibleWhen": {
+                "key": "show",
+                "equals": true
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_choreography_v1"]
+  },
+  "expectedPath": "$"
+}

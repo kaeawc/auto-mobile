@@ -1,3 +1,4 @@
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
@@ -620,6 +621,26 @@ describe("ToolExecutionContext", () => {
     },
   );
 
+  test("readiness preserves the typed transport cause", async () => {
+    const typed = new AdbDeviceTransportUnavailableError("device-1", new Error("device offline"));
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      setup: async () => ({
+        success: false,
+        message: "setup failed",
+        error: typed.message,
+        cause: new Error("context", { cause: typed }),
+        category: "deviceConnection" as const,
+      }),
+      waitForConnection: async () => true,
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await expect(
+      createToolExecutionContext("setup-transport", sessionManager, devicePool, sessionOptions),
+    ).rejects.toBe(typed);
+  });
+
   // Issue #13392: a confirmed device loss keeps its typed cause and is terminal
   // even though its message classifies as deviceConnection.
   test("does not retry a deviceConnection failure carrying a DeviceLostError cause (#13392)", async () => {
@@ -693,10 +714,7 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         sessionOptions,
-        undefined,
-        undefined,
-        false,
-        controller.signal,
+        { requireIssuedSession: false, signal: controller.signal },
       );
       // The fake timer's auto-advance fires the retry sleep only once the microtask
       // queue goes quiet, so waiting for the microtask-scheduled `firstSetupDone`
@@ -754,16 +772,10 @@ describe("ToolExecutionContext", () => {
     };
 
     const startContext = (sessionId: string, signal?: AbortSignal) =>
-      createToolExecutionContext(
-        sessionId,
-        manualSessionManager,
-        manualPool,
-        sessionOptions,
-        undefined,
-        undefined,
-        false,
+      createToolExecutionContext(sessionId, manualSessionManager, manualPool, sessionOptions, {
+        requireIssuedSession: false,
         signal,
-      );
+      });
 
     const abandonedLogs = (debugSpy: { mock: { calls: unknown[][] } }) =>
       debugSpy.mock.calls.filter((call) =>
@@ -938,10 +950,7 @@ describe("ToolExecutionContext", () => {
       sessionManager,
       devicePool,
       sessionOptions,
-      undefined,
-      undefined,
-      false,
-      controller.signal,
+      { requireIssuedSession: false, signal: controller.signal },
     );
     await setupStarted.promise;
     controller.abort(reason);
@@ -1008,7 +1017,7 @@ describe("ToolExecutionContext", () => {
   // #6227: the persisted daemon-session path (ToolRegistry passing sessionUuid
   // into createToolExecutionContext) must honor a tool's declared
   // deviceReadiness the same way the legacy/no-session path already does via
-  // DeviceSessionManager.ensureDeviceReady's `readiness` option.
+  // DeviceReadiness.ensureDeviceReady's `readiness` option.
   arranged(
     "skips accessibility setup for a new session when deviceReadiness is booted (#6227)",
     async () => {
@@ -1764,8 +1773,7 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         { ...sessionOptions, deviceReadiness: "automationReady" },
-        undefined,
-        original,
+        { admittedSession: original },
       );
       await oldEntered;
 
@@ -1795,8 +1803,7 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         { ...sessionOptions, deviceReadiness: "automationReady" },
-        undefined,
-        replacement,
+        { admittedSession: replacement },
       );
 
       releaseOldGate();
@@ -2055,10 +2062,7 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         { ...sessionOptions, deviceReadiness: "automationReady" },
-        undefined,
-        undefined,
-        false,
-        controller.signal,
+        { requireIssuedSession: false, signal: controller.signal },
       );
 
       controller.abort(new Error("request cancelled"));
@@ -2090,10 +2094,7 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         { ...sessionOptions, deviceReadiness: "automationReady" },
-        undefined,
-        undefined,
-        false,
-        controller.signal,
+        { requireIssuedSession: false, signal: controller.signal },
       );
 
       expect(setupSignal).toBeDefined();
@@ -2130,10 +2131,7 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         { ...sessionOptions, deviceReadiness: "automationReady" },
-        undefined,
-        undefined,
-        false,
-        firstController.signal,
+        { requireIssuedSession: false, signal: firstController.signal },
       );
       await new Promise((resolve) => setImmediate(resolve));
       const second = createToolExecutionContext(
@@ -2181,10 +2179,7 @@ describe("ToolExecutionContext", () => {
       sessionManager,
       devicePool,
       { ...sessionOptions, deviceReadiness: "automationReady" },
-      undefined,
-      undefined,
-      false,
-      cancelled.signal,
+      { requireIssuedSession: false, signal: cancelled.signal },
     );
     await setupEntered.promise;
     cancelled.abort(new Error("first request cancelled"));
@@ -2238,10 +2233,7 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         sessionOptions,
-        undefined,
-        undefined,
-        false,
-        firstController.signal,
+        { requireIssuedSession: false, signal: firstController.signal },
       );
       await setupEntered.promise;
       expect(resetCalls).toBe(1);
@@ -2295,10 +2287,7 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         sessionOptions,
-        undefined,
-        undefined,
-        false,
-        controller.signal,
+        { requireIssuedSession: false, signal: controller.signal },
       ),
     ).rejects.toThrow("cancelled before readiness");
     expect(resetCalls).toBe(0);
@@ -2416,14 +2405,9 @@ describe("ToolExecutionContext", () => {
     await sessionManager.releaseSession("session-1", "explicit-release");
 
     await expect(
-      createToolExecutionContext(
-        "session-1",
-        sessionManager,
-        devicePool,
-        sessionOptions,
-        undefined,
+      createToolExecutionContext("session-1", sessionManager, devicePool, sessionOptions, {
         admittedSession,
-      ),
+      }),
     ).rejects.toThrow("Session session-1 was released during setup");
     expect(sessionManager.getSession("session-1")).toBeNull();
   });
@@ -2588,14 +2572,9 @@ describe("ToolExecutionContext", () => {
     await Promise.resolve();
 
     await expect(
-      createToolExecutionContext(
-        "session-releasing",
-        sessionManager,
-        devicePool,
-        sessionOptions,
-        undefined,
-        session,
-      ),
+      createToolExecutionContext("session-releasing", sessionManager, devicePool, sessionOptions, {
+        admittedSession: session,
+      }),
     ).rejects.toThrow("released during setup");
 
     finishSetup();
@@ -2624,8 +2603,7 @@ describe("ToolExecutionContext", () => {
           sessionManager,
           devicePool,
           sessionOptions,
-          undefined,
-          session,
+          { admittedSession: session },
         ),
       ).rejects.toThrow("released during setup");
     } finally {
@@ -2799,6 +2777,16 @@ describe("ToolExecutionContext", () => {
       session_timeout_ms: 10,
       heartbeat_timeout_ms: 5,
       has_received_heartbeat: 1,
+      activity_seq: 0,
+      stable_identity_generation: 0,
+      heartbeat_timeout_source: null,
+      liveness_contract_generation: 0,
+      liveness_owner_token: null,
+      liveness_policy: null,
+      pre_cli_heartbeat_timeout_ms: null,
+      pre_cli_heartbeat_timeout_source: null,
+      pre_cli_session_timeout_ms: null,
+
       created_at: "2026-09-03T00:00:00.000Z",
       updated_at: "2026-09-03T00:00:00.000Z",
     });
@@ -2832,9 +2820,7 @@ describe("ToolExecutionContext", () => {
             sessionManager,
             devicePool,
             sessionOptions,
-            undefined,
-            undefined,
-            true, // requireIssuedSession — the device-tool boundary
+            { requireIssuedSession: true }, // requireIssuedSession — the device-tool boundary
           ),
         ).rejects.toThrow(/not an active daemon session/);
 
@@ -2889,9 +2875,7 @@ describe("ToolExecutionContext", () => {
           recoveryManager,
           recoveryPool,
           sessionOptions,
-          undefined,
-          undefined,
-          true, // requireIssuedSession must NOT block restart recovery
+          { requireIssuedSession: true }, // requireIssuedSession must NOT block restart recovery
         );
         expect(context.deviceId).toBe("device-1");
         expect(recoveryManager.getSession("restarted-session")?.assignedDevice).toBe("device-1");
@@ -2921,9 +2905,7 @@ describe("ToolExecutionContext", () => {
           sessionManager,
           devicePool,
           sessionOptions,
-          undefined,
-          undefined,
-          true,
+          { requireIssuedSession: true },
         );
 
         expect(context.deviceId).toBe("device-1");

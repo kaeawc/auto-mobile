@@ -53,7 +53,7 @@ class NavigationListenerTest {
 
   @Test
   fun `NavigationListener should handle exceptions gracefully in implementation`() {
-    val listener = NavigationListener { throw RuntimeException("Test exception") }
+    val listener = NavigationListener { throw TestFailureException("Test exception") }
 
     // Should not throw exception to caller
     try {

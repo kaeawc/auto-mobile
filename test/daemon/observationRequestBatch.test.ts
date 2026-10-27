@@ -6,15 +6,16 @@ import {
 } from "../../src/daemon/observationRequestBatch";
 import type { ObserveResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { buildObserveResult } from "../helpers/observeFixture";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 
 function successfulObservation(): ObserveResult {
-  return {
+  return buildObserveResult({
     observationId: "successful-observation",
     updatedAt: 0,
     screenSize: { width: 1, height: 1 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  };
+  });
 }
 
 describe("runObservationRequestBatch", () => {

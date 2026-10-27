@@ -21,6 +21,12 @@ export const deviceResourceDescriptions = {
     "Promoted Apple content; excludes advertising privacy preferences and app integrity services.",
   diagnosticReporting:
     "Diagnostic collectors, feedback, location analytics, and call-quality reporting; reduces diagnostic evidence, not call transport.",
+  siriAndAppIntents:
+    "iOS Simulator Siri requests, Shortcuts actions, and App Intents; excludes speech services and proactive suggestions.",
+  speechServices:
+    "iOS Simulator speech recognition, dictation, and Siri speech synthesis; excludes Siri requests and App Intents orchestration.",
+  mediaTranscoding:
+    "iOS Simulator Photos image and video conversion; media imports and photo-picker conversions may fail.",
   photoAnalysis:
     "Background Photos analysis; may reduce photo search and recognition. Preserves library access, cloud transfers, and shared media-analysis infrastructure.",
   assistantSuggestions:

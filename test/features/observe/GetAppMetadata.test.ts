@@ -375,6 +375,7 @@ describe("GetAppMetadata backend injection", () => {
         expect(deps.iosSource).toBe(iosSource);
         expect(deps.findAppByBundleId).toBe(findAppByBundleId);
         return {
+          kind: "simulator",
           getAppInfo: async (bundleId) => {
             calls.push({ deviceId, bundleId });
             return { CFBundleVersion: "42", CFBundleShortVersionString: "1.2", Path: "/app" };

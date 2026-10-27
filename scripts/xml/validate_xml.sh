@@ -26,7 +26,7 @@ fi
 # Start the timer
 start_time=$(bash -c "$(pwd)/scripts/utils/get_timestamp.sh")
 
-# shellcheck disable=SC1091 # Resolved relative to this script's location.
+# shellcheck source=scripts/lib/vcs-diff.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/vcs-diff.sh"
 
 # Need to export this function for xargs bash to see it
@@ -37,10 +37,9 @@ export -f validate_xml
 NPROC="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 
 # Find XML files, excluding ignored files.
-# shellcheck disable=SC2016
-errors=$(vcs_list_files |
+errors=$(vcs_list_files @ |
   grep -z '\.xml$' |
-  xargs -0 -n 1 -P "$NPROC" bash -c 'validate_xml val -w -b -e "$0"' 2>&1)
+  xargs -0 -n 1 -P "$NPROC" bash -c "validate_xml val -w -b -e \"\$0\"" 2>&1)
 
 # Calculate total elapsed time
 end_time=$(bash -c "$(pwd)/scripts/utils/get_timestamp.sh")

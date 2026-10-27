@@ -56,11 +56,11 @@ class FakeObserveElementCollector implements ObserveElementCollector {
 }
 
 const node = (
-  attrs: Record<string, unknown>,
+  attrs: Record<string, unknown> & Pick<Element, "bounds">,
   children?: ViewHierarchyNode[],
-): ViewHierarchyNode => ({
+): ViewHierarchyNode & Pick<Element, "bounds"> => ({
   $: attrs,
-  bounds: attrs.bounds as Element["bounds"],
+  bounds: attrs.bounds,
   ...(children ? { node: children } : {}),
 });
 
@@ -107,6 +107,9 @@ describe("ObserveElementsBuilder", () => {
 
     const builder = new ObserveElementsBuilder(fakeCollector);
     const elements = builder.build(viewHierarchy, "ios");
+    if (!elements) {
+      throw new Error("Expected collected elements");
+    }
 
     expect(fakeCollector.lastViewHierarchy).toBe(viewHierarchy);
     expect(fakeCollector.lastPlatform).toBe("ios");
@@ -181,6 +184,9 @@ describe("ObserveElementsBuilder", () => {
     );
 
     const elements = builder.build(viewHierarchy, "android");
+    if (!elements) {
+      throw new Error("Expected collected elements");
+    }
 
     expect(parser.rootTraversalStarts).toBe(3);
     expect(elements.clickable).toEqual([
@@ -252,6 +258,9 @@ describe("ObserveElementsBuilder", () => {
     );
 
     const elements = builder.build(viewHierarchy, "android");
+    if (!elements) {
+      throw new Error("Expected collected elements");
+    }
 
     expect(elements.clickable).toEqual([
       { ...preferenceRow.$, bounds: preferenceRow.bounds },
@@ -291,6 +300,9 @@ describe("ObserveElementsBuilder", () => {
     );
 
     const elements = builder.build(viewHierarchy, "ios");
+    if (!elements) {
+      throw new Error("Expected collected elements");
+    }
 
     expect(parser.rootTraversalStarts).toBe(1);
     expect(elements.text).toEqual([{ ...explicitText.$, bounds: explicitText.bounds }]);

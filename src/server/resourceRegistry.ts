@@ -3,14 +3,16 @@ import {
   type Resource,
   type ResourceTemplateType as ResourceTemplate,
 } from "@modelcontextprotocol/server";
-import { McpError } from "./mcpError";
+import { McpError } from "../daemon/mcpError";
 import type { ResourceRegistryHost } from "./registryHost";
 import { logger } from "../utils/logger";
+import { setDefaultResourceNotifier } from "../utils/NetworkState";
+import { registerResourceUpdateNotifier } from "../daemon/resourceUpdateNotifier";
 import {
   ListChangedBroadcaster,
   ResourceUpdatedBroadcaster,
   type ServerRegistrationOptions,
-} from "./listChangedBroadcast";
+} from "../daemon/listChangedBroadcast";
 import { MALFORMED_URI_SEGMENT_MESSAGE, MalformedResourceUriError } from "./resourceUriSegments";
 
 export interface ResourceReadContext {
@@ -20,6 +22,8 @@ export interface ResourceReadContext {
   /** A released session identity, available only to handlers that safely report inactivity. */
   releasedSessionUuid?: string;
   signal?: AbortSignal;
+  /** The reading client advertised MCP Apps support (`io.modelcontextprotocol/ui`) at initialize. */
+  clientSupportsApps?: boolean;
 }
 
 // Interface for resource content handlers.
@@ -47,6 +51,8 @@ export interface ResourceContent {
   mimeType?: string;
   text?: string;
   blob?: string; // base64 encoded
+  /** Content-level `_meta` (the MCP Apps `ui` hints ride here). */
+  _meta?: Record<string, unknown>;
 }
 
 // Interface for a registered resource
@@ -281,7 +287,8 @@ class ResourceRegistryClass {
     this.listRefreshers.set(name, refresh);
   }
 
-  private async refreshBeforeList(): Promise<void> {
+  /** Await every registered list refresher; the resources/list handler calls this before replying. */
+  async refreshBeforeList(): Promise<void> {
     for (const [name, refresh] of this.listRefreshers) {
       try {
         await refresh();
@@ -299,6 +306,7 @@ class ResourceRegistryClass {
     mimeType: string,
     handler: ResourceHandler,
   ): void {
+    ListChangedBroadcaster.invalidate("resources");
     this.resources.set(uri, { uri, name, description, mimeType, handler });
   }
 
@@ -312,6 +320,7 @@ class ResourceRegistryClass {
     paginationParams: string[] = [],
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
+    ListChangedBroadcaster.invalidate("resources");
     this.templates.set(uriTemplate, {
       uriTemplate,
       name,
@@ -334,6 +343,7 @@ class ResourceRegistryClass {
     paginationParams: string[] = [],
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
+    ListChangedBroadcaster.invalidate("resources");
     this.templates.set(uriTemplate, {
       uriTemplate,
       name,
@@ -382,6 +392,7 @@ class ResourceRegistryClass {
 
   // Unregister a resource by URI
   unregister(uri: string): void {
+    ListChangedBroadcaster.invalidate("resources");
     this.resources.delete(uri);
   }
 
@@ -753,12 +764,14 @@ class ResourceRegistryClass {
 
   /** Test-only: put back what {@link snapshotForTesting} captured, replacing current entries. */
   restoreForTesting(snapshot: ReturnType<ResourceRegistryClass["snapshotForTesting"]>): void {
+    ListChangedBroadcaster.invalidate("resources");
     this.resources = new Map(snapshot.resources);
     this.templates = new Map(snapshot.templates);
   }
 
   // Clear all registered resources, templates, and subscriptions (for testing)
   clearResources(): void {
+    ListChangedBroadcaster.invalidate("resources");
     this.clearEpoch++;
     this.listRefreshers.clear();
     this.resources.clear();
@@ -769,3 +782,12 @@ class ResourceRegistryClass {
 
 // Export a singleton instance
 export const ResourceRegistry = new ResourceRegistryClass();
+
+registerResourceUpdateNotifier((uris) => ResourceRegistry.notifyResourcesUpdated(uris));
+
+// NetworkState (a lower layer) notifies through this registry by default.
+setDefaultResourceNotifier({
+  notifyResourceUpdated(uri: string): void {
+    void ResourceRegistry.notifyResourceUpdated(uri);
+  },
+});

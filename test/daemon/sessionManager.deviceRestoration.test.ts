@@ -60,7 +60,9 @@ describe("SessionManager", () => {
       const manager = makeRestoringManager({
         timer: fakeTimer,
         biometricEnrollmentRestorer: () => ({
-          restore: async (enrollment) => restored.push(enrollment),
+          restore: async (enrollment) => {
+            restored.push(enrollment);
+          },
         }),
       });
       const started = Promise.withResolvers<void>();

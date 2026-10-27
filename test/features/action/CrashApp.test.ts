@@ -6,8 +6,15 @@ import {
   findAndroidCrashEvidence,
   findIosSimulatorCrashEvidence,
 } from "../../../src/features/action/CrashApp";
+import type {
+  NativeCrashReport,
+  NativeCrashReportLookup,
+  NativeCrashReportQuery,
+} from "../../../src/features/crashReports/NativeCrashReport";
+import type { RecordCrashInput } from "../../../src/features/failures/FailureRecorder";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { PhysicalIosCrashControl } from "../../../src/features/action/crashPhysicalIosApp";
 
 const androidDevice = {
   deviceId: "emulator-5554",
@@ -74,8 +81,14 @@ class FakeSimulatorCommands {
 }
 
 const dependencies = (overrides: Partial<CrashAppDependencies> = {}): CrashAppDependencies => ({
-  cacheInvalidator: { invalidate: () => {} },
+  cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => {} },
   uid: () => 501,
+  crashReports: { find: async () => ({ status: "notFound" }) },
+  crashReportRecorder: {
+    recordCrash: async () => {
+      throw new Error("no crash report should be recorded");
+    },
+  },
   ...overrides,
 });
 
@@ -151,7 +164,7 @@ describe("CrashApp (Android)", () => {
       dependencies({
         adb,
         timer,
-        cacheInvalidator: { invalidate: () => invalidations++ },
+        cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => invalidations++ },
       }),
     );
 
@@ -397,7 +410,10 @@ describe("CrashApp (Android)", () => {
     let invalidations = 0;
     const action = new CrashApp(
       androidDevice,
-      dependencies({ adb, cacheInvalidator: { invalidate: () => invalidations++ } }),
+      dependencies({
+        adb,
+        cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => invalidations++ },
+      }),
     );
 
     const result = await action.execute("com.example.app");
@@ -655,7 +671,7 @@ describe("CrashApp (iOS)", () => {
       iosSimulator,
       dependencies({
         simctl,
-        cacheInvalidator: { invalidate: () => invalidations++ },
+        cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => invalidations++ },
       }),
     );
 
@@ -693,7 +709,7 @@ describe("CrashApp (iOS)", () => {
       iosSimulator,
       dependencies({
         simctl: commands,
-        cacheInvalidator: { invalidate: () => invalidations++ },
+        cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => invalidations++ },
       }),
     );
 
@@ -734,22 +750,303 @@ describe("CrashApp (iOS)", () => {
     expect(result.evidence).toBeUndefined();
   });
 
-  test("returns explicit unsupported metadata for a physical device without running commands", async () => {
+  test("physical devices never use the simulator launchctl path (#14096)", async () => {
     const commands = new FakeSimulatorCommands([]);
-    const action = new CrashApp(iosPhysicalDevice, dependencies({ simctl: commands }));
+    const crasher = new FakePhysicalCrasher([undefined]);
+    const action = new CrashApp(
+      iosPhysicalDevice,
+      dependencies({ simctl: commands, physicalIosCrasher: crasher }),
+    );
 
-    const result = await action.execute("com.example.app");
+    await action.execute("com.example.app");
+
+    expect(commands.calls).toEqual([]);
+  });
+});
+
+/** Scripted `findAppPid` answers (one per call) and a scripted `sendAbort` outcome. */
+class FakePhysicalCrasher implements PhysicalIosCrashControl {
+  readonly lookups: string[] = [];
+  readonly aborts: number[] = [];
+  constructor(
+    private readonly pids: Array<number | null | undefined | Error>,
+    private readonly abort: "signalled" | "already_exited" | Error = "signalled",
+  ) {}
+
+  async findAppPid(bundleId: string): Promise<number | null | undefined> {
+    this.lookups.push(bundleId);
+    const next = this.pids.length > 1 ? this.pids.shift() : this.pids[0];
+    if (next instanceof Error) {
+      throw next;
+    }
+    return next;
+  }
+
+  async sendAbort(pid: number) {
+    this.aborts.push(pid);
+    if (this.abort instanceof Error) {
+      throw this.abort;
+    }
+    return this.abort;
+  }
+}
+
+describe("CrashApp (physical iOS, #14096)", () => {
+  const run = async (crasher: FakePhysicalCrasher) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const invalidations: string[] = [];
+    const action = new CrashApp(
+      iosPhysicalDevice,
+      dependencies({
+        physicalIosCrasher: crasher,
+        timer,
+        cacheInvalidator: {
+          retireAppProcess: () => {},
+          invalidate: (device) => invalidations.push(device.deviceId),
+        },
+      }),
+    );
+    return { result: await action.execute("com.example.app"), invalidations };
+  };
+
+  test("sends SIGABRT to the resolved PID and reports the exit without claiming confirmation", async () => {
+    const crasher = new FakePhysicalCrasher([4321, 4321, null]);
+    const { result, invalidations } = await run(crasher);
+
+    expect(crasher.aborts).toEqual([4321]);
+    expect(result).toMatchObject({
+      success: true,
+      supported: true,
+      platform: "ios",
+      mechanism: "ios_device_sigabrt",
+      wasRunning: true,
+      processId: 4321,
+      confirmed: false,
+      evidence: { source: "none" },
+    });
+    expect(result.evidence?.summary).toContain("#14103");
+    expect(invalidations).toEqual([iosPhysicalDevice.deviceId]);
+  });
+
+  test("a relaunched app with a new PID counts as the crashed process exiting", async () => {
+    const { result } = await run(new FakePhysicalCrasher([4321, 9999]));
+    expect(result).toMatchObject({ success: true, processId: 4321 });
+  });
+
+  test("an app that is not installed is refused without a signal", async () => {
+    const crasher = new FakePhysicalCrasher([undefined]);
+    const { result } = await run(crasher);
+    expect(result).toMatchObject({ success: false, supported: true, wasRunning: false });
+    expect(result.error).toContain("not installed");
+    expect(crasher.aborts).toEqual([]);
+  });
+
+  test("an app that is not running is refused without a signal", async () => {
+    const crasher = new FakePhysicalCrasher([null]);
+    const { result } = await run(crasher);
+    expect(result).toMatchObject({ success: false, wasRunning: false });
+    expect(result.error).toContain("not running");
+    expect(crasher.aborts).toEqual([]);
+  });
+
+  test("a process that exited before the signal is not reported as crashed", async () => {
+    const { result } = await run(new FakePhysicalCrasher([4321], "already_exited"));
+    expect(result).toMatchObject({ success: false, wasRunning: true, confirmed: false });
+    expect(result.error).toContain("exited before the crash signal");
+    expect(result.evidence).toBeUndefined();
+  });
+
+  test("a process still running after the signal fails without evidence", async () => {
+    const { result } = await run(new FakePhysicalCrasher([4321]));
+    expect(result).toMatchObject({ success: false, processId: 4321, confirmed: false });
+    expect(result.error).toContain("still running");
+  });
+
+  test("an unreadable process table after the signal cannot prove the exit", async () => {
+    const { result } = await run(new FakePhysicalCrasher([4321, new Error("device locked")]));
+    expect(result).toMatchObject({ success: false });
+    expect(result.error).toContain("still running");
+  });
+
+  test("a devicectl signal failure surfaces its message and still invalidates caches", async () => {
+    const { result, invalidations } = await run(
+      new FakePhysicalCrasher([4321], new Error("Failed to send SIGABRT: device is locked")),
+    );
+    expect(result).toMatchObject({ success: false, wasRunning: true, processId: 4321 });
+    expect(result.error).toContain("device is locked");
+    expect(invalidations).toHaveLength(1);
+  });
+});
+
+describe("CrashApp native crash reports (#14103)", () => {
+  const report = (processId: number, platform: "android" | "ios"): NativeCrashReport => ({
+    id: `report-${processId}`,
+    platform,
+    source: platform === "ios" ? "ios_ips" : "android_dropbox",
+    appId: "com.example.app",
+    appVersion: "1.4.0",
+    processId,
+    exceptionType: platform === "ios" ? "EXC_CRASH (SIGABRT)" : "CrashedByAdbException",
+    exceptionMessage: platform === "ios" ? "abort() called" : "shell-induced crash",
+    terminationReason: "SIGNAL 6: Abort trap: 6",
+    frames: [
+      {
+        className: "libsystem_c.dylib",
+        methodName: "abort",
+        fileName: null,
+        lineNumber: null,
+        isAppCode: false,
+      },
+    ],
+    reportPath: "/reports/Playground.ips",
+  });
+
+  function finder(lookup: NativeCrashReportLookup) {
+    const queries: NativeCrashReportQuery[] = [];
+    return {
+      queries,
+      find: async (query: NativeCrashReportQuery) => (queries.push(query), lookup),
+    };
+  }
+
+  function recorder(result: string | Error = "occ-7") {
+    const recorded: RecordCrashInput[] = [];
+    return {
+      recorded,
+      recordCrash: async (input: RecordCrashInput) => {
+        recorded.push(input);
+        if (result instanceof Error) {
+          throw result;
+        }
+        return result;
+      },
+    };
+  }
+
+  function androidWithoutLogcatEvidence() {
+    const adb = new FakeAdbClient();
+    adb.setCommandResultSequence("shell dumpsys activity processes", [
+      "*APP* UID u0a123 ProcessRecord{abc 3220:com.example.app/u0a123}",
+      "*APP* UID u0a123 ProcessRecord{abc 3220:com.example.app/u0a123}",
+      "",
+    ]);
+    adb.setCommandResult("shell logcat -b crash -d -v epoch -t 200", "");
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    return { adb, timer };
+  }
+
+  test("confirms an Android crash from the dropbox report when logcat has no marker", async () => {
+    const { adb, timer } = androidWithoutLogcatEvidence();
+    const crashReports = finder({ status: "found", report: report(3220, "android") });
+    const failures = recorder();
+
+    const result = await new CrashApp(
+      androidDevice,
+      dependencies({ adb, timer, crashReports, crashReportRecorder: failures }),
+    ).execute("com.example.app");
+
+    expect(result).toMatchObject({
+      success: true,
+      confirmed: true,
+      processId: 3220,
+      evidence: {
+        source: "android_dropbox",
+        summary: "CrashedByAdbException: shell-induced crash",
+      },
+      crashReport: {
+        status: "found",
+        source: "android_dropbox",
+        reportId: "report-3220",
+        exceptionType: "CrashedByAdbException",
+        terminationReason: "SIGNAL 6: Abort trap: 6",
+        frames: ["abort (libsystem_c.dylib)"],
+        failureOccurrenceId: "occ-7",
+      },
+    });
+    expect(result.error).toBeUndefined();
+    expect(crashReports.queries).toEqual([
+      expect.objectContaining({ appId: "com.example.app", processId: 3220 }),
+    ]);
+    expect(failures.recorded).toEqual([
+      expect.objectContaining({
+        exceptionType: "CrashedByAdbException",
+        deviceId: androidDevice.deviceId,
+        appVersion: "1.4.0",
+      }),
+    ]);
+  });
+
+  test("keeps the unconfirmed result and reports notFound when no report exists", async () => {
+    const { adb, timer } = androidWithoutLogcatEvidence();
+
+    const result = await new CrashApp(androidDevice, dependencies({ adb, timer })).execute(
+      "com.example.app",
+    );
 
     expect(result).toMatchObject({
       success: false,
-      supported: false,
-      platform: "ios",
-      appId: "com.example.app",
-      mechanism: "unsupported",
       confirmed: false,
+      crashReport: { status: "notFound" },
     });
-    expect(result.wasRunning).toBeUndefined();
-    expect(result.error).toContain("physical iOS");
-    expect(commands.calls).toEqual([]);
+    expect(result.error).toContain("no fresh OS crash evidence");
+  });
+
+  test("attaches the .ips report to a log-confirmed iOS Simulator crash and records it", async () => {
+    const processList = "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]";
+    const commands = new FakeSimulatorCommands(
+      [processList, processList, "PID\tStatus\tLabel\n"],
+      "2023-11-14 22:13:20.100 launchd_sim: UIKitApplication:com.example.app[bbbb][rb-legacy] [27955]: exited due to SIGABRT",
+    );
+    const timer = new FakeTimer();
+    timer.advanceTime(1_700_000_000_000);
+    const crashReports = finder({ status: "found", report: report(27955, "ios") });
+    const failures = recorder();
+
+    const result = await new CrashApp(
+      iosSimulator,
+      dependencies({ simctl: commands, timer, crashReports, crashReportRecorder: failures }),
+    ).execute("com.example.app");
+
+    expect(result).toMatchObject({
+      success: true,
+      confirmed: true,
+      evidence: { source: "ios_unified_log" },
+      crashReport: {
+        status: "found",
+        source: "ios_ips",
+        reportPath: "/reports/Playground.ips",
+        exceptionType: "EXC_CRASH (SIGABRT)",
+        failureOccurrenceId: "occ-7",
+      },
+    });
+    expect(crashReports.queries).toEqual([
+      {
+        appId: "com.example.app",
+        processId: 27955,
+        notBeforeTimestampMs: 1_700_000_000_000,
+        signal: undefined,
+      },
+    ]);
+    expect(failures.recorded).toHaveLength(1);
+  });
+
+  test("a failure to record the report never fails a confirmed crash", async () => {
+    const { adb, timer } = androidWithoutLogcatEvidence();
+
+    const result = await new CrashApp(
+      androidDevice,
+      dependencies({
+        adb,
+        timer,
+        crashReports: finder({ status: "found", report: report(3220, "android") }),
+        crashReportRecorder: recorder(new Error("database is locked")),
+      }),
+    ).execute("com.example.app");
+
+    expect(result).toMatchObject({ success: true, confirmed: true });
+    expect(result.crashReport).toMatchObject({ status: "found" });
+    expect(result.crashReport).not.toHaveProperty("failureOccurrenceId");
   });
 });

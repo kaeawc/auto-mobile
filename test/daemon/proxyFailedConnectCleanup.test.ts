@@ -7,7 +7,7 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../../src/features/toolSelection/toolSelectionControl";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -36,6 +36,7 @@ describe("proxy failed partial connect", () => {
       getDevicePool: () => ({
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
+        releaseDevice: async () => {},
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
     };

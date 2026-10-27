@@ -4,6 +4,7 @@ import { screenshotPathProtection } from "../../src/features/observe/ScreenshotP
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { buildAsciiKeyEventPlan } from "../../src/utils/android-cmdline-tools/asciiKeyEvents";
+import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 
 beforeEach(() => {
@@ -48,7 +49,7 @@ test("a socket append dispatches only `shell input keyevent` commands to adb", a
   spyOn(adb, "execute").mockImplementation(async (args, options) => {
     await options?.beforeDispatch?.(options.timeoutMs);
     dispatched.push([...args]);
-    return { stdout: "", stderr: "" };
+    return createExecResult("", "");
   });
   const request = frame("android", "A", true);
   request.params = { ...request.params, text: "ab 1.," };

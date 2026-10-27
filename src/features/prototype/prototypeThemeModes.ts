@@ -59,6 +59,12 @@ function styleFields(value: unknown, path: string): string[] {
     ...["background", "color", "shadowColor"].flatMap((key) =>
       pairAt(style[key], `${path}.${key}`),
     ),
+    ...list(style.shadows).flatMap((shadow, index) =>
+      pairAt(record(shadow)?.color, `${path}.shadows[${index}].color`),
+    ),
+    ...list(record(record(style.border)?.gradient)?.stops).flatMap((stop, index) =>
+      newlyThemedColor(record(stop)?.color, `${path}.border.gradient.stops[${index}].color`),
+    ),
     ...pairAt(record(style.border)?.color, `${path}.border.color`),
     ...list(record(style.gradient)?.stops).flatMap((stop, index) =>
       newlyThemedColor(record(stop)?.color, `${path}.gradient.stops[${index}].color`),
@@ -76,12 +82,15 @@ function nodeFields(value: unknown, path: string): string[] {
       continue;
     }
     fields.push(
+      ...pairAt(record(node.filter)?.tint, `${path}.filter.tint`),
       ...styleFields(node.style, `${path}.style`),
       ...list(node.styleWhen).flatMap((entry, index) =>
         styleFields(record(entry)?.style, `${path}.styleWhen[${index}].style`),
       ),
       ...(node.type === "image" ? pairAt(node.asset, `${path}.asset`) : []),
-      ...(node.type === "bottomSheet" ? newlyThemedColor(node.scrim, `${path}.scrim`) : []),
+      ...(node.type === "bottomSheet" || node.type === "drawer"
+        ? newlyThemedColor(node.scrim, `${path}.scrim`)
+        : []),
       ...list(node.items).flatMap((item, index) =>
         pairAt(record(item)?.image, `${path}.items[${index}].image`),
       ),

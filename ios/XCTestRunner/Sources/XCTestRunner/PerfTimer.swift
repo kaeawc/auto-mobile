@@ -15,8 +15,8 @@ public enum PerfTimer {
 
     /// Log a message with elapsed time prefix (uses stderr for immediate unbuffered output)
     public static func log(_ message: String) {
-        let ms = elapsed()
-        let line = "[PERF +\(ms)ms] \(message)\n"
+        let elapsedMilliseconds = elapsed()
+        let line = "[PERF +\(elapsedMilliseconds)ms] \(message)\n"
         fputs(line, stderr)
     }
 

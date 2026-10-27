@@ -1,6 +1,11 @@
+import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
+import {
+  SessionRequestOwnerMismatchError,
+  SESSION_BROKER_RETRY_AFTER_MS,
+} from "../../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
 import { SessionBrokerService } from "../../../src/daemon/sessionBroker/service";
 import { sessionDisposition } from "../../../src/daemon/sessionBroker/sessionDisposition";
 import { ManagedExecutionReowner } from "../../../src/daemon/sessionBroker/provisioning/executionReowner";
@@ -100,7 +105,8 @@ describe("session broker provider restart handoff", () => {
     if (scope.kind !== "ready") {
       throw new Error("Missing scope");
     }
-    const store = opened.sessionBrokerStore(scope.scope.scopeKey, new CountingIdGenerator("res"));
+    const { scopeKey } = scope.scope;
+    const store = opened.sessionBrokerStore(scopeKey, new CountingIdGenerator("res"));
     // Native devices outlive any one daemon process.
     const devices = new FakeNativePort(opened, new CountingIdGenerator("session"), FIRST);
 
@@ -125,9 +131,10 @@ describe("session broker provider restart handoff", () => {
       });
       const service = new SessionBrokerService(
         broker,
-        scope.scope.scopeKey,
+        scopeKey,
         { acquire: () => {}, release: () => {} },
         timer,
+        new InMemoryMutationRecordingGaps(),
       );
       return { broker, service, sessions };
     }
@@ -228,6 +235,41 @@ describe("session broker provider restart handoff", () => {
     expect(await next.broker.release(uuid)).toEqual({ sessionUuid: uuid, outcome: "released" });
     expect(devices.destroyed).toHaveLength(1);
   });
+
+  for (const restartHandoff of [true, false]) {
+    for (const operation of ["release", "abandon"] as const) {
+      test(`${operation} refuses an unadopted generation without native work (restartHandoff=${restartHandoff})`, async () => {
+        const { store, devices, daemon } = await world();
+        const first = daemon(FIRST);
+        const uuid = await grant(first);
+        if (restartHandoff) {
+          await first.service.close();
+        }
+        // The old owner is still live; a successor cannot adopt this request yet.
+        const next = daemon(SECOND);
+        const receipt = await store.getRequest(REQUEST);
+        const resources = await store.listResources();
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const failure = await (
+            operation === "release"
+              ? next.broker.release(uuid)
+              : next.broker.abandon(REQUEST, TOKEN)
+          ).catch((error: unknown) => error);
+          expect(failure).toBeInstanceOf(SessionRequestOwnerMismatchError);
+          expect(failure).toMatchObject({
+            code: restartHandoff ? "session_restart_handoff_pending" : "session_owner_mismatch",
+            retryable: restartHandoff,
+          });
+          expect(
+            failure instanceof SessionRequestOwnerMismatchError ? failure.retryAfterMs : null,
+          ).toBe(restartHandoff ? SESSION_BROKER_RETRY_AFTER_MS : undefined);
+          expect(await store.getRequest(REQUEST)).toEqual(receipt);
+          expect(await store.listResources()).toEqual(resources);
+          await expectNoDestruction(store, devices);
+        }
+      });
+    }
+  }
 
   test("a crashed daemon's session is retired as session_owner_exited, never explicit release", async () => {
     const { timer, repository, store, devices, daemon, restart } = await world();

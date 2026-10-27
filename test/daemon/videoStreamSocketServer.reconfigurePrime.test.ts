@@ -66,7 +66,7 @@ function hasNal(socket: FakeSocket, type: number, marker: number): boolean {
 function createHarness(resolveDevice: () => Promise<BootedDevice> = async () => device) {
   const timer = new FakeTimer();
   const sources: CaptureSource[] = [];
-  const hints: Array<{ quality?: string; fps: number; bitrateBps?: number }> = [];
+  const hints: Array<{ quality?: string; fps: number | undefined; bitrateBps?: number }> = [];
   const emitters: Array<(chunk: Buffer) => void> = [];
   const server = new TestVideoServer(
     {

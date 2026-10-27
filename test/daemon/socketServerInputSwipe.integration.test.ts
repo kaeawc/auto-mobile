@@ -1,5 +1,5 @@
 import { spyOn } from "bun:test";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import {
   createFakeDaemonState as createDrainDaemonState,
@@ -15,6 +15,7 @@ import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import type { CtrlProxySyncedHierarchy } from "../../src/features/observe/ios/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createAndroidTestClient } from "../helpers/androidCtrlProxyClientSpies";
 import type { DragRequest } from "../../src/utils/interfaces/DragRequest";
@@ -29,6 +30,10 @@ import {
   sendRequest,
   sendRequestAfterConnect,
 } from "./helpers/inputSocketHarness";
+
+async function emptySyncedHierarchy(): Promise<CtrlProxySyncedHierarchy> {
+  return { hierarchy: { updatedAt: 0, packageName: "", hierarchy: {} } };
+}
 
 describe("UnixSocketServer input/swipe", () => {
   let socketPath: string;
@@ -69,7 +74,7 @@ describe("UnixSocketServer input/swipe", () => {
   test("routes Android coordinate swipes without forwarding through tools/call", async () => {
     const requestSwipe = mock(async (request: SwipeRequest) => {
       request.onDispatch?.();
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     });
     const createMcpClient = mock(async () => {
       throw new Error("input/swipe should not create an MCP client");
@@ -124,9 +129,9 @@ describe("UnixSocketServer input/swipe", () => {
   test("LEGACY iOS swipe (no runner scale metadata) passes coordinates through unchanged", async () => {
     const requestDrag = mock(async (request: DragRequest) => {
       request.onDispatch?.();
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     });
-    const fetchHierarchy = mock(async () => ({ hierarchy: {} })); // success, no metadata => legacy
+    const fetchHierarchy = mock(emptySyncedHierarchy); // success, no metadata => legacy
     spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
       createIosTestClient(iosDevice, {
         requestDrag,
@@ -177,7 +182,7 @@ describe("UnixSocketServer input/swipe", () => {
     // px frame (#4549): endpoints arrive in pixels, divided by nativeScale=3 to runner points.
     const requestDrag = mock(async (request: DragRequest) => {
       request.onDispatch?.();
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     });
     spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
       createIosTestClient(iosDevice, {
@@ -220,7 +225,7 @@ describe("UnixSocketServer input/swipe", () => {
   test("uses the socket autolock device when deviceId is omitted", async () => {
     const requestSwipe = mock(async (request: SwipeRequest) => {
       request.onDispatch?.();
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     });
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
       createAndroidTestClient(androidDevice, { requestSwipe }),
@@ -286,7 +291,7 @@ describe("UnixSocketServer input/swipe", () => {
         fakeTimer.setTimeout(resolve, 40);
       });
       inFlight -= 1;
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     });
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
       createAndroidTestClient(androidDevice, { requestSwipe }),
@@ -333,7 +338,7 @@ describe("UnixSocketServer input/swipe", () => {
       if (callCount === 1) {
         await blockingPromise;
       }
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     });
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
       createAndroidTestClient(androidDevice, { requestSwipe }),

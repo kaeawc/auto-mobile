@@ -71,7 +71,9 @@ class NavigationEventAccumulatorTest {
   @Test
   fun `single-threaded add assigns monotonic sequences and bounds the buffer`() {
     val acc = NavigationEventAccumulator()
-    repeat(150) { acc.addEvent("dest-$it", "src", emptyMap(), emptyMap()) }
+    repeat(150) {
+      acc.addEvent(NavigationEventInput("dest-$it", "src", emptyMap(), emptyMap()))
+    }
 
     val all = acc.getAllEvents()
     assertEquals(100, all.size) // trimmed to maxEvents
@@ -86,7 +88,7 @@ class NavigationEventAccumulatorTest {
     // Push well past capacity to exercise steady-state eviction, checking bounds
     // as we cross and stay past the 100-event ceiling.
     repeat(250) { i ->
-      acc.addEvent("dest-$i", "src", emptyMap(), emptyMap())
+      acc.addEvent(NavigationEventInput("dest-$i", "src", emptyMap(), emptyMap()))
       assertTrue("buffer exceeded capacity at i=$i", acc.getAllEvents().size <= 100)
     }
 
@@ -130,7 +132,9 @@ class NavigationEventAccumulatorTest {
     for (t in 0 until threadCount) {
       Thread {
         try {
-          repeat(perThread) { acc.addEvent("dest", "src", emptyMap(), emptyMap()) }
+          repeat(perThread) {
+            acc.addEvent(NavigationEventInput("dest", "src", emptyMap(), emptyMap()))
+          }
         } catch (e: Throwable) {
           errors.add(e)
         } finally {

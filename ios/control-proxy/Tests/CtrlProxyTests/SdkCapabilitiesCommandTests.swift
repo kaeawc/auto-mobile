@@ -8,6 +8,9 @@ private actor FakeSdkHierarchyClient: SdkHierarchyFetching {
     private let hierarchy: SdkViewHierarchy?
     private var freshResult: SdkHierarchyFetchResult?
     private var networkErrorCalls = 0
+    private(set) var appLifecycleCalls = 0
+
+    func appLifecycleDidChange() async { appLifecycleCalls += 1 }
 
     init(serverInfo: SdkHierarchyServerInfo?, hierarchy: SdkViewHierarchy? = nil) {
         self.serverInfo = serverInfo
@@ -101,6 +104,35 @@ private actor RejectingSdkDatabaseClient: SdkDatabaseFetching {
 
 @MainActor
 final class SdkCapabilitiesCommandTests: XCTestCase {
+    func testLaunchAppNotifiesSdkLifecycleOnceForEachSuccessfulStrategy() async throws {
+        for state: ObservedAppState in [
+            .notRunning,
+            .runningForeground,
+            .runningBackground,
+            .runningBackgroundSuspended,
+        ] {
+            for coldBoot in [false, true] {
+                let sdk = FakeSdkHierarchyClient(serverInfo: nil)
+                let locator = FakeElementLocator()
+                locator.appState = state
+                let handler = CommandHandler(
+                    elementLocator: locator, gesturePerformer: FakeGesturePerformer(),
+                    perf: PerfProvider(), sdkHierarchyClient: sdk
+                )
+                let launch = try request(
+                    """
+                    {"type":"request_launch_app","bundleId":"com.example.sdk","coldBoot":\(coldBoot)}
+                    """
+                )
+                let payload = await handler.handle(launch)
+                let response = try XCTUnwrap(payload as? WebSocketResponse)
+                XCTAssertEqual(response.success, true)
+                let lifecycleCalls = await sdk.appLifecycleCalls
+                XCTAssertEqual(lifecycleCalls, 1, "state=\(state), coldBoot=\(coldBoot)")
+            }
+        }
+    }
+
     private func handler(
         foregroundBundleId: String,
         sdkClient: FakeSdkHierarchyClient,
@@ -260,7 +292,7 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
 
         XCTAssertEqual(capabilityResponse?.available, false)
         XCTAssertEqual(capabilityResponse?.capabilities, [])
-        XCTAssertEqual(networkResponse?.ok, false)
+        XCTAssertEqual(networkResponse?.success, false)
         let callCount = await sdkClient.networkErrorCallCount()
         XCTAssertEqual(callCount, 0)
     }
@@ -286,7 +318,7 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
         XCTAssertEqual(capabilityResponse?.bundleId, "com.example.sdk")
         XCTAssertTrue(capabilityResponse?.capabilities.contains("network_error_simulation") == true)
         XCTAssertTrue(capabilityResponse?.capabilities.contains("magic_tap") == true)
-        XCTAssertEqual(networkResponse?.ok, true)
+        XCTAssertEqual(networkResponse?.success, true)
         let callCount = await sdkClient.networkErrorCallCount()
         XCTAssertEqual(callCount, 1)
     }

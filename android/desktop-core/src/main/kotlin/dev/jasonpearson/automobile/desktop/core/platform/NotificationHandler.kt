@@ -10,5 +10,7 @@ interface NotificationHandler {
 
 /** No-op notification handler for desktop app and tests. */
 object NoOpNotificationHandler : NotificationHandler {
-  override fun show(title: String, content: String, isWarning: Boolean) {}
+  override fun show(title: String, content: String, isWarning: Boolean) {
+    // Desktop hosts intentionally have no platform notification integration.
+  }
 }

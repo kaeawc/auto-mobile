@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test";
-import { DaemonShuttingDownError } from "../../src/daemon/client";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { RestartScenario, type ShutdownKind } from "../helpers/daemonRestartScenario";
 import { warmedTests } from "../helpers/warmedTests";
 

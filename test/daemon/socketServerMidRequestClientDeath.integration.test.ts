@@ -6,10 +6,13 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
-import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
+import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/wire/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import type { Client } from "@modelcontextprotocol/client";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
 
 // #11058 item 6: a client that dies while its tool call is in flight (after an SDK-side timeout
 // sent a cancel, or with no cancel at all) must still be seen as disconnected, so the pool's
@@ -29,7 +32,7 @@ async function until(predicate: () => boolean, what: string): Promise<void> {
 
 interface FakeToolCall {
   signal: AbortSignal | undefined;
-  settle: (value: unknown) => void;
+  settle: (value: Awaited<ReturnType<Client["callTool"]>>) => void;
 }
 
 describe("a client that dies mid-request is seen as disconnected (#11058)", () => {
@@ -51,6 +54,7 @@ describe("a client that dies mid-request is seen as disconnected (#11058)", () =
       {
         isInitialized: () => true,
         getSessionManager: () => ({
+          hasSession: () => false,
           getSession: () => null,
           getDeviceLabels: () => undefined,
           releaseSession: async () => null,
@@ -66,27 +70,24 @@ describe("a client that dies mid-request is seen as disconnected (#11058)", () =
             closedConnections.push(connectionId);
           },
         }),
+        getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
       },
       timer,
     );
-    server.mcpClientFactory = async () => ({
-      listTools: async () => ({ tools: [] }),
-      callTool: (_params: unknown, options?: { signal?: AbortSignal }) =>
-        new Promise((resolve, reject) => {
-          const signal = options?.signal;
-          calls.push({ signal, settle: resolve });
-          signal?.addEventListener("abort", () => {
-            // A wedged device command keeps running after the abort.
-            if (honorAbort) {
-              reject(signal.reason);
-            }
-          });
-        }),
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => {},
-    });
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: (_params, options) =>
+          new Promise((resolve, reject) => {
+            const signal = options?.signal;
+            calls.push({ signal, settle: resolve });
+            signal?.addEventListener("abort", () => {
+              // A wedged device command keeps running after the abort.
+              if (honorAbort) {
+                reject(signal.reason);
+              }
+            });
+          }),
+      });
     await server.start();
   });
 

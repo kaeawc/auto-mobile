@@ -7,6 +7,9 @@ import type { Platform } from "../../models/Platform";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
 import type { CapacityLimits, InFlightBootMemory } from "./capacityLimits";
+import { SampleWindow } from "./SampleWindow";
+import { ENV } from "../../config/env";
+import type { BootAdmissionReason } from "./BootSlotReservation";
 
 /**
  * Platform-neutral boot admission (#11181): the ledger of admitted boots, the
@@ -15,9 +18,9 @@ import type { CapacityLimits, InFlightBootMemory } from "./capacityLimits";
  */
 
 /** Opt-out switch for every boot admission gate; exact `0` disables. */
-export const BOOT_CAPACITY_GATE_ENV = "AUTOMOBILE_BOOT_CAPACITY_GATE";
+export const BOOT_CAPACITY_GATE_ENV = ENV.BOOT_CAPACITY_GATE.name;
 /** iOS-only override of {@link BOOT_CAPACITY_GATE_ENV}: exact `0` disables, exact `1` enables. */
-export const IOS_SIM_CAPACITY_GATE_ENV = "AUTOMOBILE_IOS_SIM_CAPACITY_GATE";
+export const IOS_SIM_CAPACITY_GATE_ENV = ENV.IOS_SIM_CAPACITY_GATE.name;
 
 /**
  * Suggested wait before retrying a refused boot. Capacity frees when another
@@ -50,6 +53,8 @@ export interface RefusedCapacityDecision {
   message: string;
   /** Counted devices this process did not start (e.g. launched from Android Studio). */
   externalDevices?: string[];
+  /** Counted iOS simulators owned by AutoMobile admissions, sessions or bindings. */
+  heldDevices?: string[];
 }
 
 export interface BootAdmissionResult<D> {
@@ -68,15 +73,25 @@ export function atCapacityDecision(
   bootedCount: number,
   limits: CapacityLimits,
   retryAfterMs: number,
-  describe: { noun: string; envName: string; externalDevices?: readonly string[] },
+  describe: {
+    noun: string;
+    envName: string;
+    externalDevices?: readonly string[];
+    heldDevices?: readonly string[];
+    /** Ownership labels use a retained or empty snapshot after a failed read. */
+    ownershipUnknown?: boolean;
+  },
 ): RefusedCapacityDecision | undefined {
   if (bootedCount < limits.maxBooted) {
     return undefined;
   }
   const external = describe.externalDevices ?? [];
+  const held = describe.heldDevices ?? [];
+  const heldNote =
+    held.length > 0 ? ` ${held.length} of them are held by AutoMobile: ${held.join(", ")}.` : "";
   const externalNote =
     external.length > 0
-      ? ` ${external.length} of them were not started by AutoMobile but still count toward the limit: ${external.join(", ")}.`
+      ? ` ${external.length} of them ${describe.ownershipUnknown ? "have unconfirmed AutoMobile ownership" : describe.heldDevices ? "have no AutoMobile owner" : "were not started by AutoMobile"} but still count toward the limit: ${external.join(", ")}.`
       : "";
   const optOut = external.length > 0 ? ` or disable the gate with ${BOOT_CAPACITY_GATE_ENV}=0` : "";
   return {
@@ -86,7 +101,8 @@ export function atCapacityDecision(
     bootedCount,
     retryAfterMs,
     ...(external.length > 0 ? { externalDevices: [...external] } : {}),
-    message: `${bootedCount} ${describe.noun}(s) booted; limit is ${limits.maxBooted} (${limits.source}).${externalNote} Shut one down, raise the limit with ${describe.envName}${optOut}.`,
+    ...(held.length > 0 ? { heldDevices: [...held] } : {}),
+    message: `${bootedCount} ${describe.noun}(s) booted; limit is ${limits.maxBooted} (${limits.source}).${externalNote}${heldNote} Shut one down, raise the limit with ${describe.envName}${optOut}.`,
   };
 }
 
@@ -99,6 +115,8 @@ export interface BootAdmissionOptions<S, D extends { outcome: string }> {
   label: string;
   /** Bound on the one capacity sample; defaults to {@link DEFAULT_SAMPLE_TIMEOUT_MS}. */
   sampleTimeoutMs?: number;
+  /** Wait hint carried by the retryable error a timed-out sample throws (iOS only; #15307). */
+  timeoutRetryAfterMs?: number;
   /** One fresh capacity sample. */
   sample: () => Promise<S>;
   /** The ledger whose in-flight boots the sample may not yet reflect. */
@@ -160,7 +178,8 @@ async function sampleWithin<S, D extends { outcome: string }>(
     timeoutMs,
     signal: options.signal,
     label: `Collecting ${options.label}`,
-    timeoutError: () => sampleTimeoutError(options.platform, timeoutMs, options.label),
+    timeoutError: () =>
+      sampleTimeoutError(options.platform, timeoutMs, options.label, options.timeoutRetryAfterMs),
   });
 }
 
@@ -172,6 +191,7 @@ export function sampleTimeoutError(
   platform: Platform,
   timeoutMs: number,
   label: string,
+  retryAfterMs?: number,
 ): BootedDeviceDiscoveryIncompleteError {
   const discoveryError = {
     code: "timeout",
@@ -180,7 +200,7 @@ export function sampleTimeoutError(
   } as const;
   return platform === "android"
     ? new AndroidBootedDeviceDiscoveryIncompleteError(discoveryError)
-    : new BootedDeviceDiscoveryIncompleteError(platform, discoveryError);
+    : new BootedDeviceDiscoveryIncompleteError(platform, discoveryError, undefined, retryAfterMs);
 }
 
 /** Throws the typed retryable {@link BootCapacityExhaustedError} when the boot was refused. */
@@ -200,13 +220,17 @@ export function assertBootCapacityGranted<D extends { outcome: string }>(
       booted: decision.bootedCount,
       retryAfterMs: decision.retryAfterMs,
       ...(decision.externalDevices ? { externalDevices: decision.externalDevices } : {}),
+      ...(decision.heldDevices ? { heldDevices: decision.heldDevices } : {}),
     },
     `Refused to boot: no ${noun} capacity (code capacity_exhausted, retryable; retry after ${decision.retryAfterMs}ms): ${decision.message}`,
   );
 }
 
-interface LedgerEntry {
+export interface LedgerEntry {
+  reason?: BootAdmissionReason;
   deviceId?: string;
+  /** An old device whose slot is held until the replacement binds its own identity. */
+  replacement?: boolean;
   /** Pid of the process spawned for the boot, once handed off with one. */
   processId?: number;
   /** Set once the boot was handed off: the entry ends when the device is visible or this passes. */
@@ -220,6 +244,7 @@ interface LedgerEntry {
  * repeated, a later call adding the device id or process id the earlier one lacked.
  */
 export interface LedgerAdmission {
+  bind(deviceId?: string): void;
   release(): void;
   handOff(deviceId: string | undefined, untilMs: number, processId?: number): void;
 }
@@ -231,16 +256,6 @@ export interface LedgerAdmission {
  */
 export interface LedgerSampleWindow {
   close(): void;
-}
-
-class SampleWindow implements LedgerSampleWindow {
-  readonly ended: LedgerEntry[] = [];
-
-  constructor(private readonly onClose: (window: SampleWindow) => void) {}
-
-  close(): void {
-    this.onClose(this);
-  }
 }
 
 /** Admitted boots a capacity sample's device listing does not show. */
@@ -280,10 +295,20 @@ export class BootAdmissionLedger {
 
   constructor(private readonly timer: Pick<Timer, "now">) {}
 
-  admit(deviceId?: string): LedgerAdmission {
+  admit(
+    deviceId?: string,
+    replacement = false,
+    reason: BootAdmissionReason = "create",
+  ): LedgerAdmission {
     const token = Symbol("boot-admission");
-    this.entries.set(token, { deviceId });
+    this.entries.set(token, { deviceId, replacement, reason });
     return {
+      bind: (boundDeviceId) => {
+        const entry = this.entries.get(token);
+        if (entry) {
+          this.entries.set(token, { ...entry, deviceId: boundDeviceId, replacement: false });
+        }
+      },
       release: () => this.end(token),
       handOff: (handedOffDeviceId, untilMs, processId) => {
         const entry = this.entries.get(token);
@@ -297,6 +322,14 @@ export class BootAdmissionLedger {
         }
       },
     };
+  }
+
+  admissionsByReason(): Record<BootAdmissionReason, number> {
+    const counts = { reset: 0, create: 0, restart: 0 };
+    for (const entry of this.entries.values()) {
+      counts[entry.reason ?? "create"] += 1;
+    }
+    return counts;
   }
 
   /**
@@ -313,7 +346,13 @@ export class BootAdmissionLedger {
     // A device a listing showed is running whatever its boot deadline says: an older listing
     // still open counts it until that sample decides, so the window keeps it without a deadline.
     const kept = listed
-      ? { deviceId: entry.deviceId, processId: entry.processId, handedOff: entry.handedOff }
+      ? {
+          deviceId: entry.deviceId,
+          processId: entry.processId,
+          handedOff: entry.handedOff,
+          replacement: entry.replacement,
+          reason: entry.reason,
+        }
       : entry;
     for (const window of this.openWindows) {
       window.ended.push(kept);
@@ -381,7 +420,11 @@ export class BootAdmissionLedger {
     // Read before the loop below ends the listed entries into the open windows, this one included.
     const known = [...this.windowEnded(sampleWindow), ...this.entries.values()];
     const listedWithoutProcess = known.filter(
-      (entry) => isVisible(entry) && !hasListedProcess(entry) && entry.deviceId !== excludeDeviceId,
+      (entry) =>
+        isVisible(entry) &&
+        !hasListedProcess(entry) &&
+        entry.deviceId !== excludeDeviceId &&
+        !entry.replacement,
     ).length;
     for (const [token, entry] of [...this.entries]) {
       const visible = isVisible(entry);
@@ -399,6 +442,8 @@ export class BootAdmissionLedger {
     return {
       count: boots.length,
       boots: boots.map((entry) => ({
+        deviceId: entry.deviceId,
+        replacement: entry.replacement,
         processId: entry.processId,
         handedOff: entry.handedOff === true,
       })),
@@ -429,6 +474,7 @@ export class BootAdmissionLedger {
 
 /** The capacity numbers `listDevices` reports per platform. */
 export interface BootCapacitySnapshot {
+  admissionsByReason?: Record<BootAdmissionReason, number>;
   limit: number;
   /** Booted devices of the platform, including ones started outside AutoMobile. */
   booted: number;

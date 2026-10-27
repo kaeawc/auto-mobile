@@ -1,29 +1,15 @@
 package dev.jasonpearson.automobile.junit
 
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.ParsedToolResult
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.RECOVERY_CODES
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.RefusalDisposition
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.appendCaptureObserveStepsArgs
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.appendExecutePlanCleanupArgs
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.buildFailedStepContext
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.buildTestMetadata
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.detectTestContext
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.deviceOwnedGiveUpMessage
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.isTransientError
 import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.loadAndProcessPlan
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.parseDaemonToolResult
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.parseToolResults
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.refusalDisposition
-import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.resolveCiMode
 import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.resolvePlanPath
 import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.resolveSecretConcreteValues
 import dev.jasonpearson.automobile.junit.AutoMobilePlanExecutor.substituteParameters
+import dev.jasonpearson.automobile.junit.DeviceWaitPolicy.RECOVERY_CODES
+import dev.jasonpearson.automobile.junit.FailedStepContextBuilder.buildFailedStepContext
+import dev.jasonpearson.automobile.junit.PlanTestMetadata.resolveCiMode
 import dev.jasonpearson.automobile.validation.ToolResultEntry
 import java.io.File
-import java.util.UUID
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -95,7 +81,10 @@ internal class PlanExecutor(
       }
 
       // Execute the processed plan
-      val result = executeProcessedPlan(processedPlanContent, options, secretValues)
+      val result =
+        executePlanFromStep(
+          PlanExecutionRequest(processedPlanContent, options, 0, false, secretValues),
+        )
 
       val executionTime = System.currentTimeMillis() - startTime
 
@@ -124,20 +113,6 @@ internal class PlanExecutor(
 
   // ── Plan execution with recovery ──────────────────────────────────────────
 
-  private fun executeProcessedPlan(
-    planContent: String,
-    options: AutoMobilePlanExecutionOptions,
-    secretValues: List<String>,
-  ): InternalExecutionResult {
-    return executePlanFromStep(
-      planContent,
-      options,
-      startStep = 0,
-      recoveryAlreadyAttempted = false,
-      secretValues = secretValues,
-    )
-  }
-
   /**
    * Execute a plan starting at [startStep]. If the plan fails and recovery has not yet been
    * attempted, the Koog agent is invoked to clear whatever interrupted the failed step. On
@@ -152,196 +127,29 @@ internal class PlanExecutor(
    *   fresh one: the failed attempt's session, which recovery also used, so the resumed plan is the
    *   device holder's own session rather than a stranger the daemon would refuse (#10783).
    */
-  private fun executePlanFromStep(
-    planContent: String,
-    options: AutoMobilePlanExecutionOptions,
-    startStep: Int,
-    recoveryAlreadyAttempted: Boolean,
-    secretValues: List<String>,
-    deviceIdOverride: String? = null,
-    sessionUuidOverride: String? = null,
-  ): InternalExecutionResult {
-
+  private fun executePlanFromStep(request: PlanExecutionRequest): InternalExecutionResult {
+    val holdForRecovery = recoveryMayFollow(request.options, request.recoveryAlreadyAttempted)
+    val loop =
+      PlanAttemptLoop(
+        collaborators,
+        ::releaseHeldSession,
+        request.sessionUuidOverride,
+        holdForRecovery,
+      )
+    val (response, outputPayload, parsed, toolResults, attemptSessionUuid) =
+      loop.execute(request, holdForRecovery)
+    if (response.success && parsed.success) {
+      return InternalExecutionResult(
+        success = true,
+        exitCode = 0,
+        output = outputPayload,
+        toolResults = toolResults,
+      )
+    }
     val json = Json { ignoreUnknownKeys = true }
-    val maxRetries = options.maxRetries.coerceAtLeast(0)
-    var attempt = 0
-    var deviceOwnedWaitMs = 0L
-    var deviceOwnedWaits = 0
-    var attemptSessionUuid = sessionUuidOverride ?: UUID.randomUUID().toString()
-    // When AI recovery may follow a failure, the daemon keeps the failed attempt's session and
-    // device (#10834) so no other session can take the device between the attempt and recovery.
-    // Every path that does not go on to recovery releases the held session itself.
-    val holdForRecovery = recoveryMayFollow(options, recoveryAlreadyAttempted)
-    // A resumed run takes over the session the daemon held for recovery. Until this run's
-    // executePlan reaches the daemon, whose plan lifecycle then releases it, the runner still owns
-    // that session: it releases it before switching to a fresh one or giving up, or the held
-    // session blocks the device until its lease lapses (#11139).
-    var takenOverSession: String? = sessionUuidOverride.takeIf { !holdForRecovery }
-    val releaseTakenOverSession = {
-      takenOverSession?.let { releaseHeldSession(it) }
-      takenOverSession = null
-    }
-
-    var response: DaemonResponse
-    var outputPayload: String
-    var parsed: ParsedToolResult
-    var toolResults: List<ToolResultEntry>
-
-    // Retry loop for transient failures (timeouts, daemon busy)
-    while (true) {
-      attempt++
-      // Only the first attempt may reuse the failed attempt's session; a retry is a fresh one.
-      val sessionUuid = if (attempt == 1) attemptSessionUuid else UUID.randomUUID().toString()
-      attemptSessionUuid = sessionUuid
-
-      val args =
-        mutableMapOf<String, JsonElement>(
-          "planContent" to
-            JsonPrimitive(
-              "base64:" + java.util.Base64.getEncoder().encodeToString(planContent.toByteArray()),
-            ),
-          "platform" to JsonPrimitive("android"),
-          "startStep" to JsonPrimitive(startStep),
-          "sessionUuid" to JsonPrimitive(sessionUuid),
-        )
-
-      // Pin to the recovered device if specified, otherwise use the configured device
-      val effectiveDeviceId = deviceIdOverride ?: options.device.takeIf { it != "auto" }
-      if (effectiveDeviceId != null) {
-        args["deviceId"] = JsonPrimitive(effectiveDeviceId)
-      }
-
-      // Detect calling test context and include metadata for test run recording
-      val testContext = detectTestContext()
-      if (testContext != null) {
-        args["testMetadata"] = buildTestMetadata(testContext)
-      }
-
-      appendExecutePlanCleanupArgs(args)
-      appendCaptureObserveStepsArgs(args)
-      if (holdForRecovery) {
-        args["holdSessionOnFailure"] = JsonPrimitive(true)
-      }
-
-      // Opt this generated device session into executePlan before invoking it.
-      response =
-        callDaemonToolForAttempt(
-          "setToolEnabled",
-          JsonObject(
-            mapOf(
-              "toolName" to JsonPrimitive("executePlan"),
-              "sessionUuid" to JsonPrimitive(sessionUuid),
-            ),
-          ),
-          options.effectiveExecutePlanTimeoutMs(),
-        )
-      if (!response.success) {
-        // Treat the prerequisite like executePlan itself: the retry classifier
-        // below handles transient daemon responses rather than throwing before
-        // it has a chance to retry the attempt.
-        outputPayload =
-          response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
-        parsed =
-          parseDaemonToolResult(response, json).let {
-            if (response.error.isNullOrBlank())
-              it.copy(errorMessage = "Unable to enable executePlan")
-            else it
-          }
-        toolResults = emptyList()
-      } else {
-        if (options.debugMode) {
-          println(
-            "Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)",
-          )
-        }
-
-        takenOverSession = null
-        collaborators.heartbeat.registerSession(sessionUuid)
-        response =
-          try {
-            callDaemonToolForAttempt(
-              "executePlan",
-              JsonObject(args),
-              options.effectiveExecutePlanTimeoutMs(),
-            )
-          } finally {
-            collaborators.heartbeat.unregisterSession(sessionUuid)
-          }
-        outputPayload =
-          response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
-        parsed = parseDaemonToolResult(response, json)
-        toolResults = parseToolResults(response, json, options.debugMode)
-      }
-
-      if (options.debugMode) {
-        println("Daemon response:\n$outputPayload")
-        if (!response.error.isNullOrBlank()) {
-          println("Daemon error: ${response.error}")
-        }
-      }
-
-      val success = response.success && parsed.success
-      if (success) {
-        return InternalExecutionResult(
-          success = true,
-          exitCode = 0,
-          output = outputPayload,
-          toolResults = toolResults,
-        )
-      }
-
-      val errorMessage = response.error ?: parsed.errorMessage
-      if (refusalDisposition(parsed) == RefusalDisposition.WAIT) {
-        // Another session holds the device (typically a concurrent test attempt in this runner),
-        // or its previous session is still finishing cleanup (#10960). Wait for it to free up,
-        // within its own bounded budget, without spending maxRetries.
-        val delayMs =
-          deviceOwnedBackoffDelayMs(
-            deviceOwnedWaits,
-            deviceOwnedWaitMs,
-            parsed.retryAfterMs,
-            parsed.code,
-            collaborators.timings,
-          )
-        if (delayMs == null) {
-          parsed = parsed.copy(errorMessage = deviceOwnedGiveUpMessage(parsed, deviceOwnedWaitMs))
-          break
-        }
-        val waitLead =
-          if (parsed.code in RECOVERY_CODES) "Device is being recovered (${parsed.code})"
-          else "Device is held by another session"
-        println(
-          "$waitLead; waiting ${delayMs}ms before retrying " +
-            "(wait ${deviceOwnedWaits + 1}): $errorMessage",
-        )
-        if (holdForRecovery) releaseHeldSession(sessionUuid)
-        releaseTakenOverSession()
-        collaborators.timings.deviceOwnedSleeper(delayMs)
-        deviceOwnedWaits++
-        deviceOwnedWaitMs += delayMs
-        // A refusal consumes no executePlan retry; the next pass is the same attempt number.
-        attempt--
-        attemptSessionUuid = UUID.randomUUID().toString()
-        continue
-      }
-      if (
-        attempt > maxRetries ||
-          !(parsed.retryable ||
-            parsed.acquireNewSession ||
-            // An explicit `retryable: false` on a typed frame is the daemon's verdict (#11544); any
-            // other failure falls back to matching the message text.
-            (!parsed.terminal && isTransientError(errorMessage)))
-      ) {
-        break
-      }
-
-      // The retry is a fresh session; the held one would otherwise keep the device from it.
-      if (holdForRecovery) releaseHeldSession(sessionUuid)
-      releaseTakenOverSession()
-      println("Retrying plan execution after transient error (attempt $attempt): $errorMessage")
-      Thread.sleep(collaborators.timings.retryBackoffMs)
-    }
-
+    val planContent = request.planContent
+    val options = request.options
+    val secretValues = request.secretValues
     val failureMessage =
       if (parsed.code in RECOVERY_CODES) parsed.errorMessage
       else response.error ?: parsed.errorMessage
@@ -358,20 +166,19 @@ internal class PlanExecutor(
       )
     }
 
-    releaseTakenOverSession()
+    loop.releaseTakenOverSession()
     // Non-transient failure or retries exhausted — attempt recovery if allowed
     val failedStepContext =
       buildFailedStepContext(response, json, planContent, options.device, secretValues)
         ?.copy(sessionUuid = attemptSessionUuid)
     return handleFailure(
-      result = CommandResult(1, outputPayload, failureMessage),
-      options = options,
-      toolResults = toolResults,
-      failedStepContext = failedStepContext,
-      planContent = planContent,
-      recoveryAlreadyAttempted = recoveryAlreadyAttempted,
-      secretValues = secretValues,
-      heldSessionUuid = attemptSessionUuid.takeIf { holdForRecovery },
+      request,
+      PlanFailure(
+        CommandResult(1, outputPayload, failureMessage),
+        toolResults,
+        failedStepContext,
+        attemptSessionUuid.takeIf { holdForRecovery },
+      ),
     )
   }
 
@@ -446,12 +253,13 @@ internal class PlanExecutor(
    */
   private fun sessionLossFailure(
     sessionUuid: String?,
-    result: CommandResult,
+    failure: PlanFailure,
     errorMessage: String,
-    toolResults: List<ToolResultEntry>,
     recoveryAttempted: Boolean,
     releaseHeld: () -> Unit = {},
   ): InternalExecutionResult? {
+    val result = failure.result
+    val toolResults = failure.toolResults
     val loss = sessionUuid?.let { collaborators.heartbeat.sessionLoss(it) } ?: return null
     // An unconfirmed loss may be a session the daemon still holds: release it rather than leak it.
     if (!loss.confirmed) releaseHeld()
@@ -469,17 +277,14 @@ internal class PlanExecutor(
   }
 
   private fun handleFailure(
-    result: CommandResult,
-    options: AutoMobilePlanExecutionOptions,
-    toolResults: List<ToolResultEntry>,
-    failedStepContext: FailedStepContext?,
-    planContent: String,
-    recoveryAlreadyAttempted: Boolean,
-    secretValues: List<String>,
-    heldSessionUuid: String? = null,
+    request: PlanExecutionRequest,
+    failure: PlanFailure,
   ): InternalExecutionResult {
-    // The daemon kept the failed attempt's session and device for recovery (#10834). Only the
-    // resumed plan takes it over (and releases it); every other outcome releases it here.
+    val (result, toolResults, failedStepContext, heldSessionUuid) = failure
+    val options = request.options
+    val planContent = request.planContent
+    val secretValues = request.secretValues
+    val recoveryAlreadyAttempted = request.recoveryAlreadyAttempted
     val releaseHeld = {
       if (heldSessionUuid != null) releaseHeldSession(heldSessionUuid)
     }
@@ -492,13 +297,8 @@ internal class PlanExecutor(
 
     val ciMode = resolveCiMode()
     val recoveryFlagEnabled = agent.recoveryConfigProvider.isRecoveryEnabled()
-    if (
-      !options.aiAssistance ||
-        !recoveryFlagEnabled ||
-        ciMode ||
-        recoveryAlreadyAttempted ||
-        failedStepContext == null
-    ) {
+    val recoveryEnabled = options.aiAssistance && recoveryFlagEnabled && !ciMode
+    if (!recoveryEnabled || recoveryAlreadyAttempted || failedStepContext == null) {
       if (recoveryAlreadyAttempted) {
         println("Recovery already attempted for this test — failing without retry")
       }
@@ -515,6 +315,19 @@ internal class PlanExecutor(
       )
     }
 
+    return attemptRecovery(request, failure, errorMessage, releaseHeld)
+  }
+
+  private fun attemptRecovery(
+    request: PlanExecutionRequest,
+    failure: PlanFailure,
+    errorMessage: String,
+    releaseHeld: () -> Unit,
+  ): InternalExecutionResult {
+    val result = failure.result
+    val toolResults = failure.toolResults
+    val failedStepContext = checkNotNull(failure.failedStepContext)
+    val secretValues = request.secretValues
     // Attempt Koog-powered recovery
     println(
       "Attempting AI-assisted recovery for failed step ${failedStepContext.failedStepIndex + 1} (${failedStepContext.failedTool})",
@@ -530,37 +343,21 @@ internal class PlanExecutor(
     // device the runner no longer holds, so fail now with the daemon's reason.
     sessionLossFailure(
         recoverySession,
-        result,
+        failure,
         errorMessage,
-        toolResults,
         recoveryAttempted = false,
         releaseHeld = releaseHeld,
       )
       ?.let {
         return it
       }
-    if (recoverySession != null) collaborators.heartbeat.registerSession(recoverySession)
-    val recoveryOutcome =
-      try {
-        agent.attemptAiRecovery(
-          failedStepContext,
-          secretValues,
-          collaborators.timings,
-          collaborators.heartbeat,
-        )
-      } catch (error: Throwable) {
-        releaseHeld()
-        throw error
-      } finally {
-        if (recoverySession != null) collaborators.heartbeat.unregisterSession(recoverySession)
-      }
+    val recoveryOutcome = runRecovery(failedStepContext, secretValues, releaseHeld)
 
     // Released while recovery ran: never resume on it, whatever recovery reported.
     sessionLossFailure(
         recoverySession,
-        result,
+        failure,
         errorMessage,
-        toolResults,
         recoveryAttempted = true,
         releaseHeld = releaseHeld,
       )
@@ -582,6 +379,44 @@ internal class PlanExecutor(
       )
     }
 
+    return resumePlan(request, failure)
+  }
+
+  private fun runRecovery(
+    failedStepContext: FailedStepContext,
+    secretValues: List<String>,
+    releaseHeld: () -> Unit,
+  ): RecoveryOutcome {
+    val recoverySession = failedStepContext.sessionUuid
+    if (recoverySession != null) collaborators.heartbeat.registerSession(recoverySession)
+    var recoveryReturned = false
+    return try {
+      agent
+        .attemptAiRecovery(
+          failedStepContext,
+          secretValues,
+          collaborators.timings,
+          collaborators.heartbeat,
+        )
+        .also { recoveryReturned = true }
+    } finally {
+      try {
+        if (!recoveryReturned) releaseHeld()
+      } finally {
+        if (recoverySession != null) collaborators.heartbeat.unregisterSession(recoverySession)
+      }
+    }
+  }
+
+  private fun resumePlan(
+    request: PlanExecutionRequest,
+    failure: PlanFailure,
+  ): InternalExecutionResult {
+    val failedStepContext = checkNotNull(failure.failedStepContext)
+    val toolResults = failure.toolResults
+    val planContent = request.planContent
+    val options = request.options
+    val secretValues = request.secretValues
     // Recovery only cleared whatever was blocking the failed step (a modal,
     // notification, permission dialog, etc.). The step's own action has NOT run yet, so
     // resume by RE-RUNNING the failed step itself — the daemon retries its action
@@ -597,13 +432,15 @@ internal class PlanExecutor(
 
     val resumeResult =
       executePlanFromStep(
-        planContent = planContent,
-        options = options,
-        startStep = resumeStep,
-        recoveryAlreadyAttempted = true, // prevent recursive recovery
-        secretValues = secretValues,
-        deviceIdOverride = failedStepContext.deviceId,
-        sessionUuidOverride = failedStepContext.sessionUuid,
+        PlanExecutionRequest(
+          planContent = planContent,
+          options = options,
+          startStep = resumeStep,
+          recoveryAlreadyAttempted = true, // prevent recursive recovery
+          secretValues = secretValues,
+          deviceIdOverride = failedStepContext.deviceId,
+          sessionUuidOverride = failedStepContext.sessionUuid,
+        ),
       )
 
     return InternalExecutionResult(
@@ -618,22 +455,6 @@ internal class PlanExecutor(
   }
 
   // ── Retry helpers ────────────────────────────────────────────────────────
-
-  private fun callDaemonToolForAttempt(
-    toolName: String,
-    arguments: JsonObject,
-    timeoutMs: Long,
-  ): DaemonResponse =
-    try {
-      collaborators.daemon.callTool(toolName, arguments, timeoutMs)
-    } catch (error: DaemonUnavailableException) {
-      DaemonResponse(
-        id = "",
-        type = "mcp_response",
-        success = false,
-        error = error.message ?: "daemon request timeout",
-      )
-    }
 
   private data class InternalExecutionResult(
     val success: Boolean,

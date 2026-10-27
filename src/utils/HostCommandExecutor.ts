@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
 import { promisify } from "util";
 import type { ExecResult } from "../models";
 import { wrapCommandError } from "./CommandError";
@@ -13,7 +14,30 @@ export type HostCommandOptions = ExecRequestOptions;
 
 /** Narrow injectable long-lived process launcher shared by Android clients. */
 export type SpawnFn = (file: string, args: string[], options?: SpawnOptions) => ChildProcess;
-export type HostChildProcess = ChildProcess;
+/**
+ * The slice of a Node ChildProcess the host-launch consumers actually use.
+ * Hand-written (rather than a `Pick`) so fakes can satisfy it structurally:
+ * `Pick` would pin the `this`-returning event methods to the real ChildProcess
+ * class. A real ChildProcess is assignable to it.
+ */
+export interface HostChildProcess {
+  readonly pid?: number;
+  readonly stdin: Writable | null;
+  readonly stdout: Readable | null;
+  readonly stderr: Readable | null;
+  readonly exitCode: number | null;
+  readonly signalCode: NodeJS.Signals | null;
+  readonly killed: boolean;
+  /** Synthetic handles can confirm asynchronous resource cleanup instead of OS process exit. */
+  readonly terminationConfirmed?: Promise<boolean>;
+  kill(signal?: NodeJS.Signals | number): boolean;
+  on(event: string, listener: (...args: any[]) => void): this;
+  once(event: string, listener: (...args: any[]) => void): this;
+  off(event: string, listener: (...args: any[]) => void): this;
+  removeListener(event: string, listener: (...args: any[]) => void): this;
+  removeAllListeners(event?: string): this;
+  unref(): void;
+}
 export type HostSpawnOptions = SpawnOptions;
 
 export interface HostCommandExecutor {

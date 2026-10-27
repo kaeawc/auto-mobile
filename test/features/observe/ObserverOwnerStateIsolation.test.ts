@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { expect, spyOn } from "bun:test";
 import { warmedTests } from "../../helpers/warmedTests";
@@ -84,28 +85,37 @@ class HoldingAdb extends FakeAdbExecutor {
     return result;
   }
   release(command: string): void {
-    this.holds.get(command)?.resolve({ stdout: "released", stderr: "" });
+    this.holds.get(command)?.resolve(createExecResult("released", ""));
     this.holds.delete(command);
   }
 }
 
 function configure(adb: FakeAdbExecutor, panel = "cover"): void {
-  adb.setCommandResponse(displayCommand, {
-    stdout: `Display id 0: DisplayInfo{uniqueId "local:${panel}" type INTERNAL, real 100 x 100}`,
-    stderr: "",
-  });
-  adb.setCommandResponse("shell cmd device_state state", {
-    stdout: readFileSync(
-      "test/fixtures/android-display/foldpf-6-fold-from-closed-base-while-override-state.txt",
-      "utf8",
+  adb.setCommandResponse(
+    displayCommand,
+    createExecResult(
+      `Display id 0: DisplayInfo{uniqueId "local:${panel}" type INTERNAL, real 100 x 100}`,
+      "",
     ),
-    stderr: "",
-  });
-  adb.setCommandResponse("shell cmd device_state print-states", {
-    stdout: readFileSync("test/fixtures/android-display/foldpf-print-states.txt", "utf8"),
-    stderr: "",
-  });
-  adb.setCommandResponse("screencap", { stdout: png, stderr: "" });
+  );
+  adb.setCommandResponse(
+    "shell cmd device_state state",
+    createExecResult(
+      readFileSync(
+        "test/fixtures/android-display/foldpf-6-fold-from-closed-base-while-override-state.txt",
+        "utf8",
+      ),
+      "",
+    ),
+  );
+  adb.setCommandResponse(
+    "shell cmd device_state print-states",
+    createExecResult(
+      readFileSync("test/fixtures/android-display/foldpf-print-states.txt", "utf8"),
+      "",
+    ),
+  );
+  adb.setCommandResponse("screencap", createExecResult(png, ""));
 }
 
 // Capture the actual module-private maps during owner seeding, without adding a production test API.
@@ -170,28 +180,28 @@ test.each(["active", "all"])(
     const timer = new FakeTimer();
     const adb = new HoldingAdb();
     configure(adb);
-    adb.setCommandResponse(displayCommand, {
-      stdout:
+    adb.setCommandResponse(
+      displayCommand,
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
-      stderr: "",
-    });
+        "",
+      ),
+    );
     adb.setForegroundApp({ packageName: "com.owner.inner", userId: 0 }, { displayId: 2 });
     const maps = await seedDisplay(timer, adb);
     timer.advanceTime(6000); // An observer must not refresh even expired owner display/posture entries.
     const factory = new FakeAdbClientFactory(adb);
     const writer = new FakeScreenshotFileWriter();
-    const shot = new TakeScreenshot(
-      device,
-      factory,
+    const shot = new TakeScreenshot(device, {
+      adbFactory: factory,
       timer,
-      new CountingIdGenerator("shot"),
-      writer,
-      new FakeFileSystem(),
-      () => "/fake",
-      undefined,
-      false,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+      idGenerator: new CountingIdGenerator("shot"),
+      fileWriter: writer,
+      fileSystem: new FakeFileSystem(),
+      cacheDirResolver: () => "/fake",
+      cleanupOnCreate: false,
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
     directory = mkdtempSync(join(tmpdir(), "observer-owner-state-"));
     const store = new FileSystemObserveCacheStore(
       timer,
@@ -336,7 +346,7 @@ test.each(["active", "all"])(
       hierarchy: structuredClone(Reflect.get(client, "cachedHierarchy")),
     };
     adb.hold(ownerCommand);
-    adb.setCommandResponse(ownerCommand, { stdout: "owner result", stderr: "" });
+    adb.setCommandResponse(ownerCommand, createExecResult("owner result", ""));
     const controller = new AbortController();
     const owner = adb.executeCommand(ownerCommand, { signal: controller.signal });
     await adb.started.get(ownerCommand)!.promise;
@@ -439,10 +449,13 @@ test.each(["display", "posture"] as const)(
     await adb.started.get(heldCommand)!.promise;
     const owner = new FakeAdbExecutor();
     configure(owner, "inner");
-    owner.setCommandResponse("shell cmd device_state state", {
-      stdout: readFileSync("test/fixtures/android-display/foldpf-1-default-state.txt", "utf8"),
-      stderr: "",
-    });
+    owner.setCommandResponse(
+      "shell cmd device_state state",
+      createExecResult(
+        readFileSync("test/fixtures/android-display/foldpf-1-default-state.txt", "utf8"),
+        "",
+      ),
+    );
     await owner.executeCommand("shell cmd device_state state 2");
     ObservedAndroidDisplayCache.clear(device.deviceId);
     const cache = new ObservedAndroidDisplayCache(timer);
@@ -483,18 +496,19 @@ test("observer screenshot buffer failure never falls back to writing or pulling 
   const adb = new FakeAdbExecutor();
   adb.setCommandError("screencap", new Error("maxBuffer exceeded"));
   const writer = new FakeScreenshotFileWriter();
-  const screenshot = new TakeScreenshot(
-    device,
-    new FakeAdbClientFactory(adb),
+  const screenshot = new TakeScreenshot(device, {
+    adbFactory: new FakeAdbClientFactory(adb),
     timer,
-    new CountingIdGenerator("buffer"),
-    writer,
-    new FakeFileSystem(),
-    () => "/fake",
-    new FakeAndroidPhysicalDisplayIdResolver(new Map([[0, "4619827259835644672"]])),
-    false,
-    { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-  );
+    idGenerator: new CountingIdGenerator("buffer"),
+    fileWriter: writer,
+    fileSystem: new FakeFileSystem(),
+    cacheDirResolver: () => "/fake",
+    physicalDisplayIdResolver: new FakeAndroidPhysicalDisplayIdResolver(
+      new Map([[0, "4619827259835644672"]]),
+    ),
+    cleanupOnCreate: false,
+    pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+  });
   expect(await screenshot.executeObservationRead({ format: "png", displayId: 0 })).toEqual({
     success: false,
     error: "maxBuffer exceeded",
@@ -510,11 +524,13 @@ test("session all read preserves expired display/posture caches and recaptured b
   const timer = new FakeTimer();
   const adb = new FakeAdbExecutor();
   configure(adb);
-  adb.setCommandResponse(displayCommand, {
-    stdout:
+  adb.setCommandResponse(
+    displayCommand,
+    createExecResult(
       'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
-    stderr: "",
-  });
+      "",
+    ),
+  );
   const maps = await seedDisplay(timer, adb);
   timer.advanceTime(6000);
   const before = snapshotMaps(maps);
@@ -589,10 +605,13 @@ test("observer readOnly flag is independent of recomposition skipping and logica
   const timer = new FakeTimer();
   const adb = new FakeAdbExecutor();
   configure(adb, "inner");
-  adb.setCommandResponse(displayCommand, {
-    stdout: 'Display id 2: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    displayCommand,
+    createExecResult(
+      'Display id 2: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
+      "",
+    ),
+  );
   const window = new FakeWindow();
   window.configureActiveWindow({ appId: "com.owner", activityName: "", layoutSeqSum: 42 });
   const screen = new RealObserveScreen(

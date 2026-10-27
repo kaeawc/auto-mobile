@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   matchesDeviceReadOnlyArgShape,
   anyDeviceReadOnlyArgShapeMatches,
-} from "../../src/server/deviceReadOnlyArgShapes";
+} from "../../src/daemon/deviceReadOnlyArgShapes";
 
 describe("device read-only argument shapes", () => {
   test("matches only listed string values", () => {

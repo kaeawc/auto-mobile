@@ -1,7 +1,7 @@
-import { DaemonBoundSessionExpiredError } from "./daemonErrors";
+import { DaemonBoundSessionExpiredError } from "./DaemonBoundSessionExpiredError";
 import type { NotFoundAnswerOutcome } from "./notFoundDecision";
 import type { StallHandoverRecord } from "./ProxySessionState";
-import type { SessionReleaseSnapshot } from "../sessionManager";
+import type { SessionReleaseSnapshot } from "../sessionManager/releaseTypes";
 
 /** A held session's terminal loss waiting for one platform-only control answer (#12090). */
 export interface PendingHeldSessionLoss {

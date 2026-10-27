@@ -1,6 +1,7 @@
 import { parseJsonSchemaNode } from "../helpers/jsonSchemaNode";
+import { readToolResponse, toolJson } from "../helpers/toolResponse";
 import { NotificationPolicy } from "../../src/features/utility/NotificationPolicy";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   createPostNotificationHandler,
   postNotificationSchema,
@@ -136,6 +137,48 @@ describe("notification tools", () => {
     expect(schema.required).not.toContain("appId");
   });
 
+  test("forwards iOS category and raw payload to the executor (#14097)", async () => {
+    const received: unknown[] = [];
+    const postNotificationHandler = createPostNotificationHandler({
+      postNotificationFactory: () => ({
+        execute: async (options) => {
+          received.push(options);
+          return { success: true, supported: true, method: "simctlPush" as const };
+        },
+      }),
+    });
+    const args = postNotificationSchema.parse({
+      platform: "ios",
+      appId: "com.example.App",
+      title: "T",
+      body: "B",
+      category: "reply",
+      payload: { orderId: "A-1", aps: { "thread-id": "orders" } },
+    });
+
+    await postNotificationHandler(
+      { name: "Fake", deviceId: "11111111-2222-3333-4444-555555555555", platform: "ios" },
+      args,
+    );
+    expect(received).toEqual([
+      expect.objectContaining({
+        category: "reply",
+        payload: { orderId: "A-1", aps: { "thread-id": "orders" } },
+      }),
+    ]);
+  });
+
+  test("rejects an empty category at parse time", () => {
+    const result = postNotificationSchema.safeParse({
+      platform: "ios",
+      appId: "com.example.App",
+      title: "T",
+      body: "B",
+      category: "",
+    });
+    expect(result.success).toBe(false);
+  });
+
   test("surfaces a postNotification warning in the message and payload (#10014)", async () => {
     const postNotificationHandler = createPostNotificationHandler({
       postNotificationFactory: () => ({
@@ -227,15 +270,19 @@ test.each([
         { name: "Fake", deviceId: "fake", platform: "android" },
         { appId: result.appId, policyAccess },
       );
-      const payload = JSON.parse(response.content[0].text);
+      const payload = toolJson(response);
       expect(payload.message).toStartWith(expectedPrefix);
       expect(payload.message).toContain("not verified");
       expect(payload.message).not.toStartWith("Allowed");
       expect(payload.message).not.toStartWith("Revoked");
-      expect(response.isError).toBeUndefined();
+      expect(readToolResponse(response).isError).toBeUndefined();
     } finally {
       policy.mockRestore();
       ToolRegistry.clearTools();
     }
   },
 );
+
+afterEach(() => {
+  mock.restore();
+});

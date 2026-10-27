@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import { registerDatabaseResources } from "../../src/server/databaseResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
@@ -65,10 +65,9 @@ describe("database resources: malformed percent-escapes (#10117)", () => {
   });
 
   test("a well-formed percent-encoded databasePath and table still decode and reach the device lookup", async () => {
-    const lookup = mock(async () => []);
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevices: lookup,
-    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    const manager = new FakeDeviceManager();
+    const lookup = spyOn(manager, "getBootedDevices");
+    PlatformDeviceManagerFactory.setInstance(manager);
 
     const content = await read(
       `${prefix}/%2Fdata%2Fapp.db/tables/user%20notes/structure?appId=com.example`,

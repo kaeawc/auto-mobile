@@ -1,4 +1,5 @@
-import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
+import { installDaemonSessionBindingScopes } from "../daemon/daemonSessionBindingScopes";
+import { SessionReleaseBroadcaster } from "../daemon/sessionReleaseBroadcast";
 import { SessionToolBindingStore } from "./sessionToolBindingStore";
 import { ToolRegistry } from "./toolRegistry";
 
@@ -27,7 +28,7 @@ export function createReleaseSubscribedBindingStore(): SessionToolBindingStore {
         unsubscribe();
       };
     },
-    onBindingChanged: () => ToolRegistry.notifyToolListChanged(),
+    onBindingChanged: () => ToolRegistry.notifyToolSelectionChanged(),
   });
 }
 
@@ -43,3 +44,5 @@ export function daemonSessionToolBindingStore(): SessionToolBindingStore {
   daemonBindingStore ??= createReleaseSubscribedBindingStore();
   return daemonBindingStore;
 }
+
+installDaemonSessionBindingScopes(daemonSessionToolBindingStore);

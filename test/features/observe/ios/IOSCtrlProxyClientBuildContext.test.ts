@@ -111,12 +111,14 @@ describe("IOSCtrlProxyClient lazy build context", () => {
       8765,
       createSuccessWebSocketFactory(timer),
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { iosSource: source, contentHashProvider: provider },
+      {
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: undefined,
+        retryExecutor: undefined,
+        options: { iosSource: source, contentHashProvider: provider },
+      },
     );
     // Suppress unrelated foreground monitoring/SDK probing; exercise the real
     // hierarchy hook and manager context without navigation DB writes or sockets.
@@ -129,8 +131,8 @@ describe("IOSCtrlProxyClient lazy build context", () => {
   }
 
   function hierarchyUpdate(bundleId = appId): void {
-    client["lastForegroundBundleId"] = bundleId;
-    client["handleHierarchyUpdateForNavigation"]({
+    client.testHooks.lastForegroundBundleId = bundleId;
+    client.testHooks.handleHierarchyUpdateForNavigation({
       updatedAt: timer.now(),
       packageName: bundleId,
       hierarchy: { text: "Home" },
@@ -391,14 +393,14 @@ describe("IOSCtrlProxyClient lazy build context", () => {
   });
 
   test("an SDK process-session replacement invalidates resolved provenance", async () => {
-    client["activateSdkScreenIdentitySession"](appId, {
+    client.getSdkScreenIdentityTestHooks().activateSdkScreenIdentitySession(appId, {
       sessionId: "old-process",
       sessionEpoch: 1,
     });
     hierarchyUpdate();
     await settle();
     expect(
-      client["activateSdkScreenIdentitySession"](appId, {
+      client.getSdkScreenIdentityTestHooks().activateSdkScreenIdentitySession(appId, {
         sessionId: "new-process",
         sessionEpoch: 2,
       }),
@@ -471,7 +473,7 @@ describe("IOSCtrlProxyClient lazy build context", () => {
       expect(source.simulatorCalls).toHaveLength(1);
       await timer.advanceTimersByTimeAsync(1);
       await settle();
-      expect(client["buildContextInFlight"].size).toBe(0);
+      expect(client.getBuildContextDiagnosticsForTesting().pendingCount).toBe(0);
       source.pending = null;
       hierarchyUpdate();
       await settle();
@@ -500,7 +502,7 @@ describe("IOSCtrlProxyClient lazy build context", () => {
     await settle();
     await timer.advanceTimersByTimeAsync(30000);
     await settle();
-    expect(client["buildContextInFlight"].size).toBe(0);
+    expect(client.getBuildContextDiagnosticsForTesting().pendingCount).toBe(0);
     hash.resolve("late hash");
     await settle();
     expect(setContext).not.toHaveBeenCalled();
@@ -518,7 +520,7 @@ describe("IOSCtrlProxyClient lazy build context", () => {
     expect(source.simulatorCalls).toEqual([]);
     expect(provider.calls).toEqual([]);
     expect(harness.manager.getDeviceIdForApp(appId)).toBeNull();
-    expect(client["buildContextInFlight"].size).toBe(0);
+    expect(client.getBuildContextDiagnosticsForTesting().pendingCount).toBe(0);
   });
 
   test.each(["metadata", "hash"])(
@@ -540,7 +542,7 @@ describe("IOSCtrlProxyClient lazy build context", () => {
       expect(setContext).not.toHaveBeenCalled();
       expect(provider.calls).toHaveLength(phase === "metadata" ? 0 : 1);
       expect(harness.manager.getDeviceIdForApp(appId)).toBeNull();
-      expect(client["buildContextInFlight"].size).toBe(0);
+      expect(client.getBuildContextDiagnosticsForTesting().pendingCount).toBe(0);
     },
   );
 
@@ -550,7 +552,7 @@ describe("IOSCtrlProxyClient lazy build context", () => {
     expect(harness.manager.getDeviceIdForApp(appId)).toBe(simulatorId);
     await client.close();
     expect(harness.manager.getDeviceIdForApp(appId)).toBeNull();
-    expect(client["resolvedBuildContexts"].size).toBe(0);
+    expect(client.getBuildContextDiagnosticsForTesting().resolvedCount).toBe(0);
   });
 
   test.each([true, false])(
@@ -560,14 +562,14 @@ describe("IOSCtrlProxyClient lazy build context", () => {
       if (resolved) {
         await settle();
       }
-      const managerLookup = spyOn(client, "getNavigationGraphManager").mockImplementation(() => {
+      const managerLookup = spyOn(NavigationGraphManager, "getInstance").mockImplementation(() => {
         throw new Error("manager unavailable");
       });
       try {
         await client.close();
         await settle();
         expect(source.simulatorCalls).toHaveLength(resolved ? 1 : 0);
-        expect(client["buildContextInFlight"].size).toBe(0);
+        expect(client.getBuildContextDiagnosticsForTesting().pendingCount).toBe(0);
         expect(harness.manager.getDeviceIdForApp(appId)).toBeNull();
       } finally {
         managerLookup.mockRestore();
@@ -599,7 +601,7 @@ describe("IOSCtrlProxyClient lazy build context", () => {
     ]);
     expect(harness.manager.getDeviceIdForApp(appB)).toBeNull();
     expect(harness.manager.getDeviceIdForApp(appId)).toBe(simulatorId);
-    expect(client["buildContextInFlight"].size).toBe(0);
+    expect(client.getBuildContextDiagnosticsForTesting().pendingCount).toBe(0);
   });
 
   test("production construction leaves metadata and content-hash factories lazy", async () => {
@@ -608,9 +610,13 @@ describe("IOSCtrlProxyClient lazy build context", () => {
       8765,
     );
     try {
-      expect(production["iosSource"]).toBeUndefined();
-      expect(production["appMetadata"]).toBeUndefined();
-      expect(production["contentHashProvider"]).toBeUndefined();
+      expect(production.getBuildContextDiagnosticsForTesting().metadataSourceInitialized).toBe(
+        false,
+      );
+      expect(production.getBuildContextDiagnosticsForTesting().appMetadataInitialized).toBe(false);
+      expect(production.getBuildContextDiagnosticsForTesting().contentHashProviderInitialized).toBe(
+        false,
+      );
     } finally {
       await production.close();
       IOSCtrlProxyClient.clearInstanceRegistryForTesting();
@@ -658,7 +664,7 @@ describe("IOSCtrlProxyClient lazy build context", () => {
       } finally {
         client.clearSdkScreenIdentity(appId);
         sessionManager.mockRestore();
-        client["boundSessionId"] = null;
+        client.testHooks.boundSessionId = null;
       }
     },
   );

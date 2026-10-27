@@ -74,7 +74,7 @@ final class PrototypeCarouselTests: XCTestCase {
             .filter { $0.hasPrefix("carousel-") || $0 == "pager-indicator-unknown.json" }
             .filter { $0 != "carousel-no-children.json" }
             .sorted()
-        XCTAssertEqual(names.count, 5)
+        XCTAssertEqual(names.count, 6)
         for name in names {
             let data = try Data(contentsOf: invalid.appendingPathComponent(name))
             let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])

@@ -15,8 +15,8 @@ import {
   requestDeclaresTasks,
   taskLookupError,
   toGetTaskResult,
-} from "./mcpTasksExtension";
-import type { TaskManager } from "./TaskManager";
+} from "../../daemon/tasks/mcpTasksExtension";
+import type { TaskManager } from "../../daemon/tasks/TaskManager";
 
 export interface TasksProtocolDeps {
   readonly taskManager: TaskManager;
@@ -40,6 +40,12 @@ type InitializeHandler = (request: InitializeRequest) => Promise<InitializeResul
  * `initialize` declared it (in `capabilities.extensions` or the per-request `_meta`
  * capabilities). A client that does not declare it sees the `initialize` result unchanged. The
  * stdio proxy installs it too, because it relays the extension to the daemon.
+ *
+ * The advertisement is deliberately not gated on the client's `protocolVersion`. SEP-2663
+ * leaves the extension undefined on `2025-11-25`, but with no 2026-era `server/discover` path a
+ * version gate would leave no client able to negotiate Tasks. Serving it on the 2025-era
+ * `initialize` is a documented AutoMobile extension of the spec (owner decision, #13143; see
+ * docs/design-docs/mcp/sdk-v2-stateless-migration.md).
  */
 export function advertiseTasksOnDeclaringInitialize(inner: Server): void {
   const initialize: InitializeHandler = inner["_oninitialize"].bind(inner);

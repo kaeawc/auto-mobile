@@ -1,5 +1,7 @@
 import { resolveIosDeviceKind } from "./IosDeviceKind";
 import type { SimCtl } from "./SimCtlClient";
+import { PhysicalIosHomeBackend } from "./PhysicalIosHomeBackend";
+export { PhysicalIosHomeBackend } from "./PhysicalIosHomeBackend";
 
 /** SpringBoard transport only; runner Home presses and verification stay in the actions. */
 export interface IosHomeBackend {
@@ -24,14 +26,6 @@ export class SimulatorIosHomeBackend implements IosHomeBackend {
       ["launch", this.deviceId, "com.apple.springboard"],
       options.timeoutMs,
     );
-  }
-}
-
-export class PhysicalIosHomeBackend implements IosHomeBackend {
-  readonly kind = "physical";
-
-  async launchSpringboard(_options: { timeoutMs: number }): Promise<void> {
-    // Physical Home navigation belongs to the CtrlProxy runner in the action.
   }
 }
 

@@ -120,7 +120,7 @@ final class PrototypeAtomicTapTests: XCTestCase {
             action(#"{"type":"dismiss"}"#),
             action(breaksBinding),
         ])
-        XCTAssertEqual(events.map(\.kind), ["dismissed"])
+        XCTAssertEqual(events.map(\.wireKind), ["dismissed"])
         XCTAssertEqual(events.first?.state["flag"], .bool(true))
         XCTAssertFalse(session.isShown)
     }
@@ -349,7 +349,7 @@ final class PrototypeAtomicTapTests: XCTestCase {
                 XCTAssertEqual(first.state["query"], before["query"], name)
                 XCTAssertTrue(keys.allSatisfy { first.state[$0] != before[$0] }, name)
             } else {
-                XCTAssertEqual(events.first?.kind, "page_changed", name)
+                XCTAssertEqual(events.first?.wireKind, "page_changed", name)
             }
             XCTAssertEqual(events.dropFirst().map(\.name), ["done", "change"], name)
             XCTAssertEqual(events.last?.state["query"], .string("x"), name)

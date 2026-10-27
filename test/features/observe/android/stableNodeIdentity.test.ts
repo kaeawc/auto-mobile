@@ -143,7 +143,7 @@ describe("assignStableViewIds (#3228)", () => {
       observedBobId,
       { intentAction: "inspect" },
     ).element;
-    expect(resolved?.bounds).toEqual(after.rows[0].bounds);
+    expect<unknown>(resolved?.bounds).toEqual(after.rows[0].bounds);
   });
 
   test("only descendant-text collisions retain document-order ordinals", () => {
@@ -582,7 +582,7 @@ describe("assignStableViewIds (#3228)", () => {
       observedPasswordId,
       { intentAction: "inspect" },
     ).element;
-    expect(resolved?.bounds).toEqual(after.fields[1].bounds);
+    expect<unknown>(resolved?.bounds).toEqual(after.fields[1].bounds);
   });
 
   test("Compose text fields keep label-distinguished ids when Email is filled (#6728)", () => {
@@ -652,7 +652,7 @@ describe("assignStableViewIds (#3228)", () => {
       observedEmailId,
       { intentAction: "inspect" },
     ).element;
-    expect(resolved?.bounds).toEqual(after.fields[0].bounds);
+    expect<unknown>(resolved?.bounds).toEqual(after.fields[0].bounds);
     expect(resolved?.text).toBe("mt@example.com");
   });
 

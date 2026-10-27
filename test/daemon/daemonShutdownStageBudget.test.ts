@@ -3,19 +3,16 @@ import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
 import * as daemonFilesModule from "../../src/daemon/daemonFiles";
-import {
-  setVideoStreamSocketServerForTesting,
-  type VideoStreamSocketServer,
-} from "../../src/daemon/videoStreamSocketServer";
+import { setVideoStreamSocketServerForTesting } from "../../src/daemon/videoStreamSocketServer";
 import * as databaseModule from "../../src/db";
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { PROCESS_SHUTDOWN_TIMEOUT_MS } from "../../src/processLifecycle";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import * as shutdownCleanupModule from "../../src/shutdownCleanup";
 import {
   DAEMON_SHUTDOWN_BUDGET_RESERVE_MS,
@@ -167,7 +164,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
       events.push(`release:${sessionId}:${reason}`);
     });
     restores.push(unsubscribe);
-    daemon.setSocketServerForTesting({
+    daemon.testHooks.setSocketServer({
       liftSessionlessStrokesOn: () => {},
       quiesce: async () => {},
       drainSessionReleaseNotifications: async () => {
@@ -257,11 +254,13 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     const sessionManager = daemon.getSessionManager();
     const events: string[] = [];
     setVideoStreamSocketServerForTesting({
+      isListening: () => true,
+      start: async () => {},
       close: () => {
         events.push("video:close");
         return new Promise<void>(() => {});
       },
-    } as unknown as VideoStreamSocketServer);
+    });
     const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
       events.push(`release:${sessionId}:${reason}`);
     });
@@ -319,7 +318,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
       events.push(`release:${sessionId}:${reason}`);
     });
     restores.push(unsubscribe);
-    daemon.setSocketServerForTesting({
+    daemon.testHooks.setSocketServer({
       liftSessionlessStrokesOn: () => {},
       // The control socket waits up to 1 s for in-flight request handlers; this one needs it all.
       quiesce: async () => {
@@ -350,7 +349,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     );
     const events: string[] = [];
     // A stage that outlives its deadline by seconds, the way a recording finalizer can.
-    daemon.registerTransportForTesting("slow-http", {
+    daemon.testHooks.registerTransport("slow-http", {
       close: async () => {
         await timer.sleep(6_000);
         events.push("straggler:done");
@@ -382,7 +381,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
         deviceSessionRepository: new FakeDeviceSessionRepository(),
       },
     );
-    daemon.registerTransportForTesting("wedged-http", {
+    daemon.testHooks.registerTransport("wedged-http", {
       close: () => new Promise<void>(() => {}),
     });
 

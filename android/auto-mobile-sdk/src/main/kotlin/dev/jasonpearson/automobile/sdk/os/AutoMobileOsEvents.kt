@@ -37,8 +37,7 @@ internal object AutoMobileOsEvents {
   private var connectivityCallback: ConnectivityManager.NetworkCallback? = null
   private var batteryReceiver: BroadcastReceiver? = null
   private var screenReceiver: BroadcastReceiver? = null
-  private var lifecycleObserver: DefaultLifecycleObserver? = null
-  private var activityCallbacks: Application.ActivityLifecycleCallbacks? = null
+  private val lifecycle = OsLifecycleRegistration(::postEvent)
   @Volatile private var lastBatteryPct: String? = null
   @Volatile private var lastBatteryCharging: Boolean? = null
 
@@ -51,19 +50,19 @@ internal object AutoMobileOsEvents {
     this.buffer = buffer
     this.applicationId = context.packageName
     this.onLifecycleEvent = onLifecycleEvent
-    registerLifecycleObserver()
-    registerActivityCallbacks(context)
+    lifecycle.registerLifecycleObserver()
+    lifecycle.registerActivityCallbacks(context)
     registerConnectivityCallback(context)
     registerBatteryReceiver(context)
     registerScreenReceiver(context)
   }
 
   fun shutdown(context: Context) {
-    unregisterActivityCallbacks(context)
+    lifecycle.unregisterActivityCallbacks(context)
     unregisterConnectivityCallback(context)
     unregisterBatteryReceiver(context)
     unregisterScreenReceiver(context)
-    unregisterLifecycleObserver()
+    lifecycle.unregisterLifecycleObserver()
     buffer = null
     applicationId = null
     onLifecycleEvent = {}
@@ -81,78 +80,6 @@ internal object AutoMobileOsEvents {
         details = details,
       ),
     )
-  }
-
-  // ---- Foreground/Background ----
-
-  private fun registerLifecycleObserver() {
-    val observer =
-      object : DefaultLifecycleObserver {
-        override fun onStart(owner: LifecycleOwner) {
-          postEvent("foreground")
-        }
-
-        override fun onStop(owner: LifecycleOwner) {
-          postEvent("background")
-        }
-      }
-    lifecycleObserver = observer
-    ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
-  }
-
-  private fun unregisterLifecycleObserver() {
-    lifecycleObserver?.let {
-      ProcessLifecycleOwner.get().lifecycle.removeObserver(it)
-    }
-    lifecycleObserver = null
-  }
-
-  // ---- Activity Lifecycle ----
-
-  private fun registerActivityCallbacks(context: Context) {
-    val app = context.applicationContext as? Application ?: return
-    val callbacks =
-      object : Application.ActivityLifecycleCallbacks {
-        private fun activityName(activity: Activity): String = activity.javaClass.simpleName
-
-        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
-          postEvent("activity_created", mapOf("activity" to activityName(activity)))
-        }
-
-        override fun onActivityStarted(activity: Activity) {
-          postEvent("activity_started", mapOf("activity" to activityName(activity)))
-        }
-
-        override fun onActivityResumed(activity: Activity) {
-          postEvent("activity_resumed", mapOf("activity" to activityName(activity)))
-        }
-
-        override fun onActivityPaused(activity: Activity) {
-          postEvent("activity_paused", mapOf("activity" to activityName(activity)))
-        }
-
-        override fun onActivityStopped(activity: Activity) {
-          postEvent("activity_stopped", mapOf("activity" to activityName(activity)))
-        }
-
-        override fun onActivityDestroyed(activity: Activity) {
-          postEvent("activity_destroyed", mapOf("activity" to activityName(activity)))
-        }
-
-        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {
-          // Not tracked — too noisy and low signal
-        }
-      }
-    activityCallbacks = callbacks
-    app.registerActivityLifecycleCallbacks(callbacks)
-  }
-
-  private fun unregisterActivityCallbacks(context: Context) {
-    val app = context.applicationContext as? Application
-    activityCallbacks?.let { cb ->
-      app?.unregisterActivityLifecycleCallbacks(cb)
-    }
-    activityCallbacks = null
   }
 
   // ---- Connectivity ----
@@ -261,5 +188,84 @@ internal object AutoMobileOsEvents {
       } catch (_: Exception) {}
     }
     screenReceiver = null
+  }
+}
+
+private class OsLifecycleRegistration(
+  private val postEvent: (String, Map<String, String>?) -> Unit,
+) {
+  private var lifecycleObserver: DefaultLifecycleObserver? = null
+  private var activityCallbacks: Application.ActivityLifecycleCallbacks? = null
+
+  // ---- Foreground/Background ----
+
+  fun registerLifecycleObserver() {
+    val observer =
+      object : DefaultLifecycleObserver {
+        override fun onStart(owner: LifecycleOwner) {
+          postEvent("foreground", null)
+        }
+
+        override fun onStop(owner: LifecycleOwner) {
+          postEvent("background", null)
+        }
+      }
+    lifecycleObserver = observer
+    ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
+  }
+
+  fun unregisterLifecycleObserver() {
+    lifecycleObserver?.let {
+      ProcessLifecycleOwner.get().lifecycle.removeObserver(it)
+    }
+    lifecycleObserver = null
+  }
+
+  // ---- Activity Lifecycle ----
+
+  fun registerActivityCallbacks(context: Context) {
+    val app = context.applicationContext as? Application ?: return
+    val callbacks =
+      object : Application.ActivityLifecycleCallbacks {
+        private fun activityName(activity: Activity): String = activity.javaClass.simpleName
+
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+          postEvent("activity_created", mapOf("activity" to activityName(activity)))
+        }
+
+        override fun onActivityStarted(activity: Activity) {
+          postEvent("activity_started", mapOf("activity" to activityName(activity)))
+        }
+
+        override fun onActivityResumed(activity: Activity) {
+          postEvent("activity_resumed", mapOf("activity" to activityName(activity)))
+        }
+
+        override fun onActivityPaused(activity: Activity) {
+          postEvent("activity_paused", mapOf("activity" to activityName(activity)))
+        }
+
+        override fun onActivityStopped(activity: Activity) {
+          postEvent("activity_stopped", mapOf("activity" to activityName(activity)))
+        }
+
+        override fun onActivityDestroyed(activity: Activity) {
+          postEvent("activity_destroyed", mapOf("activity" to activityName(activity)))
+        }
+
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {
+          // Not tracked — too noisy and low signal
+        }
+      }
+    activityCallbacks = callbacks
+    app.registerActivityLifecycleCallbacks(callbacks)
+  }
+
+  fun unregisterActivityCallbacks(context: Context) {
+    val app = context.applicationContext as? Application
+    activityCallbacks?.let { cb ->
+      app?.unregisterActivityLifecycleCallbacks(cb)
+    }
+    activityCallbacks = null
   }
 }

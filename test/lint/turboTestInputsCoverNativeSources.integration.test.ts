@@ -1,5 +1,6 @@
+import { readGuardFile, guardDirectoryEntries } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 
@@ -47,12 +48,25 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "ios/**/README.md",
     // sdkApiBaselineWorkflow.test.ts reads the SDK API baseline and Gradle wiring.
     "android/auto-mobile-sdk/build.gradle.kts",
+    // ...and the shared API task classes plus the renderer's registration of them (#13727).
+    "android/prototype-compose/build.gradle.kts",
+    "android/build-logic/src/main/kotlin/dev/jasonpearson/automobile/buildlogic/apisignature/ApiSignatureTasks.kt",
+    // nativePrototype.test.ts pins the renderer library version to VERSION_NAME (#13729).
+    "android/gradle.properties",
+    // androidModulesCiUnitTests.test.ts parses the module list out of it.
+    "android/settings.gradle.kts",
+    // nativePrototypeSamples.test.ts compares the committed embedding samples with the
+    // resource output (#13732).
+    "samples/prototype-embedding/**",
+    "ios/prototype-agent/Fixtures/EmbedConsumer/Sources/**",
     "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
     // validToolsRegistryParity.test.ts reads the Kotlin plan-tool allowlist.
     "android/test-plan-validation/src/main/kotlin/dev/jasonpearson/automobile/validation/ValidTools.kt",
     // registrationTeardownGuard.test.ts walks these four for listener leaks.
     "android/auto-mobile-sdk/src/main/kotlin/**",
     "android/control-proxy/src/main/kotlin/**",
+    "android/prototype-compose/src/main/kotlin/**",
+    "android/prototype-saved/src/main/kotlin/**",
     "ios/auto-mobile-sdk/Sources/**",
     "ios/control-proxy/Sources/**",
     // ctrlProxyProtocol.test.ts reads the @SerialName set from this tree.
@@ -67,6 +81,8 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpDaemonClient.kt",
     "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpHttpClient.kt",
     "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpStdioClient.kt",
+    // androidLauncherRegistry.test.ts checks the desktop's ANDROID_LAUNCHERS list (#14056).
+    "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/AutoMobileContent.kt",
     // coordinateMappingGoldenVectorParity.test.ts parses the inline golden
     // tables out of CoordinateMappingGoldenVectorTest.kt (issue #4547).
     "android/desktop-core/src/test/kotlin/**",
@@ -75,6 +91,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "android/desktop-core/src/test/resources/sample.h264",
     // ownerTokenClientInventory.test.ts reads the JUnit socket and heartbeat owner fields.
     "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/DaemonHeartbeat.kt",
+    "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/HeartbeatTransport.kt",
     "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/DaemonSocketClient.kt",
     // executePlanToolResultsCapture.test.ts / executePlanCleanupToolResults.test.ts read the
     // captured executePlan envelopes the JUnit runner contract tests also consume (#10110).
@@ -86,9 +103,20 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // Info.plists to pin the profile payloads to the shipped app.
     "ios/network-filter/Packaging/**",
     // Prototype icon tests read the Swift capability declaration, generated symbol data and doc.
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/AutoMobilePrototypeCapabilities.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift",
+    // prototypeAccessibilityLint.test.ts pins the TypeScript baseline palette to the Swift tables.
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeTheme.swift",
     "ios/prototype-agent/ICON-SYMBOLS.md",
+    // checkPrivacyManifests.test.ts scans the compiled Swift sources and both privacy manifests,
+    // and pins the Package.swift resource and the protoviewer-build.sh copy step (#14151).
+    "ios/prototype-agent/Sources/**",
+    "ios/prototype-agent/ProtoViewer/*.swift",
+    "ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy",
+    "Package.swift",
+    "scripts/ios/protoviewer-build.sh",
   ] as const;
 
   interface TurboConfig {
@@ -103,7 +131,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
   }
 
   function loadTurbo(): TurboConfig {
-    return JSON.parse(readFileSync(join(ROOT, "turbo.json"), "utf8")) as TurboConfig;
+    return JSON.parse(readGuardFile(join(ROOT, "turbo.json"))) as TurboConfig;
   }
 
   /**
@@ -468,7 +496,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
   function referencedNativePaths(): Map<string, Set<string>> {
     const found = new Map<string, Set<string>>();
     const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      for (const entry of guardDirectoryEntries(dir)) {
         const abs = join(dir, entry.name);
         if (entry.isDirectory()) {
           walk(abs);
@@ -481,7 +509,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
           if (rel === GUARD_PATH) {
             continue;
           }
-          const source = readFileSync(abs, "utf8");
+          const source = readGuardFile(abs);
           const record = (path: string): void => {
             // The Markdown guard allowlists this gitignored SDK config without
             // reading it. Its presence varies by checkout, so it is not a cache input.
@@ -642,6 +670,10 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
    * blanket allow-list.
    */
   const NOT_READ_EXEMPTIONS: ReadonlyMap<string, string> = new Map([
+    [
+      "android",
+      "androidModulesCiUnitTests.test.ts joins it with module paths from settings.gradle.kts (a declared input) to probe src/test existence; no native tree is read",
+    ],
     [
       "android/protocol",
       "named only in comments of prototypeAppearance.test.ts and CtrlProxyPrototypes.test.ts that cite the Kotlin WebSocketResponseTest; the kotlin tree under it is a declared input",

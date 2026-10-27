@@ -22,8 +22,10 @@ class DesktopDaemonSessionStreamClientsTest {
       )
     val videoClient =
       VideoStreamClient(
-        socketPathValue = "/unused/video-socket",
-        sessionUuidProvider = session.sessionUuidProvider,
+        VideoStreamClient.Options(
+          socketPathValue = "/unused/video-socket",
+          sessionUuidProvider = session.sessionUuidProvider,
+        ),
       )
 
     val observationRequest = observationClient.observationRequest("emulator-5554")

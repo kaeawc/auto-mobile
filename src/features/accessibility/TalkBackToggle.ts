@@ -8,8 +8,8 @@ import type {
 } from "../../models/AccessibilityResult";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type { AccessibilityDetector } from "./interfaces/AccessibilityDetector";
-import { accessibilityDetector } from "./AccessibilityDetector";
+import type { AccessibilityDetector } from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { type SecureSettingsRpc, CtrlProxySecureSettingsRpc } from "./SecureSettingsRpc";
 import {
@@ -240,7 +240,7 @@ export class TalkBackToggle {
    * specifically is the active service. Used both for the pre-apply idempotency
    * check and the post-apply confirmation so the two never drift.
    */
-  private async detectTalkBackEnabled(): Promise<boolean | null> {
+  async detectTalkBackEnabled(): Promise<boolean | null> {
     this.detector.invalidateCache(this.device.deviceId);
     const state = await this.detector.resolveState(this.device.deviceId, this.adb);
     return state === null ? null : state.service === "talkback";

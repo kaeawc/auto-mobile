@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { PortManager } from "../../../src/utils/PortManager";
@@ -12,7 +13,7 @@ function setup(platform: "android" | "ios") {
   timer.enableAutoAdvance();
   const selector = new FakeElementSelector();
   const command = new TapOnElement(
-    { name: "test", platform, deviceId: "test" } as any,
+    { name: "test", platform, deviceId: "test" },
     new FakeAdbClient(),
     { timer, elementSelector: selector },
   );
@@ -27,7 +28,12 @@ function setup(platform: "android" | "ios") {
   const search = (duration = 1500, signal?: AbortSignal) =>
     command.searchForElement(
       { action: "tap", text: "missing", searchUntil: { duration } },
-      { viewHierarchy: hierarchy, screenSize: { width: 400, height: 800 } },
+      buildObserveResult({
+        updatedAt: 0,
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: hierarchy,
+        screenSize: { width: 400, height: 800 },
+      }),
       signal,
     );
   return { timer, selector, refresh, requests, search };
@@ -75,7 +81,7 @@ describe("TapOnElement search polling", () => {
       if (++calls === 2) {
         selector.setNextElement(target);
       }
-      return { hierarchy: { node: [] } };
+      return { hierarchy: { node: {} } };
     });
     const result = await search();
     expect(result.selection.element).toBe(target);

@@ -1,14 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.failures
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,41 +10,32 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.PointerIcon
-import androidx.compose.ui.input.pointer.pointerHoverIcon
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
-import dev.jasonpearson.automobile.desktop.core.time.Clock
-import dev.jasonpearson.automobile.desktop.core.time.SystemClock
 import kotlin.math.min
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.launch
+
+private val LOG = LoggerFactory.getLogger("FailuresDashboard")
 
 internal fun createFailuresDashboardPushClient(sessionUuidProvider: (() -> String?)? = null) =
   FailuresPushSocketClient(sessionUuidProvider = sessionUuidProvider)
@@ -58,235 +43,52 @@ internal fun createFailuresDashboardPushClient(sessionUuidProvider: (() -> Strin
 /** Main Failures dashboard showing crashes, ANRs, and tool call failures */
 @Composable
 fun FailuresDashboard(
-  onNavigateToScreen: (String) -> Unit = {},
-  onNavigateToTest: (String) -> Unit = {},
-  onNavigateToSource: (fileName: String, lineNumber: Int) -> Unit = { _, _ -> },
-  onNewFailureNotification: ((FailureNotification) -> Unit)? = null,
-  initialSelectedFailureId: String? = null,
-  onFailureSelected: (() -> Unit)? = null,
-  initialDateRange: DateRange = DateRange.TwentyFourHours,
-  onDateRangeChanged: ((DateRange) -> Unit)? = null,
-  onFailureCountsChanged:
-    ((crashCount: Int, anrCount: Int, toolFailureCount: Int, nonFatalCount: Int) -> Unit)? =
-    null,
-  clientProvider: (() -> AutoMobileClient)? = null,
-  streamingDataSource: StreamingFailuresDataSourceInterface? = null,
-  dataSourceMode: DataSourceMode = DataSourceMode.Fake,
   modifier: Modifier = Modifier,
-  // Null preserves legacy behavior; a supplied provider stays null until registered/after release.
-  sessionUuidProvider: (() -> String?)? = null,
-  failuresPushClient: FailuresPushSocketClient? = null, // Shared client managed at app level
-  // Seam for the locally owned push client so tests can count how often it is (re)created.
-  pushClientFactory: ((() -> String?)?) -> FailuresPushSocketClient = {
-    createFailuresDashboardPushClient(sessionUuidProvider = it)
-  },
+  options: FailuresDashboardOptions = FailuresDashboardOptions(),
 ) {
-  val scope = rememberCoroutineScope()
+  val memory = rememberFailuresMemory(options.initialSelectedFailureId)
+  with(memory) {
+    return with(options) {
+      val scope = rememberCoroutineScope()
 
-  // Retry counter - incrementing triggers LaunchedEffect to reload
-  var retryCounter by remember { mutableIntStateOf(0) }
+      // Retry counter - incrementing triggers LaunchedEffect to reload
 
-  // For fake mode: track the FakeFailuresDataSource for trigger button
-  // Key by dataSourceMode so it's recreated when mode toggles
-  val fakeDataSource =
-    remember(dataSourceMode) {
-      if (dataSourceMode == DataSourceMode.Fake) FakeFailuresDataSource() else null
-    }
+      val sources = rememberFailureSources()
+      val fakeDataSource = sources.fake
+      val currentDataSource = sources.current
+      val activeStreamingSource = sources.streaming
+      // Data state
 
-  // Create data sources
-  val mockDataSource = remember { MockFailuresDataSource() }
-  val mcpDataSource =
-    remember(clientProvider) {
-      clientProvider?.let { McpFailuresDataSource(it) }
-    }
-  val emptyDataSource = remember { EmptyFailuresDataSource() }
+      // Streaming state
 
-  val currentDataSource: FailuresDataSource =
-    when {
-      dataSourceMode == DataSourceMode.Fake -> fakeDataSource ?: mockDataSource
-      mcpDataSource != null -> mcpDataSource
-      else -> emptyDataSource // Show empty data in Real mode when MCP not available
-    }
+      // Push socket client for real-time updates - use provided or create local
+      val pushClient = rememberDashboardPushClient()
+      val isLocalPushClient = failuresPushClient == null
 
-  // Determine streaming source (fake or provided)
-  val activeStreamingSource: StreamingFailuresDataSourceInterface? =
-    when {
-      dataSourceMode == DataSourceMode.Fake -> fakeDataSource
-      else -> streamingDataSource
-    }
+      // Load data when data source changes or retry is triggered
+      LoadFailures(memory, currentDataSource)
 
-  // Data state
-  var failureGroups by remember { mutableStateOf<List<FailureGroup>>(emptyList()) }
-  var isLoading by remember { mutableStateOf(true) }
-  var errorMessage by remember { mutableStateOf<String?>(null) }
+      // Handle pending selected failure ID (for deep linking from notifications)
+      SelectPendingFailure(memory)
 
-  var selectedFailure by remember { mutableStateOf<FailureGroup?>(null) }
-  var filterType by remember { mutableStateOf<FailureType?>(null) }
-  var pendingSelectedFailureId by remember { mutableStateOf(initialSelectedFailureId) }
+      // Real-time notifications via streaming (with automatic reconnection)
+      CollectFailureNotifications(memory, activeStreamingSource)
 
-  // Streaming state
-  var streamingError by remember { mutableStateOf<String?>(null) }
-  var reconnectAttempt by remember { mutableIntStateOf(0) }
+      // Real-time failure groups updates via streaming
+      CollectFailureGroups(memory, activeStreamingSource)
 
-  // Push socket client for real-time updates - use provided or create local
-  val sessionReady = sessionUuidProvider == null || sessionUuidProvider.invoke() != null
-  val pushClient =
-    failuresPushClient
-      ?: remember(dataSourceMode, sessionUuidProvider, sessionReady) {
-        if (dataSourceMode == DataSourceMode.Real && sessionReady) {
-          pushClientFactory(sessionUuidProvider)
-        } else null
-      }
-  val isLocalPushClient = failuresPushClient == null
-
-  // Load data when data source changes or retry is triggered
-  LaunchedEffect(currentDataSource, dataSourceMode, retryCounter) {
-    isLoading = true
-    errorMessage = null
-    when (val result = currentDataSource.getFailureGroups()) {
-      is Result.Success -> {
-        failureGroups = result.data
-        isLoading = false
-      }
-      is Result.Error -> {
-        errorMessage = result.message
-        isLoading = false
-      }
-      is Result.Loading -> {
-        /* keep loading state */
-      }
-    }
-  }
-
-  // Handle pending selected failure ID (for deep linking from notifications)
-  LaunchedEffect(pendingSelectedFailureId, failureGroups) {
-    val targetId = pendingSelectedFailureId ?: return@LaunchedEffect
-    if (failureGroups.isEmpty()) return@LaunchedEffect
-
-    val targetFailure = failureGroups.find { it.id == targetId }
-    if (targetFailure != null) {
-      selectedFailure = targetFailure
-      pendingSelectedFailureId = null
-      onFailureSelected?.invoke()
-    }
-  }
-
-  // Real-time notifications via streaming (with automatic reconnection)
-  LaunchedEffect(activeStreamingSource, reconnectAttempt) {
-    if (activeStreamingSource == null) return@LaunchedEffect
-
-    try {
-      streamingError = null
-      activeStreamingSource.notificationsFlow().collect { result ->
-        when (result) {
-          is Result.Success -> {
-            // Reset reconnect attempt on success
-            reconnectAttempt = 0
-            streamingError = null
-
-            // Only notify for the most recent notification (by timestamp)
-            val mostRecent = result.data.maxByOrNull { it.timestamp }
-            if (mostRecent != null) {
-              onNewFailureNotification?.invoke(mostRecent)
-            }
-          }
-          is Result.Error -> {
-            streamingError = result.message
-          }
-          is Result.Loading -> {
-            /* waiting for data */
-          }
+      // Connect to push socket for real-time updates in real mode (only for local client)
+      DisposableEffect(pushClient, isLocalPushClient) {
+        if (isLocalPushClient) pushClient?.connect()
+        onDispose {
+          if (isLocalPushClient) pushClient?.dispose()
         }
       }
-    } catch (e: Exception) {
-      streamingError = e.message
-      // Exponential backoff for reconnection
-      val backoffMs = min(1000L * (1 shl reconnectAttempt), 30000L)
-      delay(backoffMs)
-      reconnectAttempt++
-    }
-  }
 
-  // Real-time failure groups updates via streaming
-  LaunchedEffect(activeStreamingSource) {
-    if (activeStreamingSource == null) return@LaunchedEffect
+      // Listen for push notifications and refresh data
+      RefreshPushedFailures(memory, pushClient, currentDataSource)
 
-    activeStreamingSource.failureGroupsFlow().collect { result ->
-      when (result) {
-        is Result.Success -> {
-          failureGroups = result.data.groups
-        }
-        is Result.Error -> {
-          // Don't override main error, streaming updates are supplementary
-        }
-        is Result.Loading -> {
-          /* waiting for data */
-        }
-      }
-    }
-  }
-
-  // Connect to push socket for real-time updates in real mode (only for local client)
-  DisposableEffect(pushClient, isLocalPushClient) {
-    if (isLocalPushClient) pushClient?.connect()
-    onDispose {
-      if (isLocalPushClient) pushClient?.dispose()
-    }
-  }
-
-  // Listen for push notifications and refresh data
-  LaunchedEffect(pushClient, currentDataSource, dataSourceMode) {
-    val connected = pushClient ?: return@LaunchedEffect
-    if (dataSourceMode == DataSourceMode.Real) {
-      connected.failureNotifications.collectLatest {
-        // Refresh failure groups when we receive a push notification
-        when (val result = currentDataSource.getFailureGroups()) {
-          is Result.Success -> {
-            failureGroups = result.data
-          }
-          is Result.Error -> {
-            // Don't overwrite error message on refresh failures
-          }
-          is Result.Loading -> {
-            /* keep current state */
-          }
-        }
-      }
-    }
-  }
-
-  Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
-    if (selectedFailure != null) {
-      FailureDetailView(
-        failure = selectedFailure!!,
-        onBack = { selectedFailure = null },
-        onNavigateToScreen = onNavigateToScreen,
-        onNavigateToTest = onNavigateToTest,
-        onNavigateToSource = onNavigateToSource,
-      )
-    } else {
-      FailureListView(
-        failures = failureGroups,
-        filterType = filterType,
-        onFilterChanged = { filterType = it },
-        onFailureSelected = { selectedFailure = it },
-        isLoading = isLoading,
-        errorMessage = errorMessage,
-        streamingError = streamingError,
-        onRetry = { retryCounter++ },
-        dataSource = currentDataSource,
-        dataSourceMode = dataSourceMode,
-        fakeDataSource = fakeDataSource,
-        onTriggerFakeFailure = {
-          scope.launch {
-            fakeDataSource?.triggerNewFailure()
-          }
-        },
-        pushClient = pushClient,
-        initialDateRange = initialDateRange,
-        onDateRangeChanged = onDateRangeChanged,
-        onFailureCountsChanged = onFailureCountsChanged,
-      )
+      FailuresBody(memory, sources, pushClient, scope, modifier)
     }
   }
 }
@@ -298,7 +100,7 @@ private const val MAX_DISPLAYABLE_BUCKETS = 100
  * Get valid aggregation options for a date range Must produce at least 2 buckets and no more than
  * MAX_DISPLAYABLE_BUCKETS
  */
-private fun getValidAggregations(dateRange: DateRange): List<TimeAggregation> {
+internal fun getValidAggregations(dateRange: DateRange): List<TimeAggregation> {
   return TimeAggregation.entries.filter { agg ->
     val buckets = dateRange.durationMs / agg.durationMs
     buckets >= 2 && buckets <= MAX_DISPLAYABLE_BUCKETS
@@ -306,7 +108,7 @@ private fun getValidAggregations(dateRange: DateRange): List<TimeAggregation> {
 }
 
 /** Get the next smaller date range for drill-down */
-private fun getNextSmallerDateRange(current: DateRange): DateRange? {
+internal fun getNextSmallerDateRange(current: DateRange): DateRange? {
   return when (current) {
     DateRange.ThirtyDays -> DateRange.SevenDays
     DateRange.SevenDays -> DateRange.ThreeDays
@@ -317,7 +119,10 @@ private fun getNextSmallerDateRange(current: DateRange): DateRange? {
 }
 
 /** Get the best default aggregation for a date range */
-private fun getBestAggregation(dateRange: DateRange, currentAgg: TimeAggregation): TimeAggregation {
+internal fun getBestAggregation(
+  dateRange: DateRange,
+  currentAgg: TimeAggregation,
+): TimeAggregation {
   val valid = getValidAggregations(dateRange)
   // If current is valid, keep it
   if (currentAgg in valid) return currentAgg
@@ -326,1593 +131,258 @@ private fun getBestAggregation(dateRange: DateRange, currentAgg: TimeAggregation
 }
 
 @Composable
-private fun FailureListView(
+internal fun FailureListView(
   failures: List<FailureGroup>,
   filterType: FailureType?,
   onFilterChanged: (FailureType?) -> Unit,
   onFailureSelected: (FailureGroup) -> Unit,
-  isLoading: Boolean,
-  errorMessage: String?,
-  streamingError: String?,
-  onRetry: () -> Unit,
-  dataSource: FailuresDataSource,
-  dataSourceMode: DataSourceMode,
-  fakeDataSource: FakeFailuresDataSource?,
-  onTriggerFakeFailure: () -> Unit,
-  pushClient: FailuresPushSocketClient? = null,
-  initialDateRange: DateRange = DateRange.TwentyFourHours,
-  onDateRangeChanged: ((DateRange) -> Unit)? = null,
-  onFailureCountsChanged:
-    ((crashCount: Int, anrCount: Int, toolFailureCount: Int, nonFatalCount: Int) -> Unit)? =
-    null,
+  options: FailureListOptions,
 ) {
-  val colors = SharedTheme.globalColors
-  val filteredFailures =
-    if (filterType != null) {
-      failures.filter { it.type == filterType }
-    } else {
-      failures
-    }
-
-  var dateRange by remember { mutableStateOf(initialDateRange) }
-  var timeAggregation by remember { mutableStateOf(TimeAggregation.Hour) }
-
-  // Auto-switch aggregation when date range changes and current agg is invalid
-  val validAggregations = remember(dateRange) { getValidAggregations(dateRange) }
-  LaunchedEffect(dateRange) {
-    val bestAgg = getBestAggregation(dateRange, timeAggregation)
-    if (bestAgg != timeAggregation) {
-      timeAggregation = bestAgg
-    }
-    // Notify parent of date range change
-    onDateRangeChanged?.invoke(dateRange)
-  }
-
-  // Timeline data state
-  var timelineData by remember { mutableStateOf<TimelineData?>(null) }
-  var timelineLoading by remember { mutableStateOf(true) }
-
-  // Load timeline data
-  LaunchedEffect(dataSource, dateRange, timeAggregation) {
-    timelineLoading = true
-    when (val result = dataSource.getTimelineData(dateRange, timeAggregation)) {
-      is Result.Success -> {
-        timelineData = result.data
-        timelineLoading = false
-        // Report failure counts to parent
-        val data = result.data
-        val crashCount = data.dataPoints.sumOf { it.crashes }
-        val anrCount = data.dataPoints.sumOf { it.anrs }
-        val toolFailureCount = data.dataPoints.sumOf { it.toolFailures }
-        val nonFatalCount = data.dataPoints.sumOf { it.nonfatals }
-        onFailureCountsChanged?.invoke(crashCount, anrCount, toolFailureCount, nonFatalCount)
-      }
-      is Result.Error -> {
-        timelineData = null
-        timelineLoading = false
-      }
-      is Result.Loading -> {
-        /* keep loading state */
-      }
-    }
-  }
-
-  // Refresh timeline when push notifications arrive (real mode only)
-  LaunchedEffect(pushClient, dataSource, dateRange, timeAggregation, dataSourceMode) {
-    if (dataSourceMode == DataSourceMode.Real && pushClient != null) {
-      pushClient.failureNotifications.collectLatest {
-        // Refresh timeline when we receive a push notification
-        when (val result = dataSource.getTimelineData(dateRange, timeAggregation)) {
-          is Result.Success -> {
-            timelineData = result.data
-            // Report updated failure counts to parent
-            val data = result.data
-            val crashCount = data.dataPoints.sumOf { it.crashes }
-            val anrCount = data.dataPoints.sumOf { it.anrs }
-            val toolFailureCount = data.dataPoints.sumOf { it.toolFailures }
-            val nonFatalCount = data.dataPoints.sumOf { it.nonfatals }
-            onFailureCountsChanged?.invoke(crashCount, anrCount, toolFailureCount, nonFatalCount)
-          }
-          is Result.Error -> {
-            // Don't clear timeline on refresh failures
-          }
-          is Result.Loading -> {
-            /* keep current state */
-          }
+  val memory = rememberFailureListMemory(options.initialDateRange)
+  with(memory) {
+    return with(options) {
+      val colors = SharedTheme.globalColors
+      val filteredFailures =
+        if (filterType != null) {
+          failures.filter { it.type == filterType }
+        } else {
+          failures
         }
-      }
-    }
-  }
 
-  Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-    // Date range and aggregation selectors - stack when narrow
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-      val isNarrow = maxWidth < 400.dp
+      // Auto-switch aggregation when date range changes and current agg is invalid
+      val validAggregations = remember(dateRange) { getValidAggregations(dateRange) }
+      UpdateAggregation(memory)
 
-      if (isNarrow) {
-        // Stack vertically when narrow
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-          // Date range selector
-          Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier =
-              Modifier.background(
-                  colors.text.normal.copy(alpha = 0.05f),
-                  RoundedCornerShape(6.dp),
-                )
-                .padding(4.dp),
-          ) {
-            DateRange.entries.forEach { range ->
-              val isSelected = range == dateRange
-              Box(
-                modifier =
-                  Modifier.background(
-                      if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent,
-                      RoundedCornerShape(4.dp),
-                    )
-                    .clickable { dateRange = range }
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-              ) {
-                Text(
-                  range.label,
-                  fontSize = 10.sp,
-                  color =
-                    if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
-                  maxLines = 1,
-                )
-              }
-            }
-          }
+      // Timeline data state
 
-          // Aggregation selector
-          Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            Text(
-              "Group by:",
-              fontSize = 10.sp,
-              color = colors.text.normal.copy(alpha = 0.5f),
-              maxLines = 1,
-            )
-            Row(
-              horizontalArrangement = Arrangement.spacedBy(4.dp),
-              modifier =
-                Modifier.background(
-                    colors.text.normal.copy(alpha = 0.05f),
-                    RoundedCornerShape(6.dp),
-                  )
-                  .padding(4.dp),
-            ) {
-              validAggregations.forEach { agg ->
-                val isSelected = agg == timeAggregation
-                Box(
-                  modifier =
-                    Modifier.background(
-                        if (isSelected) colors.text.normal.copy(alpha = 0.15f)
-                        else Color.Transparent,
-                        RoundedCornerShape(4.dp),
-                      )
-                      .clickable { timeAggregation = agg }
-                      .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(horizontal = 8.dp, vertical = 4.dp),
-                ) {
-                  Text(
-                    agg.label,
-                    fontSize = 10.sp,
-                    color =
-                      if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
-                    maxLines = 1,
-                  )
-                }
-              }
-            }
-          }
-        }
-      } else {
-        // Side by side when wide
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          // Date range selector
-          Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier =
-              Modifier.background(
-                  colors.text.normal.copy(alpha = 0.05f),
-                  RoundedCornerShape(6.dp),
-                )
-                .padding(4.dp),
-          ) {
-            DateRange.entries.forEach { range ->
-              val isSelected = range == dateRange
-              Box(
-                modifier =
-                  Modifier.background(
-                      if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent,
-                      RoundedCornerShape(4.dp),
-                    )
-                    .clickable { dateRange = range }
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-              ) {
-                Text(
-                  range.label,
-                  fontSize = 10.sp,
-                  color =
-                    if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
-                  maxLines = 1,
-                )
-              }
-            }
-          }
+      // Load timeline data
+      LoadFailureTimeline(memory)
 
-          // Aggregation selector (only show valid options)
-          Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            Text(
-              "Group by:",
-              fontSize = 10.sp,
-              color = colors.text.normal.copy(alpha = 0.5f),
-              maxLines = 1,
-            )
-            Row(
-              horizontalArrangement = Arrangement.spacedBy(4.dp),
-              modifier =
-                Modifier.background(
-                    colors.text.normal.copy(alpha = 0.05f),
-                    RoundedCornerShape(6.dp),
-                  )
-                  .padding(4.dp),
-            ) {
-              validAggregations.forEach { agg ->
-                val isSelected = agg == timeAggregation
-                Box(
-                  modifier =
-                    Modifier.background(
-                        if (isSelected) colors.text.normal.copy(alpha = 0.15f)
-                        else Color.Transparent,
-                        RoundedCornerShape(4.dp),
-                      )
-                      .clickable { timeAggregation = agg }
-                      .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(horizontal = 8.dp, vertical = 4.dp),
-                ) {
-                  Text(
-                    agg.label,
-                    fontSize = 10.sp,
-                    color =
-                      if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
-                    maxLines = 1,
-                  )
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+      // Refresh timeline when push notifications arrive (real mode only)
+      RefreshFailureTimeline(memory)
 
-    Spacer(Modifier.height(16.dp))
+      Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        // Date range and aggregation selectors - stack when narrow
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+          val isNarrow = maxWidth < 400.dp
 
-    // Fake mode: Trigger failure button
-    if (dataSourceMode == DataSourceMode.Fake && fakeDataSource != null) {
-      Row(
-        modifier =
-          Modifier.fillMaxWidth()
-            .background(Color(0xFF4CAF50).copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-      ) {
-        Column {
-          Text(
-            "Fake Mode",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            color = Color(0xFF4CAF50),
-          )
-          Text(
-            "Trigger test failures to see real-time notifications",
-            fontSize = 10.sp,
-            color = colors.text.normal.copy(alpha = 0.6f),
-          )
-        }
-        Box(
-          modifier =
-            Modifier.background(Color(0xFF4CAF50), RoundedCornerShape(6.dp))
-              .clickable(onClick = onTriggerFakeFailure)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 12.dp, vertical = 8.dp),
-        ) {
-          Text(
-            "Trigger Failure",
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
-            color = Color.White,
-          )
-        }
-      }
-      Spacer(Modifier.height(16.dp))
-    }
+          if (isNarrow) {
+            // Stack vertically when narrow
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+              // Date range selector
+              DateRangeSelector()
 
-    // Streaming error banner (non-fatal, shown as warning)
-    if (streamingError != null && errorMessage == null) {
-      Box(
-        modifier =
-          Modifier.fillMaxWidth()
-            .background(Color(0xFFFF9800).copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-            .padding(12.dp),
-      ) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.SpaceBetween,
-          modifier = Modifier.fillMaxWidth(),
-        ) {
-          Column(modifier = Modifier.weight(1f)) {
-            Text(
-              "Streaming updates unavailable",
-              fontSize = 12.sp,
-              fontWeight = FontWeight.Medium,
-              color = Color(0xFFFF9800),
-            )
-            Text(
-              streamingError,
-              fontSize = 10.sp,
-              color = colors.text.normal.copy(alpha = 0.6f),
-            )
-          }
-          Text(
-            "Reconnecting...",
-            fontSize = 11.sp,
-            color = Color(0xFFFF9800).copy(alpha = 0.7f),
-            modifier = Modifier.padding(8.dp),
-          )
-        }
-      }
-      Spacer(Modifier.height(16.dp))
-    }
-
-    // Error banner
-    if (errorMessage != null) {
-      Box(
-        modifier =
-          Modifier.fillMaxWidth()
-            .background(Color(0xFFE53935).copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-            .padding(12.dp),
-      ) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.SpaceBetween,
-          modifier = Modifier.fillMaxWidth(),
-        ) {
-          Column(modifier = Modifier.weight(1f)) {
-            Text(
-              "Failed to load data",
-              fontSize = 12.sp,
-              fontWeight = FontWeight.Medium,
-              color = Color(0xFFE53935),
-            )
-            Text(
-              errorMessage,
-              fontSize = 10.sp,
-              color = colors.text.normal.copy(alpha = 0.6f),
-            )
-          }
-          Text(
-            "Retry",
-            fontSize = 11.sp,
-            color = Color(0xFF2196F3),
-            modifier =
-              Modifier.clickable(onClick = onRetry)
-                .pointerHoverIcon(PointerIcon.Hand)
-                .padding(8.dp),
-          )
-        }
-      }
-      Spacer(Modifier.height(16.dp))
-    }
-
-    // Event Trends section
-    val canDrillDown = getNextSmallerDateRange(dateRange) != null
-    val currentTimelineData = timelineData
-    if (currentTimelineData != null) {
-      EventTrendsSection(
-        data = currentTimelineData,
-        dateRange = dateRange,
-        aggregation = timeAggregation,
-        onBarClick =
-          if (canDrillDown) {
-            {
-              // Drill down to smaller time range
-              val nextRange = getNextSmallerDateRange(dateRange)
-              if (nextRange != null) {
-                dateRange = nextRange
-              }
-            }
-          } else null,
-      )
-    } else if (timelineLoading) {
-      Box(
-        modifier =
-          Modifier.fillMaxWidth()
-            .height(140.dp)
-            .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp)),
-        contentAlignment = Alignment.Center,
-      ) {
-        Text(
-          "Loading timeline...",
-          fontSize = 12.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
-        )
-      }
-    }
-
-    Spacer(Modifier.height(16.dp))
-
-    // Filter chips - responsive to width
-    BoxWithConstraints(modifier = Modifier.padding(bottom = 12.dp)) {
-      val showLabels = maxWidth > 300.dp
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(
-          label = "All",
-          isSelected = filterType == null,
-          showLabel = true, // Always show "All"
-          onClick = { onFilterChanged(null) },
-        )
-        FailureType.entries.forEach { type ->
-          FilterChip(
-            label = type.label,
-            icon = type.icon,
-            isSelected = filterType == type,
-            showLabel = showLabels,
-            onClick = { onFilterChanged(type) },
-          )
-        }
-      }
-    }
-
-    // Issues header
-    Text(
-      if (isLoading) "Issues (loading...)" else "Issues (${filteredFailures.size})",
-      fontSize = 13.sp,
-      fontWeight = FontWeight.Medium,
-      color = colors.text.normal.copy(alpha = 0.7f),
-      modifier = Modifier.padding(bottom = 8.dp),
-    )
-
-    // Failure list
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-      if (filteredFailures.isEmpty()) {
-        Box(
-          modifier = Modifier.fillMaxWidth().padding(32.dp),
-          contentAlignment = Alignment.Center,
-        ) {
-          if (dataSourceMode == DataSourceMode.Real && !isLoading) {
-            Column(
-              horizontalAlignment = Alignment.CenterHorizontally,
-              verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-              Text(
-                "No failures detected",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                color = colors.text.normal.copy(alpha = 0.7f),
-              )
-              Text(
-                "AutoMobile tracks crashes and ANRs via logcat and tool failures directly.",
-                fontSize = 11.sp,
-                color = colors.text.normal.copy(alpha = 0.5f),
-              )
-              Text(
-                "The SDK provides richer context and metadata but is not required.",
-                fontSize = 11.sp,
-                color = colors.text.normal.copy(alpha = 0.5f),
-              )
+              // Aggregation selector
+              AggregationSelector(validAggregations)
             }
           } else {
-            Text(
-              "No failures found",
-              color = colors.text.normal.copy(alpha = 0.5f),
-            )
-          }
-        }
-      } else {
-        filteredFailures.forEach { failure ->
-          FailureListItem(
-            failure = failure,
-            onClick = { onFailureSelected(failure) },
-          )
-        }
-      }
-    }
-  }
-}
-
-@Composable
-private fun FilterChip(
-  label: String,
-  icon: String? = null,
-  isSelected: Boolean,
-  showLabel: Boolean = true,
-  onClick: () -> Unit,
-) {
-  val colors = SharedTheme.globalColors
-  val bgColor = if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent
-  val borderColor =
-    if (isSelected) colors.text.normal.copy(alpha = 0.3f) else colors.text.normal.copy(alpha = 0.2f)
-
-  val displayText =
-    when {
-      icon != null && showLabel -> "$icon $label"
-      icon != null -> icon
-      else -> label
-    }
-
-  Box(
-    modifier =
-      Modifier.background(bgColor, RoundedCornerShape(4.dp))
-        .border(1.dp, borderColor, RoundedCornerShape(4.dp))
-        .clickable(onClick = onClick)
-        .pointerHoverIcon(PointerIcon.Hand)
-        .padding(horizontal = 10.dp, vertical = 4.dp),
-  ) {
-    Text(displayText, fontSize = 11.sp, maxLines = 1)
-  }
-}
-
-@Composable
-private fun StatBox(
-  label: String,
-  value: String,
-  color: Color,
-  emoji: String? = null,
-  delta: String? = null,
-  deltaPositive: Boolean = false,
-  showLabel: Boolean = true,
-) {
-  val colors = SharedTheme.globalColors
-
-  // Auto-size font based on value length to prevent overflow
-  val valueFontSize =
-    when {
-      value.length <= 3 -> 18.sp
-      value.length <= 5 -> 14.sp
-      else -> 12.sp
-    }
-
-  Column(horizontalAlignment = Alignment.CenterHorizontally) {
-    Text(
-      value,
-      fontSize = valueFontSize,
-      fontWeight = FontWeight.Bold,
-      color = color,
-      maxLines = 1,
-    )
-    if (delta != null) {
-      Text(
-        delta,
-        fontSize = 9.sp,
-        color = if (deltaPositive) Color(0xFF4CAF50) else Color(0xFFE53935),
-        maxLines = 1,
-      )
-    }
-    if (showLabel) {
-      Text(
-        if (emoji != null) "$emoji $label" else label,
-        fontSize = 10.sp,
-        color = colors.text.normal.copy(alpha = 0.5f),
-        maxLines = 1,
-      )
-    } else if (emoji != null) {
-      Text(
-        emoji,
-        fontSize = 10.sp,
-        maxLines = 1,
-      )
-    }
-  }
-}
-
-@Composable
-private fun EventTrendsSection(
-  data: TimelineData,
-  dateRange: DateRange,
-  aggregation: TimeAggregation,
-  onBarClick: (() -> Unit)?,
-) {
-  val colors = SharedTheme.globalColors
-
-  // Calculate totals for current period
-  val totalCrashes = data.dataPoints.sumOf { it.crashes }
-  val totalAnrs = data.dataPoints.sumOf { it.anrs }
-  val totalToolFailures = data.dataPoints.sumOf { it.toolFailures }
-  val totalNonfatals = data.dataPoints.sumOf { it.nonfatals }
-
-  // Use previous period totals from data source
-  val previousPeriodTotals = data.previousPeriodTotals
-  val crashDelta =
-    if (previousPeriodTotals.crashes > 0) {
-      ((totalCrashes - previousPeriodTotals.crashes) * 100 / previousPeriodTotals.crashes)
-    } else 0
-
-  Column(
-    modifier =
-      Modifier.fillMaxWidth()
-        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp))
-        .padding(12.dp),
-  ) {
-    // Stats row - responsive to width
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-      val showLabels = maxWidth > 350.dp
-      Row(
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        StatBox(
-          label = "Crashes",
-          value = formatCompactNumber(totalCrashes),
-          color = FailureType.Crash.color,
-          emoji = FailureType.Crash.icon,
-          delta = if (crashDelta != 0) "${if (crashDelta > 0) "+" else ""}$crashDelta%" else null,
-          deltaPositive = crashDelta < 0,
-          showLabel = showLabels,
-        )
-        StatBox(
-          label = "ANRs",
-          value = formatCompactNumber(totalAnrs),
-          color = FailureType.ANR.color,
-          emoji = FailureType.ANR.icon,
-          showLabel = showLabels,
-        )
-        StatBox(
-          label = "Tool Errors",
-          value = formatCompactNumber(totalToolFailures),
-          color = FailureType.ToolCallFailure.color,
-          emoji = FailureType.ToolCallFailure.icon,
-          showLabel = showLabels,
-        )
-        StatBox(
-          label = "Non-Fatal",
-          value = formatCompactNumber(totalNonfatals),
-          color = FailureType.NonFatal.color,
-          emoji = FailureType.NonFatal.icon,
-          showLabel = showLabels,
-        )
-        StatBox(
-          label = "Total",
-          value =
-            formatCompactNumber(totalCrashes + totalAnrs + totalToolFailures + totalNonfatals),
-          color = colors.text.normal,
-          emoji = "📊",
-          showLabel = showLabels,
-        )
-      }
-    }
-
-    // Bar chart
-    FailureBarChart(data = data.dataPoints, aggregation = aggregation, onBarClick = onBarClick)
-  }
-}
-
-@Composable
-private fun FailureBarChart(
-  data: List<TimelineDataPoint>,
-  aggregation: TimeAggregation,
-  onBarClick: (() -> Unit)?,
-) {
-  val colors = SharedTheme.globalColors
-  val maxValue = data.maxOfOrNull { it.total } ?: 1
-  val chartHeight = 80.dp
-
-  Column {
-    // Bars
-    Row(
-      modifier = Modifier.fillMaxWidth().height(chartHeight),
-      horizontalArrangement = Arrangement.spacedBy(2.dp),
-      verticalAlignment = Alignment.Bottom,
-    ) {
-      data.forEach { point ->
-        val barHeight = if (maxValue > 0) (point.total.toFloat() / maxValue) else 0f
-
-        Column(
-          modifier =
-            Modifier.weight(1f)
-              .height(chartHeight)
-              .then(
-                if (onBarClick != null) {
-                  Modifier.clickable(onClick = onBarClick).pointerHoverIcon(PointerIcon.Hand)
-                } else Modifier,
-              ),
-          verticalArrangement = Arrangement.Bottom,
-        ) {
-          // Stacked bar: crashes (red) + ANRs (orange) + tool failures (purple) + nonfatals (blue)
-          if (point.total > 0) {
-            val crashHeight = point.crashes.toFloat() / point.total * barHeight
-            val anrHeight = point.anrs.toFloat() / point.total * barHeight
-            val toolHeight = point.toolFailures.toFloat() / point.total * barHeight
-            val nonfatalHeight = point.nonfatals.toFloat() / point.total * barHeight
-
-            if (point.nonfatals > 0) {
-              Box(
-                modifier =
-                  Modifier.fillMaxWidth()
-                    .height((chartHeight.value * nonfatalHeight).dp)
-                    .background(
-                      FailureType.NonFatal.color.copy(alpha = 0.8f),
-                      RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp),
-                    ),
-              )
-            }
-            if (point.toolFailures > 0) {
-              Box(
-                modifier =
-                  Modifier.fillMaxWidth()
-                    .height((chartHeight.value * toolHeight).dp)
-                    .background(FailureType.ToolCallFailure.color.copy(alpha = 0.8f)),
-              )
-            }
-            if (point.anrs > 0) {
-              Box(
-                modifier =
-                  Modifier.fillMaxWidth()
-                    .height((chartHeight.value * anrHeight).dp)
-                    .background(FailureType.ANR.color.copy(alpha = 0.8f)),
-              )
-            }
-            if (point.crashes > 0) {
-              Box(
-                modifier =
-                  Modifier.fillMaxWidth()
-                    .height((chartHeight.value * crashHeight).dp)
-                    .background(
-                      FailureType.Crash.color.copy(alpha = 0.8f),
-                      RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp),
-                    ),
-              )
-            }
-          }
-        }
-      }
-    }
-
-    // X-axis labels (show every few labels to avoid crowding)
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-      // Dynamically adjust label density based on available width
-      val labelStep =
-        when {
-          maxWidth < 200.dp ->
-            when {
-              data.size <= 4 -> 1
-              else -> data.size // Show only first and last
-            }
-          maxWidth < 300.dp ->
-            when {
-              data.size <= 4 -> 1
-              data.size <= 8 -> 2
-              else -> 4
-            }
-          else ->
-            when {
-              data.size <= 7 -> 1
-              data.size <= 14 -> 2
-              data.size <= 24 -> 4
-              else -> 10
-            }
-        }
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-      ) {
-        data
-          .filterIndexed { index, _ -> index % labelStep == 0 || index == data.lastIndex }
-          .forEach { point ->
-            Text(
-              point.label,
-              fontSize = 8.sp,
-              color = colors.text.normal.copy(alpha = 0.4f),
-              maxLines = 1,
-            )
-          }
-      }
-    }
-  }
-}
-
-@Composable
-private fun FailureListItem(
-  failure: FailureGroup,
-  onClick: () -> Unit,
-) {
-  val colors = SharedTheme.globalColors
-
-  Row(
-    modifier =
-      Modifier.fillMaxWidth()
-        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-        .clickable(onClick = onClick)
-        .pointerHoverIcon(PointerIcon.Hand)
-        .padding(12.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    // Type icon and severity indicator
-    Box(
-      modifier =
-        Modifier.size(36.dp)
-          .background(failure.type.color.copy(alpha = 0.15f), RoundedCornerShape(6.dp)),
-      contentAlignment = Alignment.Center,
-    ) {
-      Text(failure.type.icon, fontSize = 16.sp)
-    }
-
-    Spacer(Modifier.width(12.dp))
-
-    // Failure info
-    Column(modifier = Modifier.weight(1f)) {
-      Text(
-        failure.title,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Medium,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-      )
-      Text(
-        failure.signature,
-        fontSize = 11.sp,
-        color = colors.text.normal.copy(alpha = 0.5f),
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-      )
-    }
-
-    Spacer(Modifier.width(12.dp))
-
-    // Count and severity
-    Column(horizontalAlignment = Alignment.End) {
-      Text(
-        "${failure.totalCount}x",
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Medium,
-        color = failure.severity.color,
-      )
-      Text(
-        failure.severity.label,
-        fontSize = 10.sp,
-        color = failure.severity.color.copy(alpha = 0.7f),
-      )
-    }
-  }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-internal fun FailureDetailView(
-  failure: FailureGroup,
-  onBack: () -> Unit,
-  onNavigateToScreen: (String) -> Unit,
-  onNavigateToTest: (String) -> Unit,
-  onNavigateToSource: (fileName: String, lineNumber: Int) -> Unit,
-) {
-  var expandedState by remember(failure.id) { mutableStateOf(ExpandableListState()) }
-  val colors = SharedTheme.globalColors
-
-  Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-    // Back button
-    Text(
-      "← Back",
-      fontSize = 12.sp,
-      color = Color(0xFF2196F3),
-      modifier =
-        Modifier.clickable(onClick = onBack)
-          .pointerHoverIcon(PointerIcon.Hand)
-          .padding(bottom = 12.dp),
-    )
-
-    // Header with badges
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-      Badge(failure.type.icon + " " + failure.type.label, failure.type.color)
-      Badge(failure.severity.label, failure.severity.color)
-    }
-
-    Text(
-      failure.title,
-      fontSize = 16.sp,
-      fontWeight = FontWeight.Medium,
-      modifier = Modifier.padding(top = 8.dp),
-    )
-
-    // Summary stats row
-    Row(
-      horizontalArrangement = Arrangement.spacedBy(16.dp),
-      modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
-    ) {
-      Text(
-        "${failure.totalCount} occurrences",
-        fontSize = 12.sp,
-        color = colors.text.normal.copy(alpha = 0.6f),
-      )
-      Text(
-        "${failure.uniqueSessions} sessions",
-        fontSize = 12.sp,
-        color = colors.text.normal.copy(alpha = 0.6f),
-      )
-    }
-
-    // Captures gallery (if available)
-    if (failure.recentCaptures.isNotEmpty()) {
-      SectionHeader("Captures (${failure.recentCaptures.size})")
-      Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
-      ) {
-        expandedState.visible(FailureSection.Captures, failure.recentCaptures).forEach { capture ->
-          CaptureCard(capture = capture)
-        }
-      }
-      // The daemon caps captures at 5 (src/db/failureAnalyticsRepository.ts).
-      // Offer expansion only beyond the preview limit; no capture total is available.
-      expansionLinkLabel(
-          noun = "captures",
-          loadedCount = failure.recentCaptures.size,
-          totalCount = failure.recentCaptures.size,
-          expanded = expandedState.isExpanded(FailureSection.Captures),
-        )
-        ?.let { label ->
-          ViewAllLink(label) { expandedState = expandedState.toggle(FailureSection.Captures) }
-        }
-      Spacer(Modifier.height(16.dp))
-    }
-
-    // Error message
-    SectionHeader("Error Message")
-    Box(
-      modifier =
-        Modifier.fillMaxWidth()
-          .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
-          .padding(12.dp),
-    ) {
-      Text(
-        failure.message,
-        fontSize = 12.sp,
-        fontFamily = FontFamily.Monospace,
-        color = Color(0xFFE53935),
-      )
-    }
-
-    // Stack trace with clickable lines
-    if (failure.stackTraceElements.isNotEmpty()) {
-      Spacer(Modifier.height(16.dp))
-      SectionHeader("Stack Trace")
-      Column(
-        modifier =
-          Modifier.fillMaxWidth()
-            .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-            .padding(8.dp),
-      ) {
-        failure.stackTraceElements.forEach { element ->
-          StackTraceLine(element = element, onNavigateToSource = onNavigateToSource)
-        }
-      }
-    }
-
-    // Tool call info (for tool failures)
-    val toolCallInfo = failure.toolCallInfo
-    if (toolCallInfo != null) {
-      Spacer(Modifier.height(16.dp))
-      SectionHeader("Tool Call Details")
-      ToolCallDetailsSection(
-        toolCallInfo = toolCallInfo,
-        expandedState = expandedState,
-        onToggle = { expandedState = expandedState.toggle(it) },
-      )
-    }
-
-    // Screen breakdown histogram
-    if (failure.screenBreakdown.isNotEmpty()) {
-      Spacer(Modifier.height(16.dp))
-      SectionHeader("Screens Visited (across ${failure.totalCount} occurrences)")
-      ScreenBreakdownSection(
-        breakdown = expandedState.visible(FailureSection.Screens, failure.screenBreakdown),
-        failureScreens = failure.failureScreens,
-        onNavigateToScreen = onNavigateToScreen,
-      )
-      if (failure.screenBreakdown.size > 5) {
-        ViewAllLink(
-          if (expandedState.isExpanded(FailureSection.Screens)) "Show less"
-          else "View all ${failure.screenBreakdown.size} screens",
-        ) {
-          expandedState = expandedState.toggle(FailureSection.Screens)
-        }
-      }
-    }
-
-    // Device breakdown
-    if (failure.deviceBreakdown.isNotEmpty()) {
-      Spacer(Modifier.height(16.dp))
-      SectionHeader("Devices (${failure.deviceBreakdown.size} models)")
-      BreakdownList(
-        items =
-          expandedState.visible(FailureSection.Devices, failure.deviceBreakdown).map { device ->
-            BreakdownItem(
-              label = device.deviceModel,
-              sublabel = device.os,
-              count = device.count,
-              percentage = device.percentage,
-            )
-          },
-      )
-      if (failure.deviceBreakdown.size > 5) {
-        ViewAllLink(
-          if (expandedState.isExpanded(FailureSection.Devices)) "Show less"
-          else "View all ${failure.deviceBreakdown.size} devices",
-        ) {
-          expandedState = expandedState.toggle(FailureSection.Devices)
-        }
-      }
-    }
-
-    // Version breakdown
-    if (failure.versionBreakdown.isNotEmpty()) {
-      Spacer(Modifier.height(16.dp))
-      SectionHeader("App Versions (${failure.versionBreakdown.size})")
-      BreakdownList(
-        items =
-          expandedState.visible(FailureSection.Versions, failure.versionBreakdown).map { version ->
-            BreakdownItem(
-              label = version.version,
-              sublabel = null,
-              count = version.count,
-              percentage = version.percentage,
-            )
-          },
-      )
-      if (failure.versionBreakdown.size > 5) {
-        ViewAllLink(
-          if (expandedState.isExpanded(FailureSection.Versions)) "Show less"
-          else "View all ${failure.versionBreakdown.size} versions",
-        ) {
-          expandedState = expandedState.toggle(FailureSection.Versions)
-        }
-      }
-    }
-
-    // Affected tests
-    if (failure.affectedTests.isNotEmpty()) {
-      Spacer(Modifier.height(16.dp))
-      SectionHeader("Affected Tests (${failure.affectedTests.size})")
-      Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        expandedState
-          .visible(
-            FailureSection.Tests,
-            failure.affectedTests.entries.sortedByDescending { it.value },
-          )
-          .forEach { (testName, count) ->
+            // Side by side when wide
             Row(
-              modifier =
-                Modifier.fillMaxWidth()
-                  .background(
-                    colors.text.normal.copy(alpha = 0.03f),
-                    RoundedCornerShape(6.dp),
-                  )
-                  .clickable { onNavigateToTest(testName) }
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .padding(10.dp),
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically,
             ) {
-              Text(testName, fontSize = 12.sp, modifier = Modifier.weight(1f))
-              Text(
-                "${count}x",
-                fontSize = 11.sp,
-                color = colors.text.normal.copy(alpha = 0.5f),
-                modifier = Modifier.padding(end = 8.dp),
-              )
-              Text("View →", fontSize = 11.sp, color = Color(0xFF2196F3))
+              // Date range selector
+              DateRangeSelector()
+
+              // Aggregation selector (only show valid options)
+              AggregationSelector(validAggregations)
             }
           }
-        if (failure.affectedTests.size > 5) {
-          ViewAllLink(
-            if (expandedState.isExpanded(FailureSection.Tests)) "Show less"
-            else "View all ${failure.affectedTests.size} tests",
-          ) {
-            expandedState = expandedState.toggle(FailureSection.Tests)
-          }
         }
-      }
-    }
 
-    // Recent occurrences for drill-down
-    if (failure.sampleOccurrences.isNotEmpty()) {
-      Spacer(Modifier.height(16.dp))
-      SectionHeader("Recent Occurrences")
-      Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        expandedState.visible(FailureSection.Occurrences, failure.sampleOccurrences).forEach {
-          occurrence ->
-          OccurrenceRow(occurrence = occurrence)
-        }
-        // The daemon caps sample occurrences at 6 (src/db/failureAnalyticsRepository.ts).
-        // Offer expansion only beyond the preview limit and label partial lists as N of TOTAL.
-        expansionLinkLabel(
-            noun = "occurrences",
-            loadedCount = failure.sampleOccurrences.size,
-            totalCount = failure.totalCount,
-            expanded = expandedState.isExpanded(FailureSection.Occurrences),
-          )
-          ?.let { label ->
-            ViewAllLink(label) { expandedState = expandedState.toggle(FailureSection.Occurrences) }
-          }
-      }
-    }
+        Spacer(Modifier.height(16.dp))
 
-    // Actions
-    Spacer(Modifier.height(24.dp))
-    SectionHeader("Actions")
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-      Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        ActionCard(
-          "📋",
-          "Copy Logs",
-          "All ${failure.totalCount} occurrences",
-          Modifier.weight(1f),
-        ) {}
-        ActionCard("📦", "Export Bundle", "Debug data package", Modifier.weight(1f)) {}
-      }
-      ActionCard("🔄", "Reproduce", "Replay test to failure point", Modifier.fillMaxWidth()) {}
-    }
+        // Fake mode: Trigger failure button
+        FakeFailureBanner()
 
-    Spacer(Modifier.height(16.dp))
-  }
-}
+        // Streaming error banner (non-fatal, shown as warning)
+        FailureStreamingWarning()
 
-@Composable
-private fun Badge(text: String, color: Color) {
-  Box(
-    modifier =
-      Modifier.background(color.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-        .padding(horizontal = 8.dp, vertical = 4.dp),
-  ) {
-    Text(text, fontSize = 11.sp, color = color)
-  }
-}
+        // Error banner
+        FailureLoadError()
 
-@Composable
-private fun CaptureCard(capture: FailureCapture) {
-  val colors = SharedTheme.globalColors
-  val icon = if (capture.type == CaptureType.Video) "🎬" else "📸"
+        FailureTimeline()
+        // Filter chips - responsive to width
+        FailureTypeFilters(filterType, onFilterChanged)
 
-  Column(
-    horizontalAlignment = Alignment.CenterHorizontally,
-    modifier =
-      Modifier.width(100.dp)
-        .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
-        .clickable { /* TODO: Open capture */ }
-        .pointerHoverIcon(PointerIcon.Hand)
-        .padding(8.dp),
-  ) {
-    Text(icon, fontSize = 24.sp)
-    Text(
-      capture.deviceModel,
-      fontSize = 9.sp,
-      color = colors.text.normal.copy(alpha = 0.6f),
-      maxLines = 1,
-      overflow = TextOverflow.Ellipsis,
-      modifier = Modifier.padding(top = 4.dp),
-    )
-  }
-}
-
-@Composable
-private fun StackTraceLine(
-  element: StackTraceElement,
-  onNavigateToSource: (String, Int) -> Unit,
-) {
-  val colors = SharedTheme.globalColors
-  val lineText = buildString {
-    append("at ${element.className}.${element.methodName}")
-    if (element.fileName != null && element.lineNumber != null) {
-      append("(${element.fileName}:${element.lineNumber})")
-    }
-  }
-  val isClickable = element.isAppCode && element.fileName != null && element.lineNumber != null
-
-  Text(
-    lineText,
-    fontSize = 11.sp,
-    fontFamily = FontFamily.Monospace,
-    color = if (element.isAppCode) Color(0xFF2196F3) else colors.text.normal.copy(alpha = 0.6f),
-    modifier =
-      Modifier.fillMaxWidth()
-        .then(
-          if (isClickable)
-            Modifier.clickable {
-                onNavigateToSource(element.fileName!!, element.lineNumber!!)
-              }
-              .pointerHoverIcon(PointerIcon.Hand)
-          else Modifier,
+        // Issues header
+        Text(
+          if (isLoading) "Issues (loading...)" else "Issues (${filteredFailures.size})",
+          fontSize = 13.sp,
+          fontWeight = FontWeight.Medium,
+          color = colors.text.normal.copy(alpha = 0.7f),
+          modifier = Modifier.padding(bottom = 8.dp),
         )
-        .padding(vertical = 2.dp, horizontal = 4.dp),
-  )
-}
 
-@Composable
-private fun ToolCallDetailsSection(
-  toolCallInfo: AggregatedToolCallInfo,
-  expandedState: ExpandableListState,
-  onToggle: (FailureSection) -> Unit,
-) {
-  val colors = SharedTheme.globalColors
-
-  Column(
-    modifier =
-      Modifier.fillMaxWidth()
-        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-        .padding(12.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
-  ) {
-    DetailRow("Tool", toolCallInfo.toolName)
-
-    // Error codes breakdown
-    if (toolCallInfo.errorCodes.isNotEmpty()) {
-      Text("Error Codes:", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.6f))
-      val sortedCodes = toolCallInfo.errorCodes.entries.sortedByDescending { it.value }
-      expandedState.visible(FailureSection.ErrorCodes, sortedCodes).forEach { (code, count) ->
-        Row(modifier = Modifier.padding(start = 8.dp)) {
-          Text(
-            code,
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.weight(1f),
-          )
-          Text("${count}x", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
-        }
-      }
-      if (sortedCodes.size > 5) {
-        ViewAllLink(
-          if (expandedState.isExpanded(FailureSection.ErrorCodes)) "Show less"
-          else "View all ${sortedCodes.size} error codes",
-        ) {
-          onToggle(FailureSection.ErrorCodes)
-        }
-      }
-    }
-
-    // Duration stats
-    val stats = toolCallInfo.durationStats
-    if (stats != null) {
-      Text("Duration:", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.6f))
-      Row(
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        DurationStat("Min", stats.minMs)
-        DurationStat("Avg", stats.avgMs)
-        DurationStat("P95", stats.p95Ms)
-        DurationStat("Max", stats.maxMs)
-      }
-    }
-
-    // Parameter variants
-    if (toolCallInfo.parameterVariants.isNotEmpty()) {
-      Text("Parameters:", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.6f))
-      val params = toolCallInfo.parameterVariants.entries.toList()
-      expandedState.visible(FailureSection.Parameters, params).forEach { (param, values) ->
-        Row(modifier = Modifier.padding(start = 8.dp)) {
-          Text("$param: ", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.5f))
-          Text(
-            if (values.size == 1) values.first() else "${values.size} variants",
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace,
-          )
-        }
-      }
-      if (params.size > 5) {
-        ViewAllLink(
-          if (expandedState.isExpanded(FailureSection.Parameters)) "Show less"
-          else "View all ${params.size} parameters",
-        ) {
-          onToggle(FailureSection.Parameters)
-        }
+        // Failure list
+        FailureIssues(filteredFailures, onFailureSelected)
       }
     }
   }
 }
 
-@Composable
-private fun DurationStat(label: String, ms: Long) {
-  val colors = SharedTheme.globalColors
-  Column(horizontalAlignment = Alignment.CenterHorizontally) {
-    Text("${ms}ms", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-    Text(label, fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
-  }
-}
-
-@Composable
-private fun ScreenBreakdownSection(
-  breakdown: List<ScreenBreakdown>,
-  failureScreens: Map<String, Int>,
-  onNavigateToScreen: (String) -> Unit,
-) {
-  val colors = SharedTheme.globalColors
-  val maxVisits = breakdown.maxOfOrNull { it.visitCount } ?: 1
-
-  Column(
-    modifier =
-      Modifier.fillMaxWidth()
-        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-        .padding(12.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
-  ) {
-    breakdown
-      .sortedByDescending { it.visitCount }
-      .forEach { screen ->
-        val failureCount = failureScreens[screen.screenName] ?: 0
-        val isFailureScreen = failureCount > 0
-
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          modifier =
-            Modifier.fillMaxWidth()
-              .clickable { onNavigateToScreen(screen.screenName) }
-              .pointerHoverIcon(PointerIcon.Hand),
-        ) {
-          // Screen name with failure indicator
-          Row(modifier = Modifier.width(100.dp)) {
-            if (isFailureScreen) {
-              Text("💥 ", fontSize = 10.sp)
-            }
-            Text(
-              screen.screenName,
-              fontSize = 11.sp,
-              color = if (isFailureScreen) Color(0xFFE53935) else colors.text.normal,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
-            )
-          }
-
-          // Bar
-          Box(modifier = Modifier.weight(1f).height(16.dp).padding(horizontal = 8.dp)) {
-            // Visit bar
-            Box(
-              modifier =
-                Modifier.fillMaxWidth(screen.visitCount.toFloat() / maxVisits)
-                  .height(16.dp)
-                  .background(
-                    if (isFailureScreen) Color(0xFFE53935).copy(alpha = 0.3f)
-                    else colors.text.normal.copy(alpha = 0.15f),
-                    RoundedCornerShape(2.dp),
-                  ),
-            )
-          }
-
-          // Count
-          Text(
-            "${screen.visitCount}",
-            fontSize = 10.sp,
-            color = colors.text.normal.copy(alpha = 0.6f),
-            modifier = Modifier.width(40.dp),
-          )
-        }
-      }
-  }
-}
-
-private data class BreakdownItem(
+internal data class BreakdownItem(
   val label: String,
   val sublabel: String?,
   val count: Int,
   val percentage: Float,
 )
 
-@Composable
-private fun BreakdownList(items: List<BreakdownItem>) {
-  val colors = SharedTheme.globalColors
+data class FailuresDashboardOptions(
+  val onNavigateToScreen: (String) -> Unit = {},
+  val onNavigateToTest: (String) -> Unit = {},
+  val onNavigateToSource: (fileName: String, lineNumber: Int) -> Unit = { _, _ -> },
+  val onNewFailureNotification: ((FailureNotification) -> Unit)? = null,
+  val initialSelectedFailureId: String? = null,
+  val onFailureSelected: (() -> Unit)? = null,
+  val initialDateRange: DateRange = DateRange.TwentyFourHours,
+  val onDateRangeChanged: ((DateRange) -> Unit)? = null,
+  val onFailureCountsChanged:
+    ((crashCount: Int, anrCount: Int, toolFailureCount: Int, nonFatalCount: Int) -> Unit)? =
+    null,
+  val clientProvider: (() -> AutoMobileClient)? = null,
+  val streamingDataSource: StreamingFailuresDataSourceInterface? = null,
+  val dataSourceMode: DataSourceMode = DataSourceMode.Fake,
+  val sessionUuidProvider: (() -> String?)? = null,
+  val failuresPushClient: FailuresPushSocketClient? = null,
+  val pushClientFactory: ((() -> String?)?) -> FailuresPushSocketClient = {
+    createFailuresDashboardPushClient(sessionUuidProvider = it)
+  },
+)
 
-  Column(
-    modifier =
-      Modifier.fillMaxWidth()
-        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-        .padding(12.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
-  ) {
-    items
-      .sortedByDescending { it.count }
-      .forEach { item ->
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          modifier = Modifier.fillMaxWidth(),
-        ) {
-          Column(modifier = Modifier.width(120.dp)) {
-            Text(item.label, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (item.sublabel != null) {
-              Text(
-                item.sublabel,
-                fontSize = 9.sp,
-                color = colors.text.normal.copy(alpha = 0.5f),
-              )
+internal data class FailureListOptions(
+  val isLoading: Boolean,
+  val errorMessage: String?,
+  val streamingError: String?,
+  val onRetry: () -> Unit,
+  val dataSource: FailuresDataSource,
+  val dataSourceMode: DataSourceMode,
+  val fakeDataSource: FakeFailuresDataSource?,
+  val onTriggerFakeFailure: () -> Unit,
+  val pushClient: FailuresPushSocketClient? = null,
+  val initialDateRange: DateRange = DateRange.TwentyFourHours,
+  val onDateRangeChanged: ((DateRange) -> Unit)? = null,
+  val onFailureCountsChanged:
+    ((crashCount: Int, anrCount: Int, toolFailureCount: Int, nonFatalCount: Int) -> Unit)? =
+    null,
+)
+
+internal data class FailureStatStyle(
+  val emoji: String? = null,
+  val delta: String? = null,
+  val deltaPositive: Boolean = false,
+  val showLabel: Boolean = true,
+)
+
+internal data class FailureDetailMemory(
+  private val expandedStateState: androidx.compose.runtime.MutableState<ExpandableListState>,
+) {
+  var expandedState by expandedStateState
+}
+
+@Composable
+internal fun rememberFailureDetailMemory(failure: FailureGroup): FailureDetailMemory {
+  val expandedStateState = remember(failure.id) { mutableStateOf(ExpandableListState()) }
+  return FailureDetailMemory(expandedStateState)
+}
+
+internal data class FailureListMemory(
+  private val dateRangeState: androidx.compose.runtime.MutableState<DateRange>,
+  private val timeAggregationState: androidx.compose.runtime.MutableState<TimeAggregation>,
+  private val timelineDataState: androidx.compose.runtime.MutableState<TimelineData?>,
+  private val timelineLoadingState: androidx.compose.runtime.MutableState<Boolean>,
+) {
+  var dateRange by dateRangeState
+  var timeAggregation by timeAggregationState
+  var timelineData by timelineDataState
+  var timelineLoading by timelineLoadingState
+}
+
+@Composable
+private fun rememberFailureListMemory(initialDateRange: DateRange): FailureListMemory {
+  val dateRangeState = remember { mutableStateOf(initialDateRange) }
+  val timeAggregationState = remember { mutableStateOf(TimeAggregation.Hour) }
+  val timelineDataState = remember { mutableStateOf<TimelineData?>(null) }
+  val timelineLoadingState = remember { mutableStateOf(true) }
+  return FailureListMemory(
+    dateRangeState,
+    timeAggregationState,
+    timelineDataState,
+    timelineLoadingState,
+  )
+}
+
+internal data class FailuresMemory(
+  private val retryCounterState: androidx.compose.runtime.MutableState<Int>,
+  private val failureGroupsState: androidx.compose.runtime.MutableState<List<FailureGroup>>,
+  private val isLoadingState: androidx.compose.runtime.MutableState<Boolean>,
+  private val errorMessageState: androidx.compose.runtime.MutableState<String?>,
+  private val selectedFailureState: androidx.compose.runtime.MutableState<FailureGroup?>,
+  private val filterTypeState: androidx.compose.runtime.MutableState<FailureType?>,
+  private val pendingSelectedFailureIdState: androidx.compose.runtime.MutableState<String?>,
+  private val streamingErrorState: androidx.compose.runtime.MutableState<String?>,
+  private val reconnectAttemptState: androidx.compose.runtime.MutableState<Int>,
+) {
+  var retryCounter by retryCounterState
+  var failureGroups by failureGroupsState
+  var isLoading by isLoadingState
+  var errorMessage by errorMessageState
+  var selectedFailure by selectedFailureState
+  var filterType by filterTypeState
+  var pendingSelectedFailureId by pendingSelectedFailureIdState
+  var streamingError by streamingErrorState
+  var reconnectAttempt by reconnectAttemptState
+}
+
+internal data class FailureSources(
+  val fake: FakeFailuresDataSource?,
+  val current: FailuresDataSource,
+  val streaming: StreamingFailuresDataSourceInterface?,
+)
+
+@Composable
+private fun FailuresDashboardOptions.CollectFailureNotifications(
+  memory: FailuresMemory,
+  activeStreamingSource: StreamingFailuresDataSourceInterface?,
+) {
+  with(memory) {
+    LaunchedEffect(activeStreamingSource, reconnectAttempt) {
+      if (activeStreamingSource == null) return@LaunchedEffect
+
+      try {
+        streamingError = null
+        activeStreamingSource.notificationsFlow().collect { result ->
+          when (result) {
+            is Result.Success -> {
+              // Reset reconnect attempt on success
+              reconnectAttempt = 0
+              streamingError = null
+
+              // Only notify for the most recent notification (by timestamp)
+              val mostRecent = result.data.maxByOrNull { it.timestamp }
+              if (mostRecent != null) {
+                onNewFailureNotification?.invoke(mostRecent)
+              }
+            }
+            is Result.Error -> {
+              streamingError = result.message
+            }
+            is Result.Loading -> {
+              /* waiting for data */
             }
           }
-
-          // Bar
-          Box(modifier = Modifier.weight(1f).height(12.dp).padding(horizontal = 8.dp)) {
-            Box(
-              modifier =
-                Modifier.fillMaxWidth(item.percentage / 100f)
-                  .height(12.dp)
-                  .background(
-                    Color(0xFF2196F3).copy(alpha = 0.4f),
-                    RoundedCornerShape(2.dp),
-                  ),
-            )
-          }
-
-          Text(
-            "${item.count} (${item.percentage.toInt()}%)",
-            fontSize = 10.sp,
-            color = colors.text.normal.copy(alpha = 0.6f),
-          )
         }
+      } catch (cancellation: kotlinx.coroutines.CancellationException) {
+        throw cancellation
+      } catch (e: Exception) {
+        LOG.warn("Failure notification stream failed; retrying: ${e.message}", e)
+        streamingError = e.message
+        // Exponential backoff for reconnection
+        val backoffMs = min(1000L * (1 shl reconnectAttempt), 30000L)
+        delay(backoffMs)
+        reconnectAttempt++
       }
-  }
-}
-
-@Composable
-private fun OccurrenceRow(occurrence: FailureOccurrence) {
-  val colors = SharedTheme.globalColors
-  val timeAgo = formatTimeAgo(occurrence.timestamp)
-
-  Row(
-    modifier =
-      Modifier.fillMaxWidth()
-        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-        .clickable { /* TODO: Show occurrence detail */ }
-        .pointerHoverIcon(PointerIcon.Hand)
-        .padding(10.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    Column(modifier = Modifier.weight(1f)) {
-      Text(occurrence.deviceModel, fontSize = 11.sp)
-      Text(
-        "${occurrence.appVersion} • ${occurrence.screenAtFailure ?: "Unknown screen"}",
-        fontSize = 10.sp,
-        color = colors.text.normal.copy(alpha = 0.5f),
-      )
-    }
-    Column(horizontalAlignment = Alignment.End) {
-      Text(timeAgo, fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
-      if (occurrence.capturePath != null) {
-        Text(
-          if (occurrence.captureType == CaptureType.Video) "🎬" else "📸",
-          fontSize = 12.sp,
-        )
-      }
-    }
-  }
-}
-
-internal fun formatTimeAgo(timestamp: Long, clock: Clock = SystemClock): String {
-  val diff = clock.nowMs() - timestamp
-  return when {
-    diff < 60_000 -> "Just now"
-    diff < 3600_000 -> "${diff / 60_000}m ago"
-    diff < 86400_000 -> "${diff / 3600_000}h ago"
-    else -> "${diff / 86400_000}d ago"
-  }
-}
-
-@Composable
-private fun SectionHeader(title: String) {
-  val colors = SharedTheme.globalColors
-  Text(
-    title,
-    fontSize = 13.sp,
-    fontWeight = FontWeight.Medium,
-    color = colors.text.normal.copy(alpha = 0.7f),
-    modifier = Modifier.padding(bottom = 8.dp),
-  )
-}
-
-@Composable
-private fun ViewAllLink(
-  text: String,
-  onClick: () -> Unit,
-) {
-  Text(
-    "$text →",
-    fontSize = 11.sp,
-    color = Color(0xFF2196F3),
-    modifier =
-      Modifier.clickable(onClick = onClick)
-        .pointerHoverIcon(PointerIcon.Hand)
-        .padding(top = 8.dp, bottom = 4.dp),
-  )
-}
-
-@Composable
-private fun DetailRow(label: String, value: String) {
-  val colors = SharedTheme.globalColors
-  Row {
-    Text(
-      "$label: ",
-      fontSize = 11.sp,
-      color = colors.text.normal.copy(alpha = 0.5f),
-    )
-    Text(
-      value,
-      fontSize = 11.sp,
-      color = colors.text.normal.copy(alpha = 0.9f),
-    )
-  }
-}
-
-@Composable
-private fun ScreenChip(
-  name: String,
-  isHighlighted: Boolean,
-  onClick: () -> Unit,
-) {
-  val colors = SharedTheme.globalColors
-  val bgColor =
-    if (isHighlighted) Color(0xFFE53935).copy(alpha = 0.15f)
-    else colors.text.normal.copy(alpha = 0.08f)
-  val borderColor =
-    if (isHighlighted) Color(0xFFE53935).copy(alpha = 0.5f)
-    else colors.text.normal.copy(alpha = 0.2f)
-  val textColor = if (isHighlighted) Color(0xFFE53935) else colors.text.normal
-
-  Box(
-    modifier =
-      Modifier.background(bgColor, RoundedCornerShape(4.dp))
-        .border(1.dp, borderColor, RoundedCornerShape(4.dp))
-        .clickable(onClick = onClick)
-        .pointerHoverIcon(PointerIcon.Hand)
-        .padding(horizontal = 10.dp, vertical = 6.dp),
-  ) {
-    Text(name, fontSize = 12.sp, color = textColor)
-  }
-}
-
-@Composable
-private fun ActionCard(
-  icon: String,
-  title: String,
-  description: String,
-  modifier: Modifier = Modifier,
-  onClick: () -> Unit,
-) {
-  val colors = SharedTheme.globalColors
-
-  Row(
-    modifier =
-      modifier
-        .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-        .clickable(onClick = onClick)
-        .pointerHoverIcon(PointerIcon.Hand)
-        .padding(12.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    Text(icon, fontSize = 24.sp)
-    Spacer(Modifier.width(12.dp))
-    Column {
-      Text(
-        title,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Medium,
-      )
-      Text(
-        description,
-        fontSize = 10.sp,
-        color = colors.text.normal.copy(alpha = 0.5f),
-      )
     }
   }
 }

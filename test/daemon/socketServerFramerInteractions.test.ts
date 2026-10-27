@@ -9,7 +9,7 @@ import { DaemonSocketReachability } from "../../src/daemon/daemonSocketReachabil
 import { BaseSocketServer } from "../../src/daemon/socketServer/BaseSocketServer";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -369,7 +369,7 @@ describe("the real reachability probe against a framer-backed server (#10107 x #
     const reachability = new DaemonSocketReachability();
 
     for (let i = 0; i < 3; i++) {
-      expect(await reachability.isReachable(target.getSocketPath(), 1_000)).toBe(true);
+      expect(await reachability.probe(target.getSocketPath(), 1_000)).toBe("answered");
     }
     for (let i = 0; i < 50 && target.closes < 3; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));

@@ -1,3 +1,6 @@
+import { resolveRotateCall } from "../../../src/features/action/ActionCall";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createExecResult as makeExecResult } from "../../../src/utils/execResult";
 import { withEpilogueWarning } from "../../../src/utils/bestEffortEpilogue";
 import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
@@ -46,22 +49,17 @@ describe("Rotate", () => {
     AndroidCtrlProxyClient.resetInstances();
   });
 
-  // Helper function to create mock ExecResult
-  const createExecResult = (stdout: string = ""): ExecResult => ({
-    stdout,
-    stderr: "",
-    toString: () => stdout,
-    trim: () => stdout.trim(),
-    includes: (searchString: string) => stdout.includes(searchString),
-  });
+  // Keep the fixture shorthand while using the canonical ExecResult contract.
+  const createExecResult = (stdout = "", stderr = ""): ExecResult => makeExecResult(stdout, stderr);
 
   // Helper function to create mock ObserveResult
-  const createObserveResult = (): ObserveResult => ({
-    timestamp: Date.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} },
-  });
+  const createObserveResult = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: { node: {} } },
+    });
 
   beforeEach(() => {
     // Create mock BootedDevice
@@ -114,7 +112,7 @@ describe("Rotate", () => {
       ...createObserveResult(),
       freshness: {
         isFresh: false,
-        category: "window_identity",
+        category: "window_identity" as const,
       },
     }));
     fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult(mirrorLandscape));
@@ -180,6 +178,7 @@ describe("Rotate", () => {
     ).toEqual([
       "shell settings put system accelerometer_rotation 0",
       "shell settings put system user_rotation 1",
+      "shell settings put system accelerometer_rotation 1",
     ]);
   });
 
@@ -288,7 +287,7 @@ describe("Rotate", () => {
       ...withEpilogueWarning(withoutObservation, "Re-observe before acting."),
       message: formatRotateMessage(result),
     };
-    expect(rotateResultSchema.parse(payload)).toEqual(payload);
+    expect<unknown>(rotateResultSchema.parse(payload)).toEqual(payload);
     expect(
       rotateResultSchema.safeParse({ ...payload, orientationLockState: "enabled" }).success,
     ).toBe(false);
@@ -325,9 +324,63 @@ describe("Rotate", () => {
       });
     }
 
+    test.each([false, true])(
+      "uses applied rotation after restore, lock=%s (#15024)",
+      async (locked) => {
+        const landscape = readFileSync(
+          join(
+            __dirname,
+            "..",
+            "observe",
+            "windowDumps",
+            "dumpsys-window-displays-nomirror-landscape.txt",
+          ),
+          "utf8",
+        );
+        // #15024 evidence: requested mRotation=1, applied 0 in line 7 after sensor restore.
+        const divergent = landscape.replace(
+          "mDisplayRotation=ROTATION_90",
+          "mDisplayRotation=ROTATION_0",
+        );
+        fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
+          createExecResult("0"),
+          createExecResult("1"),
+        ]);
+        fakeAdb.setCommandResponse(
+          "shell settings get system accelerometer_rotation",
+          createExecResult(locked ? "0" : "1"),
+        );
+        scriptLandscapeRotation(() => {
+          fakeAdb.setCommandResponseSequence(liveCommand, [
+            createExecResult(locked ? landscape : divergent),
+          ]);
+        });
+        const result = await rotate.execute(
+          "landscape",
+          locked ? { lockOrientation: true } : undefined,
+        );
+        expect(result.success).toBe(locked);
+        expect(result.currentOrientation).toBe(locked ? "landscape" : "portrait");
+        if (!locked) {
+          expect(result.error).toContain("automatic rotation is on");
+          expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0")).toBe(
+            true,
+          );
+          expect(
+            fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1"),
+          ).toBe(true);
+        }
+      },
+    );
+
     test("reports a direct auto-rotate reversion during post-action observation", async () => {
       let commandsAtObservation: string[] = [];
       let observationTime = 0;
+      // Pre-call 0, then this call's own write (1) when the end-of-call check rolls it back (#14955).
+      fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
+        createExecResult("0"),
+        createExecResult("1"),
+      ]);
       scriptLandscapeRotation(() => {
         commandsAtObservation = fakeAdb.getExecutedCommands();
         fakeTimer.advanceTime(2500);
@@ -348,20 +401,27 @@ describe("Rotate", () => {
       expect(result.message).toContain("automatic rotation is on");
       expect(result.message).toContain("at the time the call returned");
       expect(result.message).toContain("lockOrientation: true");
-      expect(result.message).toContain("device session");
       expect(result.observation?.rotation).toBe(1);
-      expect(commandsAtObservation.filter((command) => command === liveCommand)).toHaveLength(3);
+      expect(commandsAtObservation.filter((command) => command === liveCommand)).toHaveLength(9);
       expect(commandsAtObservation).toContain("shell settings put system accelerometer_rotation 1");
       expect(fakeAdb.getExecutedCommands().slice(commandsAtObservation.length)).toEqual([
         liveCommand,
+        "shell settings get system user_rotation",
+        "shell settings put system user_rotation 0",
+        "shell settings get system user_rotation",
+        "shell cmd device_state print-states",
       ]);
-      expect(fakeTimer.getSleepHistory()).toEqual([150]);
+      expect(fakeTimer.getSleepHistory()).toEqual(Array(7).fill(150));
       expect(fakeTimer.now()).toBe(observationTime);
       expect(
         fakeAdb
           .getExecutedCommands()
           .filter((command) => command.includes("put system user_rotation")),
-      ).toEqual(["shell settings put system user_rotation 1"]);
+      ).toEqual([
+        "shell settings put system user_rotation 1",
+        // The sensor undid the rotation: restore the prior value so a later lock does not flip it.
+        "shell settings put system user_rotation 0",
+      ]);
     });
 
     test("preserves direct success when auto-rotate never reverts", async () => {
@@ -374,8 +434,8 @@ describe("Rotate", () => {
       expect(result.message).toContain("Successfully rotated from portrait to landscape");
       expect(
         fakeAdb.getExecutedCommands().filter((command) => command === liveCommand),
-      ).toHaveLength(4);
-      expect(fakeTimer.getSleepHistory()).toEqual([150]);
+      ).toHaveLength(10);
+      expect(fakeTimer.getSleepHistory()).toEqual(Array(7).fill(150));
     });
 
     test.each(["session", "direct lock"])(
@@ -407,7 +467,7 @@ describe("Rotate", () => {
           });
         }
         const result = await rotate.execute("landscape", {
-          lockOrientation: mode === "session" ? undefined : true,
+          lockOrientation: true,
         });
         expect(result.success).toBe(true);
         expect(result.currentOrientation).toBe("landscape");
@@ -449,7 +509,7 @@ describe("Rotate", () => {
         scriptLandscapeRotation(() => {
           observed = true;
           observationTime = fakeTimer.now();
-          fakeAdb.setCommandResponseSequence(liveCommand, [createExecResult("")]);
+          fakeAdb.setCommandResponseSequence(liveCommand, [createExecResult()]);
         });
         const stalled = Promise.withResolvers<ExecResult>();
         const execute = fakeAdb.executeCommand.bind(fakeAdb);
@@ -469,20 +529,21 @@ describe("Rotate", () => {
         );
         try {
           const result = await rotate.execute("landscape");
-          expect(result.success).toBe(true); // Existing unconfirmed-orientation contract.
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("could not be confirmed");
           expect(result.currentOrientation).toBe("unknown");
           expect(result.warning).toContain("end-of-call orientation could not be confirmed");
           expect(result.message).toContain("end-of-call orientation could not be confirmed");
           expect(result.observation).toBeDefined();
-          expect(fakeTimer.getSleepHistory()).toEqual([150]);
+          expect(fakeTimer.getSleepHistory()).toEqual(Array(7).fill(150));
           expect(
             fakeAdb.getExecutedCommands().filter((command) => command === liveCommand),
-          ).toHaveLength(4);
+          ).toHaveLength(10);
           if (outcome === "times out") {
             expect(fakeTimer.now() - observationTime).toBe(1000);
           }
         } finally {
-          stalled.resolve(createExecResult(""));
+          stalled.resolve(createExecResult());
           read.mockRestore();
         }
       },
@@ -496,7 +557,7 @@ describe("Rotate", () => {
       );
       expect(
         fakeAdb.getExecutedCommands().filter((command) => command === liveCommand),
-      ).toHaveLength(4);
+      ).toHaveLength(10);
     });
 
     test.each(["mRotation=0", ""])(
@@ -512,7 +573,7 @@ describe("Rotate", () => {
           createExecResult(live),
         ]);
         const result = await rotate.execute("landscape");
-        expect(result.success).toBe(live === "");
+        expect(result.success).toBe(false);
         expect(result.currentOrientation).toBe(live === "" ? "unknown" : "portrait");
         expect(fakeAdb.getExecutedCommands()).toEqual(commandsAtObservation);
         expect(result.observation).toBeDefined();
@@ -548,7 +609,7 @@ describe("Rotate", () => {
     function settingsSequence(auto: string[]) {
       fakeAdb.setCommandResponseSequence(
         "shell settings get system accelerometer_rotation",
-        auto.map(createExecResult),
+        auto.map((stdout) => createExecResult(stdout)),
       );
       fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=0"),
@@ -556,14 +617,14 @@ describe("Rotate", () => {
       ]);
     }
 
-    test("session default holds auto-rotate off and records originals before writes", async () => {
+    test("session default restores auto-rotate and records originals before writes", async () => {
       const original = useSession();
-      settingsSequence(["1", "0"]);
+      settingsSequence(["1"]);
       const result = await rotate.execute("landscape");
       expect(result.success).toBe(true);
-      expect(result.orientationLockState).toBe("locked");
+      expect(result.orientationLockState).toBe("unlocked");
       expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(
-        false,
+        true,
       );
       expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
       const calls = fakeAdb.getExecutedCommands();
@@ -580,7 +641,7 @@ describe("Rotate", () => {
       expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
     });
 
-    test("session already-matching orientation locks and records before its first write", async () => {
+    test("session already-matching orientation preserves automatic rotation without writes", async () => {
       const original = useSession();
       fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=1"));
       fakeAdb.setCommandResponseSequence("shell settings get system accelerometer_rotation", [
@@ -589,8 +650,8 @@ describe("Rotate", () => {
       ]);
       const result = await rotate.execute("landscape");
       expect(result.success).toBe(true);
-      expect(result.orientationLockState).toBe("locked");
-      expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
+      expect(result.orientationLockState).toBe("unlocked");
+      expect(original()).toBeUndefined();
     });
 
     test("session unknown initial auto-rotate preserves guard and records null", async () => {
@@ -663,6 +724,7 @@ describe("Rotate", () => {
           createExecResult("mRotation=0"),
           createExecResult(
             outcome === "unreadable" ? "" : outcome === "match" ? "mRotation=1" : "mRotation=0",
+            "",
           ),
         ]);
         fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
@@ -718,7 +780,7 @@ describe("Rotate", () => {
         expect(result.warning).toContain("timed out after 1000ms");
         expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 2")).toBe(false);
       } finally {
-        confirmation.resolve(createExecResult(""));
+        confirmation.resolve(createExecResult());
         wait.mockRestore();
         read.mockRestore();
       }
@@ -885,7 +947,7 @@ describe("Rotate", () => {
     test("unknown achieved orientation never rolls user_rotation back", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=0"),
-        createExecResult(""),
+        createExecResult(),
       ]);
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("2"));
       const result = await rotate.execute("landscape");
@@ -951,7 +1013,7 @@ describe("Rotate", () => {
 
     test("should fall back to user_rotation when dumpsys window has no mRotation", async () => {
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("2"));
-      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult(""));
+      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult());
 
       const orientation = await rotate.getCurrentOrientation();
 
@@ -959,19 +1021,7 @@ describe("Rotate", () => {
     });
 
     test("should return portrait as default when ADB command fails", async () => {
-      fakeAdb.setDefaultResponse({
-        stdout: "",
-        stderr: "Error",
-        toString() {
-          return this.stderr;
-        },
-        trim() {
-          return this.stderr.trim();
-        },
-        includes(s: string) {
-          return this.stderr.includes(s);
-        },
-      });
+      fakeAdb.setDefaultResponse(createExecResult("", "Error"));
 
       const orientation = await rotate.getCurrentOrientation();
 
@@ -1006,19 +1056,7 @@ describe("Rotate", () => {
     });
 
     test("should return false as default when ADB command fails", async () => {
-      fakeAdb.setDefaultResponse({
-        stdout: "",
-        stderr: "Error",
-        toString() {
-          return this.stderr;
-        },
-        trim() {
-          return this.stderr.trim();
-        },
-        includes(s: string) {
-          return this.stderr.includes(s);
-        },
-      });
+      fakeAdb.setDefaultResponse(createExecResult("", "Error"));
 
       const isLocked = await rotate.isOrientationLocked();
 
@@ -1094,7 +1132,7 @@ describe("Rotate", () => {
       // Setup: device is already in portrait orientation
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
       fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
-        createExecResult(""), // Preserve the initial user_rotation fallback.
+        createExecResult(), // Preserve the initial user_rotation fallback.
         createExecResult("mRotation=0"), // End-of-call confirmation.
       ]);
 
@@ -1177,12 +1215,12 @@ describe("Rotate", () => {
       );
       fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"),
-        createExecResult(""),
+        createExecResult(),
       ]);
 
       const result = await rotate.execute("portrait");
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
       expect(result.rotationPerformed).toBe(true);
       expect(result.previousOrientation).toBe("landscape");
       // Must NOT falsely report the requested orientation as achieved/held.
@@ -1247,7 +1285,7 @@ describe("Rotate", () => {
       // Device already in portrait: no rotation performed, fields legitimately coincide.
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
       fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
-        createExecResult(""),
+        createExecResult(),
         createExecResult("mRotation=0"),
       ]);
 
@@ -1334,7 +1372,7 @@ describe("Rotate", () => {
       }) as typeof fakeAdb.executeCommand;
 
       const rotation = rotate.execute("landscape", { lockOrientation: true });
-      for (let i = 0; i < 50 && !disableWriteStarted; i++) {
+      for (let i = 0; i < 100 && !disableWriteStarted; i++) {
         await Promise.resolve();
       }
 
@@ -1358,6 +1396,11 @@ describe("Rotate", () => {
         createExecResult(),
       );
       fakeAdb.setCommandResponse("shell settings put system user_rotation 0", createExecResult());
+
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
+        createExecResult(mirrorLandscape),
+        createExecResult(mirrorPortrait),
+      ]);
 
       const result = await rotate.execute("portrait");
 
@@ -1595,6 +1638,11 @@ describe("Rotate", () => {
         createExecResult("not-a-number"),
       );
 
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
+        createExecResult(mirrorLandscape),
+        createExecResult(mirrorPortrait),
+      ]);
+
       const result = await rotate.execute("portrait");
 
       expect(result.success).toBe(true);
@@ -1644,8 +1692,8 @@ describe("Rotate", () => {
     test("does not accept a lone match on the FINAL settle-wait attempt, since there is no later sample to confirm it (#6211)", async () => {
       // Auto-rotate is on; the device starts landscape. After forcing
       // portrait and restoring auto-rotate, the settle-wait budget
-      // (SETTLE_WAIT_MAX_ATTEMPTS=3) is exhausted with landscape, landscape,
-      // then the requested portrait on the very last attempt — a single,
+      // (3000 ms) is exhausted with a stable landscape streak,
+      // then the requested portrait on the very last sample — a single,
       // unconfirmed match with no opportunity for a later stability read.
       // Unconditionally returning that final value would falsely report
       // "portrait" held; it must instead be reported as unconfirmed.
@@ -1657,12 +1705,13 @@ describe("Rotate", () => {
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult("mRotation=1"), // post-restore confirm attempt 1: landscape
         createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape
-        createExecResult("mRotation=0"), // post-restore confirm attempt 3 (final): lone portrait match
+        ...Array.from({ length: 17 }, () => createExecResult(mirrorLandscape)),
+        createExecResult("mRotation=0"), // post-restore confirm sample 20 (final): lone portrait match
       ]);
 
       const result = await rotate.execute("portrait");
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
       expect(result.rotationPerformed).toBe(true);
       // Must NOT report the requested orientation as confirmed off a single,
       // unconfirmable final-attempt sample.
@@ -1671,7 +1720,7 @@ describe("Rotate", () => {
       expect(result.warning ?? "").toMatch(/could not be confirmed/i);
       // The settle-wait must have exhausted its full retry budget (slept
       // between every attempt) rather than stopping early on the lone match.
-      expect(fakeTimer.getSleepCallCount()).toBe(2);
+      expect(fakeTimer.getSleepCallCount()).toBe(20);
     });
 
     test("does not report a lone final opposite-orientation sample as a confirmed reversion (#6211)", async () => {
@@ -1681,25 +1730,26 @@ describe("Rotate", () => {
       );
       fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"), // pre-rotation state check
-        createExecResult(""), // settle attempt 1: unreadable
-        createExecResult(""), // settle attempt 2: unreadable
-        createExecResult("mRotation=1"), // settle attempt 3: lone landscape sample
+        createExecResult(), // settle attempt 1: unreadable
+        createExecResult(), // settle attempt 2: unreadable
+        ...Array.from({ length: 17 }, () => createExecResult()),
+        createExecResult("mRotation=1"), // settle sample 20: lone landscape sample
       ]);
 
       const result = await rotate.execute("portrait");
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
       expect(result.currentOrientation).toBe("unknown");
       expect(result.warning ?? "").toMatch(/could not be confirmed/i);
-      expect(fakeTimer.getSleepCallCount()).toBe(2);
+      expect(fakeTimer.getSleepCallCount()).toBe(20);
     });
 
     test("does not accept a lone match on the FINAL settle-wait attempt after an earlier non-adjacent match resets the streak (#6211)", async () => {
       // Alternate sequence from the review finding: portrait, landscape,
       // portrait. The first attempt matches but is immediately broken by the
       // second (non-matching) attempt, resetting the consecutive-match
-      // streak; the third (final) attempt matches again but, being the last
-      // attempt, has no later sample to confirm it either.
+      // streak; unreadable samples then break it again, and the final sample
+      // matches but has no later sample to confirm it.
       fakeAdb.setCommandResponse(
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
@@ -1708,12 +1758,13 @@ describe("Rotate", () => {
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult("mRotation=0"), // post-restore confirm attempt 1: portrait (lone, then broken)
         createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape (breaks the streak)
-        createExecResult("mRotation=0"), // post-restore confirm attempt 3 (final): lone portrait match again
+        ...Array.from({ length: 17 }, () => createExecResult()),
+        createExecResult("mRotation=0"), // post-restore confirm sample 20 (final): lone portrait match again
       ]);
 
       const result = await rotate.execute("portrait");
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
       expect(result.rotationPerformed).toBe(true);
       expect(result.currentOrientation).toBe("unknown");
       expect(result.warning).toBeDefined();
@@ -1730,12 +1781,12 @@ describe("Rotate", () => {
       );
       fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"), // pre-rotation state check
-        createExecResult(""), // every confirm attempt thereafter is unparseable
+        createExecResult(), // every confirm attempt thereafter is unparseable
       ]);
 
       const result = await rotate.execute("portrait");
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
       expect(result.currentOrientation).toBe("unknown");
       expect(result.warning ?? "").toMatch(/could not be confirmed/i);
     });
@@ -1834,7 +1885,7 @@ describe("Rotate", () => {
       );
       fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"), // pre-rotation state check
-        createExecResult(""), // every post-restore confirm attempt is unparseable
+        createExecResult(), // every post-restore confirm attempt is unparseable
       ]);
       fakeAdb.setCommandError(
         "shell settings put system accelerometer_rotation 1",
@@ -1843,7 +1894,7 @@ describe("Rotate", () => {
 
       const result = await rotate.execute("portrait");
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
       expect(result.rotationPerformed).toBe(true);
       expect(result.currentOrientation).toBe("unknown");
       expect(result.warning).toBeDefined();
@@ -1861,6 +1912,13 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
+
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
+        createExecResult(mirrorPortrait),
+        ...Array.from({ length: 8 }, () => createExecResult(mirrorLandscape)),
+        createExecResult(mirrorPortrait),
+        createExecResult(mirrorLandscape),
+      ]);
 
       // Gate the FIRST rotation's waitForRotation call so it parks mid-flight
       // — after reading state and writing accelerometer_rotation=0, but
@@ -1960,7 +2018,7 @@ describe("Rotate", () => {
     });
 
     test("should handle empty ADB output", async () => {
-      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult(""));
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult());
 
       const orientation = await rotate.getCurrentOrientation();
 
@@ -2098,7 +2156,7 @@ describe("Rotate", () => {
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult("mRotation=1"), // post-restore confirm attempt 1: landscape
         createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape (confirmed stable)
-        createExecResult(""), // post-restore confirm attempt 3 (final): unparseable
+        createExecResult(), // post-restore confirm attempt 3 (final): unparseable
       ]);
 
       const result = await rotate.execute("portrait");
@@ -2293,9 +2351,23 @@ let outputSchemaSpy: ReturnType<typeof spyOn>;
 beforeEach(() => {
   outputSchemaSpy = spyOn(Rotate.prototype, "execute").mockImplementation(async function (
     this: Rotate,
-    ...args: Parameters<Rotate["execute"]>
+    orientation: "portrait" | "landscape",
+    progressOrCall?:
+      | import("../../../src/features/action/BaseVisualChange").ProgressCallback
+      | import("../../../src/features/action/ActionCall").RotateCall,
+    lockOrientation?: boolean,
+    signal?: AbortSignal,
+    display?: number,
   ) {
-    const result = await executeForOutputSchema.apply(this, args);
+    const call = resolveRotateCall(progressOrCall, lockOrientation, signal, display);
+    const result = await executeForOutputSchema.call(
+      this,
+      orientation,
+      call.progress,
+      call.lockOrientation,
+      call.signal,
+      call.display,
+    );
     expect(
       rotateResultSchema.parse({ ...result, message: formatRotateMessage(result) }),
     ).toBeDefined();

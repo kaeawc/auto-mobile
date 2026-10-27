@@ -6,7 +6,7 @@ import {
 import {
   DAEMON_REGISTER_SESSION_METHOD,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
   SessionManager,
@@ -30,7 +30,7 @@ const notFound = {
   success: false,
   error: `Session not found: ${sessionId}`,
   code: DAEMON_SESSION_NOT_FOUND_CODE,
-};
+} as const;
 const request = (method: string, params: unknown): DaemonRequest => ({
   id: "test",
   type: "daemon_request",
@@ -415,6 +415,7 @@ describe("registration-only daemon requests", () => {
     const finishRelease = Promise.withResolvers<void>();
     let publishedSession = session;
     state.getSessionManager = () => ({
+      hasSession: () => true,
       getSession: () => publishedSession,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,

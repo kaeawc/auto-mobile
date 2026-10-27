@@ -1,0 +1,96 @@
+import { DaemonHttpIngress } from "../daemonHttpIngress";
+import { createDaemonMcpDispatcher } from "../inProcessMcpDispatcher";
+import { type DaemonSocketServer } from "../daemonSocketServer";
+import { SessionManager } from "../sessionManager";
+import { SessionHeartbeatMonitor } from "../SessionHeartbeatMonitor";
+import { PassiveWorkPolicy } from "../PassiveWorkPolicy";
+import { SingleFlightInterval } from "../SingleFlightInterval";
+import { DevicePool } from "../devicePool";
+import { ManagedExecutionReowner } from "../sessionBroker/provisioning/executionReowner";
+import { DeviceSessionRegistry } from "../deviceSessionRegistry";
+import { DaemonOptions } from "../types";
+import { DeviceForwardLeaseIdleReleaser } from "../deviceForwardLeaseIdleReleaser";
+import { DaemonSelfExitRecorder } from "../daemonExitRecord";
+import { PrivateDaemonOrphanWatchdog } from "../privateDaemonOrphanWatchdog";
+import { IncumbentOwnerGuard } from "../incumbentOwnerGuard";
+import { NavigationRetentionMonitor } from "../NavigationRetentionMonitor";
+import { DatabaseHealthProbe } from "../../db/DatabaseHealthProbe";
+import { getDeviceDataStreamServer } from "../deviceDataStreamSocketServer";
+import { NavigationGraphStreamBridge } from "../daemonStreamRouting";
+import { type InstalledAppsStore } from "../../db/installedAppsRepository";
+import { BackgroundBindingRegistryUpgrade } from "../sessionBroker/registry/BackgroundBindingRegistryUpgrade";
+import { DeviceReadiness } from "../readiness/DeviceReadiness";
+import { Timer } from "../../utils/SystemTimer";
+import { IdGenerator } from "../../utils/IdGenerator";
+import { type DaemonDeviceSessionStore } from "../daemonDependencies";
+import type { DaemonStateWrites } from "../daemonContext";
+
+/** Live views of daemon-owned services and lifetime state; collaborators receive only named Picks. */
+export interface DaemonCoreServices {
+  deviceReadiness: () => DeviceReadiness;
+  iosDeviceVerifier: () => () => Pick<DeviceReadiness, "verifyIosDevice">;
+  httpIngress: () => DaemonHttpIngress;
+  mcpDispatcher: () => ReturnType<typeof createDaemonMcpDispatcher>;
+  sessionManager: () => SessionManager;
+  devicePool: () => DevicePool;
+  deviceSessionRegistry: () => DeviceSessionRegistry;
+  installedAppsRepository: () => InstalledAppsStore;
+  deviceSessionRepository: () => DaemonDeviceSessionStore;
+  timer: () => Timer;
+  passiveWorkPolicy: () => PassiveWorkPolicy;
+  idGenerator: () => IdGenerator;
+  databaseHealthProbe: () => DatabaseHealthProbe;
+  options: () => DaemonOptions;
+  daemonState: () => DaemonStateWrites;
+}
+export interface DaemonIdentityState {
+  port: () => number;
+  setPort: (value: number) => void;
+  completeIdentityPublished: () => boolean;
+  setCompleteIdentityPublished: (value: boolean) => void;
+  socketBindCommitted: () => boolean;
+  setSocketBindCommitted: (value: boolean) => void;
+  incumbentOwnerGuard: () => IncumbentOwnerGuard;
+  daemonSessionId: () => string;
+  generationStartedAt: () => number;
+  processStartedAt: () => number;
+  processGenerationToken: () => string | undefined;
+  liveAcceptanceStartupSecret: () => string | undefined;
+  acceptanceDiscoveryCapability: () => string | undefined;
+}
+export interface DaemonLifecycleState {
+  socketServer: () => DaemonSocketServer | null;
+  setSocketServer: (value: DaemonSocketServer | null) => void;
+  selfExitRecorder: () => DaemonSelfExitRecorder;
+  startupCompletion: () => Promise<void>;
+  heartbeatMonitor: () => SessionHeartbeatMonitor | null;
+  setHeartbeatMonitor: (value: SessionHeartbeatMonitor | null) => void;
+  navigationRetentionMonitor: () => NavigationRetentionMonitor | null;
+  setNavigationRetentionMonitor: (value: NavigationRetentionMonitor | null) => void;
+  forwardLeaseIdleReleaser: () => DeviceForwardLeaseIdleReleaser | null;
+  setForwardLeaseIdleReleaser: (value: DeviceForwardLeaseIdleReleaser | null) => void;
+  orphanWatchdog: () => PrivateDaemonOrphanWatchdog | null;
+  setOrphanWatchdog: (value: PrivateDaemonOrphanWatchdog | null) => void;
+  deviceDisconnectMonitor: () => SingleFlightInterval | null;
+  setDeviceDisconnectMonitor: (value: SingleFlightInterval | null) => void;
+  deferredSessionRecoverySweeps: () => Set<Promise<void>>;
+  deviceDisconnectMisses: () => Map<string, number>;
+  sessionBrokerConfigPath: () => string | undefined;
+  managedExecutionReowner: () => ManagedExecutionReowner | undefined;
+  setManagedExecutionReowner: (value: ManagedExecutionReowner | undefined) => void;
+  deviceDataStreamServer: () => ReturnType<typeof getDeviceDataStreamServer>;
+  setDeviceDataStreamServer: (value: ReturnType<typeof getDeviceDataStreamServer>) => void;
+  navigationGraphBridge: () => NavigationGraphStreamBridge;
+  unsubscribeAdbMissingDevice: () => (() => void) | null;
+  setUnsubscribeAdbMissingDevice: (value: (() => void) | null) => void;
+  shutdownInProgress: () => boolean;
+  setShutdownInProgress: (value: boolean) => void;
+  recorderDeviceIncarnationListener: () => ((deviceId: string) => void) | undefined;
+  setRecorderDeviceIncarnationListener: (value: ((deviceId: string) => void) | undefined) => void;
+  shutdownReleaseNotifications: () => Set<string> | null;
+  setShutdownReleaseNotifications: (value: Set<string> | null) => void;
+  shutdownFallbackReleaseNotifications: () => Set<string> | null;
+  setShutdownFallbackReleaseNotifications: (value: Set<string> | null) => void;
+  backgroundRegistryUpgrade: () => BackgroundBindingRegistryUpgrade | undefined;
+  setBackgroundRegistryUpgrade: (value: BackgroundBindingRegistryUpgrade | undefined) => void;
+}

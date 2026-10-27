@@ -17,8 +17,8 @@ import {
   setVideoRecordingManagerDependencies,
   startVideoRecording,
   stopVideoRecordingUnattended,
-} from "../../src/server/videoRecordingManager";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+} from "../../src/daemon/videoRecordingManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import type { BootedDevice } from "../../src/models";
 import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
 
@@ -43,7 +43,7 @@ describe("finalized recording lookup vs derived label sessions", () => {
     timer = new FakeTimer();
     const backend = new FakeVideoCaptureBackend();
     backend.setNowProvider(() => new Date(timer.now()));
-    const sessions = new FakeDeviceSessionManager();
+    const sessions = new FakeDeviceReadiness();
     sessions.setConnectedDevices([device]);
     videoRecording.configure({ deviceDetector: sessions });
     await setVideoRecordingManagerDependencies({

@@ -9,6 +9,7 @@ import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
 import type { TapBoundsClip, TapViewHierarchy } from "../../../utils/interfaces/TapStrategy";
 import type { IosVoiceOverDetector } from "../../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
+import { resolveIosObserveRotation } from "../../observe/iosObserveRotation";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { clipIosChromeBounds } from "../swipeon/iosChromeInsets";
 import { isUsableScreenSize } from "../../utility/ElementGeometry";
@@ -29,6 +30,15 @@ export class IosTapStrategy implements TapStrategy {
   readonly settlesPostTapChange = false;
   readonly verifiesRefreshedDisplay = false;
   readonly promotesClickableAncestor = false;
+  readonly settlesFocusChangeAfterTap = true;
+  readonly rethrowsKeyboardOcclusion = false;
+
+  applyRefreshedObservationRotation(
+    observation: ObserveResult,
+    hierarchyRotation: number | undefined,
+  ): void {
+    observation.rotation = resolveIosObserveRotation(hierarchyRotation, observation.screenSize);
+  }
 
   constructor(
     private readonly device: BootedDevice,

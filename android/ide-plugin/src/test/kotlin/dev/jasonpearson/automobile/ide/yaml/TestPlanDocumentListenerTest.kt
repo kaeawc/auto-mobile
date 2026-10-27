@@ -218,27 +218,27 @@ class TestPlanDocumentListenerTest {
 
     override fun getLineEndOffset(line: Int): Int = content.length
 
-    override fun insertString(offset: Int, s: CharSequence) {}
+    override fun insertString(offset: Int, s: CharSequence) = Unit
 
-    override fun deleteString(startOffset: Int, endOffset: Int) {}
+    override fun deleteString(startOffset: Int, endOffset: Int) = Unit
 
-    override fun replaceString(startOffset: Int, endOffset: Int, s: CharSequence) {}
+    override fun replaceString(startOffset: Int, endOffset: Int, s: CharSequence) = Unit
 
-    override fun setText(text: CharSequence) {}
+    override fun setText(text: CharSequence) = Unit
 
     override fun isWritable(): Boolean = true
 
     override fun getModificationStamp(): Long = 0
 
-    override fun fireReadOnlyModificationAttempt() {}
+    override fun fireReadOnlyModificationAttempt() = Unit
 
     override fun addDocumentListener(
       listener: com.intellij.openapi.editor.event.DocumentListener,
-    ) {}
+    ) = Unit
 
     override fun removeDocumentListener(
       listener: com.intellij.openapi.editor.event.DocumentListener,
-    ) {}
+    ) = Unit
 
     override fun createRangeMarker(startOffset: Int, endOffset: Int): RangeMarker =
       throw UnsupportedOperationException()
@@ -252,27 +252,27 @@ class TestPlanDocumentListenerTest {
     override fun createGuardedBlock(startOffset: Int, endOffset: Int): RangeMarker =
       throw UnsupportedOperationException()
 
-    override fun removeGuardedBlock(block: RangeMarker) {}
+    override fun removeGuardedBlock(block: RangeMarker) = Unit
 
     override fun getOffsetGuard(offset: Int): RangeMarker? = null
 
     override fun getRangeGuard(start: Int, end: Int): RangeMarker? = null
 
-    override fun startGuardedBlockChecking() {}
+    override fun startGuardedBlockChecking() = Unit
 
-    override fun stopGuardedBlockChecking() {}
+    override fun stopGuardedBlockChecking() = Unit
 
-    override fun setCyclicBufferSize(bufferSize: Int) {}
+    override fun setCyclicBufferSize(bufferSize: Int) = Unit
 
-    override fun setReadOnly(isReadOnly: Boolean) {}
+    override fun setReadOnly(isReadOnly: Boolean) = Unit
 
-    override fun <T : Any?> putUserData(key: com.intellij.openapi.util.Key<T>, value: T?) {}
+    override fun <T : Any?> putUserData(key: com.intellij.openapi.util.Key<T>, value: T?) = Unit
 
     override fun <T : Any?> getUserData(key: com.intellij.openapi.util.Key<T>): T? = null
 
     override fun isInBulkUpdate(): Boolean = false
 
-    override fun setInBulkUpdate(value: Boolean) {}
+    override fun setInBulkUpdate(value: Boolean) = Unit
   }
 
   private class FakeDocumentEvent(private val doc: Document) : DocumentEvent(doc) {

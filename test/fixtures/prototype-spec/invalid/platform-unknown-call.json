@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["test"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "test.bogus"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].call",
+  "expectedMessage": "Unknown platform call"
+}

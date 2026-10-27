@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "image",
+      "asset": "photo",
+      "zoomable": {
+        "maxScale": 0.5
+      }
+    }
+  },
+  "expectedPath": "root.zoomable.maxScale",
+  "expectedMessage": "Invalid number value"
+}

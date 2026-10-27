@@ -1,12 +1,12 @@
 import type { Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import type { TaskRelayFrame } from "../../server/tasks/taskRelay";
+import type { TaskRelayFrame } from "../tasks/taskRelay";
 import {
   DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
   type DeviceSessionSuspectRefusal,
-} from "../../server/deviceSessionResult";
+} from "../deviceSessionResult";
 import type { DaemonClientLike } from "../client";
 import { isDeviceInventoryTool, type DaemonProxyProgressCallback } from "../daemonMcpProxy";
 import { isReplaySafeToolName } from "../deviceControlTransportFailure";

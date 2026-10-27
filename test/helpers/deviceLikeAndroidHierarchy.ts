@@ -1,3 +1,4 @@
+import { createExecResult } from "../../src/utils/execResult";
 import { spyOn } from "bun:test";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { CtrlProxyHierarchy } from "../../src/features/observe/android/CtrlProxyHierarchy";
@@ -30,11 +31,10 @@ export async function deviceLikeAndroidHierarchy(
     platform: "android",
   } as const;
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("shell dumpsys activity processes", {
-    stdout: "ProcessRecord{abc 123:com.android.settings/u0a123}",
-    stderr: "",
-    exitCode: 0,
-  });
+  adb.setCommandResponse(
+    "shell dumpsys activity processes",
+    createExecResult("ProcessRecord{abc 123:com.android.settings/u0a123}", ""),
+  );
   const tree = (extraction: number): AccessibilityHierarchy => ({
     packageName: options.packageName?.(extraction) ?? "com.android.settings",
     foregroundActivity: options.packageName

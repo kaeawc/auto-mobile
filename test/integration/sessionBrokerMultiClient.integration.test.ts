@@ -5,34 +5,43 @@
  * SessionManager run against a fake native device port; only device I/O and stdio are replaced.
  * Each "client" is a distinct liveness owner token on its own socket session id.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { renderClientRequest } from "../../scripts/manual-test/brokerBatch";
 import {
   DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_RELEASE_SESSION_METHOD,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { brokerConnectionControlRefusal } from "../../src/daemon/sessionBroker/connectionScope";
 import { DEVICE_OUTSIDE_BROKER_GRANT_CODE } from "../../src/daemon/sessionBroker/connectionRefusal";
-import { handleReleaseBrokerSession } from "../../src/daemon/sessionBroker/handlers";
 import { SESSION_OWNER_EXITED_CODE } from "../../src/devices/sessionBrokerResult";
 import { createFakeBrokerDaemon } from "../helpers/fakeBrokerDaemon";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { useScratchRoot } from "../helpers/scratchRoot";
-
-type Host = Awaited<ReturnType<typeof createFakeBrokerDaemon>>;
-
-/** One liveness owner. A connection (stdio proxy, one socket) holds exactly one grant. */
-interface Client {
-  name: string;
-  token: string;
-}
+import {
+  acquire,
+  connect,
+  deviceOf,
+  release,
+  type Host,
+  type Grant,
+  type Client,
+} from "../helpers/brokerMultiClient";
 
 const A: Client = { name: "client-a", token: "token-a" };
 const B: Client = { name: "client-b", token: "token-b" };
 
 const hosts: Host[] = [];
+
+beforeAll(async () => {
+  // Keep first-open SQLite/schema initialization outside each scenario's 100 ms budget.
+  const warm = await createFakeBrokerDaemon();
+  try {
+    await acquire(warm, A, 0);
+  } finally {
+    await warm.close();
+  }
+});
 
 /** A restarted daemon mints fresh resource ids; a counter restarting at fake-1 would collide. */
 function restartedIds() {
@@ -48,48 +57,6 @@ async function open(options: Parameters<typeof createFakeBrokerDaemon>[0] = {}):
   return host;
 }
 
-async function acquire(host: Host, client: Client, ordinal: number) {
-  const config = renderClientRequest(
-    { name: client.name, platform: "ios" },
-    `${client.name}-${ordinal}`,
-  );
-  const result = await host.prepare(config, client.token);
-  expect(result.failure).toBeUndefined();
-  expect(result.outcome).toBe("ready");
-  return {
-    config,
-    result,
-    sessionUuid: result.sessionUuid!,
-    socket: `${client.name}-socket-${ordinal}`,
-  };
-}
-
-/** The wire step a proxy performs after a grant: register the session on its own socket. */
-type Grant = Awaited<ReturnType<typeof acquire>>;
-
-async function connect(host: Host, client: Client, grant: Grant) {
-  return handleDaemonRequest(
-    {
-      id: `register-${grant.sessionUuid}`,
-      type: "daemon_request",
-      method: DAEMON_REGISTER_SESSION_METHOD,
-      params: {
-        sessionId: grant.sessionUuid,
-        clientName: client.name,
-        sessionBroker: { requestId: grant.config.requestId, livenessOwnerToken: client.token },
-      },
-    },
-    host.state,
-    undefined,
-    undefined,
-    { socketSessionId: grant.socket },
-  );
-}
-
-function deviceOf(host: Host, sessionUuid: string): string {
-  return host.sessions.getSession(sessionUuid)!.assignedDevice!;
-}
-
 function refusalFor(host: Host, grant: Grant, target: { deviceId?: string; sessionUuid?: string }) {
   // The same confinement the socket server applies to every control frame (socketServer.ts
   // assertBrokerConnectionControl): the connection's own scope, resolved through the SessionManager.
@@ -100,27 +67,6 @@ function refusalFor(host: Host, grant: Grant, target: { deviceId?: string; sessi
     requesterSessionUuid: target.sessionUuid,
     grantedDeviceOf: (uuid) => host.sessions.getSession(uuid)?.assignedDevice ?? undefined,
   });
-}
-
-function release(
-  host: Host,
-  client: Client,
-  sessionUuid: string,
-  reason?: typeof SESSION_OWNER_EXITED_CODE,
-) {
-  return handleReleaseBrokerSession(
-    {
-      id: `release-${sessionUuid}`,
-      type: "daemon_request",
-      method: "daemon/releaseBrokerSession",
-      params: {
-        sessionId: sessionUuid,
-        livenessOwnerToken: client.token,
-        ...(reason ? { reason } : {}),
-      },
-    },
-    host.state,
-  );
 }
 
 describe("session broker with several MCP clients", () => {
@@ -203,8 +149,8 @@ describe("session broker with several MCP clients", () => {
     // SessionManager). The recovery sweep frees A's devices and nothing of B's.
     host.scopes.unbind(a1.socket);
     host.scopes.unbind(a2.socket);
-    await host.sessions.releaseSession(a1.sessionUuid, "test-owner-crash");
-    await host.sessions.releaseSession(a2.sessionUuid, "test-owner-crash");
+    await host.sessions.releaseSession(a1.sessionUuid, "owner-disconnected");
+    await host.sessions.releaseSession(a2.sessionUuid, "owner-disconnected");
     await host.broker.recover();
     await host.broker.joinReleases();
     expect(await host.broker.hasActiveSession(a1.sessionUuid)).toBe(false);
@@ -401,7 +347,10 @@ describe("session broker with several MCP clients", () => {
 
       const receiptA = await second.client.status(before.a.config.requestId, A.token);
       const receiptB = await second.client.status(before.b.config.requestId, B.token);
-      expect(receiptA?.failure?.code).toBe("session_owner_exited");
+      if (!receiptA) {
+        throw new Error("missing release receipt");
+      }
+      expect(receiptA.failure?.code).toBe("session_owner_exited");
       expect(receiptB?.failure?.code).toBe("session_owner_exited");
       expect(await second.broker.hasActiveSession(before.a.sessionUuid)).toBe(false);
       expect(await second.broker.hasActiveSession(before.b.sessionUuid)).toBe(false);

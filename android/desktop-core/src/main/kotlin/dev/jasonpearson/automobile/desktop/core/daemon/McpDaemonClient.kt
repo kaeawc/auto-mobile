@@ -1,28 +1,12 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
-import java.io.BufferedReader
-import java.io.BufferedWriter
-import java.io.File
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.UnixDomainSocketAddress
-import java.nio.channels.Channels
-import java.nio.channels.SocketChannel
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.attribute.BasicFileAttributes
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -30,58 +14,98 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.serializer
 
-private val DAEMON_PATHS_LOG = LoggerFactory.getLogger("DaemonSocketPaths")
-private const val DAEMON_REGISTER_SESSION_METHOD = "daemon/registerSession"
-private const val DAEMON_CAPABILITIES_METHOD = "daemon/capabilities"
-private const val INPUT_TYPE_TEXT_APPEND_CAPABILITY = "input/typeText.mode:append"
-private const val INPUT_GESTURE_STREAM_CAPABILITY = "input/gestureStream"
-private const val OLD_DAEMON_CAPABILITIES_ERROR = "Unsupported daemon method: daemon/capabilities"
-private const val OLD_DAEMON_APPEND_MODE_ERROR = "input/typeText unsupported params: mode"
-private const val UNSUPPORTED_APPEND_MODE_ERROR =
+internal val DAEMON_PATHS_LOG = LoggerFactory.getLogger("DaemonSocketPaths")
+internal const val DAEMON_REGISTER_SESSION_METHOD = "daemon/registerSession"
+internal const val DAEMON_CAPABILITIES_METHOD = "daemon/capabilities"
+internal const val INPUT_TYPE_TEXT_APPEND_CAPABILITY = "input/typeText.mode:append"
+internal const val INPUT_GESTURE_STREAM_CAPABILITY = "input/gestureStream"
+internal const val OLD_DAEMON_CAPABILITIES_ERROR = "Unsupported daemon method: daemon/capabilities"
+internal const val OLD_DAEMON_APPEND_MODE_ERROR = "input/typeText unsupported params: mode"
+internal const val UNSUPPORTED_APPEND_MODE_ERROR =
   "The connected daemon does not support input/typeText mode:append. Restart or update the daemon before typing into the device."
-private const val SET_TOOL_ENABLED_TOOL_NAME = "setToolEnabled"
-private const val DAEMON_TOOL_SELECTION_PROFILE_PARAM = "__autoMobileToolSelectionProfileUuid"
-private const val DAEMON_OWNED_SESSIONS_PARAM = "__autoMobileOwnedSessionUuids"
-private val DEVICE_SESSION_ACQUISITION_TOOLS =
+internal const val SET_TOOL_ENABLED_TOOL_NAME = "setToolEnabled"
+internal const val DAEMON_TOOL_SELECTION_PROFILE_PARAM = "__autoMobileToolSelectionProfileUuid"
+internal const val DAEMON_OWNED_SESSIONS_PARAM = "__autoMobileOwnedSessionUuids"
+internal val DEVICE_SESSION_ACQUISITION_TOOLS =
   setOf("getAndroid", "getApple", "startDevice", "provisionDevice")
 
-class McpDaemonClient(
-  private val socketPathValue: String = DaemonSocketPaths.socketPath(),
-  private val json: Json = DaemonJson,
-  private val clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
+private data class McpDaemonClientOptions(
+  val socketPathValue: String = DaemonSocketPaths.socketPath(),
+  val json: Json = DaemonJson,
+  val clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
   val sessionUuid: String? = null,
-  /**
-   * Hang ceiling for the input helpers (tap/swipe/key) ONLY. The request socket is a BLOCKING
-   * [SocketChannel] — which supports no connect/read timeout — so without a deadline a daemon that
-   * accepts but never replies (wedged event loop, half-open socket after sleep/wake) hangs the
-   * calling thread FOREVER. For the video pane that thread is the single dispatch thread, held in
-   * its FIFO mutex: one hung input call silently killed ALL further input. A watchdog fails the one
-   * call at this deadline so the dispatcher sheds it and the next input proceeds on a fresh
-   * connection. A hang detector, not a latency budget — a healthy input round-trip is ~ms. Ordinary
-   * tool calls are deliberately UNBOUNDED (see [sendRequest]) so the daemon's long-running-tool
-   * timeout floors are honored.
-   */
-  private val inputRequestTimeoutMs: Long = INPUT_REQUEST_TIMEOUT_MS,
-  private val statusRequestTimeoutMs: Long = STATUS_REQUEST_TIMEOUT_MS,
-  /**
-   * Hang ceiling for the session keep-alive requests (`daemon/heartbeat`,
-   * `daemon/registerSession`, #11072). They run on a 2 s timer, so a daemon that accepts but never
-   * replies must fail the tick as a lapse rather than stall every later tick.
-   */
-  private val sessionKeepaliveTimeoutMs: Long = SESSION_KEEPALIVE_TIMEOUT_MS,
-  /**
-   * The daemon session input frames act for (#10698). A device a session holds takes input only
-   * from that session, so a client that drives a device its desktop session holds (but is not
-   * itself bound to that session, like the per-action pane clients) names it here. Read per frame,
-   * so a rotated session is picked up; null sends sessionless input, accepted for unheld devices.
-   * Defaults to this client's own [sessionUuid].
-   */
-  private val inputSessionUuidProvider: () -> String? = { null },
-) : AutoMobileClient {
-  private var daemonLifecycle: DaemonLifecycleEnsurer? =
+  val inputSessionUuidProvider: () -> String? = { null },
+  val requestTimeouts: DaemonRequestTimeouts = DaemonRequestTimeouts(),
+)
+
+class McpDaemonClient
+private constructor(
+  private val options: McpDaemonClientOptions,
+  operations: McpDaemonOperationDelegates,
+) :
+  AutoMobileClient,
+  AutoMobileDeviceOperations by operations.device,
+  AutoMobileTestOperations by operations.test,
+  AutoMobileFeatureOperations by operations.feature,
+  AutoMobileStorageOperations by operations.storage,
+  AutoMobileInputOperations by operations.input {
+  init {
+    operations.owner = this
+  }
+
+  constructor(
+    socketPathValue: String = DaemonSocketPaths.socketPath(),
+    json: Json = DaemonJson,
+    clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
+    sessionUuid: String? = null,
+    inputSessionUuidProvider: () -> String? = { null },
+    requestTimeouts: DaemonRequestTimeouts = DaemonRequestTimeouts(),
+  ) : this(
+    McpDaemonClientOptions(
+      socketPathValue,
+      json,
+      clientVersion,
+      sessionUuid,
+      inputSessionUuidProvider,
+      requestTimeouts,
+    ),
+    McpDaemonOperationDelegates(),
+  )
+
+  internal val socketPathValue
+    get() = options.socketPathValue
+
+  internal val json
+    get() = options.json
+
+  internal val clientVersion
+    get() = options.clientVersion
+
+  val sessionUuid
+    get() = options.sessionUuid
+
+  // callTool names this session on every call that does not name its own.
+  override val actingSessionUuid: String?
+    get() = sessionUuid
+
+  internal val inputSessionUuidProvider
+    get() = options.inputSessionUuidProvider
+
+  internal val requestTimeouts
+    get() = options.requestTimeouts
+
+  internal val inputRequestTimeoutMs
+    get() = requestTimeouts.inputRequestTimeoutMs
+
+  internal val statusRequestTimeoutMs
+    get() = requestTimeouts.statusRequestTimeoutMs
+
+  internal val sessionKeepaliveTimeoutMs
+    get() = requestTimeouts.sessionKeepaliveTimeoutMs
+
+  internal var daemonLifecycle: DaemonLifecycleEnsurer? =
     if (socketPathValue == DaemonSocketPaths.socketPath()) DesktopDaemonLifecycle() else null
 
   internal constructor(
@@ -93,13 +117,16 @@ class McpDaemonClient(
   ) : this(
     socketPathValue = socketPathValue,
     sessionUuid = sessionUuid,
-    statusRequestTimeoutMs = statusRequestTimeoutMs,
-    sessionKeepaliveTimeoutMs = sessionKeepaliveTimeoutMs,
+    requestTimeouts =
+      DaemonRequestTimeouts(
+        statusRequestTimeoutMs = statusRequestTimeoutMs,
+        sessionKeepaliveTimeoutMs = sessionKeepaliveTimeoutMs,
+      ),
   ) {
     this.daemonLifecycle = daemonLifecycle
   }
 
-  private var requestTransport: DaemonRequestTransport? = null
+  internal var requestTransport: DaemonRequestTransport? = null
 
   internal constructor(
     requestTransport: DaemonRequestTransport,
@@ -122,11 +149,11 @@ class McpDaemonClient(
   override val connectionDescription: String
     get() = socketPathValue
 
-  private val deviceGestureRecordingClient = DeviceGestureRecordingSocketClient()
-  private var daemonCapabilities: CachedDaemonCapabilities? = null
-  private val ownedSessionUuids =
+  internal val deviceGestureRecordingClient = DeviceGestureRecordingSocketClient()
+  internal var daemonCapabilities: CachedDaemonCapabilities? = null
+  internal val ownedSessionUuids =
     ConcurrentHashMap.newKeySet<String>().apply { sessionUuid?.let(::add) }
-  private var toolSelectionProfileUuid: String? = null
+  internal var toolSelectionProfileUuid: String? = null
 
   override fun ping() {
     val response = sendRequest("ide/ping")
@@ -174,646 +201,12 @@ class McpDaemonClient(
     return result.contents
   }
 
-  override fun getNavigationGraph(platform: String): JsonElement {
-    val response =
-      sendRequest(
-        "ide/getNavigationGraph",
-        buildJsonObject { put("platform", JsonPrimitive(platform)) },
-      )
-    ensureSuccess(response)
-    return response.result ?: JsonObject(emptyMap())
-  }
-
-  override fun listFeatureFlags(): List<FeatureFlagState> {
-    val response = sendRequest("ide/listFeatureFlags")
-    val responseResult = ensureSuccess(response, "ide/listFeatureFlags")
-    val result = json.decodeFromJsonElement(serializer<FeatureFlagListResult>(), responseResult)
-    return result.flags
-  }
-
-  override fun setFeatureFlag(
-    key: String,
-    enabled: Boolean,
-    config: JsonObject?,
-  ): FeatureFlagState {
-    val response =
-      sendRequest(
-        "ide/setFeatureFlag",
-        buildJsonObject {
-          put("key", JsonPrimitive(key))
-          put("enabled", JsonPrimitive(enabled))
-          if (config != null) {
-            put("config", config)
-          }
-        },
-      )
-    val responseResult = ensureSuccess(response, "ide/setFeatureFlag")
-    return json.decodeFromJsonElement(serializer<FeatureFlagState>(), responseResult)
-  }
-
-  override fun listPerformanceAuditResults(
-    startTime: String?,
-    endTime: String?,
-    limit: Int?,
-    offset: Int?,
-    deviceId: String?,
-  ): PerformanceAuditHistoryResult {
-    val uri = buildPerformanceResultsUri(startTime, endTime, limit, offset, deviceId)
-    val contents = readResource(uri)
-    return decodePerformanceAuditResource(json, contents)
-  }
-
-  override fun getTestTimings(query: TestTimingQuery): TestTimingSummary {
-    val contents = readResource(query.toResourceUri())
-    return decodeResourceResponse(json, contents, serializer<TestTimingSummary>())
-  }
-
-  override fun getTestRuns(query: TestRunQuery): TestRunSummary {
-    val contents = readResource(query.toResourceUri())
-    return decodeResourceResponse(json, contents, serializer<TestRunSummary>())
-  }
-
-  override fun startDeviceGestureRecording(platform: String): DeviceGestureRecordingStartResult {
-    return deviceGestureRecordingClient.startDeviceGestureRecording(platform)
-  }
-
-  override fun stopDeviceGestureRecording(
-    recordingId: String?,
-    planName: String?,
-  ): DeviceGestureRecordingStopResult {
-    val resolvedPlanName = planName?.ifBlank { null }
-    return deviceGestureRecordingClient.stopDeviceGestureRecording(recordingId, resolvedPlanName)
-  }
-
-  override fun executePlan(
-    planContent: String,
-    platform: String,
-    startStep: Int?,
-    sessionUuid: String?,
-  ): ExecutePlanResult {
-    val response =
-      callTool(
-        "executePlan",
-        buildJsonObject {
-          put("planContent", JsonPrimitive(planContent))
-          put("platform", JsonPrimitive(platform))
-          if (startStep != null) {
-            put("startStep", JsonPrimitive(startStep))
-          }
-          if (!sessionUuid.isNullOrBlank()) {
-            put("sessionUuid", JsonPrimitive(sessionUuid))
-          }
-        },
-      )
-    return decodeToolResponse(json, response, serializer<ExecutePlanResult>())
-  }
-
-  override fun startDevice(name: String, platform: String, deviceId: String?): StartDeviceResult {
-    val response =
-      callTool(
-        "startDevice",
-        buildJsonObject {
-          put(
-            "device",
-            buildJsonObject {
-              put("name", JsonPrimitive(name))
-              put("platform", JsonPrimitive(platform))
-              if (deviceId != null) {
-                put("deviceId", JsonPrimitive(deviceId))
-              }
-            },
-          )
-        },
-      )
-    return try {
-      decodeToolResponse(json, response, serializer<StartDeviceResult>())
-    } catch (e: Exception) {
-      startDeviceFailure(e)
-    }
-  }
-
-  override fun setActiveDevice(deviceId: String, platform: String): SetActiveDeviceResult {
-    val response =
-      callTool(
-        "setActiveDevice",
-        buildJsonObject {
-          put("deviceId", JsonPrimitive(deviceId))
-          put("platform", JsonPrimitive(platform))
-        },
-      )
-    return try {
-      decodeToolResponse(json, response, serializer<SetActiveDeviceResult>())
-    } catch (e: Exception) {
-      SetActiveDeviceResult(
-        success = false,
-        message = e.message ?: "Failed to set active device",
-        refusal = classifySetActiveDeviceRefusal(json, response),
-      )
-    }
-  }
-
-  override fun observe(platform: String): ObserveResult {
-    val response =
-      callTool(
-        "observe",
-        buildJsonObject {
-          put("platform", JsonPrimitive(platform))
-        },
-      )
-    return decodeObserveResponse(json, response)
-  }
-
-  override fun killDevice(
-    name: String,
-    deviceId: String,
-    platform: String,
-    force: Boolean,
-  ): KillDeviceResult {
-    val response = callTool("killDevice", killDeviceArguments(name, deviceId, platform, force))
-    return decodeKillDeviceResponse(json, response)
-  }
-
-  override fun getDaemonStatus():
-    dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse {
-    // Hang ceiling on the status probe (#4858). The blocking SocketChannel read is not cancellable
-    // by coroutine cancellation, so a wrapping withTimeout at the caller cannot unblock a daemon
-    // that accepts but never replies — only this watchdog, which closes the socket, can. A healthy
-    // ide/status round-trip is ~ms, so a deadline here bounds the connectivity dot without risking
-    // a
-    // slow ordinary tool call (those stay unbounded; see [sendRequest]).
-    val response =
-      sendRequest(
-        "ide/status",
-        timeoutMs = statusRequestTimeoutMs,
-        skipLifecyclePreflight = true,
-      )
-    val responseResult = ensureSuccess(response, "ide/status")
-    return json.decodeFromJsonElement(
-      serializer<dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse>(),
-      responseResult,
-    )
-  }
-
-  override fun updateService(deviceId: String, platform: String): UpdateServiceResult {
-    val response =
-      sendRequest(
-        "ide/updateService",
-        buildJsonObject {
-          put("deviceId", JsonPrimitive(deviceId))
-          put("platform", JsonPrimitive(platform))
-        },
-      )
-    val responseResult = ensureSuccess(response, "ide/updateService")
-    return json.decodeFromJsonElement(serializer<UpdateServiceResult>(), responseResult)
-  }
-
-  override fun inputTap(
-    x: Double,
-    y: Double,
-    platform: String,
-    deviceId: String?,
-    duration: Int?,
-    frameContext: String?,
-  ): InputActionResult {
-    return sendInputRequest(
-      "input/tap",
-      buildJsonObject {
-        put("platform", JsonPrimitive(platform))
-        putOptionalString("deviceId", deviceId)
-        put("x", JsonPrimitive(x))
-        put("y", JsonPrimitive(y))
-        putOptionalInt("duration", duration)
-        putOptionalString("frameContext", frameContext)
-      },
-    )
-  }
-
-  override fun inputSwipe(
-    startX: Double,
-    startY: Double,
-    endX: Double,
-    endY: Double,
-    platform: String,
-    deviceId: String?,
-    durationMs: Int?,
-    frameContext: String?,
-  ): InputActionResult {
-    return sendInputRequest(
-      "input/swipe",
-      buildJsonObject {
-        put("platform", JsonPrimitive(platform))
-        putOptionalString("deviceId", deviceId)
-        put("startX", JsonPrimitive(startX))
-        put("startY", JsonPrimitive(startY))
-        put("endX", JsonPrimitive(endX))
-        put("endY", JsonPrimitive(endY))
-        putOptionalInt("durationMs", durationMs)
-        putOptionalString("frameContext", frameContext)
-      },
-    )
-  }
-
-  override fun inputPressButton(
-    button: String,
-    platform: String,
-    deviceId: String?,
-    frameContext: String?,
-  ): InputActionResult {
-    return sendInputRequest(
-      "input/pressButton",
-      buildJsonObject {
-        put("platform", JsonPrimitive(platform))
-        putOptionalString("deviceId", deviceId)
-        put("button", JsonPrimitive(button))
-        putOptionalString("frameContext", frameContext)
-      },
-    )
-  }
-
-  override fun inputTypeText(
-    text: String,
-    platform: String,
-    deviceId: String?,
-    submit: Boolean?,
-    append: Boolean,
-    frameContext: String?,
-  ): InputActionResult {
-    val appendSupportError = if (append) inputTypeTextAppendSupportError() else null
-    if (appendSupportError != null) {
-      return InputActionResult(
-        action = "input/typeText",
-        success = false,
-        error = appendSupportError,
-      )
-    }
-    return try {
-      sendInputRequest(
-          "input/typeText",
-          buildJsonObject {
-            put("platform", JsonPrimitive(platform))
-            putOptionalString("deviceId", deviceId)
-            put("text", JsonPrimitive(text))
-            putOptionalBoolean("submit", submit)
-            putOptionalString("frameContext", frameContext)
-            // Omitted entirely when false: the daemon rejects unknown/!append values, and older
-            // daemons reject the param outright.
-            if (append) put("mode", JsonPrimitive("append"))
-          },
-        )
-        .let { result ->
-          if (append && result.error == OLD_DAEMON_APPEND_MODE_ERROR) {
-            evictDaemonCapabilities()
-            result.copy(error = UNSUPPORTED_APPEND_MODE_ERROR)
-          } else {
-            result
-          }
-        }
-    } catch (error: Exception) {
-      if (append) evictDaemonCapabilities()
-      throw error
-    }
-  }
-
-  override fun inputKey(
-    key: String,
-    platform: String,
-    deviceId: String?,
-    frameContext: String?,
-  ): InputActionResult {
-    return sendInputRequest(
-      "input/key",
-      buildJsonObject {
-        put("platform", JsonPrimitive(platform))
-        putOptionalString("deviceId", deviceId)
-        put("key", JsonPrimitive(key))
-        putOptionalString("frameContext", frameContext)
-      },
-    )
-  }
-
-  override fun openGestureStream(platform: String, deviceId: String?): GestureInputStream? {
-    // Streaming has no XCUITest equivalent, and only this Unix-socket transport can hold a
-    // connection open. Everything else falls back to the atomic swipe (the interface default).
-    if (platform != "android") return null
-    if (!daemonSupportsGestureStream()) return null
-    return try {
-      McpGestureInputStream(platform, deviceId, connectPersistentChannel())
-    } catch (_: Exception) {
-      // Could not establish the persistent connection; the caller falls back to inputSwipe.
-      null
-    }
-  }
-
-  /**
-   * Whether the connected daemon advertises `input/gestureStream`. Mirrors the append-mode probe:
-   * an older daemon answers the capability query with its unsupported-method envelope (→ false),
-   * and a successful probe is cached only while the socket's file identity is unchanged.
-   */
-  private fun daemonSupportsGestureStream(): Boolean {
-    val identity = socketIdentity()
-    val capabilities =
-      if (identity == null) {
-        when (val probe = queryDaemonCapabilities(null)) {
-          is DaemonCapabilitiesProbe.Available -> probe.capabilities
-          DaemonCapabilitiesProbe.Legacy -> return false
-          is DaemonCapabilitiesProbe.Failure -> return false
-        }
-      } else {
-        daemonCapabilities?.takeIf { it.identity == identity }?.capabilities
-          ?: sharedDaemonCapabilities[identity]
-          ?: when (val probe = queryDaemonCapabilities(identity)) {
-            is DaemonCapabilitiesProbe.Available -> probe.capabilities
-            DaemonCapabilitiesProbe.Legacy -> return false
-            is DaemonCapabilitiesProbe.Failure -> return false
-          }
-      }
-    return INPUT_GESTURE_STREAM_CAPABILITY in capabilities
-  }
-
-  /**
-   * A connected Unix-socket channel plus its line reader/writer, kept open across gesture frames.
-   */
-  private class PersistentChannel(
-    val channel: SocketChannel,
-    val reader: BufferedReader,
-    val writer: BufferedWriter,
-  )
-
-  /**
-   * Open one Unix-socket channel and leave it connected. Reuses [sendRequest]'s connect discipline
-   * — open unconnected, arm a deadline watchdog before the blocking connect — so a wedged daemon
-   * that never accepts cannot hang the caller forever.
-   */
-  private fun connectPersistentChannel(): PersistentChannel {
-    ensureVersionMatchedDaemon()
-    ensureSocketExists()
-    val address = UnixDomainSocketAddress.of(socketPathValue)
-    val channel = SocketChannel.open(java.net.StandardProtocolFamily.UNIX)
-    val expired = java.util.concurrent.atomic.AtomicBoolean(false)
-    val watchdog =
-      requestWatchdog.schedule(
-        {
-          expired.set(true)
-          try {
-            channel.close()
-          } catch (_: Exception) {
-            // Best-effort; the caller owns the definitive close.
-          }
-        },
-        inputRequestTimeoutMs,
-        java.util.concurrent.TimeUnit.MILLISECONDS,
-      )
-    try {
-      channel.connect(address)
-      val reader =
-        BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
-      val writer =
-        BufferedWriter(
-          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8),
-        )
-      return PersistentChannel(channel, reader, writer)
-    } catch (e: Exception) {
-      try {
-        channel.close()
-      } catch (_: Exception) {
-        // Best-effort cleanup after a failed connect.
-      }
-      if (expired.get()) {
-        throw DaemonUnavailableException(
-          "Gesture stream connect timed out after ${inputRequestTimeoutMs}ms",
-        )
-      }
-      throw e
-    } finally {
-      watchdog.cancel(false)
-    }
-  }
-
-  /**
-   * One streamed gesture over a single held connection. Each frame writes one `input/gesture*` line
-   * and reads its ack, under the same per-input hang ceiling as one-shot input calls (a hung frame
-   * closes the channel, killing the stream so the caller falls back rather than freezing).
-   */
-  private inner class McpGestureInputStream(
-    private val platform: String,
-    private val deviceId: String?,
-    private val connection: PersistentChannel,
-  ) : GestureInputStream {
-    override fun start(gestureId: String, x: Double, y: Double): InputActionResult =
-      sendFrame("input/gestureStart") {
-        put("platform", JsonPrimitive(platform))
-        putOptionalString("deviceId", deviceId)
-        put("gestureId", JsonPrimitive(gestureId))
-        put("x", JsonPrimitive(x))
-        put("y", JsonPrimitive(y))
-      }
-
-    override fun move(gestureId: String, x: Double, y: Double): InputActionResult =
-      sendFrame("input/gestureMove") {
-        put("platform", JsonPrimitive(platform))
-        putOptionalString("deviceId", deviceId)
-        put("gestureId", JsonPrimitive(gestureId))
-        put("x", JsonPrimitive(x))
-        put("y", JsonPrimitive(y))
-      }
-
-    override fun end(
-      gestureId: String,
-      x: Double,
-      y: Double,
-      cancel: Boolean,
-    ): InputActionResult =
-      sendFrame("input/gestureEnd") {
-        put("platform", JsonPrimitive(platform))
-        putOptionalString("deviceId", deviceId)
-        put("gestureId", JsonPrimitive(gestureId))
-        put("x", JsonPrimitive(x))
-        put("y", JsonPrimitive(y))
-        put("cancel", JsonPrimitive(cancel))
-      }
-
-    override fun close() {
-      try {
-        connection.channel.close()
-      } catch (_: Exception) {
-        // Best-effort; the stream is being torn down regardless.
-      }
-    }
-
-    private fun sendFrame(method: String, params: JsonObjectBuilder.() -> Unit): InputActionResult {
-      val request =
-        DaemonRequest(
-          id = UUID.randomUUID().toString(),
-          type = "mcp_request",
-          method = method,
-          params = withInputSession(buildJsonObject(params)),
-          clientVersion = clientVersion,
-          timeoutMs = inputRequestTimeoutMs,
-        )
-      val expired = java.util.concurrent.atomic.AtomicBoolean(false)
-      val watchdog =
-        requestWatchdog.schedule(
-          {
-            expired.set(true)
-            try {
-              connection.channel.close()
-            } catch (_: Exception) {
-              // Best-effort; the frame call owns the definitive failure.
-            }
-          },
-          inputRequestTimeoutMs,
-          java.util.concurrent.TimeUnit.MILLISECONDS,
-        )
-      return try {
-        connection.writer.write(json.encodeToString(request))
-        connection.writer.newLine()
-        connection.writer.flush()
-        val line =
-          connection.reader.readLine()
-            ?: return InputActionResult(
-              action = method,
-              success = false,
-              error = "Gesture stream closed",
-            )
-        val response = json.decodeFromString<DaemonResponse>(line)
-        response.toInputActionResult(method)
-      } catch (e: Exception) {
-        val message =
-          if (expired.get()) "Gesture frame '$method' timed out after ${inputRequestTimeoutMs}ms"
-          else e.message ?: "Gesture frame '$method' failed"
-        InputActionResult(action = method, success = false, error = message)
-      } finally {
-        watchdog.cancel(false)
-      }
-    }
-  }
-
-  /** A failure frame's code, `retryable` and `details.remainingMs`, kept on the input result. */
-  private fun DaemonResponse.toFailedInputResult(method: String): InputActionResult =
-    InputActionResult(
-      action = method,
-      success = false,
-      error = error,
-      code = code?.contentOrNull,
-      retryable = retryable,
-      retryAfterMs = (details?.get("remainingMs") as? JsonPrimitive)?.longOrNull,
-    )
-
-  private fun DaemonResponse.toInputActionResult(method: String): InputActionResult {
-    if (!success) return toFailedInputResult(method)
-    val body =
-      result
-        ?: return InputActionResult(
-          action = method,
-          success = false,
-          error = "Daemon response missing result",
-        )
-    return json.decodeFromJsonElement(serializer<InputActionResult>(), body)
-  }
-
-  override fun setKeyValue(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-    platform: String,
-    sessionUuid: String?,
-  ): SetKeyValueResult {
-    val response =
-      sendRequest(
-        "ide/setKeyValue",
-        buildJsonObject {
-          put("deviceId", JsonPrimitive(deviceId))
-          put("platform", JsonPrimitive(platform))
-          put("appId", JsonPrimitive(appId))
-          put("fileName", JsonPrimitive(fileName))
-          put("key", JsonPrimitive(key))
-          put("value", if (value != null) JsonPrimitive(value) else JsonNull)
-          put("type", JsonPrimitive(type))
-          (sessionUuid ?: this@McpDaemonClient.sessionUuid)
-            ?.takeIf { it.isNotBlank() }
-            ?.let {
-              put("sessionUuid", JsonPrimitive(it))
-            }
-        },
-      )
-    val responseResult = ensureSuccess(response, "ide/setKeyValue")
-    return try {
-      json.decodeFromJsonElement(serializer<SetKeyValueResult>(), responseResult)
-    } catch (e: Exception) {
-      SetKeyValueResult(success = false, message = e.message ?: "Failed to set key value")
-    }
-  }
-
-  override fun removeKeyValue(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    key: String,
-    platform: String,
-    sessionUuid: String?,
-  ): RemoveKeyValueResult {
-    val response =
-      sendRequest(
-        "ide/removeKeyValue",
-        buildJsonObject {
-          put("deviceId", JsonPrimitive(deviceId))
-          put("platform", JsonPrimitive(platform))
-          put("appId", JsonPrimitive(appId))
-          put("fileName", JsonPrimitive(fileName))
-          put("key", JsonPrimitive(key))
-          (sessionUuid ?: this@McpDaemonClient.sessionUuid)
-            ?.takeIf { it.isNotBlank() }
-            ?.let {
-              put("sessionUuid", JsonPrimitive(it))
-            }
-        },
-      )
-    val responseResult = ensureSuccess(response, "ide/removeKeyValue")
-    return try {
-      json.decodeFromJsonElement(serializer<RemoveKeyValueResult>(), responseResult)
-    } catch (e: Exception) {
-      RemoveKeyValueResult(success = false, message = e.message ?: "Failed to remove key value")
-    }
-  }
-
-  override fun clearKeyValueFile(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    platform: String,
-    sessionUuid: String?,
-  ): ClearKeyValueResult {
-    val response =
-      sendRequest(
-        "ide/clearKeyValueFile",
-        buildJsonObject {
-          put("deviceId", JsonPrimitive(deviceId))
-          put("platform", JsonPrimitive(platform))
-          put("appId", JsonPrimitive(appId))
-          put("fileName", JsonPrimitive(fileName))
-          (sessionUuid ?: this@McpDaemonClient.sessionUuid)
-            ?.takeIf { it.isNotBlank() }
-            ?.let {
-              put("sessionUuid", JsonPrimitive(it))
-            }
-        },
-      )
-    val responseResult = ensureSuccess(response, "ide/clearKeyValueFile")
-    return try {
-      json.decodeFromJsonElement(serializer<ClearKeyValueResult>(), responseResult)
-    } catch (e: Exception) {
-      ClearKeyValueResult(success = false, message = e.message ?: "Failed to clear key value file")
-    }
-  }
-
   override fun callTool(name: String, arguments: JsonObject): JsonElement {
+    // A device read never needs a session (#11364): naming this client's UUID would make the read
+    // fail with that session's terminal or suspect error between a release and the rotation.
+    val skipsClientSession = name == SET_TOOL_ENABLED_TOOL_NAME || "sessionUuid" in arguments
     val sessionArguments =
-      if (
-        sessionUuid != null && name != SET_TOOL_ENABLED_TOOL_NAME && "sessionUuid" !in arguments
-      ) {
+      if (sessionUuid != null && !skipsClientSession && !isDeviceReadCall(name, arguments)) {
         buildJsonObject {
           arguments.forEach { (key, value) -> put(key, value) }
           put("sessionUuid", JsonPrimitive(sessionUuid))
@@ -853,27 +246,6 @@ class McpDaemonClient(
     val result = response.result ?: JsonObject(emptyMap())
     recordResultMintedSession(name, result)
     return result
-  }
-
-  private fun recordResultMintedSession(toolName: String, result: JsonElement) {
-    if (toolName !in DEVICE_SESSION_ACQUISITION_TOOLS) return
-    val content = (result as? JsonObject)?.get("content") as? JsonArray ?: return
-    val text =
-      content
-        .mapNotNull { it as? JsonObject }
-        .firstOrNull { it["type"]?.jsonPrimitive?.contentOrNull == "text" }
-        ?.get("text")
-        ?.jsonPrimitive
-        ?.contentOrNull ?: return
-    val payload = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return
-    val runtime = payload["runtime"] as? JsonObject
-    val session = runtime?.get("session") as? JsonObject
-    val minted =
-      (session?.get("sessionUuid") as? JsonPrimitive)?.contentOrNull
-        ?: (payload["sessionId"] as? JsonPrimitive)?.contentOrNull
-    if (!minted.isNullOrBlank()) {
-      ownedSessionUuids.add(minted)
-    }
   }
 
   /**
@@ -953,285 +325,10 @@ class McpDaemonClient(
         ?: throw DaemonUnavailableException("Tool-selection response missing profile UUID")
   }
 
-  /** [params] plus the `sessionUuid` input acts for, when there is one (#10698). */
-  private fun withInputSession(params: JsonObject): JsonObject {
-    val session = inputSessionUuidProvider() ?: sessionUuid
-    if (session.isNullOrBlank() || "sessionUuid" in params) return params
-    return JsonObject(params + ("sessionUuid" to JsonPrimitive(session)))
-  }
-
-  private fun sendInputRequest(method: String, params: JsonObject): InputActionResult {
-    // Input rides the tighter deadline: a hung input/* call froze the pane's whole input path
-    // (single dispatch thread + FIFO mutex), and live interaction would rather shed one tap
-    // after 5s than sit dead for a minute.
-    val response = sendRequest(method, withInputSession(params), timeoutMs = inputRequestTimeoutMs)
-    if (!response.success) {
-      return response.toFailedInputResult(method)
-    }
-    val result =
-      response.result
-        ?: return InputActionResult(
-          action = method,
-          success = false,
-          error = "Daemon response missing result",
-        )
-    val inputResult = json.decodeFromJsonElement(serializer<InputActionResult>(), result)
-    if (inputResult.action != method) {
-      return InputActionResult(
-        action = method,
-        success = false,
-        error = "Daemon response action ${inputResult.action} did not match $method",
-      )
-    }
-    return inputResult
-  }
-
-  /**
-   * Reads the daemon's additive capability list before the desktop sends `mode: "append"`.
-   *
-   * An older daemon answers this query with its normal unsupported-method envelope. That leaves
-   * append support unknown, so the client attempts the non-destructive append request and
-   * translates only its exact unsupported-parameter response. Other probe failures, including
-   * version mismatches, are preserved. Successful responses are shared only while the Unix socket's
-   * file identity is unchanged, so the per-action facade clients in the control queue reuse one
-   * probe without trusting a daemon restarted at the same pathname. An unsupported older daemon is
-   * deliberately not cached so restarting it lets the next keystroke discover the upgraded
-   * capability.
-   */
-  private fun inputTypeTextAppendSupportError(): String? {
-    val identity = socketIdentity()
-    val capabilities =
-      if (identity == null) {
-        when (val probe = queryDaemonCapabilities(null)) {
-          is DaemonCapabilitiesProbe.Available -> probe.capabilities
-          DaemonCapabilitiesProbe.Legacy -> return null
-          is DaemonCapabilitiesProbe.Failure -> return probe.error
-        }
-      } else {
-        daemonCapabilities?.takeIf { it.identity == identity }?.capabilities
-          ?: sharedDaemonCapabilities[identity]
-          ?: when (val probe = queryDaemonCapabilities(identity)) {
-            is DaemonCapabilitiesProbe.Available -> probe.capabilities
-            DaemonCapabilitiesProbe.Legacy -> return null
-            is DaemonCapabilitiesProbe.Failure -> return probe.error
-          }
-      }
-    return if (INPUT_TYPE_TEXT_APPEND_CAPABILITY in capabilities) null
-    else UNSUPPORTED_APPEND_MODE_ERROR
-  }
-
-  private fun queryDaemonCapabilities(identity: SocketIdentity?): DaemonCapabilitiesProbe {
-    // This probe runs on the keyboard input path (inputTypeText append=true), which shares the
-    // video pane's single FIFO dispatch thread. Bound it with the same input hang ceiling so a
-    // never-replying daemon can't freeze keystrokes forever — the taps/keys deadline is useless if
-    // its prerequisite blocks unbounded.
-    val response = sendRequest(DAEMON_CAPABILITIES_METHOD, timeoutMs = inputRequestTimeoutMs)
-    if (!response.success) {
-      if (response.error == OLD_DAEMON_CAPABILITIES_ERROR) return DaemonCapabilitiesProbe.Legacy
-      return DaemonCapabilitiesProbe.Failure(response.error ?: "Daemon capability probe failed.")
-    }
-    if (response.result == null) {
-      return DaemonCapabilitiesProbe.Failure("Daemon capability probe returned no result.")
-    }
-    val capabilities =
-      try {
-        json
-          .decodeFromJsonElement(serializer<DaemonCapabilitiesResult>(), response.result)
-          .capabilities
-      } catch (_: Exception) {
-        return DaemonCapabilitiesProbe.Failure(
-          "Daemon capability probe returned an invalid result.",
-        )
-      }
-    val resolved = capabilities.toSet()
-    // A daemon restart can replace a socket at the same pathname between the probe and this
-    // point. Only publish the result if the response came from the same socket identity.
-    if (identity != null && socketIdentity() == identity) {
-      daemonCapabilities = CachedDaemonCapabilities(identity, resolved)
-      sharedDaemonCapabilities[identity] = resolved
-    }
-    return DaemonCapabilitiesProbe.Available(resolved)
-  }
-
-  private fun evictDaemonCapabilities() {
-    daemonCapabilities?.identity?.let(sharedDaemonCapabilities::remove)
-    daemonCapabilities = null
-  }
-
-  /** A socket pathname is not daemon identity: a restart can replace its inode. */
-  private fun socketIdentity(): SocketIdentity? {
-    val path = File(socketPathValue).toPath()
-    return try {
-      Files.readAttributes(path, BasicFileAttributes::class.java).fileKey()?.toString()?.let {
-        SocketIdentity(socketPathValue, it)
-      }
-    } catch (_: Exception) {
-      null
-    }
-  }
-
-  /**
-   * Send one request. [timeoutMs] is a HANG ceiling, not a latency budget, and is OPT-IN: null
-   * (ordinary tool calls) leaves the request unbounded, because the daemon deliberately grants
-   * long-running tools multi-minute floors (executePlan 600s, startDevice/launchApp/observe 90s;
-   * see src/daemon/mcpRequestTimeout.ts) and a blanket client ceiling would disconnect a valid slow
-   * call while it is still running. Only the input helpers pass a value, where a hang freezes the
-   * video pane's single dispatch thread.
-   *
-   * When set, the same deadline is sent as `DaemonRequest.timeoutMs` (#6385) so the daemon abandons
-   * the request when this client gives up, instead of running on to its 30s default. When null the
-   * field is omitted and the daemon applies its default plus per-tool floors.
-   */
-  private fun sendRequest(
-    method: String,
-    params: JsonObject = JsonObject(emptyMap()),
-    timeoutMs: Long? = null,
-    skipLifecyclePreflight: Boolean = false,
-  ): DaemonResponse {
-    requestTransport?.let { transport ->
-      return transport.send(
-        DaemonRequest(
-          id = UUID.randomUUID().toString(),
-          type = "mcp_request",
-          method = method,
-          params = params,
-          clientVersion = clientVersion,
-          timeoutMs = timeoutMs,
-        ),
-      )
-    }
-    // Status and the session keep-alives are passive. Status reports a wedged daemon, so running
-    // the lifecycle preflight first can itself hang before the request watchdog is armed; a
-    // keep-alive must never start or restart the shared daemon (#11072).
-    if (!skipLifecyclePreflight) {
-      ensureVersionMatchedDaemon()
-    }
-    ensureSocketExists()
-
-    val address = UnixDomainSocketAddress.of(socketPathValue)
-    // Open the channel UNCONNECTED so the deadline can be armed BEFORE the blocking connect(): a
-    // wedged daemon whose accept backlog is full would otherwise hang in connect() before any
-    // watchdog exists.
-    SocketChannel.open(java.net.StandardProtocolFamily.UNIX).use { channel ->
-      // Deadline watchdog. A blocking SocketChannel has no connect/read timeout, so a daemon that
-      // never accepts or never replies would hang the calling thread forever (for video-pane
-      // input that meant ALL input died). The watchdog closes the channel, which makes the blocked
-      // connect/read throw; `expired` is set BEFORE the close so the request thread
-      // deterministically
-      // reports the deadline rather than the incidental ClosedChannelException the close raced in.
-      val expired = java.util.concurrent.atomic.AtomicBoolean(false)
-      val watchdog = timeoutMs?.let { deadline ->
-        requestWatchdog.schedule(
-          {
-            expired.set(true)
-            try {
-              channel.close()
-            } catch (_: Exception) {
-              // Best-effort close; the request thread owns the definitive close via use{}.
-            }
-          },
-          deadline,
-          java.util.concurrent.TimeUnit.MILLISECONDS,
-        )
-      }
-      try {
-        channel.connect(address)
-        val reader =
-          BufferedReader(
-            InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8),
-          )
-        val writer =
-          BufferedWriter(
-            OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8),
-          )
-
-        val request =
-          DaemonRequest(
-            id = UUID.randomUUID().toString(),
-            type = "mcp_request",
-            method = method,
-            params = params,
-            clientVersion = clientVersion,
-            timeoutMs = timeoutMs,
-          )
-
-        writer.write(json.encodeToString(request))
-        writer.newLine()
-        writer.flush()
-
-        val line = reader.readLine() ?: throw DaemonUnavailableException("Daemon closed the socket")
-        return json.decodeFromString(line)
-      } catch (e: Exception) {
-        if (expired.get()) {
-          throw DaemonUnavailableException(
-            "Daemon request '$method' timed out after ${timeoutMs}ms",
-          )
-        }
-        throw e
-      } finally {
-        watchdog?.cancel(false)
-      }
-    }
-  }
-
-  private fun ensureSocketExists() {
-    val path = File(socketPathValue).toPath()
-    if (!Files.exists(path)) {
-      throw DaemonUnavailableException("Daemon socket not found at $socketPathValue")
-    }
-  }
-
-  private fun ensureVersionMatchedDaemon() {
-    when (val result = daemonLifecycle?.ensureVersionMatchedDaemon()) {
-      is DaemonLifecycleResult.Failure -> throw DaemonUnavailableException(result.message)
-      is DaemonLifecycleResult.Ready,
-      null -> Unit
-    }
-  }
-
-  private fun ensureSuccess(
-    response: DaemonResponse,
-    method: String = "daemon request",
-  ): JsonElement {
-    if (!response.success) {
-      throw DaemonUnavailableException(response.error ?: "Daemon request failed")
-    }
-    return response.result
-      ?: throw DaemonUnavailableException(
-        "JSON-RPC $method response contained no result; check the daemon response.",
-      )
-  }
-
-  private fun JsonObjectBuilder.putOptionalString(
-    key: String,
-    value: String?,
-  ) {
-    if (value != null) {
-      put(key, JsonPrimitive(value))
-    }
-  }
-
-  private fun JsonObjectBuilder.putOptionalInt(
-    key: String,
-    value: Int?,
-  ) {
-    if (value != null) {
-      put(key, JsonPrimitive(value))
-    }
-  }
-
-  private fun JsonObjectBuilder.putOptionalBoolean(
-    key: String,
-    value: Boolean?,
-  ) {
-    if (value != null) {
-      put(key, JsonPrimitive(value))
-    }
-  }
-
   companion object {
-    /** Hang ceiling for ordinary daemon requests (tool calls can legitimately take tens of s). */
+
     /** Hang ceiling for the input helpers; a healthy input round-trip is ~milliseconds. */
+    /** Hang ceiling for ordinary daemon requests (tool calls can legitimately take tens of s). */
     const val INPUT_REQUEST_TIMEOUT_MS = 5_000L
 
     /**
@@ -1244,7 +341,7 @@ class McpDaemonClient(
 
     // One shared daemon thread arms/cancels every request deadline. It only ever runs a
     // channel.close() for a request that overran its ceiling, so it stays idle in normal use.
-    private val requestWatchdog =
+    internal val requestWatchdog =
       java.util.concurrent.Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "daemon-request-watchdog").apply { isDaemon = true }
       }
@@ -1316,7 +413,7 @@ object DaemonSocketPaths {
     return trimmed
   }
 
-  private const val SNAPSHOT_SUFFIX = "-SNAPSHOT"
+  internal const val SNAPSHOT_SUFFIX = "-SNAPSHOT"
 
   internal fun releaseVersion(version: String): String = version.substringBefore('+')
 }
@@ -1347,8 +444,22 @@ internal fun resolveDaemonUserId(userName: String, osName: String, readUid: () -
   }
   return try {
     readUid().trim().ifEmpty { userName }
-  } catch (e: Exception) {
+  } catch (cancellation: kotlin.coroutines.cancellation.CancellationException) {
+    throw cancellation
+  } catch (e: IllegalStateException) {
     // The user name is the documented fallback identifier when `id -u` is unavailable.
+    DAEMON_PATHS_LOG.debug("Could not read the user id; using the user name: ${e.message}")
+    userName
+  } catch (e: java.io.IOException) {
+    // The user name is the documented fallback identifier when `id -u` is unavailable.
+    DAEMON_PATHS_LOG.debug("Could not read the user id; using the user name: ${e.message}")
+    userName
+  } catch (e: InterruptedException) {
+    // The user name is the documented fallback identifier when `id -u` is unavailable.
+    DAEMON_PATHS_LOG.debug("Could not read the user id; using the user name: ${e.message}")
+    userName
+  } catch (e: SecurityException) {
+    // A security policy that denies subprocesses makes `id -u` unavailable too (#14571).
     DAEMON_PATHS_LOG.debug("Could not read the user id; using the user name: ${e.message}")
     userName
   }
@@ -1415,19 +526,19 @@ data class DaemonResponse(
   val details: JsonObject? = null,
 )
 
-@Serializable private data class DaemonCapabilitiesResult(val capabilities: List<String>)
+@Serializable internal data class DaemonCapabilitiesResult(val capabilities: List<String>)
 
-private data class SocketIdentity(
+internal data class SocketIdentity(
   val path: String,
   val fileKey: String,
 )
 
-private data class CachedDaemonCapabilities(
+internal data class CachedDaemonCapabilities(
   val identity: SocketIdentity,
   val capabilities: Set<String>,
 )
 
-private sealed interface DaemonCapabilitiesProbe {
+internal sealed interface DaemonCapabilitiesProbe {
   data class Available(val capabilities: Set<String>) : DaemonCapabilitiesProbe
 
   data object Legacy : DaemonCapabilitiesProbe
@@ -1435,7 +546,7 @@ private sealed interface DaemonCapabilitiesProbe {
   data class Failure(val error: String) : DaemonCapabilitiesProbe
 }
 
-private val sharedDaemonCapabilities = ConcurrentHashMap<SocketIdentity, Set<String>>()
+internal val sharedDaemonCapabilities = ConcurrentHashMap<SocketIdentity, Set<String>>()
 
 open class DaemonUnavailableException(message: String) : McpConnectionException(message)
 
@@ -1444,4 +555,11 @@ class DaemonSessionNotFoundException(message: String, val releaseReason: String?
   DaemonUnavailableException(message)
 
 /** The wire `code` of a session-not-found answer (`DAEMON_SESSION_NOT_FOUND_CODE` in types.ts). */
-private const val SESSION_NOT_FOUND_CODE = "daemon_session_not_found"
+internal const val SESSION_NOT_FOUND_CODE = "daemon_session_not_found"
+
+/** Independent hang ceilings for input frames, passive status, and session keep-alives. */
+data class DaemonRequestTimeouts(
+  val inputRequestTimeoutMs: Long = McpDaemonClient.INPUT_REQUEST_TIMEOUT_MS,
+  val statusRequestTimeoutMs: Long = McpDaemonClient.STATUS_REQUEST_TIMEOUT_MS,
+  val sessionKeepaliveTimeoutMs: Long = McpDaemonClient.SESSION_KEEPALIVE_TIMEOUT_MS,
+)

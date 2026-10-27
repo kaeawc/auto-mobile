@@ -3,13 +3,13 @@ import { promises as fsPromises } from "node:fs";
 import type { SessionManager } from "../../src/daemon/sessionManager";
 import { VideoCaptureFinalizationError, VideoRecorderService } from "../../src/features/video";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
-import * as recordingCleanup from "../../src/server/recordingSessionCleanup";
+import * as recordingCleanup from "../../src/daemon/recordingSessionCleanup";
 import { sequenceBackoff } from "../../src/utils/Backoff";
 import {
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
-} from "../../src/server/recordingSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
 import {
   getVideoRecordingMetadata,
   resetVideoRecordingManagerDependencies,
@@ -19,7 +19,7 @@ import {
   markVideoRecordingIncomplete,
   interruptVideoRecording,
   VideoRecordingTeardownUnconfirmedError,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { ProcessTeardownUnconfirmedError } from "../../src/utils/ChildProcessTracker";
 import { logger } from "../../src/utils/logger";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
@@ -62,14 +62,20 @@ class FakeSessionManager implements CleanupManager {
     });
   }
   releaseA(deviceId = device.deviceId): void {
-    this.release("session-a", deviceId, "idle-timeout", {
-      sessionId: "session-a",
+    this.release(
+      "session-a",
       deviceId,
-      releaseReason: "idle-timeout",
-      releasedAtMs: 0,
-      terminal: false,
-      heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
-    });
+      "idle-timeout",
+      {
+        sessionId: "session-a",
+        deviceId,
+        releaseReason: "idle-timeout",
+        releasedAtMs: 0,
+        terminal: false,
+        heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
+      },
+      {},
+    );
   }
 }
 
@@ -163,6 +169,7 @@ describe("recording teardown ownership", () => {
           expect(deadline).toBe(5_000);
           expect(manager.registrations.at(-1)?.settled).toBe(false);
           retry = work;
+          return () => {};
         },
       },
       deps,

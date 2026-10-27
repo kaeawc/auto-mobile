@@ -5,7 +5,7 @@ import { AndroidBootAdmissionGate } from "../../src/features/bootAdmission/Andro
 import { IosSimFleetCostCollector } from "../../src/features/iosSimFleet/FleetCostCollector";
 import { InMemoryBootDurationHistory } from "../../src/features/iosSimFleet/BootDurationHistory";
 import { IosSimCapacityGate } from "../../src/features/iosSimFleet/CapacityGate";
-import { parsePsSnapshot } from "../../src/features/iosSimFleet/psSnapshot";
+import { parsePsSnapshot } from "../../src/devices/bootAdmission/psSnapshot";
 import { parseSimctlInventory } from "../../src/features/iosSimFleet/simctlInventory";
 import { toJSONSchema } from "zod/v4";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
@@ -95,6 +95,16 @@ describe("listDevices output schema accepts the real capacity shape (#11268)", (
     );
     const ios = await new IosSimCapacityGate(collector, timer, { env: {} }).describeCapacity();
     expect(ios.hostPressure).toBeDefined();
+    expect(ios.admissionsByReason).toEqual({ reset: 0, create: 0, restart: 0 });
     expect(validate(envelope({ ios })), JSON.stringify(validate.errors)).toBe(true);
+    expect(
+      validate(
+        envelope({ ios: { ...ios, admissionsByReason: { reset: 1, create: 2, restart: 3 } } }),
+      ),
+      JSON.stringify(validate.errors),
+    ).toBe(true);
+    expect(
+      validate(envelope({ ios: { ...ios, admissionsByReason: { reset: 1, create: 2 } } })),
+    ).toBe(false);
   });
 });

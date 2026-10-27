@@ -38,10 +38,11 @@ log() {
   printf '\n==> %s\n' "$*"
 }
 
-# shellcheck disable=SC2317,SC2329 # Invoked indirectly from the cleanup trap.
 warn() {
   printf 'WARN: %s\n' "$*" >&2
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then warn "$@"; fi
 
 fail() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -84,7 +85,6 @@ adb_cmd() {
   "${ADB_BIN}" -s "${ADB_SERIAL}" "$@" || true
 }
 
-# shellcheck disable=SC2317,SC2329 # Invoked indirectly via `trap cleanup EXIT`.
 cleanup() {
   if [[ "${KILL_ON_EXIT}" == "true" && "${STARTED_EMULATOR}" == "true" && -n "${ADB_SERIAL}" ]]; then
     warn "KILL_ON_EXIT=true, stopping ${ADB_SERIAL}"
@@ -93,7 +93,9 @@ cleanup() {
     warn "Leaving emulator process running (pid ${EMULATOR_PID}). Set KILL_ON_EXIT=true to stop it."
   fi
 }
-trap cleanup EXIT
+# Static reference for indirect callers; this branch never executes.
+if false; then cleanup "$@"; fi
+trap 'cleanup' EXIT
 
 # Prints the serial of a running emulator matching AVD_NAME (empty if none).
 running_serial_for_avd() {

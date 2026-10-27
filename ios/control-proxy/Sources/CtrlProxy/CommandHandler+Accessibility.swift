@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(XCTest) && os(iOS)
+    import XCTest
+#endif
 
 extension CommandHandler {
     // MARK: - Accessibility Features
@@ -192,3 +195,204 @@ extension CommandHandler {
         }
     }
 }
+
+// MARK: - Native accessibility audit (#14086)
+
+extension CommandHandler {
+    /// Run XCUITest's own accessibility audit on the requested (or foreground) app and return
+    /// every issue it reports. Unknown check names are reported back, not fatal.
+    func handleAccessibilityAudit(
+        _ request: RequestAccessibilityAudit,
+        startTime: Date
+    )
+        async -> AccessibilityAuditResponse
+    {
+        let requested = request.checks ?? []
+        let names = requested.isEmpty || requested.contains("all") ? AccessibilityAuditCheck.all : requested
+        let known = names.filter { AccessibilityAuditCheck.all.contains($0) }
+        let unknown = names.filter { !AccessibilityAuditCheck.all.contains($0) }
+        var bundleId = request.appId
+        if bundleId?.isEmpty ?? true {
+            bundleId = await elementLocator.foregroundBundleId
+        }
+        let outcome = known.isEmpty
+            ? AccessibilityAuditOutcome(issues: [], unsupportedChecks: [], error: nil)
+            : await accessibilityAuditor.audit(bundleId: bundleId, checks: known)
+        return AccessibilityAuditResponse(
+            requestId: request.requestId,
+            issues: outcome.issues,
+            unsupportedChecks: unknown + outcome.unsupportedChecks,
+            error: outcome.error,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+}
+
+/// The host-facing names of XCUITest's `XCUIAccessibilityAuditType` checks.
+enum AccessibilityAuditCheck {
+    static let all = [
+        "contrast", "hitRegion", "dynamicType", "textClipped", "sufficientDescription", "trait",
+        "elementDetection",
+    ]
+}
+
+/// `request_accessibility_audit`: audit an app with XCUITest's `performAccessibilityAudit`.
+public struct RequestAccessibilityAudit: Decodable, Sendable {
+    public var requestId: String?
+    /// The app to audit; the tracked foreground app when absent.
+    public var appId: String?
+    /// Host check names; absent, empty, or containing `all` runs every check.
+    public var checks: [String]?
+}
+
+extension RequestAccessibilityAudit: CommandPayload {}
+
+/// One issue XCUITest's accessibility audit reported, with the offending element when known.
+public struct AccessibilityAuditIssue: Encodable, Sendable {
+    public let check: String
+    public let summary: String
+    public let detail: String?
+    /// The element's accessibility identifier: the id `tapOn`/`highlight` accept.
+    public let elementId: String?
+    public let label: String?
+    public let bounds: ElementBounds?
+
+    public init(
+        check: String, summary: String, detail: String?, elementId: String?, label: String?,
+        bounds: ElementBounds?
+    ) {
+        self.check = check
+        self.summary = summary
+        self.detail = detail
+        self.elementId = elementId
+        self.label = label
+        self.bounds = bounds
+    }
+}
+
+public struct AccessibilityAuditOutcome: Sendable {
+    public let issues: [AccessibilityAuditIssue]
+    /// Checks this OS or Xcode could not run.
+    public let unsupportedChecks: [String]
+    public let error: String?
+
+    public init(issues: [AccessibilityAuditIssue], unsupportedChecks: [String], error: String?) {
+        self.issues = issues
+        self.unsupportedChecks = unsupportedChecks
+        self.error = error
+    }
+}
+
+/// Runs the platform accessibility audit; injected so the command handler is testable off-device.
+public protocol AccessibilityAuditing: Sendable {
+    func audit(bundleId: String?, checks: [String]) async -> AccessibilityAuditOutcome
+}
+
+public struct AccessibilityAuditResponse: Encodable, Sendable {
+    public let type = ResponseType.accessibilityAuditResult.rawValue
+    public let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+    public let engine = "xcuitest"
+    public let requestId: String?
+    public let success: Bool
+    public let issues: [AccessibilityAuditIssue]
+    public let unsupportedChecks: [String]
+    public let error: String?
+    public let totalTimeMs: Int64
+
+    init(
+        requestId: String?, issues: [AccessibilityAuditIssue], unsupportedChecks: [String], error: String?,
+        totalTimeMs: Int64
+    ) {
+        self.requestId = requestId
+        success = error == nil
+        self.issues = issues
+        self.unsupportedChecks = unsupportedChecks
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+/// Production `AccessibilityAuditing`: `XCUIApplication.performAccessibilityAudit` (iOS 17+).
+struct DefaultAccessibilityAuditor: AccessibilityAuditing {
+    func audit(bundleId: String?, checks: [String]) async -> AccessibilityAuditOutcome {
+        #if canImport(XCTest) && os(iOS)
+            return await MainActor.run { Self.runAudit(bundleId: bundleId, checks: checks) }
+        #else
+            return AccessibilityAuditOutcome(
+                issues: [], unsupportedChecks: checks,
+                error: "Accessibility audits need XCUITest on iOS"
+            )
+        #endif
+    }
+}
+
+#if canImport(XCTest) && os(iOS)
+    /// Collects issues from the audit's issue handler; written only on the main actor during the
+    /// synchronous audit call and read after it returns.
+    private final class AccessibilityAuditCollector: @unchecked Sendable {
+        var issues: [AccessibilityAuditIssue] = []
+    }
+
+    extension DefaultAccessibilityAuditor {
+        private static let auditTypes: [(name: String, type: XCUIAccessibilityAuditType)] = [
+            ("contrast", .contrast),
+            ("hitRegion", .hitRegion),
+            ("dynamicType", .dynamicType),
+            ("textClipped", .textClipped),
+            ("sufficientDescription", .sufficientElementDescription),
+            ("trait", .trait),
+            ("elementDetection", .elementDetection),
+        ]
+
+        @MainActor
+        static func runAudit(bundleId: String?, checks: [String]) -> AccessibilityAuditOutcome {
+            guard let bundleId, !bundleId.isEmpty else {
+                return AccessibilityAuditOutcome(
+                    issues: [], unsupportedChecks: [],
+                    error: "No foreground app to audit; launch the app or pass appId"
+                )
+            }
+            var types: XCUIAccessibilityAuditType = []
+            for entry in auditTypes where checks.contains(entry.name) {
+                types.insert(entry.type)
+            }
+            let collector = AccessibilityAuditCollector()
+            do {
+                let app = XCUIApplication(bundleIdentifier: bundleId)
+                try catchingObjCException {
+                    try app.performAccessibilityAudit(for: types) { issue in
+                        collector.issues.append(Self.describe(issue))
+                        // Returning true marks the issue handled, so the audit collects every
+                        // issue instead of recording a test failure for it.
+                        return true
+                    }
+                }
+            } catch {
+                return AccessibilityAuditOutcome(
+                    issues: collector.issues, unsupportedChecks: [],
+                    error: "Accessibility audit of \(bundleId) failed: \(error.localizedDescription)"
+                )
+            }
+            return AccessibilityAuditOutcome(issues: collector.issues, unsupportedChecks: [], error: nil)
+        }
+
+        @MainActor
+        private static func describe(_ issue: XCUIAccessibilityAuditIssue) -> AccessibilityAuditIssue {
+            let check = auditTypes.first { $0.type == issue.auditType }?.name ?? "other"
+            let snapshot = issue.element.flatMap { element in
+                try? catchingObjCException { try element.snapshot() }
+            }
+            let bounds = snapshot.map { ElementBounds(clamping: $0.frame) }
+            let identifier = snapshot?.identifier ?? ""
+            let label = snapshot?.label ?? ""
+            return AccessibilityAuditIssue(
+                check: check,
+                summary: issue.compactDescription,
+                detail: issue.detailedDescription.isEmpty ? nil : issue.detailedDescription,
+                elementId: identifier.isEmpty ? nil : identifier,
+                label: label.isEmpty ? nil : label,
+                bounds: bounds
+            )
+        }
+    }
+#endif

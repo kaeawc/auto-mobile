@@ -34,11 +34,13 @@ class WorkspaceDeviceControlTest {
     val streams = mutableListOf<FakeObservationStream>()
     setContent {
       rememberWorkspaceDeviceControl(
-        column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
-        clientProvider = { null },
-        enabled = true,
-        sessionUuidProvider = provider,
-        streamFactory = { FakeObservationStream().also { streams.add(it) } },
+        dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceDeviceControlOptions(
+          column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+          clientProvider = { null },
+          enabled = true,
+          sessionUuidProvider = provider,
+          streamFactory = { FakeObservationStream().also { streams.add(it) } },
+        ),
       )
     }
     waitForIdle()
@@ -75,13 +77,15 @@ class WorkspaceDeviceControlTest {
       var factoryCalls = 0
       setContent {
         rememberWorkspaceDeviceControl(
-          column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
-          clientProvider = { null },
-          enabled = enabled.value,
-          streamFactory = {
-            factoryCalls++
-            fake
-          },
+          dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceDeviceControlOptions(
+            column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+            clientProvider = { null },
+            enabled = enabled.value,
+            streamFactory = {
+              factoryCalls++
+              fake
+            },
+          ),
         )
       }
       waitForIdle()

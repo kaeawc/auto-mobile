@@ -1,3 +1,10 @@
+import type { PinchRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
+import type { TwoFingerSwipeRequest } from "../../src/features/observe/android/types";
+import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
+import type {
+  AndroidAccessibilityActionRequest,
+  AndroidActivateAccessibilityLinkRequest,
+} from "../../src/features/observe/android/AndroidActionDispatcher";
 import type { PrototypeShowOverrides } from "../../src/features/prototype/PrototypeTransport";
 import type {
   PrototypePatchReply,
@@ -20,6 +27,7 @@ import {
   AccessibilityNodeSelector,
 } from "../../src/features/observe/android";
 import type { PrototypeSpec } from "../../src/features/prototype/prototypeSpec";
+import type { PrototypeRequestHost } from "../../src/features/prototype/prototypeRequestHandler";
 import type { PrototypeAssetUpload } from "../../src/features/prototype/prototypeAssets";
 import type { PrototypeAssetRequestOptions } from "../../src/features/observe/android/CtrlProxyPrototypes";
 import type {
@@ -46,6 +54,7 @@ import { defaultTimer, Timer } from "../../src/utils/SystemTimer";
 export class FakeCtrlProxy implements AndroidCtrlProxy {
   constructor(private readonly timer: Timer = defaultTimer) {}
 
+  private prototypeRequestHost: PrototypeRequestHost | undefined;
   private nodeActionSelectorsSupported = true;
   private nodeActionHistory: Array<{
     action: string;
@@ -109,18 +118,9 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   getGestureRequestLog(): Array<Record<string, unknown> & { type: string }> {
     return this.gestureRequestLog.map((request) => ({ ...request }));
   }
-  async requestTapCoordinates(
-    x: number,
-    y: number,
-    duration = 10,
-    _timeoutMs?: number,
-    _perf?: PerformanceTracker,
-    _frameContext?: string,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yTapCoordinatesResult> {
+  async requestTapCoordinates(request: TapCoordinatesRequest): Promise<A11yTapCoordinatesResult> {
+    const { x, y, duration = 10, onDispatch, signal, displayId, beforeSend } = request;
+
     beforeSend?.();
     this.checkFailure("tap");
     this.tapHistory.push({
@@ -192,6 +192,21 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return this.deleteResult;
   }
 
+  readonly advanceClockRequests: { id: string; advanceTimeMs: number }[] = [];
+  private advanceClockResult: PrototypeResult = { success: true, fired: 0 };
+  setAdvanceClockResult(result: PrototypeResult): void {
+    this.advanceClockResult = result;
+  }
+  async requestAdvancePrototypeClock(
+    id: string,
+    advanceTimeMs: number,
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    this.advanceClockRequests.push({ id, advanceTimeMs });
+    this.checkFailure("requestAdvancePrototypeClock");
+    return this.advanceClockResult;
+  }
   readonly clearStorageRequests: string[] = [];
   private clearStorageResult: PrototypeResult = { success: true, cleared: 0 };
   setClearStorageResult(result: PrototypeResult): void {
@@ -402,6 +417,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   private performanceTiming: AndroidPerfTiming[] | null = null;
   private isConnectedState: boolean = true;
   private hasCachedHierarchyState: boolean = false;
+  private waitForConnectionResult: boolean | undefined;
+  private lastConnectionFailure: { forwardingLeaseConflict: boolean; message?: string } | undefined;
 
   // Failure modes
   private failureMap: Map<string, Error> = new Map();
@@ -954,19 +971,20 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
-  async requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yPinchResult> {
+  async requestPinch(request: PinchRequest): Promise<A11yPinchResult> {
+    const {
+      centerX,
+      centerY,
+      distanceStart,
+      distanceEnd,
+      rotationDegrees,
+      duration,
+      timeoutMs,
+      signal,
+      displayId,
+      beforeSend,
+    } = request;
+
     await this.applyDelay("pinch");
     beforeSend?.();
     this.checkFailure("pinch");
@@ -1192,14 +1210,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   }
 
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    selector?: AccessibilityNodeSelector,
-    timeoutMs: number = 5000,
-    _perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: AndroidActivateAccessibilityLinkRequest,
   ): Promise<A11yActionResult> {
+    const { selector, timeoutMs = 5000, signal, onDispatch } = request;
+
     signal?.throwIfAborted();
     await this.applyDelay("requestActivateAccessibilityLink");
     this.checkFailure("requestActivateAccessibilityLink");
@@ -1217,18 +1231,33 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
-  async requestTwoFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration: number = 300,
-    offset: number = 100,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
+  async requestAccessibilityAction(
+    request: AndroidAccessibilityActionRequest,
+  ): Promise<A11yActionResult> {
+    request.signal?.throwIfAborted();
+    await this.applyDelay("requestAccessibilityAction");
+    this.checkFailure("requestAccessibilityAction");
+    this.actionHistory.push({
+      action: request.action,
+      resourceId: request.resourceId,
+      timeoutMs: request.timeoutMs ?? 5000,
+    });
+    return { success: true, action: request.action, totalTimeMs: 100 };
+  }
+
+  async requestTwoFingerSwipe(request: TwoFingerSwipeRequest): Promise<A11ySwipeResult> {
+    const {
+      x1,
+      y1,
+      x2,
+      y2,
+      duration = 300,
+      offset = 100,
+      timeoutMs = 5000,
+      displayId,
+      beforeSend,
+    } = request;
+
     await this.applyDelay("requestTwoFingerSwipe");
     beforeSend?.();
     this.checkFailure("requestTwoFingerSwipe");
@@ -1290,5 +1319,368 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
   async close(): Promise<void> {
     this.isConnectedState = false;
+  }
+
+  setRecompositionTrackingEnabled(
+    ..._args: Parameters<AndroidCtrlProxy["setRecompositionTrackingEnabled"]>
+  ): ReturnType<AndroidCtrlProxy["setRecompositionTrackingEnabled"]> {
+    throw new Error("FakeCtrlProxy.setRecompositionTrackingEnabled is not scripted");
+  }
+
+  requestHierarchySyncWithoutObservationStreamPush(): never {
+    throw new Error(
+      "FakeCtrlProxy.requestHierarchySyncWithoutObservationStreamPush is not scripted",
+    );
+  }
+
+  requestInsertTextState(
+    ..._args: Parameters<AndroidCtrlProxy["requestInsertTextState"]>
+  ): ReturnType<AndroidCtrlProxy["requestInsertTextState"]> {
+    throw new Error("FakeCtrlProxy.requestInsertTextState is not scripted");
+  }
+
+  commitViaIme(
+    ..._args: Parameters<AndroidCtrlProxy["commitViaIme"]>
+  ): ReturnType<AndroidCtrlProxy["commitViaIme"]> {
+    throw new Error("FakeCtrlProxy.commitViaIme is not scripted");
+  }
+
+  setKeyboardProfile(
+    ..._args: Parameters<AndroidCtrlProxy["setKeyboardProfile"]>
+  ): ReturnType<AndroidCtrlProxy["setKeyboardProfile"]> {
+    throw new Error("FakeCtrlProxy.setKeyboardProfile is not scripted");
+  }
+
+  listKeyboardProfiles(
+    ..._args: Parameters<AndroidCtrlProxy["listKeyboardProfiles"]>
+  ): ReturnType<AndroidCtrlProxy["listKeyboardProfiles"]> {
+    throw new Error("FakeCtrlProxy.listKeyboardProfiles is not scripted");
+  }
+
+  requestClipboard(
+    ..._args: Parameters<AndroidCtrlProxy["requestClipboard"]>
+  ): ReturnType<AndroidCtrlProxy["requestClipboard"]> {
+    throw new Error("FakeCtrlProxy.requestClipboard is not scripted");
+  }
+
+  requestSettingsGet(
+    ..._args: Parameters<AndroidCtrlProxy["requestSettingsGet"]>
+  ): ReturnType<AndroidCtrlProxy["requestSettingsGet"]> {
+    throw new Error("FakeCtrlProxy.requestSettingsGet is not scripted");
+  }
+
+  requestSettingsPut(
+    ..._args: Parameters<AndroidCtrlProxy["requestSettingsPut"]>
+  ): ReturnType<AndroidCtrlProxy["requestSettingsPut"]> {
+    throw new Error("FakeCtrlProxy.requestSettingsPut is not scripted");
+  }
+
+  requestSettingsList(
+    ..._args: Parameters<AndroidCtrlProxy["requestSettingsList"]>
+  ): ReturnType<AndroidCtrlProxy["requestSettingsList"]> {
+    throw new Error("FakeCtrlProxy.requestSettingsList is not scripted");
+  }
+
+  requestInstallCaCertificate(
+    ..._args: Parameters<AndroidCtrlProxy["requestInstallCaCertificate"]>
+  ): ReturnType<AndroidCtrlProxy["requestInstallCaCertificate"]> {
+    throw new Error("FakeCtrlProxy.requestInstallCaCertificate is not scripted");
+  }
+
+  requestInstallCaCertificateFromFile(
+    ..._args: Parameters<AndroidCtrlProxy["requestInstallCaCertificateFromFile"]>
+  ): ReturnType<AndroidCtrlProxy["requestInstallCaCertificateFromFile"]> {
+    throw new Error("FakeCtrlProxy.requestInstallCaCertificateFromFile is not scripted");
+  }
+
+  requestRemoveCaCertificate(
+    ..._args: Parameters<AndroidCtrlProxy["requestRemoveCaCertificate"]>
+  ): ReturnType<AndroidCtrlProxy["requestRemoveCaCertificate"]> {
+    throw new Error("FakeCtrlProxy.requestRemoveCaCertificate is not scripted");
+  }
+
+  requestDeviceOwnerStatus(
+    ..._args: Parameters<AndroidCtrlProxy["requestDeviceOwnerStatus"]>
+  ): ReturnType<AndroidCtrlProxy["requestDeviceOwnerStatus"]> {
+    throw new Error("FakeCtrlProxy.requestDeviceOwnerStatus is not scripted");
+  }
+
+  requestPermission(
+    ..._args: Parameters<AndroidCtrlProxy["requestPermission"]>
+  ): ReturnType<AndroidCtrlProxy["requestPermission"]> {
+    throw new Error("FakeCtrlProxy.requestPermission is not scripted");
+  }
+
+  requestScreenshotWithoutObservationStreamPush(
+    ..._args: Parameters<AndroidCtrlProxy["requestScreenshotWithoutObservationStreamPush"]>
+  ): ReturnType<AndroidCtrlProxy["requestScreenshotWithoutObservationStreamPush"]> {
+    throw new Error("FakeCtrlProxy.requestScreenshotWithoutObservationStreamPush is not scripted");
+  }
+
+  requestInstalledPackages(
+    ..._args: Parameters<AndroidCtrlProxy["requestInstalledPackages"]>
+  ): ReturnType<AndroidCtrlProxy["requestInstalledPackages"]> {
+    throw new Error("FakeCtrlProxy.requestInstalledPackages is not scripted");
+  }
+
+  requestPackageInfo(
+    ..._args: Parameters<AndroidCtrlProxy["requestPackageInfo"]>
+  ): ReturnType<AndroidCtrlProxy["requestPackageInfo"]> {
+    throw new Error("FakeCtrlProxy.requestPackageInfo is not scripted");
+  }
+
+  requestLaunchIntent(
+    ..._args: Parameters<AndroidCtrlProxy["requestLaunchIntent"]>
+  ): ReturnType<AndroidCtrlProxy["requestLaunchIntent"]> {
+    throw new Error("FakeCtrlProxy.requestLaunchIntent is not scripted");
+  }
+
+  sendMessage(
+    ..._args: Parameters<AndroidCtrlProxy["sendMessage"]>
+  ): ReturnType<AndroidCtrlProxy["sendMessage"]> {
+    throw new Error("FakeCtrlProxy.sendMessage is not scripted");
+  }
+
+  getSupportedCommands(
+    ..._args: Parameters<AndroidCtrlProxy["getSupportedCommands"]>
+  ): ReturnType<AndroidCtrlProxy["getSupportedCommands"]> {
+    throw new Error("FakeCtrlProxy.getSupportedCommands is not scripted");
+  }
+
+  /** Result {@link waitForConnection} reports; defaults to the {@link setConnected} state. */
+  setWaitForConnectionResult(connected: boolean): void {
+    this.waitForConnectionResult = connected;
+  }
+
+  async waitForConnection(
+    ..._args: Parameters<AndroidCtrlProxy["waitForConnection"]>
+  ): ReturnType<AndroidCtrlProxy["waitForConnection"]> {
+    return this.waitForConnectionResult ?? this.isConnectedState;
+  }
+
+  /** Record the most recent connect failure a real client would report. */
+  setLastConnectionFailure(failure: { forwardingLeaseConflict: boolean; message?: string }): void {
+    this.lastConnectionFailure = failure;
+  }
+
+  isLastConnectionFailureForwardingLeaseConflict(): boolean {
+    return this.lastConnectionFailure?.forwardingLeaseConflict ?? false;
+  }
+
+  getLastConnectionFailureMessage(): string | undefined {
+    return this.lastConnectionFailure?.message;
+  }
+
+  async verifyServiceReady(): Promise<boolean> {
+    return this.isConnectedState;
+  }
+
+  /** Like a runner without the atomic double-tap command: nothing is sent, callers fall back to two taps. */
+  async requestDoubleTapCoordinates(): Promise<A11yTapCoordinatesResult> {
+    return { success: false, totalTimeMs: 0, error: "double-tap command unsupported by the fake" };
+  }
+
+  requestMultiFingerSwipe(
+    ..._args: Parameters<AndroidCtrlProxy["requestMultiFingerSwipe"]>
+  ): ReturnType<AndroidCtrlProxy["requestMultiFingerSwipe"]> {
+    throw new Error("FakeCtrlProxy.requestMultiFingerSwipe is not scripted");
+  }
+
+  requestGestureStart(
+    ..._args: Parameters<AndroidCtrlProxy["requestGestureStart"]>
+  ): ReturnType<AndroidCtrlProxy["requestGestureStart"]> {
+    throw new Error("FakeCtrlProxy.requestGestureStart is not scripted");
+  }
+
+  requestGestureMove(
+    ..._args: Parameters<AndroidCtrlProxy["requestGestureMove"]>
+  ): ReturnType<AndroidCtrlProxy["requestGestureMove"]> {
+    throw new Error("FakeCtrlProxy.requestGestureMove is not scripted");
+  }
+
+  requestGestureEnd(
+    ..._args: Parameters<AndroidCtrlProxy["requestGestureEnd"]>
+  ): ReturnType<AndroidCtrlProxy["requestGestureEnd"]> {
+    throw new Error("FakeCtrlProxy.requestGestureEnd is not scripted");
+  }
+
+  listPreferenceFiles(
+    ..._args: Parameters<AndroidCtrlProxy["listPreferenceFiles"]>
+  ): ReturnType<AndroidCtrlProxy["listPreferenceFiles"]> {
+    throw new Error("FakeCtrlProxy.listPreferenceFiles is not scripted");
+  }
+
+  getPreferenceEntries(
+    ..._args: Parameters<AndroidCtrlProxy["getPreferenceEntries"]>
+  ): ReturnType<AndroidCtrlProxy["getPreferenceEntries"]> {
+    throw new Error("FakeCtrlProxy.getPreferenceEntries is not scripted");
+  }
+
+  discoverKeystore(
+    ..._args: Parameters<AndroidCtrlProxy["discoverKeystore"]>
+  ): ReturnType<AndroidCtrlProxy["discoverKeystore"]> {
+    throw new Error("FakeCtrlProxy.discoverKeystore is not scripted");
+  }
+
+  getSdkCapabilities(
+    ..._args: Parameters<AndroidCtrlProxy["getSdkCapabilities"]>
+  ): ReturnType<AndroidCtrlProxy["getSdkCapabilities"]> {
+    throw new Error("FakeCtrlProxy.getSdkCapabilities is not scripted");
+  }
+
+  listDataStores(
+    ..._args: Parameters<AndroidCtrlProxy["listDataStores"]>
+  ): ReturnType<AndroidCtrlProxy["listDataStores"]> {
+    throw new Error("FakeCtrlProxy.listDataStores is not scripted");
+  }
+
+  getDataStore(
+    ..._args: Parameters<AndroidCtrlProxy["getDataStore"]>
+  ): ReturnType<AndroidCtrlProxy["getDataStore"]> {
+    throw new Error("FakeCtrlProxy.getDataStore is not scripted");
+  }
+
+  setPreference(
+    ..._args: Parameters<AndroidCtrlProxy["setPreference"]>
+  ): ReturnType<AndroidCtrlProxy["setPreference"]> {
+    throw new Error("FakeCtrlProxy.setPreference is not scripted");
+  }
+
+  removePreference(
+    ..._args: Parameters<AndroidCtrlProxy["removePreference"]>
+  ): ReturnType<AndroidCtrlProxy["removePreference"]> {
+    throw new Error("FakeCtrlProxy.removePreference is not scripted");
+  }
+
+  deleteKeychainItemForIos(
+    ..._args: Parameters<
+      import("../../src/features/observe/ios/CtrlProxyStorage").CtrlProxyStorage["deleteKeychainItemForIos"]
+    >
+  ): ReturnType<
+    import("../../src/features/observe/ios/CtrlProxyStorage").CtrlProxyStorage["deleteKeychainItemForIos"]
+  > {
+    throw new Error("FakeCtrlProxy.deleteKeychainItemForIos is not scripted");
+  }
+
+  clearPreferenceStore(
+    ..._args: Parameters<AndroidCtrlProxy["clearPreferenceStore"]>
+  ): ReturnType<AndroidCtrlProxy["clearPreferenceStore"]> {
+    throw new Error("FakeCtrlProxy.clearPreferenceStore is not scripted");
+  }
+
+  clearAccessibilityFocus(
+    ..._args: Parameters<AndroidCtrlProxy["clearAccessibilityFocus"]>
+  ): ReturnType<AndroidCtrlProxy["clearAccessibilityFocus"]> {
+    throw new Error("FakeCtrlProxy.clearAccessibilityFocus is not scripted");
+  }
+
+  setAccessibilityFocus(
+    ..._args: Parameters<AndroidCtrlProxy["setAccessibilityFocus"]>
+  ): ReturnType<AndroidCtrlProxy["setAccessibilityFocus"]> {
+    throw new Error("FakeCtrlProxy.setAccessibilityFocus is not scripted");
+  }
+
+  requestCurrentFocus(
+    ..._args: Parameters<AndroidCtrlProxy["requestCurrentFocus"]>
+  ): ReturnType<AndroidCtrlProxy["requestCurrentFocus"]> {
+    throw new Error("FakeCtrlProxy.requestCurrentFocus is not scripted");
+  }
+
+  requestTraversalOrder(
+    ..._args: Parameters<AndroidCtrlProxy["requestTraversalOrder"]>
+  ): ReturnType<AndroidCtrlProxy["requestTraversalOrder"]> {
+    throw new Error("FakeCtrlProxy.requestTraversalOrder is not scripted");
+  }
+
+  attachPrototypeRequestHost(host: PrototypeRequestHost | undefined): void {
+    this.prototypeRequestHost = host;
+  }
+
+  getPrototypeRequestHost(): PrototypeRequestHost | undefined {
+    return this.prototypeRequestHost;
+  }
+
+  invalidateForShutdownRecovery(
+    ..._args: Parameters<AndroidCtrlProxy["invalidateForShutdownRecovery"]>
+  ): ReturnType<AndroidCtrlProxy["invalidateForShutdownRecovery"]> {
+    throw new Error("FakeCtrlProxy.invalidateForShutdownRecovery is not scripted");
+  }
+
+  getSdkScreenIdentity(
+    ..._args: Parameters<AndroidCtrlProxy["getSdkScreenIdentity"]>
+  ): ReturnType<AndroidCtrlProxy["getSdkScreenIdentity"]> {
+    throw new Error("FakeCtrlProxy.getSdkScreenIdentity is not scripted");
+  }
+
+  getSdkScreenIdentityReceivedAtMs(
+    ..._args: Parameters<AndroidCtrlProxy["getSdkScreenIdentityReceivedAtMs"]>
+  ): ReturnType<AndroidCtrlProxy["getSdkScreenIdentityReceivedAtMs"]> {
+    throw new Error("FakeCtrlProxy.getSdkScreenIdentityReceivedAtMs is not scripted");
+  }
+
+  awaitSdkScreenIdentityAfter(
+    ..._args: Parameters<AndroidCtrlProxy["awaitSdkScreenIdentityAfter"]>
+  ): ReturnType<AndroidCtrlProxy["awaitSdkScreenIdentityAfter"]> {
+    throw new Error("FakeCtrlProxy.awaitSdkScreenIdentityAfter is not scripted");
+  }
+
+  pushNetworkMockRules(
+    ..._args: Parameters<AndroidCtrlProxy["pushNetworkMockRules"]>
+  ): ReturnType<AndroidCtrlProxy["pushNetworkMockRules"]> {
+    throw new Error("FakeCtrlProxy.pushNetworkMockRules is not scripted");
+  }
+
+  requestGlobalAction(
+    ..._args: Parameters<AndroidCtrlProxy["requestGlobalAction"]>
+  ): ReturnType<AndroidCtrlProxy["requestGlobalAction"]> {
+    throw new Error("FakeCtrlProxy.requestGlobalAction is not scripted");
+  }
+
+  validateFrameContext(
+    ..._args: Parameters<AndroidCtrlProxy["validateFrameContext"]>
+  ): ReturnType<AndroidCtrlProxy["validateFrameContext"]> {
+    throw new Error("FakeCtrlProxy.validateFrameContext is not scripted");
+  }
+
+  requestDeviceInfo(
+    ..._args: Parameters<AndroidCtrlProxy["requestDeviceInfo"]>
+  ): ReturnType<AndroidCtrlProxy["requestDeviceInfo"]> {
+    throw new Error("FakeCtrlProxy.requestDeviceInfo is not scripted");
+  }
+
+  onInteraction(
+    ..._args: Parameters<AndroidCtrlProxy["onInteraction"]>
+  ): ReturnType<AndroidCtrlProxy["onInteraction"]> {
+    throw new Error("FakeCtrlProxy.onInteraction is not scripted");
+  }
+
+  notifyRecordingStarted(
+    ..._args: Parameters<AndroidCtrlProxy["notifyRecordingStarted"]>
+  ): ReturnType<AndroidCtrlProxy["notifyRecordingStarted"]> {
+    throw new Error("FakeCtrlProxy.notifyRecordingStarted is not scripted");
+  }
+
+  notifyRecordingStopped(
+    ..._args: Parameters<AndroidCtrlProxy["notifyRecordingStopped"]>
+  ): ReturnType<AndroidCtrlProxy["notifyRecordingStopped"]> {
+    throw new Error("FakeCtrlProxy.notifyRecordingStopped is not scripted");
+  }
+
+  recordInitialObservationStreamHierarchy(
+    ..._args: Parameters<AndroidCtrlProxy["recordInitialObservationStreamHierarchy"]>
+  ): ReturnType<AndroidCtrlProxy["recordInitialObservationStreamHierarchy"]> {
+    throw new Error("FakeCtrlProxy.recordInitialObservationStreamHierarchy is not scripted");
+  }
+
+  getScreenScaleMetadata(
+    ..._args: Parameters<AndroidCtrlProxy["getScreenScaleMetadata"]>
+  ): ReturnType<AndroidCtrlProxy["getScreenScaleMetadata"]> {
+    throw new Error("FakeCtrlProxy.getScreenScaleMetadata is not scripted");
+  }
+
+  captureScreenshotForObservationStream(
+    ..._args: Parameters<AndroidCtrlProxy["captureScreenshotForObservationStream"]>
+  ): ReturnType<AndroidCtrlProxy["captureScreenshotForObservationStream"]> {
+    throw new Error("FakeCtrlProxy.captureScreenshotForObservationStream is not scripted");
   }
 }

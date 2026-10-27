@@ -68,10 +68,13 @@ class HierarchyDebouncerSuppressionTest {
       HierarchyDebouncer(
         scope = backgroundScope,
         timeProvider = FakeTime(),
-        extractHierarchy = { _, snapshotOptions ->
-          optionsSeen.add(snapshotOptions)
-          ViewHierarchy(packageName = "current")
-        },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, snapshotOptions ->
+              optionsSeen.add(snapshotOptions)
+              ViewHierarchy(packageName = "current")
+            },
+          ),
       )
     val explicit = HierarchySnapshotOptions(displayId = 2)
     debouncer.extractAfterQuiescenceSuspending(
@@ -97,6 +100,45 @@ class HierarchyDebouncerSuppressionTest {
   }
 
   private fun TestScope.verifyOverlappingCalls(firstThrows: Boolean) {
+    with(OverlappingExtractions(this, firstThrows)) {
+      val first = extractionThread("first extraction", debouncer, firstFailure)
+      try {
+        await(firstEntered)
+        val second = extractionThread("second extraction", debouncer, secondFailure)
+        try {
+          await(secondStarted)
+          releaseFirst.countDown()
+          await(secondEntered)
+          first.join(1_000)
+          assertFalse(first.isAlive)
+          if (firstThrows) {
+            assertEquals("first extraction failed", firstFailure.get()?.message)
+          } else {
+            assertNull(firstFailure.get())
+          }
+
+          debouncer.onAccessibilityEvent()
+          assertFalse("remaining call must suppress debounce", debouncer.getState().hasActiveJob)
+          assertTrue(debouncer.hierarchyFlow.replayCache.isEmpty())
+        } finally {
+          releaseSecond.countDown()
+          second.join(1_000)
+        }
+        assertFalse(second.isAlive)
+        assertNull(secondFailure.get())
+
+        debouncer.onAccessibilityEvent()
+        assertTrue("last call must restore debounce", debouncer.getState().hasActiveJob)
+        runCurrent()
+        assertNotNull(debouncer.hierarchyFlow.replayCache.lastOrNull())
+      } finally {
+        releaseFirst.countDown()
+        first.join(1_000)
+      }
+    }
+  }
+
+  private inner class OverlappingExtractions(test: TestScope, firstThrows: Boolean) {
     val firstEntered = CountDownLatch(1)
     val secondStarted = CountDownLatch(1)
     val secondEntered = CountDownLatch(1)
@@ -107,90 +149,54 @@ class HierarchyDebouncerSuppressionTest {
     val calls = AtomicInteger()
     val debouncer =
       HierarchyDebouncer(
-        scope = backgroundScope,
+        scope = test.backgroundScope,
         timeProvider = FakeTime(secondStarted),
-        quickDebounceMs = 0,
-        unsolicitedIntervalMs = 0,
-        extractHierarchy = { _, _ ->
-          when (calls.incrementAndGet()) {
-            1 -> {
-              firstEntered.countDown()
-              await(releaseFirst)
-              if (firstThrows) error("first extraction failed")
-              ViewHierarchy(packageName = "first")
-            }
-            2 -> {
-              secondEntered.countDown()
-              await(releaseSecond)
-              ViewHierarchy(packageName = "second")
-            }
-            else -> ViewHierarchy(packageName = "unsolicited")
-          }
-        },
-      )
-    val first =
-      thread(name = "first extraction") {
-        firstFailure.set(
-          runCatching {
-            runBlocking {
-              debouncer.extractAfterQuiescenceSuspending(
-                quiescenceMs = 0,
-                maxWaitMs = 1,
-                initialEventWaitMs = 0,
-              )
-            }
-          }
-            .exceptionOrNull(),
-        )
-      }
-    try {
-      await(firstEntered)
-      val second =
-        thread(name = "second extraction") {
-          secondFailure.set(
-            runCatching {
-              runBlocking {
-                debouncer.extractAfterQuiescenceSuspending(
-                  quiescenceMs = 0,
-                  maxWaitMs = 1,
-                  initialEventWaitMs = 0,
-                )
+        config =
+          HierarchyDebouncerConfig(
+            quickDebounceMs = 0,
+            unsolicitedIntervalMs = 0,
+          ),
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ ->
+              when (calls.incrementAndGet()) {
+                1 -> {
+                  firstEntered.countDown()
+                  await(releaseFirst)
+                  if (firstThrows) error("first extraction failed")
+                  ViewHierarchy(packageName = "first")
+                }
+                2 -> {
+                  secondEntered.countDown()
+                  await(releaseSecond)
+                  ViewHierarchy(packageName = "second")
+                }
+                else -> ViewHierarchy(packageName = "unsolicited")
               }
-            }
-              .exceptionOrNull(),
-          )
-        }
-      try {
-        await(secondStarted)
-        releaseFirst.countDown()
-        await(secondEntered)
-        first.join(1_000)
-        assertFalse(first.isAlive)
-        if (firstThrows) {
-          assertEquals("first extraction failed", firstFailure.get()?.message)
-        } else {
-          assertNull(firstFailure.get())
-        }
-
-        debouncer.onAccessibilityEvent()
-        assertFalse("remaining call must suppress debounce", debouncer.getState().hasActiveJob)
-        assertTrue(debouncer.hierarchyFlow.replayCache.isEmpty())
-      } finally {
-        releaseSecond.countDown()
-        second.join(1_000)
-      }
-      assertFalse(second.isAlive)
-      assertNull(secondFailure.get())
-
-      debouncer.onAccessibilityEvent()
-      assertTrue("last call must restore debounce", debouncer.getState().hasActiveJob)
-      runCurrent()
-      assertNotNull(debouncer.hierarchyFlow.replayCache.lastOrNull())
-    } finally {
-      releaseFirst.countDown()
-      first.join(1_000)
-    }
+            },
+          ),
+      )
   }
+
+  private fun extractionThread(
+    name: String,
+    debouncer: HierarchyDebouncer,
+    failure: AtomicReference<Throwable?>,
+  ): Thread =
+    thread(name = name) {
+      failure.set(
+        runCatching {
+          runBlocking {
+            debouncer.extractAfterQuiescenceSuspending(
+              quiescenceMs = 0,
+              maxWaitMs = 1,
+              initialEventWaitMs = 0,
+            )
+          }
+        }
+          .exceptionOrNull(),
+      )
+    }
 
   @Test
   fun `single call suppresses then restores emissions`() = runTest {
@@ -201,13 +207,19 @@ class HierarchyDebouncerSuppressionTest {
       HierarchyDebouncer(
         scope = backgroundScope,
         timeProvider = FakeTime(),
-        quickDebounceMs = 0,
-        unsolicitedIntervalMs = 0,
-        extractHierarchy = { _, _ ->
-          entered.countDown()
-          await(release)
-          ViewHierarchy(packageName = "current")
-        },
+        config =
+          HierarchyDebouncerConfig(
+            quickDebounceMs = 0,
+            unsolicitedIntervalMs = 0,
+          ),
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ ->
+              entered.countDown()
+              await(release)
+              ViewHierarchy(packageName = "current")
+            },
+          ),
       )
     val worker = thread {
       failure.set(

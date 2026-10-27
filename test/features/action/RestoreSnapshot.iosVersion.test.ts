@@ -29,20 +29,22 @@ const accepted = [
     major: Number(value.split(".")[0]),
     minor: Number(value.split(".")[1]),
   })),
-  ...[
-    ["iOS 26.5", 26, 5],
-    ["iOS 16.4", 16, 4],
-    ["iOS-17-0", 17, 0],
-    ["iOS_17_0", 17, 0],
-    ["ios 17.0", 17, 0],
-    ["iOS17 5 1", 17, 5],
-    ["17", 17, undefined],
-    ["17.5.1", 17, 5],
-    ["com.apple.CoreSimulator.SimRuntime.iOS-26-5", 26, 5],
-    ["com.apple.CoreSimulator.SimRuntime.iOS-17-0", 17, 0],
-    ["com.apple.CoreSimulator.SimRuntime.iOS-17", 17, undefined],
-    ["com.apple.CoreSimulator.SimRuntime.ios-17-5-1", 17, 5],
-  ].map(([value, major, minor]) => ({ source: "synthetic", value: String(value), major, minor })),
+  ...(
+    [
+      ["iOS 26.5", 26, 5],
+      ["iOS 16.4", 16, 4],
+      ["iOS-17-0", 17, 0],
+      ["iOS_17_0", 17, 0],
+      ["ios 17.0", 17, 0],
+      ["iOS17 5 1", 17, 5],
+      ["17", 17, undefined],
+      ["17.5.1", 17, 5],
+      ["com.apple.CoreSimulator.SimRuntime.iOS-26-5", 26, 5],
+      ["com.apple.CoreSimulator.SimRuntime.iOS-17-0", 17, 0],
+      ["com.apple.CoreSimulator.SimRuntime.iOS-17", 17, undefined],
+      ["com.apple.CoreSimulator.SimRuntime.ios-17-5-1", 17, 5],
+    ] satisfies Array<[string, number, number | undefined]>
+  ).map(([value, major, minor]) => ({ source: "synthetic", value: String(value), major, minor })),
 ];
 
 // All rejected inputs are synthetic; none is a captured simctl response.

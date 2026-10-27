@@ -350,21 +350,13 @@ describe("WebpBinaryResolver", () => {
 
     const resolverOptions = { ...options, fileDownloader: downloader };
     const firstResolver = resolverFor(fileSystem, resolverOptions);
-    const secondResolver = resolverFor(fileSystem, resolverOptions);
     // Observe the second caller entering the shared in-flight map, rather than
     // assuming its probes finish before a fixed download delay.
     const secondProvisionStarted = Promise.withResolvers<void>();
-    const secondProvisioner = secondResolver as unknown as {
-      provisionArchiveOnce(archive: unknown, cacheDir: string): Promise<void>;
-    };
-    const provisionArchiveOnce = secondProvisioner.provisionArchiveOnce.bind(secondResolver);
-    const provisionSpy = spyOn(secondProvisioner, "provisionArchiveOnce").mockImplementation(
-      (archive, cacheDir) => {
-        const provision = provisionArchiveOnce(archive, cacheDir);
-        secondProvisionStarted.resolve();
-        return provision;
-      },
-    );
+    const secondResolver = resolverFor(fileSystem, {
+      ...resolverOptions,
+      onArchiveProvisionRequested: () => secondProvisionStarted.resolve(),
+    });
     let first: string;
     let second: string;
     try {
@@ -377,7 +369,6 @@ describe("WebpBinaryResolver", () => {
       [first, second] = await Promise.all([firstResolution, secondResolution]);
     } finally {
       downloadGate.resolve();
-      provisionSpy.mockRestore();
     }
 
     expect(first).toBe(MAC_ARM64_CWEBP);

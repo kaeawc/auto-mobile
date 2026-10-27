@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { AndroidCtrlProxyDelegatingFacade } from "../../../../src/features/observe/android/AndroidCtrlProxyDelegatingFacade";
@@ -30,7 +31,7 @@ async function harness() {
   const socket = new RecordingSocket("ws://fake", "none", 0, timer);
   const adb = new FakeAdbExecutor();
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "client-settlement", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "client-settlement", platform: "android", name: "Android" },
     adb,
     {
       webSocketFactory: () => socket,
@@ -41,7 +42,7 @@ async function harness() {
   );
   await Promise.resolve();
   client.connectionTestHooks.socket = socket;
-  client["supportedCommands"] = new Set([
+  client.connectionTestHooks.supportedCommands = new Set([
     "full_command_set_v1",
     "request_id_echo_v1",
     "tap_double_v1",
@@ -70,6 +71,7 @@ async function harness() {
     "request_list_keyboard_profiles",
     "prototype_saved_v1",
     "prototype_storage_v1",
+    "prototype_timers_v1",
     "prototype_patch_v1",
     "prototype_persistence_replay_v1",
     "show_prototype",
@@ -81,16 +83,17 @@ async function harness() {
     "inspect_prototypes",
     "delete_saved_prototype",
     "clear_prototype_storage",
+    "advance_prototype_clock",
     "put_prototype_asset",
     "remove_prototype_asset",
   ]);
   client.ensureConnected = async () => true;
-  client["connectWebSocket"] = async () => true;
-  client["cancelScreenshotBackoff"] = () => {};
+  client.testHooks.overrideConnectWebSocket(async () => true);
+  client.testHooks.overrideCancelScreenshotBackoff(() => {});
   // A lost connection otherwise arms a reconnect timer, which is not a request leak.
-  client["autoReconnectEnabled"] = false;
-  adb.setCommandResponse("pidof", { stdout: "1234", stderr: "" });
-  return { client, timer, socket, manager: client["requestManager"] };
+  client.connectionTestHooks.autoReconnectEnabled = false;
+  adb.setCommandResponse("pidof", createExecResult("1234", ""));
+  return { client, timer, socket, manager: client.connectionTestHooks.requestManager };
 }
 type Harness = Awaited<ReturnType<typeof harness>>;
 
@@ -131,7 +134,23 @@ const methods: RequestMethod[] = [
   {
     name: "requestActivateAccessibilityLink",
     invoke: (h, s) =>
-      h.client.requestActivateAccessibilityLink("link", 1, undefined, LONG_TIMEOUT_MS, perf, s),
+      h.client.requestActivateAccessibilityLink({
+        text: "link",
+        occurrence: 1,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+        signal: s,
+      }),
+  },
+  {
+    name: "requestAccessibilityAction",
+    invoke: (h, s) =>
+      h.client.requestAccessibilityAction({
+        action: "expand",
+        resourceId: "com.example:id/row",
+        timeoutMs: LONG_TIMEOUT_MS,
+        signal: s,
+      }),
   },
   {
     name: "requestClipboard",
@@ -180,7 +199,14 @@ const methods: RequestMethod[] = [
   {
     name: "requestTapCoordinates",
     invoke: (h, s) =>
-      h.client.requestTapCoordinates(1, 2, 50, LONG_TIMEOUT_MS, perf, undefined, undefined, s),
+      h.client.requestTapCoordinates({
+        x: 1,
+        y: 2,
+        duration: 50,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+        signal: s,
+      }),
   },
   {
     name: "requestDoubleTapCoordinates",
@@ -203,12 +229,30 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestPinch",
-    invoke: (h, s) => h.client.requestPinch(5, 5, 10, 20, 0, 100, LONG_TIMEOUT_MS, perf, s),
+    invoke: (h, s) =>
+      h.client.requestPinch({
+        centerX: 5,
+        centerY: 5,
+        distanceStart: 10,
+        distanceEnd: 20,
+        rotationDegrees: 0,
+        duration: 100,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+        signal: s,
+      }),
   },
   {
     name: "requestGestureStart",
     abortable: false,
-    invoke: (h) => h.client.requestGestureStart("g", 1, 2, LONG_TIMEOUT_MS, perf),
+    invoke: (h) =>
+      h.client.requestGestureStart({
+        gestureId: "g",
+        x: 1,
+        y: 2,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+      }),
   },
   {
     name: "requestGestureMove",
@@ -361,6 +405,11 @@ const methods: RequestMethod[] = [
     invoke: (h) => h.client.requestClearPrototypeStorage("p", LONG_TIMEOUT_MS, perf),
   },
   {
+    name: "requestAdvancePrototypeClock",
+    abortable: false,
+    invoke: (h) => h.client.requestAdvancePrototypeClock("p", 1000, LONG_TIMEOUT_MS, perf),
+  },
+  {
     name: "requestPutPrototypeAsset",
     invoke: (h, s) =>
       h.client.requestPutPrototypeAsset(
@@ -410,7 +459,17 @@ const methods: RequestMethod[] = [
   {
     name: "requestTwoFingerSwipe",
     abortable: false,
-    invoke: (h) => h.client.requestTwoFingerSwipe(1, 2, 3, 4, 100, 50, LONG_TIMEOUT_MS, perf),
+    invoke: (h) =>
+      h.client.requestTwoFingerSwipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        duration: 100,
+        offset: 50,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+      }),
   },
   {
     name: "requestMultiFingerSwipe",
@@ -458,7 +517,7 @@ const methods: RequestMethod[] = [
   {
     name: "setPreference",
     abortable: false,
-    invoke: (h) => h.client.setPreference("pkg", "file", "key", "1", "string", LONG_TIMEOUT_MS),
+    invoke: (h) => h.client.setPreference("pkg", "file", "key", "1", "STRING", LONG_TIMEOUT_MS),
   },
   {
     name: "removePreference",
@@ -519,7 +578,7 @@ async function settle(
   if (trigger === "abort") {
     controller.abort(new Error("caller cancelled"));
   } else {
-    h.client["finishEstablishedConnection"](h.socket);
+    h.client.testHooks.finishEstablishedConnection(h.socket);
   }
   await flush();
   if (!settled) {
@@ -559,6 +618,26 @@ describe("AndroidCtrlProxyClient request settlement (#11844)", () => {
 
 /** Request-shaped public methods with a reason they are not driven over the socket here. */
 const EXCLUDED: Record<string, string> = {
+  awaitCancellableRequest:
+    "protected transport helper; exercised through the public request methods in this table",
+  sendClientCommand:
+    "protected transport helper; exercised through the public request methods in this table",
+  handleHierarchyUpdate:
+    "inbound hierarchy delivery; resolves waiters rather than creating an outbound request",
+  handleWebSocketMessage:
+    "protected inbound dispatch; resolves waiters rather than creating an outbound request",
+  getAccessibilityHierarchy:
+    "uses the hierarchy delegate covered by requestHierarchySync and hierarchy-specific tests",
+  getLatestHierarchy:
+    "uses the hierarchy delegate covered by requestHierarchySync and hierarchy-specific tests",
+  hasCachedHierarchy: "reads the in-process hierarchy cache; it sends nothing",
+  invalidateCache: "invalidates the in-process hierarchy cache; it sends nothing",
+  supportsAccessibilityLinkActivation:
+    "capability query before dispatch, covered by accessibility-link tests",
+  supportsCommand: "capability query before dispatch, covered by command-capability tests",
+  supportsNodeActionSelectors: "capability query before dispatch, covered by node-action tests",
+  verifyServiceReady:
+    "bounded retry wrapper around requestHierarchySync, covered by service-readiness tests",
   requestInstallCaCertificateFromFile:
     "reads the certificate on the host, then sends the same frame as requestInstallCaCertificate",
   getSdkCapabilities:

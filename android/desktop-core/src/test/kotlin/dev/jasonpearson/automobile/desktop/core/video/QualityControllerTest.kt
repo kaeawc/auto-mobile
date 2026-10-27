@@ -28,7 +28,13 @@ class QualityControllerTest {
 
   @Test
   fun `derives actual fps as frames over elapsed`() {
-    val controller = QualityController(initialQuality = VideoStreamQuality.Medium, targetFps = 30)
+    val controller =
+      QualityController(
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.Medium,
+          targetFps = 30,
+        ),
+      )
     // 20 frames, 50ms apart => a steady 20 fps.
     controller.feed(count = 20, intervalMs = 50)
     assertEquals(20f, controller.actualFps.value, 0.2f)
@@ -38,7 +44,13 @@ class QualityControllerTest {
   fun `measures fps by frames over elapsed, not an average of instantaneous rates`() {
     // Alternating 10ms / 90ms gaps are two frames per 100ms = 20fps. An average of instantaneous
     // 1000/dt values would overstate this to ~50fps; frames-over-elapsed reports the true rate.
-    val controller = QualityController(initialQuality = VideoStreamQuality.High, targetFps = 30)
+    val controller =
+      QualityController(
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.High,
+          targetFps = 30,
+        ),
+      )
     var t = 0L
     repeat(40) { i ->
       controller.onFrame(t)
@@ -49,7 +61,13 @@ class QualityControllerTest {
 
   @Test
   fun `reports zero fps before two frames arrive`() {
-    val controller = QualityController(initialQuality = VideoStreamQuality.Medium, targetFps = 30)
+    val controller =
+      QualityController(
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.Medium,
+          targetFps = 30,
+        ),
+      )
     assertEquals(0f, controller.actualFps.value, 0.0f)
     controller.onFrame(0)
     assertEquals(0f, controller.actualFps.value, 0.0f)
@@ -59,10 +77,12 @@ class QualityControllerTest {
   fun `cascades down while a heavy drop persists`() {
     val controller =
       QualityController(
-        initialQuality = VideoStreamQuality.High,
-        targetFps = 30,
-        samplesToDowngrade = 3,
-        minDwellMs = 0,
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.High,
+          targetFps = 30,
+          samplesToDowngrade = 3,
+          minDwellMs = 0,
+        ),
       )
     // ~17fps (60ms apart) is well under the 30fps target but faster than the idle cadence, so it is
     // read as genuine degradation and keeps stepping down to the cheapest preset.
@@ -76,10 +96,12 @@ class QualityControllerTest {
     // at ~10fps. That is not encoder/transport degradation and must not ratchet the preset down.
     val controller =
       QualityController(
-        initialQuality = VideoStreamQuality.High,
-        targetFps = 30,
-        samplesToDowngrade = 3,
-        minDwellMs = 0,
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.High,
+          targetFps = 30,
+          samplesToDowngrade = 3,
+          minDwellMs = 0,
+        ),
       )
     controller.feed(count = 60, intervalMs = 100)
     assertEquals(VideoStreamQuality.High, controller.quality.value)
@@ -89,10 +111,12 @@ class QualityControllerTest {
   fun `sustained encoder drops downgrade quality regardless of delivery cadence`() {
     val controller =
       QualityController(
-        initialQuality = VideoStreamQuality.High,
-        targetFps = 30,
-        samplesToDowngrade = 3,
-        minDwellMs = 0,
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.High,
+          targetFps = 30,
+          samplesToDowngrade = 3,
+          minDwellMs = 0,
+        ),
       )
 
     repeat(10) { dropped -> controller.onDroppedFrames((dropped + 1).toLong()) }
@@ -104,10 +128,12 @@ class QualityControllerTest {
   fun `encoder drops still downgrade when healthy frames arrive between telemetry reports`() {
     val controller =
       QualityController(
-        initialQuality = VideoStreamQuality.High,
-        targetFps = 30,
-        samplesToDowngrade = 3,
-        minDwellMs = 0,
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.High,
+          targetFps = 30,
+          samplesToDowngrade = 3,
+          minDwellMs = 0,
+        ),
       )
 
     // An actively delivering stream: healthy frames stream in between each drop report. Those
@@ -132,11 +158,13 @@ class QualityControllerTest {
   fun `static Android and iOS sources do not downgrade while encoder drops stay flat`() {
     val controller =
       QualityController(
-        initialQuality = VideoStreamQuality.High,
-        targetFps = 30,
-        samplesToDowngrade = 1,
-        minSamplesForDecision = 1,
-        minDwellMs = 0,
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.High,
+          targetFps = 30,
+          samplesToDowngrade = 1,
+          minSamplesForDecision = 1,
+          minDwellMs = 0,
+        ),
       )
 
     // Android may repeat frames and iOS may suppress them. Neither behavior increments the source
@@ -150,10 +178,12 @@ class QualityControllerTest {
   fun `does not downgrade a brief dip shorter than the hysteresis window`() {
     val controller =
       QualityController(
-        initialQuality = VideoStreamQuality.High,
-        targetFps = 30,
-        samplesToDowngrade = 3,
-        minDwellMs = 0,
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.High,
+          targetFps = 30,
+          samplesToDowngrade = 3,
+          minDwellMs = 0,
+        ),
       )
     // Warm the rate up at a healthy 30fps first.
     var t = controller.feed(count = 15, intervalMs = 33)
@@ -168,10 +198,12 @@ class QualityControllerTest {
   fun `climbs back up once the rate is sustainably healthy`() {
     val controller =
       QualityController(
-        initialQuality = VideoStreamQuality.Low,
-        targetFps = 30,
-        samplesToUpgrade = 8,
-        minDwellMs = 0,
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.Low,
+          targetFps = 30,
+          samplesToUpgrade = 8,
+          minDwellMs = 0,
+        ),
       )
     // Steady 30fps (33ms apart) is at target — healthy enough to climb to the top preset.
     controller.feed(count = 60, intervalMs = 33)
@@ -182,20 +214,24 @@ class QualityControllerTest {
   fun `never downgrades below Low or upgrades above High`() {
     val low =
       QualityController(
-        initialQuality = VideoStreamQuality.Low,
-        targetFps = 30,
-        samplesToDowngrade = 3,
-        minDwellMs = 0,
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.Low,
+          targetFps = 30,
+          samplesToDowngrade = 3,
+          minDwellMs = 0,
+        ),
       )
     low.feed(count = 30, intervalMs = 60) // ~17fps, chronic drop
     assertEquals(VideoStreamQuality.Low, low.quality.value)
 
     val high =
       QualityController(
-        initialQuality = VideoStreamQuality.High,
-        targetFps = 30,
-        samplesToUpgrade = 5,
-        minDwellMs = 0,
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.High,
+          targetFps = 30,
+          samplesToUpgrade = 5,
+          minDwellMs = 0,
+        ),
       )
     high.feed(count = 30, intervalMs = 33) // perfect rate
     assertEquals(VideoStreamQuality.High, high.quality.value)
@@ -205,10 +241,12 @@ class QualityControllerTest {
   fun `min dwell paces automatic changes to one step per window`() {
     val controller =
       QualityController(
-        initialQuality = VideoStreamQuality.High,
-        targetFps = 30,
-        samplesToDowngrade = 3,
-        minDwellMs = 5_000,
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.High,
+          targetFps = 30,
+          samplesToDowngrade = 3,
+          minDwellMs = 5_000,
+        ),
       )
     // Sustained drop over ~3.6s (< the 5s dwell): without dwell this would fall to Low, but only
     // one
@@ -221,11 +259,13 @@ class QualityControllerTest {
   fun `auto adjustment can be disabled while fps is still measured`() {
     val controller =
       QualityController(
-        initialQuality = VideoStreamQuality.High,
-        targetFps = 30,
-        samplesToDowngrade = 3,
-        minDwellMs = 0,
-        autoAdjustEnabled = false,
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.High,
+          targetFps = 30,
+          samplesToDowngrade = 3,
+          minDwellMs = 0,
+          autoAdjustEnabled = false,
+        ),
       )
     controller.feed(count = 30, intervalMs = 60)
     assertEquals(VideoStreamQuality.High, controller.quality.value)
@@ -236,11 +276,13 @@ class QualityControllerTest {
   fun `toggling auto adjustment resets the decision streaks`() {
     val controller =
       QualityController(
-        initialQuality = VideoStreamQuality.High,
-        targetFps = 30,
-        samplesToDowngrade = 3,
-        minSamplesForDecision = 1,
-        minDwellMs = 0,
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.High,
+          targetFps = 30,
+          samplesToDowngrade = 3,
+          minSamplesForDecision = 1,
+          minDwellMs = 0,
+        ),
       )
     // Two dropping samples accrue but don't yet downgrade.
     controller.feed(count = 3, intervalMs = 60) // frames at 0,60,120 => two 60ms drop intervals
@@ -256,9 +298,11 @@ class QualityControllerTest {
     val selected = mutableListOf<VideoStreamQuality>()
     val controller =
       QualityController(
-        initialQuality = VideoStreamQuality.Medium,
-        targetFps = 30,
-        onManualSelection = { selected.add(it) },
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.Medium,
+          targetFps = 30,
+          onManualSelection = { selected.add(it) },
+        ),
       )
     controller.selectQuality(VideoStreamQuality.Low)
     assertEquals(VideoStreamQuality.Low, controller.quality.value)
@@ -273,9 +317,11 @@ class QualityControllerTest {
     val selected = mutableListOf<VideoStreamQuality>()
     val controller =
       QualityController(
-        initialQuality = VideoStreamQuality.Medium,
-        targetFps = 30,
-        onManualSelection = { selected.add(it) },
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.Medium,
+          targetFps = 30,
+          onManualSelection = { selected.add(it) },
+        ),
       )
     controller.selectQuality(VideoStreamQuality.Medium)
     assertEquals(listOf(VideoStreamQuality.Medium), selected)
@@ -286,11 +332,13 @@ class QualityControllerTest {
     val selected = mutableListOf<VideoStreamQuality>()
     val controller =
       QualityController(
-        initialQuality = VideoStreamQuality.High,
-        targetFps = 30,
-        samplesToDowngrade = 3,
-        minDwellMs = 0,
-        onManualSelection = { selected.add(it) },
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.High,
+          targetFps = 30,
+          samplesToDowngrade = 3,
+          minDwellMs = 0,
+          onManualSelection = { selected.add(it) },
+        ),
       )
     controller.feed(count = 60, intervalMs = 60) // heavy drop → auto-downgrades
     assertEquals(VideoStreamQuality.Low, controller.quality.value)
@@ -302,12 +350,14 @@ class QualityControllerTest {
   fun `a reconnect gap right after a change does not immediately downgrade`() {
     val controller =
       QualityController(
-        initialQuality = VideoStreamQuality.Medium,
-        targetFps = 30,
-        // Aggressive: a single dropping sample would downgrade if the gap were counted.
-        samplesToDowngrade = 1,
-        minSamplesForDecision = 1,
-        minDwellMs = 0,
+        dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+          initialQuality = VideoStreamQuality.Medium,
+          targetFps = 30,
+          // Aggressive: a single dropping sample would downgrade if the gap were counted.
+          samplesToDowngrade = 1,
+          minSamplesForDecision = 1,
+          minDwellMs = 0,
+        ),
       )
     controller.selectQuality(VideoStreamQuality.High) // triggers a re-subscribe
     // The first frame after the reconnect arrives a long time later; the reset window swallows it

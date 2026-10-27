@@ -8,11 +8,12 @@ import {
   DeviceBootTimeoutError,
   enrichBootedDevicesFromImages,
   getInFlightAndroidColdBootReader,
+  type DeviceBootRequest,
   type DeviceBootServiceDependencies,
   type DeviceBootProgress,
 } from "../../src/devices/deviceBootService";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
-import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
+import { DefaultDeviceMatcher, type DeviceMatcher } from "../../src/utils/deviceMatcher";
 import { pickAndroidSystemImage } from "../../src/devices/deviceProvisioning";
 import { ProvisionDeviceCreateRejectedError } from "../../src/devices/exactDeviceProvisioning";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -30,8 +31,9 @@ import type { Timer } from "../../src/utils/SystemTimer";
 import type { DiscoverySource } from "../../src/utils/discoverySource";
 import { stableStringify } from "../../src/utils/stableStringify";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
-import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 import {
   InMemoryVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
@@ -47,7 +49,7 @@ const image: DeviceInfo = {
 
 function service(
   deviceManager: FakeDeviceUtils,
-  matcher = new FakeDeviceMatcher(),
+  matcher: DeviceMatcher = new FakeDeviceMatcher(),
   bootRecovery?: DeviceBootRecovery,
   timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator,
@@ -335,7 +337,7 @@ describe("DeviceBootService", () => {
         platform: "android",
         isRunning: true,
         osVersion: "35",
-        apiLevel: "35",
+        apiLevel: 35,
         formFactor: "phone",
         screenWidth: 1080,
         screenHeight: 2400,
@@ -354,7 +356,7 @@ describe("DeviceBootService", () => {
     expect(result.device).toMatchObject({
       deviceId: running.deviceId,
       osVersion: "35",
-      apiLevel: "35",
+      apiLevel: 35,
       formFactor: "phone",
       screenWidth: 1080,
       screenHeight: 2400,
@@ -393,7 +395,7 @@ describe("DeviceBootService", () => {
       name: "Pixel_9_API_35",
       platform: "android",
       isRunning: false,
-      apiLevel: "35",
+      apiLevel: 35,
       osVersion: "35",
     };
     const handset: BootedDevice = {
@@ -414,7 +416,7 @@ describe("DeviceBootService", () => {
 
     expect(enrichedHandset.apiLevel).toBeUndefined();
     expect(enrichedHandset.osVersion).toBeUndefined();
-    expect(enrichedEmulator.apiLevel).toBe("35");
+    expect(enrichedEmulator.apiLevel).toBe(35);
     expect(enrichedEmulator.osVersion).toBe("35");
   });
 
@@ -1042,14 +1044,14 @@ describe("DeviceBootService", () => {
 
   it("backfills a booted simulator's runtime from its image before CtrlProxy readiness (#7160)", async () => {
     const devices = new FakeDeviceUtils();
-    const simulator: DeviceInfo = {
+    const simulator = {
       platform: "ios",
       name: "iPhone 14 Pro",
       deviceId: "IOS-16-UDID",
       isRunning: true,
       iosVersion: "16.4",
       osVersion: "16.4",
-    };
+    } satisfies DeviceInfo;
     devices.setDeviceImages("ios", [simulator]);
     // A partial booted-device listing used to lose the runtime while the
     // matching image inventory still had it, allowing an impossible Xcode
@@ -1176,6 +1178,45 @@ describe("DeviceBootService", () => {
     expect(devices.wasMethodCalled("startDevice")).toBe(false);
   });
 
+  it.each([false, true])(
+    "boots an exact AVD beside a foreign placeholder (freshProvision=%s)",
+    async (freshProvision) => {
+      const devices = new FakeDeviceUtils();
+      devices.setDeviceImages("android", [image]);
+      devices.setBootedDevices("android", [
+        {
+          name: "Unknown (emulator-5556)",
+          platform: "android",
+          deviceId: "emulator-5556",
+          foreignOwned: true,
+        },
+      ]);
+      const result = await service(devices, new DefaultDeviceMatcher()).boot({
+        platform: "android",
+        name: image.name,
+        matchExactName: true,
+        freshProvision,
+      });
+      expect(result.source).toBe("cold-boot");
+      expect(result.device.name).toBe(image.name);
+    },
+  );
+
+  it("exact-name selection ignores a foreign runtime with the same name", async () => {
+    const devices = new FakeDeviceUtils();
+    devices.setDeviceImages("android", [image]);
+    devices.setBootedDevices("android", [
+      { name: image.name, platform: "android", deviceId: "emulator-5556", foreignOwned: true },
+      { name: image.name, platform: "android", deviceId: "emulator-5554" },
+    ]);
+    const result = await service(devices, new DefaultDeviceMatcher()).boot({
+      platform: "android",
+      name: image.name,
+      matchExactName: true,
+    });
+    expect(result.device.deviceId).toBe("emulator-5554");
+  });
+
   it("refuses an exact AVD while a running emulator's name is unresolved", async () => {
     const devices = new FakeDeviceUtils();
     devices.setDeviceImages("android", [image]);
@@ -1231,7 +1272,7 @@ describe("DeviceBootService", () => {
     let bypassedAndroidCache = false;
     devices.setBootedDevices("android", [first]);
     devices.getBootedDevicesDetailed = async (_platform, options = {}) => {
-      bypassedAndroidCache = options.bypassAndroidDeviceListCache === true;
+      bypassedAndroidCache = options?.bypassAndroidDeviceListCache === true;
       return {
         devices: [first, second],
         succeededPlatforms: new Set(["android"] as const),
@@ -1260,7 +1301,7 @@ describe("DeviceBootService", () => {
     const fresh: BootedDevice = { ...stale, deviceId: "emulator-5556" };
     let bypassedAndroidCache = false;
     devices.getBootedDevicesDetailed = async (_platform, options = {}) => {
-      bypassedAndroidCache = options.bypassAndroidDeviceListCache === true;
+      bypassedAndroidCache = options?.bypassAndroidDeviceListCache === true;
       return {
         devices: bypassedAndroidCache ? [fresh] : [stale],
         succeededPlatforms: new Set(["android"] as const),
@@ -1425,18 +1466,13 @@ describe("DeviceBootService", () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();
     const timer = new FakeTimer();
-    let killCount = 0;
     let progressStarted = false;
-    let outcome: "pending" | "rejected" = "pending";
+    const outcome: { value: "pending" | "rejected" } = { value: "pending" };
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killCount++;
-        return true;
-      },
-      pid: 12,
-    } as any);
+    const childTimer = new FakeTimer();
+    const launched = new FakeChildProcess(childTimer);
+    devices.setMockChildProcess(image.name, launched);
 
     const boot = service(devices, matcher, undefined, timer).boot(
       { platform: "android", timeoutMs: 10_000 },
@@ -1450,30 +1486,26 @@ describe("DeviceBootService", () => {
       },
     );
     void boot.catch(() => {
-      outcome = "rejected";
+      outcome.value = "rejected";
     });
 
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(progressStarted).toBe(true);
     timer.advanceTime(10_000);
     await new Promise<void>((resolve) => setImmediate(resolve));
+    childTimer.advanceTime(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(outcome).toBe("rejected");
-    expect(killCount).toBe(1);
+    expect(outcome.value).toBe("rejected");
+    expect(launched.killed).toBe(true);
   });
 
   it("opts a fresh-provision Android cold boot into offline recovery and kills the AVD process when readiness fails (#7054)", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();
-    let killCount = 0;
     devices.setDeviceImages("android", [image]);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killCount++;
-        return true;
-      },
-      pid: 24,
-    } as any);
+    const launched = new FakeChildProcess();
+    devices.setMockChildProcess(image.name, launched);
     // Mirror the diagnostic the emulator client raises when a fresh cold boot
     // stays ADB-offline through the bounded recovery.
     devices.setWaitForDeviceReadyError(
@@ -1494,25 +1526,20 @@ describe("DeviceBootService", () => {
     // The fresh-provision flag reaches the Android readiness wait...
     expect(devices.getWaitForDeviceReadyOptions()).toEqual({ freshProvision: true });
     // ...and the owned emulator process is torn down, leaving no dangling boot.
-    expect(killCount).toBe(1);
+    expect(launched.killed).toBe(true);
   });
 
   it("cancels the owned process when a pending progress callback is externally aborted", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();
     const controller = new AbortController();
-    let killCount = 0;
     let progressStarted = false;
-    let outcome: "pending" | "rejected" = "pending";
+    const outcome: { value: "pending" | "rejected" } = { value: "pending" };
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killCount++;
-        return true;
-      },
-      pid: 12,
-    } as any);
+    const childTimer = new FakeTimer();
+    const launched = new FakeChildProcess(childTimer);
+    devices.setMockChildProcess(image.name, launched);
 
     const boot = service(devices, matcher).boot(
       { platform: "android", signal: controller.signal },
@@ -1526,16 +1553,18 @@ describe("DeviceBootService", () => {
       },
     );
     void boot.catch(() => {
-      outcome = "rejected";
+      outcome.value = "rejected";
     });
 
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(progressStarted).toBe(true);
     controller.abort(new Error("request cancelled"));
     await new Promise<void>((resolve) => setImmediate(resolve));
+    childTimer.advanceTime(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(outcome).toBe("rejected");
-    expect(killCount).toBe(1);
+    expect(outcome.value).toBe("rejected");
+    expect(launched.killed).toBe(true);
   });
 
   it("preserves an explicit null abort reason instead of substituting an error", async () => {
@@ -1546,10 +1575,8 @@ describe("DeviceBootService", () => {
     let rejection: unknown = "unset";
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => true,
-      pid: 12,
-    } as any);
+    const childTimer = new FakeTimer();
+    devices.setMockChildProcess(image.name, new FakeChildProcess(childTimer));
 
     const boot = service(devices, matcher).boot(
       { platform: "android", signal: controller.signal },
@@ -1570,6 +1597,8 @@ describe("DeviceBootService", () => {
     expect(progressStarted).toBe(true);
     controller.abort(null);
     await new Promise<void>((resolve) => setImmediate(resolve));
+    childTimer.advanceTime(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(rejection).toBeNull();
   });
@@ -1577,16 +1606,10 @@ describe("DeviceBootService", () => {
   it("cancels the owned process when final progress reporting fails", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();
-    let killCount = 0;
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killCount++;
-        return true;
-      },
-      pid: 12,
-    } as any);
+    const launched = new FakeChildProcess();
+    devices.setMockChildProcess(image.name, launched);
 
     await expect(
       service(devices, matcher).boot(
@@ -1601,7 +1624,7 @@ describe("DeviceBootService", () => {
       ),
     ).rejects.toThrow("progress failed");
 
-    expect(killCount).toBe(1);
+    expect(launched.killed).toBe(true);
   });
 
   it("preserves successful cold-boot progress reporting", async () => {
@@ -1979,22 +2002,16 @@ describe("DeviceBootService", () => {
   it("cancels a failed cold boot through its launch handle", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();
-    let killed = false;
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killed = true;
-        return true;
-      },
-      pid: 12,
-    } as any);
+    const launched = new FakeChildProcess();
+    devices.setMockChildProcess(image.name, launched);
     devices.setWaitForDeviceReadyError(new Error("not ready"));
 
     await expect(service(devices, matcher).boot({ platform: "android" })).rejects.toThrow(
       "not ready",
     );
-    expect(killed).toBe(true);
+    expect(launched.killed).toBe(true);
   });
 
   it("applies an injected recovery policy at the cold product boot boundary", async () => {
@@ -2083,6 +2100,7 @@ describe("DeviceBootService", () => {
           provisionCriteria = criteria;
           return {
             platform: "ios",
+            prebootDisabledResources: ["widgets"],
             name: "AutoMobile CI iPhone",
             deviceId: "CI-UDID",
             deviceType: "iPhone",
@@ -2093,7 +2111,7 @@ describe("DeviceBootService", () => {
       matchingStrategy: "LATEST",
     });
 
-    await bootService.boot({
+    const result = await bootService.boot({
       platform: "ios",
       name: "AutoMobile CI iPhone (26.3)",
       minOsVersion: "26.3",
@@ -2102,6 +2120,7 @@ describe("DeviceBootService", () => {
       createIfMissing: true,
     });
 
+    expect(result.prebootDisabledResources).toEqual(["widgets"]);
     expect(provisionCriteria).toMatchObject({ minOsVersion: "26.3", maxOsVersion: "26.3" });
   });
 
@@ -2313,7 +2332,7 @@ describe("DeviceBootService", () => {
         signalFreshDiscovery = resolve;
       });
       devices.getBootedDevicesDetailed = async (platform, options) => {
-        if (ownerReadinessActive && options.bypassAndroidDeviceListCache === true) {
+        if (ownerReadinessActive && options?.bypassAndroidDeviceListCache === true) {
           signalFreshDiscovery();
         }
         return await originalGetBootedDevicesDetailed(platform, options);
@@ -2390,7 +2409,7 @@ describe("DeviceBootService", () => {
       devices.getBootedDevicesDetailed = async (platform, options) => {
         if (
           platform === "android" &&
-          options.bypassAndroidDeviceListCache === true &&
+          options?.bypassAndroidDeviceListCache === true &&
           !transportVisible
         ) {
           hiddenAdopterDiscoveries++;
@@ -2573,7 +2592,7 @@ describe("DeviceBootService", () => {
         signalFreshDiscovery = resolve;
       });
       devices.getBootedDevicesDetailed = async (platform, options) => {
-        if (ownerReadinessActive && options.bypassAndroidDeviceListCache === true) {
+        if (ownerReadinessActive && options?.bypassAndroidDeviceListCache === true) {
           signalFreshDiscovery();
         }
         return await originalGetBootedDevicesDetailed(platform, options);
@@ -2608,13 +2627,6 @@ describe("DeviceBootService", () => {
       const devices = new FakeDeviceUtils();
       const timer = new FakeTimer();
       const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
-      const lifecycleLease: VirtualDeviceLifecycleLease = {
-        signal: new AbortController().signal,
-        identity: { kind: "selector", platform: "android", selector: "retry-boundary-test" },
-        bindCanonicalIdentity: async () => {},
-        transitionToTeardown: () => {},
-        release: () => {},
-      };
       const ownerImage = { ...image, deviceId: "emulator-5554", isRunning: false };
       const retryGate = Promise.withResolvers<void>();
       const firstAttemptFailed = Promise.withResolvers<void>();
@@ -2669,7 +2681,7 @@ describe("DeviceBootService", () => {
       const originalGetBootedDevicesDetailed = devices.getBootedDevicesDetailed.bind(devices);
       let retryPending = false;
       devices.getBootedDevicesDetailed = async (platform, options) => {
-        if (retryPending && options.bypassAndroidDeviceListCache === true) {
+        if (retryPending && options?.bypassAndroidDeviceListCache === true) {
           retryGapDiscovery();
           return {
             devices: [{ name: image.name, platform: "android", deviceId: "emulator-5554" }],
@@ -2684,7 +2696,6 @@ describe("DeviceBootService", () => {
       const owner = ownerBootService.boot({
         platform: "android",
         deviceId: image.name,
-        lifecycleLease,
       });
       await firstAttemptFailed.promise;
       devices.setBootedDevices("android", [
@@ -2694,7 +2705,6 @@ describe("DeviceBootService", () => {
       const concurrent = concurrentBootService.boot({
         platform: "android",
         deviceId: image.name,
-        lifecycleLease,
       });
       await retryGapDiscovered;
       retryGate.resolve();
@@ -2737,7 +2747,7 @@ describe("DeviceBootService", () => {
       devices.getBootedDevices = async () => [];
       let freshChecks = 0;
       devices.getBootedDevicesDetailed = async (_platform, options) => {
-        if (options.bypassIosDeviceListCache === true) {
+        if (options?.bypassIosDeviceListCache === true) {
           freshChecks++;
         }
         return {
@@ -3319,7 +3329,7 @@ describe("DeviceBootService", () => {
       const pendingReadiness = new Promise<BootedDevice>(() => {});
       devices.setDeviceImages("android", [image]);
       matcher.setImageResult(image);
-      devices.setMockChildProcess(image.name, { kill: () => true, pid: 12 } as any);
+      devices.setMockChildProcess(image.name, new FakeChildProcess());
       devices.waitForDeviceReady = async () => {
         markReadinessStarted();
         return pendingReadiness;

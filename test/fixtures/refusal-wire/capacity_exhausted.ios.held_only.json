@@ -1,0 +1,13 @@
+{
+  "code": "capacity_exhausted.ios.held_only",
+  "builder": "assertBootCapacityGranted via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Refused to boot: no simulator capacity (code capacity_exhausted, retryable; retry after 5000ms): 2 simulator(s) booted; limit is 2 (default). 2 of them are held by AutoMobile: 9A1B2C3D-0000-4000-8000-000000000001, 9A1B2C3D-0000-4000-8000-000000000002. Shut one down, raise the limit with AUTOMOBILE_IOS_SIM_MAX_BOOTED.\",\"platform\":\"ios\",\"limit\":2,\"booted\":2,\"retryAfterMs\":5000,\"heldDevices\":[\"9A1B2C3D-0000-4000-8000-000000000001\",\"9A1B2C3D-0000-4000-8000-000000000002\"],\"code\":\"capacity_exhausted\",\"retryable\":true}"
+      }
+    ],
+    "isError": true
+  }
+}

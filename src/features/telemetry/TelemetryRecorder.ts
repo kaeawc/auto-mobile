@@ -1,8 +1,9 @@
 import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
 import type { PrototypeScope } from "../prototype/PrototypeStatusStore";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { recordNetworkEvent, type RecordNetworkEventInput } from "../../db/networkEventRepository";
-import { NetworkState } from "../../server/NetworkState";
+import { NetworkState } from "../../utils/NetworkState";
 import { recordLogEvent, type RecordLogEventInput } from "../../db/logEventRepository";
 import { recordOsEvent, type RecordOsEventInput } from "../../db/osEventRepository";
 import {
@@ -15,6 +16,7 @@ import { getTelemetryPushServer } from "../../daemon/telemetryPushSocketServer";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import type { TelemetryEventBuffer } from "./TelemetryEventBuffer";
 import { testOverrides } from "../../utils/testOverrides";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 
 export type TelemetryCategory =
   | "network"
@@ -111,7 +113,7 @@ export class TelemetryRecorder {
 
   constructor(
     repository: TelemetryRepository = TelemetryRecorder.defaultRepositoryOverride === undefined
-      ? process.env.NODE_ENV === "test" && testOverrides.telemetryNoOpDefault
+      ? readEnvRaw(AMBIENT_ENV.NODE_ENV) === "test" && testOverrides.telemetryNoOpDefault
         ? noOpRepository
         : defaultRepository
       : (TelemetryRecorder.defaultRepositoryOverride ?? defaultRepository),
@@ -406,6 +408,14 @@ export class TelemetryRecorder {
     });
   }
 
+  /**
+   * True only after a confirmed write. Unbuffered, that is the repository write
+   * itself; buffered, it is the TelemetryEventBuffer receipt (issue #14625),
+   * which resolves only once the row's batch committed and `false` when that
+   * batch failed or the buffer was stopped. A buffered call therefore settles on
+   * the next flush, not immediately: callers on a poll path must not await it
+   * inline (the iOS ingestor commits its dedupe state when it settles).
+   */
   async recordLayoutEvent(event: {
     timestamp: number;
     applicationId: string | null;
@@ -417,27 +427,40 @@ export class TelemetryRecorder {
     likelyCause: string | null;
     detailsJson: string | null;
     screenName?: string | null;
-  }): Promise<void> {
+  }): Promise<boolean> {
     const { deviceId, sessionId } = this.snapshotContext();
     const input: RecordLayoutEventInput = { deviceId, sessionId, ...event };
-
-    if (this.buffer) {
-      this.buffer.addLayout(input);
-    } else {
-      try {
-        await this.getBarrier().track(() => this.repository.recordLayoutEvent(input));
-      } catch (e) {
-        logger.error(`[TelemetryRecorder] Failed to record layout event: ${e}`);
-      }
-    }
-
-    this.pushToSocket({
+    const layoutEvent: TelemetryEvent = {
       category: "layout",
       timestamp: event.timestamp,
       deviceId,
       sessionId,
       data: event,
-    });
+    };
+
+    if (this.buffer) {
+      const receipt = this.buffer.addLayout(input);
+      // Push before awaiting the receipt so the live feed is not delayed by the
+      // flush interval, matching the other buffered kinds.
+      this.pushToSocket(layoutEvent);
+      return receipt;
+    }
+
+    let persisted = false;
+    try {
+      persisted =
+        (await this.getBarrier().track(async () => {
+          await this.repository.recordLayoutEvent(input);
+          return true;
+        })) === true;
+    } catch (error) {
+      logger.warn(
+        `[TelemetryRecorder] Failed to record layout event: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    this.pushToSocket(layoutEvent);
+    return persisted;
   }
 
   /**

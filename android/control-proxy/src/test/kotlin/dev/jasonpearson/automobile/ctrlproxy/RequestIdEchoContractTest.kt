@@ -20,6 +20,7 @@ class RequestIdEchoContractTest {
   private val idLessEvents =
     setOf(
       "connected",
+      "display_transition",
       "interaction_event",
       "prototype_event",
       "package_event",

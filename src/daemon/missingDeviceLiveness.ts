@@ -2,14 +2,16 @@ import { clearDeviceError, markDeviceError, holderOf, isIdle } from "./deviceBin
 import { logger } from "../utils/logger";
 import type { BootedDevice, Platform } from "../models";
 import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
-import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources";
-import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResources";
+import {
+  resetBootedDevicesResourceCache,
+  resetAndroidDeviceImageResourceCache,
+} from "./deviceResourceInvalidation";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
 import type { PooledDevice, RemoveDeviceOptions, SessionRecoveryPreparation } from "./devicePool";
 import type { IdentityComparison } from "../devices/deviceIdentityEvidence";
 
-/** Consecutive successful discovery sweeps required to confirm absence. */
+/** Missing observations required to confirm absence without intervening presence. */
 export const MISSING_DEVICE_MISS_THRESHOLD = 3;
 
 export function classifyMissingDeviceObservation(
@@ -19,13 +21,16 @@ export function classifyMissingDeviceObservation(
   return !sourceSucceeded ? "source-unavailable" : devicePresent ? "present" : "missing";
 }
 
-/** A failed source supplies no evidence of absence and breaks the miss streak. */
+/** A failed source supplies no evidence either way: hold until presence or another miss. */
 export function observeMissingDevice(
   missesByDevice: Map<string, number>,
   deviceId: string,
   observation: "present" | "missing" | "source-unavailable",
 ): { misses: number; confirmedGone: boolean } {
-  if (observation !== "missing") {
+  if (observation === "source-unavailable") {
+    return { misses: missesByDevice.get(deviceId) ?? 0, confirmedGone: false };
+  }
+  if (observation === "present") {
     missesByDevice.delete(deviceId);
     return { misses: 0, confirmedGone: false };
   }
@@ -325,15 +330,23 @@ export class MissingDeviceLiveness {
   }
 
   /**
-   * One fresh discovery sweep for presence checks. Bypass the Android device-list
-   * cache for this read without invalidating other callers' cached snapshot.
+   * One fresh discovery sweep for presence checks. Bypass the platform's device-list
+   * cache for this read without invalidating other callers' cached snapshot. iOS needs
+   * it too: a mapped simulator listing taken before a fast boot stays cached for 5 s and
+   * still shows the just-booted clone Shutdown, so the bind that follows the boot was
+   * refused as "not available in the device pool" (#15295).
    */
   async takeFreshPresenceDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
     resetBootedDevicesResourceCache();
     resetAndroidDeviceImageResourceCache();
     const discovery = await this.pool
       .getDeviceManager()
-      .getBootedDevicesDetailed(platform, { bypassAndroidDeviceListCache: true });
+      .getBootedDevicesDetailed(
+        platform,
+        platform === "ios"
+          ? { bypassIosDeviceListCache: true }
+          : { bypassAndroidDeviceListCache: true },
+      );
     return this.pool.mapAndroidDiscovery &&
       this.pool.needsAndroidTransportNormalization?.(discovery.devices)
       ? { ...discovery, devices: this.pool.mapAndroidDiscovery(discovery.devices) }
@@ -345,7 +358,7 @@ export class MissingDeviceLiveness {
    * either the pooled entry is the runtime that answered, or a different one
    * has taken the serial and the entry must be replaced.
    */
-  private async reconcileDiscoveredPooledDevice(
+  async reconcileDiscoveredPooledDevice(
     device: PooledDevice,
     bootedDevice: BootedDevice,
     assignmentLockHeld: boolean,
@@ -610,7 +623,7 @@ export class MissingDeviceLiveness {
     return true;
   }
 
-  private async resolveMissingDeviceIncident(
+  async resolveMissingDeviceIncident(
     device: PooledDevice,
     attemptDeviceLossRecovery: boolean,
     incidentId: string | undefined,

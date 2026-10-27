@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { activeVideoRecording } from "../helpers/planVideoFixtures";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -84,7 +85,7 @@ describe("plan video warnings and completed recording recovery", () => {
     start = spyOn(
       AndroidSegmentedPlanVideoSession.prototype,
       "startFirstSegment",
-    ).mockResolvedValue(undefined);
+    ).mockResolvedValue(activeVideoRecording("video-warnings"));
     finalize = spyOn(AndroidSegmentedPlanVideoSession.prototype, "finalize");
   });
   afterEach(async () => {

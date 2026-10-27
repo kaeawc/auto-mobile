@@ -1458,8 +1458,12 @@ describe("DeviceSessionRepository", () => {
       ).resolves.toBe("released");
 
       const row = await repo.getSession("session-1");
-      expect(row!.release_reason).toBe(deviceRestartReleaseReason(androidDevice.name));
-      expect(isRecoverableDaemonReleaseReason(row!.release_reason)).toBe(true);
+      const reason = row?.release_reason;
+      expect(reason).toBe(deviceRestartReleaseReason(androidDevice.name));
+      if (reason === null || reason === undefined) {
+        throw new Error("Expected a persisted release reason");
+      }
+      expect(isRecoverableDaemonReleaseReason(reason)).toBe(true);
     } finally {
       sessionManager.stopCleanupTimer();
     }

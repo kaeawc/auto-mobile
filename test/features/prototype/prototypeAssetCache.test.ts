@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { FilePrototypeAssetCache } from "../../../src/features/prototype/prototypeAssetCache";
 import { FakeMirrorFileSystem } from "../../fakes/FakeMirrorFileSystem";
 import { logger } from "../../../src/utils/logger";
@@ -31,16 +31,15 @@ function harness(maxBytes = 64) {
       ),
   };
 }
-const warnings: ReturnType<typeof spyOn<typeof logger, "warn">>[] = [];
+let warning: ReturnType<typeof spyOn<typeof logger, "warn">>;
+beforeEach(() => {
+  warning = spyOn(logger, "warn");
+});
 function silence() {
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  warnings.push(warn);
-  return warn;
+  return warning.mockImplementation(() => {});
 }
 afterEach(() => {
-  for (const warn of warnings.splice(0)) {
-    warn.mockRestore();
-  }
+  warning.mockRestore();
 });
 describe("persistent prototype asset cache", () => {
   test("round trip and restart preserve arbitrary ids and isolate devices", async () => {

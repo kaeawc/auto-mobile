@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { createDefaultHostExec } from "../../../src/features/utility/DeepLinkManager";
 import {
   DefaultHostCommandExecutor,
@@ -8,12 +9,12 @@ import {
 
 describe("DeepLinkManager default host exec", () => {
   test("passes argv and maxBuffer through the seam and closes stdin", async () => {
-    const writes: string[] = [];
+    const child = new FakeChildProcess();
     const calls: Array<{ file: string; args: string[]; maxBuffer?: number }> = [];
     const fakeExec: ExecFileWithChild = (file, args, options, callback) => {
       calls.push({ file, args, maxBuffer: options?.maxBuffer });
       queueMicrotask(() => callback(null, Buffer.from("out"), Buffer.from("err")));
-      return { stdin: { end: (value: string) => writes.push(value) } } as unknown as ChildProcess;
+      return child;
     };
     const executor = new DefaultHostCommandExecutor(
       async () => ({ stdout: "", stderr: "" }),
@@ -23,7 +24,7 @@ describe("DeepLinkManager default host exec", () => {
     const result = await createDefaultHostExec(executor)("tool", ["literal arg"], "input");
 
     expect(calls).toEqual([{ file: "tool", args: ["literal arg"], maxBuffer: 16 * 1024 * 1024 }]);
-    expect(writes).toEqual(["input"]);
+    expect(child.getStdinData().toString()).toBe("input");
     expect(result.stdout).toBe("out");
     expect(result.stderr).toBe("err");
     expect(result.toString()).toBe("out");

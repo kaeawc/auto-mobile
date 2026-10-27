@@ -92,9 +92,11 @@ const SAMPLE_XCTESTRUN_V2 = `<?xml version="1.0" encoding="UTF-8"?>
 </dict>
 </plist>`;
 
-function expectDict(value: unknown): Map<string, unknown> {
-  expect(value).toBeInstanceOf(Map);
-  return value as Map<string, unknown>;
+function expectDict(value: unknown): Map<string, PlistValue> {
+  if (!(value instanceof Map)) {
+    throw new Error("expected the plist value to be a dictionary");
+  }
+  return value;
 }
 
 describe("XctestrunPlist", function () {
@@ -213,7 +215,7 @@ describe("XctestrunPlist", function () {
     });
 
     test("escapes XML-special characters in string values", async function () {
-      const root = new Map<string, unknown>([["weird", 'a & b < c > d "q"']]);
+      const root = new Map<string, PlistValue>([["weird", 'a & b < c > d "q"']]);
       const xml = buildPlist(root);
       expect(xml).toContain("a &amp; b &lt; c &gt; d");
       const reparsed = expectDict(await parsePlist(xml));
@@ -304,8 +306,8 @@ describe("XctestrunPlist", function () {
     });
 
     test("creates EnvironmentVariables when the UI-test target lacks one", async function () {
-      const root = new Map<string, unknown>([
-        ["UITarget", new Map<string, unknown>([["IsUITestBundle", true]])],
+      const root = new Map<string, PlistValue>([
+        ["UITarget", new Map<string, PlistValue>([["IsUITestBundle", true]])],
       ]);
       const count = injectUITestEnvironment(root, { CTRL_PROXY_IOS_PORT: "9000" });
       expect(count).toBe(1);
@@ -314,8 +316,8 @@ describe("XctestrunPlist", function () {
     });
 
     test("returns 0 when there is no UI-test bundle", async function () {
-      const root = new Map<string, unknown>([
-        ["UnitTarget", new Map<string, unknown>([["IsUITestBundle", false]])],
+      const root = new Map<string, PlistValue>([
+        ["UnitTarget", new Map<string, PlistValue>([["IsUITestBundle", false]])],
       ]);
       expect(injectUITestEnvironment(root, { X: "1" })).toBe(0);
     });

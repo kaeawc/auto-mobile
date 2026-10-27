@@ -40,12 +40,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 /**
@@ -94,6 +96,24 @@ fun AudioPlayerComponent(
     }
   }
 
+  AudioPlayerCard(
+    audioResource,
+    modifier,
+    viewModel,
+    AudioPlayerState(isPlaying, isPlayerReady, currentPosition, duration),
+    playbackError,
+  )
+}
+
+@Composable
+private fun AudioPlayerCard(
+  audioResource: VideoResource,
+  modifier: Modifier,
+  viewModel: MediaPlayerViewModel,
+  state: AudioPlayerState,
+  playbackError: String?,
+) {
+  val context = LocalContext.current
   AutoMobileContentCard(
     modifier = modifier,
     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
@@ -130,10 +150,7 @@ fun AudioPlayerComponent(
       // Audio player interface
       if (playbackError == null) {
         AudioPlayerInterface(
-          isPlaying = isPlaying,
-          isPlayerReady = isPlayerReady,
-          currentPosition = currentPosition,
-          duration = duration,
+          state = state,
           onPlayPause = { viewModel.togglePlayPause() },
           onSeek = { position -> viewModel.seekTo(position) },
           onVolumeChange = { volume -> viewModel.setVolume(volume) },
@@ -143,17 +160,22 @@ fun AudioPlayerComponent(
   }
 }
 
+data class AudioPlayerState(
+  val isPlaying: Boolean,
+  val isPlayerReady: Boolean,
+  val currentPosition: Long,
+  val duration: Long,
+)
+
 /** Audio player interface with visualizations and controls. */
 @Composable
 fun AudioPlayerInterface(
-  isPlaying: Boolean,
-  isPlayerReady: Boolean,
-  currentPosition: Long,
-  duration: Long,
+  state: AudioPlayerState,
   onPlayPause: () -> Unit,
   onSeek: (Long) -> Unit,
   onVolumeChange: (Float) -> Unit,
 ) {
+  val (isPlaying, isPlayerReady, currentPosition, duration) = state
   Column(
     horizontalAlignment = Alignment.CenterHorizontally,
     verticalArrangement = Arrangement.spacedBy(24.dp),
@@ -361,7 +383,7 @@ private fun formatTime(timeMs: Long): String {
   val seconds = (timeMs / 1000).toInt()
   val minutes = seconds / 60
   val remainingSeconds = seconds % 60
-  return "%02d:%02d".format(minutes, remainingSeconds)
+  return "%02d:%02d".format(Locale.ROOT, minutes, remainingSeconds)
 }
 
 /** Preview for the audio player component. */
@@ -372,7 +394,7 @@ fun AudioPlayerComponentPreview() {
     AudioPlayerComponent(
       audioResource =
         VideoResource.UriVideo(
-          android.net.Uri.parse("https://www.soundjay.com/misc/sounds/bell-ringing-05.wav"),
+          "https://www.soundjay.com/misc/sounds/bell-ringing-05.wav".toUri(),
         ),
     )
   }

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
@@ -8,11 +9,11 @@ describe("Android semantic link activation outcomes", () => {
   const createClient = async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    adb.setCommandResponse("forward", createExecResult("8765", ""));
     adb.setScreenState(true);
     let socket!: FakeWebSocket;
     const client = AndroidCtrlProxyClient.createForTesting(
-      { deviceId: "semantic-link", platform: "android", name: "Test Device", isEmulator: true },
+      { deviceId: "semantic-link", platform: "android", name: "Test Device" },
       adb,
       {
         webSocketFactory: (url) => (socket = new FakeWebSocket(url, "none", 0, timer)),
@@ -50,28 +51,26 @@ describe("Android semantic link activation outcomes", () => {
     });
     let dispatchCount = 0;
     try {
-      const pending = client.requestActivateAccessibilityLink(
-        "Terms",
-        0,
-        undefined,
-        5000,
-        undefined,
-        controller.signal,
-        () => {
+      const pending = client.requestActivateAccessibilityLink({
+        text: "Terms",
+        occurrence: 0,
+        timeoutMs: 5000,
+        signal: controller.signal,
+        onDispatch: () => {
           dispatchCount++;
         },
-      );
+      });
       await written;
       if (mode === "timeout") {
         timer.advanceTime(5000);
       } else if (mode === "transport") {
-        client["requestManager"].cancelAll("WebSocket connection closed");
+        socket.terminate();
       } else if (mode === "abort after dispatch") {
         controller.abort(new Error("cancelled"));
         for (let i = 0; i < 30; i++) {
           await Promise.resolve();
         }
-        expect(client["requestManager"].getPendingCount()).toBe(0);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
         timer.advanceTime(5000);
       } else {
         socket.simulateMessage(
@@ -91,7 +90,7 @@ describe("Android semantic link activation outcomes", () => {
       expect(result.retryable).toBe(acknowledged ? undefined : false);
       expect(frames).toHaveLength(1);
       expect(dispatchCount).toBe(1);
-      expect(client["requestManager"].getPendingCount()).toBe(0);
+      expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
       if (mode.includes("refusal")) {
         expect(result.error).toBe("node refused activation");
       }
@@ -105,7 +104,7 @@ describe("Android semantic link activation outcomes", () => {
     const { client, socket } = await createClient();
     const controller = new AbortController();
     const reason = new Error("cancelled before send");
-    const manager = client["requestManager"];
+    const manager = client.connectionTestHooks.requestManager;
     const register = manager.register.bind(manager);
     const registration = spyOn(manager, "register").mockImplementation((...args) => {
       const pending = register(...args);
@@ -114,19 +113,20 @@ describe("Android semantic link activation outcomes", () => {
     });
     const send = spyOn(socket, "send");
     try {
-      const pending = client.requestActivateAccessibilityLink(
-        "Terms",
-        0,
-        undefined,
-        5000,
-        undefined,
-        controller.signal,
-      );
+      const pending = client.requestActivateAccessibilityLink({
+        text: "Terms",
+        occurrence: 0,
+        timeoutMs: 5000,
+        signal: controller.signal,
+      });
       for (let i = 0; i < 30; i++) {
         await Promise.resolve();
       }
       const pendingCount = manager.getPendingCount();
-      client["requestManager"].resolveError(manager.getPendingIds()[0], "unfixed request sent");
+      client.connectionTestHooks.requestManager.resolveError(
+        manager.getPendingIds()[0],
+        "unfixed request sent",
+      );
       await expect(pending).rejects.toBe(reason);
       expect(pendingCount).toBe(0);
       expect(registration).toHaveBeenCalledTimes(1);

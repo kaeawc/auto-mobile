@@ -139,7 +139,7 @@ describe("DevicePool", () => {
         session_timeout_ms: 60_000,
         heartbeat_timeout_ms: 60_000,
         heartbeat_timeout_source: "custom",
-        has_received_heartbeat: false,
+        has_received_heartbeat: 0,
         liveness_policy: "cli-idle",
         pre_cli_heartbeat_timeout_ms: 12_000,
         pre_cli_heartbeat_timeout_source: "custom",

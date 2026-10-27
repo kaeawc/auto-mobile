@@ -156,6 +156,38 @@
         "acquireNewSession": false
       }
     },
+    "socket-frame.cancelled.sdkCapabilityQuery": {
+      "expected": "retry",
+      "fields": {
+        "code": "cancelled",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "socket-frame.timeout.sdkCapabilityQuery": {
+      "expected": "retry",
+      "fields": {
+        "code": "timeout",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "socket-frame.not_connected.sdkCapabilityQuery": {
+      "expected": "retry",
+      "fields": {
+        "code": "not_connected",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "socket-frame.sdk_capability_query_failed": {
+      "expected": "retry",
+      "fields": {
+        "code": "sdk_capability_query_failed",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
     "socket-frame.timeout.boot": {
       "expected": "retry",
       "fields": {
@@ -344,7 +376,29 @@
           "retryAfterMs": 5000,
           "externalDevices": ["9A1B2C3D-0000-4000-8000-000000000001"],
           "code": "capacity_exhausted",
-          "retryable": true
+          "retryable": true,
+          "heldDevices": ["9A1B2C3D-0000-4000-8000-000000000002"]
+        }
+      }
+    },
+    "socket-frame.capacity_exhausted.ios.held_only": {
+      "expected": "wait",
+      "fields": {
+        "code": "capacity_exhausted",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 5000,
+        "details": {
+          "platform": "ios",
+          "limit": 2,
+          "booted": 2,
+          "retryAfterMs": 5000,
+          "code": "capacity_exhausted",
+          "retryable": true,
+          "heldDevices": [
+            "9A1B2C3D-0000-4000-8000-000000000001",
+            "9A1B2C3D-0000-4000-8000-000000000002"
+          ]
         }
       }
     },

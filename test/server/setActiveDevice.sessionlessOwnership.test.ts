@@ -8,7 +8,7 @@ import {
 } from "../../src/daemon/inputDeviceOwnership";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -104,8 +104,8 @@ describe("sessionless setActiveDevice respects device ownership (#11071)", () =>
 
     expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
     expect(error?.message).toContain(`already assigned to session ${HOLDER}`);
-    expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
-    expect(tools.deviceSessionManager.getExplicitDevicePin()).toBeUndefined();
+    expect(tools.deviceReadiness.getEnsureDeviceReadyCalls()).toBe(0);
+    expect(tools.deviceReadiness.getExplicitDevicePin()).toBeUndefined();
   });
 
   arranged("a device an autolock owner holds is refused, typed, before readiness", async () => {
@@ -114,8 +114,8 @@ describe("sessionless setActiveDevice respects device ownership (#11071)", () =>
     const error = await refusal(tools.call("setActiveDevice", { deviceId: free.deviceId }));
 
     expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
-    expect(tools.deviceSessionManager.getExplicitDevicePin()).toBeUndefined();
+    expect(tools.deviceReadiness.getEnsureDeviceReadyCalls()).toBe(0);
+    expect(tools.deviceReadiness.getExplicitDevicePin()).toBeUndefined();
   });
 
   arranged("the holder's own connection selects its device as its session (#10994)", async () => {
@@ -125,13 +125,13 @@ describe("sessionless setActiveDevice respects device ownership (#11071)", () =>
     });
 
     expect(JSON.stringify(result)).toContain(HOLDER);
-    expect(tools.deviceSessionManager.getExplicitDevicePin()).toBeUndefined();
+    expect(tools.deviceReadiness.getExplicitDevicePin()).toBeUndefined();
   });
 
   arranged("a free device is still selected and pinned", async () => {
     await tools.call("setActiveDevice", { deviceId: free.deviceId });
 
-    expect(tools.deviceSessionManager.getExplicitDevicePin()?.deviceId).toBe(free.deviceId);
+    expect(tools.deviceReadiness.getExplicitDevicePin()?.deviceId).toBe(free.deviceId);
   });
 
   arranged(
@@ -139,7 +139,7 @@ describe("sessionless setActiveDevice respects device ownership (#11071)", () =>
     async () => {
       const release = Promise.withResolvers<void>();
       const entered = Promise.withResolvers<void>();
-      tools.deviceSessionManager.setEnsureDeviceReadyHook(async () => {
+      tools.deviceReadiness.setEnsureDeviceReadyHook(async () => {
         entered.resolve();
         await release.promise;
       });
@@ -151,7 +151,7 @@ describe("sessionless setActiveDevice respects device ownership (#11071)", () =>
       const error = await outcome;
 
       expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-      expect(tools.deviceSessionManager.getExplicitDevicePin()).toBeUndefined();
+      expect(tools.deviceReadiness.getExplicitDevicePin()).toBeUndefined();
     },
   );
 });

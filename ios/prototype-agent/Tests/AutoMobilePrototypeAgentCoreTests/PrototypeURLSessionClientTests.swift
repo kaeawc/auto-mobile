@@ -7,6 +7,7 @@ import XCTest
 /// What the stubbed network does for one request.
 enum StubReply: @unchecked Sendable {
     case respond(status: Int, headers: [String: String], chunks: [Data])
+    case redirect(status: Int, url: URL)
     case fail(code: Int)
     case hang
 }
@@ -69,6 +70,16 @@ final class StubProtocol: URLProtocol {
                 client?.urlProtocol(self, didLoad: chunk)
             }
             client?.urlProtocolDidFinishLoading(self)
+        case let .redirect(status, url)?:
+            guard let source = request.url,
+                  let response = HTTPURLResponse(
+                      url: source,
+                      statusCode: status,
+                      httpVersion: "HTTP/1.1",
+                      headerFields: [:]
+                  )
+            else { return }
+            client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: url), redirectResponse: response)
         case let .fail(code)?:
             client?.urlProtocol(self, didFailWithError: NSError(domain: NSURLErrorDomain, code: code))
         case .hang?, nil:
@@ -81,11 +92,15 @@ final class StubProtocol: URLProtocol {
 
 final class PrototypeURLSessionClientTests: XCTestCase {
     private func client() -> PrototypeURLSessionClient {
-        PrototypeURLSessionClient(protocolClasses: [StubProtocol.self])
+        PrototypeURLSessionClient(
+            protocolClasses: [StubProtocol.self],
+            resolver: FakeHostResolver(),
+            metrics: FakeConnectionMetrics.allowed
+        )
     }
 
     private func call(
-        _ url: String = "http://localhost:8080/feed?q=hello+world",
+        _ url: String = "http://public.example:8080/feed?q=hello+world",
         method: PrototypeRequestMethod = .get,
         headers: [String: String] = [:],
         body: Data? = nil,
@@ -117,12 +132,12 @@ final class PrototypeURLSessionClientTests: XCTestCase {
     func testADynamicUrlHeadersAndBodyReachTheSession() async throws {
         StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: []) }
         let request = call(
-            "http://localhost:8080/items/7?q=a+b&page=2", method: .post,
+            "http://public.example:8080/items/7?q=a+b&page=2", method: .post,
             headers: ["Accept": "application/json", "X-Token": "abc"], body: Data("payload".utf8)
         )
         _ = try await client().perform(request)
         let seen = try XCTUnwrap(StubProtocol.requests.first)
-        XCTAssertEqual(seen.url?.absoluteString, "http://localhost:8080/items/7?q=a+b&page=2")
+        XCTAssertEqual(seen.url?.absoluteString, "http://public.example:8080/items/7?q=a+b&page=2")
         XCTAssertEqual(seen.httpMethod, "POST")
         XCTAssertEqual(seen.value(forHTTPHeaderField: "Accept"), "application/json")
         XCTAssertEqual(seen.value(forHTTPHeaderField: "X-Token"), "abc")
@@ -145,7 +160,7 @@ final class PrototypeURLSessionClientTests: XCTestCase {
 
     func testAJsonBodyDefaultsToApplicationJson() {
         let job = PrototypeRequestJob(
-            requestId: "r", prototypeId: "p", via: .device, method: .post, url: "http://localhost/",
+            requestId: "r", prototypeId: "p", via: .device, method: .post, url: "http://public.example/",
             headers: [:], body: .object(["a": .number(1)]), timeoutMs: 1000
         )
         XCTAssertEqual(PrototypeHttpRequest(job: job).headers["Content-Type"], "application/json")
@@ -285,7 +300,10 @@ final class PrototypeURLSessionClientTests: XCTestCase {
         let failed = await failure { try await client().perform(call()) }
         XCTAssertEqual(
             failed?.error,
-            PrototypeRequestError(.connectionRefused, "Connection refused: http://localhost:8080/feed?q=hello+world")
+            PrototypeRequestError(
+                .connectionRefused,
+                "Connection refused: http://public.example:8080/feed?q=hello+world"
+            )
         )
     }
 
@@ -331,5 +349,221 @@ final class PrototypeURLSessionClientTests: XCTestCase {
         XCTAssertEqual(map(URLError(.cancelled), tooLarge: true), .tooLarge)
         XCTAssertEqual(map(URLError(.cancelled), cancelled: true), .cancelled)
         XCTAssertEqual(map(URLError(.timedOut), cancelled: true), .cancelled)
+    }
+}
+
+extension PrototypeURLSessionClientTests {
+    func testDefaultPolicyBlocksNamesAndLiteralsBeforeDNSOrTransport() async {
+        StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: []) }
+        let resolver = FakeHostResolver()
+        let client = PrototypeURLSessionClient(
+            protocolClasses: [StubProtocol.self],
+            resolver: resolver,
+            metrics: FakeConnectionMetrics.allowed
+        )
+        for host in [
+            "127.0.0.1",
+            "2130706433",
+            "0x7f.1",
+            "0177.0.0.1",
+            "[::1]",
+            "[::ffff:7f00:1]",
+            "[64:ff9b::7f00:1]",
+            "[2002:7f00:1::]",
+            "[fe80::1]",
+            "localhost",
+            "LOCALHOST.",
+            "foo.localhost",
+        ] {
+            let failed = await failure { try await client.perform(call("http://\(host)/")) }
+            XCTAssertEqual(failed?.error.code, .blockedDestination, host)
+        }
+        XCTAssertTrue(resolver.requestedHosts.isEmpty)
+        XCTAssertTrue(StubProtocol.requests.isEmpty)
+    }
+
+    func testMixedDNSAnswersAndEmptyAnswersAreRefused() async {
+        StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: []) }
+        for answers in [["8.8.8.8", "127.0.0.1"], []] {
+            let client = PrototypeURLSessionClient(
+                protocolClasses: [StubProtocol.self],
+                resolver: FakeHostResolver(answers), metrics: FakeConnectionMetrics.allowed
+            )
+            let failed = await failure { try await client.perform(call()) }
+            XCTAssertEqual(failed?.error.code, .blockedDestination)
+        }
+        XCTAssertTrue(StubProtocol.requests.isEmpty)
+    }
+
+    func testForbiddenHeadersAreRejectedBeforeDNSAndTransport() async {
+        StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: []) }
+        let resolver = FakeHostResolver()
+        let client = PrototypeURLSessionClient(
+            protocolClasses: [StubProtocol.self],
+            resolver: resolver,
+            metrics: FakeConnectionMetrics.allowed
+        )
+        for name in [
+            "hOsT",
+            "cOnNeCtIoN",
+            "uPgRaDe",
+            "tRaNsFeR-EnCoDiNg",
+            "cOnTeNt-LeNgTh",
+            "tE",
+            "tRaIlEr",
+            "kEeP-AlIvE",
+            "cOoKiE",
+            "eXpEcT",
+            "oRiGiN",
+            "pRoXy-AuThOrIzAtIoN",
+            "PrOxY-Custom",
+        ] {
+            let failed = await failure { try await client.perform(call(headers: [name: "x"])) }
+            XCTAssertEqual(failed?.error.code, .invalidRequest, name)
+        }
+        XCTAssertTrue(resolver.requestedHosts.isEmpty)
+        XCTAssertTrue(StubProtocol.requests.isEmpty)
+    }
+
+    func testRedirectsToBlockedDestinationsDowngradesAndSixthHopFail() async throws {
+        for target in ["http://127.0.0.1/", "http://public.example/"] {
+            let url = try XCTUnwrap(URL(string: target))
+            StubProtocol.reset { _ in .redirect(status: 302, url: url) }
+            let failed = await failure { try await client().perform(call("https://public.example/")) }
+            XCTAssertEqual(failed?.error.code, .blockedDestination, target)
+            XCTAssertEqual(StubProtocol.requests.count, 1)
+        }
+        let url = try XCTUnwrap(URL(string: "https://public.example/loop"))
+        StubProtocol.reset { _ in .redirect(status: 302, url: url) }
+        let failed = await failure { try await client().perform(call("https://public.example/")) }
+        XCTAssertEqual(failed?.error.code, .blockedDestination)
+        XCTAssertEqual(StubProtocol.requests.count, 6)
+    }
+
+    func testPublicRedirectsApplyMethodBodyAndOriginRules() async throws {
+        let target = try XCTUnwrap(URL(string: "https://other.example/done"))
+        for status in [301, 302, 303, 307, 308] {
+            StubProtocol.reset { request in
+                request.url?.path == "/done"
+                    ? .respond(status: 200, headers: [:], chunks: [Data("ok".utf8)])
+                    : .redirect(status: status, url: target)
+            }
+            let resolver = FakeHostResolver()
+            let client = PrototypeURLSessionClient(
+                protocolClasses: [StubProtocol.self],
+                resolver: resolver,
+                metrics: FakeConnectionMetrics.allowed
+            )
+            let result = try await client.perform(call(
+                "https://public.example/start", method: .post,
+                headers: ["Authorization": "Bearer value", "X-Token": "kept"], body: Data("payload".utf8)
+            ))
+            XCTAssertEqual(result.body, Data("ok".utf8))
+            let next = try XCTUnwrap(StubProtocol.requests.last)
+            XCTAssertEqual(next.httpMethod, status < 307 ? "GET" : "POST", "\(status)")
+            XCTAssertEqual(StubProtocol.bodies.last, status < 307 ? Data() : Data("payload".utf8))
+            XCTAssertNil(next.value(forHTTPHeaderField: "Authorization"))
+            XCTAssertEqual(next.value(forHTTPHeaderField: "X-Token"), "kept")
+            XCTAssertEqual(resolver.requestedHosts, ["public.example", "other.example"])
+        }
+    }
+}
+
+extension PrototypeURLSessionClientTests {
+    func testRedirectMethodRewriteFollowsFetchAndStripsEntityHeaders() async throws {
+        let egress = PrototypeRequestEgressCheck(policy: PrototypeEgressPolicy(), resolver: FakeHostResolver())
+        let cases: [(String, Int, String)] = [
+            ("POST", 301, "GET"), ("POST", 302, "GET"), ("POST", 303, "GET"),
+            ("PUT", 301, "PUT"), ("PATCH", 302, "PATCH"), ("DELETE", 302, "DELETE"),
+            ("PUT", 303, "GET"), ("DELETE", 303, "GET"), ("HEAD", 303, "HEAD"),
+            ("POST", 307, "POST"), ("PUT", 308, "PUT"),
+        ]
+        for (method, status, expected) in cases {
+            let source = try XCTUnwrap(PrototypeURLSessionClient.urlRequest(for: call(
+                "https://public.example/start", method: PrototypeRequestMethod(rawValue: method) ?? .post,
+                headers: ["Content-Type": "application/json", "Content-Language": "en", "X-Token": "kept"],
+                body: Data("payload".utf8)
+            )))
+            let state = PrototypeURLSessionCall(maxBytes: 100, timeoutMs: 1000, request: source)
+            let next = try await state.redirect(
+                to: XCTUnwrap(URL(string: "https://public.example/next")),
+                status: status,
+                egress: egress
+            )
+            XCTAssertEqual(next.httpMethod, expected, "\(method) \(status)")
+            XCTAssertEqual(next.value(forHTTPHeaderField: "X-Token"), "kept")
+            let rewritten = expected != method
+            XCTAssertEqual(
+                next.value(forHTTPHeaderField: "Content-Type"),
+                rewritten ? nil : "application/json",
+                "\(method) \(status)"
+            )
+            XCTAssertEqual(
+                next.value(forHTTPHeaderField: "Content-Language"),
+                rewritten ? nil : "en",
+                "\(method) \(status)"
+            )
+        }
+    }
+
+    func testAuthorizationOriginComparisonIncludesSchemeAndPort() async throws {
+        let egress = PrototypeRequestEgressCheck(policy: PrototypeEgressPolicy(), resolver: FakeHostResolver())
+        for (target, keepsAuthorization) in [
+            ("http://public.example/next", true),
+            ("http://public.example:80/next", true),
+            ("https://public.example/next", false),
+            ("http://public.example:8080/next", false),
+            ("http://other.example/next", false),
+        ] {
+            let source = try XCTUnwrap(PrototypeURLSessionClient.urlRequest(for: call(
+                "http://public.example/start", headers: ["Authorization": "value"]
+            )))
+            let state = PrototypeURLSessionCall(maxBytes: 100, timeoutMs: 1000, request: source)
+            let next = try await state.redirect(to: XCTUnwrap(URL(string: target)), status: 302, egress: egress)
+            XCTAssertEqual(next.value(forHTTPHeaderField: "Authorization"), keepsAuthorization ? "value" : nil, target)
+        }
+    }
+
+    func testFiveRedirectsSucceedAndHeadMethodIsPreserved() async throws {
+        let base = try XCTUnwrap(URL(string: "https://public.example/"))
+        StubProtocol.reset { request in
+            let hop = Int(request.url?.lastPathComponent ?? "") ?? 0
+            return hop == 5 ? .respond(status: 200, headers: [:], chunks: [])
+                : .redirect(status: 303, url: base.appendingPathComponent(String(hop + 1)))
+        }
+        let response = try await client().perform(call(base.absoluteString, method: .head))
+        XCTAssertEqual(response.status, 200)
+        XCTAssertEqual(StubProtocol.requests.count, 6)
+        XCTAssertTrue(StubProtocol.requests.allSatisfy { $0.httpMethod == "HEAD" })
+    }
+
+    func testRedirectRerunsDNSAndRejectsMixedAnswers() async throws {
+        let target = try XCTUnwrap(URL(string: "https://public.example/done"))
+        StubProtocol.reset { _ in .redirect(status: 307, url: target) }
+        // The first hop is a public literal. The redirect is a name with one blocked answer.
+        let resolver = FakeHostResolver(["8.8.8.8", "127.0.0.1"])
+        let client = PrototypeURLSessionClient(
+            protocolClasses: [StubProtocol.self],
+            resolver: resolver,
+            metrics: FakeConnectionMetrics.allowed
+        )
+        let failed = await failure { try await client.perform(call("https://8.8.8.8/start")) }
+        XCTAssertEqual(failed?.error.code, .blockedDestination)
+        XCTAssertEqual(resolver.requestedHosts, ["public.example"])
+        XCTAssertEqual(StubProtocol.requests.count, 1)
+    }
+
+    func testRedirectRefusesUnsupportedScheme() async throws {
+        let egress = PrototypeRequestEgressCheck(policy: PrototypeEgressPolicy(), resolver: FakeHostResolver())
+        let source = try XCTUnwrap(PrototypeURLSessionClient.urlRequest(for: call()))
+        let state = PrototypeURLSessionCall(maxBytes: 100, timeoutMs: 1000, request: source)
+        do {
+            _ = try await state.redirect(
+                to: XCTUnwrap(URL(string: "ftp://public.example/")), status: 302, egress: egress
+            )
+            XCTFail("Accepted an unsupported scheme")
+        } catch {
+            XCTAssertEqual((error as? PrototypeRequestError)?.code, .blockedDestination)
+        }
     }
 }

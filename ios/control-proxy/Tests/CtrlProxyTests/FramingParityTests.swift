@@ -65,14 +65,14 @@ final class FramingParityTests: XCTestCase {
     // MARK: - Sizing / predicates
 
     func testFrameReadLength() {
-        let rl = Framing.frameReadLength
-        XCTAssertNotNil(rl(10, false), "valid length reads")
-        XCTAssertNotNil(rl(64 * 1024 * 1024, false), "exactly max reads")
+        let readLength = Framing.frameReadLength
+        XCTAssertNotNil(readLength(10, false), "valid length reads")
+        XCTAssertNotNil(readLength(64 * 1024 * 1024, false), "exactly max reads")
         // A masked frame reads exactly the 4 mask-key bytes more than an unmasked one.
-        XCTAssertEqual(rl(10, true), rl(10, false).map { $0 + 4 }, "masked adds 4 key bytes")
+        XCTAssertEqual(readLength(10, true), readLength(10, false).map { $0 + 4 }, "masked adds 4 key bytes")
         // Over the 64 MiB frame cap → nil (not read).
-        XCTAssertNil(rl(64 * 1024 * 1024 + 1, false), "oversize → nil")
-        XCTAssertNil(rl(UInt64(Int.max) + 1, true), "way oversize → nil")
+        XCTAssertNil(readLength(64 * 1024 * 1024 + 1, false), "oversize → nil")
+        XCTAssertNil(readLength(UInt64(Int.max) + 1, true), "way oversize → nil")
     }
 
     func testControlAndDataOpcodePredicates() {
@@ -164,7 +164,7 @@ final class FramingParityTests: XCTestCase {
     // MARK: - Fragmentation reassembly (documented decisions)
 
     func testAccumulateDecisions() {
-        let he = Data("he".utf8), llo = Data("llo".utf8), bang = Data("!".utf8), hello = Data("hello".utf8)
+        let prefixData = Data("he".utf8), llo = Data("llo".utf8), bang = Data("!".utf8), hello = Data("hello".utf8)
         func acc(
             _ buffer: Data,
             _ opcode: UInt8,
@@ -174,25 +174,25 @@ final class FramingParityTests: XCTestCase {
         )
             -> (tag: String, data: Data?)
         {
-            let r = Framing.accumulate(
+            let result = Framing.accumulate(
                 buffer: buffer,
                 opcode: opcode,
                 isFinal: isFinal,
                 payload: payload,
                 inProgressOpcode: inProgress
             )
-            return (r.tag, r.data)
+            return (result.tag, result.data)
         }
         // Single unfragmented text message → delivered whole.
         XCTAssertEqual(acc(Data(), 0x01, true, hello, nil).tag, "deliver")
         XCTAssertEqual(acc(Data(), 0x01, true, hello, nil).data, hello)
         // Start + continue fragments buffer; the final continuation delivers the assembly.
-        XCTAssertEqual(acc(Data(), 0x01, false, he, nil).tag, "buffered")
-        XCTAssertEqual(acc(he, 0x00, false, llo, 0x01).tag, "buffered")
+        XCTAssertEqual(acc(Data(), 0x01, false, prefixData, nil).tag, "buffered")
+        XCTAssertEqual(acc(prefixData, 0x00, false, llo, 0x01).tag, "buffered")
         XCTAssertEqual(acc(hello, 0x00, true, bang, 0x01).tag, "deliver")
         // Protocol errors: continuation with nothing open, data while open, bad opcode.
         XCTAssertEqual(acc(Data(), 0x00, true, bang, nil).tag, "protocolError")
-        XCTAssertEqual(acc(he, 0x01, true, hello, 0x01).tag, "protocolError")
+        XCTAssertEqual(acc(prefixData, 0x01, true, hello, 0x01).tag, "protocolError")
         XCTAssertEqual(acc(Data(), 0x03, true, bang, nil).tag, "protocolError")
     }
 

@@ -71,15 +71,19 @@ enum PrototypeChecks {
         return PrototypeCheckEvaluation(valid: failed == nil, firstFailingMessage: failed?.message)
     }
 
+    private static func requiredPasses(_ value: JSONValue?, nodeType: String) -> Bool {
+        switch nodeType {
+        case "checkbox", "switch": return value == .bool(true)
+        case "slider", "timePicker": return value?.numberValue?.isFinite == true
+        default:
+            guard let text = value?.stringValue else { return false }
+            return !PrototypeContractValidator.matches("blankText", text)
+        }
+    }
+
     private static func passes(_ value: JSONValue?, check: PrototypeCheck, nodeType: String) -> Bool {
         if check.required != nil {
-            switch nodeType {
-            case "checkbox", "switch": return value == .bool(true)
-            case "slider", "timePicker": return value?.numberValue?.isFinite == true
-            default:
-                guard let text = value?.stringValue else { return false }
-                return !PrototypeCheckPattern.wholeMatch("[\(whitespace)]*", text)
-            }
+            return requiredPasses(value, nodeType: nodeType)
         }
         if value == nil || value == .null || value == .string("") {
             return true

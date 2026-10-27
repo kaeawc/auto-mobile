@@ -1,11 +1,13 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { registerFeatureFlagResources } from "../../src/server/featureFlagResources";
+import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 import type { FeatureFlagRepository, FeatureFlagRecord } from "../../src/db/featureFlagRepository";
 import type {
   FeatureFlagDefinition,
   FeatureFlagConfig,
+  FeatureFlagKey,
 } from "../../src/features/featureFlags/FeatureFlagDefinitions";
 import type { FeatureFlagApplier } from "../../src/features/featureFlags/FeatureFlagApplier";
 
@@ -19,7 +21,7 @@ class FakeFeatureFlagRepository implements FeatureFlagRepository {
   }
 
   async upsertFlag(
-    key: string,
+    key: FeatureFlagKey,
     enabled: boolean,
     config?: FeatureFlagConfig | null,
   ): Promise<void> {
@@ -27,10 +29,15 @@ class FakeFeatureFlagRepository implements FeatureFlagRepository {
     if (existing) {
       existing.enabled = enabled;
       if (config !== undefined) {
-        existing.config = config ?? undefined;
+        existing.config = config;
       }
     } else {
-      this.flags.push({ key, enabled, config: config ?? undefined });
+      this.flags.push({
+        key,
+        enabled,
+        config: config ?? null,
+        updatedAt: "1970-01-01T00:00:00.000Z",
+      });
     }
   }
 }
@@ -58,7 +65,7 @@ describe("featureFlagResources", () => {
       );
       expect(template).toBeDefined();
 
-      const result = await template!.template.handler(template!.params);
+      const result = await invokeResourceTemplate(template!);
       expect(result.uri).toBe("automobile:config/feature-flags/ai-recovery");
       expect(result.mimeType).toBe("application/json");
 
@@ -83,7 +90,7 @@ describe("featureFlagResources", () => {
       );
       expect(template).toBeDefined();
 
-      await expect(template!.template.handler(template!.params)).rejects.toThrow(
+      await expect(invokeResourceTemplate(template!)).rejects.toThrow(
         "Unknown feature flag: nonexistent",
       );
     } finally {

@@ -3,9 +3,9 @@
 # Shared colors + command_exists + detect_os/detect_arch (issue #2822).
 # Note: SwiftFormat intentionally ships only macOS/Linux paths; detect_os may
 # return "windows" but main() routes that to the unsupported branch.
-# shellcheck source=scripts/lib/tool-install.sh disable=SC1091
+# shellcheck source=scripts/lib/tool-install.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
-# shellcheck source=scripts/swiftformat/swiftformat_version.sh disable=SC1091
+# shellcheck source=scripts/swiftformat/swiftformat_version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/swiftformat_version.sh"
 
 # Install SwiftFormat on macOS

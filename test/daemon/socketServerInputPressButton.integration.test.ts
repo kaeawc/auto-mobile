@@ -1,9 +1,10 @@
 import { spyOn } from "bun:test";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import {
+  createFakeDaemonState,
   createFakeDaemonState as createDrainDaemonState,
   createFakeDeviceManager,
   createFakeSession,
@@ -22,7 +23,7 @@ import { PressButton } from "../../src/features/action/PressButton";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
-import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
+import type { DeviceLabelMap } from "../../src/daemon/sessionManager";
 import type { BootedDevice, PressButtonResult } from "../../src/models";
 
 const androidDevice: BootedDevice = {
@@ -40,36 +41,6 @@ const iosDevice: BootedDevice = {
 const unexpectedDaemonState = (): never => {
   throw new Error("Unexpected daemon state access");
 };
-
-function createFakeDaemonState(
-  autolockSessions: Map<string, Session> = new Map(),
-  mcpAutolockSessions: Map<string, string> = new Map(),
-) {
-  return {
-    isInitialized: () => true,
-    getSessionManager: () => ({
-      getSession: (sessionId: string) => autolockSessions.get(sessionId) ?? null,
-      getDeviceLabels: (_sessionId: string): DeviceLabelMap | undefined => undefined,
-      releaseSession: async () => null,
-    }),
-    getDevicePool: () => ({
-      refreshDevices: async () => 0,
-      getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
-      releaseDevice: async () => {},
-      resolveAutolockSessionForMcpSession: (
-        mcpSessionId: string | undefined,
-        platform?: "android" | "ios",
-      ) => {
-        if (!mcpSessionId) {
-          return undefined;
-        }
-        const sessionId = mcpAutolockSessions.get(mcpSessionId);
-        const session = sessionId ? autolockSessions.get(sessionId) : undefined;
-        return session?.platform === platform ? session.sessionId : undefined;
-      },
-    }),
-  };
-}
 
 function sendRequest(
   socketPath: string,

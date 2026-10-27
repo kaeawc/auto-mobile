@@ -1,3 +1,4 @@
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
 import {
@@ -102,6 +103,15 @@ describe("iOS saved prototype tool actions", () => {
     observationReads = [];
     dispose = registerPrototypeTools({
       iosSavedPrototypeInstaller: backend ?? installer,
+      protoViewerFactory: () => ({
+        installed: async () => false,
+        importBundle: async () => {
+          throw new Error("Absent ProtoViewer must not import");
+        },
+        open: async () => {
+          throw new Error("Absent ProtoViewer must not open");
+        },
+      }),
       assetFileReader: reader,
       observationScreenshotReader: async (uri) => {
         observationReads.push(uri);
@@ -127,14 +137,14 @@ describe("iOS saved prototype tool actions", () => {
       },
     });
   }
-  async function call(input: unknown, device = ios, signal?: AbortSignal) {
+  async function call(input: Record<string, unknown>, device = ios, signal?: AbortSignal) {
     const result = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(
       device,
       input,
       undefined,
       signal,
     );
-    return prototypeOutputSchema.parse(result.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(result));
   }
   const save = (extra: Record<string, unknown> = {}, signal?: AbortSignal) =>
     call({ action: "save", spec, ...extra }, ios, signal);

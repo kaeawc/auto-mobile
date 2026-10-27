@@ -152,7 +152,11 @@ test("blocked system-layer output skips capture and superseded shows add nothing
     android: true,
     action: "show",
     success: true,
-    spec: { id: "panel", root: { type: "text" as const, text: "Hello" } },
+    spec: {
+      window: { placement: { type: "fullscreen" as const }, opacity: 1 },
+      id: "panel",
+      root: { type: "text" as const, text: "Hello" },
+    },
     hiddenReason: "device_blocked" as const,
     superseded: () => false,
     capture: () => {
@@ -197,7 +201,11 @@ test("suspended final capture discards the show hint in output", async () => {
       android: true,
       action: "show",
       success: true,
-      spec: { id: "panel", window: { layer: "app" }, root: { type: "text", text: "Hello" } },
+      spec: {
+        id: "panel",
+        window: { layer: "app", placement: { type: "fullscreen" as const }, opacity: 1 },
+        root: { type: "text", text: "Hello" },
+      },
       hiddenReason: "app_layer_window_hidden",
       superseded: () => false,
       capture: () => f.capture,

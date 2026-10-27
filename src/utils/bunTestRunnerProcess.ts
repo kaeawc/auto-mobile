@@ -1,3 +1,4 @@
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 const TEST_FILE_ENTRYPOINT = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 
 /** The running script: the current test file under `bun test`, `dist/src/index.js` (or the compiled binary) otherwise. */
@@ -20,6 +21,8 @@ export function isBunTestRunnerProcess(
   entrypoint: string | undefined,
 ): boolean {
   return (
-    env.NODE_ENV === "test" && entrypoint !== undefined && TEST_FILE_ENTRYPOINT.test(entrypoint)
+    readEnvRaw(AMBIENT_ENV.NODE_ENV, env) === "test" &&
+    entrypoint !== undefined &&
+    TEST_FILE_ENTRYPOINT.test(entrypoint)
   );
 }

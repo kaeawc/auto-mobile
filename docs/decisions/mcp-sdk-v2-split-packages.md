@@ -41,7 +41,7 @@ converter directly with the same options keeps `schemas/tool-definitions.json` u
 ## Consequences
 
 - Wire output is unchanged. The v2 behaviour differences are bridged in code, each in one
-  place: `McpError` (`src/server/mcpError.ts`) keeps the v1 `MCP error <code>: ` message prefix
+  place: `McpError` (`src/daemon/mcpError.ts`) keeps the v1 `MCP error <code>: ` message prefix
   on errors this server throws; `createStdioServerTransport`
   (`src/server/stdioServerTransport.ts`) keeps the stdio transport open across stdin EOF so
   requests received before EOF are still answered (#11951, #12049), and reads stdin only while

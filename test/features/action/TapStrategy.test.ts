@@ -8,7 +8,8 @@ import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
-import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { resolveIosObserveRotation } from "../../../src/features/observe/iosObserveRotation";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import type { TapStrategy } from "../../../src/utils/interfaces/TapStrategy";
 
@@ -33,6 +34,39 @@ test("Android tap strategy retries unknown once and reports its default decision
   expect(detector.getDetectionCallCount()).toBe(2);
   expect(warnings).toHaveLength(1);
   expect(warnings[0]).toContain("could not determine");
+});
+
+/** The policy flags a fake must copy from the strategy it stands in for (#13316). */
+const POLICY_FLAGS = [
+  "longPressDurationMs",
+  "warnsOnDisabledElement",
+  "settlesPostTapChange",
+  "verifiesRefreshedDisplay",
+  "promotesClickableAncestor",
+  "settlesFocusChangeAfterTap",
+  "rethrowsKeyboardOcclusion",
+  "retryTapIfNoChange",
+] as const;
+
+function policy(strategy: TapStrategy) {
+  return Object.fromEntries(POLICY_FLAGS.map((flag) => [flag, strategy[flag]]));
+}
+
+test("the iOS fake tap strategy carries IosTapStrategy's policy flags", () => {
+  const ios = new IosTapStrategy(
+    { name: "ios", deviceId: "ios", platform: "ios" },
+    new FakeIosVoiceOverDetector(),
+  );
+  expect(policy(FakeTapStrategy.ios())).toEqual(policy(ios));
+});
+
+test("the default fake tap strategy carries Android's policy flags with retries off", () => {
+  const android = new AndroidTapStrategy(
+    { name: "android", deviceId: "android", platform: "android" },
+    new FakeAdbClient(),
+    new FakeAccessibilityDetector(),
+  );
+  expect(policy(new FakeTapStrategy())).toEqual({ ...policy(android), retryTapIfNoChange: false });
 });
 
 describe("TapStrategy", () => {
@@ -123,7 +157,7 @@ describe("TapStrategy", () => {
             detector.setDetectionResult(
               androidDevice.deviceId,
               enabled,
-              enabled ? "talkback" : null,
+              enabled ? "talkback" : "unknown",
             ),
         };
       },
@@ -327,7 +361,15 @@ test("platform tap refinements are Android-only capabilities of the strategy", (
     s.settlesPostTapChange,
     s.verifiesRefreshedDisplay,
     s.promotesClickableAncestor,
+    s.settlesFocusChangeAfterTap,
+    s.rethrowsKeyboardOcclusion,
   ];
-  expect(flags(android)).toEqual([true, true, true, true]);
-  expect(flags(ios)).toEqual([false, false, false, false]);
+  expect(flags(android)).toEqual([true, true, true, true, false, true]);
+  expect(flags(ios)).toEqual([false, false, false, false, true, false]);
+  const observation = { screenSize: { width: 100, height: 200 } } as ObserveResult;
+  ios.applyRefreshedObservationRotation(observation, 90);
+  expect(observation.rotation).toBe(resolveIosObserveRotation(90, observation.screenSize));
+  const untouched = { screenSize: { width: 100, height: 200 } } as ObserveResult;
+  android.applyRefreshedObservationRotation(untouched, 90);
+  expect(untouched.rotation).toBeUndefined();
 });

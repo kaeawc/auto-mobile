@@ -32,7 +32,7 @@ describe("createDaemonFatalProcessHandler (unit)", () => {
     const handler = createDaemonFatalProcessHandler(logger);
     const error = new Error("boom in child.on(data)");
 
-    handler({ type: "uncaughtException", error });
+    void handler({ type: "uncaughtException", error });
 
     expect(logger.errors).toHaveLength(1);
     expect(logger.errors[0].message).toContain("uncaughtException");
@@ -46,7 +46,7 @@ describe("createDaemonFatalProcessHandler (unit)", () => {
     const logger = makeFakeLogger();
     const handler = createDaemonFatalProcessHandler(logger);
 
-    handler({
+    void handler({
       type: "unhandledRejection",
       reason: "floating rejection",
       promise: Promise.resolve(),
@@ -62,7 +62,7 @@ describe("createDaemonFatalProcessHandler (unit)", () => {
     const handler = createDaemonFatalProcessHandler(logger);
 
     // Node types this as Error, but a thrown non-Error can still reach here.
-    handler({ type: "uncaughtException", error: "not-an-error" as unknown as Error });
+    void handler({ type: "uncaughtException", error: "not-an-error" });
 
     expect(logger.errors[0].message).toContain("not-an-error");
   });

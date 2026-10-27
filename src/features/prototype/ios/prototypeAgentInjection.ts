@@ -7,30 +7,31 @@
  */
 import type { BootedDevice } from "../../../models";
 import { ActionableError } from "../../../models/ActionableError";
-import { fixedBackoff, type BackoffPolicy } from "../../../utils/Backoff";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import type { IdGenerator } from "../../../utils/IdGenerator";
 import { resolveIosDeviceKind } from "../../../utils/ios-cmdline-tools/IosDeviceKind";
-import { logger } from "../../../utils/logger";
-import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { ResolvedPrototypeAgent } from "./PrototypeAgentProvider";
-import type { PrototypeAgentConnections } from "./iosPrototypeTransport";
 import {
   connectPrototypeAgent,
   createPrototypeAgentLaunchConfig,
   type PrototypeAgentClient,
   type PrototypeAgentConnector,
   type PrototypeAgentHandshake,
-  type PrototypeAgentSocket,
 } from "./prototypeAgentClient";
+import { PrototypeAgentRegistry, prototypeAgentKey } from "./PrototypeAgentRegistry";
+import { RetryingPrototypeAgentConnector } from "./RetryingPrototypeAgentConnector";
+export { RetryingPrototypeAgentConnector } from "./RetryingPrototypeAgentConnector";
+export {
+  PrototypeAgentRegistry,
+  portManagerPrototypeAgentPorts,
+  prototypeAgentKey,
+} from "./PrototypeAgentRegistry";
 
 export const SIMCTL_CHILD_DYLD_INSERT_LIBRARIES = "SIMCTL_CHILD_DYLD_INSERT_LIBRARIES";
 /** dyld separates `DYLD_INSERT_LIBRARIES` entries with a colon. */
 const DYLD_PATH_SEPARATOR = ":";
 const SYSTEM_BUNDLE_PREFIX = "com.apple.";
-const DEFAULT_CONNECT_ATTEMPTS = 10;
-const DEFAULT_CONNECT_RETRY_DELAY_MS = 200;
 
 /** Resolves a verified agent dylib; `PrototypeAgentProvider` implements it. */
 export interface PrototypeAgentDylibResolver {
@@ -45,16 +46,6 @@ export interface PrototypeAgentPortAllocator {
 
 /** Connects to the agent on a port and completes the authenticated handshake. */
 export type PrototypeAgentConnect = (port: number, token: string) => Promise<PrototypeAgentClient>;
-
-/** `PortManager` keyed per device and bundle id, skipping the fixed iOS SDK port. */
-export const portManagerPrototypeAgentPorts: PrototypeAgentPortAllocator = {
-  allocate: (key) => PortManager.allocate(key, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS }),
-  release: (key) => PortManager.release(key),
-};
-
-export function prototypeAgentKey(deviceId: string, bundleId: string): string {
-  return `prototype-agent:${deviceId}:${bundleId}`;
-}
 
 /** Appends the agent to an existing `DYLD_INSERT_LIBRARIES` list instead of replacing it. */
 export function mergeDyldInsertLibraries(existing: string | undefined, dylibPath: string): string {
@@ -119,107 +110,6 @@ export interface PrototypeAgentRecord {
   dylibPath: string;
   client: PrototypeAgentClient;
   handshake: PrototypeAgentHandshake;
-}
-
-/**
- * The recorded agent connections. A record is dropped, its connection closed and its port
- * released when the app is terminated, the session or device is released, the app is relaunched
- * with prototype injection, or the agent closes the connection (the app exited).
- */
-export class PrototypeAgentRegistry implements PrototypeAgentConnections {
-  /** Insertion-ordered: the newest registration on a device is its last entry. */
-  private readonly records = new Map<string, PrototypeAgentRecord>();
-
-  constructor(
-    private readonly ports: PrototypeAgentPortAllocator = portManagerPrototypeAgentPorts,
-  ) {}
-
-  /**
-   * The device's current open agent connection: the most recent `launchApp {prototype: true}`
-   * on it whose connection is still open (closed connections are dropped at once).
-   */
-  get(deviceId: string): PrototypeAgentClient | undefined {
-    let current: PrototypeAgentRecord | undefined;
-    for (const record of this.records.values()) {
-      if (record.deviceId === deviceId) {
-        current = record;
-      }
-    }
-    return current?.client;
-  }
-
-  getRecord(deviceId: string, bundleId: string): PrototypeAgentRecord | undefined {
-    return this.records.get(prototypeAgentKey(deviceId, bundleId));
-  }
-
-  /** The recorded agent, or an error that tells the caller how to get one. */
-  require(deviceId: string, bundleId: string): PrototypeAgentRecord {
-    const record = this.getRecord(deviceId, bundleId);
-    if (record === undefined) {
-      throw new ActionableError(
-        `No prototype agent is recorded for ${bundleId} on ${deviceId}. Relaunch with launchApp ` +
-          "{prototype: true}; the relaunch restarts the app and loses its state.",
-      );
-    }
-    return record;
-  }
-
-  register(record: PrototypeAgentRecord): void {
-    const key = prototypeAgentKey(record.deviceId, record.bundleId);
-    const previous = this.records.get(key);
-    // Delete before set so the new record becomes the device's newest entry.
-    this.records.delete(key);
-    if (previous !== undefined && previous.client !== record.client) {
-      // The port belongs to the new record now; close only the old connection.
-      previous.client.close();
-    }
-    this.records.set(key, record);
-    record.client.onClosed((error) => {
-      if (this.records.get(key)?.client === record.client) {
-        logger.info(`[prototype-agent] ${record.bundleId} on ${record.deviceId} disconnected`, {
-          reason: errorMessage(error),
-        });
-        this.records.delete(key);
-        this.ports.release(key);
-      }
-    });
-  }
-
-  /**
-   * Drops the record and closes its connection. The port is released too unless `keepPort` is
-   * set: a relaunch reuses the keyed allocation because the old process still holds the listener
-   * until the cold launch terminates it.
-   */
-  release(deviceId: string, bundleId: string, options: { keepPort?: boolean } = {}): void {
-    const key = prototypeAgentKey(deviceId, bundleId);
-    const record = this.records.get(key);
-    if (record === undefined) {
-      return;
-    }
-    this.records.delete(key);
-    if (options.keepPort !== true) {
-      this.ports.release(key);
-    }
-    record.client.close();
-  }
-
-  releaseDevice(deviceId: string): void {
-    for (const record of [...this.records.values()]) {
-      if (record.deviceId === deviceId) {
-        this.release(record.deviceId, record.bundleId);
-      }
-    }
-  }
-
-  releaseAll(): void {
-    for (const record of [...this.records.values()]) {
-      this.release(record.deviceId, record.bundleId);
-    }
-  }
-
-  size(): number {
-    return this.records.size;
-  }
 }
 
 /** Process-wide agent records; the prototype tool (#10568) reads the same instance. */
@@ -330,38 +220,6 @@ export class PrototypeAgentInjector {
     }
     this.launchOwners.delete(key);
     return true;
-  }
-}
-
-/**
- * Retries refused connections while the app's agent starts its listener. Only `connect` is
- * retried; a handshake failure is a real error and surfaces at once.
- */
-export class RetryingPrototypeAgentConnector implements PrototypeAgentConnector {
-  constructor(
-    private readonly connector: PrototypeAgentConnector,
-    private readonly timer: Timer,
-    private readonly attempts: number = DEFAULT_CONNECT_ATTEMPTS,
-    private readonly backoff: BackoffPolicy = fixedBackoff(DEFAULT_CONNECT_RETRY_DELAY_MS),
-  ) {}
-
-  async connect(port: number): Promise<PrototypeAgentSocket> {
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= this.attempts; attempt++) {
-      try {
-        return await this.connector.connect(port);
-      } catch (error) {
-        lastError = error;
-        if (attempt < this.attempts) {
-          // A refused connection is expected until the agent's listener is up; retry.
-          logger.debug(
-            `[prototype-agent] connect to ${port} attempt ${attempt} failed: ${errorMessage(error)}`,
-          );
-          await this.timer.sleep(this.backoff.delayForAttempt(attempt));
-        }
-      }
-    }
-    throw lastError;
   }
 }
 

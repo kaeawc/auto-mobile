@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.viewinterop.AndroidView
+import dev.jasonpearson.automobile.slides.model.SlideContent
 import kotlinx.coroutines.delay
 
 /**
@@ -27,13 +28,14 @@ import kotlinx.coroutines.delay
  */
 @Composable
 fun CodeSampleSlideItem(
-  code: String,
-  language: String,
-  title: String? = null, // Kept for API compatibility but not used
-  highlight: String? = null,
-  isDarkMode: Boolean = false,
+  content: SlideContent.CodeSample,
   modifier: Modifier = Modifier,
+  isDarkMode: Boolean = false,
 ) {
+  val code = content.code
+  val language = content.language
+  val highlight = content.highlight
+
   val context = LocalContext.current
   var showLoading by remember { mutableStateOf(true) }
 
@@ -173,27 +175,30 @@ internal fun processCodeWithHighlighting(
 fun CodeSampleSlideItemPreview() {
   MaterialTheme {
     CodeSampleSlideItem(
-      code =
-        """
-        @Test
-        fun testLoginFlow() {
-            // Launch the app
-            tapOn(text = "Login")
+      content =
+        SlideContent.CodeSample(
+          code =
+            """
+            @Test
+            fun testLoginFlow() {
+                // Launch the app
+                tapOn(text = "Login")
 
-            // Enter credentials
-            inputText("user@example.com")
-            tapOn(text = "Next")
-            inputText("password123")
+                // Enter credentials
+                inputText("user@example.com")
+                tapOn(text = "Next")
+                inputText("password123")
 
-            // Submit login
-            tapOn(text = "Sign In")
+                // Submit login
+                tapOn(text = "Sign In")
 
-            // Verify success
-            observe(waitFor = WaitFor(text = "Welcome"))
-        }
-        """
-          .trimIndent(),
-      language = "kotlin",
+                // Verify success
+                observe(waitFor = WaitFor(text = "Welcome"))
+            }
+            """
+              .trimIndent(),
+          language = "kotlin",
+        ),
       isDarkMode = false,
     )
   }
@@ -204,27 +209,30 @@ fun CodeSampleSlideItemPreview() {
 fun CodeSampleSlideItemDarkPreview() {
   MaterialTheme {
     CodeSampleSlideItem(
-      code =
-        """
-        @Test
-        fun testLoginFlow() {
-            // Launch the app
-            tapOn(text = "Login")
+      content =
+        SlideContent.CodeSample(
+          code =
+            """
+            @Test
+            fun testLoginFlow() {
+                // Launch the app
+                tapOn(text = "Login")
 
-            // Enter credentials
-            inputText("user@example.com")
-            tapOn(text = "Next")
-            inputText("password123")
+                // Enter credentials
+                inputText("user@example.com")
+                tapOn(text = "Next")
+                inputText("password123")
 
-            // Submit login
-            tapOn(text = "Sign In")
+                // Submit login
+                tapOn(text = "Sign In")
 
-            // Verify success
-            observe(waitFor = WaitFor(text = "Welcome"))
-        }
-        """
-          .trimIndent(),
-      language = "kotlin",
+                // Verify success
+                observe(waitFor = WaitFor(text = "Welcome"))
+            }
+            """
+              .trimIndent(),
+          language = "kotlin",
+        ),
       isDarkMode = true,
     )
   }
@@ -235,33 +243,36 @@ fun CodeSampleSlideItemDarkPreview() {
 fun CodeSampleSlideItemHighlightPreview() {
   MaterialTheme {
     CodeSampleSlideItem(
-      code =
-        """
-        keepClearAreas: restricted=[], unrestricted=[]
-        mPrepareSyncSeqId=0
+      content =
+        SlideContent.CodeSample(
+          code =
+            """
+            keepClearAreas: restricted=[], unrestricted=[]
+            mPrepareSyncSeqId=0
 
-        mGlobalConfiguration={1.0 310mcc260mnc [en_US] ldltr sw448dp w997dp h448dp 360dpi nrml long hdr widecg land finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2244, 1008) mAppBounds=Rect(0, 0 - 2244, 1008) mMaxBounds=Rect(0, 0 - 2244, 1008) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} s.6257 fontWeightAdjustment=0}
-        mHasPermanentDpad=false
-        mTopFocusedDisplayId=0
-        imeLayeringTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
-        imeInputTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
-        imeControlTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
-        Minimum task size of display#0 220  mBlurEnabled=true
-        mLastDisplayFreezeDuration=0 due to new-config
-        mDisableSecureWindows=false
-        mHighResSnapshotScale=0.8
-        mSnapshotEnabled=true
-        SnapshotCache Task
-        """
-          .trimIndent(),
-      language = "shell",
-      highlight =
-        """
-        imeLayeringTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
-        imeInputTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
-        imeControlTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
-        """
-          .trimIndent(),
+            mGlobalConfiguration={1.0 310mcc260mnc [en_US] ldltr sw448dp w997dp h448dp 360dpi nrml long hdr widecg land finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2244, 1008) mAppBounds=Rect(0, 0 - 2244, 1008) mMaxBounds=Rect(0, 0 - 2244, 1008) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} s.6257 fontWeightAdjustment=0}
+            mHasPermanentDpad=false
+            mTopFocusedDisplayId=0
+            imeLayeringTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
+            imeInputTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
+            imeControlTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
+            Minimum task size of display#0 220  mBlurEnabled=true
+            mLastDisplayFreezeDuration=0 due to new-config
+            mDisableSecureWindows=false
+            mHighResSnapshotScale=0.8
+            mSnapshotEnabled=true
+            SnapshotCache Task
+            """
+              .trimIndent(),
+          language = "shell",
+          highlight =
+            """
+            imeLayeringTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
+            imeInputTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
+            imeControlTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
+            """
+              .trimIndent(),
+        ),
       isDarkMode = true,
     )
   }

@@ -1,0 +1,60 @@
+{
+  "spec": {
+    "id": "secure",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "secret": "",
+      "password": "",
+      "public": "ok"
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "column",
+          "repeat": {
+            "items": {
+              "path": "/rows"
+            },
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "textField",
+              "stateKey": "secret",
+              "secure": true,
+              "onSubmit": [
+                {
+                  "type": "request",
+                  "url": "https://example.com",
+                  "via": "device",
+                  "query": {
+                    "token": {
+                      "state": "public_{index}"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["state:secret"]
+    },
+    "data": {
+      "rows": []
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "storage.keys[0]",
+  "expectedMessage": "Secure value cannot be persisted"
+}

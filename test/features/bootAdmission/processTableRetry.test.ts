@@ -18,8 +18,8 @@ import type {
 import { logger } from "../../../src/utils/logger";
 import { raceWithDeadline } from "../../../src/utils/raceWithDeadline";
 import { FakeProcFs } from "../../fakes/FakeProcFs";
-import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
-import { ProcessTableReader } from "../../../src/features/bootAdmission/processTableRetry";
+import { parsePsSnapshot } from "../../../src/devices/bootAdmission/psSnapshot";
+import { ProcessTableReader } from "../../../src/devices/bootAdmission/processTableRetry";
 import type { ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {

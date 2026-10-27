@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { BrokerTransportError } from "../../scripts/manual-test/brokerDaemonClient";
+import { describe, expect, test } from "bun:test";
 import { join, resolve } from "node:path";
 import {
   BrokerDeviceLedger,
@@ -340,4 +341,241 @@ test("native info refuses protected or non-product devices without appending any
     expect(f.appends).toEqual([]);
     expect(f.ledger.devices()).toEqual([]);
   }
+});
+
+function timingWithReset(
+  outcome: NonNullable<NonNullable<SessionBrokerResult["timing"]>["reset"]>["outcome"],
+  retired = false,
+) {
+  return {
+    reset: {
+      mode: "erase" as const,
+      outcome,
+      retired,
+      phases: {},
+      reuseCount: 0,
+      startedAtMs: 0,
+      totalMs: 1,
+    },
+  };
+}
+
+describe("grant ended by session_owner_exited (#14780)", () => {
+  const ended = (f: ReturnType<typeof fixture>): SessionBrokerResult => ({
+    ...f.released,
+    outcome: "failed",
+    failure: {
+      code: "session_owner_exited",
+      message: "Session owner exited before relinquishing its device",
+      retryable: false,
+    },
+  });
+
+  test("destroyed device absent from healthy inventory verifies without timing out", async () => {
+    const f = fixture();
+    f.bind();
+    f.broker.statusResults = [ended(f)];
+    await assertReleasedAndAbsent({
+      ledger: f.ledger,
+      daemonClient: f.broker,
+      timer: f.timer,
+      budgetMs: 240_000,
+      devicesView: async () => f.view,
+    });
+    expect(f.ledger.releaseComplete(f.ledger.devices()[0])).toBe(true);
+    expect(leakReport(f.ledger, f.view)).toEqual([]);
+    expect(f.timer.now()).toBe(0);
+  });
+
+  test("a device still present is not accepted as absent", async () => {
+    const f = fixture();
+    f.bind();
+    f.broker.statusResults = [ended(f)];
+    const pending = assertReleasedAndAbsent({
+      ledger: f.ledger,
+      daemonClient: f.broker,
+      timer: f.timer,
+      budgetMs: 500,
+      devicesView: async () => ({ ...f.view, devices: [device] }),
+    });
+    const result = pending.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await drainUntilQuiescent(f.timer);
+    f.timer.advanceTime(500);
+    expect(await result).toBeInstanceOf(Error);
+    f.timer.reset();
+  });
+});
+
+test.each(["clean", "fallback:erase"] as const)(
+  "present released %s device is pooled immediately and survives reload",
+  async (outcome) => {
+    const f = fixture();
+    f.bind();
+    f.broker.statusResults = [{ ...f.released, timing: timingWithReset(outcome) }];
+    const options = {
+      ledger: f.ledger,
+      daemonClient: f.broker,
+      timer: f.timer,
+      budgetMs: 500,
+      devicesView: async () => ({ ...f.view, devices: [device] }),
+    };
+    await assertReleasedAndAbsent(options);
+    await assertReleasedAndAbsent(options);
+    const loaded = new BrokerDeviceLedger(f.options);
+    expect(loaded.entries.filter((row) => row.kind === "pooled")).toHaveLength(1);
+    expect(loaded.releaseComplete(loaded.devices()[0])).toBe(true);
+    expect(leakReport(loaded, { devices: [device] })).toEqual([]);
+    expect(loaded.entries.some((row) => row.kind === "leaked")).toBe(false);
+    expect(f.timer.now()).toBe(0);
+  },
+);
+
+test.each(["clean", "pending", "destroyed", "retired", "unconfirmed", "transport"])(
+  "only the latest grant's confirmed reusable reset permits pooling (%s)",
+  async (mode) => {
+    const f = fixture();
+    f.bind();
+    // Preserve an older pooled event; it cannot excuse a later grant's unsafe reset.
+    f.ledger.record("released", f.ledger.devices()[0]);
+    f.ledger.record("pooled", f.ledger.devices()[0]);
+    const latest = {
+      session: { ...f.init.session, requestId: "new-request", sessionUuid: "new-session" },
+    };
+    f.ledger.info("other", latest, { sessionId: "new-session", nativeDevice: device });
+    const latestStatus = {
+      ...f.released,
+      requestId: "new-request",
+      sessionUuid: "new-session",
+      cleanupPending: mode === "unconfirmed",
+      timing: timingWithReset(
+        mode === "pending" || mode === "destroyed" ? mode : "clean",
+        mode === "retired",
+      ),
+    };
+    f.broker.status = async (requestId) => {
+      if (requestId === "new-request" && mode === "transport") {
+        throw new BrokerTransportError("restarting");
+      }
+      return requestId === "new-request"
+        ? latestStatus
+        : { ...f.released, timing: timingWithReset("clean") };
+    };
+    const pending = assertReleasedAndAbsent({
+      ledger: f.ledger,
+      daemonClient: f.broker,
+      timer: f.timer,
+      budgetMs: 500,
+      devicesView: async () => ({ ...f.view, devices: [device] }),
+    });
+    const result = pending.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await drainUntilQuiescent(f.timer);
+    if (mode !== "clean") {
+      f.timer.advanceTime(500);
+    }
+    if (mode === "clean") {
+      expect(await result).toBeNull();
+    } else {
+      expect(await result).toBeInstanceOf(Error);
+    }
+    expect(f.ledger.entries.filter((row) => row.kind === "pooled")).toHaveLength(
+      mode === "clean" ? 2 : 1,
+    );
+    expect(leakReport(f.ledger, { devices: [device] })).toHaveLength(
+      mode === "clean" ? 0 : mode === "unconfirmed" || mode === "transport" ? 1 : 2,
+    );
+  },
+);
+
+test("status transport failures leave the pass unconfirmed, then retry", async () => {
+  const f = fixture();
+  f.bind();
+  f.broker.statusResults = [new BrokerTransportError("restarting"), f.released];
+  const pending = assertReleasedAndAbsent({
+    ledger: f.ledger,
+    daemonClient: f.broker,
+    timer: f.timer,
+    budgetMs: 2000,
+    devicesView: async () => f.view,
+  });
+  await drainUntilQuiescent(f.timer);
+  expect(f.ledger.entries.some((row) => row.kind === "released")).toBe(false);
+  f.timer.advanceTime(1000);
+  await pending;
+  expect(f.ledger.releaseComplete(f.ledger.devices()[0])).toBe(true);
+});
+
+test("non-transport status errors propagate from release assertions", async () => {
+  const f = fixture();
+  f.bind();
+  f.broker.statusResults = [new Error("refused")];
+  await expect(
+    assertReleasedAndAbsent({
+      ledger: f.ledger,
+      daemonClient: f.broker,
+      timer: f.timer,
+      budgetMs: 2000,
+      devicesView: async () => f.view,
+    }),
+  ).rejects.toThrow("refused");
+});
+
+test("pooled reload requires a native identity and a preceding acquired grant", () => {
+  for (const invalid of ["device", "grant"]) {
+    const f = fixture();
+    f.bind();
+    const row = f.ledger.devices()[0];
+    f.ledger.record("pooled", row);
+    const rows = f.ledger.entries;
+    if (invalid === "device") {
+      delete rows.at(-1)!.device;
+    }
+    f.files.set(
+      f.ledger.path,
+      rows
+        .filter((row) => invalid !== "grant" || row.kind !== "acquired")
+        .map((row) => JSON.stringify(row) + "\n")
+        .join(""),
+    );
+    expect(() => new BrokerDeviceLedger(f.options)).toThrow("no ready batch grant");
+  }
+});
+
+test("late transport failure cannot send more status RPCs after the deadline", async () => {
+  const f = fixture();
+  f.bind();
+  f.ledger.info(
+    "other",
+    { session: { ...f.init.session, requestId: "other", sessionUuid: "other" } },
+    { sessionId: "other", nativeDevice: { ...device, name: "ambroker-other" } },
+  );
+  let reject = (_error: Error) => {};
+  let calls = 0;
+  f.broker.status = () => {
+    calls++;
+    return new Promise((_resolve, rejectStatus) => {
+      reject = rejectStatus;
+    });
+  };
+  const pending = assertReleasedAndAbsent({
+    ledger: f.ledger,
+    daemonClient: f.broker,
+    timer: f.timer,
+    budgetMs: 500,
+    devicesView: async () => f.view,
+  }).then(
+    () => null,
+    (error: unknown) => error,
+  );
+  await drainUntilQuiescent(f.timer);
+  f.timer.advanceTime(500);
+  expect(await pending).toBeInstanceOf(Error);
+  reject(new BrokerTransportError("late predecessor close"));
+  await drainUntilQuiescent(f.timer);
+  expect(calls).toBe(1);
 });

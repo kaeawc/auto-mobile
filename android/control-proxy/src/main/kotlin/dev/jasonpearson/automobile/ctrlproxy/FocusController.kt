@@ -7,27 +7,26 @@ import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import dev.jasonpearson.automobile.protocol.TraversalOrderData
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.serializer
 
 /**
  * Accessibility focus, TalkBack traversal order and highlight overlay requests. Everything that
  * needs the live accessibility service or the late-bound WebSocket server comes through [Host] and
- * [ResponseSender].
+ * [ResultSender].
  */
 internal class FocusController(
   private val host: Host,
   private val perfProvider: PerfProvider,
   private val timeProvider: TimeProvider,
-  private val resultBroadcaster: ResultBroadcaster,
   private val jsonCompact: Json,
-  private val responseSender: ResponseSender,
+  private val resultSender: ResultSender,
 ) {
   /** Service-side operations the controller cannot perform without the accessibility service. */
   interface Host {
@@ -43,17 +42,6 @@ internal class FocusController(
 
     /** Null until the overlay drawer is initialized. */
     fun currentOverlayDrawer(): OverlayDrawer?
-  }
-
-  /** Keeps the service's late-bound WebSocket server behind one seam. */
-  interface ResponseSender {
-    fun isRunning(): Boolean
-
-    suspend fun broadcast(message: String)
-
-    suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String)
-
-    fun connectionCount(): Int
   }
 
   companion object {
@@ -97,7 +85,22 @@ internal class FocusController(
       host.launchRequestScope(requestId) {
         broadcastCurrentFocusResult(requestId, focusedElement, totalTime)
       }
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error getting current focus", e)
+      host.launchRequestScope(requestId) {
+        broadcastCurrentFocusError(requestId, e.message, errorTime - startTime)
+      }
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error getting current focus", e)
+      host.launchRequestScope(requestId) {
+        broadcastCurrentFocusError(requestId, e.message, errorTime - startTime)
+      }
+    } catch (e: SecurityException) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error getting current focus", e)
@@ -142,7 +145,22 @@ internal class FocusController(
       host.launchRequestScope(requestId) {
         broadcastTraversalOrderResult(requestId, traversalResult, totalTime)
       }
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error getting traversal order", e)
+      host.launchRequestScope(requestId) {
+        broadcastTraversalOrderError(requestId, e.message, errorTime - startTime)
+      }
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error getting traversal order", e)
+      host.launchRequestScope(requestId) {
+        broadcastTraversalOrderError(requestId, e.message, errorTime - startTime)
+      }
+    } catch (e: SecurityException) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error getting traversal order", e)
@@ -171,7 +189,15 @@ internal class FocusController(
           // Let cooperative cancellation unwind cleanly rather than reporting a failed highlight
           // result (#3130).
           throw e
-        } catch (e: Exception) {
+        } catch (e: IllegalArgumentException) {
+          HighlightOperationResult(false, e.message ?: "Failed to add highlight")
+        } catch (e: IllegalStateException) {
+          HighlightOperationResult(false, e.message ?: "Failed to add highlight")
+        } catch (e: SecurityException) {
+          HighlightOperationResult(false, e.message ?: "Failed to add highlight")
+        } catch (e: android.view.WindowManager.BadTokenException) {
+          HighlightOperationResult(false, e.message ?: "Failed to add highlight")
+        } catch (e: android.view.WindowManager.InvalidDisplayException) {
           HighlightOperationResult(false, e.message ?: "Failed to add highlight")
         }
 
@@ -184,30 +210,13 @@ internal class FocusController(
     success: Boolean,
     error: String?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping highlight response broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "highlight_response") {
-      val errorJson = jsonCompact.encodeToString<String?>(error)
-      responseSender.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"highlight_response","timestamp":${timeProvider.currentTimeMillis()}""")
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          append(""","success":$success""")
-          append(""","error":$errorJson""")
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
-      }
-      Log.d(
-        TAG,
-        "Broadcasted highlight response to ${responseSender.connectionCount()} clients",
+    resultSender.sendFrame(requestId, "highlight_response") { perfTiming ->
+      highlightResponseFrame(
+        timeProvider.currentTimeMillis(),
+        requestId,
+        success,
+        error,
+        perfTiming,
       )
     }
   }
@@ -218,37 +227,16 @@ internal class FocusController(
     focusedElement: UIElementInfo?,
     totalTimeMs: Long,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping current focus result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "current_focus_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        buildString {
-          append(
-            """{"type":"current_focus_result","timestamp":${timeProvider.currentTimeMillis()}""",
-          )
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          append(""","totalTimeMs":$totalTimeMs""")
-          if (focusedElement != null) {
-            val elementJson =
-              jsonCompact.encodeToString(serializer<UIElementInfo>(), focusedElement)
-            append(""","focusedElement":$elementJson""")
-          } else {
-            append(""","focusedElement":null""")
-          }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
+    resultSender.sendFrame(requestId, "current_focus_result") { perfTiming ->
+      val elementJson = focusedElement?.let {
+        jsonCompact.encodeToString(serializer<UIElementInfo>(), it)
       }
-      Log.d(
-        TAG,
-        "Broadcasted current focus result to ${responseSender.connectionCount()} clients",
+      currentFocusResultFrame(
+        timeProvider.currentTimeMillis(),
+        requestId,
+        totalTimeMs,
+        elementJson,
+        perfTiming,
       )
     }
   }
@@ -259,17 +247,8 @@ internal class FocusController(
     error: String?,
     totalTimeMs: Long,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping current focus error broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "current_focus_error") {
-      responseSender.broadcast(currentFocusErrorFrame(requestId, error, totalTimeMs))
-      Log.d(
-        TAG,
-        "Broadcasted current focus error to ${responseSender.connectionCount()} clients",
-      )
+    resultSender.sendFrame(requestId, "current_focus_error", attachPerf = false) { _ ->
+      currentFocusErrorFrame(requestId, error, totalTimeMs)
     }
   }
 
@@ -279,36 +258,23 @@ internal class FocusController(
     traversalResult: TraversalOrderResult,
     totalTimeMs: Long,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping traversal order result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "traversal_order_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        buildString {
-          append(
-            """{"type":"traversal_order_result","timestamp":${timeProvider.currentTimeMillis()}""",
-          )
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          append(""","totalTimeMs":$totalTimeMs""")
-          val resultJson =
-            jsonCompact.encodeToString(
-              serializer<TraversalOrderResult>(),
-              traversalResult,
-            )
-          append(""","result":$resultJson""")
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
-      }
-      Log.d(
-        TAG,
-        "Broadcasted traversal order result to ${responseSender.connectionCount()} clients",
+    resultSender.sendFrame(requestId, "traversal_order_result") { perfTiming ->
+      val result =
+        TraversalOrderData(
+          elements =
+            traversalResult.elements.map {
+              jsonCompact.encodeToString(serializer<UIElementInfo>(), it)
+            },
+          focusedIndex = traversalResult.focusedIndex,
+          totalCount = traversalResult.totalCount,
+          truncationReasons = traversalResult.truncationReasons,
+        )
+      traversalOrderResultFrame(
+        timeProvider.currentTimeMillis(),
+        requestId,
+        totalTimeMs,
+        result,
+        perfTiming,
       )
     }
   }
@@ -319,17 +285,8 @@ internal class FocusController(
     error: String?,
     totalTimeMs: Long,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping traversal order error broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "traversal_order_error") {
-      responseSender.broadcast(traversalOrderErrorFrame(requestId, error, totalTimeMs))
-      Log.d(
-        TAG,
-        "Broadcasted traversal order error to ${responseSender.connectionCount()} clients",
-      )
+    resultSender.sendFrame(requestId, "traversal_order_error", attachPerf = false) { _ ->
+      traversalOrderErrorFrame(requestId, error, totalTimeMs)
     }
   }
 }

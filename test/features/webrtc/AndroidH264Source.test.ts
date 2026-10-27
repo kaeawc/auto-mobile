@@ -49,7 +49,7 @@ function fakeAdbFactory(
 }
 
 function makeSource(
-  overrides: Partial<Parameters<typeof AndroidH264Source.prototype.constructor>[0]> = {},
+  overrides: Partial<ConstructorParameters<typeof AndroidH264Source>[0]> = {},
   wmSizeOutput = "",
   onSpawn?: (process: FakeProcess) => void,
 ) {

@@ -1,6 +1,7 @@
-import { VisualHighlight, VisualHighlightClient } from "../../src/features/debug/VisualHighlight";
+import { VisualHighlight } from "../../src/features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../../src/features/debug/VisualHighlightClient";
 import type { HighlightOperationResult } from "../../src/models";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { runHighlightClientContract } from "./HighlightClientContract";
 
@@ -19,7 +20,7 @@ runHighlightClientContract("VisualHighlightClient (scripted device-side client)"
     },
   };
   const client = new VisualHighlightClient(
-    new FakeDeviceSessionManager(),
+    new FakeDeviceReadiness(),
     (device) => new VisualHighlight(device, null, deviceClient),
   );
   return {

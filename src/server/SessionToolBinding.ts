@@ -2,7 +2,7 @@ import { nonBlankSessionUuid } from "./planCallerIdentity";
 import {
   DeviceOutsideBoundSessionError,
   SessionOutsideBoundSessionError,
-} from "./deviceOutsideBoundSessionRefusal";
+} from "../daemon/deviceOutsideBoundSessionRefusal";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import {
   SessionToolBindingStore,

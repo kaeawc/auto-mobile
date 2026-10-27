@@ -4,8 +4,8 @@ import {
   DEFAULT_TASK_RETENTION_MS,
   DefaultTaskManager,
   TASK_INTERRUPTED_MESSAGE,
-} from "../../../src/server/tasks/TaskManager";
-import { toCreateTaskResult, toGetTaskResult } from "../../../src/server/tasks/mcpTasksExtension";
+} from "../../../src/daemon/tasks/TaskManager";
+import { toCreateTaskResult, toGetTaskResult } from "../../../src/daemon/tasks/mcpTasksExtension";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeMcpTaskStore } from "../../fakes/FakeMcpTaskStore";
 import { FakeTimer } from "../../fakes/FakeTimer";

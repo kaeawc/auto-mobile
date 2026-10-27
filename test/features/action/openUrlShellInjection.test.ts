@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { afterEach, describe, expect, spyOn, test, mock, beforeEach } from "bun:test";
 import type { ObserveResult } from "../../../src/models";
 import { OpenURL } from "../../../src/features/action/OpenURL";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
@@ -6,6 +7,8 @@ import { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeDeviceUrlLauncher } from "../../fakes/FakeDeviceUrlLauncher";
+
+afterEach(() => mock.restore());
 
 const observeResultStub = {
   observationId: "open-url-stub",
@@ -83,15 +86,14 @@ describe("openLink does not let a URL escape the Android device shell (issue #42
 
   // Run execute() without the observe/visual-change machinery: the platform
   // dispatch is the only part under test here.
-  const stubObservedInteraction = () => {
+  beforeEach(() => {
     const spy = spyOn(BaseVisualChange.prototype, "observedInteraction").mockImplementation(
-      async (block) => block(observeResultStub),
+      runBlockWith(observeResultStub),
     );
     restores.push(() => spy.mockRestore());
-  };
+  });
 
   test.each(hostileUrls)("android argv: %s", async (_label, url, quoted) => {
-    stubObservedInteraction();
     const fakeAdb = new FakeAdbExecutor();
     const openURL = new OpenURL(ANDROID_DEVICE, fakeAdb);
 
@@ -106,7 +108,6 @@ describe("openLink does not let a URL escape the Android device shell (issue #42
   });
 
   test("the reproduced injection payload cannot terminate the -d argument", async () => {
-    stubObservedInteraction();
     const fakeAdb = new FakeAdbExecutor();
     // Before the fix this produced:
     //   am start -a android.intent.action.VIEW -d "https://x/" ; id ; echo ""
@@ -137,15 +138,14 @@ describe("openLink passes the URL to simctl as its own argv element (issue #4213
     }
   });
 
-  const stubObservedInteraction = () => {
+  beforeEach(() => {
     const spy = spyOn(BaseVisualChange.prototype, "observedInteraction").mockImplementation(
-      async (block) => block(observeResultStub),
+      runBlockWith(observeResultStub),
     );
     restores.push(() => spy.mockRestore());
-  };
+  });
 
   test.each(hostileUrls)("ios simulator argv: %s", async (_label, url) => {
-    stubObservedInteraction();
     const simctl = new FakeSimctl();
     const openURL = new OpenURL(
       iosSimulator,

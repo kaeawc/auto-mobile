@@ -1,10 +1,28 @@
+import { countSessionAdmissions } from "./sqliteAdmissions";
+import { completedAcquisitionTiming, pendingAcquisitionTiming } from "./timingRecorder";
+import { requestRecord, resourceRecord, readRequest, readResource } from "./sqliteRecords";
+import { SqliteBrokerTimingStore } from "./sqliteTimingStore";
+import type { SessionPreparationTiming } from "./devicePort";
+import { SessionRequestOwnerMismatchError } from "./SessionRequestOwnerMismatchError";
+import { SessionBrokerInvariantError } from "./SessionBrokerInvariantError";
 import type { Kysely, Selectable, Transaction } from "kysely";
+import {
+  readExport,
+  acknowledgeExport,
+  linkRequestExport,
+  linkExport,
+  pruneTerminalRequests,
+  deleteUnreferencedTombstones,
+} from "./sqliteReceipts";
 import {
   SESSION_OWNER_EXITED_CODE,
   SESSION_OWNER_EXITED_MESSAGE,
   type SessionBrokerFailure,
+  type SessionBrokerTiming,
 } from "../../devices/sessionBrokerResult";
 import { ActionableError } from "../../models/ActionableError";
+import type { SessionDeviceProfile } from "../../devices/sessionRequirements";
+import type { BrokerTimingSample } from "./store";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { BindingRegistryDatabase } from "./registry/sqliteBindingRegistry";
@@ -18,6 +36,8 @@ import {
 } from "./requestIdentity";
 import {
   destructionTicket,
+  type BrokerExportIdentity,
+  type BrokerExportRecord,
   type BrokerAbandonment,
   type BrokerAdmission,
   type BrokerAdmissionInput,
@@ -30,42 +50,8 @@ import {
 
 type Executor = Kysely<BindingRegistryDatabase> | Transaction<BindingRegistryDatabase>;
 
-const TERMINAL_REQUEST_STATES = ["released", "failed"] as const;
-
 function isTerminalState(state: BrokerRequestsTable["state"] | undefined): boolean {
   return state === "released" || state === "failed";
-}
-
-function requestRecord(row: Selectable<BrokerRequestsTable>): BrokerRequestRecord {
-  const { restartHandoff, ...owner } = JSON.parse(row.owner_json) as BindingProcessIdentity & {
-    restartHandoff?: unknown;
-  };
-  return {
-    requestId: row.request_id,
-    fingerprint: row.fingerprint,
-    parameters: JSON.parse(row.parameters_json),
-    owner,
-    ...(restartHandoff === true ? { restartHandoff: true as const } : {}),
-    state: row.state,
-    resourceId: row.resource_id,
-    sessionId: row.session_id,
-    error: row.error,
-    errorCode: row.error_code,
-    retryable: row.retryable === 1,
-  };
-}
-
-function resourceRecord(row: Selectable<BrokerResourcesTable>): BrokerResourceRecord {
-  return {
-    resourceId: row.resource_id,
-    allocationIndex: row.allocation_index,
-    scopeKey: row.scope_key,
-    profile: JSON.parse(row.profile_json),
-    state: row.state,
-    requestId: row.request_id,
-    revision: row.revision,
-    idleOrder: row.idle_order,
-  };
 }
 
 function sameOwner(left: BindingProcessIdentity, right: BindingProcessIdentity): boolean {
@@ -103,7 +89,7 @@ function ownerIdentity(owner: BindingProcessIdentity): BindingProcessIdentity {
 
 function requireValue<T>(value: T | undefined | null, message: string): T {
   if (value === undefined || value === null) {
-    throw new ActionableError(message);
+    throw new SessionBrokerInvariantError(message);
   }
   return value;
 }
@@ -129,16 +115,51 @@ function occupiedResources(resources: readonly BrokerResourceRecord[]) {
  * interrupted resource to idle.
  */
 export class SqliteSessionBrokerStore {
+  private readonly timingStore: SqliteBrokerTimingStore;
+
   constructor(
     private readonly db: Kysely<BindingRegistryDatabase>,
     private readonly scopeKey: string,
     private readonly isOwnerLive: BindingExecOwnerLiveness,
     private readonly ids: IdGenerator = defaultIdGenerator,
     private readonly clock: Pick<Timer, "now"> = defaultTimer,
-  ) {}
+  ) {
+    this.timingStore = new SqliteBrokerTimingStore(db, clock);
+  }
 
   async getRequest(requestId: string): Promise<BrokerRequestRecord | undefined> {
-    return this.readRequest(this.db, requestId);
+    return readRequest(this.db, requestId);
+  }
+
+  recordTiming(
+    requestId: string,
+    timing: SessionBrokerTiming,
+    profile?: SessionDeviceProfile,
+  ): Promise<void> {
+    return this.timingStore.recordTiming(requestId, timing, profile);
+  }
+
+  timingSamples(sinceMs: number, untilMs: number, limit: number): Promise<BrokerTimingSample[]> {
+    return this.timingStore.timingSamples(sinceMs, untilMs, limit);
+  }
+
+  getExport(prepareId: string): Promise<BrokerExportRecord | undefined> {
+    return readExport(this.db, prepareId);
+  }
+
+  acknowledgeExport(
+    prepareId: string,
+    now = this.clock.now(),
+  ): Promise<BrokerExportRecord | undefined> {
+    return acknowledgeExport(this.db, prepareId, now);
+  }
+
+  linkRequestExport(
+    requestId: string,
+    fingerprint: string,
+    identity: BrokerExportIdentity,
+  ): Promise<void> {
+    return linkRequestExport(this.db, this.clock.now(), requestId, fingerprint, identity);
   }
 
   async getSession(sessionId: string): Promise<BrokerRequestRecord | undefined> {
@@ -150,8 +171,21 @@ export class SqliteSessionBrokerStore {
     return row && requestRecord(row);
   }
 
-  async listResources(): Promise<BrokerResourceRecord[]> {
+  async listResources(resourceId?: string): Promise<BrokerResourceRecord[]> {
+    if (resourceId !== undefined) {
+      const resource = await readResource(this.db, resourceId);
+      return resource ? [resource] : [];
+    }
     return this.readResources(this.db);
+  }
+
+  async getResource(resourceId: string): Promise<BrokerResourceRecord | undefined> {
+    // Preserve the receipt-read failure/race injection seam while querying only this row.
+    return (await this.listResources(resourceId))[0];
+  }
+
+  listLiveResources(): Promise<BrokerResourceRecord[]> {
+    return this.readResources(this.db, true);
   }
 
   async listRequests(): Promise<BrokerRequestRecord[]> {
@@ -194,100 +228,34 @@ export class SqliteSessionBrokerStore {
     return rows.map(requestRecord);
   }
 
-  /**
-   * Deletes terminal receipts that became terminal at least `retentionMs` ago and hold no
-   * undestroyed resource, oldest first, at most `limit` per call. Their destroyed resource
-   * tombstones go with them unless a retained receipt still names that resource. A receipt with
-   * no terminal time (written before retention existed) is stamped now instead, so it gets a
-   * full window. A pruned identity answers as unknown, exactly as one never seen.
-   */
-  async pruneTerminalRequests(retentionMs: number, limit: number): Promise<number> {
-    if (!Number.isFinite(retentionMs) || retentionMs < 0 || !Number.isInteger(limit) || limit < 1) {
-      throw new ActionableError(
-        "Receipt retention needs a non-negative window and a positive limit",
-      );
-    }
-    return this.db.transaction().execute(async (trx) => {
-      const now = this.clock.now();
-      await trx
-        .updateTable("session_broker_requests")
-        .set({ terminal_at_ms: now })
-        .where("state", "in", TERMINAL_REQUEST_STATES)
-        .where("terminal_at_ms", "is", null)
-        .execute();
-      const expired = await trx
-        .selectFrom("session_broker_requests")
-        .select("request_id")
-        .where("state", "in", TERMINAL_REQUEST_STATES)
-        .where("terminal_at_ms", "<=", now - retentionMs)
-        .where(({ not, exists, selectFrom }) =>
-          not(
-            exists(
-              selectFrom("session_broker_resources")
-                .select("session_broker_resources.resource_id")
-                .whereRef(
-                  "session_broker_resources.request_id",
-                  "=",
-                  "session_broker_requests.request_id",
-                )
-                .where("session_broker_resources.state", "!=", "destroyed"),
-            ),
-          ),
-        )
-        .orderBy("terminal_at_ms")
-        .orderBy("request_id")
-        .limit(limit)
-        .execute();
-      const ids = expired.map((row) => row.request_id);
-      if (ids.length === 0) {
-        return 0;
-      }
-      // Tombstones still named by a retained receipt keep answering its profile.
-      await trx
-        .deleteFrom("session_broker_resources")
-        .where("request_id", "in", ids)
-        .where("state", "=", "destroyed")
-        .where(({ not, exists, selectFrom }) =>
-          not(
-            exists(
-              selectFrom("session_broker_requests")
-                .select("session_broker_requests.request_id")
-                .whereRef(
-                  "session_broker_requests.resource_id",
-                  "=",
-                  "session_broker_resources.resource_id",
-                )
-                .where("session_broker_requests.request_id", "not in", ids),
-            ),
-          ),
-        )
-        .execute();
-      await trx
-        .updateTable("session_broker_resources")
-        .set({ request_id: null })
-        .where("request_id", "in", ids)
-        .execute();
-      await trx.deleteFrom("session_broker_requests").where("request_id", "in", ids).execute();
-      return ids.length;
-    });
+  pruneTerminalRequests(
+    retentionMs: number,
+    limit: number,
+    exportRetentionMs?: number,
+  ): Promise<number> {
+    return pruneTerminalRequests(this.db, this.clock, retentionMs, limit, exportRetentionMs);
   }
 
   /** A failed catalog/default lookup consumes its operation identity without consuming capacity. */
   async recordPreAdmissionFailure(
-    input: Pick<BrokerAdmissionInput, "requestId" | "fingerprint" | "parameters" | "owner">,
+    input: Pick<
+      BrokerAdmissionInput,
+      "requestId" | "fingerprint" | "parameters" | "owner" | "export"
+    >,
     failure: SessionBrokerFailure,
   ): Promise<BrokerRequestRecord> {
     if (!input.requestId.trim() || !input.fingerprint.trim()) {
       throw new ActionableError("Session request identity and fingerprint must be non-empty");
     }
     return this.db.transaction().execute(async (trx) => {
-      const previous = await this.readRequest(trx, input.requestId);
+      const previous = await readRequest(trx, input.requestId);
       if (previous) {
         if (previous.fingerprint !== input.fingerprint) {
           throw new ActionableError(
             "Session request identity was already used with different parameters",
           );
         }
+        await linkExport(trx, input.requestId, input.export, this.clock.now());
         return previous;
       }
       const row = await trx
@@ -307,6 +275,7 @@ export class SqliteSessionBrokerStore {
         })
         .returningAll()
         .executeTakeFirstOrThrow();
+      await linkExport(trx, input.requestId, input.export, this.clock.now());
       return requestRecord(row);
     });
   }
@@ -316,13 +285,14 @@ export class SqliteSessionBrokerStore {
       throw new ActionableError("Session request identity and fingerprint must be non-empty");
     }
     return this.db.transaction().execute(async (trx) => {
-      const previous = await this.readRequest(trx, input.requestId);
+      const previous = await readRequest(trx, input.requestId);
       if (previous) {
         if (previous.fingerprint !== input.fingerprint) {
           throw new ActionableError(
             "Session request identity was already used with different parameters",
           );
         }
+        await linkExport(trx, input.requestId, input.export, this.clock.now());
         return { kind: "existing", request: previous };
       }
       const row = await trx
@@ -342,6 +312,7 @@ export class SqliteSessionBrokerStore {
         })
         .returningAll()
         .executeTakeFirstOrThrow();
+      await linkExport(trx, input.requestId, input.export, this.clock.now());
       return this.reserve(trx, requestRecord(row), input);
     });
   }
@@ -360,7 +331,7 @@ export class SqliteSessionBrokerStore {
       throw new ActionableError("Session request identity and liveness owner token are required");
     }
     return this.db.transaction().execute(async (trx) => {
-      const previous = await this.readRequest(trx, requestId);
+      const previous = await readRequest(trx, requestId);
       if (!previous) {
         const tombstone = abandonedRequestIdentity(livenessOwnerToken);
         const row = await trx
@@ -394,7 +365,7 @@ export class SqliteSessionBrokerStore {
         };
       }
       if (!sameOwner(previous.owner, owner)) {
-        throw new ActionableError("Session request belongs to another daemon process generation");
+        throw new SessionRequestOwnerMismatchError(previous.restartHandoff === true);
       }
       let ticket: DestructionTicket | undefined;
       if (previous.resourceId) {
@@ -424,8 +395,11 @@ export class SqliteSessionBrokerStore {
       if (request.fingerprint !== input.fingerprint || request.state !== "acquiring") {
         throw new ActionableError("Cannot continue a changed or terminal session request");
       }
+      if (request.resourceId === null) {
+        return this.reserve(trx, request, input);
+      }
       const resource = requireValue(
-        await this.readResource(
+        await readResource(
           trx,
           requireValue(request.resourceId, "No admission eviction to resume"),
         ),
@@ -444,6 +418,7 @@ export class SqliteSessionBrokerStore {
     requestId: string,
     owner: BindingProcessIdentity,
     sessionId: string,
+    phases?: SessionPreparationTiming,
   ): Promise<BrokerRequestRecord> {
     if (!sessionId.trim()) {
       throw new ActionableError("A prepared session must have a non-empty session UUID");
@@ -469,7 +444,11 @@ export class SqliteSessionBrokerStore {
         );
       }
       await this.updateResource(trx, resource, { state: "active" });
-      return this.updateRequest(trx, requestId, { state: "active", session_id: sessionId });
+      return this.updateRequest(trx, requestId, {
+        state: "active",
+        session_id: sessionId,
+        ...completedAcquisitionTiming(request, resource, phases, this.clock.now()),
+      });
     });
   }
 
@@ -521,7 +500,9 @@ export class SqliteSessionBrokerStore {
       }
       const resource = await this.ownedResource(trx, request);
       if (request.state !== "releasing" || resource.state !== "resetting") {
-        throw new ActionableError("Only a joined, resetting session can return a clean device");
+        throw new SessionBrokerInvariantError(
+          "Only a joined, resetting session can return a clean device",
+        );
       }
       const binding = await trx
         .selectFrom("slot_assignments")
@@ -536,19 +517,20 @@ export class SqliteSessionBrokerStore {
         binding.exec_session_uuid ||
         journal
       ) {
-        throw new ActionableError(
+        throw new SessionBrokerInvariantError(
           "Physical device still has execution or journal work; it cannot enter the idle pool",
         );
       }
-      const resources = await this.readResources(trx);
-      const idleOrder = Math.max(0, ...resources.map((entry) => entry.idleOrder)) + 1;
+      const resources = await this.readResources(trx, true);
+      const idleOrder =
+        resources.reduce((latest, entry) => Math.max(latest, entry.idleOrder), 0) + 1;
       await this.updateResource(trx, resource, {
         state: "idle",
         request_id: null,
         idle_order: idleOrder,
       });
       await this.updateRequest(trx, requestId, { state: "released" });
-      return this.trimIdle(trx, limits);
+      return this.trimIdle(trx, limits, resource.resourceId, requestId);
     });
   }
 
@@ -647,7 +629,7 @@ export class SqliteSessionBrokerStore {
    */
   async confirmDestroyed(ticket: DestructionTicket): Promise<boolean> {
     return this.db.transaction().execute(async (trx) => {
-      const resource = await this.readResource(trx, ticket.resourceId);
+      const resource = await readResource(trx, ticket.resourceId);
       if (!resource || resource.revision !== ticket.revision) {
         return false;
       }
@@ -660,7 +642,7 @@ export class SqliteSessionBrokerStore {
       if (await this.physicalWorkPending(trx, resource)) {
         return false;
       }
-      // Keep the revision so replaying exactly this confirmed destruction is idempotent.
+      // Retained receipts still need the profile and idempotent destruction revision.
       await trx
         .updateTable("session_broker_resources")
         .set({ state: "destroyed" })
@@ -668,13 +650,18 @@ export class SqliteSessionBrokerStore {
         .execute();
       if (resource.requestId) {
         await this.settleRequestAfterDestruction(trx, resource);
+      } else {
+        await deleteUnreferencedTombstones(trx, resource.resourceId);
       }
+      await this.timingStore.confirmDestroyed(trx, resource.requestId);
       return true;
     });
   }
 
   /**
    * Recovery first takes durable ownership, fences the prior owner, and requires destruction.
+   * A relinquished release stays releasing until destruction confirms its released receipt;
+   * other interrupted requests fail with session_owner_exited.
    * A live or uncertain owner is retained. The caller must bound uncertainty and arrange another
    * recovery pass, never infer an idle device from process exit.
    */
@@ -683,10 +670,7 @@ export class SqliteSessionBrokerStore {
     owner: BindingProcessIdentity,
   ): Promise<DestructionTicket | undefined> {
     return this.db.transaction().execute(async (trx) => {
-      const request = requireValue(
-        await this.readRequest(trx, requestId),
-        "Unknown session request",
-      );
+      const request = requireValue(await readRequest(trx, requestId), "Unknown session request");
       if (sameOwner(request.owner, owner) || this.isOwnerLive(request.owner)) {
         return undefined;
       }
@@ -698,15 +682,17 @@ export class SqliteSessionBrokerStore {
         const resource = await this.ownedResource(trx, request);
         if (resource.state !== "destroyed") {
           ticket = destructionTicket(
-            await this.updateResource(trx, resource, { state: "destroying" }),
+            request.state === "releasing" && resource.state === "destroying"
+              ? resource
+              : await this.updateResource(trx, resource, { state: "destroying" }),
           );
         }
       }
       await this.updateRequest(trx, requestId, {
         owner_json: JSON.stringify(owner),
-        state: "failed",
-        error: SESSION_OWNER_EXITED_MESSAGE,
-        error_code: SESSION_OWNER_EXITED_CODE,
+        state: request.state === "releasing" ? "releasing" : "failed",
+        error: request.state === "releasing" ? null : SESSION_OWNER_EXITED_MESSAGE,
+        error_code: request.state === "releasing" ? null : SESSION_OWNER_EXITED_CODE,
       });
       return ticket;
     });
@@ -742,10 +728,7 @@ export class SqliteSessionBrokerStore {
     owner: BindingProcessIdentity,
   ): Promise<"adopted" | "pending" | "not-handoff"> {
     return this.db.transaction().execute(async (trx) => {
-      const request = requireValue(
-        await this.readRequest(trx, requestId),
-        "Unknown session request",
-      );
+      const request = requireValue(await readRequest(trx, requestId), "Unknown session request");
       if (!request.restartHandoff || request.state !== "active" || !request.sessionId) {
         return "not-handoff";
       }
@@ -776,7 +759,7 @@ export class SqliteSessionBrokerStore {
     trx: Transaction<BindingRegistryDatabase>,
     resource: BrokerResourceRecord,
   ): Promise<void> {
-    const request = await this.readRequest(trx, requireValue(resource.requestId, "No request"));
+    const request = await readRequest(trx, requireValue(resource.requestId, "No request"));
     if (request?.resourceId !== resource.resourceId) {
       return;
     }
@@ -797,42 +780,43 @@ export class SqliteSessionBrokerStore {
     request: BrokerRequestRecord,
     input: BrokerAdmissionInput,
   ): Promise<BrokerAdmission> {
-    const resources = await this.readResources(trx);
-    const active = await trx
-      .selectFrom("session_broker_requests")
-      .select(["request_id", "state", "resource_id"])
-      .where("state", "!=", "released")
-      .where("request_id", "!=", request.requestId)
-      .execute();
-    // A failed request may still have a live native session or ambiguous creation. Retain its
-    // session admission as well as its device admission until cleanup is confirmed.
-    const sessionCount = active.filter(
-      (entry) =>
-        entry.state !== "failed" ||
-        resources.some(
-          (resource) =>
-            resource.resourceId === entry.resource_id &&
-            resource.requestId === entry.request_id &&
-            resource.state !== "destroyed",
-        ),
-    ).length;
+    const resources = await this.readResources(trx, true);
+    const sessionCount = await countSessionAdmissions(trx, request.requestId);
     const decision = selectAdmission(
       {
         activeOrAcquiringSessions: sessionCount,
+        resetWaitThresholdMs: input.resetReadiness?.thresholdMs,
         resources: occupiedResources(resources).map((resource) => ({
           ...resource,
           compatible:
-            resource.state === "idle" &&
+            (resource.state === "idle" || resource.state === "resetting") &&
             input.matches(
               requireValue(
                 resources.find((entry) => entry.resourceId === resource.id),
                 "Missing resource",
               ).profile,
             ),
+          expectedReadyMs:
+            input.resetReadiness?.canWait?.(resource.id) === false
+              ? undefined
+              : input.resetReadiness?.expectedReadyMs.get(resource.id),
         })),
       },
       input.limits,
     );
+    if (decision.kind === "wait") {
+      input.resetReadiness?.reserveWait?.(request.requestId, decision.resourceId);
+      const resetting = requireValue(
+        resources.find((resource) => resource.resourceId === decision.resourceId),
+        "Waiting resource disappeared",
+      );
+      return {
+        ...decision,
+        request: await this.updateRequest(trx, request.requestId, {
+          ...pendingAcquisitionTiming(input, request, resetting, "wait", this.clock.now()),
+        }),
+      };
+    }
     if (decision.kind === "refuse") {
       return {
         kind: "refused",
@@ -873,6 +857,7 @@ export class SqliteSessionBrokerStore {
       resource = await this.updateResource(trx, selected, {
         state: decision.kind === "reuse" ? "reserved" : "destroying",
         request_id: request.requestId,
+        reuse_count: (selected.reuseCount ?? 0) + (decision.kind === "reuse" ? 1 : 0),
       });
     }
     return {
@@ -880,6 +865,14 @@ export class SqliteSessionBrokerStore {
       resource,
       request: await this.updateRequest(trx, request.requestId, {
         resource_id: resource.resourceId,
+        ...pendingAcquisitionTiming(
+          input,
+          request,
+          resource,
+          decision.kind,
+          this.clock.now(),
+          creationProfile,
+        ),
       }),
     };
   }
@@ -887,8 +880,10 @@ export class SqliteSessionBrokerStore {
   private async trimIdle(
     trx: Transaction<BindingRegistryDatabase>,
     limits: BrokerLimits,
+    returningResourceId?: string,
+    returningRequestId?: string,
   ): Promise<DestructionTicket[]> {
-    const resources = await this.readResources(trx);
+    const resources = await this.readResources(trx, true);
     const selected = chooseIdleEvictions(
       { activeOrAcquiringSessions: 0, resources: occupiedResources(resources) },
       limits,
@@ -899,23 +894,13 @@ export class SqliteSessionBrokerStore {
         resources.find((entry) => entry.resourceId === id),
         "Idle resource disappeared",
       );
-      tickets.push(
-        destructionTicket(await this.updateResource(trx, resource, { state: "destroying" })),
-      );
+      const changes =
+        resource.resourceId === returningResourceId && returningRequestId
+          ? { state: "destroying" as const, request_id: returningRequestId }
+          : { state: "destroying" as const };
+      tickets.push(destructionTicket(await this.updateResource(trx, resource, changes)));
     }
     return tickets;
-  }
-
-  private async readRequest(
-    db: Executor,
-    requestId: string,
-  ): Promise<BrokerRequestRecord | undefined> {
-    const row = await db
-      .selectFrom("session_broker_requests")
-      .selectAll()
-      .where("request_id", "=", requestId)
-      .executeTakeFirst();
-    return row && requestRecord(row);
   }
 
   private async currentDestructionTicket(
@@ -925,7 +910,7 @@ export class SqliteSessionBrokerStore {
     if (!request.resourceId) {
       return {};
     }
-    const resource = await this.readResource(db, request.resourceId);
+    const resource = await readResource(db, request.resourceId);
     return resource?.requestId === request.requestId && resource.state === "destroying"
       ? { ticket: destructionTicket(resource) }
       : {};
@@ -961,22 +946,11 @@ export class SqliteSessionBrokerStore {
     );
   }
 
-  private async readResource(
-    db: Executor,
-    resourceId: string,
-  ): Promise<BrokerResourceRecord | undefined> {
-    const row = await db
-      .selectFrom("session_broker_resources")
-      .selectAll()
-      .where("resource_id", "=", resourceId)
-      .executeTakeFirst();
-    return row && resourceRecord(row);
-  }
-
-  private async readResources(db: Executor): Promise<BrokerResourceRecord[]> {
+  private async readResources(db: Executor, liveOnly = false): Promise<BrokerResourceRecord[]> {
     const rows = await db
       .selectFrom("session_broker_resources")
       .selectAll()
+      .$if(liveOnly, (query) => query.where("state", "!=", "destroyed"))
       .orderBy("allocation_index")
       .execute();
     return rows.map(resourceRecord);
@@ -987,9 +961,9 @@ export class SqliteSessionBrokerStore {
     id: string,
     owner: BindingProcessIdentity,
   ): Promise<BrokerRequestRecord> {
-    const request = requireValue(await this.readRequest(db, id), "Unknown session request");
+    const request = requireValue(await readRequest(db, id), "Unknown session request");
     if (!sameOwner(request.owner, owner)) {
-      throw new ActionableError("Session request belongs to another daemon process generation");
+      throw new SessionRequestOwnerMismatchError(request.restartHandoff === true);
     }
     return request;
   }
@@ -999,14 +973,13 @@ export class SqliteSessionBrokerStore {
     request: BrokerRequestRecord,
   ): Promise<BrokerResourceRecord> {
     const resource = requireValue(
-      await this.readResource(
-        db,
-        requireValue(request.resourceId, "Request has no device reservation"),
-      ),
+      await readResource(db, requireValue(request.resourceId, "Request has no device reservation")),
       "Request resource disappeared",
     );
     if (resource.requestId !== request.requestId) {
-      throw new ActionableError("Session request no longer owns this device reservation");
+      throw new SessionBrokerInvariantError(
+        "Session request no longer owns this device reservation",
+      );
     }
     return resource;
   }
@@ -1014,7 +987,9 @@ export class SqliteSessionBrokerStore {
   private async updateResource(
     trx: Transaction<BindingRegistryDatabase>,
     resource: BrokerResourceRecord,
-    changes: Partial<Pick<BrokerResourcesTable, "state" | "request_id" | "idle_order">>,
+    changes: Partial<
+      Pick<Selectable<BrokerResourcesTable>, "state" | "request_id" | "idle_order" | "reuse_count">
+    >,
   ): Promise<BrokerResourceRecord> {
     const row = await trx
       .updateTable("session_broker_resources")
@@ -1030,8 +1005,17 @@ export class SqliteSessionBrokerStore {
     id: string,
     changes: Partial<
       Pick<
-        BrokerRequestsTable,
-        "state" | "resource_id" | "session_id" | "error" | "error_code" | "retryable" | "owner_json"
+        Selectable<BrokerRequestsTable>,
+        | "state"
+        | "resource_id"
+        | "session_id"
+        | "error"
+        | "error_code"
+        | "retryable"
+        | "owner_json"
+        | "timing_json"
+        | "timing_profile_json"
+        | "timing_updated_at_ms"
       >
     >,
   ): Promise<BrokerRequestRecord> {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { handleSessionInfo } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -68,9 +68,7 @@ describe("cli-idle session with a read in flight past its idle deadline", () => 
     startRead();
 
     await timer.advanceTimeAsync(CLI_IDLE_MS - 10_000, drain);
-    const state = {
-      getSessionManager: () => manager,
-    } as unknown as Parameters<typeof handleSessionInfo>[1];
+    const state = { getSessionManager: () => manager };
     const info = await handleSessionInfo(
       {
         id: "s1",
@@ -82,8 +80,10 @@ describe("cli-idle session with a read in flight past its idle deadline", () => 
       { getActiveDeviceSessionExecutionCount: () => 1 },
     );
     expect(info.success).toBe(true);
-    const reportedIdleReleaseAt = (info as { result: { idleReleaseAt: number } }).result
-      .idleReleaseAt;
+    const reportedIdleReleaseAt = info.result?.idleReleaseAt;
+    if (typeof reportedIdleReleaseAt !== "number") {
+      throw new Error("session-info reported no idleReleaseAt");
+    }
 
     await timer.advanceTimeAsync(20_000, drain);
 

@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import {
   hasWrongWindowEvidence,
   recordWrongWindowEvidence,
@@ -15,11 +16,12 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { ObserveResult } from "../../../../src/models";
 
 function makeResult(label: string): ObserveResult {
-  return {
+  return buildObserveResult({
+    observationId: label,
     updatedAt: label,
     screenSize: { width: 100, height: 200 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  };
+  });
 }
 
 /**

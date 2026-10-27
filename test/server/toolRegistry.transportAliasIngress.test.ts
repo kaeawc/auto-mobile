@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { DEVICE_ASSIGNED_TO_BINDING_CODE } from "../../src/daemon/sessionBroker/provisioning/refusal";
@@ -20,16 +20,27 @@ import {
 } from "../helpers/transportAliasHarness";
 
 const cleanups: Array<() => void> = [];
-afterEach(() => {
+function runCleanups(): void {
   for (const cleanup of cleanups.splice(0).reverse()) {
     cleanup();
   }
-});
+}
+afterEach(runCleanups);
 async function harness(options: HarnessOptions) {
   return transportAliasHarness(options, cleanups);
 }
 
 const phone = () => harness({ pooledRows: [booted(USB), booted(WIRELESS)], held: USB });
+
+// The first harness loads and compiles the daemon pool, session and tool-call graph; build one
+// here, outside the 100 ms test budget, rather than inside whichever test runs first.
+beforeAll(async () => {
+  try {
+    await phone();
+  } finally {
+    runCleanups();
+  }
+});
 
 describe("a tool call naming a held handset by either transport id (#11618)", () => {
   test("the pool holds the handset once, under its USB serial", async () => {
@@ -53,7 +64,7 @@ describe("a tool call naming a held handset by either transport id (#11618)", ()
 
       expect(outcome).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
       expect(h.tools.runs).toEqual([]);
-      expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
       expect(h.sessions.getSession(HOLDER)!.lastUsedAt).toBe(before.lastUsedAt);
       expect(h.sessions.getSession(HOLDER)!.expiresAt).toBe(before.expiresAt);
     });
@@ -121,7 +132,7 @@ describe("a tool call naming a held handset by either transport id (#11618)", ()
 
         expect(outcome).toBe("ran");
         expect(h.reads).toEqual([USB]);
-        expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+        expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
         expect(h.sessions.getSession(HOLDER)!.lastUsedAt).toBe(before.lastUsedAt);
         expect(h.sessions.getSession(HOLDER)!.expiresAt).toBe(before.expiresAt);
         expect(h.sessions.getAllSessions().map((session) => session.sessionId)).toEqual(
@@ -140,7 +151,7 @@ describe("a tool call naming a held handset by either transport id (#11618)", ()
       h.timer.advanceTime(1000);
       expect(await h.outcome("readProbe", { sessionUuid: "other-session", deviceId })).toBe("ran");
       expect(h.reads).toEqual([USB]);
-      expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
       expect(
         h.sessions.getAllSessions().map((s) => ({
           sessionId: s.sessionId,
@@ -258,7 +269,7 @@ describe("a transport the pool has not folded yet (#11618)", () => {
 
     expect(outcome).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
     expect(h.tools.runs).toEqual([]);
-    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
     expect(h.pool.getAndroidTransportAliases(USB)).toEqual([WIRELESS]);
     expect(h.pool.getAllDevices().map((device) => device.id)).toEqual([USB]);
   });
@@ -287,11 +298,11 @@ describe("a transport the pool has not folded yet (#11618)", () => {
       const args = { platform: "android", deviceId: WIRELESS, __mcpSessionId: connection };
 
       expect(await h.outcome("readProbe", args)).toBe("ran");
-      expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
       expect(h.reads).toEqual([USB]);
       expect(await h.outcome("observe", args)).toBe("ran");
       expect(h.tools.watcherReads).toEqual([USB]);
-      expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
       expect(h.tools.runs).toEqual([]);
       expect(h.pool.getAndroidTransportAliases(USB)).toEqual([WIRELESS]);
       expect(h.sessions.getSession(HOLDER)!.lastUsedAt).toBe(before.lastUsedAt);
@@ -314,7 +325,7 @@ describe("a transport the pool has not folded yet (#11618)", () => {
       expect(outcome).not.toBe("discovery_incomplete");
       expect(outcome).not.toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
       expect(outcome).not.toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
-      expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
       expect(h.tools.runs).toEqual([]);
     },
   );
@@ -346,7 +357,7 @@ describe("a transport the pool has not folded yet (#11618)", () => {
   test("a folded alias costs no adb call per tool call", async () => {
     const h = await phone();
     const probes = h.adbFactory.getCallCount();
-    const scans = h.tools.deviceSessionManager.getDetectConnectedPlatformsCallCount();
+    const scans = h.tools.deviceReadiness.getDetectConnectedPlatformsCallCount();
     const rawScans = h.rawScans();
 
     await h.outcome("controlProbe", { platform: "android", deviceId: WIRELESS });
@@ -354,7 +365,7 @@ describe("a transport the pool has not folded yet (#11618)", () => {
     await h.outcome("controlProbe", { sessionUuid: HOLDER, deviceId: USB });
 
     expect(h.adbFactory.getCallCount()).toBe(probes);
-    expect(h.tools.deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(scans);
+    expect(h.tools.deviceReadiness.getDetectConnectedPlatformsCallCount()).toBe(scans);
     expect(h.rawScans()).toBe(rawScans);
   });
 
@@ -502,7 +513,7 @@ describe("unidentified transports use the held-alias rule (#11596)", () => {
         });
       }
       expect(h.tools.runs).toEqual([]);
-      expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
     },
   );
 
@@ -524,7 +535,7 @@ describe("unidentified transports use the held-alias rule (#11596)", () => {
       true,
     );
     expect(h.reads).toEqual([WIRELESS]);
-    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("a control call on a wireless phone with a generic serial is allowed, as before", async () => {
@@ -571,7 +582,7 @@ describe("unidentified transports use the held-alias rule (#11596)", () => {
       DEVICE_OWNED_BY_OTHER_SESSION_CODE,
     );
     expect(h.tools.runs).toEqual([]);
-    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
     expect(h.sessions.getSession(HOLDER)!.lastUsedAt).toBe(before.lastUsedAt);
     expect(h.sessions.getSession(HOLDER)!.expiresAt).toBe(before.expiresAt);
     expect(h.pool.getAndroidTransportAliases(generic)).toEqual([]);
@@ -595,7 +606,7 @@ describe("unidentified transports use the held-alias rule (#11596)", () => {
       }).then(describeOutcome, describeOutcome),
     ).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
     expect(h.tools.runs).toEqual([]);
-    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test.each([undefined, STRANGER_CONNECTION])(
@@ -617,7 +628,7 @@ describe("unidentified transports use the held-alias rule (#11596)", () => {
           __mcpSessionId: connection,
         }),
       ).toBe("ran");
-      expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
       expect(h.reads).toEqual([WIRELESS]);
       expect(h.tools.runs).toEqual([]);
       expect(h.sessions.getSession(HOLDER)!.lastUsedAt).toBe(before.lastUsedAt);
@@ -644,18 +655,21 @@ describe("unidentified transports use the held-alias rule (#11596)", () => {
 
     expect(h.rawScans() - listingsBefore).toBe(2);
     expect(identity).toHaveBeenCalledWith(listed, generic);
+    const mapped: unknown = mapping.mock.results.at(-1)?.value;
     expect(identity.mock.calls.at(-1)?.[0]).toBe(
-      mapping.mock.results.at(-1)?.value.find((row) => row.deviceId === WIRELESS),
+      Array.isArray(mapped)
+        ? mapped.find((row: BootedDevice) => row.deviceId === WIRELESS)
+        : undefined,
     );
     expect(h.reads).toEqual([WIRELESS]);
-    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("an unidentified read with nothing held keeps read readiness", async () => {
     const h = await harness({ pooledRows: [booted(WIRELESS)], serial: "unknown" });
     expect(await h.outcome("readProbe", { platform: "android", deviceId: WIRELESS })).toBe("ran");
-    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
-    expect(h.tools.deviceSessionManager.getLastOptions()?.intent).toBe("read");
+    expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(1);
+    expect(h.tools.deviceReadiness.getLastOptions()?.intent).toBe("read");
   });
 });
 
@@ -687,7 +701,7 @@ describe("devices the alias fold does not concern (#11618)", () => {
     expect(readByAlias).toBe("ran");
     expect(h.reads).toEqual([EMULATOR]);
     expect(h.tools.runs).toEqual([]);
-    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(h.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("an iOS id is passed through untouched and never probed", async () => {

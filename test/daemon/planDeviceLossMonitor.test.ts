@@ -1,17 +1,19 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS } from "../../src/daemon/deviceDisconnectHandler";
 import type { PooledDevice } from "../../src/daemon/devicePool";
 import type { BootedDeviceDiscoveryOptions } from "../../src/devices/deviceUtils";
+import type { BootedDevice } from "../../src/models";
 import {
   InMemoryEmulatorLossIncidentStore,
   type EmulatorLossDetectionPath,
 } from "../../src/daemon/emulatorLossIncident";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import {
   deviceLossOutcomeFromError,
   enrichDeviceLossOutcome,
-} from "../../src/server/deviceLossOutcome";
+} from "../../src/utils/deviceLossOutcome";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { AndroidTransportAliases } from "../../src/utils/androidSerial";
 import { createExecResult } from "../../src/utils/execResult";
@@ -25,11 +27,14 @@ import { InMemoryAdbTransportRestartRegistry } from "../../src/utils/android-cmd
 const executionIds: string[] = [];
 const previousPlanActive = serverConfig.isPlanExecutionActive();
 afterEach(() => {
+  DaemonState.getInstance().reset();
   for (const id of executionIds.splice(0)) {
     executionTracker.endExecution(id);
   }
   serverConfig.setPlanExecutionActive(previousPlanActive);
 });
+
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 function harness() {
   serverConfig.setPlanExecutionActive(true);
@@ -37,7 +42,7 @@ function harness() {
   const adb = new FakeAdbExecutor();
   const transportAliases = new AndroidTransportAliases(new FakeAdbClientFactory(adb));
   const incidents = new InMemoryEmulatorLossIncidentStore(timer, new FakeIdGenerator());
-  const device: PooledDevice = {
+  const device: Mutable<PooledDevice> = {
     id: "emulator-5554",
     name: "Pixel",
     platform: "android",
@@ -48,7 +53,7 @@ function harness() {
     lastUsedAt: 0,
     errorCount: 0,
     avdName: "Pixel",
-    androidImage: { name: "Pixel", platform: "android" },
+    androidImage: { name: "Pixel", platform: "android", isRunning: true },
   };
   const peer = { ...device, id: "emulator-5556", avdName: "Pixel_2", sessionId: "peer" };
   const devices = new Map([
@@ -71,7 +76,7 @@ function harness() {
       this.onDiscovery();
       return super.getBootedDevicesDetailed(platform);
     }
-    async getAndroidOfflineDeviceIds() {
+    async getAndroidOfflineDeviceIds(_candidateIds?: Iterable<string>) {
       this.onOfflineProbe();
       if (this.offlineProbeError) {
         throw this.offlineProbeError;
@@ -87,63 +92,69 @@ function harness() {
   let leased = false;
   let onReservation = () => {};
   let onIncident = () => {};
-  const daemon: Daemon = Object.create(Daemon.prototype);
-  Object.assign(daemon, {
-    timer,
-    deviceDisconnectMonitor: null,
-    deviceDisconnectMisses: new Map(),
-    deviceDisconnectMissIncarnations: new Map(),
-    confirmedDisconnectedDeviceIds: new Set(),
-    forceDisconnectedDeviceIds: new Set([device.id]),
-    forceDisconnectedDeviceGenerations: new Map(),
-    offlineRecoveryAttemptedDeviceIds: new Set(),
-    offlineRecoveryAttemptedIncarnations: new Map(),
-    deferredSessionRecoverySweeps: new Set(),
-    devicePool: {
-      mapAndroidDiscovery: transportAliases.mapDiscovery.bind(transportAliases),
-      getAndroidTransportAliases: transportAliases.aliases.bind(transportAliases),
-      reconcileDiscoveryObservation: async () => {
-        throw new Error("Plan discovery must remain presence-only");
-      },
-      getAllDevices: () => [...devices.values()],
-      getDevice: (id: string) => devices.get(id) ?? null,
-      isDeviceLeasedForAndroidStartup: () => leased,
-      isShutdownReservationHeld: async () => {
-        onReservation();
-        return reserved;
-      },
-      recordEmulatorLossIncident: async (id: string, detectionPath: EmulatorLossDetectionPath) => {
-        const incident = await incidents.open({
-          deviceId: id,
-          avdName: devices.get(id)?.avdName,
-          detectionPath,
-          lastAdbState: "absent",
-          session: {
-            sessionUuid: "plan:main",
-            state: "active",
-            lastHeartbeatMs: 0,
-            hasReceivedHeartbeat: true,
-            heartbeatTimeoutMs: 10_000,
-          },
-          recoveryPolicy: { onLoss: false, maxAttempts: 1 },
-        });
-        onIncident();
-        return incident.id;
-      },
-      finishEmulatorLossIncident: async (id: string | undefined) => {
-        if (id) {
-          await incidents.completeRecovery(id, "not-attempted");
-        }
-      },
+  const daemon = new Daemon({}, { timer });
+  const hooks = daemon.testHooks;
+  hooks.deviceLoss.forceDisconnectedIds.add(device.id);
+  const pool = hooks.devicePool;
+  spyOn(pool, "retryDueDeferredSessionRecoveries").mockImplementation(async () => {});
+  spyOn(pool, "mapAndroidDiscovery").mockImplementation(
+    transportAliases.mapDiscovery.bind(transportAliases),
+  );
+  spyOn(pool, "getAndroidTransportAliases").mockImplementation(
+    transportAliases.aliases.bind(transportAliases),
+  );
+  spyOn(pool, "reconcileDiscoveryObservation").mockImplementation(
+    async (observations: readonly BootedDevice[]) => {
+      expect(
+        observations.some((row) =>
+          executionTracker.hasActiveDeviceExecutions(row.deviceId, {
+            onlyToolName: "executePlan",
+          }),
+        ),
+      ).toBe(false);
     },
-    sessionManager: {
-      getAllSessions: () => [],
-      getDeviceLabels: (id: string) =>
-        id === "plan" ? { main: "plan:main", sibling: "plan:sibling" } : undefined,
-      getSessionForDevice: (id: string) => devices.get(id)?.sessionId ?? null,
-    },
+  );
+  spyOn(pool, "getAllDevices").mockImplementation(() => [...devices.values()]);
+  spyOn(pool, "getDevice").mockImplementation((id) => devices.get(id) ?? null);
+  spyOn(pool, "isDeviceLeasedForAndroidStartup").mockImplementation(() => leased);
+  spyOn(pool, "isShutdownReservationHeld").mockImplementation(async () => {
+    onReservation();
+    return reserved;
   });
-  daemon["startDeviceDisconnectMonitor"](manager, async () => []);
+  spyOn(pool, "recordEmulatorLossIncident").mockImplementation(
+    async (id: string, detectionPath: EmulatorLossDetectionPath) => {
+      const incident = await incidents.open({
+        deviceId: id,
+        avdName: devices.get(id)?.avdName,
+        detectionPath,
+        lastAdbState: "absent",
+        session: {
+          sessionUuid: "plan:main",
+          state: "active",
+          lastHeartbeatMs: 0,
+          hasReceivedHeartbeat: true,
+          heartbeatTimeoutMs: 10_000,
+        },
+        recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+      });
+      onIncident();
+      return incident.id;
+    },
+  );
+  spyOn(pool, "finishEmulatorLossIncident").mockImplementation(async (id: string | undefined) => {
+    if (id) {
+      await incidents.completeRecovery(id, "not-attempted");
+    }
+  });
+  const sessions = hooks.sessionManager;
+  spyOn(sessions, "getAllSessions").mockImplementation(() => []);
+  spyOn(sessions, "getDeviceLabels").mockImplementation((id: string) =>
+    id === "plan" ? { main: "plan:main", sibling: "plan:sibling" } : undefined,
+  );
+  spyOn(sessions, "getSessionForDevice").mockImplementation(
+    (id: string) => devices.get(id)?.sessionId ?? null,
+  );
+  daemon.testHooks.startDeviceDisconnectMonitor(manager, async () => []);
   const start = (tool: string, id = device.id, sessionUuid = "plan") => {
     const execution = executionTracker.startExecution(tool, undefined, sessionUuid);
     executionIds.push(execution.id);
@@ -175,7 +186,7 @@ function harness() {
     },
     async tick() {
       timer.advanceTime(5_000);
-      await daemon["deviceDisconnectMonitor"]!.run();
+      await daemon.testHooks.runtime.deviceDisconnectMonitor!.run();
       expect(timer.getSleepHistory()).toEqual([]);
     },
   };
@@ -211,7 +222,7 @@ describe("confirmed plan device loss", () => {
       await h.tick();
       await h.tick();
       expect(h.manager.calls).toHaveLength(boundary === "sweep" ? 2 : 5);
-      expect(h.daemon["deviceDisconnectMisses"].has(h.device.id)).toBe(false);
+      expect(h.daemon.testHooks.deviceLoss.misses.has(h.device.id)).toBe(false);
       expect(plan.abortController.signal.aborted).toBe(false);
       expect(await h.incidents.list()).toEqual([]);
       expect(h.transportAliases.mapDiscovery([alias])).toEqual([canonical]);
@@ -221,12 +232,13 @@ describe("confirmed plan device loss", () => {
   test("repeated checks cannot confirm before the named window elapses", async () => {
     const h = harness();
     const plan = h.start("executePlan");
-    const check = h.daemon["createPlanDeviceLossCheck"](h.manager, () =>
+    const check = h.daemon.testHooks.createPlanDeviceLossCheck(h.manager, () =>
       h.manager.getBootedDevicesDetailed("android", { bypassAndroidDeviceListCache: true }),
     );
     const missing = {
       disconnected: [],
       missed: [{ deviceId: h.device.id, misses: 1 }],
+      transitional: [],
       skippedAllDiscoveryFailed: false,
     };
     const present = new Set([h.peer.id]);
@@ -251,13 +263,14 @@ describe("confirmed plan device loss", () => {
     h.device.avdName = undefined;
     h.devices.set(h.device.id, h.device);
     const plan = h.start("executePlan");
-    const check = h.daemon["createPlanDeviceLossCheck"](h.manager, () =>
+    const check = h.daemon.testHooks.createPlanDeviceLossCheck(h.manager, () =>
       h.manager.getBootedDevicesDetailed("android", { bypassAndroidDeviceListCache: true }),
     );
     await check(
       {
         disconnected: [],
         missed: [{ deviceId: h.device.id, misses: 1 }],
+        transitional: [],
         skippedAllDiscoveryFailed: false,
       },
       new Set([h.peer.id]),
@@ -291,13 +304,14 @@ describe("confirmed plan device loss", () => {
     h.manager.getAndroidOfflineDeviceIds = async (ids: Iterable<string>) =>
       new Set([...ids].filter((id) => id === wifi));
     const plan = h.start("executePlan");
-    const check = h.daemon["createPlanDeviceLossCheck"](h.manager, () =>
+    const check = h.daemon.testHooks.createPlanDeviceLossCheck(h.manager, () =>
       h.manager.getBootedDevicesDetailed("android", { bypassAndroidDeviceListCache: true }),
     );
     await check(
       {
         disconnected: [],
         missed: [{ deviceId: usb, misses: 1 }],
+        transitional: [],
         skippedAllDiscoveryFailed: false,
       },
       new Set([h.peer.id]),
@@ -317,7 +331,7 @@ describe("confirmed plan device loss", () => {
     const restarts = new InMemoryAdbTransportRestartRegistry(h.timer);
     const gate = Promise.withResolvers<void>();
     const restart = restarts.runRestart(h.device.id, () => gate.promise);
-    const check = h.daemon["createPlanDeviceLossCheck"](
+    const check = h.daemon.testHooks.createPlanDeviceLossCheck(
       h.manager,
       () => h.manager.getBootedDevicesDetailed("android", { bypassAndroidDeviceListCache: true }),
       restarts,
@@ -325,6 +339,7 @@ describe("confirmed plan device loss", () => {
     const missing = {
       disconnected: [],
       missed: [{ deviceId: h.device.id, misses: 1 }],
+      transitional: [],
       skippedAllDiscoveryFailed: false,
     };
     await check(missing, new Set([h.peer.id]));
@@ -407,12 +422,21 @@ describe("confirmed plan device loss", () => {
       expect(cancel).toHaveBeenCalledTimes(1);
       expect(await h.incidents.list()).toHaveLength(1);
       expect(h.manager.calls.slice(0, 2)).toEqual([
-        { bypassAndroidDeviceListCache: false },
-        { bypassAndroidDeviceListCache: true },
+        {
+          bypassAndroidDeviceListCache: false,
+          skipAndroidProfileEnrichment: true,
+          iosDeviceListMaxAgeMs: 15_000,
+          skipPhysicalIosDiscovery: true,
+        },
+        {
+          bypassAndroidDeviceListCache: true,
+          skipAndroidProfileEnrichment: true,
+          skipPhysicalIosDiscovery: true,
+        },
       ]);
       expect(h.manager.platforms.slice(0, 4)).toEqual(["either", "android", "either", "android"]);
-      expect(h.daemon["deviceDisconnectMisses"].get(h.device.id)).toBe(1);
-      expect(h.daemon["confirmedDisconnectedDeviceIds"].size).toBe(0);
+      expect(h.daemon.testHooks.deviceLoss.misses.get(h.device.id)).toBe(1);
+      expect(h.daemon.testHooks.deviceLoss.confirmedDisconnectedIds.size).toBe(0);
       // A fresh presence observation ends the episode even without replacing the object.
       h.manager.bootedDevices.push({ deviceId: h.device.id, name: "Pixel", platform: "android" });
       await h.tick();
@@ -453,11 +477,27 @@ describe("confirmed plan device loss", () => {
       const plan = h.start("executePlan");
       h.manager.bootedDevices = [];
       if (!rawSignal) {
-        h.daemon["forceDisconnectedDeviceIds"].clear();
+        h.daemon.testHooks.deviceLoss.forceDisconnectedIds.clear();
       }
       await h.tick();
       await h.tick();
-      expect(h.manager.calls).toHaveLength(4);
+      // The peer has no plan: each sweep confirms its absence before the plan's own check.
+      expect(h.manager.calls.map((options) => options.bypassAndroidDeviceListCache)).toEqual([
+        false,
+        true,
+        true,
+        false,
+        true,
+        true,
+      ]);
+      expect(h.manager.platforms).toEqual([
+        "either",
+        "either",
+        "android",
+        "either",
+        "either",
+        "android",
+      ]);
       expect(plan.abortController.signal.aborted).toBe(false);
       expect(await h.incidents.list()).toEqual([]);
     },
@@ -588,8 +628,11 @@ describe("confirmed plan device loss", () => {
     async (state) => {
       const h = harness();
       const plan = h.start("executePlan");
-      if (state === "idle" || state === "error") {
+      if (state === "idle") {
         h.device.status = state;
+      }
+      if (state === "error") {
+        h.device.health = state;
       }
       if (state === "leased") {
         h.leased = true;

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { ListInstalledApps } from "../../../src/features/observe/ListInstalledApps";
 import { CtrlProxyInstalledPackageSource } from "../../../src/features/observe/CtrlProxyInstalledPackageSource";
@@ -16,6 +17,7 @@ import type {
   AndroidInstalledPackageSource,
 } from "../../../src/features/observe/ListInstalledApps";
 import { logger } from "../../../src/utils/logger";
+import { AdbDeviceTransportUnavailableError } from "../../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 
 /**
  * Stands in for the on-device accessibility service: one canned
@@ -93,11 +95,11 @@ describe("ListInstalledApps", function () {
       const originalListUsers = fakeAdb.listUsers.bind(fakeAdb);
       fakeAdb.listUsers = async (signal?: AbortSignal) => {
         listUsersSignal = signal;
-        return originalListUsers(signal);
+        return originalListUsers();
       };
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", createExecResult("", ""));
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", createExecResult("", ""));
 
       await listInstalledApps.executeDetailedResult(controller.signal);
 
@@ -122,15 +124,17 @@ describe("ListInstalledApps", function () {
     test("should list all installed packages", async function () {
       // Set up single user with packages
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout:
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult(
           "package:com.android.chrome\npackage:com.google.android.gms\npackage:com.example.myapp\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "package:com.android.chrome\npackage:com.google.android.gms\n",
-        stderr: "",
-      });
+          "",
+        ),
+      );
+      fakeAdb.setCommandResponse(
+        "shell pm list packages -s --user 0",
+        createExecResult("package:com.android.chrome\npackage:com.google.android.gms\n", ""),
+      );
 
       const result = await listInstalledApps.execute();
 
@@ -143,14 +147,11 @@ describe("ListInstalledApps", function () {
 
     test("should filter out empty lines and non-package lines", async function () {
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.example.app\n\nsome other line\npackage:com.test.app\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.example.app\n\nsome other line\npackage:com.test.app\n", ""),
+      );
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", createExecResult("", ""));
 
       const result = await listInstalledApps.execute();
 
@@ -161,14 +162,8 @@ describe("ListInstalledApps", function () {
 
     test("should handle adb command failure gracefully", async function () {
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "",
-        stderr: "error",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", createExecResult("", "error"));
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", createExecResult("", ""));
 
       const result = await listInstalledApps.execute();
 
@@ -178,14 +173,11 @@ describe("ListInstalledApps", function () {
 
     test("should trim package names correctly", async function () {
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package: com.example.app \npackage:com.test.app\t\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package: com.example.app \npackage:com.test.app\t\n", ""),
+      );
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", createExecResult("", ""));
 
       const result = await listInstalledApps.execute();
 
@@ -196,6 +188,112 @@ describe("ListInstalledApps", function () {
   });
 
   describe("executeDetailed", function () {
+    describe("listing failures", () => {
+      let repository: FakeInstalledAppsRepository;
+
+      beforeEach(() => {
+        repository = new FakeInstalledAppsRepository();
+        listInstalledApps = new ListInstalledApps(
+          mockDevice,
+          new FakeAdbClientFactory(fakeAdb),
+          new FakeSimctl(),
+          {
+            cacheEnabled: true,
+            installedAppsRepository: repository,
+            timer: new FakeTimer(),
+            installedPackageSource: new FakeInstalledPackageSource({
+              available: false,
+              reason: "No fake CtrlProxy connection",
+            }),
+          },
+        );
+      });
+
+      test("preserves the typed package-listing error", async () => {
+        const error = new AdbDeviceTransportUnavailableError(
+          mockDevice.deviceId,
+          new Error("device offline"),
+        );
+        fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+        fakeAdb.setCommandError("shell pm list packages --user 0", error);
+
+        const result = await listInstalledApps.executeDetailedResult();
+
+        expect(result.successful).toBe(false);
+        expect(result.error).toBe(error);
+        expect(result.error).toBeInstanceOf(AdbDeviceTransportUnavailableError);
+        expect(await repository.listInstalledApps(mockDevice.deviceId)).toEqual([]);
+      });
+
+      test.each([false, true])(
+        "keeps the first error of equal priority (transport: %s)",
+        async (transport) => {
+          const first = transport
+            ? new AdbDeviceTransportUnavailableError(mockDevice.deviceId, new Error("offline"))
+            : new Error("first user failed");
+          const second = transport
+            ? new AdbDeviceTransportUnavailableError(
+                mockDevice.deviceId,
+                new Error("offline again"),
+              )
+            : new Error("second user failed");
+          fakeAdb.setUsers([
+            { userId: 0, name: "Owner", flags: 13, running: true },
+            { userId: 10, name: "Work", flags: 30, running: true },
+          ]);
+          fakeAdb.setCommandError("shell pm list packages --user 0", first);
+          fakeAdb.setCommandError("shell pm list packages --user 10", second);
+
+          const result = await listInstalledApps.executeDetailedResult();
+
+          expect(result.successful).toBe(false);
+          expect(result.error).toBe(first);
+        },
+      );
+
+      test("prefers an original error with a transport cause and keeps partial apps uncached", async () => {
+        const transport = new AdbDeviceTransportUnavailableError(
+          mockDevice.deviceId,
+          new Error("device offline"),
+        );
+        const wrapped = new Error("work profile listing failed", { cause: transport });
+        fakeAdb.setUsers([
+          { userId: 0, name: "Owner", flags: 13, running: true },
+          { userId: 10, name: "Work", flags: 30, running: true },
+          { userId: 11, name: "Other", flags: 30, running: true },
+        ]);
+        fakeAdb.setCommandError("shell pm list packages --user 0", new Error("permission denied"));
+        fakeAdb.setCommandError("shell pm list packages --user 10", wrapped);
+        fakeAdb.setCommandResponse(
+          "shell pm list packages --user 11",
+          createExecResult("package:com.example.partial\n", ""),
+        );
+
+        const result = await listInstalledApps.executeDetailedResult(undefined, {
+          namesOnly: true,
+        });
+
+        expect(result.successful).toBe(false);
+        expect(result.error).toBe(wrapped);
+        expect(result.apps.profiles[11]).toEqual([
+          expect.objectContaining({ packageName: "com.example.partial" }),
+        ]);
+        expect(await repository.listInstalledApps(mockDevice.deviceId)).toEqual([]);
+      });
+
+      test("reports an actionable failure when no users are reported", async () => {
+        fakeAdb.setUsers([]);
+
+        const result = await listInstalledApps.executeDetailedResult();
+
+        expect(result.successful).toBe(false);
+        expect(result.error).toBeInstanceOf(Error);
+        expect(result.error).toMatchObject({
+          message: expect.stringContaining("No users reported"),
+        });
+      });
+    });
+
     test("should list apps from all user profiles", async function () {
       // Configure two users: primary and work profile
       const users: AndroidUser[] = [
@@ -205,22 +303,22 @@ describe("ListInstalledApps", function () {
       fakeAdb.setUsers(users);
 
       // Configure packages for each user
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.android.chrome\npackage:com.example.personalapp\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "package:com.android.chrome\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages --user 10", {
-        stdout: "package:com.android.chrome\npackage:com.example.workapp\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 10", {
-        stdout: "package:com.android.chrome\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.android.chrome\npackage:com.example.personalapp\n", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell pm list packages -s --user 0",
+        createExecResult("package:com.android.chrome\n", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 10",
+        createExecResult("package:com.android.chrome\npackage:com.example.workapp\n", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell pm list packages -s --user 10",
+        createExecResult("package:com.android.chrome\n", ""),
+      );
 
       const result = await listInstalledApps.executeDetailed();
 
@@ -255,22 +353,22 @@ describe("ListInstalledApps", function () {
       fakeAdb.setUsers(users);
       fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 10 });
 
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.android.settings\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "package:com.android.settings\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages --user 10", {
-        stdout: "package:com.android.settings\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 10", {
-        stdout: "package:com.android.settings\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.android.settings\n", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell pm list packages -s --user 0",
+        createExecResult("package:com.android.settings\n", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 10",
+        createExecResult("package:com.android.settings\n", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell pm list packages -s --user 10",
+        createExecResult("package:com.android.settings\n", ""),
+      );
 
       const result = await listInstalledApps.executeDetailed();
 
@@ -284,14 +382,17 @@ describe("ListInstalledApps", function () {
       const users: AndroidUser[] = [{ userId: 0, name: "Owner", flags: 13, running: true }];
       fakeAdb.setUsers(users);
 
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.android.chrome\npackage:com.google.android.apps.weather\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "package:com.android.chrome\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult(
+          "package:com.android.chrome\npackage:com.google.android.apps.weather\n",
+          "",
+        ),
+      );
+      fakeAdb.setCommandResponse(
+        "shell pm list packages -s --user 0",
+        createExecResult("package:com.android.chrome\n", ""),
+      );
 
       const result = await listInstalledApps.executeDetailed();
 
@@ -312,22 +413,16 @@ describe("ListInstalledApps", function () {
       // Set foreground app in work profile
       fakeAdb.setForegroundApp({ packageName: "com.example.workapp", userId: 10 });
 
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.example.personalapp\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages --user 10", {
-        stdout: "package:com.example.workapp\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 10", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.example.personalapp\n", ""),
+      );
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", createExecResult("", ""));
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 10",
+        createExecResult("package:com.example.workapp\n", ""),
+      );
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 10", createExecResult("", ""));
 
       const result = await listInstalledApps.executeDetailed();
 
@@ -344,14 +439,14 @@ describe("ListInstalledApps", function () {
       const users: AndroidUser[] = [{ userId: 0, name: "Owner", flags: 13, running: true }];
       fakeAdb.setUsers(users);
 
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.android.chrome\npackage:com.example.app\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "package:com.android.chrome\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.android.chrome\npackage:com.example.app\n", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell pm list packages -s --user 0",
+        createExecResult("package:com.android.chrome\n", ""),
+      );
 
       const result = await listInstalledApps.executeDetailed();
 
@@ -378,27 +473,31 @@ describe("ListInstalledApps", function () {
 
     beforeEach(function () {
       fakeAdb.setUsers(users);
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout:
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult(
           "package:com.android.contacts\npackage:com.android.providers.contacts\npackage:com.example.myapp\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "package:com.android.contacts\npackage:com.android.providers.contacts\n",
-        stderr: "",
-      });
+          "",
+        ),
+      );
+      fakeAdb.setCommandResponse(
+        "shell pm list packages -s --user 0",
+        createExecResult(
+          "package:com.android.contacts\npackage:com.android.providers.contacts\n",
+          "",
+        ),
+      );
     });
 
     test("marks apps with a MAIN/LAUNCHER entry point launchable from one batched adb read", async function () {
       fakeAdb.setCommandResponse(
         "shell cmd package query-activities --brief --user 0 " +
           "-a android.intent.action.MAIN -c android.intent.category.LAUNCHER",
-        {
-          stdout:
-            "2 activities found:\n  Activity #0:\n    com.android.contacts/.activities.PeopleActivity\n" +
+        createExecResult(
+          "2 activities found:\n  Activity #0:\n    com.android.contacts/.activities.PeopleActivity\n" +
             "  Activity #1:\n    com.example.myapp/.Main\n",
-          stderr: "",
-        },
+          "",
+        ),
       );
 
       const result = await listInstalledApps.executeDetailed();
@@ -451,7 +550,7 @@ describe("ListInstalledApps", function () {
       fakeAdb.setCommandResponse(
         "shell cmd package query-activities --brief --user 0 " +
           "-a android.intent.action.MAIN -c android.intent.category.LAUNCHER",
-        { stdout: "com.example.myapp/.Main\n", stderr: "" },
+        createExecResult("com.example.myapp/.Main\n", ""),
       );
 
       const cached = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
@@ -544,14 +643,14 @@ describe("ListInstalledApps", function () {
         { userId: 0, name: "Owner", flags: 13, running: true },
         { userId: 10, name: "Work", flags: 0, running: true },
       ]);
-      fakeAdb.setCommandResponse("shell pm list packages --user 10", {
-        stdout: "package:com.android.settings\npackage:com.work.app\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 10", {
-        stdout: "package:com.android.settings\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 10",
+        createExecResult("package:com.android.settings\npackage:com.work.app\n", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell pm list packages -s --user 10",
+        createExecResult("package:com.android.settings\n", ""),
+      );
       const source = new FakeInstalledPackageSource({
         available: true,
         result: {
@@ -600,22 +699,16 @@ describe("ListInstalledApps", function () {
         { userId: 0, name: "Owner", flags: 13, running: true },
         { userId: 10, name: "Work", flags: 0, running: true },
       ]);
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.owner.app\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages --user 10", {
-        stdout: "package:com.work.app\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 10", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.owner.app\n", ""),
+      );
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", createExecResult("", ""));
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 10",
+        createExecResult("package:com.work.app\n", ""),
+      );
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 10", createExecResult("", ""));
       const source = new FakeInstalledPackageSource({
         available: false,
         reason: "WebSocket not connected",
@@ -824,10 +917,10 @@ describe("ListInstalledApps", function () {
         },
       ]);
       fakeAdb.setUsers(workUsers);
-      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_10, {
-        stdout: "com.example.work/.Main\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        LAUNCHER_PROBE_USER_10,
+        createExecResult("com.example.work/.Main\n", ""),
+      );
 
       const cached = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
         cacheEnabled: true,
@@ -877,10 +970,10 @@ describe("ListInstalledApps", function () {
         },
       ]);
       fakeAdb.setUsers(workUsers);
-      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_10, {
-        stdout: "com.example.work/.Main\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        LAUNCHER_PROBE_USER_10,
+        createExecResult("com.example.work/.Main\n", ""),
+      );
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
       const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
       const cached = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
@@ -940,10 +1033,10 @@ describe("ListInstalledApps", function () {
           profile_type: "primary",
         },
       ]);
-      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_0, {
-        stdout: "com.example.myapp/.Main\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        LAUNCHER_PROBE_USER_0,
+        createExecResult("com.example.myapp/.Main\n", ""),
+      );
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
 
       const cached = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
@@ -974,21 +1067,21 @@ describe("ListInstalledApps", function () {
     test("keeps a system app's launchability per user rather than per package", async function () {
       fakeAdb.setUsers(workUsers);
       for (const userId of [0, 10]) {
-        fakeAdb.setCommandResponse(`shell pm list packages --user ${userId}`, {
-          stdout: "package:com.android.contacts\n",
-          stderr: "",
-        });
-        fakeAdb.setCommandResponse(`shell pm list packages -s --user ${userId}`, {
-          stdout: "package:com.android.contacts\n",
-          stderr: "",
-        });
+        fakeAdb.setCommandResponse(
+          `shell pm list packages --user ${userId}`,
+          createExecResult("package:com.android.contacts\n", ""),
+        );
+        fakeAdb.setCommandResponse(
+          `shell pm list packages -s --user ${userId}`,
+          createExecResult("package:com.android.contacts\n", ""),
+        );
       }
       // Disabled for the owner, enabled in the work profile.
-      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_0, { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_10, {
-        stdout: "com.android.contacts/.activities.PeopleActivity\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_0, createExecResult("", ""));
+      fakeAdb.setCommandResponse(
+        LAUNCHER_PROBE_USER_10,
+        createExecResult("com.android.contacts/.activities.PeopleActivity\n", ""),
+      );
 
       const result = await listInstalledApps.executeDetailed();
 
@@ -1016,11 +1109,11 @@ describe("ListInstalledApps", function () {
         })),
       );
       fakeAdb.setUsers(workUsers);
-      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_0, { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_10, {
-        stdout: "com.android.contacts/.activities.PeopleActivity\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_0, createExecResult("", ""));
+      fakeAdb.setCommandResponse(
+        LAUNCHER_PROBE_USER_10,
+        createExecResult("com.android.contacts/.activities.PeopleActivity\n", ""),
+      );
 
       const cached = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
         cacheEnabled: true,
@@ -1062,10 +1155,10 @@ describe("ListInstalledApps", function () {
           profile_type: "primary",
         },
       ]);
-      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_0, {
-        stdout: "com.example.myapp/.Main\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        LAUNCHER_PROBE_USER_0,
+        createExecResult("com.example.myapp/.Main\n", ""),
+      );
       return { repo, timer };
     }
 
@@ -1282,14 +1375,11 @@ describe("ListInstalledApps", function () {
       timer.advanceTime(5 * 60 * 1000 + 1);
 
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.example.fresh\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.example.fresh\n", ""),
+      );
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", createExecResult("", ""));
 
       const cachedList = new ListInstalledApps(
         mockDevice,
@@ -1324,14 +1414,11 @@ describe("ListInstalledApps", function () {
       );
 
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.broadcast.app\npackage:com.example.other\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.broadcast.app\npackage:com.example.other\n", ""),
+      );
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", createExecResult("", ""));
 
       const cachedList = new ListInstalledApps(
         mockDevice,
@@ -1381,14 +1468,11 @@ describe("ListInstalledApps", function () {
       );
 
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.example.fresh\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.example.fresh\n", ""),
+      );
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", createExecResult("", ""));
 
       const cachedList = new ListInstalledApps(
         mockDevice,
@@ -1420,14 +1504,11 @@ describe("ListInstalledApps", function () {
       await repo.markDeviceStale(mockDevice.deviceId);
 
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.installed.app\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.installed.app\n", ""),
+      );
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", createExecResult("", ""));
 
       const cachedList = new ListInstalledApps(
         mockDevice,
@@ -1466,11 +1547,11 @@ describe("ListInstalledApps", function () {
       ).rejects.toThrow("transient stale-marker failure");
 
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.example.fresh\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.example.fresh\n", ""),
+      );
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", createExecResult("", ""));
       const list = new ListInstalledApps(device, new FakeAdbClientFactory(fakeAdb), null, {
         cacheEnabled: true,
         installedAppsRepository: repo,
@@ -1493,11 +1574,11 @@ describe("ListInstalledApps", function () {
       const timer = new FakeTimer();
       timer.advanceTime(1_000);
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.example.live\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.example.live\n", ""),
+      );
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", createExecResult("", ""));
       const list = new ListInstalledApps(device, new FakeAdbClientFactory(fakeAdb), null, {
         cacheEnabled: true,
         installedAppsRepository: repo,
@@ -1539,11 +1620,11 @@ describe("ListInstalledApps", function () {
       ).rejects.toThrow("stale cache row");
 
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
-      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.example.live\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.example.live\n", ""),
+      );
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", createExecResult("", ""));
       const list = new ListInstalledApps(device, new FakeAdbClientFactory(fakeAdb), null, {
         cacheEnabled: true,
         installedAppsRepository: repo,

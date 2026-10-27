@@ -296,7 +296,8 @@ final class SdkHierarchyServerTests: XCTestCase {
         }
 
         func walkNow() -> SdkViewHierarchy {
-            fatalError("The lifecycle test does not request a hierarchy")
+            XCTFail("The lifecycle test does not request a hierarchy")
+            return SdkViewHierarchy(screenScale: 1, screenWidth: 0, screenHeight: 0, root: nil)
         }
     }
 

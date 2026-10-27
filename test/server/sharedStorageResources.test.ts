@@ -3,6 +3,7 @@ import { registerSharedStorageResources } from "../../src/server/sharedStorageRe
 import type { SharedStorageReadService } from "../../src/server/sharedStorageReadService";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ActionableError } from "../../src/models/ActionableError";
+import { readTemplateMatch } from "../helpers/resourceTemplate";
 
 const fakeService: SharedStorageReadService = {
   list: async (request) => ({
@@ -71,10 +72,10 @@ describe("Shared-storage read resources", () => {
     });
     const base = "automobile:devices/emulator-5554/storage-domains/media_library/automobile-media";
     const listing = ResourceRegistry.matchTemplate(base)!;
-    const payload = JSON.parse((await listing.template.handler(listing.params)).text!);
+    const payload = JSON.parse((await readTemplateMatch(listing)).text!);
     expect(payload.files[0].resourceUri).toBe(`${base}/docs/read%20me.txt`);
     const file = ResourceRegistry.matchTemplate(`${base}/photo.png`)!;
-    expect((await file.template.handler(file.params)).blob).toBe("AAH/");
+    expect((await readTemplateMatch(file)).blob).toBe("AAH/");
     expect(domains).toEqual(["media_library", "media_library"]);
   });
 
@@ -85,7 +86,7 @@ describe("Shared-storage read resources", () => {
     );
     expect(match).toBeDefined();
 
-    const content = await match!.template.handler(match!.params);
+    const content = await readTemplateMatch(match!);
     expect(content.mimeType).toBe("application/json");
     const payload = JSON.parse(content.text!);
     expect(payload).toMatchObject({
@@ -118,7 +119,7 @@ describe("Shared-storage read resources", () => {
       const match = ResourceRegistry.matchTemplate(uri);
       expect(match).toBeDefined();
 
-      const error = await match!.template.handler(match!.params).then(
+      const error = await readTemplateMatch(match!).then(
         () => undefined,
         (caught: unknown) => caught,
       );
@@ -137,7 +138,7 @@ describe("Shared-storage read resources", () => {
     const match = ResourceRegistry.matchTemplate(uri);
     expect(match).toBeDefined();
 
-    const content = await match!.template.handler(match!.params);
+    const content = await readTemplateMatch(match!);
     expect(content.uri).toBe(uri);
     expect(content.mimeType).toBe("application/octet-stream");
     expect(content.blob).toBe("AAH/");
@@ -163,7 +164,7 @@ describe("Shared-storage read resources", () => {
     });
     const uri = "automobile:devices/emulator-5554/downloads/run-42/notes/hi.txt";
     const match = ResourceRegistry.matchTemplate(uri);
-    const content = await match!.template.handler(match!.params);
+    const content = await readTemplateMatch(match!);
     expect(content.mimeType).toBe("text/plain");
     expect(content.text).toBe("hello");
     expect(content.blob).toBeUndefined();
@@ -184,7 +185,7 @@ describe("Shared-storage read resources", () => {
     });
     const uri = "automobile:devices/emulator-5554/downloads/run-42/notes/gone.txt";
     const match = ResourceRegistry.matchTemplate(uri);
-    const content = await match!.template.handler(match!.params);
+    const content = await readTemplateMatch(match!);
     expect(content.mimeType).toBe("application/json");
     const payload = JSON.parse(content.text!);
     expect(payload.observation).toBe("missing");
@@ -198,7 +199,7 @@ describe("Shared-storage read resources", () => {
     );
     // The traversal URI must not resolve to a readable file.
     if (match) {
-      await expect(match.template.handler(match.params)).rejects.toThrow();
+      await expect(readTemplateMatch(match)).rejects.toThrow();
     }
   });
 });

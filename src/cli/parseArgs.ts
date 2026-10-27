@@ -33,6 +33,7 @@ import {
   RUNNER_READINESS_TIMEOUT_FLAG,
   parseRunnerReadinessTimeout,
 } from "../utils/runnerReadinessConfig";
+import { ENV, isRetiredToolsetVariable, readEnvBool, readEnvRaw } from "../config/env";
 
 export type { ParseLogger } from "./numericValidators";
 
@@ -99,7 +100,6 @@ const externalValueFlags = [
 /** Parses daemon options from explicit argument tokens, rather than process.argv. */
 // The existing option surface is intentionally preserved during this extraction.
 // A declarative parser migration is separate behavior-changing work.
-// eslint-disable-next-line complexity
 export function parseArgs(
   args: string[],
   log: ParseLogger,
@@ -130,14 +130,10 @@ export function parseArgs(
   const daemonMode = hasFlag("daemon-mode");
   const noProxy = hasFlag("no-proxy") || hasFlag("direct");
   const noDaemon = hasFlag("no-daemon");
-  const daemonCommandIndex = args.indexOf("--daemon");
-  const daemonRequested = daemonCommandIndex >= 0;
-  const daemonCommand =
-    daemonCommandIndex >= 0 ? args[daemonCommandIndex + 1] || undefined : undefined;
-  const daemonArgs = daemonCommandIndex >= 0 ? args.slice(daemonCommandIndex + 2) : [];
+  const { daemonRequested, daemonCommand, daemonArgs } = parseDaemonCommand(args);
   const debugPerf =
-    hasFlag("debug-perf") || hasFlag("ui-perf-debug") || process.env.AUTOMOBILE_DEBUG_PERF === "1";
-  const debug = hasFlag("debug") || process.env.AUTOMOBILE_DEBUG === "1";
+    hasFlag("debug-perf") || hasFlag("ui-perf-debug") || readEnvBool(ENV.DEBUG_PERF, environment);
+  const debug = hasFlag("debug") || readEnvBool(ENV.DEBUG, environment);
   const strictPort = hasFlag("strict-port");
   const uiPerfMode = !hasFlag("no-ui-perf-mode");
   const memPerfAuditMode = hasFlag("mem-perf-audit");
@@ -163,19 +159,7 @@ export function parseArgs(
     process.env,
     resolveDaemonLaunchWorkingDirectory(),
   );
-  const runnerReadinessEnv =
-    environment[RUNNER_READINESS_TIMEOUT_ENV] ??
-    environment.AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS;
-  const parsedRunnerReadinessEnv = parseRunnerReadinessTimeout(runnerReadinessEnv);
-  // Undefined means this client has no opinion about a running daemon's
-  // readiness budget. The daemon's ServerConfig owns the product default.
-  const runnerReadinessTimeoutMs = parsedRunnerReadinessEnv;
-  if (runnerReadinessEnv !== undefined && parsedRunnerReadinessEnv === undefined) {
-    log.warn(
-      `Invalid ${RUNNER_READINESS_TIMEOUT_ENV}: ${runnerReadinessEnv}; expected an integer ` +
-        `from ${MIN_RUNNER_READINESS_TIMEOUT_MS} to ${MAX_RUNNER_READINESS_TIMEOUT_MS}`,
-    );
-  }
+  const runnerReadinessTimeoutMs = parseReadinessEnvironment(environment, log);
   const video = createVideoRecordingDefaults(log);
   const { videoRecordingDefaults } = video;
 
@@ -247,7 +231,7 @@ function parseToolDefaults(
   environment: NodeJS.ProcessEnv,
 ): { enabledTools: string[]; disabledTools: string[] } {
   const retiredToolsetVariable = Object.keys(environment).find((name) =>
-    name.startsWith("AUTOMOBILE_TOOLSET_"),
+    isRetiredToolsetVariable(name),
   );
   if (retiredToolsetVariable) {
     throw new Error(
@@ -275,8 +259,10 @@ function parseToolDefaults(
       ?.split(",")
       .map((value) => value.trim())
       .filter(Boolean) ?? [];
-  const environmentEnabledTools = parseEnvironmentTools(environment.AUTOMOBILE_ENABLED_TOOLS);
-  const environmentDisabledTools = parseEnvironmentTools(environment.AUTOMOBILE_DISABLED_TOOLS);
+  const environmentEnabledTools = parseEnvironmentTools(readEnvRaw(ENV.ENABLED_TOOLS, environment));
+  const environmentDisabledTools = parseEnvironmentTools(
+    readEnvRaw(ENV.DISABLED_TOOLS, environment),
+  );
   const environmentDisabledSet = new Set(environmentDisabledTools);
   const environmentConflict = environmentEnabledTools.find((toolName) =>
     environmentDisabledSet.has(toolName),
@@ -326,37 +312,12 @@ function createVideoRecordingDefaults(log: ParseLogger) {
     videoRecordingDefaults.format = value;
   };
 
-  applyQualityPreset(
-    process.env.AUTOMOBILE_VIDEO_QUALITY_PRESET ?? process.env.AUTO_MOBILE_VIDEO_QUALITY_PRESET,
-    "env",
-  );
+  applyQualityPreset(readEnvRaw(ENV.VIDEO_QUALITY_PRESET), "env");
   const envNumbers: Array<[string | undefined, string, boolean, CliVideoRecordingNumericKey]> = [
-    [
-      process.env.AUTOMOBILE_VIDEO_TARGET_BITRATE_KBPS ??
-        process.env.AUTO_MOBILE_VIDEO_TARGET_BITRATE_KBPS,
-      "video target bitrate",
-      false,
-      "targetBitrateKbps",
-    ],
-    [
-      process.env.AUTOMOBILE_VIDEO_MAX_THROUGHPUT_MBPS ??
-        process.env.AUTO_MOBILE_VIDEO_MAX_THROUGHPUT_MBPS,
-      "video max throughput",
-      true,
-      "maxThroughputMbps",
-    ],
-    [
-      process.env.AUTOMOBILE_VIDEO_FPS ?? process.env.AUTO_MOBILE_VIDEO_FPS,
-      "video fps",
-      false,
-      "fps",
-    ],
-    [
-      process.env.AUTOMOBILE_VIDEO_MAX_ARCHIVE_MB ?? process.env.AUTO_MOBILE_VIDEO_MAX_ARCHIVE_MB,
-      "video max archive size",
-      true,
-      "maxArchiveSizeMb",
-    ],
+    [readEnvRaw(ENV.VIDEO_TARGET_BITRATE_KBPS), "video target bitrate", false, "targetBitrateKbps"],
+    [readEnvRaw(ENV.VIDEO_MAX_THROUGHPUT_MBPS), "video max throughput", true, "maxThroughputMbps"],
+    [readEnvRaw(ENV.VIDEO_FPS), "video fps", false, "fps"],
+    [readEnvRaw(ENV.VIDEO_MAX_ARCHIVE_MB), "video max archive size", true, "maxArchiveSizeMb"],
   ];
   for (const [value, label, allowFloat, key] of envNumbers) {
     const parsed = parsePositiveNumber(value, label, allowFloat, log);
@@ -364,7 +325,7 @@ function createVideoRecordingDefaults(log: ParseLogger) {
       videoRecordingDefaults[key] = parsed;
     }
   }
-  applyFormat(process.env.AUTOMOBILE_VIDEO_FORMAT ?? process.env.AUTO_MOBILE_VIDEO_FORMAT, "env");
+  applyFormat(readEnvRaw(ENV.VIDEO_FORMAT), "env");
 
   return { videoRecordingDefaults, applyQualityPreset, applyFormat };
 }
@@ -720,4 +681,30 @@ function applyVideoNumber(
   if (value !== undefined) {
     defaults[key] = value;
   }
+}
+
+function parseReadinessEnvironment(environment: NodeJS.ProcessEnv, log: ParseLogger) {
+  const runnerReadinessEnv =
+    environment[RUNNER_READINESS_TIMEOUT_ENV] ??
+    environment.AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS;
+  const parsedRunnerReadinessEnv = parseRunnerReadinessTimeout(runnerReadinessEnv);
+  // Undefined means this client has no opinion about a running daemon's
+  // readiness budget. The daemon's ServerConfig owns the product default.
+  const runnerReadinessTimeoutMs = parsedRunnerReadinessEnv;
+  if (runnerReadinessEnv !== undefined && parsedRunnerReadinessEnv === undefined) {
+    log.warn(
+      `Invalid ${RUNNER_READINESS_TIMEOUT_ENV}: ${runnerReadinessEnv}; expected an integer ` +
+        `from ${MIN_RUNNER_READINESS_TIMEOUT_MS} to ${MAX_RUNNER_READINESS_TIMEOUT_MS}`,
+    );
+  }
+  return runnerReadinessTimeoutMs;
+}
+
+function parseDaemonCommand(args: string[]) {
+  const daemonCommandIndex = args.indexOf("--daemon");
+  const daemonRequested = daemonCommandIndex >= 0;
+  const daemonCommand =
+    daemonCommandIndex >= 0 ? args[daemonCommandIndex + 1] || undefined : undefined;
+  const daemonArgs = daemonCommandIndex >= 0 ? args.slice(daemonCommandIndex + 2) : [];
+  return { daemonRequested, daemonCommand, daemonArgs };
 }

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { BootedDevice } from "../../../../src/models";
@@ -17,12 +18,11 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
     fakeTimer = new FakeTimer();
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
     fakeAdb.setScreenState(true);
     testDevice = {
       deviceId: "test-device-capabilities",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
     AndroidCtrlProxyManager.resetInstances();
@@ -53,7 +53,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
         ['{"type":"start_recording"}'],
         ['{"type":"stop_recording"}'],
       ]);
-      expect(client["requestManager"].getPendingCount()).toBe(0);
+      expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
     } finally {
       send.mockRestore();
       await client.close();
@@ -102,7 +102,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
       if (mode !== "success") {
         expect(result.error).toBe("Unknown command type: request_click_focused_input");
       }
-      expect(client["requestManager"].getPendingCount()).toBe(0);
+      expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
     } finally {
       send.mockRestore();
       await client.close();
@@ -128,7 +128,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
       const result = await client.requestClickFocusedInput();
       expect(result).toMatchObject({ success: false, action: "click", acknowledged: true });
       expect(result.error).toBe("Unknown command type: request_click_focused_input");
-      expect(client["requestManager"].getPendingCount()).toBe(0);
+      expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
     } finally {
       send.mockRestore();
       await client.close();
@@ -211,7 +211,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
         expect(result.dispatched).toBe(mode !== "send failure");
         expect(result.acknowledged).toBe(["refusal", "protocol refusal", "success"].includes(mode));
         expect(result.success).toBe(mode === "success");
-        expect(client["requestManager"].getPendingCount()).toBe(0);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
       } finally {
         send.mockRestore();
         await client.close();

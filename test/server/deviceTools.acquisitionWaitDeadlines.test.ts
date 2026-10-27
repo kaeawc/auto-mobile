@@ -1,8 +1,7 @@
 import { makePool } from "../helpers/makePool";
+import { useFakeCtrlProxyManagerHost } from "../helpers/ctrlProxyManagerHost";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { EventEmitter } from "events";
-import type { ChildProcess } from "child_process";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { AdbServerResetQuarantine } from "../../src/daemon/adbServerResetQuarantine";
@@ -24,9 +23,14 @@ import {
   RunnerReadinessError,
   SystemUiAnrRecoveryRequiredError,
 } from "../../src/ctrlProxy/RunnerReadinessService";
-import { RunnerReadinessService } from "../../src/ctrlProxy/RunnerReadinessService";
+import {
+  RunnerReadinessService,
+  type ReadinessAndroidManager,
+} from "../../src/ctrlProxy/RunnerReadinessService";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { createExecResult } from "../../src/utils/execResult";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -38,6 +42,19 @@ import {
   registerLiveDeadline,
   unregisterLiveDeadline,
 } from "../../src/daemon/liveDeadlineRegistry";
+
+/** A replacement emulator process that reports itself killed without ever emitting exit. */
+class SilentChildProcess extends FakeChildProcess {
+  constructor() {
+    super();
+    this.pid = 4242;
+  }
+
+  override kill(): boolean {
+    this.killed = true;
+    return true;
+  }
+}
 
 isolateToolRegistry();
 
@@ -62,6 +79,7 @@ function observe(promise: Promise<unknown>) {
 }
 
 describe("device acquisition wait deadlines", () => {
+  useFakeCtrlProxyManagerHost();
   let timer: FakeTimer;
   let deviceUtils: FakeDeviceUtils;
   let sessionManager: SessionManager;
@@ -74,7 +92,7 @@ describe("device acquisition wait deadlines", () => {
   const android: BootedDevice = { platform: "android", name: "Pixel", deviceId: "emulator-5554" };
   const ios: BootedDevice = { platform: "ios", name: "iPhone", deviceId: "sim-udid" };
 
-  beforeEach(() => {
+  function arrangeHarness(): void {
     timer = new FakeTimer();
     deviceUtils = new FakeDeviceUtils();
     lifecycleReleases = 0;
@@ -114,6 +132,7 @@ describe("device acquisition wait deadlines", () => {
       notifyDeviceInventoryResourcesChanged: async () => {},
       syncInstalledAppResourceRegistry: async () => false,
       lifecycleCoordinator: {
+        isReserved: () => false,
         reserve: async (identity) => ({
           identity,
           signal: new AbortController().signal,
@@ -126,7 +145,19 @@ describe("device acquisition wait deadlines", () => {
       },
     });
     registerDeviceTools();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     resetDeviceToolsDependencies();
@@ -154,21 +185,24 @@ describe("device acquisition wait deadlines", () => {
     );
   }
 
-  test("startDevice caps its boot/preparation budget by the anchored MCP deadline", async () => {
-    let observedDeadline: number | undefined;
-    const stopped = new Error("captured preparation before device work");
-    const handlers = createStartDeviceHandlers({
-      stripInternalAcquisitionParams: () => ({ platform: "android", name: "Pixel" }),
-      prepareDevice: async (_args, budgets) => {
-        observedDeadline = budgets.automationDeadlineMs;
-        throw stopped;
-      },
-    });
-    const rawArgs = { platform: "android" as const, name: "Pixel", __mcpRequestDeadlineMs: 500 };
-    await expect(handlers.startDeviceHandler(rawArgs)).rejects.toBe(stopped);
-    expect(observedDeadline).toBe(500);
-    expect(timer.getSleepHistory()).toEqual([]);
-  });
+  arranged(
+    "startDevice caps its boot/preparation budget by the anchored MCP deadline",
+    async () => {
+      let observedDeadline: number | undefined;
+      const stopped = new Error("captured preparation before device work");
+      const handlers = createStartDeviceHandlers({
+        stripInternalAcquisitionParams: () => ({ platform: "android", name: "Pixel" }),
+        prepareDevice: async (_args, budgets) => {
+          observedDeadline = budgets.automationDeadlineMs;
+          throw stopped;
+        },
+      });
+      const rawArgs = { platform: "android" as const, name: "Pixel", __mcpRequestDeadlineMs: 500 };
+      await expect(handlers.startDeviceHandler(rawArgs)).rejects.toBe(stopped);
+      expect(observedDeadline).toBe(500);
+      expect(timer.getSleepHistory()).toEqual([]);
+    },
+  );
 
   for (const mode of [
     "boot progress",
@@ -177,7 +211,7 @@ describe("device acquisition wait deadlines", () => {
     "live without progress",
   ] as const) {
     const withProgress = mode === "boot progress" || mode === "readiness progress";
-    test(`cold boot deadline: ${mode}`, async () => {
+    arranged(`cold boot deadline: ${mode}`, async () => {
       const key = "cold-boot-deadline";
       const deadline = new ProgressExtendableDeadline(0, 180_000);
       if (mode !== "no progress") {
@@ -197,12 +231,13 @@ describe("device acquisition wait deadlines", () => {
       };
       const service = new RunnerReadinessService({
         timer,
-        getAndroidManager: () => ({
+        getAndroidManager: (): ReadinessAndroidManager => ({
           isInstalled: async () => true,
           isEnabled: async () => true,
           isVersionCompatible: async () => true,
           enable: async () => {},
           resetSetupState: () => {},
+          reopenSetupGate: () => {},
           setup: async () => ({ success: true, message: "ready" }),
           ensureCompatibleVersion: async () => {
             setupSignal = getAbortSignal();
@@ -288,23 +323,26 @@ describe("device acquisition wait deadlines", () => {
   }
 
   for (const stage of ["upgrade", "uninstall"] as const) {
-    test(`cancelled APK ${stage} invalidates the installed cache`, async () => {
+    arranged(`cancelled APK ${stage} invalidates the installed cache`, async () => {
       const adb = new FakeAdbExecutor();
       const manager = AndroidCtrlProxyManager.createForTestingWithDeps(android, adb, timer);
       const listing = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
-      adb.setCommandResponse(listing, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}`,
-        stderr: "",
-      });
-      adb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/ctrlproxy/base.apk",
-        stderr: "",
-      });
+      adb.setCommandResponse(
+        listing,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}`, ""),
+      );
+      adb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/ctrlproxy/base.apk", ""),
+      );
       // A known mismatched SHA selects upgrade; an unknown SHA selects reinstall.
-      adb.setCommandResponse("shell sha256sum", {
-        stdout: stage === "upgrade" ? "different-sha /data/app/ctrlproxy/base.apk" : "",
-        stderr: "",
-      });
+      adb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          stage === "upgrade" ? "different-sha /data/app/ctrlproxy/base.apk" : "",
+          "",
+        ),
+      );
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       manager.downloadApk = async () => "fake.apk";
       manager.cleanupApk = async () => {};
@@ -316,7 +354,7 @@ describe("device acquisition wait deadlines", () => {
         if (command.startsWith(stage === "upgrade" ? "install -r" : "shell pm uninstall")) {
           dispatched = true;
           // Model a package mutation completed on-device before cancellation arrived.
-          adb.setCommandResponse(listing, { stdout: "", stderr: "" });
+          adb.setCommandResponse(listing, createExecResult("", ""));
           caller.abort(new Error("caller cancelled"));
         }
         return await execute(command, ...args);
@@ -343,7 +381,7 @@ describe("device acquisition wait deadlines", () => {
   ]) {
     for (const mode of ["in-time", "deadline", "request abort"] as const) {
       const inTime = mode === "in-time";
-      test(`${stage} acquisition ${mode}`, async () => {
+      arranged(`${stage} acquisition ${mode}`, async () => {
         const platform = stage === "iOS CtrlProxy setup" ? "ios" : "android";
         const device = platform === "android" ? android : ios;
         await pool.addDevice(device);
@@ -369,18 +407,18 @@ describe("device acquisition wait deadlines", () => {
           };
         };
         AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
-        adb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}`,
-          stderr: "",
-        });
-        adb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-          stdout: "package:/data/app/ctrlproxy/base.apk",
-          stderr: "",
-        });
-        adb.setCommandResponse("shell sha256sum", {
-          stdout: "different-sha /data/app/ctrlproxy/base.apk",
-          stderr: "",
-        });
+        adb.setCommandResponse(
+          `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+          createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}`, ""),
+        );
+        adb.setCommandResponse(
+          `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+          createExecResult("package:/data/app/ctrlproxy/base.apk", ""),
+        );
+        adb.setCommandResponse(
+          "shell sha256sum",
+          createExecResult("different-sha /data/app/ctrlproxy/base.apk", ""),
+        );
         manager.downloadApk = async () => "fake.apk";
         manager.cleanupApk = async () => {};
         let connectionReady = stage !== "CtrlProxy WebSocket connect" && platform === "android";
@@ -399,12 +437,13 @@ describe("device acquisition wait deadlines", () => {
         };
         const service = new RunnerReadinessService({
           timer,
-          getAndroidManager: () => ({
+          getAndroidManager: (): ReadinessAndroidManager => ({
             isInstalled: async () => true,
             isEnabled: async () => true,
             isVersionCompatible: async () => true,
             enable: async () => {},
             resetSetupState: () => {},
+            reopenSetupGate: () => {},
             setup: async () => ({ success: true, message: "ready" }),
             ensureCompatibleVersion: async () => {
               if (stage === "CtrlProxy APK upgrade") {
@@ -519,336 +558,23 @@ describe("device acquisition wait deadlines", () => {
   }
 
   for (const cancelled of [false, true]) {
-    test(`getAndroid bounds a mutex-blocked readiness reservation on ${cancelled ? "abort" : "deadline"}`, async () => {
-      await pool.addDevice(android);
-      // Hold the actual pool assignment mutex only once the reservation call starts:
-      // boot discovery must retain its normal fast path and ordering.
-      const reserve = pool.reserveDeviceForReadiness.bind(pool);
-      let unlock: (() => void) | undefined;
-      let started = false;
-      pool.reserveDeviceForReadiness = async (...args) => {
-        unlock = await mutex.acquire();
-        started = true;
-        return await reserve(...args);
-      };
-      const controller = new AbortController();
-      const reason = new ActionableError("caller cancelled acquisition");
-      const outcome = observe(acquire(android, controller.signal));
-      try {
-        await flushMicrotasks();
-        expect(started).toBe(true);
-        timer.advanceTime(cancelled ? 500 : 1_999);
-        await flushMicrotasks();
-        expect(outcome.settled).toBe(false);
-        if (cancelled) {
-          controller.abort(reason);
-        } else {
-          timer.advanceTime(1);
-        }
-        await flushMicrotasks();
-        expect(outcome.settled).toBe(false);
-        timer.advanceTime(999);
-        await flushMicrotasks();
-        expect(outcome.settled).toBe(false);
-        timer.advanceTime(1);
-        await flushMicrotasks();
-        expect(outcome.settled).toBe(true);
-        if (cancelled) {
-          expect(outcome.error).toBe(reason);
-        } else {
-          expect(outcome.error).toBeInstanceOf(ActionableError);
-          expect((outcome.error as Error).message).toContain(
-            "getAndroid timeout exhausted while reserving the device for readiness",
-          );
-          expect((outcome.error as Error).message).toContain("budgetMs=2000");
-        }
-        expect(lifecycleReleases).toBe(1);
-      } finally {
-        controller.abort(reason);
-        unlock?.();
-        await flushMicrotasks();
-      }
-      expect(reservations.isReservedForReadiness(android.deviceId)).toBe(false);
-      expect(sessionManager.getAllSessionIds()).toEqual([]);
-    });
-  }
-
-  for (const mode of ["boot deadline", "abort", "grant at boot deadline"]) {
-    const cancelled = mode === "abort";
-    const grantAtDeadline = mode === "grant at boot deadline";
-    test(`getAndroid bounds a mutex-blocked startup lease on ${mode} and releases its late grant once`, async () => {
-      await pool.addDevice(android);
-      const reserve = pool.reserveAndroidStartupLease.bind(pool);
-      let started = false;
-      let grants = 0;
-      let releases = 0;
-      pool.reserveAndroidStartupLease = async (...args) => {
-        started = true;
-        const release = await reserve(...args);
-        grants++;
-        return async () => {
-          releases++;
-          await release();
-        };
-      };
-      const unlock = await mutex.acquire();
-      const controller = new AbortController();
-      const reason = new DOMException("caller cancelled startup lease", "AbortError");
-      const outcome = observe(acquire(android, controller.signal));
-      try {
-        await flushMicrotasks();
-        expect(started).toBe(true);
-        if (grantAtDeadline) {
-          timer.setTimeout(unlock, 1_000);
-        }
-        timer.advanceTime(cancelled ? 500 : 999);
-        await flushMicrotasks();
-        expect(outcome.settled).toBe(false);
-        if (cancelled) {
-          controller.abort(reason);
-        } else {
-          timer.advanceTime(1);
-        }
-        await flushMicrotasks();
-        expect(outcome.settled).toBe(true);
-        if (cancelled) {
-          expect(outcome.error).toBe(reason);
-        } else {
-          expect(outcome.error).toBeInstanceOf(ActionableError);
-          expect((outcome.error as Error).message).toBe(
-            "Timed out waiting for Android AVD reset recovery of 'Pixel'",
-          );
-        }
-        expect(grants).toBe(grantAtDeadline ? 1 : 0);
-        expect(lifecycleReleases).toBe(0);
-      } finally {
-        unlock();
-        await flushMicrotasks();
-      }
-      expect(grants).toBe(1);
-      expect(releases).toBe(1);
-      expect(startupLeases.size).toBe(0);
-      expect(reservations.isReservedForReadiness(android.deviceId)).toBe(false);
-      expect(sessionManager.getAllSessionIds()).toEqual([]);
-      expect(lifecycleReleases).toBe(0);
-    });
-  }
-
-  test("getAndroid bounds failure finalization to the grace and drains each reservation once after the mutex frees", async () => {
-    await pool.addDevice(android);
-    let startupReleases = 0;
-    const reserveStartup = pool.reserveAndroidStartupLease.bind(pool);
-    pool.reserveAndroidStartupLease = async (...args) => {
-      const release = await reserveStartup(...args);
-      return async () => {
-        startupReleases++;
-        await release();
-      };
-    };
-    let readinessReleases = 0;
-    const reserveReadiness = pool.reserveDeviceForReadiness.bind(pool);
-    pool.reserveDeviceForReadiness = async (...args) => {
-      const release = await reserveReadiness(...args);
-      return Object.assign(
-        async () => {
-          readinessReleases++;
-          await release();
-        },
-        { owner: release.owner },
-      );
-    };
-    let unlock: (() => void) | undefined;
-    let started = false;
-    setDeviceToolsDependencies({
-      ensureCtrlProxyReady: async () => {
-        unlock = await mutex.acquire();
-        started = true;
-        timer.advanceTime(2_000);
-        throw new ActionableError("getAndroid automation deadline exhausted");
-      },
-    });
-    const outcome = observe(acquire(android));
-    try {
-      await flushMicrotasks();
-      expect(started).toBe(true);
-      // The injected runner failure models its deadline firing while finalization
-      // is queued behind the real pool mutex; no new preparation may start.
-      expect(readinessReleases).toBe(1);
-      expect(reservations.isReservedForReadiness(android.deviceId)).toBe(true);
-      expect(startupLeases.size).toBe(1);
-      expect(lifecycleReleases).toBe(0);
-      expect(outcome.settled).toBe(false);
-      timer.advanceTime(999);
-      await flushMicrotasks();
-      expect(outcome.settled).toBe(false);
-      timer.advanceTime(1);
-      await flushMicrotasks();
-      expect(outcome.settled).toBe(true);
-      expect(outcome.error).toBeInstanceOf(ActionableError);
-      expect((outcome.error as Error).message).toContain("automation deadline exhausted");
-      expect(startupReleases).toBe(0);
-      expect(lifecycleReleases).toBe(0);
-    } finally {
-      unlock?.();
-      await flushMicrotasks();
-    }
-    expect(readinessReleases).toBe(1);
-    expect(startupReleases).toBe(1);
-    expect(lifecycleReleases).toBe(1);
-    expect(startupLeases.size).toBe(0);
-    expect(reservations.isReservedForReadiness(android.deviceId)).toBe(false);
-    expect(sessionManager.getAllSessionIds()).toEqual([]);
-  });
-
-  test("getAndroid bounds partial lifecycle reservation rollback when startup release is mutex-blocked", async () => {
-    await pool.addDevice(android);
-    let unlock: (() => void) | undefined;
-    let startupReleases = 0;
-    const reserveStartup = pool.reserveAndroidStartupLease.bind(pool);
-    pool.reserveAndroidStartupLease = async (...args) => {
-      const release = await reserveStartup(...args);
-      return async () => {
-        startupReleases++;
-        await release();
-      };
-    };
-    const failure = new ActionableError("lifecycle deadline exhausted");
-    setDeviceToolsDependencies({
-      lifecycleCoordinator: {
-        reserve: async () => {
-          unlock = await mutex.acquire();
-          timer.advanceTime(2_000);
-          throw failure;
-        },
-      },
-    });
-    const outcome = observe(acquire(android));
-    try {
-      await flushMicrotasks();
-      expect(startupLeases.size).toBe(1);
-      expect(startupReleases).toBe(1);
-      expect(outcome.settled).toBe(false);
-      timer.advanceTime(999);
-      await flushMicrotasks();
-      expect(outcome.settled).toBe(false);
-      timer.advanceTime(1);
-      await flushMicrotasks();
-      expect(outcome.settled).toBe(true);
-      expect(outcome.error).toBeInstanceOf(ActionableError);
-    } finally {
-      unlock?.();
-      await flushMicrotasks();
-    }
-    expect(startupReleases).toBe(1);
-    expect(startupLeases.size).toBe(0);
-    expect(lifecycleReleases).toBe(0);
-    expect(reservations.isReservedForReadiness(android.deviceId)).toBe(false);
-  });
-
-  for (const grantAtDeadline of [false, true]) {
-    test(`getAndroid releases an abort-ignoring readiness grant ${grantAtDeadline ? "at" : "after"} its deadline`, async () => {
-      await pool.addDevice(android);
-      const gate = Promise.withResolvers<void>();
-      const reserve = pool.reserveDeviceForReadiness.bind(pool);
-      let started = false;
-      let grants = 0;
-      let releases = 0;
-      pool.reserveDeviceForReadiness = async (...args) => {
-        started = true;
-        await gate.promise;
-        // Model the narrow late-grant case even if a pool implementation ignores
-        // its ambient request cancellation after taking the assignment mutex.
-        const reservation = await runWithAbortSignal(undefined, () => reserve(...args));
-        grants++;
-        return Object.assign(
-          async () => {
-            releases++;
-            await reservation();
-          },
-          { owner: reservation.owner },
-        );
-      };
-      const outcome = observe(acquire(android));
-      try {
-        await flushMicrotasks();
-        expect(started).toBe(true);
-        if (grantAtDeadline) {
-          timer.setTimeout(() => gate.resolve(), 2_000);
-        }
-        timer.advanceTime(2_000);
-        await flushMicrotasks();
-        expect(outcome.settled).toBe(true);
-        expect(outcome.error).toBeInstanceOf(ActionableError);
-        expect((outcome.error as Error).message).toContain("reserving the device for readiness");
-        expect(lifecycleReleases).toBe(1);
-      } finally {
-        gate.resolve();
-        await flushMicrotasks();
-      }
-      expect(grants).toBe(1);
-      expect(releases).toBe(1);
-      expect(reservations.isReservedForReadiness(android.deviceId)).toBe(false);
-      expect(sessionManager.getAllSessionIds()).toEqual([]);
-    });
-  }
-
-  for (const cancelled of [false, true]) {
-    test(`runner setup bounds a mutex-blocked shutdown check on ${cancelled ? "abort" : "deadline"}`, async () => {
-      const unlock = await mutex.acquire();
-      const controller = new AbortController();
-      const reason = new DOMException("caller cancelled readiness", "AbortError");
-      const outcome = observe(ensureReady(android, controller.signal));
-      try {
-        await flushMicrotasks();
-        timer.advanceTime(cancelled ? 500 : 1_999);
-        await flushMicrotasks();
-        expect(outcome.settled).toBe(false);
-        if (cancelled) {
-          controller.abort(reason);
-        } else {
-          timer.advanceTime(1);
-        }
-        await flushMicrotasks();
-        expect(outcome.settled).toBe(true);
-        if (cancelled) {
-          expect(outcome.error).toBe(reason);
-        } else {
-          expect(outcome.error).toBeInstanceOf(RunnerReadinessError);
-          expect(outcome.error).toMatchObject({ deadlineExhausted: true, phase: "runner-setup" });
-          expect((outcome.error as Error).message).toContain(
-            "provisionDevice automation runner readiness failed: platform=android requested=[requested target] resolved=[Pixel (emulator-5554)] phase=runner-setup",
-          );
-        }
-      } finally {
-        controller.abort(reason);
-        unlock();
-        await flushMicrotasks();
-      }
-    });
-  }
-
-  for (const acquisition of [true, false]) {
-    for (const cancelled of [false, true]) {
-      test(`${acquisition ? "getApple" : "runner setup"} detaches shared iOS rearm on ${cancelled ? "abort" : "deadline"}`, async () => {
-        const cleanup = Promise.withResolvers<void>();
-        const fake = new FakeIOSCtrlProxyManager(timer);
+    arranged(
+      `getAndroid bounds a mutex-blocked readiness reservation on ${cancelled ? "abort" : "deadline"}`,
+      async () => {
+        await pool.addDevice(android);
+        // Hold the actual pool assignment mutex only once the reservation call starts:
+        // boot discovery must retain its normal fast path and ordering.
+        const reserve = pool.reserveDeviceForReadiness.bind(pool);
+        let unlock: (() => void) | undefined;
         let started = false;
-        let cleanupFinished = false;
-        let cleanupSignal: AbortSignal | undefined;
-        fake.rearmAfterDeviceReappearance = async () => {
+        pool.reserveDeviceForReadiness = async (...args) => {
+          unlock = await mutex.acquire();
           started = true;
-          cleanupSignal = getAbortSignal();
-          await cleanup.promise;
-          cleanupFinished = true;
+          return await reserve(...args);
         };
-        const manager = IOSCtrlProxyManager.createForTesting(ios, timer);
-        manager.rearmAfterDeviceReappearance = fake.rearmAfterDeviceReappearance.bind(fake);
-        const existing = spyOn(IOSCtrlProxyManager, "getExistingInstance").mockReturnValue(manager);
         const controller = new AbortController();
-        const reason = new ActionableError("caller cancelled iOS wait");
-        const outcome = observe(
-          acquisition ? acquire(ios, controller.signal) : ensureReady(ios, controller.signal),
-        );
+        const reason = new ActionableError("caller cancelled acquisition");
+        const outcome = observe(acquire(android, controller.signal));
         try {
           await flushMicrotasks();
           expect(started).toBe(true);
@@ -861,32 +587,372 @@ describe("device acquisition wait deadlines", () => {
             timer.advanceTime(1);
           }
           await flushMicrotasks();
+          expect(outcome.settled).toBe(false);
+          timer.advanceTime(999);
+          await flushMicrotasks();
+          expect(outcome.settled).toBe(false);
+          timer.advanceTime(1);
+          await flushMicrotasks();
           expect(outcome.settled).toBe(true);
           if (cancelled) {
             expect(outcome.error).toBe(reason);
-          } else if (acquisition) {
+          } else {
             expect(outcome.error).toBeInstanceOf(ActionableError);
             expect((outcome.error as Error).message).toContain(
-              "getApple timeout exhausted while waiting for iOS runner removal cleanup",
+              "getAndroid timeout exhausted while reserving the device for readiness",
             );
+            expect((outcome.error as Error).message).toContain("budgetMs=2000");
+          }
+          expect(lifecycleReleases).toBe(1);
+        } finally {
+          controller.abort(reason);
+          unlock?.();
+          await flushMicrotasks();
+        }
+        expect(reservations.isReservedForReadiness(android.deviceId)).toBe(false);
+        expect(sessionManager.getAllSessionIds()).toEqual([]);
+      },
+    );
+  }
+
+  for (const mode of ["boot deadline", "abort", "grant at boot deadline"]) {
+    const cancelled = mode === "abort";
+    const grantAtDeadline = mode === "grant at boot deadline";
+    arranged(
+      `getAndroid bounds a mutex-blocked startup lease on ${mode} and releases its late grant once`,
+      async () => {
+        await pool.addDevice(android);
+        const reserve = pool.reserveAndroidStartupLease.bind(pool);
+        let started = false;
+        let grants = 0;
+        let releases = 0;
+        pool.reserveAndroidStartupLease = async (...args) => {
+          started = true;
+          const release = await reserve(...args);
+          grants++;
+          return async () => {
+            releases++;
+            await release();
+          };
+        };
+        const unlock = await mutex.acquire();
+        const controller = new AbortController();
+        const reason = new DOMException("caller cancelled startup lease", "AbortError");
+        const outcome = observe(acquire(android, controller.signal));
+        try {
+          await flushMicrotasks();
+          expect(started).toBe(true);
+          if (grantAtDeadline) {
+            timer.setTimeout(unlock, 1_000);
+          }
+          timer.advanceTime(cancelled ? 500 : 999);
+          await flushMicrotasks();
+          expect(outcome.settled).toBe(false);
+          if (cancelled) {
+            controller.abort(reason);
+          } else {
+            timer.advanceTime(1);
+          }
+          await flushMicrotasks();
+          expect(outcome.settled).toBe(true);
+          if (cancelled) {
+            expect(outcome.error).toBe(reason);
+          } else {
+            expect(outcome.error).toBeInstanceOf(ActionableError);
+            expect((outcome.error as Error).message).toBe(
+              "Timed out waiting for Android AVD reset recovery of 'Pixel'",
+            );
+          }
+          expect(grants).toBe(grantAtDeadline ? 1 : 0);
+          expect(lifecycleReleases).toBe(0);
+        } finally {
+          unlock();
+          await flushMicrotasks();
+        }
+        expect(grants).toBe(1);
+        expect(releases).toBe(1);
+        expect(startupLeases.size).toBe(0);
+        expect(reservations.isReservedForReadiness(android.deviceId)).toBe(false);
+        expect(sessionManager.getAllSessionIds()).toEqual([]);
+        expect(lifecycleReleases).toBe(0);
+      },
+    );
+  }
+
+  arranged(
+    "getAndroid bounds failure finalization to the grace and drains each reservation once after the mutex frees",
+    async () => {
+      await pool.addDevice(android);
+      let startupReleases = 0;
+      const reserveStartup = pool.reserveAndroidStartupLease.bind(pool);
+      pool.reserveAndroidStartupLease = async (...args) => {
+        const release = await reserveStartup(...args);
+        return async () => {
+          startupReleases++;
+          await release();
+        };
+      };
+      let readinessReleases = 0;
+      const reserveReadiness = pool.reserveDeviceForReadiness.bind(pool);
+      pool.reserveDeviceForReadiness = async (...args) => {
+        const release = await reserveReadiness(...args);
+        return Object.assign(
+          async () => {
+            readinessReleases++;
+            await release();
+          },
+          { owner: release.owner },
+        );
+      };
+      let unlock: (() => void) | undefined;
+      let started = false;
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          unlock = await mutex.acquire();
+          started = true;
+          timer.advanceTime(2_000);
+          throw new ActionableError("getAndroid automation deadline exhausted");
+        },
+      });
+      const outcome = observe(acquire(android));
+      try {
+        await flushMicrotasks();
+        expect(started).toBe(true);
+        // The injected runner failure models its deadline firing while finalization
+        // is queued behind the real pool mutex; no new preparation may start.
+        expect(readinessReleases).toBe(1);
+        expect(reservations.isReservedForReadiness(android.deviceId)).toBe(true);
+        expect(startupLeases.size).toBe(1);
+        expect(lifecycleReleases).toBe(0);
+        expect(outcome.settled).toBe(false);
+        timer.advanceTime(999);
+        await flushMicrotasks();
+        expect(outcome.settled).toBe(false);
+        timer.advanceTime(1);
+        await flushMicrotasks();
+        expect(outcome.settled).toBe(true);
+        expect(outcome.error).toBeInstanceOf(ActionableError);
+        expect((outcome.error as Error).message).toContain("automation deadline exhausted");
+        expect(startupReleases).toBe(0);
+        expect(lifecycleReleases).toBe(0);
+      } finally {
+        unlock?.();
+        await flushMicrotasks();
+      }
+      expect(readinessReleases).toBe(1);
+      expect(startupReleases).toBe(1);
+      expect(lifecycleReleases).toBe(1);
+      expect(startupLeases.size).toBe(0);
+      expect(reservations.isReservedForReadiness(android.deviceId)).toBe(false);
+      expect(sessionManager.getAllSessionIds()).toEqual([]);
+    },
+  );
+
+  arranged(
+    "getAndroid bounds partial lifecycle reservation rollback when startup release is mutex-blocked",
+    async () => {
+      await pool.addDevice(android);
+      let unlock: (() => void) | undefined;
+      let startupReleases = 0;
+      const reserveStartup = pool.reserveAndroidStartupLease.bind(pool);
+      pool.reserveAndroidStartupLease = async (...args) => {
+        const release = await reserveStartup(...args);
+        return async () => {
+          startupReleases++;
+          await release();
+        };
+      };
+      const failure = new ActionableError("lifecycle deadline exhausted");
+      setDeviceToolsDependencies({
+        lifecycleCoordinator: {
+          isReserved: () => false,
+          reserve: async () => {
+            unlock = await mutex.acquire();
+            timer.advanceTime(2_000);
+            throw failure;
+          },
+        },
+      });
+      const outcome = observe(acquire(android));
+      try {
+        await flushMicrotasks();
+        expect(startupLeases.size).toBe(1);
+        expect(startupReleases).toBe(1);
+        expect(outcome.settled).toBe(false);
+        timer.advanceTime(999);
+        await flushMicrotasks();
+        expect(outcome.settled).toBe(false);
+        timer.advanceTime(1);
+        await flushMicrotasks();
+        expect(outcome.settled).toBe(true);
+        expect(outcome.error).toBeInstanceOf(ActionableError);
+      } finally {
+        unlock?.();
+        await flushMicrotasks();
+      }
+      expect(startupReleases).toBe(1);
+      expect(startupLeases.size).toBe(0);
+      expect(lifecycleReleases).toBe(0);
+      expect(reservations.isReservedForReadiness(android.deviceId)).toBe(false);
+    },
+  );
+
+  for (const grantAtDeadline of [false, true]) {
+    arranged(
+      `getAndroid releases an abort-ignoring readiness grant ${grantAtDeadline ? "at" : "after"} its deadline`,
+      async () => {
+        await pool.addDevice(android);
+        const gate = Promise.withResolvers<void>();
+        const reserve = pool.reserveDeviceForReadiness.bind(pool);
+        let started = false;
+        let grants = 0;
+        let releases = 0;
+        pool.reserveDeviceForReadiness = async (...args) => {
+          started = true;
+          await gate.promise;
+          // Model the narrow late-grant case even if a pool implementation ignores
+          // its ambient request cancellation after taking the assignment mutex.
+          const reservation = await runWithAbortSignal(undefined, () => reserve(...args));
+          grants++;
+          return Object.assign(
+            async () => {
+              releases++;
+              await reservation();
+            },
+            { owner: reservation.owner },
+          );
+        };
+        const outcome = observe(acquire(android));
+        try {
+          await flushMicrotasks();
+          expect(started).toBe(true);
+          if (grantAtDeadline) {
+            timer.setTimeout(() => gate.resolve(), 2_000);
+          }
+          timer.advanceTime(2_000);
+          await flushMicrotasks();
+          expect(outcome.settled).toBe(true);
+          expect(outcome.error).toBeInstanceOf(ActionableError);
+          expect((outcome.error as Error).message).toContain("reserving the device for readiness");
+          expect(lifecycleReleases).toBe(1);
+        } finally {
+          gate.resolve();
+          await flushMicrotasks();
+        }
+        expect(grants).toBe(1);
+        expect(releases).toBe(1);
+        expect(reservations.isReservedForReadiness(android.deviceId)).toBe(false);
+        expect(sessionManager.getAllSessionIds()).toEqual([]);
+      },
+    );
+  }
+
+  for (const cancelled of [false, true]) {
+    arranged(
+      `runner setup bounds a mutex-blocked shutdown check on ${cancelled ? "abort" : "deadline"}`,
+      async () => {
+        const unlock = await mutex.acquire();
+        const controller = new AbortController();
+        const reason = new DOMException("caller cancelled readiness", "AbortError");
+        const outcome = observe(ensureReady(android, controller.signal));
+        try {
+          await flushMicrotasks();
+          timer.advanceTime(cancelled ? 500 : 1_999);
+          await flushMicrotasks();
+          expect(outcome.settled).toBe(false);
+          if (cancelled) {
+            controller.abort(reason);
+          } else {
+            timer.advanceTime(1);
+          }
+          await flushMicrotasks();
+          expect(outcome.settled).toBe(true);
+          if (cancelled) {
+            expect(outcome.error).toBe(reason);
           } else {
             expect(outcome.error).toBeInstanceOf(RunnerReadinessError);
             expect(outcome.error).toMatchObject({ deadlineExhausted: true, phase: "runner-setup" });
-          }
-          expect(cleanupFinished).toBe(false);
-          expect(cleanupSignal).toBeUndefined();
-          if (acquisition) {
-            expect(lifecycleReleases).toBe(1);
+            expect((outcome.error as Error).message).toContain(
+              "provisionDevice automation runner readiness failed: platform=android requested=[requested target] resolved=[Pixel (emulator-5554)] phase=runner-setup",
+            );
           }
         } finally {
           controller.abort(reason);
-          cleanup.resolve();
+          unlock();
           await flushMicrotasks();
-          existing.mockRestore();
         }
-        expect(cleanupFinished).toBe(true);
-        expect(reservations.isReservedForReadiness(ios.deviceId)).toBe(false);
-      });
+      },
+    );
+  }
+
+  for (const acquisition of [true, false]) {
+    for (const cancelled of [false, true]) {
+      arranged(
+        `${acquisition ? "getApple" : "runner setup"} detaches shared iOS rearm on ${cancelled ? "abort" : "deadline"}`,
+        async () => {
+          const cleanup = Promise.withResolvers<void>();
+          const fake = new FakeIOSCtrlProxyManager(timer);
+          let started = false;
+          let cleanupFinished = false;
+          let cleanupSignal: AbortSignal | undefined;
+          fake.rearmAfterDeviceReappearance = async () => {
+            started = true;
+            cleanupSignal = getAbortSignal();
+            await cleanup.promise;
+            cleanupFinished = true;
+          };
+          const manager = IOSCtrlProxyManager.createForTesting(ios, timer);
+          manager.rearmAfterDeviceReappearance = fake.rearmAfterDeviceReappearance.bind(fake);
+          const existing = spyOn(IOSCtrlProxyManager, "getExistingInstance").mockReturnValue(
+            manager,
+          );
+          const controller = new AbortController();
+          const reason = new ActionableError("caller cancelled iOS wait");
+          const outcome = observe(
+            acquisition ? acquire(ios, controller.signal) : ensureReady(ios, controller.signal),
+          );
+          try {
+            await flushMicrotasks();
+            expect(started).toBe(true);
+            timer.advanceTime(cancelled ? 500 : 1_999);
+            await flushMicrotasks();
+            expect(outcome.settled).toBe(false);
+            if (cancelled) {
+              controller.abort(reason);
+            } else {
+              timer.advanceTime(1);
+            }
+            await flushMicrotasks();
+            expect(outcome.settled).toBe(true);
+            if (cancelled) {
+              expect(outcome.error).toBe(reason);
+            } else if (acquisition) {
+              expect(outcome.error).toBeInstanceOf(ActionableError);
+              expect((outcome.error as Error).message).toContain(
+                "getApple timeout exhausted while waiting for iOS runner removal cleanup",
+              );
+            } else {
+              expect(outcome.error).toBeInstanceOf(RunnerReadinessError);
+              expect(outcome.error).toMatchObject({
+                deadlineExhausted: true,
+                phase: "runner-setup",
+              });
+            }
+            expect(cleanupFinished).toBe(false);
+            expect(cleanupSignal).toBeUndefined();
+            if (acquisition) {
+              expect(lifecycleReleases).toBe(1);
+            }
+          } finally {
+            controller.abort(reason);
+            cleanup.resolve();
+            await flushMicrotasks();
+            existing.mockRestore();
+          }
+          expect(cleanupFinished).toBe(true);
+          expect(reservations.isReservedForReadiness(ios.deviceId)).toBe(false);
+        },
+      );
     }
   }
 
@@ -897,7 +963,7 @@ describe("device acquisition wait deadlines", () => {
     for (const deadlineKind of ["live", "anchored"] as const) {
       for (const mode of ["wedged", "in-time"] as const) {
         const operationName = platform === "android" ? "getAndroid" : "getApple";
-        test(`${operationName} ${deadlineKind} deadline with ${mode} readiness`, async () => {
+        arranged(`${operationName} ${deadlineKind} deadline with ${mode} readiness`, async () => {
           const device = platform === "android" ? android : ios;
           await pool.addDevice(device);
           const readiness = Promise.withResolvers<void>();
@@ -973,7 +1039,7 @@ describe("device acquisition wait deadlines", () => {
 
   // #10649: a readiness step that honors cancellation surfaces the live-deadline
   // error itself, which must name the acquisition stage that was running.
-  test("getApple live deadline error names the running acquisition stage", async () => {
+  arranged("getApple live deadline error names the running acquisition stage", async () => {
     await pool.addDevice(ios);
     setDeviceToolsDependencies({
       ensureCtrlProxyReady: async (request) =>
@@ -1007,101 +1073,92 @@ describe("device acquisition wait deadlines", () => {
 
   // #6034 review: System UI ANR recovery reuses the preserved session without
   // `runOperationWithinDeadline`, so binding must check cancellation itself.
-  test("a late System UI ANR recovery after the backstop binds nothing and leaves the replacement idle", async () => {
-    const recoveryImage = {
-      platform: "android" as const,
-      name: android.name,
-      deviceId: "emulator-5556",
-      isRunning: false,
-    };
-    const replacementProcess = Object.assign(new EventEmitter(), {
-      pid: 4242,
-      exitCode: null,
-      signalCode: null,
-      killed: false,
-      kill() {
-        replacementProcess.killed = true;
-        return true;
-      },
-    });
-    deviceUtils.setBootedDevices("android", [android]);
-    await pool.initializeWithDevices([android]);
-    await pool.bindOrReuseDeviceSession({
-      sessionId: "owner-session",
-      deviceId: android.deviceId,
-      platform: "android",
-      sourceImage: recoveryImage,
-    });
-    deviceUtils.setDeviceImages("android", [recoveryImage]);
-    deviceUtils.setMockChildProcess(
-      recoveryImage.name,
-      replacementProcess as unknown as ChildProcess,
-    );
-    const killDevice = deviceUtils.killDevice.bind(deviceUtils);
-    deviceUtils.killDevice = async (device) => {
-      await killDevice(device);
-      deviceUtils.setBootedDevices("android", []);
-    };
-    const matcher = new FakeDeviceMatcher();
-    matcher.setBootedResult(android);
-    matcher.setImageResult(recoveryImage);
-    const recoveredReadiness = Promise.withResolvers<void>();
-    let readinessAttempts = 0;
-    let recoverySignal: AbortSignal | undefined;
-    setDeviceToolsDependencies({
-      env: {},
-      deviceMatcherFactory: () => matcher,
-      ensureCtrlProxyReady: async (request) => {
-        readinessAttempts++;
-        if (readinessAttempts === 1) {
-          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-        }
-        recoverySignal = request.signal;
-        // Ignores cancellation, then reports the replacement ready after the deadline.
-        await recoveredReadiness.promise;
-      },
-    });
-    const notifyDeviceReady = spyOn(pool, "notifyDeviceReady");
-    const outcome = observe(
-      ToolRegistry.getTool("startDevice")!.handler({
+  arranged(
+    "a late System UI ANR recovery after the backstop binds nothing and leaves the replacement idle",
+    async () => {
+      const recoveryImage = {
+        platform: "android" as const,
+        name: android.name,
+        deviceId: "emulator-5556",
+        isRunning: false,
+      };
+      const replacementProcess = new SilentChildProcess();
+      deviceUtils.setBootedDevices("android", [android]);
+      await pool.initializeWithDevices([android]);
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: android.deviceId,
         platform: "android",
-        __mcpRequestDeadlineMs: 500,
-      }),
-    );
-    try {
-      for (let pass = 0; pass < 20 && recoverySignal === undefined; pass++) {
+        sourceImage: recoveryImage,
+      });
+      deviceUtils.setDeviceImages("android", [recoveryImage]);
+      deviceUtils.setMockChildProcess(recoveryImage.name, replacementProcess);
+      const killDevice = deviceUtils.killDevice.bind(deviceUtils);
+      deviceUtils.killDevice = async (device) => {
+        await killDevice(device);
+        deviceUtils.setBootedDevices("android", []);
+      };
+      const matcher = new FakeDeviceMatcher();
+      matcher.setBootedResult(android);
+      matcher.setImageResult(recoveryImage);
+      const recoveredReadiness = Promise.withResolvers<void>();
+      let readinessAttempts = 0;
+      let recoverySignal: AbortSignal | undefined;
+      setDeviceToolsDependencies({
+        env: {},
+        deviceMatcherFactory: () => matcher,
+        ensureCtrlProxyReady: async (request) => {
+          readinessAttempts++;
+          if (readinessAttempts === 1) {
+            throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+          }
+          recoverySignal = request.signal;
+          // Ignores cancellation, then reports the replacement ready after the deadline.
+          await recoveredReadiness.promise;
+        },
+      });
+      const notifyDeviceReady = spyOn(pool, "notifyDeviceReady");
+      const outcome = observe(
+        ToolRegistry.getTool("startDevice")!.handler({
+          platform: "android",
+          __mcpRequestDeadlineMs: 500,
+        }),
+      );
+      try {
+        for (let pass = 0; pass < 20 && recoverySignal === undefined; pass++) {
+          await flushMicrotasks();
+        }
+        expect(recoverySignal).toBeDefined();
+        timer.advanceTime(500 + ACQUISITION_DEADLINE_BACKSTOP_GRACE_MS - 1);
+        await flushMicrotasks();
+        expect(outcome.settled).toBe(false);
+        timer.advanceTime(1);
+        await flushMicrotasks();
+        expect(outcome.error).toBeInstanceOf(ActionableError);
+        expect((outcome.error as Error).message).toContain("preparing the automation runner");
+        expect(replacementProcess.killed).toBe(false);
+        // The pool's own handoff already announced the replacement; binding adds nothing.
+        const readyNotifications = notifyDeviceReady.mock.calls.length;
+
+        recoveredReadiness.resolve();
+        await flushMicrotasks();
+        expect(recoverySignal?.aborted).toBe(true);
+        expect(replacementProcess.killed).toBe(false);
+        expect(pool.getDevice(recoveryImage.deviceId)).toMatchObject({
+          status: "idle",
+          sessionId: null,
+        });
+        expect(sessionManager.getSession("owner-session")).toBeNull();
+        expect(sessionManager.getDeviceReadiness("owner-session")).toBeUndefined();
+        expect(notifyDeviceReady).toHaveBeenCalledTimes(readyNotifications);
+        // Cleanup releases the AVD lease without waiting for the retained process to exit.
+        expect(lifecycleReleases).toBe(1);
+        expect(reservations.isReservedForReadiness(recoveryImage.deviceId)).toBe(false);
+      } finally {
+        recoveredReadiness.resolve();
+        notifyDeviceReady.mockRestore();
         await flushMicrotasks();
       }
-      expect(recoverySignal).toBeDefined();
-      timer.advanceTime(500 + ACQUISITION_DEADLINE_BACKSTOP_GRACE_MS - 1);
-      await flushMicrotasks();
-      expect(outcome.settled).toBe(false);
-      timer.advanceTime(1);
-      await flushMicrotasks();
-      expect(outcome.error).toBeInstanceOf(ActionableError);
-      expect((outcome.error as Error).message).toContain("preparing the automation runner");
-      expect(replacementProcess.killed).toBe(false);
-      // The pool's own handoff already announced the replacement; binding adds nothing.
-      const readyNotifications = notifyDeviceReady.mock.calls.length;
-
-      recoveredReadiness.resolve();
-      await flushMicrotasks();
-      expect(recoverySignal?.aborted).toBe(true);
-      expect(replacementProcess.killed).toBe(false);
-      expect(pool.getDevice(recoveryImage.deviceId)).toMatchObject({
-        status: "idle",
-        sessionId: null,
-      });
-      expect(sessionManager.getSession("owner-session")).toBeNull();
-      expect(sessionManager.getDeviceReadiness("owner-session")).toBeUndefined();
-      expect(notifyDeviceReady).toHaveBeenCalledTimes(readyNotifications);
-      // Cleanup releases the AVD lease without waiting for the retained process to exit.
-      expect(lifecycleReleases).toBe(1);
-      expect(reservations.isReservedForReadiness(recoveryImage.deviceId)).toBe(false);
-    } finally {
-      recoveredReadiness.resolve();
-      notifyDeviceReady.mockRestore();
-      await flushMicrotasks();
-    }
-  });
+    },
+  );
 });

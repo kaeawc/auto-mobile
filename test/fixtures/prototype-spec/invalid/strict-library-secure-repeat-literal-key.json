@@ -1,0 +1,60 @@
+{
+  "spec": {
+    "id": "secure",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "pw_b": "",
+      "pw_a": ""
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "column",
+          "repeat": {
+            "items": [
+              {
+                "id": "b"
+              },
+              {
+                "id": "a"
+              }
+            ],
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "textField",
+              "stateKey": "pw_{item.id}",
+              "secure": true
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "request",
+              "url": "https://example.com",
+              "via": "device",
+              "method": "POST",
+              "body": {
+                "state": "pw_a"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "root.children[1].onTap[0].body.state",
+  "expectedMessage": "Secure value cannot be bound into a request"
+}

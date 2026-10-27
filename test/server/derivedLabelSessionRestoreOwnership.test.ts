@@ -1,9 +1,9 @@
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   DAEMON_OWNED_SESSIONS_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -34,11 +34,6 @@ const BASE = "sess-a";
 const OWNER = "conn-1";
 const OTHER = "conn-2";
 
-/** The socket server's private restore step: where the owned-sessions selector is consumed. */
-interface RestoreSeam {
-  restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void>;
-}
-
 function wire(result: { content?: unknown }): Record<string, unknown> {
   const content = result.content as { text: string }[];
   return JSON.parse(content[0].text) as Record<string, unknown>;
@@ -56,7 +51,7 @@ describe("restoring a derived label session through the owned-sessions selector"
 
   /** A socket `tools/call` from `connection` whose arguments carry the owned-sessions selector. */
   const socketRestore = (connection: string, args: Record<string, unknown>): Promise<void> =>
-    (socketServer as unknown as RestoreSeam).restoreSelectorSessions(
+    socketServer.testHooks.restoreSelectorSessions(
       { ...args, [DAEMON_OWNED_SESSIONS_PARAM]: [labelSession] },
       connection,
     );
@@ -76,7 +71,7 @@ describe("restoring a derived label session through the owned-sessions selector"
     restore();
   });
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     spies = [
@@ -102,7 +97,8 @@ describe("restoring a derived label session through the owned-sessions selector"
       }),
     );
     await pool.initializeWithDevices([primary, labelled]);
-    DaemonState.getInstance().initialize(manager, pool, new DeviceSessionRegistry(timer));
+    const registry = new DeviceSessionRegistry(timer);
+    DaemonState.getInstance().initialize(manager, pool, registry);
     tools = new RealToolCallPath([primary, labelled]).install();
     await pool.bindOrReuseDeviceSession({
       sessionId: BASE,
@@ -119,12 +115,29 @@ describe("restoring a derived label session through the owned-sessions selector"
     );
     socketServer = createTestUnixSocketServer(
       "/tmp/never-listened.sock",
-      { isInitialized: () => true, getDevicePool: () => pool } as unknown as DaemonStateAccess,
+      {
+        isInitialized: () => true,
+        getSessionManager: () => manager,
+        getDevicePool: () => pool,
+        getDeviceSessionRegistry: () => registry,
+      } satisfies DaemonStateAccess,
       timer,
     );
     fixture = new McpTestFixture({ daemonMode: true });
     await fixture.setup();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(async () => {
     await fixture?.teardown();
@@ -143,31 +156,40 @@ describe("restoring a derived label session through the owned-sessions selector"
     }
   });
 
-  test("another connection's call naming the derived session is refused at the restore", async () => {
-    await expect(socketRestore(OTHER, { sessionUuid: labelSession })).rejects.toMatchObject({
-      code: DEVICE_OWNED_BY_OTHER_SESSION_CODE,
-    });
-  });
+  arranged(
+    "another connection's call naming the derived session is refused at the restore",
+    async () => {
+      await expect(socketRestore(OTHER, { sessionUuid: labelSession })).rejects.toMatchObject({
+        code: DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+      });
+    },
+  );
 
-  test("the owner still drives its labelled device by label after another connection tried to restore it", async () => {
-    await socketRestore(OTHER, { deviceId: primary.deviceId }).catch(() => {});
+  arranged(
+    "the owner still drives its labelled device by label after another connection tried to restore it",
+    async () => {
+      await socketRestore(OTHER, { deviceId: primary.deviceId }).catch(() => {});
 
-    const result = await tap(OWNER, { sessionUuid: BASE, device: "B" });
+      const result = await tap(OWNER, { sessionUuid: BASE, device: "B" });
 
-    expect(result.isError).not.toBe(true);
-    expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId]);
-  });
+      expect(result.isError).not.toBe(true);
+      expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId]);
+    },
+  );
 
-  test("the owner still drives its labelled device by session name after that restore", async () => {
-    await socketRestore(OTHER, { deviceId: primary.deviceId }).catch(() => {});
+  arranged(
+    "the owner still drives its labelled device by session name after that restore",
+    async () => {
+      await socketRestore(OTHER, { deviceId: primary.deviceId }).catch(() => {});
 
-    const result = await tap(OWNER, { sessionUuid: labelSession });
+      const result = await tap(OWNER, { sessionUuid: labelSession });
 
-    expect(result.isError).not.toBe(true);
-    expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId]);
-  });
+      expect(result.isError).not.toBe(true);
+      expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId]);
+    },
+  );
 
-  test("the other connection gains nothing from the refused restore", async () => {
+  arranged("the other connection gains nothing from the refused restore", async () => {
     await socketRestore(OTHER, { deviceId: primary.deviceId }).catch(() => {});
 
     const result = await tap(OTHER, { sessionUuid: labelSession });
@@ -177,11 +199,14 @@ describe("restoring a derived label session through the owned-sessions selector"
     expect(pool.resolveOwnedDeviceSessionForMcpSession(OTHER, labelled.deviceId)).toBeUndefined();
   });
 
-  test("the owner's own selector naming its derived session restores nothing new and is not refused", async () => {
-    await socketRestore(OWNER, { sessionUuid: labelSession });
+  arranged(
+    "the owner's own selector naming its derived session restores nothing new and is not refused",
+    async () => {
+      await socketRestore(OWNER, { sessionUuid: labelSession });
 
-    expect(pool.isSessionOwnedByOtherConnection(BASE, OWNER)).toBe(false);
-    expect(pool.isSessionOwnedByOtherConnection(BASE, OTHER)).toBe(true);
-    expect(pool.isSessionOwnedByOtherConnection(labelSession, OTHER)).toBe(true);
-  });
+      expect(pool.isSessionOwnedByOtherConnection(BASE, OWNER)).toBe(false);
+      expect(pool.isSessionOwnedByOtherConnection(BASE, OTHER)).toBe(true);
+      expect(pool.isSessionOwnedByOtherConnection(labelSession, OTHER)).toBe(true);
+    },
+  );
 });

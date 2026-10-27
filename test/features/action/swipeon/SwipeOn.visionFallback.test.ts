@@ -24,7 +24,9 @@ const enabledVisionConfig: VisionFallbackConfig = {
 const device = { name: "test-device", platform: "android", deviceId: "device-1" } as const;
 
 const createObserveResult = (): ObserveResult => ({
-  timestamp: Date.now(),
+  updatedAt: Date.now(),
+  observationId: "test-observation",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   screenSize: { width: 1080, height: 1920 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   viewHierarchy: { hierarchy: {} },
@@ -35,7 +37,7 @@ describe("SwipeOn vision fallback", () => {
   let fakeGesture: FakeGestureExecutor;
   let fakeAccessibilityDetector: FakeAccessibilityDetector;
   let fakeTimer: FakeTimer;
-  let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
+  let getInstanceSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     fakeAccessibilityDetector = new FakeAccessibilityDetector();
@@ -51,7 +53,7 @@ describe("SwipeOn vision fallback", () => {
   });
 
   afterEach(() => {
-    getInstanceSpy?.mockRestore();
+    getInstanceSpy.mockRestore();
   });
 
   const createSwipeOn = (capturer: FakeScreenshotCapturer, analyzer: FakeVisionAnalyzer) => {

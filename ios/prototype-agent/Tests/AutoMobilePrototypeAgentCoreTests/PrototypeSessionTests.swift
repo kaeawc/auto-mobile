@@ -71,7 +71,7 @@ final class PrototypeSessionTests: XCTestCase {
         try session.show(textSpec(id: "a", state: #"{"n":1}"#))
         let events = session.dismiss(reason: .agent)
         XCTAssertEqual(events.count, 1)
-        XCTAssertEqual(events.first?.kind, "dismissed")
+        XCTAssertEqual(events.first?.wireKind, "dismissed")
         XCTAssertEqual(events.first?.id, "a")
         XCTAssertEqual(events.first?.payload, .object(["reason": .string("agent")]))
         XCTAssertEqual(events.first?.state, ["n": .number(1)])
@@ -86,7 +86,7 @@ final class PrototypeSessionTests: XCTestCase {
             action(#"{"type":"dismiss"}"#),
             action(#"{"type":"emit","name":"late"}"#),
         ])
-        XCTAssertEqual(events.map(\.kind), ["dismissed"])
+        XCTAssertEqual(events.map(\.wireKind), ["dismissed"])
         XCTAssertEqual(events.first?.payload, .object(["reason": .string("user")]))
     }
 
@@ -96,7 +96,7 @@ final class PrototypeSessionTests: XCTestCase {
         var session = PrototypeSession()
         try session.show(textSpec(id: "a", state: #"{"name":""}"#))
         let events = session.change(key: "name", value: .string("Al"))
-        XCTAssertEqual(events.map(\.kind), ["emit"])
+        XCTAssertEqual(events.map(\.wireKind), ["emit"])
         XCTAssertEqual(events.first?.name, "change")
         XCTAssertEqual(events.first?.payload, .object(["key": .string("name"), "value": .string("Al")]))
         XCTAssertEqual(events.first?.state["name"], .string("Al"))
@@ -132,7 +132,7 @@ final class PrototypeSessionTests: XCTestCase {
         {"id":"a","window":{"placement":{"type":"fullscreen"}},"state":{"tab":0},
          "root":{"type":"pager","id":"p","children":[{"type":"spacer"},{"type":"spacer"}]}}
         """))
-        XCTAssertEqual(session.select(index: 1, pager: "p", key: "tab").map(\.kind), ["page_changed"])
+        XCTAssertEqual(session.select(index: 1, pager: "p", key: "tab").map(\.wireKind), ["page_changed"])
         XCTAssertEqual(session.state["tab"], .number(0))
         XCTAssertEqual(session.select(index: 2, pager: nil, key: "tab").map(\.name), ["change"])
         XCTAssertEqual(session.state["tab"], .number(2))
@@ -203,7 +203,7 @@ final class PrototypeSessionTests: XCTestCase {
             action(#"{"type":"increment","key":"n"}"#),
             action(#"{"type":"dismiss"}"#),
         ])
-        XCTAssertEqual(events.map(\.kind), ["dismissed"])
+        XCTAssertEqual(events.map(\.wireKind), ["dismissed"])
     }
 
     func testSetPageClampsAndEmitsOnlyOnChange() throws {
@@ -301,7 +301,7 @@ final class PrototypeSessionTests: XCTestCase {
         let event = PrototypeEvent(
             id: "a",
             sequence: 4,
-            kind: "emit",
+            wireKind: "emit",
             name: nil,
             payload: .array([.bool(true), .null]),
             state: ["k": .string("v")],

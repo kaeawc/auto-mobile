@@ -6,9 +6,10 @@ import dev.jasonpearson.automobile.protocol.ErrorResponse
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonObjectBuilder
-import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -312,20 +313,25 @@ class CaCertificateControllerTest {
     val timer = FakeTimer()
     val policy = FakeDevicePolicy(timer)
     private val perfProvider = PerfProvider.createForTesting(timer)
-    val sender = FakeResponseSender(perfProvider)
+    val sender = CapturingTransport(perfProvider)
     val errors = mutableListOf<ErrorResponse>()
     val controller = newController()
 
     fun newController() =
       CaCertificateController(
-        devicePolicy = policy,
-        packageName = PACKAGE,
-        filesDir = { directory },
+        dependencies =
+          CaCertificateDependencies(
+            devicePolicy = policy,
+            packageName = PACKAGE,
+            filesDir = { directory },
+          ),
         perfProvider = perfProvider,
         timeProvider = timer,
-        resultBroadcaster =
-          ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
-        responseSender = sender,
+        resultSender =
+          guardedResultSender(
+            sender,
+            ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
+          ),
       )
 
     fun assertCertificateFrame(
@@ -415,28 +421,29 @@ class CaCertificateControllerTest {
     fun asFrame() = Frame(type, requestId, content.mapValues { it.value.jsonPrimitive.content })
   }
 
-  private class FakeResponseSender(private val perfProvider: PerfProvider) :
-    CaCertificateController.ResponseSender {
-    var running = true
+  private class CapturingTransport(private val perfProvider: PerfProvider) : FakeResultTransport() {
     var failure: Exception? = null
     var connectionCountReads = 0
     val frames = mutableListOf<CapturedFrame>()
 
-    override fun isRunning() = running
-
-    override suspend fun broadcastWithPerf(
-      type: String,
-      requestId: String?,
-      buildContent: JsonObjectBuilder.() -> Unit,
-    ) {
+    // Production flushes before building the frame; flush the real provider the same way.
+    override fun flushPerfTiming(): JsonElement? {
       failure?.let { throw it }
-      assertTrue(running)
-      // Match production's flush-before-build ordering, without opening a WebSocket server.
-      perfProvider.flush()
-      frames += CapturedFrame(type, requestId, buildJsonObject(buildContent))
+      return perfProvider.flush()
     }
 
-    override fun getConnectionCount(): Int {
+    override suspend fun sendFrame(frame: String) {
+      assertTrue(running)
+      val parsed = Json.parseToJsonElement(frame).jsonObject
+      frames +=
+        CapturedFrame(
+          parsed.getValue("type").jsonPrimitive.content,
+          parsed["requestId"]?.jsonPrimitive?.content,
+          JsonObject(parsed - setOf("type", "timestamp", "requestId", "perfTiming")),
+        )
+    }
+
+    override fun connectionCount(): Int {
       connectionCountReads++
       return 1
     }

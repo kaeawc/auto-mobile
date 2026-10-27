@@ -15,12 +15,12 @@ import {
   FileMigrationLock,
   IN_MEMORY_DATABASE_PATH,
   IN_MEMORY_DB_OPT_IN_ENV,
-  NoOpMigrationLock,
   isInMemoryDatabaseOptInEnabled,
   isInMemoryDatabasePath,
   migrationLockPathFor,
   selectMigrationLock,
 } from "../../src/db/migrationLock";
+import { NoOpMigrationLock } from "../../src/db/NoOpMigrationLock";
 import { ActionableError } from "../../src/models/ActionableError";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -390,16 +390,16 @@ describe("isInMemoryDatabaseOptInEnabled", () => {
   });
 
   test("recognizes the truthy opt-in values (case/whitespace-insensitive)", () => {
-    // Only 1/true/yes are accepted, after trim().toLowerCase().
-    for (const value of ["1", "true", "TRUE", "yes", "  Yes  ", "\t1\n"]) {
+    // The shared env flag rule: 1/true/yes/on, after trim().toLowerCase().
+    for (const value of ["1", "true", "TRUE", "yes", "  Yes  ", "\t1\n", "on", "On"]) {
       expect(isInMemoryDatabaseOptInEnabled({ [IN_MEMORY_DB_OPT_IN_ENV]: value })).toBe(true);
     }
   });
 
   test("treats empty/false-ish values as disabled (fail-safe: no silent opt-in)", () => {
-    // "on"/"On" is NOT an accepted token (only 1/true/yes), so it stays disabled;
-    // whitespace-only and arbitrary strings are disabled too.
-    for (const value of ["", "0", "false", "no", "off", "nope", "on", "On", "maybe", "   "]) {
+    // Only the shared env flag tokens (1/true/yes/on) enable it, so whitespace-only and
+    // arbitrary strings stay disabled.
+    for (const value of ["", "0", "false", "no", "off", "nope", "maybe", "   "]) {
       expect(isInMemoryDatabaseOptInEnabled({ [IN_MEMORY_DB_OPT_IN_ENV]: value })).toBe(false);
     }
   });

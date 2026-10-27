@@ -1,3 +1,7 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createAndroidTestClient } from "../../helpers/androidCtrlProxyClientSpies";
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
+import { createExecResult } from "../../../src/utils/execResult";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
 import { TextIndeterminateError } from "../../../src/features/action/TextIndeterminateError";
@@ -6,7 +10,7 @@ import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { imeOcclusionHierarchy } from "../../fixtures/observe/imeOcclusion";
-import { describe, expect, mock, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, mock, spyOn, test, afterEach } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -31,6 +35,9 @@ import {
   IME_COMMIT_READ_BACK_SETTLE_MS,
   SendKeys,
   type SendKeysCommandExecutor,
+  type SendKeysTypeCommand,
+  type SendKeysKeyCommand,
+  type SendKeysCommandResult,
   type SendKeysInputKey,
   type SendKeysObserver,
   type SendKeysTextClient,
@@ -56,6 +63,8 @@ import {
   withAndroidImeLock,
 } from "../../../src/features/action/androidImeLock";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+
+afterEach(() => mock.restore());
 
 describe("SendKeys iOS text transport", () => {
   test.each([5, 1000])("passes a scaled timeout for %s characters", async (length) => {
@@ -209,7 +218,7 @@ describe("SendKeys IME failure after typing", () => {
     async (afterTyping) => {
       const timer = new FakeTimer();
       const adb = new FakeAdbExecutor();
-      adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+      adb.setCommandResponse("forward", createExecResult("8765", ""));
       adb.setScreenState(true);
       const device = { ...androidDevice, deviceId: `ime-done-failure-${afterTyping}` };
       const reason = "No focused editable node found for IME action";
@@ -360,7 +369,11 @@ const unicodeCorpus = [
 ] as const;
 
 function createObserver(
-  result: ObserveResult = { timestamp: Date.now() } as ObserveResult,
+  result: ObserveResult = buildObserveResult({
+    updatedAt: Date.now(),
+    screenSize: { width: 500, height: 500 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+  }),
 ): SendKeysObserver & {
   calls: number;
   options: Array<Parameters<SendKeysObserver["execute"]>[0]>;
@@ -382,7 +395,11 @@ function focusedAndroidObservation(
   timestamp: number = Date.now(),
 ): ObserveResult {
   return {
-    timestamp,
+    updatedAt: timestamp,
+    screenSize: { width: 500, height: 500 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    observationId: "focused-observation",
     viewHierarchy: {
       hierarchy: {
         node: {
@@ -395,7 +412,7 @@ function focusedAndroidObservation(
         },
       },
     },
-  } as ObserveResult;
+  };
 }
 
 function createTextClient(
@@ -580,8 +597,8 @@ describe("SendKeys", () => {
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeIdForFake, stderr: "" },
-      { stdout: commitImeIdForFake, stderr: "" },
+      createExecResult(priorImeIdForFake, ""),
+      createExecResult(commitImeIdForFake, ""),
     ]);
     const textClient = createTextClient({
       commitViaIme: async (text) => ({ success: true, committedUnits: text.length }),
@@ -595,9 +612,10 @@ describe("SendKeys", () => {
     return { executor, timer, textClient, adb };
   }
 
-  test.each([false, true])(
-    "default replace reads a hinted empty field as empty with focusedElement=%s",
-    async (withFocusedElement) => {
+  describe("hinted empty field replacement", () => {
+    let observation: ObserveResult;
+    let fields: number;
+    beforeEach(() => {
       const fixture: { viewHierarchy: ViewHierarchyResult } = JSON.parse(
         readFileSync(
           resolve("test/fixtures/android-focus/playground-text-field-post-tap.json"),
@@ -605,8 +623,13 @@ describe("SendKeys", () => {
         ),
       );
       const parser = new DefaultElementParser();
-      const observation: ObserveResult = { timestamp: 0, viewHierarchy: fixture.viewHierarchy };
-      let fields = 0;
+      observation = buildObserveResult({
+        updatedAt: 0,
+        viewHierarchy: fixture.viewHierarchy,
+        screenSize: { width: 500, height: 500 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      });
+      fields = 0;
       for (const root of [
         ...parser.extractRootNodes(fixture.viewHierarchy),
         ...parser.extractWindowRootNodes(fixture.viewHierarchy),
@@ -618,34 +641,40 @@ describe("SendKeys", () => {
             properties.text = "Search settings";
             properties["hint-text"] = "Search settings";
             fields++;
-            if (withFocusedElement) {
-              observation.focusedElement = {
-                ...properties,
-                bounds: { left: 84, top: 1115, right: 996, bottom: 1262 },
-              };
-            }
+            observation.focusedElement = {
+              ...properties,
+              bounds: { left: 84, top: 1115, right: 996, bottom: 1262 },
+            };
           }
         });
       }
-      expect(fields).toBeGreaterThan(0);
-      if (withFocusedElement) {
-        expect(observation.focusedElement?.text).toBe("Search settings");
-      }
-      const { executor, timer, textClient } = imeVerificationHarness(createObserver(observation));
-      const result = await executor.type({ action: "type", text: "Q", operation: "replace" });
-      expect(result).toMatchObject({
-        success: false,
-        partialApplication: true,
-        committedUnits: 1,
-        resolvedMode: "ime",
-      });
-      expect(result.error).toContain('the focused field holds ""');
-      expect(result.error).not.toContain("Search settings");
-      expect(textClient.calls).toContain("clearField");
-      expect(textClient.commitViaImeCalls).toHaveLength(1);
-      expect(timer.getSleepHistory()).toEqual([150, 150]);
-    },
-  );
+    });
+    test.each([false, true])(
+      "default replace reads a hinted empty field as empty with focusedElement=%s",
+      async (withFocusedElement) => {
+        if (!withFocusedElement) {
+          delete observation.focusedElement;
+        }
+        expect(fields).toBeGreaterThan(0);
+        if (withFocusedElement) {
+          expect(observation.focusedElement?.text).toBe("Search settings");
+        }
+        const { executor, timer, textClient } = imeVerificationHarness(createObserver(observation));
+        const result = await executor.type({ action: "type", text: "Q", operation: "replace" });
+        expect(result).toMatchObject({
+          success: false,
+          partialApplication: true,
+          committedUnits: 1,
+          resolvedMode: "ime",
+        });
+        expect(result.error).toContain('the focused field holds ""');
+        expect(result.error).not.toContain("Search settings");
+        expect(textClient.calls).toContain("clearField");
+        expect(textClient.commitViaImeCalls).toHaveLength(1);
+        expect(timer.getSleepHistory()).toEqual([150, 150]);
+      },
+    );
+  });
 
   test("default replace still verifies non-hint replacement content", async () => {
     let fieldText = "Q";
@@ -854,7 +883,7 @@ describe("SendKeys", () => {
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 
-  test("back and home do not require editable focus", async () => {
+  test("escape and tab do not require editable focus", async () => {
     const observer = createObserver(focusedAndroidObservation("", { focused: "false" }, 0));
     const { textClient, adb, timer } = imeVerificationHarness(observer);
     const press = mock(async (_key: Parameters<SendKeysInputKey["press"]>[0]) => ({
@@ -866,10 +895,10 @@ describe("SendKeys", () => {
       observer,
       { textClient: textClient.client, inputKey: { press }, timer },
     );
-    for (const key of ["back", "home"] as const) {
+    for (const key of ["escape", "tab"] as const) {
       expect(await executor.key({ action: "key", key })).toMatchObject({ success: true });
     }
-    expect(press.mock.calls.map((call) => call[0])).toEqual(["back", "home"]);
+    expect(press.mock.calls.map((call) => call[0])).toEqual(["escape", "tab"]);
     expect(observer.calls).toBe(0);
     expect(textClient.calls).toEqual([]);
   });
@@ -921,11 +950,13 @@ describe("SendKeys", () => {
     observation.displayRevision = 0;
     const observer = createObserver(observation);
     const { executor, timer, adb } = imeVerificationHarness(observer);
-    adb.setCommandResponse("shell cmd display get-displays", {
-      stdout:
+    adb.setCommandResponse(
+      "shell cmd display get-displays",
+      createExecResult(
         'Display id 2: DisplayInfo{"Panel", displayId 2, uniqueId "local:external", 200 x 200}',
-      stderr: "",
-    });
+        "",
+      ),
+    );
     const device: BootedDevice = {
       ...androidDevice,
       displays: {
@@ -938,7 +969,12 @@ describe("SendKeys", () => {
       observer,
       timer,
       lastRenderedObservation: () => observation,
-      displayTransitions: { revision: () => 0 },
+      displayTransitions: {
+        revision: () => 0,
+        identityRevision: () => 0,
+        sameIdentitySince: () => true,
+        currentObservedPanel: () => undefined,
+      },
       timestampProvider: { now: async () => 0 },
       focuser: { focus: async () => ({ success: true }) },
     });
@@ -1067,7 +1103,11 @@ describe("SendKeys", () => {
         execute: async () =>
           ++reads === 1
             ? focusedAndroidObservation("partial", {}, 0)
-            : ({ timestamp: 0 } as ObserveResult),
+            : buildObserveResult({
+                updatedAt: 0,
+                screenSize: { width: 500, height: 500 },
+                systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+              }),
       });
       expect(await executor.type({ action: "type", text, mode: "ime" })).toMatchObject({
         success: true,
@@ -1130,7 +1170,13 @@ describe("SendKeys", () => {
     };
     const sendKeys = new SendKeys(iosDevice, undefined, {
       executor,
-      observer: createObserver({ timestamp: 0 } as ObserveResult),
+      observer: createObserver(
+        buildObserveResult({
+          updatedAt: 0,
+          screenSize: { width: 500, height: 500 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        }),
+      ),
       timestampProvider: { now: async () => 0 },
       timer,
     });
@@ -1165,7 +1211,13 @@ describe("SendKeys", () => {
     };
     const sendKeys = new SendKeys(iosDevice, undefined, {
       executor,
-      observer: createObserver({ timestamp: 0 } as ObserveResult),
+      observer: createObserver(
+        buildObserveResult({
+          updatedAt: 0,
+          screenSize: { width: 500, height: 500 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        }),
+      ),
       timestampProvider: { now: async () => new Promise(() => {}) },
       timer,
     });
@@ -1209,7 +1261,7 @@ describe("SendKeys", () => {
   test("executes commands in order, stops on failure, and observes once", async () => {
     const calls: string[] = [];
     const executor: SendKeysCommandExecutor = {
-      type: mock(async (command) => {
+      type: mock(async (command: SendKeysTypeCommand): Promise<SendKeysCommandResult> => {
         calls.push(`type:${command.text}`);
         return {
           index: -1,
@@ -1221,7 +1273,7 @@ describe("SendKeys", () => {
           resolvedMode: "eventAll",
         };
       }),
-      key: mock(async (command) => {
+      key: mock(async (command: SendKeysKeyCommand): Promise<SendKeysCommandResult> => {
         calls.push(`key:${command.key}`);
         return { index: -1, action: "key", key: command.key, success: false, error: "blocked" };
       }),
@@ -1453,7 +1505,11 @@ describe("SendKeys", () => {
 
   test("accepts a hierarchy pushed before command delivery returns", async () => {
     let deviceTime = 1000;
-    const pushedObservation = { timestamp: 1001 } as ObserveResult;
+    const pushedObservation = buildObserveResult({
+      updatedAt: 1001,
+      screenSize: { width: 500, height: 500 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    });
     const sendKeys = new SendKeys(androidDevice, undefined, {
       timestampProvider: { now: async () => deviceTime },
       executor: {
@@ -1470,7 +1526,7 @@ describe("SendKeys", () => {
       },
       observer: {
         execute: async (options) => {
-          expect(options?.minTimestamp).toBeLessThanOrEqual(pushedObservation.timestamp);
+          expect(options?.minTimestamp).toBeLessThanOrEqual(Number(pushedObservation.updatedAt));
           return pushedObservation;
         },
       },
@@ -1568,40 +1624,43 @@ describe("DefaultSendKeysCommandExecutor", () => {
   const commitImeId = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
   const priorImeId = "com.example.keyboard/.Ime";
 
-  test.each(unicodeCorpus)("iOS forwards Unicode corpus %s intact for every mode", async (text) => {
-    for (const mode of [
-      "auto",
-      "a11y",
-      "ime",
-      "eventAll",
-      "eventLast",
-      "eventOnly",
-      "imeKeyEvents",
-    ] as const) {
-      const textClient = createTextClient();
-      const executor = new DefaultSendKeysCommandExecutor(
-        iosDevice,
-        createAdbFactory(new FakeAdbExecutor()),
-        createObserver(),
-        { textClient: textClient.client },
-      );
-      expect(await executor.type({ action: "type", text, mode })).toMatchObject({
-        success: true,
-        resolvedMode: "xcuiTypeText",
-        textLength: Array.from(text).length,
-      });
-      expect(textClient.calls).toEqual([`insert:${text}`]);
-    }
-  });
+  test.each([...unicodeCorpus])(
+    "iOS forwards Unicode corpus %s intact for every mode",
+    async (text) => {
+      for (const mode of [
+        "auto",
+        "a11y",
+        "ime",
+        "eventAll",
+        "eventLast",
+        "eventOnly",
+        "imeKeyEvents",
+      ] as const) {
+        const textClient = createTextClient();
+        const executor = new DefaultSendKeysCommandExecutor(
+          iosDevice,
+          createAdbFactory(new FakeAdbExecutor()),
+          createObserver(),
+          { textClient: textClient.client },
+        );
+        expect(await executor.type({ action: "type", text, mode })).toMatchObject({
+          success: true,
+          resolvedMode: "xcuiTypeText",
+          textLength: Array.from(text).length,
+        });
+        expect(textClient.calls).toEqual([`insert:${text}`]);
+      }
+    },
+  );
 
-  test.each(unicodeCorpus)(
+  test.each([...unicodeCorpus])(
     "Android a11y and IME forward Unicode corpus %s intact",
     async (text) => {
       for (const mode of ["a11y", "ime", "auto"] as const) {
         const adb = new FakeAdbExecutor();
         adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-          { stdout: priorImeId, stderr: "" },
-          { stdout: commitImeId, stderr: "" },
+          createExecResult(priorImeId, ""),
+          createExecResult(commitImeId, ""),
         ]);
         const textClient = createTextClient();
         const executor = new DefaultSendKeysCommandExecutor(
@@ -1623,7 +1682,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     },
   );
 
-  test.each(unicodeCorpus)(
+  test.each([...unicodeCorpus])(
     "Android ASCII-only modes reject Unicode corpus %s before mutation",
     async (text) => {
       for (const mode of ["eventOnly", "imeKeyEvents"] as const) {
@@ -1715,7 +1774,13 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const executor = new DefaultSendKeysCommandExecutor(
       iosDevice,
       createAdbFactory(adb),
-      createObserver({ timestamp: 0 } as ObserveResult),
+      createObserver(
+        buildObserveResult({
+          updatedAt: 0,
+          screenSize: { width: 500, height: 500 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        }),
+      ),
       { textClient },
     );
 
@@ -1875,7 +1940,13 @@ describe("DefaultSendKeysCommandExecutor", () => {
             if (++reads <= (operation === "clear" ? 2 : 1)) {
               return focusedAndroidObservation("first\nlater\nlines", {}, 0);
             }
-            return after === undefined ? { timestamp: 0 } : focusedAndroidObservation(after, {}, 0);
+            return after === undefined
+              ? buildObserveResult({
+                  updatedAt: 0,
+                  screenSize: { width: 500, height: 500 },
+                  systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+                })
+              : focusedAndroidObservation(after, {}, 0);
           },
         };
         const executor = new DefaultSendKeysCommandExecutor(
@@ -2214,9 +2285,12 @@ describe("DefaultSendKeysCommandExecutor", () => {
         createObserver(focusedAndroidObservation("zQ9 X", { password: "true" })),
         { textClient: createTextClient().client },
       );
-      const spies = (["debug", "info", "warn", "error"] as const).map((level) =>
-        spyOn(logger, level).mockImplementation(() => {}),
-      );
+      const spies = [
+        spyOn(logger, "debug").mockImplementation(() => {}),
+        spyOn(logger, "info").mockImplementation(() => {}),
+        spyOn(logger, "warn").mockImplementation(() => {}),
+        spyOn(logger, "error").mockImplementation(() => {}),
+      ];
       try {
         const result = await executor.type({ action: "type", text: "Zq9 x", mode });
 
@@ -2248,11 +2322,13 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("eventAll splits a literal %s across two input text calls", async () => {
     const adb = new FakeAdbExecutor();
     adb.setAndroidApiLevel(31);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const executor = new DefaultSendKeysCommandExecutor(
       androidDevice,
       createAdbFactory(adb),
       createObserver(focusedAndroidObservation()),
-      { textClient: createTextClient().client },
+      { textClient: createTextClient().client, timer },
     );
 
     const result = await executor.type({ action: "type", text: "50%s 1", mode: "eventAll" });
@@ -2318,8 +2394,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("explicit IME mode retains password rejection", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: `${priorImeId}\n`, stderr: "" },
-      { stdout: `${commitImeId}\n`, stderr: "" },
+      createExecResult(`${priorImeId}\n`, ""),
+      createExecResult(`${commitImeId}\n`, ""),
     ]);
     const textClient = createTextClient({
       commitViaIme: async () => ({ success: false, error: "password input rejected" }),
@@ -2347,8 +2423,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: `${priorImeId}\n`, stderr: "" },
-      { stdout: `${commitImeId}\n`, stderr: "" },
+      createExecResult(`${priorImeId}\n`, ""),
+      createExecResult(`${commitImeId}\n`, ""),
     ]);
     const textClient = createTextClient(options);
     const observer = createObserver(observation);
@@ -2460,8 +2536,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
       timer.enableAutoAdvance();
       const adb = new FakeAdbExecutor();
       adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-        { stdout: `${priorImeId}\n`, stderr: "" },
-        { stdout: `${commitImeId}\n`, stderr: "" },
+        createExecResult(`${priorImeId}\n`, ""),
+        createExecResult(`${commitImeId}\n`, ""),
       ]);
       const textClient = createTextClient();
       const executor = new DefaultSendKeysCommandExecutor(
@@ -2502,16 +2578,16 @@ describe("DefaultSendKeysCommandExecutor", () => {
       };
       client.requestSetText = async (text) => {
         calls.push(`replace:${text}`);
-        return { success: true };
+        return { success: true, totalTimeMs: 1 };
       };
       client.requestInsertText = async (text) => {
         calls.push(`insert:${text}`);
-        return { success: true };
+        return { success: true, totalTimeMs: 1 };
       };
       client.requestInsertTextState = async () => ({ success: false });
       client.commitViaIme = async () => {
         calls.push("commit");
-        return { success: true };
+        return { success: true, totalTimeMs: 1 };
       };
       AndroidCtrlProxyClient.registerForTesting(client, device.deviceId);
       const executor = new DefaultSendKeysCommandExecutor(
@@ -2569,11 +2645,11 @@ describe("DefaultSendKeysCommandExecutor", () => {
 
   test("auto IME activation failure falls back before any editor mutation", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell ime set", { stdout: "", stderr: "selection failed" });
-    adb.setCommandResponse("shell settings get secure default_input_method", {
-      stdout: priorImeId,
-      stderr: "",
-    });
+    adb.setCommandResponse("shell ime set", createExecResult("", "selection failed"));
+    adb.setCommandResponse(
+      "shell settings get secure default_input_method",
+      createExecResult(priorImeId, ""),
+    );
     const textClient = createTextClient();
     const executor = new DefaultSendKeysCommandExecutor(
       androidDevice,
@@ -2593,8 +2669,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("auto IME does not fall back after a partial commit", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
     ]);
     const textClient = createTextClient({
       commitViaIme: async () => ({
@@ -2636,8 +2712,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const supported = createTextClient();
     const supportedAdb = new FakeAdbExecutor();
     supportedAdb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: `${priorImeId}\n`, stderr: "" },
-      { stdout: `${commitImeId}\n`, stderr: "" },
+      createExecResult(`${priorImeId}\n`, ""),
+      createExecResult(`${commitImeId}\n`, ""),
     ]);
     const executor = new DefaultSendKeysCommandExecutor(
       androidDevice,
@@ -2701,8 +2777,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
     for (const text of ["Ab!", ""]) {
       const adb = new FakeAdbExecutor();
       adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-        { stdout: priorImeId, stderr: "" },
-        { stdout: commitImeId, stderr: "" },
+        createExecResult(priorImeId, ""),
+        createExecResult(commitImeId, ""),
       ]);
       const textClient = createTextClient();
       const timer = new FakeTimer();
@@ -2724,8 +2800,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("ime mode still accepts Unicode replacement text", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
     ]);
     const textClient = createTextClient();
     const timer = new FakeTimer();
@@ -2748,7 +2824,13 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const explicitImeExecutor = new DefaultSendKeysCommandExecutor(
       androidDevice,
       createAdbFactory(new FakeAdbExecutor()),
-      createObserver({ timestamp: 0 } as ObserveResult),
+      createObserver(
+        buildObserveResult({
+          updatedAt: 0,
+          screenSize: { width: 500, height: 500 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        }),
+      ),
       { textClient: explicitImeClient.client },
     );
     const imeResult = await explicitImeExecutor.type({
@@ -2778,8 +2860,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const events: string[] = [];
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: `${priorImeId}\n`, stderr: "" },
-      { stdout: `${commitImeId}\n`, stderr: "" },
+      createExecResult(`${priorImeId}\n`, ""),
+      createExecResult(`${commitImeId}\n`, ""),
     ]);
     const executeCommand = adb.executeCommand.bind(adb);
     adb.executeCommand = async (command, ...options) => {
@@ -2821,21 +2903,18 @@ describe("DefaultSendKeysCommandExecutor", () => {
 
   test("ime mode with a non-zero foreground user pins every ime and settings command to that user", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell am get-current-user", { stdout: "10\n", stderr: "" });
-    adb.setCommandResponse("shell ime list --user 10 -a -s", {
-      stdout: `${priorImeId}\n${commitImeId}\n`,
-      stderr: "",
-    });
-    adb.setCommandResponse("shell ime list --user 10 -s", {
-      stdout: `${priorImeId}\n`,
-      stderr: "",
-    });
+    adb.setCommandResponse("shell am get-current-user", createExecResult("10\n", ""));
+    adb.setCommandResponse(
+      "shell ime list --user 10 -a -s",
+      createExecResult(`${priorImeId}\n${commitImeId}\n`, ""),
+    );
+    adb.setCommandResponse("shell ime list --user 10 -s", createExecResult(`${priorImeId}\n`, ""));
     // prior read, activation readback, restore pre-read, restore readback, verification.
     adb.setCommandResponseSequence("shell settings --user 10 get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
-      { stdout: priorImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
+      createExecResult(commitImeId, ""),
+      createExecResult(priorImeId, ""),
     ]);
     const textClient = createTextClient({ commitViaIme: async () => ({ success: true }) });
     const executor = new DefaultSendKeysCommandExecutor(
@@ -2864,21 +2943,18 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("auto IME on a non-zero foreground user restores that user's IME, then the eventAll fallback runs the case read-back once", async () => {
     const adb = new FakeAdbExecutor();
     adb.setAndroidApiLevel(34);
-    adb.setCommandResponse("shell am get-current-user", { stdout: "10\n", stderr: "" });
-    adb.setCommandResponse("shell ime list --user 10 -a -s", {
-      stdout: `${priorImeId}\n${commitImeId}\n`,
-      stderr: "",
-    });
-    adb.setCommandResponse("shell ime list --user 10 -s", {
-      stdout: `${priorImeId}\n`,
-      stderr: "",
-    });
+    adb.setCommandResponse("shell am get-current-user", createExecResult("10\n", ""));
+    adb.setCommandResponse(
+      "shell ime list --user 10 -a -s",
+      createExecResult(`${priorImeId}\n${commitImeId}\n`, ""),
+    );
+    adb.setCommandResponse("shell ime list --user 10 -s", createExecResult(`${priorImeId}\n`, ""));
     // Activation read-back still shows the prior IME, so activation fails verification and the
     // restore then has to act on the same user.
-    adb.setCommandResponse("shell settings --user 10 get secure default_input_method", {
-      stdout: priorImeId,
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell settings --user 10 get secure default_input_method",
+      createExecResult(priorImeId, ""),
+    );
     const textClient = createTextClient();
     const reads: number[] = [];
     const observer = createObserver();
@@ -2945,12 +3021,16 @@ describe("DefaultSendKeysCommandExecutor", () => {
       timer.enableAutoAdvance();
       const adb = new FakeAdbExecutor();
       adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-        { stdout: priorImeId, stderr: "" },
-        { stdout: commitImeId, stderr: "" },
+        createExecResult(priorImeId, ""),
+        createExecResult(commitImeId, ""),
       ]);
       const observer = createObserver(
         fieldText === null
-          ? ({ timestamp: timer.now() } as ObserveResult)
+          ? buildObserveResult({
+              updatedAt: timer.now(),
+              screenSize: { width: 500, height: 500 },
+              systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+            })
           : focusedAndroidObservation(fieldText, secure ? { password: "true" } : {}, timer.now()),
       );
       const textClient = createTextClient({
@@ -2999,8 +3079,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
     ]);
     const observer = createObserver(focusedAndroidObservation("existing", {}, timer.now()));
     const textClient = createTextClient();
@@ -3033,12 +3113,16 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const text = "one *bold* two `code` tail";
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
     ]);
     const observer = createObserver(
       fieldText === null
-        ? ({ timestamp: timer.now() } as ObserveResult)
+        ? buildObserveResult({
+            updatedAt: timer.now(),
+            screenSize: { width: 500, height: 500 },
+            systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+          })
         : focusedAndroidObservation(fieldText, secure ? { password: "true" } : {}, timer.now()),
     );
     const textClient = createTextClient();
@@ -3071,8 +3155,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
       const timer = new FakeTimer();
       const adb = new FakeAdbExecutor();
       adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-        { stdout: priorImeId, stderr: "" },
-        { stdout: commitImeId, stderr: "" },
+        createExecResult(priorImeId, ""),
+        createExecResult(commitImeId, ""),
       ]);
       const textClient = createTextClient();
       const executor = new DefaultSendKeysCommandExecutor(
@@ -3092,13 +3176,13 @@ describe("DefaultSendKeysCommandExecutor", () => {
 
   test("ime mode preserves a companion keyboard that was already enabled", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell ime list -s", {
-      stdout: `${priorImeId}\n${commitImeId}\n`,
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell ime list -s",
+      createExecResult(`${priorImeId}\n${commitImeId}\n`, ""),
+    );
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
     ]);
     const executor = new DefaultSendKeysCommandExecutor(
       androidDevice,
@@ -3121,11 +3205,11 @@ describe("DefaultSendKeysCommandExecutor", () => {
       for (const failure of ["stderr", "throw"] as const) {
         const adb = new FakeAdbExecutor();
         adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-          { stdout: `${priorImeId}\n`, stderr: "" },
-          { stdout: `${commitImeId}\n`, stderr: "" },
+          createExecResult(`${priorImeId}\n`, ""),
+          createExecResult(`${commitImeId}\n`, ""),
         ]);
         if (failure === "stderr") {
-          adb.setCommandResponse("shell ime disable", { stdout: "", stderr: "disable failed" });
+          adb.setCommandResponse("shell ime disable", createExecResult("", "disable failed"));
         } else {
           adb.setCommandError("shell ime disable", new Error("disable failed"));
         }
@@ -3162,8 +3246,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("ime mode disables a temporarily enabled IME when there was no prior default", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: "null\n", stderr: "" },
-      { stdout: `${commitImeId}\n`, stderr: "" },
+      createExecResult("null\n", ""),
+      createExecResult(`${commitImeId}\n`, ""),
     ]);
     const executor = new DefaultSendKeysCommandExecutor(
       androidDevice,
@@ -3206,8 +3290,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const events: string[] = [];
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
     ]);
     const textClient = createTextClient({
       setKeyboardProfile: async (id) => {
@@ -3291,8 +3375,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("per-call profile skips restoration when already active", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
     ]);
     const textClient = createTextClient({
       setKeyboardProfile: async () => ({ success: true, previousProfileId: "gboard" }),
@@ -3314,8 +3398,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("profile restoration failure does not mask a successful commit", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
     ]);
     const textClient = createTextClient({
       setKeyboardProfile: async (id) => {
@@ -3385,8 +3469,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const events: string[] = [];
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
     ]);
     const executeCommand = adb.executeCommand.bind(adb);
     adb.executeCommand = async (command, ...options) => {
@@ -3423,8 +3507,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
     async (committedUnits) => {
       const adb = new FakeAdbExecutor();
       adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-        { stdout: priorImeId, stderr: "" },
-        { stdout: commitImeId, stderr: "" },
+        createExecResult(priorImeId, ""),
+        createExecResult(commitImeId, ""),
       ]);
       const textClient = createTextClient({
         commitViaIme: async () => ({
@@ -3456,8 +3540,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
       const timer = new FakeTimer();
       const adb = new FakeAdbExecutor();
       adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-        { stdout: priorImeId, stderr: "" },
-        { stdout: commitImeId, stderr: "" },
+        createExecResult(priorImeId, ""),
+        createExecResult(commitImeId, ""),
       ]);
       const controller = new AbortController();
       let started!: () => void;
@@ -3508,17 +3592,17 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("ime mode restores the selected subtype after the original component", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
     ]);
-    adb.setCommandResponse("shell settings get secure selected_input_method_subtype", {
-      stdout: "42",
-      stderr: "",
-    });
-    adb.setCommandResponse("shell dumpsys input_method", {
-      stdout: `mId=${priorImeId}\n  mSubtypeId=42 mSubtypeLocale=en_US`,
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell settings get secure selected_input_method_subtype",
+      createExecResult("42", ""),
+    );
+    adb.setCommandResponse(
+      "shell dumpsys input_method",
+      createExecResult(`mId=${priorImeId}\n  mSubtypeId=42 mSubtypeLocale=en_US`, ""),
+    );
     const executor = new DefaultSendKeysCommandExecutor(
       androidDevice,
       createAdbFactory(adb),
@@ -3539,16 +3623,16 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("a no-longer-advertised subtype reports both commit and restore failures", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
     ]);
-    adb.setCommandResponse("shell settings get secure selected_input_method_subtype", {
-      stdout: "42",
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell settings get secure selected_input_method_subtype",
+      createExecResult("42", ""),
+    );
     adb.setCommandResponseSequence("shell dumpsys input_method", [
-      { stdout: `mId=${priorImeId}\n  mSubtypeId=42 mSubtypeLocale=en_US`, stderr: "" },
-      { stdout: `mId=${priorImeId}\n  mSubtypeId=99 mSubtypeLocale=en_US`, stderr: "" },
+      createExecResult(`mId=${priorImeId}\n  mSubtypeId=42 mSubtypeLocale=en_US`, ""),
+      createExecResult(`mId=${priorImeId}\n  mSubtypeId=99 mSubtypeLocale=en_US`, ""),
     ]);
     const textClient = createTextClient({
       commitViaIme: async () => ({ success: false, error: "commit rejected" }),
@@ -3574,21 +3658,21 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("activation and subtype restore failures both reach the caller", async () => {
     const device = { ...androidDevice, deviceId: "ime-activation-restore-failure" };
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell settings get secure default_input_method", {
-      stdout: priorImeId,
-      stderr: "",
-    });
-    adb.setCommandResponse(`shell ime set ${commitImeId}`, {
-      stdout: "",
-      stderr: "activation rejected",
-    });
-    adb.setCommandResponse("shell settings get secure selected_input_method_subtype", {
-      stdout: "42",
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell settings get secure default_input_method",
+      createExecResult(priorImeId, ""),
+    );
+    adb.setCommandResponse(
+      `shell ime set ${commitImeId}`,
+      createExecResult("", "activation rejected"),
+    );
+    adb.setCommandResponse(
+      "shell settings get secure selected_input_method_subtype",
+      createExecResult("42", ""),
+    );
     adb.setCommandResponseSequence("shell dumpsys input_method", [
-      { stdout: `mId=${priorImeId}\n  mSubtypeId=42 mSubtypeLocale=en_US`, stderr: "" },
-      { stdout: `mId=${priorImeId}\n  mSubtypeId=99 mSubtypeLocale=en_US`, stderr: "" },
+      createExecResult(`mId=${priorImeId}\n  mSubtypeId=42 mSubtypeLocale=en_US`, ""),
+      createExecResult(`mId=${priorImeId}\n  mSubtypeId=99 mSubtypeLocale=en_US`, ""),
     ]);
     const executor = new DefaultSendKeysCommandExecutor(
       device,
@@ -3608,21 +3692,21 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("auto mode does not fall back after activation plus restoration failure", async () => {
     const device = { ...androidDevice, deviceId: "ime-auto-restore-failure" };
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell settings get secure default_input_method", {
-      stdout: priorImeId,
-      stderr: "",
-    });
-    adb.setCommandResponse(`shell ime set ${commitImeId}`, {
-      stdout: "",
-      stderr: "activation rejected",
-    });
-    adb.setCommandResponse("shell settings get secure selected_input_method_subtype", {
-      stdout: "42",
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell settings get secure default_input_method",
+      createExecResult(priorImeId, ""),
+    );
+    adb.setCommandResponse(
+      `shell ime set ${commitImeId}`,
+      createExecResult("", "activation rejected"),
+    );
+    adb.setCommandResponse(
+      "shell settings get secure selected_input_method_subtype",
+      createExecResult("42", ""),
+    );
     adb.setCommandResponseSequence("shell dumpsys input_method", [
-      { stdout: `mId=${priorImeId}\n  mSubtypeId=42 mSubtypeLocale=en_US`, stderr: "" },
-      { stdout: `mId=${priorImeId}\n  mSubtypeId=99 mSubtypeLocale=en_US`, stderr: "" },
+      createExecResult(`mId=${priorImeId}\n  mSubtypeId=42 mSubtypeLocale=en_US`, ""),
+      createExecResult(`mId=${priorImeId}\n  mSubtypeId=99 mSubtypeLocale=en_US`, ""),
     ]);
     const textClient = createTextClient();
     const executor = new DefaultSendKeysCommandExecutor(
@@ -3644,8 +3728,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const device = { ...androidDevice, deviceId: "ime-unsafe-test" };
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
     ]);
     const textClient = createTextClient({
       commitViaIme: async () => ({ success: false, partialApplication: true, sessionUnsafe: true }),
@@ -3672,8 +3756,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("failed IME replacement reports partial application after clearing", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
     ]);
     const textClient = createTextClient({
       commitViaIme: async () => ({ success: false, error: "deadline exceeded" }),
@@ -3703,10 +3787,10 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const adb = new FakeAdbExecutor();
     // Two full commits: each reads default_input_method twice (capture + verify).
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
-      { stdout: priorImeId, stderr: "" },
-      { stdout: commitImeId, stderr: "" },
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
+      createExecResult(priorImeId, ""),
+      createExecResult(commitImeId, ""),
     ]);
     const executeCommand = adb.executeCommand.bind(adb);
     adb.executeCommand = async (command, ...options) => {
@@ -4397,13 +4481,13 @@ describe("SendKeys IME focus regression", () => {
     });
     const observation: ObserveResult = {
       observationId: "occluded-focus",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
       updatedAt: 1,
       screenSize: { width: 400, height: 240 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: hierarchy,
     };
-    tap.observedInteraction = async (action) => ({
-      ...(await action(recordObservationRead(observation))),
+    tap.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
       observation,
     });
     const error =
@@ -4429,7 +4513,7 @@ describe("SendKeys IME focus regression", () => {
       },
     );
     expect(
-      await sendKeys.execute([{ action: "key", key: "ENTER" }], { text: "Continue as Guest" }),
+      await sendKeys.execute([{ action: "key", key: "enter" }], { text: "Continue as Guest" }),
     ).toEqual({
       success: false,
       completedCommands: 0,
@@ -4462,7 +4546,7 @@ describe("SendKeys post-action capture boundary", () => {
           createSettleObserve: () => h.settleObserve,
         });
         expect(h.captures).toHaveLength(1);
-        const final = getStructuredPayload(response)!;
+        const final = getStructuredPayload<typeof result>(response)!;
         const captured = h.captures[0];
         const expectedId =
           scenario === "imeAction" ? "settle-2" : beforeGate.observation!.observationId;
@@ -4470,7 +4554,7 @@ describe("SendKeys post-action capture boundary", () => {
         expect(final.observation).toMatchObject({
           observationId: expectedId,
           screenshotPath: `${expectedId}.png`,
-          screenshotCapturedAt: 123,
+          screenshotCapturedAt: new Date(123).toISOString(),
           settled: scenario === "imeAction",
         });
         expect(final.commands).toEqual(beforeGate.commands);
@@ -4563,13 +4647,12 @@ describe("SendKeys post-action capture boundary", () => {
     const focus = new CapturingFocus(device, h.adb, timer);
     focus.observeScreen = observe;
     focus.window = new FakeWindow();
-    const capture = spyOn(observe, "captureScreenshot").mockImplementation(
-      async (_perf, _signal, chosen) => {
-        events.push(`capture:start:${chosen?.observationId}`);
-        await Promise.resolve();
-        events.push(`capture:end:${chosen?.observationId}`);
-      },
-    );
+    const capture = mock<typeof observe.captureScreenshot>(async (_perf, _signal, chosen) => {
+      events.push(`capture:start:${chosen?.observationId}`);
+      await Promise.resolve();
+      events.push(`capture:end:${chosen?.observationId}`);
+    });
+    observe.captureScreenshot = capture;
     const insert = h.client.insert;
     h.client.insert = async (...args) => {
       events.push("dispatch");
@@ -4597,7 +4680,7 @@ describe("SendKeys post-action capture boundary", () => {
               async () => ({ success: true, focusVerified: true }),
               { previousObservation: before, changeExpected: false, skipUiStability: true },
             );
-            expect(hasPendingTerminalScreenshot(result.observation)).toBe(true);
+            expect(hasPendingTerminalScreenshot(result.observation!)).toBe(true);
             expect(capture).not.toHaveBeenCalled();
             return { success: true, focusVerified: true };
           },
@@ -4634,7 +4717,7 @@ describe("SendKeys post-action capture boundary", () => {
         expect(h.capture).toHaveBeenCalledTimes(2);
         expect(h.capture.mock.calls[0][2]).toBe(h.before);
       } finally {
-        h.capture.mockRestore();
+        h.capture.mockReset();
       }
     },
   );
@@ -4812,7 +4895,11 @@ describe("SendKeys Android non-idempotent outcomes", () => {
         }
         return pending;
       });
-      const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(text);
+      const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+        createAndroidTestClient(android, {
+          requestImeAction: (...args) => text.requestImeAction(...args),
+        }),
+      );
       const observer = createObserver(focusedAndroidObservation("", {}, 1));
       const executor = new DefaultSendKeysCommandExecutor(
         android,
@@ -4900,7 +4987,10 @@ describe("Android adapter cancellation fence", () => {
         return pending;
       },
     };
-    const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(facade);
+    const client = createAndroidTestClient(android);
+    client.requestInsertText = facade.requestInsertText;
+    client.requestImeAction = facade.requestImeAction;
+    const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     const executor = new DefaultSendKeysCommandExecutor(
       android,
       createAdbFactory(new FakeAdbExecutor()),
@@ -4972,7 +5062,11 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
         order.push("read");
         const text = texts[Math.min(options.length - 1, texts.length - 1)];
         return text === undefined
-          ? ({ timestamp: 0 } as ObserveResult)
+          ? buildObserveResult({
+              updatedAt: 0,
+              screenSize: { width: 500, height: 500 },
+              systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+            })
           : focusedAndroidObservation(text, {}, 0);
       },
     };

@@ -8,7 +8,7 @@ import {
 
 describe("shared IME commit contract", () => {
   test("host formula constants match the contract", () => {
-    expect(IME_COMMIT_TIMEOUT).toEqual(contract.host);
+    expect<unknown>(IME_COMMIT_TIMEOUT).toEqual(contract.host);
   });
   test.each(contract.segmentCases)("segment boundaries for $text", ({ text, segments }) => {
     expect(imeCommitSegmentCount(text)).toBe(segments);

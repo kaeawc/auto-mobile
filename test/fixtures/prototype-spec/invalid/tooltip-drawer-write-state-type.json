@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "drawer",
+      "edge": "start",
+      "openWhen": {
+        "key": "open",
+        "equals": true
+      },
+      "child": {
+        "type": "text",
+        "text": "Navigation"
+      },
+      "onTap": [
+        {
+          "type": "setState",
+          "key": "open",
+          "value": 1
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].value",
+  "expectedMessage": "setState value does not fit the control bound to \"open\": Drawer requires a boolean state key"
+}

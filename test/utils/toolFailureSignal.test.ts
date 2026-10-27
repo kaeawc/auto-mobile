@@ -92,7 +92,7 @@ describe("JSON formatter failure signal", () => {
       new DefaultToolResponseFormatter().createJSONToolResponse,
     ]) {
       const response = formatter(payload);
-      const expected = { content: [{ type: "text", text: JSON.stringify(payload) }] };
+      const expected = { content: [{ type: "text" as const, text: JSON.stringify(payload) }] };
       expect(isMarkedToolFailure(response)).toBe(marked);
       expect(response).toEqual(expected);
       expect(JSON.stringify(response)).toBe(JSON.stringify(expected));
@@ -128,7 +128,7 @@ describe("formatter wire identity", () => {
   ])("preserves serialized envelopes and key order: $name", ({ payload, hoisted }) => {
     // The pre-convergence text serialization, independent of the shared builder.
     const text = JSON.stringify(payload, (key, value) => (key === "extras" ? undefined : value));
-    const content = [{ type: "text", text }];
+    const content = [{ type: "text" as const, text }];
     const expectedStructured = {
       content,
       structuredContent:

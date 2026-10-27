@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -45,7 +46,7 @@ export interface ContractRequest {
 
 /** The gesture surface both implementations must agree on. */
 export interface AndroidGestureSurface {
-  requestTapCoordinates(x: number, y: number, duration?: number): Promise<ContractResult>;
+  requestTapCoordinates(request: TapCoordinatesRequest): Promise<ContractResult>;
   requestSwipe(
     request: Pick<SwipeRequest, "x1" | "y1" | "x2" | "y2" | "duration">,
   ): Promise<ContractResult>;
@@ -96,21 +97,25 @@ const SCENARIOS: Scenario[] = [
   {
     name: "a tap is sent with its coordinates and duration and succeeds",
     replies: { request_tap_coordinates: capturedResponse("tap_coordinates_result") },
-    run: async (proxy) => [observed(await proxy.requestTapCoordinates(201, 406, 100))],
+    run: async (proxy) => [
+      observed(await proxy.requestTapCoordinates({ x: 201, y: 406, duration: 100 })),
+    ],
     expectedRequests: [{ type: "request_tap_coordinates", x: 201, y: 406, duration: 100 }],
     expected: [{ success: true }],
   },
   {
     name: "a tap without a duration presses for 10 ms",
     replies: { request_tap_coordinates: capturedResponse("tap_coordinates_result") },
-    run: async (proxy) => [observed(await proxy.requestTapCoordinates(5, 6))],
+    run: async (proxy) => [observed(await proxy.requestTapCoordinates({ x: 5, y: 6 }))],
     expectedRequests: [{ type: "request_tap_coordinates", x: 5, y: 6, duration: 10 }],
     expected: [{ success: true }],
   },
   {
     name: "a refused tap comes back as a failed result carrying the device's message, not a throw",
     replies: { request_tap_coordinates: capturedResponse("tap_coordinates_refused") },
-    run: async (proxy) => [observed(await proxy.requestTapCoordinates(1, 2, 10))],
+    run: async (proxy) => [
+      observed(await proxy.requestTapCoordinates({ x: 1, y: 2, duration: 10 })),
+    ],
     expectedRequests: [{ type: "request_tap_coordinates", x: 1, y: 2, duration: 10 }],
     expected: [{ success: false, error: "Gesture dispatch was cancelled" }],
   },
@@ -179,9 +184,9 @@ const SCENARIOS: Scenario[] = [
       request_swipe: capturedResponse("swipe_result"),
     },
     run: async (proxy) => [
-      observed(await proxy.requestTapCoordinates(1, 2, 50)),
+      observed(await proxy.requestTapCoordinates({ x: 1, y: 2, duration: 50 })),
       observed(await proxy.requestSwipe({ x1: 5, y1: 6, x2: 7, y2: 8, duration: 120 })),
-      observed(await proxy.requestTapCoordinates(3, 4, 60)),
+      observed(await proxy.requestTapCoordinates({ x: 3, y: 4, duration: 60 })),
     ],
     expectedRequests: [
       { type: "request_tap_coordinates", x: 1, y: 2, duration: 50 },

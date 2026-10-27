@@ -1,4 +1,5 @@
 import type { Kysely } from "kysely";
+import type { Database } from "./types";
 
 /**
  * SQLite's catalog and Kysely's default migration bookkeeping tables. This
@@ -25,11 +26,19 @@ export interface MigratorSchema {
 }
 
 /**
+ * A database handle migrations may run against: the pre-migration `unknown`
+ * schema the daemon opens, or the application schema (a test migrating the
+ * singleton it already holds). Kysely is invariant in its schema parameter, so
+ * the two are not assignable to one another.
+ */
+export type MigrationTargetDb = Kysely<unknown> | Kysely<Database>;
+
+/**
  * Migration entry points receive Kysely<unknown> because the application schema
  * is not yet established. Generics cannot recover these known internal tables
  * from unknown. Narrow once at this boundary without cloning the connection or
  * changing its executor/plugins; callers check/create tables before using them.
  */
-export function asMigratorDb(db: Kysely<unknown>): Kysely<MigratorSchema> {
+export function asMigratorDb(db: MigrationTargetDb): Kysely<MigratorSchema> {
   return db as Kysely<MigratorSchema>;
 }

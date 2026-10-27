@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import plugin from "../../oxlint-plugins/auto-mobile.mjs";
 import { runRule } from "./oxlintRuleHarness";
 
@@ -57,7 +58,7 @@ describe("auto-mobile/no-direct-bun-spawn", () => {
   test("the message names the seam, and the rule is an error for src/", () => {
     const [message] = runRule(plugin.rules["no-direct-bun-spawn"], "Bun.spawn([]);");
     expect(message).toContain("HostCommandExecutor");
-    const config = readFileSync(new URL("../../.oxlintrc.json", import.meta.url), "utf8");
+    const config = readGuardFile(new URL("../../.oxlintrc.json", import.meta.url));
     expect(config).toContain('"auto-mobile/no-direct-bun-spawn": "error"');
   });
 });

@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "permissions": [
+        {
+          "name": "camera",
+          "purpose": "Scan"
+        },
+        {
+          "name": "camera",
+          "purpose": "Again"
+        }
+      ]
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "requires.permissions[1].name",
+  "expectedMessage": "Duplicate permission"
+}

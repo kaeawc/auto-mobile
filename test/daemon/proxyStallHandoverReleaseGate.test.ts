@@ -56,30 +56,38 @@ describe("daemon_stalled handover on a recoverable session release", () => {
 
   test("a plain session's stall handover ends as a terminal loss", () => {
     const subject = proxy();
-    subject["sessionState"].stallHandovers.set(SESSION, {
+    subject.getInternalsForTesting().sessionState.stallHandovers.set(SESSION, {
       handover: stalledHandover(SESSION),
       delivered: false,
+      restore: { bound: false, lastUsedAt: 0, initialBinding: false },
     });
 
-    subject["handleSessionReleasedNotification"](released(SESSION, "daemon-restart"));
+    subject
+      .getInternalsForTesting()
+      .handleSessionReleasedNotification(released(SESSION, "daemon-restart"));
 
-    expect(subject["sessionState"].stallHandovers.has(SESSION)).toBe(false);
-    expect(subject["pendingSessionLosses"].get(SESSION)?.releaseReasons).toEqual({
+    expect(subject.getInternalsForTesting().sessionState.stallHandovers.has(SESSION)).toBe(false);
+    expect(
+      subject.getInternalsForTesting().pendingSessionLosses.get(SESSION)?.releaseReasons,
+    ).toEqual({
       [SESSION]: "daemon-restart",
     });
   });
 
   test("a broker-owned session keeps its stall handover for the successor daemon", () => {
     const subject = proxy();
-    subject["sessionBrokerSessions"].set(SESSION, "request-1");
-    subject["sessionState"].stallHandovers.set(SESSION, {
+    subject.getInternalsForTesting().brokerSessions.sessions.set(SESSION, "request-1");
+    subject.getInternalsForTesting().sessionState.stallHandovers.set(SESSION, {
       handover: stalledHandover(SESSION),
       delivered: false,
+      restore: { bound: false, lastUsedAt: 0, initialBinding: false },
     });
 
-    subject["handleSessionReleasedNotification"](released(SESSION, "daemon-restart"));
+    subject
+      .getInternalsForTesting()
+      .handleSessionReleasedNotification(released(SESSION, "daemon-restart"));
 
-    expect(subject["sessionState"].stallHandovers.has(SESSION)).toBe(true);
-    expect(subject["pendingSessionLosses"].has(SESSION)).toBe(false);
+    expect(subject.getInternalsForTesting().sessionState.stallHandovers.has(SESSION)).toBe(true);
+    expect(subject.getInternalsForTesting().pendingSessionLosses.has(SESSION)).toBe(false);
   });
 });

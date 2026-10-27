@@ -5,13 +5,15 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
-import { Idle } from "./Idle";
+import { Idle, ROTATION_WAIT_TIMEOUT_MS } from "./Idle";
+import { exponentialBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import { BootedDevice, GfxMetrics } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import type { AwaitIdle as AwaitIdleInterface, UiStabilityState } from "./interfaces/AwaitIdle";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
+import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import { shellQuote } from "../../utils/shellQuote";
 
 /** Consecutive missing-frame polls allowed before ending the stability wait. */
@@ -19,11 +21,23 @@ export const NO_FRAME_STATS_GRACE_POLLS = 10;
 /** Minimum duration of a consecutive missing-frame streak before ending the wait. */
 export const NO_FRAME_STATS_GRACE_MS = 1000;
 
+/**
+ * Delays between window-manager rotation reads. Each read is a dumpsys round trip, so the first
+ * re-check waits a beat for the animation and later ones back off instead of hammering a loaded
+ * device.
+ */
+export const ROTATION_POLL_BACKOFF: BackoffPolicy = exponentialBackoff({
+  initialDelayMs: 50,
+  multiplier: 2,
+  maxDelayMs: 400,
+});
+
 export class AwaitIdle implements AwaitIdleInterface {
   private adb: AdbExecutor;
   private adbFactory: AdbClientFactory;
   private idle: Idle;
   private timer: Timer;
+  private rotationPollBackoff: BackoffPolicy;
 
   private stabilityThresholdMs = 60;
   private pollIntervalMs = 17;
@@ -37,10 +51,13 @@ export class AwaitIdle implements AwaitIdleInterface {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
+    hierarchyReader?: ViewHierarchyRequestReader,
+    rotationPollBackoff: BackoffPolicy = ROTATION_POLL_BACKOFF,
   ) {
+    this.rotationPollBackoff = rotationPollBackoff;
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
-    this.idle = new Idle(device, this.adbFactory, timer);
+    this.idle = new Idle(device, this.adbFactory, timer, hierarchyReader);
     this.timer = timer;
   }
 
@@ -52,12 +69,12 @@ export class AwaitIdle implements AwaitIdleInterface {
    */
   async waitForRotation(
     targetRotation: number,
-    timeoutMs: number = 500,
+    timeoutMs: number = ROTATION_WAIT_TIMEOUT_MS,
     signal?: AbortSignal,
   ): Promise<void> {
     const startTime = this.timer.now();
 
-    while (true) {
+    for (let attempt = 1; ; attempt++) {
       throwIfAborted(signal);
       const rotationResult = await awaitWhileRequestIsLive(
         this.idle.getRotationStatus(targetRotation, startTime, timeoutMs, undefined, signal),
@@ -76,7 +93,10 @@ export class AwaitIdle implements AwaitIdleInterface {
       // Wait a short interval before checking again
       await awaitWhileRequestIsLive(
         this.timer.sleep(
-          Math.min(this.pollIntervalMs, Math.max(0, timeoutMs - (this.timer.now() - startTime))),
+          Math.min(
+            this.rotationPollBackoff.delayForAttempt(attempt),
+            Math.max(0, timeoutMs - (this.timer.now() - startTime)),
+          ),
         ),
         signal,
       );
@@ -177,10 +197,12 @@ export class AwaitIdle implements AwaitIdleInterface {
   }> {
     const stabilityResult = await this.idle.getUiStability(
       packageName,
-      state.prevMissedVsync,
-      state.prevSlowUiThread,
-      state.prevFrameDeadlineMissed,
-      state.prevTotalFrames,
+      {
+        missedVsync: state.prevMissedVsync,
+        slowUiThread: state.prevSlowUiThread,
+        frameDeadlineMissed: state.prevFrameDeadlineMissed,
+        totalFrames: state.prevTotalFrames,
+      },
       state.firstGfxInfoLog,
       new NoOpPerformanceTracker(),
       { timeoutMs, signal },
@@ -241,6 +263,23 @@ export class AwaitIdle implements AwaitIdleInterface {
    * @returns Promise that resolves with GfxMetrics when UI is stable
    */
   async waitForUiStabilityWithState(
+    packageName: string,
+    timeoutMs: number,
+    initState: UiStabilityState,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+  ): Promise<GfxMetrics | null> {
+    return (
+      (await this.idle.waitForQuietTreeStability(
+        packageName,
+        initState.startTime,
+        timeoutMs,
+        signal,
+      )) ?? this.waitForFrameStabilityWithState(packageName, timeoutMs, initState, perf, signal)
+    );
+  }
+
+  private async waitForFrameStabilityWithState(
     packageName: string,
     timeoutMs: number,
     initState: {

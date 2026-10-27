@@ -42,12 +42,14 @@ internal class NavigationEventReceiver(
           if (
             !sdkEventBatchProcessor()
               .enqueueNavigationEvent(
-                destination = event.destination,
-                source = event.source.name,
-                arguments = event.arguments ?: emptyMap(),
-                metadata = event.metadata ?: emptyMap(),
-                applicationId = event.applicationId,
-                timestamp = event.timestamp,
+                NavigationEventInput(
+                  destination = event.destination,
+                  source = event.source.name,
+                  arguments = event.arguments ?: emptyMap(),
+                  metadata = event.metadata ?: emptyMap(),
+                  applicationId = event.applicationId,
+                  timestamp = event.timestamp,
+                ),
               )
           ) {
             Log.w(TAG, "Dropping navigation event because the SDK event queue is full")
@@ -56,49 +58,38 @@ internal class NavigationEventReceiver(
         }
       }
 
-      // Fallback to legacy extras for backward compatibility
-      val destination = intent.getStringExtra(AutoMobileSDK.EXTRA_DESTINATION) ?: return
-      val source = intent.getStringExtra(AutoMobileSDK.EXTRA_SOURCE) ?: return
-      val applicationId = intent.getStringExtra(AutoMobileSDK.EXTRA_APPLICATION_ID)
+      receiveLegacy(intent)
+    } catch (e: Exception) {
+      Log.e(TAG, "Error handling navigation event broadcast", e)
+    }
+  }
 
-      // Extract arguments (prefixed with "arg_")
-      val arguments = mutableMapOf<String, String>()
-      val metadata = mutableMapOf<String, String>()
+  private fun receiveLegacy(intent: Intent) {
+    // Fallback to legacy extras for backward compatibility
+    val destination = intent.getStringExtra(AutoMobileSDK.EXTRA_DESTINATION) ?: return
+    val source = intent.getStringExtra(AutoMobileSDK.EXTRA_SOURCE) ?: return
+    val applicationId = intent.getStringExtra(AutoMobileSDK.EXTRA_APPLICATION_ID)
 
-      intent.extras?.keySet()?.forEach { key ->
-        when {
-          key.startsWith("arg_") -> {
-            intent.getStringExtra(key)?.let { value ->
-              arguments[key.removePrefix("arg_")] = value
-            }
-          }
-          key.startsWith("meta_") -> {
-            intent.getStringExtra(key)?.let { value ->
-              metadata[key.removePrefix("meta_")] = value
-            }
-          }
-        }
-      }
+    val (arguments, metadata) = navigationExtras(intent)
 
-      Log.d(
-        TAG,
-        "Received navigation event (legacy): $destination from $source (app: $applicationId)",
-      )
-      if (
-        !sdkEventBatchProcessor()
-          .enqueueNavigationEvent(
+    Log.d(
+      TAG,
+      "Received navigation event (legacy): $destination from $source (app: $applicationId)",
+    )
+    if (
+      !sdkEventBatchProcessor()
+        .enqueueNavigationEvent(
+          NavigationEventInput(
             destination = destination,
             source = source,
             arguments = arguments,
             metadata = metadata,
             applicationId = applicationId,
             timestamp = timeProvider.currentTimeMillis(),
-          )
-      ) {
-        Log.w(TAG, "Dropping navigation event because the SDK event queue is full")
-      }
-    } catch (e: Exception) {
-      Log.e(TAG, "Error handling navigation event broadcast", e)
+          ),
+        )
+    ) {
+      Log.w(TAG, "Dropping navigation event because the SDK event queue is full")
     }
   }
 }
@@ -114,12 +105,14 @@ internal class RecompositionSnapshotReceiver(
     }
 
     val payload = intent.getStringExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_SNAPSHOT) ?: return
-    try {
-      val snapshot = jsonLenient.decodeFromString(serializer<RecompositionSnapshot>(), payload)
-      recompositionStore.updateSnapshot(snapshot)
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to parse recomposition snapshot", e)
-    }
+    val snapshot =
+      try {
+        jsonLenient.decodeFromString(serializer<RecompositionSnapshot>(), payload)
+      } catch (e: IllegalArgumentException) {
+        Log.e(TAG, "Failed to parse recomposition snapshot", e)
+        return
+      }
+    recompositionStore.updateSnapshot(snapshot)
   }
 }
 
@@ -137,27 +130,52 @@ internal class FrameMetricsSnapshotReceiver(
     }
 
     val payload = intent.getStringExtra(AutoMobileSDK.EXTRA_FRAME_METRICS_SNAPSHOT) ?: return
-    try {
-      val snapshot = jsonLenient.decodeFromString(serializer<FrameMetricsSnapshot>(), payload)
-      frameMetricsStore.updateSnapshot(snapshot)
-      // Forward live so the host can feed real app-frame data into perfSnapshot.
-      if (isRunning()) {
-        val response =
-          FrameMetricsEventResponse(
-            timestamp = snapshot.timestamp,
-            frameMetrics =
-              FrameMetricsData(
-                applicationId = snapshot.applicationId,
-                fps = snapshot.fps,
-                frameTimeMs = snapshot.frameTimeMs,
-                jankFrames = snapshot.jankFrames,
-                totalFrames = snapshot.totalFrames,
-              ),
-          )
-        scope.launch { broadcast(response) }
+    val snapshot =
+      try {
+        jsonLenient.decodeFromString(serializer<FrameMetricsSnapshot>(), payload)
+      } catch (e: IllegalArgumentException) {
+        Log.e(TAG, "Failed to parse frame metrics snapshot", e)
+        return
       }
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to parse frame metrics snapshot", e)
+    frameMetricsStore.updateSnapshot(snapshot)
+    // Forward live so the host can feed real app-frame data into perfSnapshot.
+    if (isRunning()) {
+      val response =
+        FrameMetricsEventResponse(
+          timestamp = snapshot.timestamp,
+          frameMetrics =
+            FrameMetricsData(
+              applicationId = snapshot.applicationId,
+              fps = snapshot.fps,
+              frameTimeMs = snapshot.frameTimeMs,
+              jankFrames = snapshot.jankFrames,
+              totalFrames = snapshot.totalFrames,
+            ),
+        )
+      scope.launch { broadcast(response) }
     }
   }
+}
+
+private fun navigationExtras(intent: Intent): Pair<Map<String, String>, Map<String, String>> {
+  // Extract arguments (prefixed with "arg_")
+  val arguments = mutableMapOf<String, String>()
+  val metadata = mutableMapOf<String, String>()
+
+  intent.extras?.keySet()?.forEach { key ->
+    when {
+      key.startsWith("arg_") -> {
+        intent.getStringExtra(key)?.let { value ->
+          arguments[key.removePrefix("arg_")] = value
+        }
+      }
+      key.startsWith("meta_") -> {
+        intent.getStringExtra(key)?.let { value ->
+          metadata[key.removePrefix("meta_")] = value
+        }
+      }
+    }
+  }
+
+  return arguments to metadata
 }

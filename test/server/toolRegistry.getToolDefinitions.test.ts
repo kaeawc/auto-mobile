@@ -46,8 +46,8 @@ describe("ToolRegistry.getToolDefinitions", () => {
       const initialChoices = choices();
       expect(initialChoices).toEqual(["optionalTool"]);
       expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).toEqual([
-        "setToolEnabled",
         "optionalTool",
+        "setToolEnabled",
       ]);
       for (const tool of ToolRegistry.getToolDefinitions()) {
         expect(ToolRegistry.getTool(tool.name)).toBeDefined();
@@ -161,7 +161,7 @@ describe("ToolRegistry.getToolDefinitions", () => {
     expect(JSON.stringify(replacement.inputSchema)).toContain("after");
   });
 
-  test("invalidates converted schemas when adding a normal tool registration", () => {
+  test("adding a normal tool registration converts only the added tool; the others stay cached", () => {
     ToolRegistry.register(
       "existingTool",
       "Existing tool",
@@ -169,6 +169,7 @@ describe("ToolRegistry.getToolDefinitions", () => {
       async () => ({ content: [{ type: "text", text: "existing" }] }),
     );
     const originalExisting = ToolRegistry.getToolDefinitions()[0];
+    const builtBefore = ToolRegistry.schemaBuildCountForTesting();
 
     ToolRegistry.register("addedTool", "Added tool", z.object({ added: z.number() }), async () => ({
       content: [{ type: "text", text: "added" }],
@@ -179,8 +180,9 @@ describe("ToolRegistry.getToolDefinitions", () => {
 
     expect(existing).toBeDefined();
     expect(added).toBeDefined();
-    expect(existing!.inputSchema).not.toBe(originalExisting.inputSchema);
+    expect(existing!.inputSchema).toBe(originalExisting.inputSchema);
     expect(JSON.stringify(added!.inputSchema)).toContain("added");
+    expect(ToolRegistry.schemaBuildCountForTesting() - builtBefore).toBe(1);
   });
 
   test("reconverts a replaced device-aware tool registration", () => {
@@ -205,7 +207,7 @@ describe("ToolRegistry.getToolDefinitions", () => {
     expect(JSON.stringify(replacement.inputSchema)).toContain("after");
   });
 
-  test("invalidates converted schemas when adding a device-aware tool registration", () => {
+  test("adding a device-aware tool registration converts only the added tool; the others stay cached", () => {
     ToolRegistry.registerDeviceAware(
       "existingDeviceTool",
       "Existing device tool",
@@ -213,6 +215,7 @@ describe("ToolRegistry.getToolDefinitions", () => {
       async () => ({ content: [{ type: "text", text: "existing" }] }),
     );
     const originalExisting = ToolRegistry.getToolDefinitions()[0];
+    const builtBefore = ToolRegistry.schemaBuildCountForTesting();
 
     ToolRegistry.registerDeviceAware(
       "addedDeviceTool",
@@ -226,8 +229,71 @@ describe("ToolRegistry.getToolDefinitions", () => {
 
     expect(existing).toBeDefined();
     expect(added).toBeDefined();
-    expect(existing!.inputSchema).not.toBe(originalExisting.inputSchema);
+    expect(existing!.inputSchema).toBe(originalExisting.inputSchema);
     expect(JSON.stringify(added!.inputSchema)).toContain("added");
+    expect(ToolRegistry.schemaBuildCountForTesting() - builtBefore).toBe(1);
+  });
+
+  test("re-registering a tool with the same schemas reuses its conversion, a changed schema does not", () => {
+    const schema = z.object({ same: z.string() });
+    const register = (registered: z.ZodType, description: string) =>
+      ToolRegistry.register("sameSchemaTool", description, registered, async () => ({
+        content: [{ type: "text", text: "ok" }],
+      }));
+    register(schema, "First");
+    const first = ToolRegistry.getToolDefinitions()[0];
+    const built = ToolRegistry.schemaBuildCountForTesting();
+
+    register(schema, "Second");
+    const second = ToolRegistry.getToolDefinitions()[0];
+    expect(second.description).toBe("Second");
+    expect(second.inputSchema).toBe(first.inputSchema);
+    expect(ToolRegistry.schemaBuildCountForTesting()).toBe(built);
+
+    register(z.object({ other: z.number() }), "Third");
+    const third = ToolRegistry.getToolDefinitions()[0];
+    expect(third.inputSchema).not.toBe(first.inputSchema);
+    expect(JSON.stringify(third.inputSchema)).toContain("other");
+    expect(ToolRegistry.schemaBuildCountForTesting()).toBe(built + 1);
+  });
+
+  test("a removed tool is converted again when it is registered back", () => {
+    const schema = z.object({ back: z.string() });
+    const register = () =>
+      ToolRegistry.register("comesBackTool", "Comes back", schema, async () => ({
+        content: [{ type: "text", text: "ok" }],
+      }));
+    register();
+    expect(ToolRegistry.getToolDefinitions()).toHaveLength(1);
+    const built = ToolRegistry.schemaBuildCountForTesting();
+
+    ToolRegistry.unregister("comesBackTool");
+    expect(ToolRegistry.getToolDefinitions()).toHaveLength(0);
+    register();
+    expect(ToolRegistry.getToolDefinitions()).toHaveLength(1);
+    expect(ToolRegistry.schemaBuildCountForTesting()).toBe(built + 1);
+  });
+
+  test("a session binding or tool selection change keeps every conversion; a tool-list change drops them", () => {
+    ToolRegistry.register(
+      "selectionTool",
+      "A tool whose schemas a selection change cannot affect",
+      z.object({ value: z.string() }),
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+      { outputSchema: z.object({ ok: z.boolean() }) },
+    );
+    const cached = ToolRegistry.getToolDefinitions()[0];
+    const built = ToolRegistry.schemaBuildCountForTesting();
+
+    ToolRegistry.notifyToolSelectionChanged();
+    const afterSelection = ToolRegistry.getToolDefinitions()[0];
+    expect(afterSelection.inputSchema).toBe(cached.inputSchema);
+    expect(afterSelection.outputSchema).toBe(cached.outputSchema);
+    expect(ToolRegistry.schemaBuildCountForTesting()).toBe(built);
+
+    ToolRegistry.notifyToolListChanged();
+    expect(ToolRegistry.getToolDefinitions()[0].inputSchema).not.toBe(cached.inputSchema);
+    expect(ToolRegistry.schemaBuildCountForTesting()).toBe(built + 1);
   });
 
   test("caches output schema variants per structured-content flag (bounds tuple always advertised)", () => {

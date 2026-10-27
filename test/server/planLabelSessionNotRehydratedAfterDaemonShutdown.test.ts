@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
   cancelAndReleaseSession,
@@ -7,7 +8,7 @@ import { TerminalSessionError } from "../../src/daemon/sessionManager";
 import { deviceRestartReleaseReason } from "../../src/db/deviceSessionRepository";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import {
   BASE,
   LABEL_B,
@@ -46,7 +47,7 @@ describe("daemon shutdown while a multi-device plan runs", () => {
   });
   beforeEach(setUp);
   afterEach(() => {
-    monitor?.stop();
+    void monitor?.stop();
     monitor = undefined;
     hunt.tearDown();
   });
@@ -161,7 +162,7 @@ describe("daemon shutdown while a multi-device plan runs", () => {
 
     // The owner is back and heartbeats the session it holds, every second, for 12 s.
     for (let second = 0; second < 12; second++) {
-      sessionManager.recordHeartbeat(BASE);
+      await deliverDaemonHeartbeat(sessionManager, BASE);
       await hunt.timer.advanceTimeAsync(1_000);
     }
     expect(sessionManager.getSession(BASE)?.assignedDevice).toBe(deviceA.deviceId);

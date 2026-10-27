@@ -14,6 +14,13 @@
 # steps: the same class of collision is invisible until it fires, and it fires
 # only on an already-failing run.
 #
+# Uploads nested in local composite actions (`uses: ./.github/actions/...`)
+# land in the caller's artifact namespace once per invocation, so the extractor
+# expands every call site rather than recording each action once (#14580), and
+# reads every file with a YAML parser rather than line patterns, so key order
+# and quoting cannot hide a step (#14578). See scripts/ci/workflowArtifactNames.ts
+# for how per-invocation names are resolved.
+#
 # Two axes are out of reach of a file-static check, so do not over-trust this:
 #
 #   - A reusable workflow's uploads land in the *caller's* artifact namespace,
@@ -25,56 +32,56 @@
 #     interpolates ${{ matrix.os }}; dropping that interpolation would be the
 #     same failure class as #3976 and would still pass this guard.
 
-# Print "<job>\t<artifact name>" for every upload-artifact step in a workflow.
-#
-# Capture starts only after the top-level "jobs:" key so a same-named key under
-# "on:" cannot match, matching the convention in
-# screenshot-diff-artifact-upload.bats. awk, not sed -- BSD sed lacks the
-# range/address forms this needs.
-#
-# Whole step blocks are buffered and scanned at flush time rather than read as
-# a "uses: then name:" sequence. YAML mapping keys are unordered, so a step
-# written `with:` first and `uses:` second is legal; a sequential reader skips
-# it AND then mis-attributes the *next* step's name to it, which would let a
-# duplicate slip through the very guard meant to catch it. The `uses:` value is
-# matched with optional quotes for the same reason.
-#
-# Within a block the artifact name is the `name:` under `with:` -- the step's
-# own display name is `- name:`, which carries a leading dash and so cannot
-# match, and it precedes `with:` in any case.
+EXTRACTOR="$BATS_TEST_DIRNAME/../../scripts/ci/workflowArtifactNames.ts"
+
+# Print "<workflow>\t<job>\t<artifact name>" for every upload one run of each
+# given workflow performs, local composite actions expanded per invocation.
+# Local actions resolve against the current directory, like GitHub's workspace.
+artifact_uploads() {
+  bun "$EXTRACTOR" "$@"
+}
+
+# Print "<job>\t<artifact name>" for every upload in a single workflow. The
+# extractor's output is captured first so its failure is not masked by a pipe.
 upload_artifact_names() {
-  awk '
-    function flush() {
-      if (n_lines == 0) return
-      is_upload = 0
-      for (i = 1; i <= n_lines; i++) {
-        if (lines[i] ~ /uses: *["'"'"']?actions\/upload-artifact/) is_upload = 1
-      }
-      if (is_upload) {
-        in_with = 0
-        for (i = 1; i <= n_lines; i++) {
-          if (lines[i] ~ /^ *with: *$/) { in_with = 1; continue }
-          if (in_with && lines[i] ~ /^ *name: /) {
-            artifact = lines[i]
-            sub(/^ *name: /, "", artifact)
-            print job "\t" artifact
-            break
-          }
-        }
-      }
-      n_lines = 0
-    }
-    /^jobs:/ { in_jobs = 1; next }
-    !in_jobs { next }
-    /^  [A-Za-z0-9_-]+:/ { flush(); job = $1; sub(":", "", job) }
-    /^ *- / { flush() }
-    { lines[++n_lines] = $0 }
-    END { flush() }
-  ' "$1"
+  local uploads
+  uploads="$(artifact_uploads "$1")" || return
+  [ -z "$uploads" ] || printf '%s\n' "$uploads" | cut -f2-
+}
+
+# Print "<workflow>\t<artifact name>" for every name uploaded twice in one run.
+duplicate_artifact_names() {
+  local uploads
+  uploads="$(artifact_uploads "$@")" || return
+  [ -z "$uploads" ] || printf '%s\n' "$uploads" | cut -f1,3 | sort | uniq -d
 }
 
 workflows() {
   find .github/workflows -maxdepth 1 -name '*.yml' | sort
+}
+
+# A throwaway workspace with an uploading composite action written in the two
+# shapes a line scanner drops: `with:` before `uses:`, and a quoted `uses:`.
+make_composite_workspace() {
+  workspace="$BATS_TEST_TMPDIR/workspace"
+  mkdir -p "$workspace/.github/actions/upload-pair" "$workspace/.github/workflows"
+  cat > "$workspace/.github/actions/upload-pair/action.yml" <<'YAML'
+name: upload-pair
+runs:
+  using: composite
+  steps:
+    - name: "With before uses"
+      with:
+        name: composite-alpha
+        path: out
+      uses: actions/upload-artifact@v6
+    - name: "Quoted uses"
+      uses: "actions/upload-artifact@v6"
+      with:
+        name: composite-beta
+        path: out
+YAML
+  cd "$workspace" || return
 }
 
 @test "the extractor finds upload-artifact steps at all" {
@@ -85,20 +92,15 @@ workflows() {
   [ "${#lines[@]}" -gt 5 ]
 }
 
-@test "no two upload-artifact steps in one workflow share an artifact name" {
-  duplicates=""
-  while read -r workflow; do
-    dupes="$(upload_artifact_names "$workflow" \
-      | cut -f2 \
-      | sort \
-      | uniq -d)"
-    if [ -n "$dupes" ]; then
-      duplicates="$duplicates$workflow: $(echo "$dupes" | tr '\n' ' ')"$'\n'
-    fi
-  done < <(workflows)
-
+@test "no two uploads in one workflow run share an artifact name" {
+  # Composite-action uploads are counted at each call site, so this also
+  # covers a workflow upload reusing a composite's name and two jobs invoking
+  # the same uploading action.
+  files=()
+  while IFS= read -r workflow; do files+=("$workflow"); done < <(workflows)
+  duplicates="$(duplicate_artifact_names "${files[@]}")"
   if [ -n "$duplicates" ]; then
-    echo "Duplicate upload-artifact names within a single workflow:"
+    echo "Duplicate artifact names within a single workflow run:"
     echo "$duplicates"
   fi
   [ -z "$duplicates" ]
@@ -158,4 +160,102 @@ YAML
   [ "$(echo "$block" | grep -c 'if: failure()')" -eq 2 ]
   [ "$(echo "$block" | grep -c 'continue-on-error: true')" -eq 2 ]
   [ "$(echo "$block" | grep -c 'uses: actions/upload-artifact@v[0-9]')" -eq 2 ]
+}
+
+@test "composite uploads are expanded at their real call sites" {
+  # A silently-unexpanded composite would make the duplicate check above blind
+  # to every upload moved into .github/actions/ (#13029). Pin one per caller.
+  [[ "$(upload_artifact_names .github/workflows/pull_request.yml)" == *$'build-ide-plugin\tide-plugin-zip'* ]]
+  [[ "$(upload_artifact_names .github/workflows/merge.yml)" == *$'build-ide-plugin\tide-plugin-zip'* ]]
+}
+
+@test "composite uploads are parsed structurally, not by key order or quoting" {
+  # #14578: the old guard grepped eight lines after an unquoted
+  # `uses: actions/upload-artifact`, so both steps below contributed nothing.
+  make_composite_workspace
+  cat > .github/workflows/ci.yml <<'YAML'
+jobs:
+  build:
+    steps:
+      - uses: ./.github/actions/upload-pair
+YAML
+  run upload_artifact_names .github/workflows/ci.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = $'build\tcomposite-alpha\nbuild\tcomposite-beta' ]
+
+  # So a workflow step reusing either name is a collision.
+  cat >> .github/workflows/ci.yml <<'YAML'
+      - uses: actions/upload-artifact@v6
+        with:
+          name: composite-beta
+YAML
+  run duplicate_artifact_names .github/workflows/ci.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = $'.github/workflows/ci.yml\tcomposite-beta' ]
+}
+
+@test "composite uploads count once per invocation" {
+  # #14580: two jobs invoking the same uploading action upload its names twice
+  # in one run; the old guard recorded each action's names once globally.
+  make_composite_workspace
+  cat > .github/workflows/ci.yml <<'YAML'
+jobs:
+  first:
+    steps:
+      - uses: ./.github/actions/upload-pair
+  second:
+    steps:
+      - uses: ./.github/actions/upload-pair
+YAML
+  run duplicate_artifact_names .github/workflows/ci.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = $'.github/workflows/ci.yml\tcomposite-alpha\n.github/workflows/ci.yml\tcomposite-beta' ]
+
+  # A single invocation per workflow, as in the real repo, is not a collision.
+  cat > .github/workflows/other.yml <<'YAML'
+jobs:
+  only:
+    steps:
+      - uses: ./.github/actions/upload-pair
+YAML
+  run duplicate_artifact_names .github/workflows/other.yml
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "per-invocation names resolve the calling job and inputs" {
+  # Names templated on github.job or an input differ per call site, so
+  # expanding every invocation must not turn them into false collisions.
+  make_composite_workspace
+  mkdir -p .github/actions/templated
+  cat > .github/actions/templated/action.yml <<'YAML'
+inputs:
+  flavor:
+    default: plain
+runs:
+  using: composite
+  steps:
+    - uses: actions/upload-artifact@v6
+      with:
+        name: diagnostics-${{ github.job }}
+    - uses: actions/upload-artifact@v6
+      with:
+        name: report-${{ inputs.flavor }}
+YAML
+  cat > .github/workflows/ci.yml <<'YAML'
+jobs:
+  first:
+    steps:
+      - uses: ./.github/actions/templated
+        with:
+          flavor: debug
+  second:
+    steps:
+      - uses: ./.github/actions/templated
+YAML
+  run upload_artifact_names .github/workflows/ci.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = $'first\tdiagnostics-first\nfirst\treport-debug\nsecond\tdiagnostics-second\nsecond\treport-plain' ]
+  run duplicate_artifact_names .github/workflows/ci.yml
+  [ -z "$output" ]
 }

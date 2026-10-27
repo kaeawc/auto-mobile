@@ -97,17 +97,16 @@
         // stays fast and does NOT run them, so the ratchet script (which runs
         // `oxlint --type-aware`) keeps them in RATCHET_CODES at a zero baseline:
         // any diagnostic there is a new violation and fails the gate.
-        "complexity": ["warn", 12],
-        "max-depth": ["warn", 3],
-        "max-params": ["warn", 6],
+        "complexity": ["error", 12],
+        "max-depth": ["error", 3],
+        "max-params": ["error", 6],
         "max-lines-per-function": [
-          "warn",
+          "error",
           { "max": 150, "skipBlankLines": true, "skipComments": true }
         ],
-        "max-classes-per-file": ["warn", 1],
-        "auto-mobile/max-class-lines": ["warn", { "max": 1000 }],
-        "auto-mobile/catch-convention": "warn",
-        "auto-mobile/no-unknown-cast": "error",
+        "max-classes-per-file": ["error", 1],
+        "auto-mobile/max-class-lines": ["error", { "max": 1000 }],
+        "auto-mobile/catch-convention": "error",
         "typescript/no-floating-promises": "error",
         "typescript/no-misused-promises": "error",
         "auto-mobile/no-raw-env-number-parse": "error"
@@ -123,10 +122,18 @@
       }
     },
     {
+      "files": ["src/**/*.ts", "test/**/*.ts"],
+      "rules": {
+        "auto-mobile/no-unknown-cast": "error"
+      }
+    },
+    {
       "files": ["test/**/*.ts"],
       "rules": {
         "no-unused-expressions": "off",
-        "auto-mobile/no-bare-expect": "error"
+        "auto-mobile/no-bare-expect": "error",
+        "auto-mobile/no-as-any": "error",
+        "typescript/no-floating-promises": "error"
       }
     },
     {

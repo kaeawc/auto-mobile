@@ -1,11 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import fc from "fast-check";
-import {
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-  type DaemonClientLike,
-} from "../../src/daemon/client";
-import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/constants";
+import { DaemonUnavailableError, type DaemonClientLike } from "../../src/daemon/client";
+import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import {
   DaemonMcpProxy,
   DaemonConnectionSessionReleasedError,
@@ -13,8 +10,8 @@ import {
   RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
 } from "../../src/daemon/daemonMcpProxy";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
-import { ROUTED_SESSION_META_KEY } from "../../src/server/routedSessionMeta";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { ROUTED_SESSION_META_KEY } from "../../src/daemon/routedSessionMeta";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -437,10 +434,10 @@ class World {
   lateHeldAcknowledgement(sessionUuid: string): void {
     // The fake answers one keeper request at a time; use the acknowledgement seams to model an
     // abandoned request answering after a later not-found request dropped the held session.
-    this.proxy["noteDaemonIdleEvidence"](sessionUuid, {
+    this.proxy.getInternalsForTesting().noteDaemonIdleEvidence(sessionUuid, {
       daemonInstance: `daemon-${this.daemonInstance}`,
     });
-    this.proxy["recordHeldSessionHeartbeatSuccess"](sessionUuid, true);
+    this.proxy.getInternalsForTesting().recordHeldSessionHeartbeatSuccess(sessionUuid, true);
     this.acknowledged(this.sessions.get(sessionUuid)!);
   }
 
@@ -2232,8 +2229,8 @@ describe("not-found peer and retained handoff regressions", () => {
           await world.apply({ kind: "ticks", count: WINDOW_TICKS + 2 });
           if (name.startsWith("late ack")) {
             if (
-              !world.proxy["notFoundStopped"].has(held) ||
-              world.proxy["otherHeldSessions"].has(held)
+              !world.proxy.getInternalsForTesting().notFoundStopped.has(held) ||
+              world.proxy.getInternalsForTesting().otherHeldSessions.has(held)
             ) {
               world.violations.push("scenario did not drop the held session on stopped");
             }
@@ -2242,7 +2239,7 @@ describe("not-found peer and retained handoff regressions", () => {
             const beats = world.sessions.get(held)!.heartbeats;
             await world.tick();
             if (
-              !world.proxy["otherHeldSessions"].has(held) ||
+              !world.proxy.getInternalsForTesting().otherHeldSessions.has(held) ||
               world.sessions.get(held)!.heartbeats <= beats
             ) {
               world.violations.push(
@@ -2277,7 +2274,7 @@ describe("not-found peer and retained handoff regressions", () => {
       results.set(name, world.violations);
     }
   });
-  test.each(cases)("%s", (name) => {
+  test.each([...cases])("%s", (name) => {
     expect(results.get(name)).toEqual([]);
   });
 });

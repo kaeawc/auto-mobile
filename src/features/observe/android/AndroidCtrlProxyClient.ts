@@ -1,34 +1,24 @@
-import { AndroidInboundMessageRouter } from "./AndroidInboundMessageRouter";
-import type {
-  InteractionEvent,
-  AndroidDisplayTransition,
-  WsFrameMetricsMessage,
-} from "./androidCtrlProxyInboundProtocol";
+import { assertAndroidCtrlProxyDevice } from "./androidCtrlProxyDeviceGuard";
+import { AndroidCtrlProxyClientDeps } from "./AndroidCtrlProxyClientDeps";
+import { defaultAndroidServiceManagerFactory } from "./AndroidCtrlProxyServices";
+export { type AndroidCtrlProxyClientDeps } from "./AndroidCtrlProxyClientDeps";
 export type {
-  InteractionEvent,
   AndroidDisplayTransition,
+  InteractionEvent,
   StorageTelemetryInput,
   WebSocketMessage,
 } from "./androidCtrlProxyInboundProtocol";
 export {
   displayTransitionFromWire,
   normalizeStorageWireValue,
-  storageTelemetryInputFromWire,
   parseCtrlProxyJson,
+  storageTelemetryInputFromWire,
 } from "./androidCtrlProxyInboundWire";
-import {} from "./androidCtrlProxyInboundWire";
 
-import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
-
-import {
-  type PrototypePatchRequest,
-  type PrototypePatchReply,
-} from "../../prototype/prototypePatchWire";
 import { resetForeignCtrlProxyForwardEvidenceForTesting } from "./foreignCtrlProxyForwardEvidence";
-import { isProcessRunning } from "../../../utils/processLiveness";
 
+export type { AndroidCtrlProxy, AndroidCtrlProxyClientSurface } from "./AndroidCtrlProxy";
 export { CTRL_PROXY_CONNECT_ATTEMPTS } from "./AndroidCtrlProxyPortForwarder";
-import { AndroidCtrlProxyPortForwarder } from "./AndroidCtrlProxyPortForwarder";
 
 /**
  * AndroidCtrlProxyClient - Main client for Android accessibility service.
@@ -46,42 +36,57 @@ import { AndroidCtrlProxyPortForwarder } from "./AndroidCtrlProxyPortForwarder";
  * - CtrlProxyHighlights: Visual highlight overlays
  */
 
-import type { InsertTextState } from "./ctrlProxyProtocol";
+/**
+ * AndroidCtrlProxyClient - Main client for Android accessibility service.
+ *
+ * This client provides a unified interface to the Android accessibility service
+ * via WebSocket connection. It uses composition with delegate modules to handle
+ * specific functionality:
+ *
+ * - CtrlProxyGestures: Swipe, tap, drag, pinch operations
+ * - CtrlProxyText: setText, clearText, IME actions, select all
+ * - CtrlProxyHierarchy: Hierarchy retrieval, caching, conversion
+ * - CtrlProxyStorage: SharedPreferences operations
+ * - CtrlProxyCertificates: CA cert install/remove, permissions
+ * - CtrlProxyFocus: TalkBack focus, traversal order
+ * - CtrlProxyHighlights: Visual highlight overlays
+ */
 import WebSocket from "ws";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
 } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { logger, type Logger } from "../../../utils/logger";
-
-import type { ScreenIdentity } from "../../../models/ObserveResult";
+import { logger } from "../../../utils/logger";
 
 import {
-  HostForwardClientConnectionProbe,
-  type ForwardClientConnectionProbe,
-} from "./CtrlProxyForwardClientProbe";
-import { NoForwardClientConnectionProbe } from "./NoForwardClientConnectionProbe";
-import { NoOpCtrlProxyForwardLease } from "./NoOpCtrlProxyForwardLease";
-import {
-  BootedDevice,
-  ImeAction,
-  ViewHierarchyResult,
-  ScreenScaleMetadata,
-  HighlightOperationResult,
-  HighlightShape,
-  toActionableError,
-  ActionableError,
-} from "../../../models";
-import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
-import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
-import {
-  type DeviceClientRegistry,
   MapDeviceClientRegistry,
+  type DeviceClientRegistry,
 } from "../../../ctrlProxy/deviceClientRegistry";
-import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
+import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
+import { requireBootedDevice } from "../../../devices/requireBootedDevice";
+import { ActionableError, BootedDevice, toActionableError } from "../../../models";
+import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/PerformanceTracker";
+import { PortManager } from "../../../utils/PortManager";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
+import { errorMessage } from "../../../utils/describeUnknownError";
+import { daemonDeviceAdmissionGate } from "../../../utils/deviceAdmissionGate";
+import {
+  deviceIncarnationToken,
+  registerDeviceIncarnationListener,
+} from "../../../utils/deviceIncarnation";
+import {
+  NETWORK_MOCK_REPORT_TIMEOUT_MS,
+  type NetworkMockPushResult,
+  type NetworkMockRuleSync,
+} from "../../../utils/networkMockRules";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
+import { shellQuote } from "../../../utils/shellQuote";
+import type { StorageSubscription } from "../../storage/storageTypes";
+import { WebSocketFactory } from "../DeviceServiceClient";
+import { ObserverPendingRequestTimeoutError } from "../ObserverPendingRequestTimeoutError";
+import { ScreenshotBackoffScheduler } from "../ScreenshotBackoffScheduler";
+import { OBSERVE_RECOVERY_WAIT_MS } from "./AndroidServiceRecovery";
 import {
   forwardLeaseActivity,
   heldForwardLeaseDeviceIds,
@@ -91,532 +96,28 @@ import {
   type ForwardLeaseClient,
   type ForwardLeaseClientRegistry,
 } from "./CtrlProxyForwardLeaseRegistry";
-import {
-  ForcedRestartBudget,
-  type ForcedRestartSnapshot,
-} from "../../../ctrlProxy/ForcedRestartBudget";
-import { NavigationGraphManager, NavigationEvent } from "../../navigation/NavigationGraphManager";
-import { type ContentHashProvider } from "../../../utils/ContentHashProvider";
-import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
-import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
-import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
-import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
-import { getInstalledAppsCacheWriteCoordinator } from "../../../db/installedAppsCacheWriteCoordinator";
-import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
-import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
-import {
-  AndroidServiceRecovery,
-  OBSERVE_RECOVERY_WAIT_MS,
-  type AndroidServiceManagerFactory,
-} from "./AndroidServiceRecovery";
-import { AndroidHierarchyUpdateHandler } from "./AndroidHierarchyUpdateHandler";
-import { AndroidCtrlProxyDelegatingFacade } from "./AndroidCtrlProxyDelegatingFacade";
-import { AndroidDeviceStateSync } from "./AndroidDeviceStateSync";
-import { AndroidScreenshotCapture } from "./AndroidScreenshotCapture";
-import { AndroidActionDispatcher } from "./AndroidActionDispatcher";
-import { AndroidClientRequests } from "./AndroidClientRequests";
-import { AndroidBuildContextResolver } from "./AndroidBuildContextResolver";
-import { AndroidSdkScreenIdentityStore } from "./AndroidSdkScreenIdentityStore";
-import { AndroidInteractionTracker, MAX_CACHED_INTERACTIONS } from "./AndroidNavigationEvents";
-import { AndroidServiceReadinessVerifier } from "./AndroidServiceReadinessVerifier";
-import { AndroidScreenshotRequester } from "./AndroidScreenshotRequester";
-import { AndroidNavigationWriteQueue } from "./AndroidNavigationWriteQueue";
-import { requireBootedDevice } from "../../../devices/requireBootedDevice";
-import { type SendCommandOptions } from "../DeviceServiceUtils";
-import {
-  TrackedScreenGeometry,
-  screenshotBindingPushOptions,
-  type ScreenGeometryBinding,
-} from "../TrackedScreenGeometry";
-import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
-import { COORDINATE_SPACE_PX } from "../../../daemon/canonicalPixels";
-import { ScreenshotBackoffScheduler, ScreenshotCaptureResult } from "../ScreenshotBackoffScheduler";
-import {
-  ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
-  type ScreenshotMetadata,
-} from "../ScreenshotMetadata";
-import {} from "./screenshotFallbackReason";
-import { AndroidPhysicalDisplayIdResolver } from "./AndroidPhysicalDisplayId";
-import { type SdkAnrPayload, type SdkCrashPayload } from "../crash/sdkCrashIngestion";
-import {
-  AndroidSdkEventIngestor,
-  DefaultAndroidSdkEventIngestor,
-  type AndroidHandledExceptionEvent as HandledExceptionEvent,
-} from "./AndroidSdkEventIngestor";
-import { FailureEventRepository } from "../../../db/failureEventRepository";
-import type { CrashEventSink } from "../../../utils/interfaces/CrashMonitor";
-import { serverConfig } from "../../../utils/ServerConfig";
-import { getSdkFrameMetricsStore } from "../../performance/SdkFrameMetricsStore";
-import {
-  AndroidAppEventRecorder,
-  parseStackTrace,
-  type AndroidPackageEvent as PackageEvent,
-} from "./AndroidAppEventRecorder";
-import {
-  deviceIncarnationToken,
-  registerDeviceIncarnationListener,
-} from "../../../utils/deviceIncarnation";
-import type { StackTraceElement } from "../../../server/failuresResources";
-import {} from "../../../server/NetworkState";
-import {
-  NETWORK_MOCK_REPORT_TIMEOUT_MS,
-  type NetworkMockPushResult,
-  type NetworkMockRuleSync,
-} from "../../../server/networkMockRules";
+import { NoForwardClientConnectionProbe } from "./NoForwardClientConnectionProbe";
+import { NoOpCtrlProxyForwardLease } from "./NoOpCtrlProxyForwardLease";
+import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 import { pushNetworkMockRules } from "./networkMockRulesPush";
-import {
-  ANDROID_CAPABILITY_GATED_COMMANDS,
-  ANDROID_FULL_COMMAND_SET_CAPABILITY,
-  PROTOTYPE_DISPLAY_CAPABILITY,
-  MULTI_FINGER_GESTURE_CAPABILITY,
-  PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
-  PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
-  PROTOTYPE_SAVED_CAPABILITY,
-  PROTOTYPE_MULTI_SURFACE_CAPABILITY,
-  PROTOTYPE_STORAGE_CAPABILITY,
-  ctrlProxyRequests,
-  serializeCtrlProxyRequest,
-} from "./ctrlProxyProtocol";
-import type { StorageSubscription } from "../../storage/storageTypes";
-import { WebSocketFactory, defaultWebSocketFactory } from "../DeviceServiceClient";
-import { ObserverPendingRequestTimeoutError } from "../ObserverPendingRequestTimeoutError";
-import {
-  observationStreamDeviceConnectionLostNotifier,
-  type DeviceConnectionLostNotifier,
-} from "../DeviceConnectionLostNotifier";
-import { daemonDeviceAdmissionGate } from "../../../utils/deviceAdmissionGate";
-import type { SetTextOptions } from "../DeviceService";
-import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
-import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
-import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator";
-import { errorMessage } from "../../../utils/describeUnknownError";
-import {} from "../../../utils/screenshot/screenshotFormats";
-import { shellQuote } from "../../../utils/shellQuote";
-import { FileCtrlProxyForwardLease, type CtrlProxyForwardLease } from "./CtrlProxyForwardLease";
 
 // Import delegates
-import { CtrlProxyGestures } from "./CtrlProxyGestures";
-import { CtrlProxyText, type ImeCommitActionResult } from "./CtrlProxyText";
-import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
-import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
-import { CtrlProxyStorage } from "./CtrlProxyStorage";
-import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
-import { CtrlProxyFocus } from "./CtrlProxyFocus";
-import { CtrlProxyPrototypes, type PrototypeAssetRequestOptions } from "./CtrlProxyPrototypes";
-import type { PrototypeSpec } from "../../prototype/prototypeSpec";
-import type { PrototypeAssetUpload } from "../../prototype/prototypeAssets";
-import type {
-  PrototypeAppearanceOverride,
-  PrototypeAssetResult,
-  PrototypeDismiss,
-  PrototypeEvent,
-  PrototypeResult,
-} from "./ctrlProxyProtocol";
-import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
-import { CtrlProxyPackages, type PackageInfoOptions } from "./CtrlProxyPackages";
 
 // Import types
-import type { DelegateContext, DragRequest, SwipeRequest } from "../shared/types";
-import type { AndroidCtrlProxyClientTestHooks } from "./AndroidCtrlProxyClientTestHooks";
-import { defaultPrototypeAssetCache } from "../../prototype/prototypeAssetCache";
-import { defaultSavedPrototypeMirror } from "../../prototype/savedPrototypeMirror";
+// Import delegates
+// Import types
+import type { AndroidCtrlProxy } from "./AndroidCtrlProxy";
+import { AndroidCtrlProxyTestHooksFacade } from "./AndroidCtrlProxyTestHooksFacade";
 import type {
-  HierarchyDelegateContext,
-  CertificatesDelegateContext,
   AccessibilityHierarchy,
-  AccessibilityHierarchyResponse,
-  CachedHierarchy,
-  ScreenshotResult,
-  A11ySwipeResult,
-  A11yTapCoordinatesResult,
-  A11yDragResult,
-  A11yPinchResult,
-  A11ySetTextResult,
-  A11yImeActionResult,
-  A11ySelectAllResult,
-  A11yActionResult,
-  AccessibilityNodeSelector,
-  A11yClipboardResult,
-  A11yCaCertResult,
-  A11yDeviceOwnerStatusResult,
-  A11yPermissionResult,
-  A11ySettingsGetResult,
-  A11ySettingsPutResult,
-  A11ySettingsListResult,
-  SettingsNamespace,
-  SettingsValueType,
-  A11yInstalledPackagesResult,
-  A11yPackageInfoResult,
-  A11yLaunchIntentResult,
   AndroidPerfTiming,
-  HierarchySyncDiagnostics,
   ObserverHierarchyRequestOptions,
 } from "./types";
 
-/**
- * Interface for accessibility service providing Android UI hierarchy and interaction capabilities
- */
-export interface AndroidCtrlProxy extends CtrlProxyClient {
-  isLastConnectionFailureForwardingLeaseConflict?(): boolean;
-  getLastConnectionFailureMessage?(): string | undefined;
-  setRecompositionTrackingEnabled(
-    enabled: boolean,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<void>;
-
-  getLatestHierarchy(
-    waitForFresh?: boolean,
-    timeout?: number,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-  ): Promise<AccessibilityHierarchyResponse>;
-
-  requestHierarchySync(
-    perf?: PerformanceTracker,
-    disableAllFiltering?: boolean,
-    signal?: AbortSignal,
-    timeoutMs?: number,
-    diagnostics?: HierarchySyncDiagnostics,
-  ): Promise<{
-    hierarchy: AccessibilityHierarchy;
-    perfTiming?: AndroidPerfTiming[];
-    frameContext?: string;
-  } | null>;
-
-  requestHierarchySyncWithoutObservationStreamPush(
-    perf?: PerformanceTracker,
-    disableAllFiltering?: boolean,
-    signal?: AbortSignal,
-    timeoutMs?: number,
-  ): Promise<{
-    hierarchy: AccessibilityHierarchy;
-    perfTiming?: AndroidPerfTiming[];
-    frameContext?: string;
-  } | null>;
-
-  convertToViewHierarchyResult(accessibilityHierarchy: AccessibilityHierarchy): ViewHierarchyResult;
-
-  requestSwipe(request: SwipeRequest): Promise<A11ySwipeResult>;
-
-  requestTapCoordinates(
-    x: number,
-    y: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yTapCoordinatesResult>;
-
-  requestDrag(request: DragRequest): Promise<A11yDragResult>;
-
-  requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yPinchResult>;
-
-  requestSetText(text: string, options?: SetTextOptions): Promise<A11ySetTextResult>;
-
-  requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }>;
-
-  requestInsertText(
-    text: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: {
-      expectedSuffix?: string;
-      acceptsCaretNotPlaced?: boolean;
-      precedingState?: InsertTextState;
-    },
-    transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">,
-  ): Promise<A11ySetTextResult>;
-
-  commitViaIme(
-    text: string,
-    priorImeId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents" | "clearField",
-    trace?: boolean,
-  ): Promise<ImeCommitActionResult>;
-
-  setKeyboardProfile(
-    profileId: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<{
-    success: boolean;
-    activeProfileId?: string;
-    previousProfileId?: string;
-    error?: string;
-  }>;
-
-  listKeyboardProfiles(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<KeyboardProfileCatalog>;
-
-  requestClearText(
-    resourceId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11ySetTextResult>;
-
-  requestImeAction(
-    action: ImeAction,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    abortSignal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<A11yImeActionResult>;
-
-  requestSelectAll(timeoutMs?: number, perf?: PerformanceTracker): Promise<A11ySelectAllResult>;
-
-  requestAction(
-    action: string,
-    resourceId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yActionResult>;
-
-  requestClickFocusedInput(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult>;
-
-  requestNodeAction(
-    action: string,
-    selector: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult>;
-
-  supportsNodeActionSelectors(perf?: PerformanceTracker, signal?: AbortSignal): Promise<boolean>;
-
-  supportsCommand(name: string): Promise<boolean>;
-
-  requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    selector?: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<A11yActionResult>;
-
-  supportsAccessibilityLinkActivation(perf?: PerformanceTracker): Promise<boolean>;
-
-  requestClipboard(
-    action: "copy" | "paste" | "clear" | "get",
-    text?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11yClipboardResult>;
-
-  requestSettingsGet(
-    namespace: SettingsNamespace,
-    key: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11ySettingsGetResult>;
-
-  requestSettingsPut(
-    namespace: SettingsNamespace,
-    key: string,
-    value: string | null,
-    valueType?: SettingsValueType,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11ySettingsPutResult>;
-
-  requestSettingsList(
-    namespace: SettingsNamespace,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11ySettingsListResult>;
-
-  requestInstallCaCertificate(
-    certificate: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yCaCertResult>;
-
-  requestInstallCaCertificateFromFile(
-    certificatePath: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yCaCertResult>;
-
-  requestRemoveCaCertificate(
-    alias: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yCaCertResult>;
-
-  requestDeviceOwnerStatus(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yDeviceOwnerStatusResult>;
-
-  requestPermission(
-    permission: string,
-    requestPermission?: boolean,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yPermissionResult>;
-
-  requestShowPrototype(
-    spec: PrototypeSpec,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    displayId?: number,
-    reset?: boolean,
-    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
-  ): Promise<PrototypeResult>;
-  requestDismissPrototype(
-    target: PrototypeDismiss,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult>;
-  requestPatchPrototype(
-    patch: PrototypePatchRequest,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypePatchReply>;
-  requestSavePrototype(
-    save: { spec: PrototypeSpec; label: string; icon?: string },
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult>;
-  requestPinSavedPrototype(
-    id: string,
-    icon?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult>;
-  requestListSavedPrototypes(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult>;
-  requestDeleteSavedPrototype(
-    id: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult>;
-  requestClearPrototypeStorage(
-    id: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult>;
-  requestInspectPrototypes(timeoutMs?: number, perf?: PerformanceTracker): Promise<PrototypeResult>;
-  requestPutPrototypeAsset(
-    asset: PrototypeAssetUpload,
-    options?: PrototypeAssetRequestOptions,
-  ): Promise<PrototypeAssetResult>;
-  requestRemovePrototypeAsset(
-    id: string,
-    options?: PrototypeAssetRequestOptions,
-  ): Promise<PrototypeAssetResult>;
-  onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void;
-
-  requestAddHighlight(
-    id: string,
-    shape: HighlightShape,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<HighlightOperationResult>;
-
-  requestScreenshot(timeoutMs?: number, perf?: PerformanceTracker): Promise<ScreenshotResult>;
-
-  requestScreenshotWithoutObservationStreamPush(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<ScreenshotResult>;
-
-  requestInstalledPackages(
-    includeSystem?: boolean,
-    userId?: number,
-    timeoutMs?: number,
-  ): Promise<A11yInstalledPackagesResult>;
-
-  requestPackageInfo(
-    packageName: string,
-    options?: PackageInfoOptions,
-    timeoutMs?: number,
-  ): Promise<A11yPackageInfoResult>;
-
-  requestLaunchIntent(packageName: string, timeoutMs?: number): Promise<A11yLaunchIntentResult>;
-}
-
-/** Isolation markers kept for hierarchy requests whose waiter already gave up. */
-const MAX_RETAINED_HIERARCHY_REQUEST_MARKERS = 64;
-
-function portAllocationIdForClient(
-  deviceId: string,
-  transientObserver: boolean,
-  ids: IdGenerator,
-): string {
-  return transientObserver ? `${deviceId}:observer:${ids.next()}` : deviceId;
-}
-
 export type {
-  AndroidServiceRecoveryManager,
   AndroidServiceManagerFactory,
+  AndroidServiceRecoveryManager,
 } from "./AndroidServiceRecovery";
-
-export interface AndroidCtrlProxyClientDeps {
-  /** Creates the client's WebSocket transport. */
-  webSocketFactory?: WebSocketFactory;
-  /** Schedules connection and request deadlines. */
-  timer?: Timer;
-  /** Stores installed-app metadata. */
-  installedAppsRepository?: InstalledAppsStore;
-  /** Executes retryable operations. */
-  retryExecutor?: RetryExecutor;
-  /** Records app crash events. */
-  crashEventSink?: CrashEventSink;
-  /** Reports lost device connections. */
-  deviceConnectionLostNotifier?: DeviceConnectionLostNotifier;
-  /** Ingests SDK telemetry, crash, and ANR events. */
-  sdkEventIngestor?: AndroidSdkEventIngestor;
-  /** Logs client lifecycle and cleanup events. */
-  logger?: Logger;
-  /** Provides certificate file operations. */
-  certificateFileSystem?: CertificateFileSystem;
-  /** Coordinates ownership of the device's CtrlProxy forward. */
-  ctrlProxyForwardLease?: CtrlProxyForwardLease;
-  /** Creates the accessibility-service recovery manager. */
-  serviceManagerFactory?: AndroidServiceManagerFactory;
-  /** Generates client and request identifiers. */
-  idGenerator?: IdGenerator;
-  /** Creates a detached observer without service recovery or auto-reconnect. */
-  transientObserver?: boolean;
-}
-
-const defaultAndroidServiceManagerFactory: AndroidServiceManagerFactory = (device) =>
-  AndroidCtrlProxyManager.getInstance(device);
 
 /**
  * Client for interacting with the AutoMobile Accessibility Service via WebSocket.
@@ -626,125 +127,35 @@ const defaultAndroidServiceManagerFactory: AndroidServiceManagerFactory = (devic
 const CTRL_PROXY_CLIENT_PURPOSE = "to drive the device through CtrlProxy";
 
 export class AndroidCtrlProxyClient
-  extends AndroidCtrlProxyDelegatingFacade
+  extends AndroidCtrlProxyTestHooksFacade
   implements AndroidCtrlProxy
 {
+  protected getLiveLocalPorts(): ReadonlySet<number> {
+    return new Set(
+      [
+        ...AndroidCtrlProxyClient.registry.entries().map(([, client]) => client),
+        ...AndroidCtrlProxyClient.activeObservers,
+      ]
+        .filter((other) => other.device.deviceId === this.device.deviceId && !other.closed)
+        .map((other) => other.localPort),
+    );
+  }
+
   protected override get clientLogTag(): string {
     return "AndroidCtrlProxyClient";
   }
-
-  /** Optional observer for display and posture changes. */
-  onDisplayTransition?: (event: AndroidDisplayTransition) => void;
-  private readonly streamedCaptureSequences = new WeakMap<object, number>();
-  private static readonly DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250;
-
-  private adb: AdbExecutor;
-  private readonly physicalDisplayIdResolver: AndroidPhysicalDisplayIdResolver;
-  private readonly idGenerator: IdGenerator;
-
-  // Per-instance port allocation for multi-device support
-  private localPort: number;
-  private readonly ownsPortAllocation: boolean;
-  private readonly portAllocationId: string;
 
   // Singleton instances per device
   public static readonly registry: DeviceClientRegistry<AndroidCtrlProxyClient> =
     new MapDeviceClientRegistry<AndroidCtrlProxyClient>();
   private static readonly activeObservers = new Set<AndroidCtrlProxyClient>();
 
-  // Build/device provenance (#4984): lazily-built content-hash provider (cached by
-  // (deviceId, packageId, versionCode)), the resolved build context per app (kept on
-  // the per-device client so it survives session rebinds and is re-applied to the
-  // current session's manager on every event), the set of apps whose resolution is
-  // in flight, and a per-app generation bumped on package changes so a resolution
-  // that started before an update can't apply a stale build.
-
-  // Hierarchy caching (accessed by delegates via context)
-  private cachedHierarchy: CachedHierarchy | null = null;
-
-  // Android-specific state
-  private portForwardingSetup: boolean = false;
-  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
-  readonly ctrlProxyForwardLease: CtrlProxyForwardLease;
-  /**
-   * @internal Host TCP-table reader deciding whether an unrecorded forward is
-   * still in use (#10690). Tests replace it; production reads lsof/netstat.
-   */
-  forwardClientProbe: ForwardClientConnectionProbe = new HostForwardClientConnectionProbe();
-  /** @internal Injected liveness probe for sticky foreign-forward evidence. */
-  forwardClientProcessIsRunning: (pid: number) => boolean = isProcessRunning;
-  private ctrlProxyForwardLeaseReleaseScheduled: boolean = false;
-  /** Set when shutdown released this client's lease before its close finished. */
-  private forwardLeaseForceReleased: boolean = false;
-  private inFlightConnection: Promise<boolean> | null = null;
-  private cleanupHeldPort: number | null = null;
-  private lastWebSocketTimeout: number = 0;
-
   private incarnationToken: string | undefined;
-  private readinessHolds = 0;
-  private forwardSetupFailure: string | undefined;
-  private readonly inFlightMessageHandlers = new Set<Promise<void>>();
   // Match the bounded ADB forward-removal confirmation window during teardown.
   private static readonly INBOUND_HANDLER_DRAIN_TIMEOUT_MS = 2000;
-
-  // Re-entry guard: a recovery burst that has not settled must not start a
-  // second, overlapping recovery attempt.
-  private isRecoveringService: boolean = false;
   /** A socket must survive this interval before it can rearm a restart. */
   private static readonly RESTART_REARM_STABILITY_MS = 2000;
-  private restartRearmTimeout: NodeJS.Timeout | null = null;
-  /** One client exists per device; this budget gates both failure bursts and observe calls. */
-  public readonly forcedRestartBudget: ForcedRestartBudget;
-  private serviceRecovery: AndroidServiceRecovery | undefined;
   public static readonly OBSERVE_RECOVERY_WAIT_MS = OBSERVE_RECOVERY_WAIT_MS;
-  private readonly serviceManagerFactory: AndroidServiceManagerFactory;
-
-  // Delegate instances (lazy initialized)
-  private _gestures: CtrlProxyGestures | null = null;
-  private _text: CtrlProxyText | null = null;
-  private _hierarchy: CtrlProxyHierarchy | null = null;
-  private _storage: CtrlProxyStorage | null = null;
-  private _certificates: CtrlProxyCertificates | null = null;
-  private _focus: CtrlProxyFocus | null = null;
-  private _prototypes: CtrlProxyPrototypes | null = null;
-  private _highlights: CtrlProxyHighlights | null = null;
-  private _packages: CtrlProxyPackages | null = null;
-
-  private readonly interactionTracker = new AndroidInteractionTracker(this.timer);
-  private installedAppsRepository: InstalledAppsStore | null = null;
-
-  // Hierarchy navigation detector
-  private sdkNavigationAppIds: Set<string> = new Set();
-  private readonly sdkScreenIdentityStore = new AndroidSdkScreenIdentityStore(this.timer);
-
-  // Screen geometry derived from hierarchies, carrying whether the daemon has actually seen a
-  // hierarchy with that geometry (issue #3348). See TrackedScreenGeometry.
-  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
-  readonly screenGeometry = new TrackedScreenGeometry();
-  // Runner-reported scale metadata from the most recent hierarchy (#4548). Android reports
-  // nativeScale 1 with pixel dims equal to its (already-pixel) screen dims. Retained for #4549;
-  // null until a #4548-aware runner reports it. Nothing in current behavior reads it.
-  private reportedScaleMetadata: ScreenScaleMetadata | null = null;
-  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
-  readonly hierarchyObservationStreamSuppressions = new Map<string, NodeJS.Timeout>();
-  private readonly observerHierarchyRequestIds = new Map<string, boolean>();
-  private readonly transientObserver: boolean;
-  // Request ids whose screenshot responses must not be auto-pushed to the
-  // observation stream. Scoped per-request so an unrelated in-flight screenshot
-  // (e.g. backoff capture or MCP screenshot) cannot consume the suppression.
-  private screenshotObservationStreamSuppressions: Set<string> = new Set();
-  // Request ids cancelled after their screenshot frame was dispatched. The runner cannot retract a
-  // request already on the wire, so a later response must be discarded rather than auto-pushed.
-  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
-  lateCancelledScreenshotRequestIds: Set<string> = new Set();
-  private readonly pendingFocusedInputClickIds: Set<string> = new Set();
-
-  // Capture identity bound to each in-flight screenshot request, keyed by requestId (issue #3348).
-  // Recorded when the request is SENT and consumed when its response is pushed, so a hierarchy that
-  // arrives while the frame is in flight cannot relabel it. Same-resolution navigation makes this
-  // the only defence: the pixel dimensions are identical, so nothing about the frame reveals that
-  // it belongs to the previous screen.
-  private screenshotCaptureBindings: Map<string, ScreenGeometryBinding> = new Map();
   // Track whether the device supports accessibility service screenshots (API 30+).
   // null = unknown, true = supported, false = unsupported (fall back to ADB screencap).
   // Only marked unsupported after consecutive failures to avoid disabling on transient timeouts.
@@ -755,105 +166,14 @@ export class AndroidCtrlProxyClient
   set a11yScreenshotSupported(value: boolean | null) {
     this.getScreenshotCapture().a11yScreenshotSupported = value;
   }
-  // Minimum interval between accessibility takeScreenshot() requests. The platform rate-limits
-  // calls below its floor (~333ms, ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT); 350ms sits just
-  // above it so a front-loaded backoff burst or an animation's restart storm cannot trip the
-  // limit into needless ADB-screencap fallover (issue #4927).
-  private static readonly A11Y_SCREENSHOT_MIN_INTERVAL_MS = 350;
-
-  // Work profile monitor for polling profiles without accessibility service
-  private workProfileMonitor: WorkProfileMonitor | null = null;
-
-  private readonly rejectedCommands = new Set<string>();
-
-  // Matches iOS's CONNECTION_RESET_MS (set for #2695). The base default
-  // (10000ms) outlives waitForConnection()'s default retry budget
-  // (~2.7s), so a client that hit maxConnectionAttempts stays cooled down
-  // well past a caller's next waitForConnection() even when the endpoint
-  // has since recovered (issue #7538). Callers that just changed the
-  // endpoint's state (setup, enable, rebind) should still call the base
-  // class's resetConnectionBudget() rather than relying on this shorter
-  // window alone.
-  private static readonly CONNECTION_RESET_MS = 2000;
-
-  // Track foreground package for crash monitoring
-  private lastForegroundPackage: string | null = null;
-
-  private readonly crashEventSink: CrashEventSink;
-  private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
-  private readonly certificateFileSystem: CertificateFileSystem | undefined;
-
-  private portForwarder: AndroidCtrlProxyPortForwarder | null = null;
-
-  private appEventRecorder: AndroidAppEventRecorder | null = null;
-
-  /**
-   * Owns SDK telemetry/crash/ANR ingestion (issue #2764). Lazily built so it can
-   * close over instance methods (`parseStackTrace`, session-bound nav manager);
-   * injectable for tests.
-   */
-  private sdkEventIngestorInstance: AndroidSdkEventIngestor | null = null;
-  private readonly loggerInstance: Logger;
-
-  // Logging tag for base class
-  protected readonly logTag = "ACCESSIBILITY_SERVICE";
-
-  /**
-   * Private constructor - use getInstance() instead
-   */
   private constructor(
     device: BootedDevice,
     adb: AdbExecutor,
     deps: AndroidCtrlProxyClientDeps = {},
   ) {
-    super(
-      deps.timer ?? defaultTimer,
-      deps.webSocketFactory ?? defaultWebSocketFactory,
-      { connectionResetMs: AndroidCtrlProxyClient.CONNECTION_RESET_MS },
-      deps.retryExecutor ?? defaultRetryExecutor,
-    );
-    const {
-      serviceManagerFactory = defaultAndroidServiceManagerFactory,
-      idGenerator = defaultIdGenerator,
-      logger: loggerInstance = logger,
-      transientObserver,
-    } = deps;
-    this.forcedRestartBudget = new ForcedRestartBudget(this.timer);
-    this.serviceManagerFactory = serviceManagerFactory;
-    this.sdkEventIngestorInstance = deps.sdkEventIngestor ?? null;
-    this.loggerInstance = loggerInstance;
-    this.device = device;
+    super(device, adb, deps);
     this.incarnationToken = AndroidCtrlProxyClient.currentIncarnationToken(device.deviceId);
-    this.adb = adb;
-    this.idGenerator = idGenerator;
-    this.transientObserver = transientObserver === true;
-    this.autoReconnectEnabled = transientObserver !== true;
-    this.physicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver({ timer: this.timer });
-    this.installedAppsRepository = deps.installedAppsRepository ?? null;
-    this.crashEventSink = deps.crashEventSink ?? new FailureEventRepository();
-    this.deviceConnectionLostNotifier =
-      deps.deviceConnectionLostNotifier ?? observationStreamDeviceConnectionLostNotifier;
-    this.certificateFileSystem = deps.certificateFileSystem;
-    this.ctrlProxyForwardLease = this.resolveForwardLease(deps.ctrlProxyForwardLease);
-    // A detached observer needs its own forward while a disconnected singleton
-    // retains the device allocation for a later reconnect.
-    this.portAllocationId = portAllocationIdForClient(
-      device.deviceId,
-      this.transientObserver,
-      idGenerator,
-    );
-    this.ownsPortAllocation = PortManager.getPort(this.portAllocationId) === undefined;
-    this.localPort = PortManager.allocate(this.portAllocationId, {
-      reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
-    });
-    AndroidCtrlProxyManager.getInstance(device);
     AndroidCtrlProxyClient.trackObserver(this);
-  }
-
-  private resolveForwardLease(
-    ctrlProxyForwardLease?: CtrlProxyForwardLease,
-  ): CtrlProxyForwardLease {
-    return ctrlProxyForwardLease ?? new FileCtrlProxyForwardLease(this.device.deviceId);
   }
 
   private static trackObserver(client: AndroidCtrlProxyClient): void {
@@ -875,8 +195,9 @@ export class AndroidCtrlProxyClient
   public static getInstance(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-  ): AndroidCtrlProxyClient {
+  ): AndroidCtrlProxy {
     requireBootedDevice(device, "AndroidCtrlProxyClient.getInstance");
+    assertAndroidCtrlProxyDevice(device);
     daemonDeviceAdmissionGate.assertDeviceActionable(device.deviceId, CTRL_PROXY_CLIENT_PURPOSE);
     const deviceId = device.deviceId;
     const registry = AndroidCtrlProxyClient.registry;
@@ -930,6 +251,8 @@ export class AndroidCtrlProxyClient
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     existing?: AndroidCtrlProxyClient,
   ): AndroidCtrlProxyClient {
+    requireBootedDevice(device, "AndroidCtrlProxyClient.createForObservationRead");
+    assertAndroidCtrlProxyDevice(device);
     return new AndroidCtrlProxyClient(device, adbFactory.create(device), {
       ctrlProxyForwardLease:
         existing?.ctrlProxyForwardLease.fork?.() ?? existing?.ctrlProxyForwardLease,
@@ -1153,374 +476,6 @@ export class AndroidCtrlProxyClient
   }
 
   /**
-   * The newest AutoMobile SDK navigation route the app reported, when the app embeds the SDK.
-   * Single-activity Compose apps name their screens only this way.
-   */
-  public getSdkScreenIdentity(applicationId?: string): ScreenIdentity | undefined {
-    return this.sdkScreenIdentityStore.get(applicationId);
-  }
-
-  /** Host time (this client's timer) at which the app's newest SDK route arrived. */
-  public getSdkScreenIdentityReceivedAtMs(applicationId: string): number | undefined {
-    return this.sdkScreenIdentityStore.getReceivedAtMs(applicationId);
-  }
-
-  /**
-   * Resolve with the app's SDK route once one newer than `sinceMs` has arrived, or undefined after
-   * `timeoutMs` (or when the app's route is cleared first). Returns at once for a route that
-   * already postdates `sinceMs`.
-   */
-  public awaitSdkScreenIdentityAfter(
-    applicationId: string,
-    sinceMs: number,
-    timeoutMs: number,
-  ): Promise<ScreenIdentity | undefined> {
-    return this.sdkScreenIdentityStore.awaitAfter(applicationId, sinceMs, timeoutMs);
-  }
-
-  /**
-   * Forget the SDK navigation route of an app whose process was replaced (terminated, relaunched
-   * cold, data cleared, crashed), or of every app when none is named (the SDK link was lost).
-   */
-  public clearSdkScreenIdentity(applicationId?: string): void {
-    this.sdkScreenIdentityStore.clear(applicationId);
-  }
-
-  private recordSdkScreenIdentity(applicationId: string, identity: ScreenIdentity): void {
-    this.sdkScreenIdentityStore.record(applicationId, identity);
-  }
-
-  /**
-   * Get the NavigationGraphManager for the bound session, or the global singleton.
-   */
-  private getNavigationGraphManager(): NavigationGraphManager {
-    return this.boundSessionId
-      ? NavigationGraphManager.getInstanceForSession(this.boundSessionId)
-      : NavigationGraphManager.getInstance();
-  }
-
-  /** Ensure the build/device provenance context for an app is applied (#4984). Non-blocking. */
-  private ensureBuildContext(appId: string): void {
-    this.buildContextResolver.ensure(appId);
-  }
-
-  /** Invalidate all cached build/content-hash provenance for an app (#4984). */
-  private invalidateBuildContext(appId: string): void {
-    this.buildContextResolver.invalidate(appId);
-  }
-
-  /** Every app id with cached or in-flight build-context state (#4984). */
-  private knownBuildContextApps(): string[] {
-    return this.buildContextResolver.knownApps();
-  }
-
-  private get contentHashProvider(): ContentHashProvider | null {
-    return this.buildContextResolver.contentHashProvider;
-  }
-  private set contentHashProvider(value: ContentHashProvider | null) {
-    this.buildContextResolver.contentHashProvider = value;
-  }
-
-  /**
-   * The SDK-event ingestor for this client (issue #2764). Built lazily so it can
-   * close over instance methods and the session-bound navigation manager; a
-   * test-injected instance short-circuits construction.
-   */
-  private getSdkEventIngestor(): AndroidSdkEventIngestor {
-    if (!this.sdkEventIngestorInstance) {
-      this.sdkEventIngestorInstance = new DefaultAndroidSdkEventIngestor({
-        deviceId: this.device.deviceId,
-        getNavigationScreenSource: () => this.getNavigationGraphManager(),
-        parseStackTrace: (stackTrace, packageName) => this.parseStackTrace(stackTrace, packageName),
-        now: () => this.timer.now(),
-      });
-    }
-    return this.sdkEventIngestorInstance;
-  }
-
-  /** Keep mutable test seams and post-await state live without exposing connection lifecycle. */
-  private hierarchyUpdateHandler: AndroidHierarchyUpdateHandler | undefined;
-  private getHierarchyUpdateHandler(): AndroidHierarchyUpdateHandler {
-    if (!this.hierarchyUpdateHandler) {
-      const client = this;
-      this.hierarchyUpdateHandler = new AndroidHierarchyUpdateHandler({
-        timer: client.timer,
-        get deviceId() {
-          return client.device.deviceId;
-        },
-        transientObserver: client.transientObserver,
-        get hierarchy() {
-          return client.hierarchy;
-        },
-        observerHierarchyRequestIds: client.observerHierarchyRequestIds,
-        hierarchyObservationStreamSuppressions: client.hierarchyObservationStreamSuppressions,
-        get sdkNavigationAppIds() {
-          return client.sdkNavigationAppIds;
-        },
-        get cachedHierarchy() {
-          return client.cachedHierarchy;
-        },
-        set cachedHierarchy(value) {
-          client.cachedHierarchy = value;
-        },
-        get lastForegroundPackage() {
-          return client.lastForegroundPackage;
-        },
-        set lastForegroundPackage(value) {
-          client.lastForegroundPackage = value;
-        },
-        removeHierarchyObservationStreamSuppression: (requestId) =>
-          client.removeHierarchyObservationStreamSuppression(requestId),
-        updateCachedScreenDimensions: (hierarchy) => client.updateCachedScreenDimensions(hierarchy),
-        pushHierarchyToObservationStream: (hierarchy, frameContext) =>
-          client.pushHierarchyToObservationStream(hierarchy, frameContext),
-        startScreenshotBackoff: () => client.startScreenshotBackoff(),
-        getNavigationGraphManager: () => client.getNavigationGraphManager(),
-        ensureBuildContext: (packageName) => client.ensureBuildContext(packageName),
-        getHierarchyNavigationDetector: () => client.getHierarchyNavigationDetector(),
-      });
-    }
-    return this.hierarchyUpdateHandler;
-  }
-
-  private screenshotCapture: AndroidScreenshotCapture | undefined;
-  private getScreenshotCapture(): AndroidScreenshotCapture {
-    if (!this.screenshotCapture) {
-      const client = this;
-      this.screenshotCapture = new AndroidScreenshotCapture({
-        get adb() {
-          return client.adb;
-        },
-        timer: client.timer,
-        get deviceId() {
-          return client.device.deviceId;
-        },
-        get closed() {
-          return client.closed;
-        },
-        get logger() {
-          return client.loggerInstance;
-        },
-        idGenerator: client.idGenerator,
-        physicalDisplayIdResolver: client.physicalDisplayIdResolver,
-        screenGeometry: client.screenGeometry,
-        requestManager: client.requestManager,
-        get screenshotObservationStreamSuppressions() {
-          return client.screenshotObservationStreamSuppressions;
-        },
-        get socket() {
-          return client.ws;
-        },
-        noteScreenshotCaptureStarted: () =>
-          client.getScreenshotBackoffScheduler().noteCaptureStarted(),
-      });
-    }
-    return this.screenshotCapture;
-  }
-
-  private resetA11yScreenshotSupport(): void {
-    this.getScreenshotCapture().resetA11yScreenshotSupport();
-  }
-
-  private buildContextResolverInstance: AndroidBuildContextResolver | undefined;
-  private get buildContextResolver(): AndroidBuildContextResolver {
-    if (!this.buildContextResolverInstance) {
-      const client = this;
-      this.buildContextResolverInstance = new AndroidBuildContextResolver({
-        get closed() {
-          return client.closed;
-        },
-        get device() {
-          return client.device;
-        },
-        get adb() {
-          return client.adb;
-        },
-        timer: client.timer,
-        getNavigationGraphManager: () => client.getNavigationGraphManager(),
-        requestPackageInfo: (appId, options, timeoutMs) =>
-          client.requestPackageInfo(appId, options, timeoutMs),
-      });
-    }
-    return this.buildContextResolverInstance;
-  }
-  private actionDispatcher: AndroidActionDispatcher | undefined;
-  private getActionDispatcher(): AndroidActionDispatcher {
-    if (!this.actionDispatcher) {
-      const client = this;
-      this.actionDispatcher = new AndroidActionDispatcher({
-        timer: client.timer,
-        requestManager: client.requestManager,
-        pendingFocusedInputClickIds: client.pendingFocusedInputClickIds,
-        get supportedCommands() {
-          return client.supportedCommands;
-        },
-        awaitActionWork: (work, signal) => client.awaitActionWork(work, signal),
-        awaitCancellableRequest: (requestId, promise, signal, startTime) =>
-          client.awaitCancellableRequest(requestId, promise, signal, startTime),
-        connectWebSocket: (perf) => client.connectWebSocket(perf),
-        waitForHandshake: (timeoutMs, signal) => client.waitForHandshake(timeoutMs, signal),
-        isCommandSupported: (messageType) => client.isCommandSupported(messageType),
-        cancelScreenshotBackoff: () => client.cancelScreenshotBackoff(),
-        createDelegateContext: () => client.createDelegateContext(),
-      });
-    }
-    return this.actionDispatcher;
-  }
-
-  private clientRequests: AndroidClientRequests | undefined;
-  private getClientRequests(): AndroidClientRequests {
-    if (!this.clientRequests) {
-      const client = this;
-      this.clientRequests = new AndroidClientRequests({
-        timer: client.timer,
-        requestManager: client.requestManager,
-        get logger() {
-          return client.loggerInstance;
-        },
-        get actions() {
-          return client.getActionDispatcher();
-        },
-        isConnected: () => client.isConnected(),
-        connectWebSocket: (perf) => client.connectWebSocket(perf),
-        createDelegateContext: () => client.createDelegateContext(),
-        awaitActionWork: (work, signal) => client.awaitActionWork(work, signal),
-      });
-    }
-    return this.clientRequests;
-  }
-
-  private getServiceRecovery(): AndroidServiceRecovery {
-    if (!this.serviceRecovery) {
-      const client = this;
-      this.serviceRecovery = new AndroidServiceRecovery({
-        get adb() {
-          return client.adb;
-        },
-        timer: client.timer,
-        get deviceId() {
-          return client.device.deviceId;
-        },
-        get device() {
-          return client.device;
-        },
-        get closed() {
-          return client.closed;
-        },
-        get connectionGeneration() {
-          return client.connectionGeneration;
-        },
-        get consecutiveConnectionFailures() {
-          return client.consecutiveConnectionFailures;
-        },
-        set consecutiveConnectionFailures(value: number) {
-          client.consecutiveConnectionFailures = value;
-        },
-        get isRecoveringService() {
-          return client.isRecoveringService;
-        },
-        set isRecoveringService(value: boolean) {
-          client.isRecoveringService = value;
-        },
-        get recoveryPromise() {
-          return client.recoveryPromise;
-        },
-        set recoveryPromise(value: Promise<boolean> | null) {
-          client.recoveryPromise = value;
-        },
-        forcedRestartBudget: client.forcedRestartBudget,
-        serviceManagerFactory: client.serviceManagerFactory,
-        get restartRearmPending() {
-          return client.restartRearmTimeout !== null;
-        },
-        get socket() {
-          return client.ws;
-        },
-        isConnected: () => client.isConnected(),
-        resetConnectionBudget: () => client.resetConnectionBudget(),
-        connectBackgroundWebSocket: () => client.connectBackgroundWebSocket(),
-      });
-    }
-    return this.serviceRecovery;
-  }
-
-  private getPortForwarder(): AndroidCtrlProxyPortForwarder {
-    if (!this.portForwarder) {
-      const client = this;
-      this.portForwarder = new AndroidCtrlProxyPortForwarder({
-        get adb() {
-          return client.adb;
-        },
-        timer: client.timer,
-        get deviceId() {
-          return client.device.deviceId;
-        },
-        ctrlProxyForwardLease: client.ctrlProxyForwardLease,
-        get forwardClientProbe() {
-          return client.forwardClientProbe;
-        },
-        get forwardClientProcessIsRunning() {
-          return client.forwardClientProcessIsRunning;
-        },
-        get closed() {
-          return client.closed;
-        },
-        get localPort() {
-          return client.localPort;
-        },
-        set localPort(value) {
-          client.localPort = value;
-        },
-        portAllocationId: client.portAllocationId,
-        get portForwardingSetup() {
-          return client.portForwardingSetup;
-        },
-        set portForwardingSetup(value) {
-          client.portForwardingSetup = value;
-        },
-        get forwardLeaseForceReleased() {
-          return client.forwardLeaseForceReleased;
-        },
-        set forwardSetupFailure(failure: string | undefined) {
-          client.forwardSetupFailure = failure;
-        },
-        getLiveLocalPorts: () =>
-          new Set(
-            [
-              ...AndroidCtrlProxyClient.registry.entries().map(([, client]) => client),
-              ...AndroidCtrlProxyClient.activeObservers,
-            ]
-              .filter((other) => other.device.deviceId === this.device.deviceId && !other.closed)
-              .map((other) => other.localPort),
-          ),
-      });
-    }
-    return this.portForwarder;
-  }
-
-  /** Resolve collaborators lazily so injected stores and session-bound ingestors stay live. */
-  private getAppEventRecorder(): AndroidAppEventRecorder {
-    if (!this.appEventRecorder) {
-      this.appEventRecorder = new AndroidAppEventRecorder({
-        deviceId: this.device.deviceId,
-        platform: this.device.platform,
-        timer: this.timer,
-        crashEventSink: this.crashEventSink,
-        getSdkEventIngestor: () => this.getSdkEventIngestor(),
-        getInstalledAppsStore: () => this.getInstalledAppsRepository(),
-        getWorkProfileMonitor: () => this.workProfileMonitor,
-        invalidateBuildContext: (appId) => this.invalidateBuildContext(appId),
-        getLastForegroundPackage: () => this.lastForegroundPackage,
-        // Resolve the module exports per call so later spies and singleton swaps are honoured.
-        getFrameMetricsStore: () => getSdkFrameMetricsStore(),
-        getInstalledAppsCacheWriteCoordinator: () => getInstalledAppsCacheWriteCoordinator(),
-        getDbWriteBarrier: () => getDbWriteBarrier(),
-      });
-    }
-    return this.appEventRecorder;
-  }
-
-  /**
    * Reset all instances (for testing)
    */
   public static resetInstances(): void {
@@ -1562,63 +517,6 @@ export class AndroidCtrlProxyClient
     return client;
   }
 
-  /** @internal Typed view of internals for unit tests; production code must not use it. */
-  get testHooks(): AndroidCtrlProxyClientTestHooks {
-    const client = this;
-    return {
-      requestManager: client.requestManager,
-      forcedRestartBudget: client.forcedRestartBudget,
-      text: () => client.text,
-      webSocketMessageHandlers: () => client.webSocketMessageHandlers,
-      cachedHierarchy: () => client.cachedHierarchy,
-      handleWebSocketMessage: (data) => client.handleWebSocketMessage(data),
-      getWebSocketUrl: () => client.getWebSocketUrl(),
-      removeCtrlProxyPortForward: (port) => client.removeCtrlProxyPortForward(port),
-      get recoveryPromise() {
-        return client.recoveryPromise;
-      },
-      set recoveryPromise(value) {
-        client.recoveryPromise = value;
-      },
-      get isRecoveringService() {
-        return client.isRecoveringService;
-      },
-      set isRecoveringService(value) {
-        client.isRecoveringService = value;
-      },
-      get connectionAttempts() {
-        return client.connectionAttempts;
-      },
-      set connectionAttempts(value) {
-        client.connectionAttempts = value;
-      },
-      get lastConnectionAttempt() {
-        return client.lastConnectionAttempt;
-      },
-      set lastConnectionAttempt(value) {
-        client.lastConnectionAttempt = value;
-      },
-      get connectionResetMs() {
-        return client.config.connectionResetMs;
-      },
-      set connectionResetMs(value) {
-        client.config.connectionResetMs = value;
-      },
-      get portForwardingSetup() {
-        return client.portForwardingSetup;
-      },
-      set portForwardingSetup(value) {
-        client.portForwardingSetup = value;
-      },
-      get localPort() {
-        return client.localPort;
-      },
-      set localPort(value) {
-        client.localPort = value;
-      },
-    };
-  }
-
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   public static createWithFileForwardLeaseForTesting(
     device: BootedDevice,
@@ -1627,183 +525,6 @@ export class AndroidCtrlProxyClient
     timer: Timer,
   ): AndroidCtrlProxyClient {
     return new AndroidCtrlProxyClient(device, adb, { webSocketFactory, timer });
-  }
-
-  // ===========================================================================
-  // Delegate Context Factories
-  // ===========================================================================
-
-  private createHierarchyDelegateContext(): HierarchyDelegateContext {
-    return {
-      ...this.createDelegateContext(),
-      device: this.device,
-      adb: this.adb,
-      getCachedHierarchy: () => this.cachedHierarchy,
-      setCachedHierarchy: (h) => {
-        this.cachedHierarchy = h;
-      },
-      getLastWebSocketTimeout: () => this.lastWebSocketTimeout,
-      setLastWebSocketTimeout: (time) => {
-        this.lastWebSocketTimeout = time;
-      },
-      markObserverHierarchyRequest: (requestId, options) => {
-        this.observerHierarchyRequestIds.set(requestId, options?.isolateResponse ?? false);
-        // Markers of unanswered requests outlive their waiter (a late reply must stay isolated);
-        // evict the oldest so an unresponsive runner cannot grow the map without bound.
-        while (this.observerHierarchyRequestIds.size > MAX_RETAINED_HIERARCHY_REQUEST_MARKERS) {
-          const oldest = this.observerHierarchyRequestIds.keys().next().value;
-          if (oldest === undefined) {
-            break;
-          }
-          this.observerHierarchyRequestIds.delete(oldest);
-        }
-      },
-      unmarkObserverHierarchyRequest: (requestId) => {
-        this.observerHierarchyRequestIds.delete(requestId);
-      },
-    };
-  }
-
-  protected override extraDelegateContextFields(): Partial<DelegateContext> {
-    return {
-      prototypeAssetCache: { serial: this.device.deviceId, cache: defaultPrototypeAssetCache() },
-      savedPrototypeMirror: { serial: this.device.deviceId, mirror: defaultSavedPrototypeMirror() },
-      isCommandSupported: (messageType) =>
-        messageType === PROTOTYPE_SAVED_CAPABILITY
-          ? this.supportedCommands?.has(messageType) === true
-          : this.isCommandSupported(messageType),
-      getSupportedCommands: () => this.getSupportedCommands(),
-      idGenerator: this.idGenerator,
-    };
-  }
-
-  private createCertificatesDelegateContext(): CertificatesDelegateContext {
-    return {
-      ...this.createDelegateContext(),
-      adb: this.adb,
-    };
-  }
-
-  // ===========================================================================
-  // Delegate Getters (lazy initialization)
-  // ===========================================================================
-
-  protected get gestures(): CtrlProxyGestures {
-    return this.lazyDelegate(
-      () => this._gestures,
-      (value) => {
-        this._gestures = value;
-      },
-      () => new CtrlProxyGestures(this.createDelegateContext()),
-    );
-  }
-
-  protected get text(): CtrlProxyText {
-    return this.lazyDelegate(
-      () => this._text,
-      (value) => {
-        this._text = value;
-      },
-      () => new CtrlProxyText(this.createDelegateContext()),
-    );
-  }
-
-  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
-  get hierarchy(): CtrlProxyHierarchy {
-    return this.lazyDelegate(
-      () => this._hierarchy,
-      (value) => {
-        this._hierarchy = value;
-      },
-      () => new CtrlProxyHierarchy(this.createHierarchyDelegateContext()),
-    );
-  }
-
-  protected get storage(): CtrlProxyStorage {
-    return this.lazyDelegate(
-      () => this._storage,
-      (value) => {
-        this._storage = value;
-      },
-      () => new CtrlProxyStorage(this.createDelegateContext()),
-    );
-  }
-
-  protected get certificates(): CtrlProxyCertificates {
-    return this.lazyDelegate(
-      () => this._certificates,
-      (value) => {
-        this._certificates = value;
-      },
-      () =>
-        new CtrlProxyCertificates(
-          this.createCertificatesDelegateContext(),
-          this.certificateFileSystem,
-        ),
-    );
-  }
-
-  protected get focus(): CtrlProxyFocus {
-    return this.lazyDelegate(
-      () => this._focus,
-      (value) => {
-        this._focus = value;
-      },
-      () => new CtrlProxyFocus(this.createDelegateContext()),
-    );
-  }
-
-  protected get prototypes(): CtrlProxyPrototypes {
-    return this.lazyDelegate(
-      () => this._prototypes,
-      (value) => {
-        this._prototypes = value;
-      },
-      () => new CtrlProxyPrototypes(this.createDelegateContext()),
-    );
-  }
-
-  protected get highlights(): CtrlProxyHighlights {
-    return this.lazyDelegate(
-      () => this._highlights,
-      (value) => {
-        this._highlights = value;
-      },
-      () => new CtrlProxyHighlights(this.createDelegateContext()),
-    );
-  }
-
-  private get packages(): CtrlProxyPackages {
-    return this.lazyDelegate(
-      () => this._packages,
-      (value) => {
-        this._packages = value;
-      },
-      () => new CtrlProxyPackages(this.createDelegateContext()),
-    );
-  }
-
-  async requestInstalledPackages(
-    includeSystem: boolean = true,
-    userId?: number,
-    timeoutMs: number = 5000,
-  ): Promise<A11yInstalledPackagesResult> {
-    return this.packages.requestInstalledPackages(includeSystem, userId, timeoutMs);
-  }
-
-  async requestPackageInfo(
-    packageName: string,
-    options: PackageInfoOptions = {},
-    timeoutMs: number = 5000,
-  ): Promise<A11yPackageInfoResult> {
-    return this.packages.requestPackageInfo(packageName, options, timeoutMs);
-  }
-
-  async requestLaunchIntent(
-    packageName: string,
-    timeoutMs: number = 5000,
-  ): Promise<A11yLaunchIntentResult> {
-    return this.packages.requestLaunchIntent(packageName, timeoutMs);
   }
 
   // ===========================================================================
@@ -1920,28 +641,6 @@ export class AndroidCtrlProxyClient
     );
   }
 
-  /**
-   * Push THIS device's mock rules and error simulation from the host store.
-   * Runs on every (re)connect, and after a session release clears the store so
-   * the device drops what that session installed (issue #10061).
-   */
-  public syncNetworkStateToDevice(): void {
-    this.getDeviceStateSync().syncNetworkState();
-  }
-
-  private syncAccessibilityFlagsToDevice(): void {
-    this.getDeviceStateSync().syncAccessibilityFlags();
-  }
-
-  private deviceStateSync: AndroidDeviceStateSync | undefined;
-  private getDeviceStateSync(): AndroidDeviceStateSync {
-    this.deviceStateSync ??= new AndroidDeviceStateSync({
-      deviceId: this.device.deviceId,
-      sendMessage: (message) => this.sendMessage(message),
-    });
-    return this.deviceStateSync;
-  }
-
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   public onConnectionClosed(): void {
     const rearmTimerWasArmed = this.restartRearmTimeout !== null;
@@ -2011,68 +710,8 @@ export class AndroidCtrlProxyClient
     }
   }
 
-  /** Start a recovery for this observed transport failure if none is pending. */
-  public ensureRecoveryStarted(): void {
-    this.getServiceRecovery().ensureStarted(this.autoReconnectEnabled);
-  }
-
-  /** Current forced-restart admission state, for typed observe/action failure reasons. */
-  public getRestartBudgetSnapshot(): ForcedRestartSnapshot {
-    return this.forcedRestartBudget.snapshot();
-  }
-
-  public isRecoveryInFlight(): boolean {
-    return this.recoveryPromise !== null;
-  }
-
   protected async setupBeforeConnect(perf: PerformanceTracker, signal: AbortSignal): Promise<void> {
     await this.setupPortForwarding(perf, signal);
-  }
-
-  // ===========================================================================
-  // Delegated Public Methods - Hierarchy
-  // ===========================================================================
-
-  // Thin pass-throughs: like the gesture/text/etc. delegates below, these do NOT
-  // restate the delegate's default parameter values. Omitted args forward as
-  // `undefined`, so CtrlProxyHierarchy (the single source of truth) applies its own
-  // defaults — keeping the two-copies drift class from issue #3505 unrepresentable.
-  async getAccessibilityHierarchy(
-    ...args: Parameters<CtrlProxyHierarchy["getAccessibilityHierarchy"]>
-  ): Promise<ViewHierarchyResult | null> {
-    return this.hierarchy.getAccessibilityHierarchy(...args);
-  }
-
-  async setRecompositionTrackingEnabled(
-    enabled: boolean,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    return this.hierarchy.setRecompositionTrackingEnabled(enabled, perf, signal);
-  }
-
-  async getLatestHierarchy(
-    ...args: Parameters<CtrlProxyHierarchy["getLatestHierarchy"]>
-  ): Promise<AccessibilityHierarchyResponse> {
-    return this.hierarchy.getLatestHierarchy(...args);
-  }
-
-  async requestHierarchySync(
-    perf?: PerformanceTracker,
-    disableAllFiltering?: boolean,
-    signal?: AbortSignal,
-    timeoutMs?: number,
-    diagnostics?: HierarchySyncDiagnostics,
-    displayId?: number,
-  ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
-    return this.hierarchy.requestHierarchySync(
-      perf,
-      disableAllFiltering,
-      signal,
-      timeoutMs,
-      diagnostics,
-      displayId,
-    );
   }
 
   async requestHierarchySyncWithoutObservationStreamPush(
@@ -2117,7 +756,7 @@ export class AndroidCtrlProxyClient
     }
   }
 
-  private removeHierarchyObservationStreamSuppression(requestId: string): boolean {
+  protected removeHierarchyObservationStreamSuppression(requestId: string): boolean {
     const timeout = this.hierarchyObservationStreamSuppressions.get(requestId);
     if (timeout === undefined) {
       return false;
@@ -2155,33 +794,6 @@ export class AndroidCtrlProxyClient
     );
   }
 
-  convertToViewHierarchyResult(
-    accessibilityHierarchy: AccessibilityHierarchy,
-  ): ViewHierarchyResult {
-    const result = this.hierarchy.convertToViewHierarchyResult(accessibilityHierarchy);
-    const captureSequence = this.streamedCaptureSequences.get(accessibilityHierarchy);
-    if (captureSequence !== undefined) {
-      result.captureSequence = captureSequence;
-    }
-    return result;
-  }
-
-  hasCachedHierarchy(): boolean {
-    return this.hierarchy.hasCachedHierarchy();
-  }
-
-  invalidateCache(): void {
-    return this.hierarchy.invalidateCache();
-  }
-
-  async requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }> {
-    // Older APKs do not know this optional command; absence retains legacy suffix settling.
-    if (!(await this.supportsCommand("request_insert_text_state"))) {
-      return { success: true };
-    }
-    return this.text.requestInsertTextState();
-  }
-
   async subscribeStorage(
     packageName: string,
     fileName: string,
@@ -2210,267 +822,6 @@ export class AndroidCtrlProxyClient
     }
   }
 
-  // ===========================================================================
-  // Non-delegated Public Methods
-  // ===========================================================================
-
-  async requestAction(
-    action: string,
-    resourceId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    selector?: AccessibilityNodeSelector,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult> {
-    return this.getActionDispatcher().requestAction(
-      action,
-      resourceId,
-      timeoutMs,
-      perf,
-      selector,
-      signal,
-    );
-  }
-
-  async requestClickFocusedInput(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult> {
-    return this.getActionDispatcher().requestClickFocusedInput(timeoutMs, perf, signal);
-  }
-
-  private settleUnattributedFocusedClickRejection(
-    requestId: string | null | undefined,
-    rejectedCommand: string | undefined,
-    errorText: string,
-  ): void {
-    this.getActionDispatcher().settleUnattributedFocusedClickRejection(
-      requestId,
-      rejectedCommand,
-      errorText,
-    );
-  }
-
-  /** These legacy client requests bypass the generic capability/deadline gate. */
-  private sendClientCommand<T extends { success: boolean; totalTimeMs: number; error?: string }>(
-    requestId: string,
-    serializeRequest: (requestId: string) => string,
-    options: Pick<
-      SendCommandOptions<T>,
-      "responseType" | "messageType" | "timeoutMs" | "responseError" | "beforeSend" | "onDispatch"
-    > & { timeoutError: (timeoutMs: number) => T },
-    cancellation?: { signal: AbortSignal | undefined; startTime: number },
-    perf?: PerformanceTracker,
-  ): Promise<T> {
-    return this.getActionDispatcher().sendClientCommand<T>(
-      requestId,
-      serializeRequest,
-      options,
-      cancellation,
-      perf,
-    );
-  }
-
-  async requestNodeAction(
-    action: string,
-    selector: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult> {
-    return this.getActionDispatcher().requestNodeAction(action, selector, timeoutMs, perf, signal);
-  }
-
-  async supportsNodeActionSelectors(
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    return this.getActionDispatcher().supportsNodeActionSelectors(perf, signal);
-  }
-
-  public async supportsCommand(name: string): Promise<boolean> {
-    return (await this.getSupportedCommands())?.includes(name) === true;
-  }
-
-  async supportsAccessibilityLinkActivation(perf?: PerformanceTracker): Promise<boolean> {
-    return this.getActionDispatcher().supportsAccessibilityLinkActivation(perf);
-  }
-
-  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
-  // oxlint-disable-next-line max-params
-  async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    selector?: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<A11yActionResult> {
-    return this.getActionDispatcher().requestActivateAccessibilityLink(
-      text,
-      occurrence,
-      selector,
-      timeoutMs,
-      perf,
-      signal,
-      onDispatch,
-    );
-  }
-
-  requestClipboard(
-    ...args: Parameters<AndroidClientRequests["requestClipboard"]>
-  ): ReturnType<AndroidClientRequests["requestClipboard"]> {
-    return this.getClientRequests().requestClipboard(...args);
-  }
-
-  requestSettingsGet(
-    ...args: Parameters<AndroidClientRequests["requestSettingsGet"]>
-  ): ReturnType<AndroidClientRequests["requestSettingsGet"]> {
-    return this.getClientRequests().requestSettingsGet(...args);
-  }
-
-  requestSettingsPut(
-    ...args: Parameters<AndroidClientRequests["requestSettingsPut"]>
-  ): ReturnType<AndroidClientRequests["requestSettingsPut"]> {
-    return this.getClientRequests().requestSettingsPut(...args);
-  }
-
-  requestSettingsList(
-    ...args: Parameters<AndroidClientRequests["requestSettingsList"]>
-  ): ReturnType<AndroidClientRequests["requestSettingsList"]> {
-    return this.getClientRequests().requestSettingsList(...args);
-  }
-
-  requestGlobalAction(
-    ...args: Parameters<AndroidClientRequests["requestGlobalAction"]>
-  ): ReturnType<AndroidClientRequests["requestGlobalAction"]> {
-    return this.getClientRequests().requestGlobalAction(...args);
-  }
-
-  validateFrameContext(
-    ...args: Parameters<AndroidClientRequests["validateFrameContext"]>
-  ): ReturnType<AndroidClientRequests["validateFrameContext"]> {
-    return this.getClientRequests().validateFrameContext(...args);
-  }
-
-  requestDeviceInfo(
-    ...args: Parameters<AndroidClientRequests["requestDeviceInfo"]>
-  ): ReturnType<AndroidClientRequests["requestDeviceInfo"]> {
-    return this.getClientRequests().requestDeviceInfo(...args);
-  }
-
-  private awaitCancellableRequest<
-    T extends { success: boolean; totalTimeMs: number; error?: string },
-  >(
-    requestId: string,
-    promise: Promise<T>,
-    signal: AbortSignal | undefined,
-    startTime: number,
-  ): Promise<T> {
-    return this.getClientRequests().awaitCancellableRequest(requestId, promise, signal, startTime);
-  }
-
-  private screenshotRequesterInstance: AndroidScreenshotRequester | undefined;
-  private getScreenshotRequester(): AndroidScreenshotRequester {
-    if (!this.screenshotRequesterInstance) {
-      const client = this;
-      this.screenshotRequesterInstance = new AndroidScreenshotRequester({
-        timer: client.timer,
-        requestManager: client.requestManager,
-        screenGeometry: client.screenGeometry,
-        get screenshotObservationStreamSuppressions() {
-          return client.screenshotObservationStreamSuppressions;
-        },
-        get screenshotCaptureBindings() {
-          return client.screenshotCaptureBindings;
-        },
-        get lateCancelledScreenshotRequestIds() {
-          return client.lateCancelledScreenshotRequestIds;
-        },
-        get socket() {
-          return client.ws;
-        },
-        get supportedCommands() {
-          return client.supportedCommands;
-        },
-        connectWebSocket: (perf) => client.connectWebSocket(perf),
-        noteScreenshotCaptureStarted: () =>
-          client.getScreenshotBackoffScheduler().noteCaptureStarted(),
-      });
-    }
-    return this.screenshotRequesterInstance;
-  }
-
-  /**
-   * `hidePrototypes` asks the device to hide its prototype for this capture (#9305); it is sent only
-   * to a CtrlProxy advertising `screenshot_hide_prototype_v1`, and the result's `prototypesHidden`
-   * reports the outcome.
-   */
-  async requestScreenshot(
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    suppressObservationStreamPush: boolean = false,
-    signal?: AbortSignal,
-    displayId?: number,
-    hidePrototypes: boolean = false,
-  ): Promise<ScreenshotResult> {
-    return this.getScreenshotRequester().requestScreenshot(
-      timeoutMs,
-      perf,
-      suppressObservationStreamPush,
-      signal,
-      displayId,
-      hidePrototypes,
-    );
-  }
-
-  async requestScreenshotWithoutObservationStreamPush(
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-  ): Promise<ScreenshotResult> {
-    return this.requestScreenshot(timeoutMs, perf, true);
-  }
-
-  private serviceReadinessVerifierInstance: AndroidServiceReadinessVerifier | undefined;
-  private getServiceReadinessVerifier(): AndroidServiceReadinessVerifier {
-    if (!this.serviceReadinessVerifierInstance) {
-      const client = this;
-      this.serviceReadinessVerifierInstance = new AndroidServiceReadinessVerifier({
-        retryExecutor: client.retryExecutor,
-        get logger() {
-          return client.loggerInstance;
-        },
-        requestHierarchySync: (signal, timeoutMs, diagnostics) =>
-          client.requestHierarchySync(
-            new NoOpPerformanceTracker(),
-            false,
-            signal,
-            timeoutMs,
-            diagnostics,
-          ),
-      });
-    }
-    return this.serviceReadinessVerifierInstance;
-  }
-
-  async verifyServiceReady(
-    maxAttempts: number = 5,
-    delayMs: number = 500,
-    timeoutMs: number = 3000,
-  ): Promise<boolean> {
-    return this.getServiceReadinessVerifier().verifyServiceReady(maxAttempts, delayMs, timeoutMs);
-  }
-
-  // ===========================================================================
-  // Event Listeners
-  // ===========================================================================
-
-  onInteraction(listener: (event: InteractionEvent) => void): () => void {
-    return this.interactionTracker.onInteraction(listener);
-  }
-
   /** Send start_recording for wire compatibility; currently has no effect on the device. */
   notifyRecordingStarted(): void {
     this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.startRecording()));
@@ -2479,91 +830,6 @@ export class AndroidCtrlProxyClient
   /** Send stop_recording for wire compatibility; currently has no effect on the device. */
   notifyRecordingStopped(): void {
     this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.stopRecording()));
-  }
-
-  // ===========================================================================
-  // Hierarchy Navigation Detector
-  // ===========================================================================
-
-  getHierarchyNavigationDetector(): HierarchyNavigationDetector {
-    if (!this.hierarchyNavigationDetector) {
-      this.hierarchyNavigationDetector = new HierarchyNavigationDetector(
-        this.getNavigationGraphManager(),
-        { timer: this.timer },
-      );
-
-      this.hierarchyNavigationDetector.setNavigationCallback((info) => {
-        if (info.packageName && info.screenFingerprint) {
-          if (!serverConfig.isNavigationScreenshotsEnabled()) {
-            return;
-          }
-          const appId = info.packageName;
-          const screenName = `screen_${info.screenFingerprint.substring(0, 12)}`;
-          NavigationScreenshotManager.getInstance()
-            .captureAndStore(this.device, this.adb, appId, screenName)
-            .then((screenshotPath) => {
-              if (screenshotPath) {
-                this.getNavigationGraphManager()
-                  .updateNodeScreenshot(appId, screenName, screenshotPath)
-                  .catch((err) =>
-                    logger.warn(`[CTRL_PROXY] Failed to update hierarchy screenshot: ${err}`),
-                  );
-              }
-            })
-            .catch((err) =>
-              logger.debug(`[CTRL_PROXY] Hierarchy screenshot capture skipped: ${err}`),
-            );
-        }
-      });
-    }
-    return this.hierarchyNavigationDetector;
-  }
-
-  resetHierarchyNavigationDetector(): void {
-    if (this.hierarchyNavigationDetector) {
-      this.hierarchyNavigationDetector.reset();
-    }
-  }
-
-  // ===========================================================================
-  // Screenshot Backoff
-  // ===========================================================================
-
-  cancelScreenshotBackoff(): void {
-    if (this.screenshotBackoffScheduler) {
-      // Fully quiesce (including the trailing throttle capture) — this is a teardown/quiesce path
-      // (disconnect, pre-action), not a sequence restart, so nothing should survive (issue #4927).
-      this.screenshotBackoffScheduler.stop();
-    }
-  }
-
-  refreshObservationStreamScreenshotCadence(): void {
-    this.screenshotBackoffScheduler?.rescheduleKeepAlive();
-  }
-
-  refreshObservationStreamHierarchyCadence(intervalMs?: number | null): void {
-    if (!this.isCommandSupported("set_hierarchy_interval")) {
-      logger.info(
-        "[AndroidCtrlProxyClient] Skipping hierarchy cadence sync; runner does not advertise set_hierarchy_interval",
-      );
-      return;
-    }
-
-    const resolvedIntervalMs =
-      intervalMs === undefined
-        ? (getDeviceDataStreamServer()?.getHierarchyIntervalMsForDevice(
-            this.device.deviceId,
-            AndroidCtrlProxyClient.DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS,
-          ) ?? AndroidCtrlProxyClient.DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS)
-        : intervalMs;
-
-    this.sendMessage(
-      serializeCtrlProxyRequest(
-        ctrlProxyRequests.setHierarchyInterval({
-          intervalMs: resolvedIntervalMs,
-        }),
-      ),
-    );
   }
 
   // ===========================================================================
@@ -2605,6 +871,9 @@ export class AndroidCtrlProxyClient
       this.lateCancelledScreenshotRequestIds.clear();
       this.releaseCtrlProxyForwardLeaseAfterConnectionSettles();
       AndroidCtrlProxyClient.activeObservers.delete(this);
+      // A closed client never reconnects, so leaving it registered would hand a
+      // stale client to the next getInstance. Only evict if still current.
+      AndroidCtrlProxyClient.registry.invalidate(this.device.deviceId, this);
     }
   }
 
@@ -2632,47 +901,6 @@ export class AndroidCtrlProxyClient
         `[CTRL_PROXY] Inbound handler drain timed out after ${AndroidCtrlProxyClient.INBOUND_HANDLER_DRAIN_TIMEOUT_MS}ms; continuing cleanup`,
       );
     }
-  }
-
-  private ensureLocalPortAvailableForForwarding(signal?: AbortSignal): Promise<void> {
-    return this.getPortForwarder().ensureLocalPortAvailableForForwarding(signal);
-  }
-
-  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
-  setupPortForwarding(
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-  ): Promise<void> {
-    return this.getPortForwarder().setupPortForwarding(perf, signal);
-  }
-
-  /**
-   * Remove stale local forwards for this device that target CtrlProxy's fixed
-   * device port. A daemon crash drops the in-memory singleton registry but
-   * leaves ADB's forwards alive; the next client setup is their recovery path.
-   *
-   * A newly-created singleton is registered before it can start connecting, so
-   * its allocated port is treated as live even before port forwarding completes.
-   */
-  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
-  sweepOrphanedCtrlProxyPortForwards(signal?: AbortSignal): Promise<void> {
-    return this.getPortForwarder().sweepOrphanedCtrlProxyPortForwards(signal);
-  }
-
-  /**
-   * Remove a forward only when it still maps this device and host port to the
-   * CtrlProxy device port. Re-listing closes the race with a different service
-   * reusing the host port after the orphan sweep discovered it.
-   *
-   * @returns `true` when no matching forward remains; `false` when adb failed
-   * to establish that state.
-   */
-  private removeCtrlProxyPortForward(
-    port: number,
-    signal?: AbortSignal,
-    options: { reclaimUnrecorded?: boolean } = {},
-  ): Promise<boolean> {
-    return this.getPortForwarder().removeCtrlProxyPortForward(port, signal, options);
   }
 
   private async finishInvalidatedConnectionCleanup(): Promise<void> {
@@ -2706,7 +934,7 @@ export class AndroidCtrlProxyClient
   }
 
   /** Resolve request responses only when the runner supplies a truthy request ID. */
-  private resolvePendingResponse<Message extends { requestId?: string | null }, Payload>(
+  protected resolvePendingResponse<Message extends { requestId?: string | null }, Payload>(
     message: Message,
     buildPayload: (message: Message & { requestId: string }) => Payload,
   ): void {
@@ -2718,422 +946,8 @@ export class AndroidCtrlProxyClient
     }
   }
 
-  /** SDK event frames include custom_event, which is intentionally outside WebSocketMessage. */
-  private async recordSdkTelemetryEvent(message: {
-    type: string;
-    timestamp?: number;
-    event?: Record<string, unknown>;
-  }): Promise<void> {
-    const event = message.event;
-    if (event) {
-      await this.getSdkEventIngestor().recordSdkEvent(
-        {
-          type: message.type,
-          timestamp: message.timestamp ?? this.timer.now(),
-          payload: { event },
-        },
-        (event.applicationId as string) ?? null,
-      );
-    }
-  }
-
-  private inboundMessageRouter: AndroidInboundMessageRouter | null = null;
-  private getInboundMessageRouter(): AndroidInboundMessageRouter {
-    if (!this.inboundMessageRouter) {
-      const client = this;
-      this.inboundMessageRouter = new AndroidInboundMessageRouter({
-        transientObserver: client.transientObserver,
-        rejectedCommands: client.rejectedCommands,
-        get supportedCommands() {
-          return client.supportedCommands;
-        },
-        set supportedCommands(value) {
-          client.supportedCommands = value;
-        },
-        get hierarchy() {
-          return client.hierarchy;
-        },
-        get lateCancelledScreenshotRequestIds() {
-          return client.lateCancelledScreenshotRequestIds;
-        },
-        requestManager: client.requestManager,
-        get _hierarchy() {
-          return client._hierarchy;
-        },
-        get device() {
-          return client.device;
-        },
-        get onDisplayTransition() {
-          return client.onDisplayTransition;
-        },
-        get screenshotObservationStreamSuppressions() {
-          return client.screenshotObservationStreamSuppressions;
-        },
-        get screenshotCaptureBindings() {
-          return client.screenshotCaptureBindings;
-        },
-        get certificates() {
-          return client.certificates;
-        },
-        get focus() {
-          return client.focus;
-        },
-        get sdkNavigationAppIds() {
-          return client.sdkNavigationAppIds;
-        },
-        get closed() {
-          return client.closed;
-        },
-        get adb() {
-          return client.adb;
-        },
-        get prototypes() {
-          return client.prototypes;
-        },
-        timer: client.timer,
-        get lastInteractionByApp() {
-          return client.lastInteractionByApp;
-        },
-        get storage() {
-          return client.storage;
-        },
-        get maxCachedInteractions() {
-          return MAX_CACHED_INTERACTIONS;
-        },
-        refreshObservationStreamHierarchyCadence: (...args) =>
-          client.refreshObservationStreamHierarchyCadence(...args),
-        settleUnattributedFocusedClickRejection: (...args) =>
-          client.settleUnattributedFocusedClickRejection(...args),
-        handleHierarchyUpdate: (...args) => client.handleHierarchyUpdate(...args),
-        pushScreenshotToObservationStream: (...args) =>
-          client.pushScreenshotToObservationStream(...args),
-        resolvePendingResponse: (...args) => client.resolvePendingResponse(...args),
-        recordSdkScreenIdentity: (...args) => client.recordSdkScreenIdentity(...args),
-        ensureBuildContext: (...args) => client.ensureBuildContext(...args),
-        attachRecentInteraction: (...args) => client.attachRecentInteraction(...args),
-        enqueueNavigationGraphWrite: (...args) => client.enqueueNavigationGraphWrite(...args),
-        getNavigationGraphManager: (...args) => client.getNavigationGraphManager(...args),
-        handlePackageEvent: (...args) => client.handlePackageEvent(...args),
-        pruneStaleInteractions: (...args) => client.pruneStaleInteractions(...args),
-        notifyInteractionListeners: (...args) => client.notifyInteractionListeners(...args),
-        handleHandledExceptionEvent: (...args) => client.handleHandledExceptionEvent(...args),
-        clearSdkScreenIdentity: (...args) => client.clearSdkScreenIdentity(...args),
-        handleCrashEvent: (...args) => client.handleCrashEvent(...args),
-        handleAnrEvent: (...args) => client.handleAnrEvent(...args),
-        handleFrameMetricsEvent: (...args) => client.handleFrameMetricsEvent(...args),
-        getSdkEventIngestor: (...args) => client.getSdkEventIngestor(...args),
-        recordSdkTelemetryEvent: (...args) => client.recordSdkTelemetryEvent(...args),
-      });
-    }
-    return this.inboundMessageRouter;
-  }
-
-  private get webSocketMessageHandlers() {
-    return this.getInboundMessageRouter().webSocketMessageHandlers;
-  }
-
-  private get lastInteractionByApp() {
-    return this.interactionTracker.lastInteractionByApp;
-  }
-
-  private pruneStaleInteractions(now: number): void {
-    this.interactionTracker.pruneStaleInteractions(now);
-  }
-
-  private attachRecentInteraction(event: NavigationEvent): void {
-    this.interactionTracker.attachRecentInteraction(event);
-  }
-
-  private notifyInteractionListeners(event: InteractionEvent): void {
-    this.interactionTracker.notifyInteractionListeners(event);
-  }
-
-  private navigationWriteQueueInstance: AndroidNavigationWriteQueue | undefined;
-  private enqueueNavigationGraphWrite(received: NavigationEvent): Promise<void> {
-    this.navigationWriteQueueInstance ??= new AndroidNavigationWriteQueue({
-      deviceId: this.device.deviceId,
-      getNavigationGraphManager: () => this.getNavigationGraphManager(),
-    });
-    return this.navigationWriteQueueInstance.enqueue(received);
-  }
-
-  private handleWebSocketMessage(data: WebSocket.Data): Promise<void> {
-    return this.getInboundMessageRouter().handleWebSocketMessage(data);
-  }
-
-  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
-  handleHierarchyUpdate(
-    data: AccessibilityHierarchy,
-    perfTiming?: AndroidPerfTiming[],
-    frameContext?: string,
-    requestId?: string | null,
-  ): void {
-    this.getHierarchyUpdateHandler().handle(data, perfTiming, frameContext, requestId);
-  }
-
-  /** Converts wire to domain at the push; provenance stays keyed by the wire object. */
-  private pushHierarchyToObservationStream(
-    wireHierarchy: AccessibilityHierarchy,
-    frameContext?: string,
-  ): void {
-    const hierarchy = this.hierarchy.convertToViewHierarchyResult(wireHierarchy);
-    hierarchy.updatedAt = wireHierarchy.updatedAt || undefined; // stream timestamp source
-    this.forwardHierarchyToObservationStream(hierarchy, frameContext, {
-      logTag: "CTRL_PROXY",
-      recordForwarded: (captureSequence) => {
-        wireHierarchy.captureSequence = captureSequence;
-        this.streamedCaptureSequences.set(wireHierarchy, captureSequence);
-        this.screenGeometry.markForwarded(captureSequence);
-      },
-    });
-  }
-
-  /**
-   * Bind the hierarchy explicitly forwarded by the daemon's subscriber bootstrap. The request
-   * suppressed this client's normal stream push, so it must replace any prior provenance before
-   * accepting the identity assigned by that explicit push, then start keepalives for a static
-   * screen.
-   */
-  recordInitialObservationStreamHierarchy(
-    hierarchy: ViewHierarchyResult,
-    captureSequence: number | null,
-  ): void {
-    this.screenGeometry.clear();
-    this.updateCachedScreenDimensions(hierarchy);
-    if (captureSequence !== null) {
-      this.screenGeometry.markForwarded(captureSequence);
-    }
-    this.startScreenshotBackoff();
-  }
-
-  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
-  pushScreenshotToObservationStream(
-    screenshotBase64: string,
-    metadata: ScreenshotMetadata = ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
-    binding?: ScreenGeometryBinding,
-    frameContext?: string,
-    rotation?: number,
-  ): void {
-    const server = getDeviceDataStreamServer();
-    if (!server) {
-      return;
-    }
-
-    // Declare the geometry the request was BOUND to, not whatever the cache holds now — the two
-    // differ exactly when a hierarchy arrived while this frame was in flight. Without a binding,
-    // fall back to a nominal size and send no identity, so a control client fails closed.
-    const screenWidth = binding?.width ?? this.screenGeometry.width ?? 1080;
-    const screenHeight = binding?.height ?? this.screenGeometry.height ?? 2340;
-
-    try {
-      // The identity AND the coordinate space travel with the frame from the moment it was
-      // requested (issues #3348, #4549) — both from the binding taken at initiation, never the
-      // client's LATEST metadata at delivery. Android bounds are already physical pixels
-      // (nativeScale === 1), so a post-#4548 runner's frame is canonical pixels as-is; the binding
-      // carries that declaration so a mid-flight metadata flip cannot relabel the frame.
-      server.pushScreenshotUpdate(
-        this.device.deviceId,
-        screenshotBase64,
-        screenWidth,
-        screenHeight,
-        metadata,
-        {
-          ...screenshotBindingPushOptions(binding),
-          rotation,
-          ...(frameContext === undefined ? {} : { frameContext }),
-        },
-      );
-    } catch (error) {
-      logger.debug(`[CTRL_PROXY] Failed to push screenshot to observation stream: ${error}`);
-    }
-  }
-
-  private updateCachedScreenDimensions(
-    hierarchy: Pick<
-      AccessibilityHierarchy,
-      "windows" | "nativeScale" | "pixelWidth" | "pixelHeight"
-    >,
-  ): void {
-    // Retain the additive #4548 scale metadata alongside — but never instead of — the
-    // window-derived geometry below. Same freshness rule as the tracked geometry: a hierarchy
-    // without the fields (pre-#4548 runner) resets it to null rather than leaving stale values.
-    this.reportedScaleMetadata = readScreenScaleMetadata(hierarchy);
-    const windows = hierarchy.windows;
-    if (!windows || windows.length === 0) {
-      this.screenGeometry.clear();
-      return;
-    }
-
-    let maxArea = 0;
-    let bestDimensions: { width: number; height: number } | null = null;
-
-    for (const window of windows) {
-      if (window.bounds) {
-        const width = window.bounds.right - window.bounds.left;
-        const height = window.bounds.bottom - window.bounds.top;
-        const area = width * height;
-        if (area > maxArea) {
-          maxArea = area;
-          bestDimensions = { width, height };
-        }
-      }
-    }
-
-    if (bestDimensions) {
-      // A change clears the identity: it becomes capture-tracked only once the hierarchy carrying
-      // it reaches the daemon (see pushHierarchyToObservationStream) — which will NOT happen when
-      // this hierarchy is suppressed, or when there is no stream server. The coordinate space is
-      // bound here (#4549) from the metadata present for THIS hierarchy, so a later metadata flip
-      // cannot restamp a frame whose request was bound now.
-      this.screenGeometry.update(
-        bestDimensions.width,
-        bestDimensions.height,
-        this.reportedScaleMetadata ? COORDINATE_SPACE_PX : undefined,
-        this.reportedScaleMetadata?.nativeScale,
-      );
-    } else {
-      // No usable window bounds in this hierarchy. Clearing (rather than keeping the previous
-      // entry) stops a later push from vouching for dimensions this hierarchy cannot confirm.
-      this.screenGeometry.clear();
-    }
-  }
-
-  /**
-   * Runner-reported scale metadata from the most recent hierarchy (#4548), or null when the
-   * runner has not reported it (pre-#4548 runner, or no hierarchy yet). Exposed for #4549's
-   * canonical-pixel conversion; nothing in current behavior consumes it.
-   */
-  getScreenScaleMetadata(): ScreenScaleMetadata | null {
-    return this.reportedScaleMetadata;
-  }
-
-  private getScreenshotBackoffScheduler(): ScreenshotBackoffScheduler {
-    return this.createScreenshotBackoffScheduler(
-      async () => this.captureScreenshotForBackoff(),
-      (result) => this.emitBackoffScreenshot(result),
-      {
-        intervals: [0, 100, 300, 500, 800, 1300],
-        keepAliveIntervalMs: 3000,
-        minCaptureIntervalMs: AndroidCtrlProxyClient.A11Y_SCREENSHOT_MIN_INTERVAL_MS,
-      },
-    );
-  }
-
-  private emitBackoffScreenshot(result: ScreenshotCaptureResult): void {
-    if (result.data) {
-      this.pushScreenshotToObservationStream(
-        result.data,
-        result,
-        result.captureBinding,
-        result.frameContext,
-        result.rotation,
-      );
-    }
-  }
-
-  private async captureScreenshotForBackoff(): Promise<ScreenshotCaptureResult> {
-    const server = getDeviceDataStreamServer();
-    if (!server || !server.hasSubscriberForDevice(this.device.deviceId)) {
-      return { success: false, error: "No subscribers" };
-    }
-
-    return this.captureScreenshotForObservationStream();
-  }
-
-  async captureScreenshotForObservationStream(): Promise<ScreenshotCaptureResult> {
-    return this.getScreenshotCapture().captureForObservationStream();
-  }
-
-  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
-  startScreenshotBackoff(): void {
-    const server = getDeviceDataStreamServer();
-    if (!server || !server.hasSubscriberForDevice(this.device.deviceId)) {
-      return;
-    }
-
-    const scheduler = this.getScreenshotBackoffScheduler();
-    scheduler.startBackoffSequence();
-  }
-
-  private getInstalledAppsRepository(): InstalledAppsStore {
-    if (!this.installedAppsRepository) {
-      this.installedAppsRepository = new InstalledAppsRepository();
-    }
-    return this.installedAppsRepository;
-  }
-
-  /**
-   * Get or create the work profile monitor for polling profiles without accessibility service
-   */
-  getWorkProfileMonitor(): WorkProfileMonitor {
-    if (!this.workProfileMonitor) {
-      this.workProfileMonitor = new DefaultWorkProfileMonitor({
-        deviceId: this.device.deviceId,
-        adb: this.adb,
-        installedAppsStore: this.getInstalledAppsRepository(),
-        timer: this.timer,
-      });
-    }
-    return this.workProfileMonitor;
-  }
-
-  /**
-   * Start the work profile monitor to poll profiles without accessibility service
-   */
-  startWorkProfileMonitor(): void {
-    this.getWorkProfileMonitor().start();
-  }
-
-  /**
-   * Stop the work profile monitor
-   */
-  stopWorkProfileMonitor(): void {
-    if (this.workProfileMonitor) {
-      this.workProfileMonitor.stop();
-    }
-  }
-
-  private handlePackageEvent(event: PackageEvent, timestamp?: number): Promise<void> {
-    return this.getAppEventRecorder().handlePackageEvent(event, timestamp);
-  }
-
-  private handleHandledExceptionEvent(event: HandledExceptionEvent): Promise<void> {
-    return this.getAppEventRecorder().handleHandledExceptionEvent(event);
-  }
-
-  private isCommandSupported(messageType: string): boolean {
-    if (this.rejectedCommands.has(messageType)) {
-      return false;
-    }
-    if (this.supportedCommands?.has(ANDROID_FULL_COMMAND_SET_CAPABILITY)) {
-      return this.supportedCommands.has(messageType);
-    }
-    // Legacy behavior for services that predate full_command_set_v1 (older APKs).
-    if (
-      [
-        "gesture_display_id_v1",
-        "tap_double_v1",
-        MULTI_FINGER_GESTURE_CAPABILITY,
-        PROTOTYPE_DISPLAY_CAPABILITY,
-        PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
-        PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
-        PROTOTYPE_MULTI_SURFACE_CAPABILITY,
-        PROTOTYPE_STORAGE_CAPABILITY,
-      ].includes(messageType)
-    ) {
-      return this.supportedCommands?.has(messageType) === true;
-    }
-    if (this.supportedCommands === null) {
-      return true;
-    }
-    if (ANDROID_CAPABILITY_GATED_COMMANDS.has(messageType)) {
-      return this.supportedCommands.has(messageType);
-    }
-    return true;
-  }
-
   // Cancel only this caller's wait; connection establishment is shared with other operations.
-  private async awaitActionWork<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  protected async awaitActionWork<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     signal?.throwIfAborted();
     if (!signal) {
       return work();
@@ -3150,26 +964,6 @@ export class AndroidCtrlProxyClient
     signal: AbortSignal,
   ): Promise<void> {
     return this.awaitActionWork(work, signal);
-  }
-
-  private handleFrameMetricsEvent(data: NonNullable<WsFrameMetricsMessage["frameMetrics"]>): void {
-    return this.getAppEventRecorder().handleFrameMetricsEvent(data);
-  }
-
-  private handleCrashEvent(event: SdkCrashPayload): Promise<void> {
-    return this.getAppEventRecorder().handleCrashEvent(event);
-  }
-
-  private handleAnrEvent(event: SdkAnrPayload): Promise<void> {
-    return this.getAppEventRecorder().handleAnrEvent(event);
-  }
-
-  private parseStackTrace(stackTrace: string, packageName: string): StackTraceElement[] {
-    return parseStackTrace(stackTrace, packageName);
-  }
-
-  private markInstalledAppsStale(reason: string): Promise<void> {
-    return this.getAppEventRecorder().markInstalledAppsStale(reason);
   }
 }
 

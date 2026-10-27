@@ -18,7 +18,12 @@ const isWindows = platform() === "win32";
 function createFakeDaemonState(refreshDevices: () => Promise<number> = async () => 0) {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      hasSession: () => false,
+      getSession: () => null,
+      getDeviceLabels: () => undefined,
+      releaseSession: async () => null,
+    }),
     getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices,
@@ -121,7 +126,7 @@ describe("UnixSocketServer close", () => {
   (isWindows ? test.skip : test)(
     "delivers a real response when an in-flight request settles during the drain",
     async () => {
-      let releaseRefresh: () => void;
+      let releaseRefresh: () => void = () => {};
       const refreshComplete = new Promise<number>((resolve) => {
         releaseRefresh = () => {
           resolve(0);
@@ -186,7 +191,7 @@ describe("UnixSocketServer close", () => {
     "gives a stalled request and its queued successor one shutdown frame each",
     async () => {
       let refreshStarts = 0;
-      let releaseRefresh: () => void;
+      let releaseRefresh: () => void = () => {};
       const refreshComplete = new Promise<number>((resolve) => {
         releaseRefresh = () => {
           resolve(0);

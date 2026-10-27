@@ -32,28 +32,28 @@ const ADVERTISED_SUBTYPE_UNIT_VECTOR = `mId=${primaryIme}\n  mSubtypeId=42 mSubt
 
 function fixture(deviceId = "test-device") {
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("shell ime list -a -s", {
-    stdout: `${primaryIme}\n${alternateIme}\n`,
-    stderr: "",
-  });
-  adb.setCommandResponse("shell ime list -s", { stdout: `${primaryIme}\n`, stderr: "" });
-  adb.setCommandResponse("shell settings get secure default_input_method", {
-    stdout: `${primaryIme}\n`,
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "shell ime list -a -s",
+    createExecResult(`${primaryIme}\n${alternateIme}\n`, ""),
+  );
+  adb.setCommandResponse("shell ime list -s", createExecResult(`${primaryIme}\n`, ""));
+  adb.setCommandResponse(
+    "shell settings get secure default_input_method",
+    createExecResult(`${primaryIme}\n`, ""),
+  );
   return { adb, catalog: new AndroidImeCatalog(adb, deviceId, pinnedUser(0)) };
 }
 
 test("explicit selection recovers quarantine only after verified IME readback", async () => {
   const deviceId = "quarantined-select-success";
   const { adb, catalog } = fixture(deviceId);
-  adb.setCommandResponse("shell ime list -s", {
-    stdout: `${primaryIme}\n${alternateIme}\n`,
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "shell ime list -s",
+    createExecResult(`${primaryIme}\n${alternateIme}\n`, ""),
+  );
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-    { stdout: primaryIme, stderr: "" },
-    { stdout: alternateIme, stderr: "" },
+    createExecResult(primaryIme, ""),
+    createExecResult(alternateIme, ""),
   ]);
   quarantineAndroidIme(deviceId);
 
@@ -77,10 +77,10 @@ test("explicit selection of the already active IME recovers quarantine by readba
 test("mismatched selection readback leaves the device quarantined", async () => {
   const deviceId = "quarantined-select-mismatch";
   const { adb, catalog } = fixture(deviceId);
-  adb.setCommandResponse("shell ime list -s", {
-    stdout: `${primaryIme}\n${alternateIme}\n`,
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "shell ime list -s",
+    createExecResult(`${primaryIme}\n${alternateIme}\n`, ""),
+  );
   quarantineAndroidIme(deviceId);
 
   await expect(catalog.select(alternateIme)).rejects.toThrow("did not take effect");
@@ -93,14 +93,14 @@ test("mismatched selection readback leaves the device quarantined", async () => 
 test("failed ime set leaves the device quarantined and surfaces its error", async () => {
   const deviceId = "quarantined-select-failure";
   const { adb, catalog } = fixture(deviceId);
-  adb.setCommandResponse("shell ime list -s", {
-    stdout: `${primaryIme}\n${alternateIme}\n`,
-    stderr: "",
-  });
-  adb.setCommandResponse(`shell ime set ${alternateIme}`, {
-    stdout: "",
-    stderr: "permission denied",
-  });
+  adb.setCommandResponse(
+    "shell ime list -s",
+    createExecResult(`${primaryIme}\n${alternateIme}\n`, ""),
+  );
+  adb.setCommandResponse(
+    `shell ime set ${alternateIme}`,
+    createExecResult("", "permission denied"),
+  );
   quarantineAndroidIme(deviceId);
 
   await expect(catalog.select(alternateIme)).rejects.toThrow(
@@ -114,13 +114,13 @@ test("failed ime set leaves the device quarantined and surfaces its error", asyn
 test("failed selection readback leaves the device quarantined", async () => {
   const deviceId = "quarantined-select-readback-failure";
   const { adb, catalog } = fixture(deviceId);
-  adb.setCommandResponse("shell ime list -s", {
-    stdout: `${primaryIme}\n${alternateIme}\n`,
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "shell ime list -s",
+    createExecResult(`${primaryIme}\n${alternateIme}\n`, ""),
+  );
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-    { stdout: primaryIme, stderr: "" },
-    { stdout: "", stderr: "permission denied" },
+    createExecResult(primaryIme, ""),
+    createExecResult("", "permission denied"),
   ]);
   quarantineAndroidIme(deviceId);
 
@@ -146,13 +146,13 @@ test("scoped selection does not clear quarantine", async () => {
 test("quarantined explicit selection holds the lock until readback before an ordinary operation", async () => {
   const deviceId = "quarantined-select-serialization";
   const { adb } = fixture(deviceId);
-  adb.setCommandResponse("shell ime list -s", {
-    stdout: `${primaryIme}\n${alternateIme}\n`,
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "shell ime list -s",
+    createExecResult(`${primaryIme}\n${alternateIme}\n`, ""),
+  );
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-    { stdout: primaryIme, stderr: "" },
-    { stdout: alternateIme, stderr: "" },
+    createExecResult(primaryIme, ""),
+    createExecResult(alternateIme, ""),
   ]);
   let enteredSet: () => void = () => {};
   const setStarted = new Promise<void>((resolve) => {
@@ -228,13 +228,13 @@ test("select rejects an unknown or disabled IME before running ime set", async (
 
 test("select uses component argv and verifies the resulting active IME", async () => {
   const { adb, catalog } = fixture();
-  adb.setCommandResponse("shell ime list -s", {
-    stdout: `${primaryIme}\n${alternateIme}\n`,
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "shell ime list -s",
+    createExecResult(`${primaryIme}\n${alternateIme}\n`, ""),
+  );
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-    { stdout: primaryIme, stderr: "" },
-    { stdout: alternateIme, stderr: "" },
+    createExecResult(primaryIme, ""),
+    createExecResult(alternateIme, ""),
   ]);
   expect((await catalog.select(alternateIme)).activeImeId).toBe(alternateIme);
   expect(adb.getExecutedArgv()).toContainEqual(["shell", "ime", "set", alternateIme]);
@@ -250,19 +250,16 @@ test("select uses component argv and verifies the resulting active IME", async (
 
 test("select reports a failed postcondition instead of claiming readiness", async () => {
   const { adb, catalog } = fixture();
-  adb.setCommandResponse("shell ime list -s", {
-    stdout: `${primaryIme}\n${alternateIme}\n`,
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "shell ime list -s",
+    createExecResult(`${primaryIme}\n${alternateIme}\n`, ""),
+  );
   await expect(catalog.select(alternateIme)).rejects.toThrow("did not take effect");
 });
 
 test("rejects malformed list output before it can become a selectable component", async () => {
   const { adb, catalog } = fixture();
-  adb.setCommandResponse("shell ime list -a -s", {
-    stdout: "Error: service not ready",
-    stderr: "",
-  });
+  adb.setCommandResponse("shell ime list -a -s", createExecResult("Error: service not ready", ""));
   await expect(catalog.list()).rejects.toThrow("invalid IME component list");
 });
 
@@ -284,13 +281,13 @@ test("selection waits for another IME operation on the same device", async () =>
 test("reports the verified IME after cancellation following set dispatch", async () => {
   const { adb } = fixture();
   const controller = new AbortController();
-  adb.setCommandResponse("shell ime list -s", {
-    stdout: `${primaryIme}\n${alternateIme}\n`,
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "shell ime list -s",
+    createExecResult(`${primaryIme}\n${alternateIme}\n`, ""),
+  );
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-    { stdout: primaryIme, stderr: "" },
-    { stdout: alternateIme, stderr: "" },
+    createExecResult(primaryIme, ""),
+    createExecResult(alternateIme, ""),
   ]);
   const catalog = new AndroidImeCatalog(
     {
@@ -316,10 +313,10 @@ test("reports the verified IME after cancellation following set dispatch", async
 test("reports a genuine set failure after cancellation following dispatch", async () => {
   const { adb } = fixture();
   const controller = new AbortController();
-  adb.setCommandResponse("shell ime list -s", {
-    stdout: `${primaryIme}\n${alternateIme}\n`,
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "shell ime list -s",
+    createExecResult(`${primaryIme}\n${alternateIme}\n`, ""),
+  );
   const catalog = new AndroidImeCatalog(
     {
       execute: async (args: string[], options?: AdbExecuteOptions) => {
@@ -335,10 +332,10 @@ test("reports a genuine set failure after cancellation following dispatch", asyn
     "dispatch-failure-device",
     pinnedUser(0),
   );
-  adb.setCommandResponse(`shell ime set ${alternateIme}`, {
-    stdout: "",
-    stderr: "permission denied",
-  });
+  adb.setCommandResponse(
+    `shell ime set ${alternateIme}`,
+    createExecResult("", "permission denied"),
+  );
 
   await expect(catalog.selectWithinLock(alternateIme, controller.signal)).rejects.toThrow(
     "Failed to select IME",
@@ -348,10 +345,10 @@ test("reports a genuine set failure after cancellation following dispatch", asyn
 test("cancels set before dispatch without changing the active IME", async () => {
   const { adb } = fixture();
   const controller = new AbortController();
-  adb.setCommandResponse("shell ime list -s", {
-    stdout: `${primaryIme}\n${alternateIme}\n`,
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "shell ime list -s",
+    createExecResult(`${primaryIme}\n${alternateIme}\n`, ""),
+  );
   let dispatched = false;
   let enteredQueue: () => void = () => {};
   const queued = new Promise<void>((resolve) => {
@@ -447,21 +444,24 @@ Dexopt state:
 
 test("captures identity and subtype without inventing absent optional fields", async () => {
   const { adb, catalog } = fixture();
-  adb.setCommandResponse("shell settings get secure selected_input_method_subtype", {
-    stdout: "42\n",
-    stderr: "",
-  });
-  adb.setCommandResponse("shell dumpsys input_method", {
-    stdout: ADVERTISED_SUBTYPE_UNIT_VECTOR,
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "shell settings get secure selected_input_method_subtype",
+    createExecResult("42\n", ""),
+  );
+  adb.setCommandResponse(
+    "shell dumpsys input_method",
+    createExecResult(ADVERTISED_SUBTYPE_UNIT_VECTOR, ""),
+  );
   expect(parseAdvertisedImeSubtypes(ADVERTISED_SUBTYPE_UNIT_VECTOR, primaryIme)?.get(42)).toBe(
     "en_US",
   );
-  adb.setCommandResponse("shell dumpsys package", {
-    stdout: `Packages:\n  Package [com.example.primaryime] (abc):\n    versionName=15.2.0\nShared users:\n`,
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "shell dumpsys package",
+    createExecResult(
+      `Packages:\n  Package [com.example.primaryime] (abc):\n    versionName=15.2.0\nShared users:\n`,
+      "",
+    ),
+  );
   const subtype = await catalog.readSubtype(primaryIme);
   expect(subtype).toEqual({ id: 42, locale: "en_US" });
   expect(await catalog.identity(primaryIme, subtype)).toEqual({
@@ -470,7 +470,7 @@ test("captures identity and subtype without inventing absent optional fields", a
     versionName: "15.2.0",
     subtype: "en_US",
   });
-  adb.setCommandResponse("shell dumpsys package", { stdout: "Packages:\n", stderr: "" });
+  adb.setCommandResponse("shell dumpsys package", createExecResult("Packages:\n", ""));
   expect(await catalog.identity(primaryIme, { id: null })).toEqual({
     component: primaryIme,
     package: "com.example.primaryime",
@@ -479,13 +479,13 @@ test("captures identity and subtype without inventing absent optional fields", a
 
 test("restores a selected subtype and deletes an unset one after verifying readback", async () => {
   const { adb, catalog } = fixture();
-  adb.setCommandResponse("shell dumpsys input_method", {
-    stdout: `mId=${primaryIme}\n  mSubtypeId=42 mSubtypeLocale=en_US`,
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "shell dumpsys input_method",
+    createExecResult(`mId=${primaryIme}\n  mSubtypeId=42 mSubtypeLocale=en_US`, ""),
+  );
   adb.setCommandResponseSequence("shell settings get secure selected_input_method_subtype", [
-    { stdout: "42", stderr: "" },
-    { stdout: "null", stderr: "" },
+    createExecResult("42", ""),
+    createExecResult("null", ""),
   ]);
   await catalog.restoreSubtypeWithinLock(primaryIme, { id: 42 });
   await catalog.restoreSubtypeWithinLock(primaryIme, { id: null });
@@ -508,10 +508,10 @@ test("restores a selected subtype and deletes an unset one after verifying readb
 
 test("rejects a subtype that is no longer advertised before writing it", async () => {
   const { adb, catalog } = fixture();
-  adb.setCommandResponse("shell dumpsys input_method", {
-    stdout: `mId=${primaryIme}\n  mSubtypeId=99 mSubtypeLocale=en_US`,
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "shell dumpsys input_method",
+    createExecResult(`mId=${primaryIme}\n  mSubtypeId=99 mSubtypeLocale=en_US`, ""),
+  );
   await expect(catalog.restoreSubtypeWithinLock(primaryIme, { id: 42 })).rejects.toThrow(
     "no longer advertised",
   );
@@ -630,7 +630,7 @@ test("pinForeground keeps one user even if the foreground user changes afterward
 
 test("foreground user comes from the shared resolver's current-user read", async () => {
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("shell am get-current-user", { stdout: "10\n", stderr: "" });
+  adb.setCommandResponse("shell am get-current-user", createExecResult("10\n", ""));
 
   expect(await createForegroundUserSource(adb).foregroundUserId()).toBe(10);
 });
@@ -656,9 +656,7 @@ test("passes the dumpsys bound through fake exec and parses input_method above 1
       dumpsysReads += 1;
       return createExecResult(stdout, "");
     },
-    null,
-    new DefaultRetryExecutor(timer),
-    timer,
+    { retryExecutor: new DefaultRetryExecutor(timer), timer },
   );
   expect(
     await new AndroidImeCatalog(adb, "large-ime-dump", pinnedUser(0)).readSubtype(primaryIme),
@@ -735,10 +733,10 @@ test.each(["set", "put", "delete"] as const)(
   "catalog never retries mutating %s on timeout",
   async (mutation) => {
     const { adb } = fixture();
-    adb.setCommandResponse("shell ime list -s", {
-      stdout: `${primaryIme}\n${alternateIme}`,
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell ime list -s",
+      createExecResult(`${primaryIme}\n${alternateIme}`, ""),
+    );
     let attempts = 0;
     const error = new AdbCommandTimeoutError("mutation timed out");
     const catalog = new AndroidImeCatalog(

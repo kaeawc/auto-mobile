@@ -1,3 +1,5 @@
+import { prototypeSpecSchema } from "../../src/features/prototype/prototypeSpec";
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   ctrlProxyRequests,
@@ -70,7 +72,7 @@ describe("prototype multiple surfaces", () => {
   });
   async function call(input: Record<string, unknown>, target: BootedDevice = device) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(target, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
   const show = (id: string, extra: Record<string, unknown> = {}) =>
     call({ action: "show", spec: spec(id), replaceOthers: false, ...extra });
@@ -103,7 +105,7 @@ describe("prototype multiple surfaces", () => {
     },
   );
   test.each([undefined, true, false])("wire sends only false (%s)", (replaceOthers) => {
-    const args = { requestId: "r", spec: spec("a"), replaceOthers };
+    const args = { requestId: "r", spec: prototypeSpecSchema.parse(spec("a")), replaceOthers };
     const wire = ctrlProxyRequests.showPrototype(args);
     expect(Object.hasOwn(wire, "replaceOthers")).toBe(replaceOthers === false);
     if (replaceOthers === false) {
@@ -111,7 +113,9 @@ describe("prototype multiple surfaces", () => {
     }
   });
   test("Android transport forwards false", async () => {
-    await new AndroidPrototypeTransport(client).show(spec("a"), { ...{ replaceOthers: false } });
+    await new AndroidPrototypeTransport(client).show(prototypeSpecSchema.parse(spec("a")), {
+      ...{ replaceOthers: false },
+    });
     expect(client.getPrototypeHistory()[0]).toHaveProperty("replaceOthers", false);
   });
   test("missing capability refuses before any request", async () => {
@@ -127,7 +131,9 @@ describe("prototype multiple surfaces", () => {
   test("iOS transport refuses false before requesting the agent", async () => {
     const agent = new FakePrototypeAgentClient();
     await expect(
-      new IosPrototypeTransport(agent).show(spec("a"), { ...{ replaceOthers: false } }),
+      new IosPrototypeTransport(agent).show(prototypeSpecSchema.parse(spec("a")), {
+        ...{ replaceOthers: false },
+      }),
     ).rejects.toThrow(
       "iOS shows one prototype at a time; replaceOthers:false is Android only (prototype_multi_surface_v1)",
     );

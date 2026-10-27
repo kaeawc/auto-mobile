@@ -1,4 +1,4 @@
-import * as videoRecordingManager from "../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { warmedTests } from "../helpers/warmedTests";
 import {
   afterAll,
@@ -52,20 +52,18 @@ import {
   stopVideoRecording,
   stopVideoRecordingUnattended,
   type VideoRetentionPolicy,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { createVideoRecordingDeviceIncarnationListener } from "../../src/server/videoRecordingIncarnationListener";
 import { DefaultDeviceIncarnationInvalidator } from "../../src/server/DeviceIncarnationInvalidator";
 import {
   restoreDeviceSnapshot,
   setDeviceSnapshotManagerDependencies,
   resetDeviceSnapshotManagerDependencies,
-} from "../../src/server/deviceSnapshotManager";
+} from "../../src/daemon/deviceSnapshotManager";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
 import { FakeAvdSnapshotService } from "../fakes/FakeAvdSnapshotService";
-import type { DeviceSnapshotRepository } from "../../src/db/deviceSnapshotRepository";
-import type { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import type { DeviceSnapshotManifest } from "../../src/models";
 import {
   VideoRecordingRepository,
@@ -90,7 +88,7 @@ import { displayTransitions } from "../../src/features/observe/DisplayTransition
 import {
   buildVideoArchiveItemUri,
   VIDEO_RESOURCE_URIS,
-} from "../../src/server/videoRecordingResourceUris";
+} from "../../src/daemon/videoRecordingResourceUris";
 
 describe("videoRecordingManager", () => {
   let fakeTimer: FakeTimer;
@@ -410,9 +408,9 @@ describe("videoRecordingManager", () => {
     });
     const listener = restoreListener();
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as DeviceSnapshotRepository,
+      snapshotRepository: repository,
       configRepository: new FakeDeviceSnapshotConfigRepository(),
-      snapshotStore: new FakeDeviceSnapshotStore() as DeviceSnapshotStore,
+      snapshotStore: new FakeDeviceSnapshotStore(),
       avdSnapshots: new FakeAvdSnapshotService(),
       timer: fakeTimer,
       deviceIncarnationInvalidator: new DefaultDeviceIncarnationInvalidator([listener]),
@@ -836,7 +834,7 @@ describe("videoRecordingManager", () => {
     test.each([
       ["ENOENT", 0],
       ["EACCES", 3],
-    ] as const)(
+    ] satisfies Array<[string, number]>)(
       "Android host-file monitor suppresses only expected missing-file warnings (%s)",
       async (code, expectedWarnings) => {
         const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 300 });
@@ -972,7 +970,7 @@ describe("videoRecordingManager", () => {
     expect(active.warning).toContain("without a pinned panel");
     expect(fakeBackend.startCalls[0]?.physicalDisplayId).toBeUndefined();
     const { metadata } = await stopVideoRecording(active.recordingId);
-    expect(metadata.warnings).toEqual([active.warning]);
+    expect<unknown>(metadata.warnings).toEqual([active.warning]);
     expect(metadata.transitions).toEqual([
       {
         atMs: 0,
@@ -1200,17 +1198,11 @@ describe("videoRecordingManager", () => {
         .setCommandResultSequence("shell stat -c %s /sdcard/empty.mp4", ["0", "0", "0", "0", "0"]);
       const captureBackend =
         platform === "ios"
-          ? new FfmpegVideoProcessingBackend(
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              captureTimer,
-              { remove: async () => {} },
-              undefined,
-              { size: async () => 0 },
-            )
+          ? new FfmpegVideoProcessingBackend(undefined, {
+              timer: captureTimer,
+              captureFileRemover: { remove: async () => {} },
+              recordingFileProbe: { size: async () => 0 },
+            })
           : new PlatformVideoCaptureBackend(factory, captureTimer);
       if (platform === "ios") {
         Object.defineProperty(captureBackend, "postProcessRecording", {
@@ -1511,7 +1503,7 @@ describe("videoRecordingManager", () => {
     fakeBackend.start = async (config) => {
       signalStart?.();
       await new Promise<void>((resolve) => {
-        config.abortSignal?.addEventListener("abort", resolve, { once: true });
+        config.abortSignal?.addEventListener("abort", () => resolve(), { once: true });
       });
       throw new Error("start aborted");
     };
@@ -2119,7 +2111,7 @@ describe("videoRecordingManager", () => {
     test.each([
       ["interrupted", 0],
       ["completed", 1024],
-    ] as const)(
+    ] satisfies Array<["interrupted" | "completed", number]>)(
       "reports the newest %s recording when no recording has a file",
       async (status, sizeBytes) => {
         await seed("only-interrupted", "interrupted", 1_000, 0);

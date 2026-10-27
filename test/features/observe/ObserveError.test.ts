@@ -1,13 +1,14 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { appendObserveError } from "../../../src/features/observe/ObserveError";
 import type { ObserveResult } from "../../../src/models";
 
 function makeResult(): ObserveResult {
-  return {
+  return buildObserveResult({
     updatedAt: 0,
     screenSize: { width: 0, height: 0 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  };
+  });
 }
 
 describe("appendObserveError", () => {

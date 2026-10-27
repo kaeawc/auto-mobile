@@ -33,13 +33,24 @@ class McpToolErrorException(
   val code: String? = null,
   val deviceId: String? = null,
   cause: Throwable? = null,
-  /** The refusal's `retryAfterMs` hint, when it carried one. */
+  val details: McpRefusalDetails = McpRefusalDetails(),
+) : McpConnectionException(message, cause) {
+  val retryAfterMs: Long?
+    get() = details.retryAfterMs
+
+  val retryable: Boolean?
+    get() = details.retryable
+
+  val nextAction: String?
+    get() = details.nextAction
+}
+
+/** Retry and recovery hints carried by a typed daemon refusal. */
+data class McpRefusalDetails(
   val retryAfterMs: Long? = null,
-  /** The refusal's `retryable` flag; null when the payload did not carry one. */
   val retryable: Boolean? = null,
-  /** The refusal's `nextAction`, e.g. [NEXT_ACTION_ACQUIRE_NEW_SESSION]; null when absent. */
   val nextAction: String? = null,
-) : McpConnectionException(message, cause)
+)
 
 /** True when the daemon said this session is terminal and only a new session UUID can proceed. */
 fun Throwable.isSessionTerminalRefusal(): Boolean =

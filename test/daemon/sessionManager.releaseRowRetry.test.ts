@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import {
   PLAN_AUTO_RELEASE_REASON,
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
@@ -428,4 +428,8 @@ describe("the row of a released session (#11557)", () => {
     });
     expect(releases).toEqual(["heartbeat-timeout"]);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

@@ -127,7 +127,18 @@ function accessedName(node: ts.Node): string | undefined {
 
 /** True for `sessionContext` as an identifier or as the last member of an access chain. */
 function isSessionContext(node: ts.Expression): boolean {
-  const inner = ts.skipOuterExpressions(node);
+  let inner = node;
+  while (
+    ts.isParenthesizedExpression(inner) ||
+    ts.isAsExpression(inner) ||
+    ts.isTypeAssertionExpression(inner) ||
+    ts.isNonNullExpression(inner) ||
+    ts.isSatisfiesExpression(inner) ||
+    ts.isExpressionWithTypeArguments(inner) ||
+    ts.isPartiallyEmittedExpression(inner)
+  ) {
+    inner = inner.expression;
+  }
   return (
     (ts.isIdentifier(inner) && inner.text === "sessionContext") ||
     accessedName(inner) === "sessionContext"

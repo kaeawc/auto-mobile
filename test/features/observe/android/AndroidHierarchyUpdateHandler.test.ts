@@ -1,3 +1,4 @@
+import { wireHierarchyFrom } from "../../../helpers/androidHierarchyConverter";
 import { describe, expect, test } from "bun:test";
 import {
   AndroidHierarchyUpdateHandler,
@@ -11,7 +12,7 @@ import type {
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 function frame(updatedAt: number): AccessibilityHierarchy {
-  return { updatedAt, packageName: "com.example", windows: [] } as AccessibilityHierarchy;
+  return wireHierarchyFrom({ updatedAt, packageName: "com.example", windows: [] });
 }
 
 function harness(cached: CachedHierarchy | null = null) {

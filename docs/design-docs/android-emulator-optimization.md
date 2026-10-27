@@ -1,7 +1,8 @@
 # Android emulator optimization
 
-Status: implementation and local experiments, September 2026. Controls remain
-independent. No profiles or automatic package disabling.
+Controls remain independent. No profiles or automatic package disabling.
+
+Host-side cost evidence and the device measurement plan: [Android emulator host cost](android-emulator-host-cost.md).
 
 ## Available controls
 
@@ -48,12 +49,91 @@ Reuse the existing surfaces for other costs:
 | Read-only shared snapshots                     | Distinct instance IDs/ports, shared/private accounting, isolation tests                     | Requires multi-instance lifecycle work before pool use                                                                          |
 | Linux CPU quotas / affinity / KSM / Cuttlefish | Linux/KVM worker and explicit limits with throughput tests                                  | Not available as cross-platform controls on a macOS emulator host                                                               |
 
-The supplied host has macOS/arm64 emulator tooling. This does not validate Linux
-KVM/Cuttlefish, Windows hypervisor behavior, custom system images, or realistic
-multi-host fleet density. Google account/Slack workflows need their own
-application fixtures and credentials; an unconfigured AVD cannot validate push,
-login, attachments, or huddles. These are evidence requirements, not claims of
-compatibility from a package list.
+Local evidence is macOS/arm64 only: it does not validate Linux KVM/Cuttlefish, Windows
+hypervisors, custom images, or multi-host fleet density, and an unconfigured AVD cannot
+validate push, login, attachments or huddles (those need their own app fixtures and
+credentials).
+
+## macOS software-rendering fallback
+
+Emulator 37.2 and later resolve `-gpu auto` to a software renderer on macOS, because the
+deprecated host OpenGL drivers cannot provide the GLES 3.1 features newer system images
+require. Nothing fails; the emulator runs at about 10 FPS. The `doctor` check
+`Emulator Rendering` warns when the host is macOS, `emulator -version` reports 37.2 or
+later, and an AVD's effective GPU mode is still `auto`. An explicit `hw.gpu.mode` in the
+AVD, `-gpu` in `AUTOMOBILE_EMULATOR_ARGS`, or `-feature GuestAngle` clears it. AutoMobile
+does not change the GPU mode itself: `-gpu host` can break Google sign-in and limits
+snapshots. The version threshold lives in `EmulatorSoftwareRendering.ts`; raise its upper
+bound once a fixed emulator ships.
+
+## Linux GPU renderer qualification
+
+Repeated post-ready `SIGSEGV` emulator exits on Linux hosts (#12453) were seen
+with `-gpu swangle -feature -Vulkan` on emulator 37.2.12.0 and a
+`medium_phone` Android 15/API 35 Google APIs `x86_64` image. The cause is still
+open: no native backtrace was captured, and the crash has not been reproduced.
+
+The manual `Linux Qualification` workflow
+(`.github/workflows/linux-qualification.yml`, scripts under
+`scripts/ci/linux-qualification/`) runs each GPU mode under three workloads:
+AutoMobile tools, a raw `adb` control, and a heartbeat-only control. Run
+38902077979 (main `f1fd091b81`, two cycles per cell, emulator 37.2.12.0,
+`android-35;google_apis;x86_64`, GitHub-hosted `ubuntu-latest`, no GPU) gave:
+
+| GPU mode               | AutoMobile             | Raw adb control        | Heartbeat only         |
+| ---------------------- | ---------------------- | ---------------------- | ---------------------- |
+| `swiftshader_indirect` | 2/2 clean              | 2/2 clean              | 2/2 clean              |
+| `swangle`              | 2/2 clean              | 2/2 clean              | 2/2 clean              |
+| `angle_indirect`       | 2/2 clean              | 2/2 clean              | 2/2 clean              |
+| `host`                 | fails at renderer init | fails at renderer init | fails at renderer init |
+
+No software or indirect GPU cell crashed after readiness. `-gpu host` stops
+before readiness with `Failed to get EGL display` / `Could not start renderer`
+because the runner has no GPU render node. That is a startup failure, not the
+post-ready signature. Two clean cycles per cell is weak evidence: it neither
+clears nor implicates any software renderer.
+
+The emulator's `-verbose` output shows what each flag actually selected on
+37.2.12.0:
+
+| Flag passed                     | Renderer the emulator used                                                              |
+| ------------------------------- | --------------------------------------------------------------------------------------- |
+| `-gpu swiftshader_indirect`     | mode `swiftshader`: SwiftShader GLES (`gles_swiftshader`, GLES 3.0), SwiftShader Vulkan |
+| `-gpu swangle -feature -Vulkan` | ANGLE GLES (`gles_swangle`, GLES 3.1) on SwiftShader; host `Vulkan` feature off         |
+| `-gpu angle_indirect`           | fell back to mode `lavapipe`: ANGLE GLES on Mesa llvmpipe Vulkan                        |
+
+The `angle_indirect` row therefore measured ANGLE on Lavapipe, not a distinct
+ANGLE-indirect path.
+
+The emulator documentation deprecates `swiftshader_indirect`,
+`swangle_indirect` and `guest` (36.4.9) and `angle_indirect` (34.2.14). The
+current software modes are `software`, `swiftshader`, `lavapipe` and `swangle`.
+CI (`.github/actions/android-emulator/action.yml`) passes `-gpu swiftshader`,
+the mode the deprecated `swiftshader_indirect` already mapped to.
+
+Linux configuration guidance until the cause is known:
+
+- On headless hosts without a GPU, use a current software mode: `-gpu swangle`
+  or `-gpu swiftshader`. Both were clean in this matrix. Pass it with
+  `AUTOMOBILE_EMULATOR_ARGS='["-gpu","swangle"]'`.
+- Use `-gpu host` only where `/dev/dri/renderD*` and a working EGL/Vulkan driver
+  exist.
+- `-feature -Vulkan` is the one non-default part of the crashing hosts'
+  configuration. It was clean here, but it is unqualified beyond these runs;
+  omit it unless a workload needs it.
+
+When an emulator exits unexpectedly, the loss incident keeps the process exit
+signal and a bounded, redacted `outputTail` of emulator output from launch
+onward. `outputUnavailable: "adopted"` marks an emulator AutoMobile did not
+launch, so no output was tracked. Slot recovery (`onLoss`) stays off by default
+and never substitutes a different device.
+
+The `swangle` cell matched the crashing hosts' flags, emulator build, image and
+hardware profile. What still differs is the host machine, the experimental
+broker build (these runs used the published 0.0.85 package), the repeated
+acquire/release workload, and the cycle count. A longer soak on `swangle` and
+`swiftshader` is the remaining step for #12453; no self-hosted GPU host is
+available, so the `host` row stays unexercised.
 
 ## Measurement protocol
 
@@ -91,40 +171,21 @@ Preserve raw evidence. A one-device smoke measurement cannot prove fleet savings
 - [Init service lifecycle](https://android.googlesource.com/platform/system/core/+/refs/heads/main/init/README.md)
 - [Cuttlefish](https://source.android.com/docs/devices/cuttlefish/get-started)
 
-## Initial local measurements
+## Initial local measurements (preliminary, not a benchmark)
 
-A disposable Android 15 Google APIs arm64 emulator (emulator 36.4.5, 2 vCPU,
-2048 MB guest RAM, 1080×1920 at 420 dpi, headless/audio-off, GPU auto) was sampled
-on macOS. Auto selected SwiftShader. After excluding the overlap with initial
-smoke validation, 52 baseline samples covered 257 seconds; 60 treatment samples
-covered 297 seconds. The treatment disabled animations, screensavers, Gmail,
-YouTube, Photos, Wellbeing and printing. Exact prior overrides were then restored.
+On a disposable Android 15 Google APIs arm64 emulator (2 vCPU, 2048 MB, headless,
+GPU auto = SwiftShader, macOS), disabling animations, screensavers, Gmail, YouTube,
+Photos, Wellbeing and printing left median emulator RSS unchanged (4691.5 MiB before,
+4693.1 MiB after; 52 baseline vs 60 treatment samples). No repeated A/B/A, unrelated
+host work was running, and CPU percentages from the sampler are not used to claim a
+reduction.
 
-Median emulator-process RSS was 4691.5 MiB before and 4693.1 MiB after. This run
-showed no material host RSS saving. It is not a controlled causal benchmark:
-there was no repeated A/B/A sequence, unrelated host work was running, and no
-logged-in application workflow was exercised. Guest memory also changed while
-background services settled. CPU percentages from this preliminary sampler are
-not used to claim a reduction. Raw results remain in the task's scratch artifacts.
-
-Native follow-up checks on that disposable API-35 image exercised all 21 optional
-package groups: 18 disabled and restored, while Assistant, Dialer and Messages
-were correctly protected as active role holders. Google Play services and GSF
-were included in the reversible mechanism test; this does not validate app
-compatibility while disabled.
-
-More aggressive mechanism probes also succeeded: Maps' background app-op changed
-to `ignore` and back to `default`; its standby bucket changed from 10 to 45 and
-back to 10; forced deep Doze was entered and unforced. On the debuggable image,
-root access allowed `statsd` to remain stopped for three observations and then
-restart successfully. Maps speed-profile compilation returned success. These
-prove command availability and limited state transitions, not performance wins
-or suitability for ordinary interactive workflows. No native service control was
-added to the public catalog based on this short probe.
-
-The persisted hardware fields also booted successfully with 720×1280, 280 dpi,
-two online CPUs, no exposed cameras, audio input/output off and `gpuMode: host`.
-The emulator log identified Apple M3 Max rendering, whereas the earlier auto
-configuration used SwiftShader. A native screenshot rendered the launcher
-correctly. Because resolution, renderer and boot state changed together, this is
-hardware-control validation rather than an isolated GPU performance comparison.
+Mechanism checks on the API-35 image: 18 of 21 optional package groups disabled and
+restored (Assistant, Dialer, Messages protected as active role holders); Maps'
+background app-op (`ignore`/`default`), standby bucket (10/45/10), forced deep Doze,
+a root-only `statsd` stop/restart, and speed-profile compilation all worked. These
+prove command availability and limited reversible transitions, not performance wins,
+and nothing was added to the public catalog from them. Persisted hardware fields
+(720x1280, 280 dpi, two CPUs, no cameras, audio off, `gpuMode: host`) booted and
+rendered correctly; resolution, renderer and boot state changed together, so this is
+control validation, not a GPU comparison.

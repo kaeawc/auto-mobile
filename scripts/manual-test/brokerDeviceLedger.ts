@@ -4,7 +4,12 @@ import { isSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/device
 import type { Timer } from "../../src/utils/SystemTimer";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
 import { readBrokerProtectedDevices } from "./brokerClientFiles";
-import type { BrokerDaemonClient } from "./brokerDaemonClient";
+import { BrokerTransportError, type BrokerDaemonClient } from "./brokerDaemonClient";
+import {
+  SESSION_OWNER_EXITED_CODE,
+  type SessionBrokerResult,
+} from "../../src/devices/sessionBrokerResult";
+import { errorMessage } from "../../src/utils/describeUnknownError";
 import {
   matchesProtection,
   nameEvidenceMissing,
@@ -27,7 +32,7 @@ export const brokerLedgerEntrySchema = z.object({
   requestId: z.string().min(1),
   sessionUuid: z.string().min(1),
   at: z.number().finite(),
-  kind: z.enum(["acquired", "info", "released", "absent", "leaked"]),
+  kind: z.enum(["acquired", "info", "released", "absent", "pooled", "leaked"]),
   device: brokerNativeDeviceSchema.optional(),
   absence: z.literal("not-verifiable").optional(),
 });
@@ -157,7 +162,10 @@ export class BrokerDeviceLedger {
     }
     return this.append({ ...grant, device: binding.nativeDevice, kind: "info" });
   }
-  record(kind: "released" | "absent" | "leaked", device: BrokerLedgerEntry): BrokerLedgerEntry {
+  record(
+    kind: "released" | "absent" | "pooled" | "leaked",
+    device: BrokerLedgerEntry,
+  ): BrokerLedgerEntry {
     if (!this.hasGrant(device) || (!device.device && kind !== "released")) {
       throw new Error("Device event requires a ready batch grant and native identity.");
     }
@@ -191,7 +199,7 @@ export class BrokerDeviceLedger {
     return (
       this.hasEvent(grant, "released") &&
       (device
-        ? this.hasEvent(device, "absent")
+        ? this.hasEvent(device, "absent") || this.hasEvent(device, "pooled")
         : this.entries.some(
             (row) =>
               sameGrant(row, grant) && row.kind === "released" && row.absence === "not-verifiable",
@@ -268,17 +276,36 @@ export function leakReport(
   ledger: BrokerDeviceLedger,
   devicesView: Pick<LedgerDevicesView, "devices">,
 ): BrokerLedgerEntry[] {
-  return ledger
-    .devices()
-    .filter((row) => ledger.hasEvent(row, "released") && present(row, devicesView));
+  const devices = ledger.devices();
+  return devices.filter((row) => {
+    const latest = devices.findLast(
+      (grant) =>
+        grant.device?.name === row.device?.name && grant.device?.platform === row.device?.platform,
+    )!;
+    return (
+      ledger.hasEvent(row, "released") &&
+      present(row, devicesView) &&
+      !(ledger.hasEvent(row, "pooled") && ledger.hasEvent(latest, "pooled"))
+    );
+  });
 }
-/** Join authoritative released status AND a healthy inventory under one RPC-inclusive budget. */
+/**
+ * A grant ended by a daemon restart or owner kill is terminal `failed/session_owner_exited` with
+ * its device destroyed by the broker (#14780). It is a receipt like `released`; the native-absence
+ * join below still decides whether the device is gone.
+ */
+function endedByOwnerExit(status: SessionBrokerResult): boolean {
+  return status.outcome === "failed" && status.failure?.code === SESSION_OWNER_EXITED_CODE;
+}
+
+/** Join released status with healthy inventory proving absence or a reusable pooled device. */
 export async function assertReleasedAndAbsent(options: {
   ledger: BrokerDeviceLedger;
   devicesView(): Promise<LedgerDevicesView>;
   daemonClient: BrokerDaemonClient;
   timer: Timer;
   budgetMs: number;
+  log?: (message: string) => void;
 }): Promise<void> {
   const { ledger, timer, daemonClient } = options;
   if (!Number.isFinite(options.budgetMs) || options.budgetMs <= 0) {
@@ -295,19 +322,39 @@ export async function assertReleasedAndAbsent(options: {
     await raceWithDeadline(
       async () => {
         while (active && timer.now() < deadline) {
-          const confirmed = new Set<string>();
-          for (const device of ledger.devices()) {
-            const status = await daemonClient.status(device.requestId, ledger.token(device));
+          const confirmed = new Map<string, SessionBrokerResult>();
+          const devices = ledger.devices();
+          let transportFailed = false;
+          for (const device of devices) {
+            if (!active || timer.now() >= deadline) {
+              return;
+            }
+            let status: SessionBrokerResult | undefined;
+            try {
+              status = await daemonClient.status(device.requestId, ledger.token(device));
+            } catch (error) {
+              if (!(error instanceof BrokerTransportError)) {
+                throw error;
+              }
+              if (!active) {
+                return;
+              }
+              // Restart transport loss is not a receipt; leave this grant unconfirmed for this pass.
+              const message = `Broker status transport retry for ${device.client}: ${errorMessage(error)}`;
+              options.log?.(message);
+              transportFailed = true;
+              continue;
+            }
             if (!active) {
               return;
             }
             if (
               status?.sessionUuid === device.sessionUuid &&
               status.requestId === device.requestId &&
-              status.outcome === "released" &&
+              (status.outcome === "released" || endedByOwnerExit(status)) &&
               !status.cleanupPending
             ) {
-              confirmed.add(device.sessionUuid);
+              confirmed.set(device.sessionUuid, status);
               if (!ledger.hasEvent(device, "released")) {
                 ledger.record("released", device);
               }
@@ -322,19 +369,39 @@ export async function assertReleasedAndAbsent(options: {
             view.daemons.every((daemon) => daemon.alive && daemon.error === undefined);
           if (healthy) {
             lastView = view;
-            for (const device of ledger.devices()) {
+            const satisfied = new Set<string>();
+            for (const device of devices) {
+              if (!confirmed.has(device.sessionUuid)) {
+                continue;
+              }
+              if (!present(device, view)) {
+                satisfied.add(device.sessionUuid);
+                if (!ledger.hasEvent(device, "absent")) {
+                  ledger.record("absent", device);
+                }
+                continue;
+              }
+              const latest = devices.findLast(
+                (grant) =>
+                  grant.device?.name === device.device?.name &&
+                  grant.device?.platform === device.device?.platform,
+              )!;
+              const reset = confirmed.get(latest.sessionUuid)?.timing?.reset;
               if (
-                confirmed.has(device.sessionUuid) &&
-                !present(device, view) &&
-                !ledger.hasEvent(device, "absent")
+                reset &&
+                reset.retired !== true &&
+                (reset.outcome === "clean" || reset.outcome.startsWith("fallback:"))
               ) {
-                ledger.record("absent", device);
+                satisfied.add(device.sessionUuid);
+                if (!ledger.hasEvent(device, "pooled")) {
+                  ledger.record("pooled", device);
+                }
               }
             }
             if (
-              ledger
-                .devices()
-                .every((device) => confirmed.has(device.sessionUuid) && !present(device, view))
+              devices.every(
+                (device) => confirmed.has(device.sessionUuid) && satisfied.has(device.sessionUuid),
+              )
             ) {
               completed = true;
               return;
@@ -343,7 +410,9 @@ export async function assertReleasedAndAbsent(options: {
               break;
             }
           }
-          await timer.sleep(Math.min(250, Math.max(0, deadline - timer.now())));
+          await timer.sleep(
+            Math.min(transportFailed ? 1000 : 250, Math.max(0, deadline - timer.now())),
+          );
         }
         throw new Error("Broker release/absence could not be verified.");
       },

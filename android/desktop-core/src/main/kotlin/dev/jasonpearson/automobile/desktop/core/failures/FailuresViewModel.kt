@@ -96,6 +96,8 @@ class FailuresViewModel(
             // Keep loading state
           }
         }
+      } catch (cancellation: kotlinx.coroutines.CancellationException) {
+        throw cancellation
       } catch (e: Exception) {
         LOG.error("Exception loading failures", e)
         _state.value = FailuresUiState.Error(message = e.message ?: "Unknown error")

@@ -1,6 +1,11 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { AndroidNotificationUIDetector } from "../../../src/features/systemTray/AndroidNotificationUIDetector";
-import { IosNotificationUIDetector } from "../../../src/features/systemTray/IosNotificationUIDetector";
+import {
+  IosNotificationUIDetector,
+  type IosGestureResult,
+} from "../../../src/features/systemTray/IosNotificationUIDetector";
 import { createNotificationUIDetector } from "../../../src/features/systemTray/createNotificationUIDetector";
 import { FakeNotificationUIDetector } from "../../fakes/FakeNotificationUIDetector";
 import { ActionableError } from "../../../src/models";
@@ -12,7 +17,20 @@ import type {
 } from "../../../src/models";
 import type { NotificationUIDetector } from "../../../src/utils/interfaces/NotificationUIDetector";
 import type { SystemTrayDependencies } from "../../../src/features/systemTray/systemTrayHelpers";
+import { fixedBackoff } from "../../../src/utils/Backoff";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { readFileSync } from "node:fs";
+import { wireCapture } from "../../helpers/wireCapture";
+import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
+import { springBoardPhotosIcon } from "../../fixtures/observe/iosSpringBoardIcon";
+import settings from "../../fixtures/ios/ctrlproxy-golden/settings-tap-general/0002-push-hierarchy_update.json";
+import { IOS_NOTIFICATION_CENTER_CLASS_HINTS } from "../../../src/features/systemTray/notificationHints";
+import { collectNotificationCandidates } from "../../../src/features/systemTray/systemTrayHelpers";
+import {
+  getSystemTrayDependencies,
+  resetSystemTrayDependencies,
+  setSystemTrayDependencies,
+} from "../../../src/features/systemTray/helpers/dependencies";
 
 /**
  * Conformance check for the platform-agnostic NotificationUIDetector
@@ -31,6 +49,8 @@ describe("NotificationUIDetector", () => {
     name: "iPhone 15",
     platform: "ios",
   };
+
+  beforeEach(() => resetSystemTrayDependencies());
 
   const trayHierarchy: ViewHierarchyResult = {
     packageName: "com.android.systemui",
@@ -89,11 +109,11 @@ describe("NotificationUIDetector", () => {
     text: "Hello",
   } as Element;
 
-  const observationWithSize: ObserveResult = {
+  const observationWithSize: ObserveResult = buildObserveResult({
     updatedAt: 0,
     screenSize: { width: 375, height: 812 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  };
+  });
 
   describe("FakeNotificationUIDetector", () => {
     let fake: FakeNotificationUIDetector;
@@ -268,7 +288,75 @@ describe("NotificationUIDetector", () => {
     });
   });
 
+  // Already-converted ViewHierarchyResult from manual-test batch 20261019d,
+  // evidence/i1-notification-center-hierarchy.json; do not reconvert compact bounds.
+  const ios27NotificationCenterHierarchy = wireCapture(
+    JSON.parse(
+      readFileSync(
+        new URL(
+          "../../fixtures/ios-notification-center/ios27-notification-center-hierarchy.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ),
+  );
+
   describe("IosNotificationUIDetector behavior", () => {
+    // Closest captured home hierarchy: the Photos icon subtree from #8060/#8081.
+    // ios-lock-state/observe-unlocked.json has no raw viewHierarchy.
+    const capturedIosHomeIconHierarchy = convertIosHierarchy({
+      packageName: "com.apple.springboard",
+      updatedAt: 0,
+      hierarchy: springBoardPhotosIcon,
+    });
+    const capturedIosSettingsHierarchy = convertIosHierarchy({
+      hierarchy: settings.push.data.hierarchy,
+      packageName: settings.push.data.packageName,
+      updatedAt: settings.push.data.updatedAt,
+    });
+    const capturedDetector = new IosNotificationUIDetector(iosDevice, {
+      requestSwipe: async () => ({ success: true }),
+      requestTapCoordinates: async () => ({ success: true }),
+      now: () => 0,
+    });
+
+    it("detects the captured empty iOS 27 Notification Center", () => {
+      expect(capturedDetector.isTrayOpen(ios27NotificationCenterHierarchy)).toBe(true);
+      // The captured ListCell is an empty list placeholder, not a notification.
+      expect(collectNotificationCandidates(ios27NotificationCenterHierarchy)).toEqual([]);
+    });
+
+    it.each([
+      ["SpringBoard home icon subtree", capturedIosHomeIconHierarchy],
+      ["Settings app", capturedIosSettingsHierarchy],
+      [
+        "Settings hierarchy with SpringBoard fallback",
+        {
+          ...capturedIosSettingsHierarchy,
+          packageName: "com.apple.springboard",
+        },
+      ],
+      [
+        "Notification Center structure in another package",
+        {
+          ...ios27NotificationCenterHierarchy,
+          packageName: "com.example.app",
+        },
+      ],
+    ] as const)("rejects %s", (_name, hierarchy) => {
+      expect(capturedDetector.isTrayOpen(hierarchy)).toBe(false);
+    });
+
+    it.each(IOS_NOTIFICATION_CENTER_CLASS_HINTS)("preserves legacy %s detection", (hint) => {
+      expect(
+        capturedDetector.isTrayOpen({
+          ...iosNotificationCenterHierarchy,
+          hierarchy: { node: { $: { class: hint } } },
+        }),
+      ).toBe(true);
+    });
+
     it("detects NotificationCenter only under SpringBoard", () => {
       const detector = new IosNotificationUIDetector(iosDevice, {
         requestSwipe: async () => ({ success: true }),
@@ -313,6 +401,97 @@ describe("NotificationUIDetector", () => {
       expect(swipes[0].y1).toBeGreaterThan(swipes[0].y2);
     });
 
+    it.each([
+      ["cover sheet", ios27NotificationCenterHierarchy, 1, 0],
+      ["legacy Notification Center", iosNotificationCenterHierarchy, 0, 1],
+    ] as const)(
+      "closes %s with the appropriate action",
+      async (_name, hierarchy, homes, swipes) => {
+        let homeCalls = 0;
+        let swipeCalls = 0;
+        const deps = {
+          pressHome: async () => {
+            homeCalls++;
+            return { success: true };
+          },
+          requestSwipe: async () => {
+            swipeCalls++;
+            return { success: true };
+          },
+          requestTapCoordinates: async () => ({ success: true }),
+          now: () => 0,
+        };
+        await new IosNotificationUIDetector(iosDevice, deps).collapseTray({
+          ...observationWithSize,
+          viewHierarchy: hierarchy,
+        });
+        expect(homeCalls).toBe(homes);
+        expect(swipeCalls).toBe(swipes);
+      },
+    );
+
+    it("closes the cover sheet without screen dimensions", async () => {
+      let homeCalls = 0;
+      const deps = {
+        pressHome: async () => {
+          homeCalls++;
+          return { success: true };
+        },
+        requestSwipe: async () => {
+          throw new Error("Cover-sheet close must not swipe");
+        },
+        requestTapCoordinates: async () => ({ success: true }),
+        now: () => 0,
+      };
+      const observation = {
+        ...observationWithSize,
+        viewHierarchy: ios27NotificationCenterHierarchy,
+      };
+      Reflect.deleteProperty(observation, "screenSize");
+      await new IosNotificationUIDetector(iosDevice, deps).collapseTray(observation);
+      expect(homeCalls).toBe(1);
+    });
+
+    it("rejects cover-sheet close when home press is unavailable", async () => {
+      await expect(
+        capturedDetector.collapseTray({
+          ...observationWithSize,
+          viewHierarchy: ios27NotificationCenterHierarchy,
+        }),
+      ).rejects.toThrow("Failed to close Notification Center: home press unavailable");
+    });
+
+    it.each([
+      [
+        { success: false, error: "Runner refused", dispatched: true, acknowledged: true },
+        "Failed to close Notification Center: Runner refused",
+      ],
+      [
+        { success: false, error: "Home timed out", dispatched: true, acknowledged: false },
+        "Outcome of close Notification Center is indeterminate",
+      ],
+      [
+        { success: false, error: "Press failed" },
+        "Failed to close Notification Center: Press failed",
+      ],
+    ] satisfies Array<[IosGestureResult, string]>)(
+      "handles home result %j",
+      async (result, message) => {
+        const deps = {
+          pressHome: async () => result,
+          requestSwipe: async () => ({ success: true }),
+          requestTapCoordinates: async () => ({ success: true }),
+          now: () => 0,
+        };
+        await expect(
+          new IosNotificationUIDetector(iosDevice, deps).collapseTray({
+            ...observationWithSize,
+            viewHierarchy: ios27NotificationCenterHierarchy,
+          }),
+        ).rejects.toThrow(message);
+      },
+    );
+
     it("rejects expand/collapse without screen dimensions", async () => {
       const detector = new IosNotificationUIDetector(iosDevice, {
         requestSwipe: async () => ({ success: true }),
@@ -336,7 +515,9 @@ describe("NotificationUIDetector", () => {
       const taps: Array<{ x: number; y: number }> = [];
       const detector = new IosNotificationUIDetector(iosDevice, {
         requestSwipe: async () => ({ success: true }),
-        requestTapCoordinates: async (x, y) => {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { x, y } = request;
+
           taps.push({ x, y });
           return { success: true };
         },
@@ -460,6 +641,7 @@ describe("NotificationUIDetector", () => {
         requestTapCoordinates: async () => ({ success: true }),
       }),
       timer: new FakeTimer(),
+      backoff: fixedBackoff(0),
     });
 
     it("returns an AndroidNotificationUIDetector for Android devices", () => {
@@ -492,6 +674,24 @@ describe("NotificationUIDetector", () => {
       expect(detector.device).toBe(iosDevice);
     });
 
+    it("wires cover-sheet HOME to the factory with the device and signal", async () => {
+      const controller = new AbortController();
+      const calls: Array<{ device: BootedDevice; signal?: AbortSignal }> = [];
+      const deps = {
+        ...buildDeps(),
+        iosClientFactory: undefined,
+        pressHomeFactory: async (device: BootedDevice, signal?: AbortSignal) => {
+          calls.push({ device, signal });
+          return { success: true };
+        },
+      };
+      await createNotificationUIDetector(iosDevice, () => deps, controller.signal).collapseTray({
+        ...observationWithSize,
+        viewHierarchy: ios27NotificationCenterHierarchy,
+      });
+      expect(calls).toEqual([{ device: iosDevice, signal: controller.signal }]);
+    });
+
     it("keeps the iOS client's dispatch markers so an unanswered dismiss swipe is indeterminate", async () => {
       const deps = (): SystemTrayDependencies => ({
         ...buildDeps(),
@@ -509,6 +709,51 @@ describe("NotificationUIDetector", () => {
       await expect(detector.swipeElement(sampleElement)).rejects.toThrow(
         "Outcome of dismiss notification is indeterminate",
       );
+    });
+
+    it("maps the production home press result to an indeterminate actionable error", async () => {
+      setSystemTrayDependencies({
+        pressButtonFactory: () => ({
+          execute: async () => ({
+            success: false,
+            button: "home",
+            keyCode: -1,
+            code: "indeterminate_outcome",
+            error: "Button press outcome is indeterminate: no result was confirmed",
+          }),
+        }),
+      });
+      const observation = {
+        ...observationWithSize,
+        viewHierarchy: ios27NotificationCenterHierarchy,
+      };
+      const detector = createNotificationUIDetector(iosDevice, getSystemTrayDependencies);
+      const collapse = detector.collapseTray(observation);
+      await expect(collapse).rejects.toBeInstanceOf(ActionableError);
+      await expect(collapse).rejects.toThrow(
+        "Outcome of close Notification Center is indeterminate",
+      );
+    });
+
+    it("keeps a plain production home press failure as a plain actionable error", async () => {
+      setSystemTrayDependencies({
+        pressButtonFactory: () => ({
+          execute: async () => ({
+            success: false,
+            button: "home",
+            keyCode: -1,
+            code: "press_failed",
+            error: "Home refused",
+          }),
+        }),
+      });
+      const detector = createNotificationUIDetector(iosDevice, getSystemTrayDependencies);
+      await expect(
+        detector.collapseTray({
+          ...observationWithSize,
+          viewHierarchy: ios27NotificationCenterHierarchy,
+        }),
+      ).rejects.toThrow("Failed to close Notification Center: Home refused");
     });
 
     it("throws when iOS client factory is missing", async () => {

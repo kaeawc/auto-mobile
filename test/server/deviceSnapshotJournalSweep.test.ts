@@ -2,10 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { promises as fs } from "fs";
 import * as path from "path";
 import type { BootedDevice, DeviceSnapshotManifest } from "../../src/models";
-import type {
-  DeviceSnapshotRecord,
-  DeviceSnapshotRepository,
-} from "../../src/db/deviceSnapshotRepository";
+import type { DeviceSnapshotRecord } from "../../src/db/deviceSnapshotRepository";
 import { DeviceSnapshotStore, type SnapshotPathOptions } from "../../src/utils/DeviceSnapshotStore";
 import { logger } from "../../src/utils/logger";
 import { sortedReaddir } from "../../src/utils/io";
@@ -22,7 +19,7 @@ import {
   STARTUP_SWEEP_DELAY_MS,
   SNAPSHOT_JOURNAL_SWEEP_MAX_ENTRIES,
   SNAPSHOT_JOURNAL_SWEEP_MAX_SCOPE_DIRECTORIES,
-} from "../../src/server/deviceSnapshotManager";
+} from "../../src/daemon/deviceSnapshotManager";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
@@ -89,7 +86,7 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
     avdSnapshots = new FakeAvdSnapshotService();
     timer = new FakeTimer();
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as DeviceSnapshotRepository,
+      snapshotRepository: repository,
       configRepository,
       snapshotStore: realStore,
       avdSnapshots,
@@ -274,7 +271,7 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
   });
 
   test("fake recovery failure discards that scope, continues legacy recovery and removes the record", async () => {
-    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore as DeviceSnapshotStore });
+    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore });
     const failure = new Error("queued recovery failure");
     fakeStore.queueRecoveryFailure(failure);
     fakeStore.queueDiscardLeftovers(["/leftover/aside"]);
@@ -301,7 +298,7 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
   });
 
   test("reserved Android scoped name never recovers or discards the flat scope root", async () => {
-    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore as DeviceSnapshotStore });
+    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore });
     await repository.insertSnapshot(record("android", EMULATOR));
     await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
     expect(fakeStore.recoveryCalls).toEqual([
@@ -345,7 +342,7 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
       expect(mkdir).not.toHaveBeenCalled();
       expect(await fs.readdir(root)).toEqual([]);
       await setDeviceSnapshotManagerDependencies({
-        snapshotStore: fakeStore as DeviceSnapshotStore,
+        snapshotStore: fakeStore,
       });
       expect((await runSnapshotJournalSweep()).recovered).toBe(0);
       expect(fakeStore.recoveryCalls).toEqual([]);
@@ -404,7 +401,7 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
   });
 
   test("fake sweep skips a capture holding the name lock without waiting and recovers idle entries", async () => {
-    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore as DeviceSnapshotStore });
+    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore });
     fakeStore.leftoverJournalEntries = [
       { snapshotName: "locked" },
       { snapshotName: "idle", options: IOS_OPTIONS },
@@ -448,7 +445,7 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
   for (const firstEntryPoint of ["list", "capture", "restore", "config"] as const) {
     test(`${firstEntryPoint} schedules once; all entry points return before the deferred enumeration`, async () => {
       await setDeviceSnapshotManagerDependencies({
-        snapshotStore: fakeStore as DeviceSnapshotStore,
+        snapshotStore: fakeStore,
       });
       fakeStore.leftoverJournalEntries = [{ snapshotName: "leftover" }];
       const enumerate = spyOn(fakeStore, "listLeftoverSnapshotJournals");
@@ -513,7 +510,7 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
   }
 
   test("a sleep scheduled before reset does not sweep after resolving; the next generation schedules once", async () => {
-    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore as DeviceSnapshotStore });
+    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore });
     fakeStore.leftoverJournalEntries = [{ snapshotName: "leftover" }];
     await listDeviceSnapshots();
     expect(timer.getPendingSleeps()).toEqual([STARTUP_SWEEP_DELAY_MS]);
@@ -521,9 +518,9 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
     resetDeviceSnapshotManagerDependencies();
     expect(timer.getPendingSleeps()).toEqual([STARTUP_SWEEP_DELAY_MS]);
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as DeviceSnapshotRepository,
+      snapshotRepository: repository,
       configRepository,
-      snapshotStore: fakeStore as DeviceSnapshotStore,
+      snapshotStore: fakeStore,
       timer,
       avdSnapshots,
     });
@@ -541,7 +538,7 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
   });
 
   test("a pre-reset sleep cannot sweep the new dependencies while their own sleep is pending", async () => {
-    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore as DeviceSnapshotStore });
+    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore });
     await listDeviceSnapshots();
     expect(timer.getPendingSleeps()).toEqual([STARTUP_SWEEP_DELAY_MS]);
     resetDeviceSnapshotManagerDependencies();
@@ -550,9 +547,9 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
     const nextStore = new FakeDeviceSnapshotStore(root);
     nextStore.leftoverJournalEntries = [{ snapshotName: "next-generation" }];
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as DeviceSnapshotRepository,
+      snapshotRepository: repository,
       configRepository,
-      snapshotStore: nextStore as DeviceSnapshotStore,
+      snapshotStore: nextStore,
       timer: nextTimer,
       avdSnapshots,
       now: () => new Date(nextTimer.now()),
@@ -575,7 +572,7 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
   });
 
   test("scheduled sleep rejection is caught and warned without running the sweep", async () => {
-    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore as DeviceSnapshotStore });
+    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore });
     const failure = new Error("sleep failed");
     const delay = Promise.withResolvers<void>();
     const sleep = spyOn(timer, "sleep").mockReturnValue(delay.promise);
@@ -602,7 +599,7 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
   });
 
   test("scheduled enumeration failure is caught and logged without failing the caller", async () => {
-    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore as DeviceSnapshotStore });
+    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore });
     const failure = new Error("enumeration failed");
     const enumerate = spyOn(fakeStore, "listLeftoverSnapshotJournals").mockRejectedValue(failure);
     const warned = Promise.withResolvers<void>();
@@ -625,7 +622,7 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
   });
 
   test("fake recovery failure is counted and does not stop later entries", async () => {
-    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore as DeviceSnapshotStore });
+    await setDeviceSnapshotManagerDependencies({ snapshotStore: fakeStore });
     fakeStore.leftoverJournalEntries = [{ snapshotName: "bad" }, { snapshotName: "good" }];
     const failure = new Error("recovery failed");
     fakeStore.queueRecoveryFailure(failure);

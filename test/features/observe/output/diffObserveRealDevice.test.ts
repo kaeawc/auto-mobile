@@ -90,10 +90,14 @@ describe("actions-diff-observe real-device sign-off (#3051)", () => {
       // reports the field, and the typed value lands on the `to` side.
       const diff = diffObserveResult(textBefore, textAfter);
       expect(diff.fields?.focusedElement).toBeDefined();
-      const to = diff.fields!.focusedElement.to as Record<string, unknown> | undefined;
-      expect(to?.["text"]).toBe("SignOff3051");
+      const focus = diff.fields!.focusedElement;
+      if (!focus || !("to" in focus)) {
+        throw new Error("Expected focus change");
+      }
+      const to = focus.to;
+      expect(to).toHaveProperty("text", "SignOff3051");
       // The mirror is stripped of its `node` subtree (#3059) — never re-embedded.
-      expect(to && "node" in to).toBe(false);
+      expect(to).not.toHaveProperty("node");
     });
 
     test("every emitted node change is a real {from,to} on an actionable attribute", () => {

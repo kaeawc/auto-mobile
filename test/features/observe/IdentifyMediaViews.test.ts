@@ -235,7 +235,7 @@ describe("IdentifyMediaViews", () => {
     const cases: Array<{
       className: string;
       platform: "android" | "ios";
-      expected: string | null;
+      expected: ReturnType<IdentifyMediaViews["classify"]>[number]["mediaType"] | null;
     }> = [
       { className: "UIImageView", platform: "android", expected: "image" },
       { className: "UIActivityIndicatorView", platform: "android", expected: null },

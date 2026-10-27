@@ -474,6 +474,9 @@ describe("IosSimulatorCaptureHelperPool", () => {
 
       expect(helpers).toHaveLength(2);
       expect(helpers[1].starts).toBe(1);
+      if (!("isStarted" in second)) {
+        throw new Error("Expected started lease");
+      }
       expect(second.isStarted).toBe(true);
       await second.stop();
     } finally {
@@ -516,6 +519,9 @@ describe("IosSimulatorCaptureHelperPool", () => {
     await lease.stop();
     await lease.start();
 
+    if (!("isStarted" in lease)) {
+      throw new Error("Expected started lease");
+    }
     expect(lease.isStarted).toBe(true);
     await lease.stop();
     await pool.shutdown();

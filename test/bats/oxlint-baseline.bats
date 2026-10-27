@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=parallel-within-file
 #
 # Tests for scripts/oxlint-baseline.sh -- the oxlint ratchet gate that replaces
 # ESLint's eslint-suppressions.json (oxlint has no native bulk-suppressions).
@@ -22,9 +23,9 @@ setup() {
   # A canned oxlint JSON report: two ratcheted diagnostics in one file plus one
   # in another, and two error-level diagnostics that must be ignored entirely.
   FIXTURE_JSON='printf "%s" "{\"diagnostics\":[
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"eslint(max-depth)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src/b.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-misused-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/b.ts\"},
     {\"code\":\"eslint(no-debugger)\",\"filename\":\"src/a.ts\"},
     {\"code\":\"auto-mobile(no-raw-promise-race)\",\"filename\":\"src/a.ts\"}
   ]}"'
@@ -55,10 +56,10 @@ teardown() {
 @test "check fails on a NEW file+rule pair" {
   OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
   local more='printf "%s" "{\"diagnostics\":[
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"eslint(max-depth)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src/b.ts\"},
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/new.ts\"}
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-misused-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/b.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/new.ts\"}
   ]}"'
   OXLINT_JSON_CMD="$more" run bash "$SCRIPT"
   [ "$status" -eq 1 ]
@@ -68,10 +69,10 @@ teardown() {
 @test "check fails on an INCREASED count for an existing pair" {
   OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
   local more='printf "%s" "{\"diagnostics\":[
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"eslint(max-depth)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src/b.ts\"}
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-misused-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/b.ts\"}
   ]}"'
   OXLINT_JSON_CMD="$more" run bash "$SCRIPT"
   [ "$status" -eq 1 ]
@@ -81,7 +82,7 @@ teardown() {
 @test "check passes when a violation is FIXED (lower count is fine)" {
   OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
   local fewer='printf "%s" "{\"diagnostics\":[
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/a.ts\"}
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/a.ts\"}
   ]}"'
   OXLINT_JSON_CMD="$fewer" run bash "$SCRIPT"
   [ "$status" -eq 0 ]
@@ -91,10 +92,10 @@ teardown() {
 @test "update refuses to grow the baseline without --allow-grow" {
   OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
   local more='printf "%s" "{\"diagnostics\":[
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"eslint(max-depth)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src/b.ts\"},
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/new.ts\"}
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-misused-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/b.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/new.ts\"}
   ]}"'
   OXLINT_JSON_CMD="$more" run bash "$SCRIPT" --update
   [ "$status" -eq 1 ]
@@ -110,9 +111,9 @@ teardown() {
   # src/c.ts complexity appears. An aggregate-only guard would accept this and
   # let the subsequent check pass over the new defect.
   local swap='printf "%s" "{\"diagnostics\":[
-    {\"code\":\"eslint(max-depth)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src/b.ts\"},
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/c.ts\"}
+    {\"code\":\"typescript(no-misused-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/b.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/c.ts\"}
   ]}"'
   OXLINT_JSON_CMD="$swap" run bash "$SCRIPT" --update
   [ "$status" -eq 1 ]
@@ -128,9 +129,9 @@ teardown() {
   # Same violations, but reported with Windows backslash paths (as oxlint may emit
   # on windows-latest). Without normalization every key would read as NEW.
   local win='printf "%s" "{\"diagnostics\":[
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src\\\\a.ts\"},
-    {\"code\":\"eslint(max-depth)\",\"filename\":\"src\\\\a.ts\"},
-    {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src\\\\b.ts\"}
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src\\\\a.ts\"},
+    {\"code\":\"typescript(no-misused-promises)\",\"filename\":\"src\\\\a.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src\\\\b.ts\"}
   ]}"'
   OXLINT_JSON_CMD="$win" run bash "$SCRIPT"
   [ "$status" -eq 0 ]

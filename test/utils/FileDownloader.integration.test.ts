@@ -5,13 +5,6 @@ import { Readable } from "node:stream";
 import { DefaultFileDownloader } from "../../src/utils/FileDownloader";
 import { FakeFileDownloader } from "../fakes/FakeFileDownloader";
 
-type PipeResponseToFile = {
-  pipeResponseToFile(response: Readable, tempDestination: string): Promise<void>;
-};
-
-const asPipeResponseToFile = (downloader: DefaultFileDownloader): PipeResponseToFile =>
-  downloader as unknown as PipeResponseToFile;
-
 /**
  * A minimal stand-in for `http.IncomingMessage` that lets a test control
  * exactly when the body stream ends, errors, or is destroyed without
@@ -30,13 +23,16 @@ const createFakeResponse = (): Readable & { waitForRead(): Promise<void> } => {
   const read = new Promise<void>((resolve) => {
     resolveRead = resolve;
   });
-  const response = new Readable({
+  const response = new (class extends Readable {
+    waitForRead(): Promise<void> {
+      return read;
+    }
+  })({
     read() {
       resolveRead?.();
       resolveRead = undefined;
     },
-  }) as Readable & { waitForRead(): Promise<void> };
-  response.waitForRead = () => read;
+  });
   response.on("error", () => {
     // Real IncomingMessage instances never throw an unhandled error for a
     // premature close; see the comment above.
@@ -64,7 +60,7 @@ describe("FakeFileDownloader", function () {
 
     expect(downloader.downloadedUrls).toEqual([url]);
     expect(downloader.downloadedDestinations).toEqual([destination]);
-    expect(await fs.readFile(destination)).toEqual(downloader.payload);
+    expect(downloader.payload).toEqual(await fs.readFile(destination));
   });
 
   test("should throw configured error", async function () {
@@ -113,7 +109,7 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     response.push(Buffer.from("partial body"));
 
     const tempDestination = path.join(tempDir, "mid-close.bin.download-test.tmp");
-    const downloader = asPipeResponseToFile(new DefaultFileDownloader());
+    const downloader = new DefaultFileDownloader().testHooks;
 
     const result = downloader.pipeResponseToFile(response, tempDestination);
     // Wait for pipeline to request input before closing the source. This is
@@ -142,7 +138,7 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     const tempDestination = `${destination}.download-test.tmp`;
     const existingPayload = Buffer.from("already downloaded by another attempt");
     await fs.writeFile(destination, existingPayload);
-    const downloader = asPipeResponseToFile(new DefaultFileDownloader());
+    const downloader = new DefaultFileDownloader().testHooks;
 
     const result = downloader.pipeResponseToFile(response, tempDestination);
     await response.waitForRead();
@@ -166,7 +162,7 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
 
     const destination = path.join(tempDir, "complete.bin");
     const tempDestination = `${destination}.download-test.tmp`;
-    const downloader = asPipeResponseToFile(new DefaultFileDownloader());
+    const downloader = new DefaultFileDownloader().testHooks;
 
     await downloader.pipeResponseToFile(response, tempDestination);
 

@@ -35,10 +35,13 @@ class CanonicalPixelClientMigrationTest {
       width = 1170,
       height = 2532,
       timestamp = 1L,
-      deviceId = "sim-udid",
-      captureSequence = 7L,
-      coordinateSpace = CoordinateSpace.Pixels,
-      nativeScale = 3.5,
+      options =
+        ScreenshotUpdateOptions(
+          deviceId = "sim-udid",
+          captureSequence = 7L,
+          coordinateSpace = CoordinateSpace.Pixels,
+          nativeScale = 3.5,
+        ),
     )
 
     assertEquals(CoordinateSpace.Pixels, state.screenshotFacts?.coordinateSpace)
@@ -51,10 +54,13 @@ class CanonicalPixelClientMigrationTest {
 
     state.updateHierarchy(
       newHierarchy = LayoutInspectorMockData.mockHierarchy,
-      deviceId = "sim-udid",
-      captureSequence = 7L,
-      coordinateSpace = CoordinateSpace.Pixels,
-      nativeScale = 3.5,
+      options =
+        HierarchyUpdateOptions(
+          deviceId = "sim-udid",
+          captureSequence = 7L,
+          coordinateSpace = CoordinateSpace.Pixels,
+          nativeScale = 3.5,
+        ),
     )
 
     assertEquals(CoordinateSpace.Pixels, state.hierarchyFacts?.coordinateSpace)
@@ -66,8 +72,15 @@ class CanonicalPixelClientMigrationTest {
     // A pre-#4548 runner's frames must not acquire a declaration on the way through the client.
     val state = LayoutInspectorState()
 
-    state.updateScreenshot(data = byteArrayOf(1), width = 1080, height = 2340, timestamp = 1L)
-    state.updateHierarchy(newHierarchy = LayoutInspectorMockData.mockHierarchy)
+    state.updateScreenshot(
+      data = byteArrayOf(1),
+      width = 1080,
+      height = 2340,
+      timestamp = 1L,
+    )
+    state.updateHierarchy(
+      newHierarchy = LayoutInspectorMockData.mockHierarchy,
+    )
 
     assertNull(state.screenshotFacts?.coordinateSpace)
     assertNull(state.hierarchyFacts?.coordinateSpace)

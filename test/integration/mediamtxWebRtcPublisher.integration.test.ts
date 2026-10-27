@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { once } from "node:events";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import type { Readable } from "node:stream";
+import { once, type EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -40,7 +41,7 @@ interface DecodedVideo {
 }
 
 interface StartedProcess {
-  readonly process: ChildProcessWithoutNullStreams;
+  readonly process: ChildProcessByStdio<null, Readable, Readable>;
   readonly logs: () => string;
   readonly error: () => Error | undefined;
 }
@@ -137,7 +138,9 @@ async function waitFor(
   }
 }
 
-function exitedProcessDescription(process: ChildProcessWithoutNullStreams): string | undefined {
+function exitedProcessDescription(
+  process: ChildProcessByStdio<null, Readable, Readable>,
+): string | undefined {
   if (process.exitCode !== null) {
     return `exit code ${process.exitCode}`;
   }
@@ -148,7 +151,7 @@ function exitedProcessDescription(process: ChildProcessWithoutNullStreams): stri
 }
 
 async function waitForHttpServer(
-  process: ChildProcessWithoutNullStreams,
+  process: ChildProcessByStdio<null, Readable, Readable>,
   logs: () => string,
   url: string,
   name: string,
@@ -188,7 +191,7 @@ async function waitForHttpServer(
 }
 
 async function stopProcess(
-  process: ChildProcessWithoutNullStreams | undefined,
+  process: ChildProcessByStdio<null, Readable, Readable> | undefined,
   graceMs: number = 3_000,
 ): Promise<void> {
   if (
@@ -332,7 +335,7 @@ async function readDecodedVideo(cdp: CdpClient): Promise<DecodedVideo> {
  * wall-clock watchdog (#5391) instead of failing with a diagnostic.
  */
 async function boundedOnce(
-  emitter: Parameters<typeof once>[0],
+  emitter: EventEmitter,
   event: string,
   description: string,
   timeoutMs: number = 10_000,
@@ -431,7 +434,7 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
       [join(repoRoot, "examples/mediamtx/mediamtx.yml")],
       tempDir,
     );
-    let ffmpeg: ChildProcessWithoutNullStreams | undefined;
+    let ffmpeg: ChildProcessByStdio<null, Readable, Readable> | undefined;
     let chrome: StartedProcess | undefined;
     let cdp: CdpClient | undefined;
     const patchedResources: string[] = [];

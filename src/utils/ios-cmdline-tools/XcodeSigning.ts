@@ -5,7 +5,8 @@ import { join } from "path";
 import { createHash, X509Certificate } from "crypto";
 import { logger } from "../logger";
 import { Xcodebuild, XcodebuildClient } from "./XcodebuildClient";
-import { escapeXml, parsePlist, PlistReal, type PlistValue } from "./XctestrunPlist";
+import { escapeXml } from "./XctestrunPlist";
+import { parseProvisioningProfileXml } from "./provisioningProfileFields";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../workingDirectory";
 import { SecurityClient, type SecurityClientApi } from "./SecurityClient";
 import { defaultTimer, Timer } from "../SystemTimer";
@@ -13,6 +14,7 @@ import { raceWithDeadline } from "../raceWithDeadline";
 import { getAbortSignal } from "../AbortContext";
 import { getSharedAutoMobileDir } from "../tempDir";
 import { sortedReaddir } from "../io";
+import { ENV, readEnvRaw } from "../../config/env";
 
 type SigningStyle = "automatic" | "manual";
 
@@ -63,28 +65,10 @@ interface SigningResolution {
   warnings: string[];
 }
 
-const plistValueToSigningValue = (value: PlistValue): unknown => {
-  if (value instanceof Map) {
-    return Object.fromEntries(
-      [...value.entries()].map(([key, child]) => [key, plistValueToSigningValue(child)]),
-    );
-  }
-  if (Array.isArray(value)) {
-    return value.map(plistValueToSigningValue);
-  }
-  if (value instanceof PlistReal) {
-    return value.value;
-  }
-  if (Buffer.isBuffer(value)) {
-    return value.toString("base64");
-  }
-  return value;
-};
-
-interface XcodeSigningDependencies {
+export interface XcodeSigningDependencies {
   platform: () => NodeJS.Platform;
   securityClient: SecurityClientApi;
-  xcodebuild: Xcodebuild;
+  xcodebuild: Pick<Xcodebuild, "executeCommand" | "isAvailable">;
   readDir: (path: string) => Promise<string[]>;
   readFile: (path: string) => Promise<string>;
   stat: (path: string) => Promise<{ isFile: () => boolean }>;
@@ -565,7 +549,7 @@ export class XcodeSigningManager {
   }
 
   private readTeamIdPreferences(): string[] {
-    const raw = process.env.AUTOMOBILE_IOS_TEAM_IDS ?? process.env.AUTOMOBILE_IOS_TEAM_ID ?? "";
+    const raw = readEnvRaw(ENV.IOS_TEAM_IDS) ?? readEnvRaw(ENV.IOS_TEAM_ID) ?? "";
     if (!raw) {
       return [];
     }
@@ -577,35 +561,25 @@ export class XcodeSigningManager {
 
   private readProfilePreference(): string | null {
     const value =
-      process.env.AUTOMOBILE_IOS_PROFILE_UUID ??
-      process.env.AUTOMOBILE_IOS_PROFILE_NAME ??
-      process.env.AUTOMOBILE_IOS_PROFILE_SPECIFIER;
+      readEnvRaw(ENV.IOS_PROFILE_UUID) ??
+      readEnvRaw(ENV.IOS_PROFILE_NAME) ??
+      readEnvRaw(ENV.IOS_PROFILE_SPECIFIER);
     return value?.trim() || null;
   }
 
   private readIdentityPreference(): string | null {
-    const value = process.env.AUTOMOBILE_IOS_CODE_SIGN_IDENTITY ?? "";
+    const value = readEnvRaw(ENV.IOS_CODE_SIGN_IDENTITY) ?? "";
     return value.trim().length > 0 ? value.trim() : null;
   }
 
   private async parseProvisioningProfile(path: string): Promise<ProvisioningProfile | null> {
     try {
       const decoded = await this.dependencies.securityClient.decodeCms(path);
-      const plist = await parsePlist(decoded);
-      if (!plist || typeof plist !== "object") {
+      const fields = await parseProvisioningProfileXml(decoded);
+      if (!fields) {
         return null;
       }
-      const data = plistValueToSigningValue(plist as PlistValue) as Record<string, unknown>;
-      const { uuid, name, teamIds, teamName } = this.readProfileIdentity(data);
-      const { expirationDate, creationDate } = this.readProfileDates(data);
-      const provisionsAllDevices = data.ProvisionsAllDevices === true;
-      const provisionedDevices = Array.isArray(data.ProvisionedDevices)
-        ? data.ProvisionedDevices.map(String)
-        : null;
-      const entitlements =
-        typeof data.Entitlements === "object" && data.Entitlements
-          ? (data.Entitlements as Record<string, unknown>)
-          : {};
+      const { data, uuid, name, expirationDate } = fields;
       const developerCertificates = Array.isArray(data.DeveloperCertificates)
         ? data.DeveloperCertificates.map(String)
         : [];
@@ -614,26 +588,26 @@ export class XcodeSigningManager {
         .filter(Boolean)
         .map((cert) => cert as CertificateInfo);
 
-      if (!uuid || !name || !expirationDate || Number.isNaN(expirationDate.getTime())) {
+      if (!uuid || !name || Number.isNaN(expirationDate.getTime())) {
         return null;
       }
 
       const profileType = resolveProfileType(
-        entitlements,
-        provisionsAllDevices,
-        provisionedDevices,
+        fields.entitlements,
+        fields.provisionsAllDevices,
+        fields.provisionedDevices,
       );
 
       return {
         uuid,
         name,
-        teamIds,
-        teamName,
+        teamIds: fields.teamIds,
+        teamName: fields.teamName,
         expirationDate,
-        creationDate,
-        provisionsAllDevices,
-        provisionedDevices,
-        entitlements,
+        creationDate: fields.creationDate,
+        provisionsAllDevices: fields.provisionsAllDevices,
+        provisionedDevices: fields.provisionedDevices,
+        entitlements: fields.entitlements,
         developerCertificates: certificates,
         profileType,
         path,
@@ -644,32 +618,6 @@ export class XcodeSigningManager {
     }
   }
 
-  private readProfileIdentity(
-    data: Record<string, unknown>,
-  ): Pick<ProvisioningProfile, "uuid" | "name" | "teamIds" | "teamName"> {
-    const uuid = String(data.UUID ?? "");
-    const name = String(data.Name ?? "");
-    const teamIds = Array.isArray(data.TeamIdentifier) ? data.TeamIdentifier.map(String) : [];
-    const teamName = typeof data.TeamName === "string" ? data.TeamName : undefined;
-    return { uuid, name, teamIds, teamName };
-  }
-
-  private readProfileDates(
-    data: Record<string, unknown>,
-  ): Pick<ProvisioningProfile, "expirationDate" | "creationDate"> {
-    const expirationDate =
-      data.ExpirationDate instanceof Date
-        ? data.ExpirationDate
-        : new Date(String(data.ExpirationDate ?? ""));
-    const creationDate =
-      data.CreationDate instanceof Date
-        ? data.CreationDate
-        : data.CreationDate
-          ? new Date(String(data.CreationDate))
-          : undefined;
-    return { expirationDate, creationDate };
-  }
-
   private async writeEntitlementsIfNeeded(
     profile: ProvisioningProfile,
   ): Promise<string | undefined> {
@@ -677,8 +625,9 @@ export class XcodeSigningManager {
     if (!hasEntitlements) {
       return undefined;
     }
-    if (process.env.AUTOMOBILE_IOS_CODE_SIGN_ENTITLEMENTS_PATH) {
-      return process.env.AUTOMOBILE_IOS_CODE_SIGN_ENTITLEMENTS_PATH;
+    const entitlementsOverride = readEnvRaw(ENV.IOS_CODE_SIGN_ENTITLEMENTS_PATH);
+    if (entitlementsOverride) {
+      return entitlementsOverride;
     }
     const filename = `${profile.uuid}.plist`;
     const entitlementsDir = this.entitlementsDirectory();

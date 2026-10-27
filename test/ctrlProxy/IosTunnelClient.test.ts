@@ -332,7 +332,7 @@ describe("IosTunnelClient", () => {
     await manager["stopIproxyTunnel"]({ clearDevicePort: true });
     expect(await fake.isAlive()).toBe(false);
     expect(executor.getSpawnedProcesses()).toHaveLength(0);
-    expect(Object.values(manager)).toContain(fake);
+    expect(manager.diagnostics.tunnelClient).toBe(fake);
     expect(fake.starts).toEqual([
       {
         localPort: manager.getServicePort(),

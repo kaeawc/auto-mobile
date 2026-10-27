@@ -1,4 +1,9 @@
 import type { BootedDevice } from "../models";
+import {
+  registerDeviceSnapshotIncarnationInvalidator,
+  type DeviceIncarnationInvalidator,
+} from "../daemon/deviceSnapshotIncarnationInvalidator";
+export type { DeviceIncarnationInvalidator } from "../daemon/deviceSnapshotIncarnationInvalidator";
 import { logger } from "../utils/logger";
 import {
   advanceDeviceIncarnation,
@@ -16,14 +21,7 @@ import "../features/performance/RecompositionTracker";
 import "../ctrlProxy/CtrlProxyManager";
 import "./appResources";
 import "./videoRecordingIncarnationListener";
-import "./webrtcStreamIncarnationListener";
-
-/** Invalidates host-side state that belongs to one physical device incarnation. */
-export interface DeviceIncarnationInvalidator {
-  prepareForIncarnationChange(device: BootedDevice): Promise<void>;
-  invalidate(device: BootedDevice): Promise<string | void>;
-  settleIncarnationChange(device: BootedDevice, outcome: { ready: boolean }): Promise<void>;
-}
+import "../daemon/webrtcStreamIncarnationListener";
 
 export interface CtrlProxyClientLifecycle {
   closeAndRemove(deviceId: string): Promise<void>;
@@ -118,3 +116,5 @@ export class DefaultDeviceIncarnationInvalidator implements DeviceIncarnationInv
     return deviceSessionUuid;
   }
 }
+
+registerDeviceSnapshotIncarnationInvalidator(new DefaultDeviceIncarnationInvalidator());

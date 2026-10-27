@@ -8,7 +8,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
 import { isSessionlessDeviceRead } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -185,7 +185,7 @@ describe("deviceId-only calls from the holder's own connection (#10994)", () => 
       await fromConnection(OTHER_CONNECTION, "readProbe", { deviceId: held.deviceId });
       expect(reads).toEqual([{ readPath: true, sessionUuid: undefined }]);
       expect(tools.watcherResolutions).toBe(1);
-      expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
+      expect(tools.deviceReadiness.getEnsureDeviceReadyCalls()).toBe(0);
       expect(lastUsedAt()).toBe(before);
 
       await fromConnection(HOLDER_CONNECTION, "readProbe", { deviceId: held.deviceId });

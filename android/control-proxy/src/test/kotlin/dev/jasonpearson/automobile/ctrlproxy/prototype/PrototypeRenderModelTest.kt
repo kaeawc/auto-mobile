@@ -20,6 +20,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PrototypeRenderModelTest {
+  // These tests probe unknown icon names on a plain JVM, where android.util.Log is not mocked.
+  @org.junit.Before
+  fun silenceIconWarnings() {
+    prototypeIconWarning = {}
+  }
+
   companion object {
     @JvmStatic
     @org.junit.BeforeClass
@@ -539,7 +545,8 @@ class PrototypeRenderModelTest {
   @Test
   fun `placement opacity and alpha first colors map without a display`() {
     assertEquals(100, mapPrototypeSpec(spec(PrototypeSpacerNode())).opacityPercent)
-    val window = PrototypeWindow(PrototypeFullscreenPlacement("#80123456"), 37)
+    val window =
+      PrototypeWindow(PrototypeFullscreenPlacement(PrototypeModeValue.Single("#80123456")), 37)
     val model = mapPrototypeSpec(spec(PrototypeSpacerNode()).copy(window = window))
     assertEquals(37, model.request().opacityPercent)
     assertEquals(

@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import type { DaemonMethodCallOptions } from "../../src/daemon/client";
 import {
   daemonCommandArgumentError,
@@ -18,8 +18,11 @@ import {
   DAEMON_RELEASE_BROKER_SESSION_METHOD,
   DAEMON_SESSION_REQUEST_STATUS_METHOD,
 } from "../../src/daemon/sessionBrokerProxyAcquisition";
+import { SESSION_BROKER_RETRY_AFTER_MS } from "../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
 import { describeUnknownError } from "../../src/utils/describeUnknownError";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
+
+afterEach(() => mock.restore());
 
 const REQUEST_ID = "python-harness-attempt-1";
 const SESSION_UUID = "f4e8bd2a-991c-4c97-a530-b4d687a54475";
@@ -57,6 +60,14 @@ class FakeBrokerCommandClient implements SessionBrokerCommandClient {
 
   async close(): Promise<void> {
     this.closeCalls++;
+  }
+
+  async callTool(): Promise<never> {
+    throw new Error("A broker command must not call an MCP tool");
+  }
+
+  async readResource(): Promise<never> {
+    throw new Error("A broker command must not read an MCP resource");
   }
 }
 
@@ -98,7 +109,7 @@ describe("session broker command arguments", () => {
     expect(clientsCreated).toBe(0);
   });
 
-  test.each([
+  test.each<{ name: string; args: string[] }>([
     { name: "no arguments", args: [] },
     { name: "missing identity and token", args: [REQUEST_ID, "--json"] },
     {
@@ -138,6 +149,29 @@ describe("session broker command arguments", () => {
 });
 
 describe("session broker status command", () => {
+  test("v1 status accepts additive timing and unknown fields without stripping them", async () => {
+    const receipt = {
+      contractVersion: 1,
+      requestId: REQUEST_ID,
+      outcome: "pending",
+      sessionUuid: null,
+      profile: null,
+      cleanupPending: true,
+      timing: {
+        reset: {
+          mode: "erase",
+          outcome: "pending",
+          phases: { stop: 3 },
+          reuseCount: 1,
+          startedAtMs: 0,
+          totalMs: 3,
+        },
+      },
+      futureField: "ignored",
+    } as const;
+    const client = new FakeBrokerCommandClient(receipt);
+    expect(await queryBrokerSessionRequestStatus(statusArgs, () => client)).toBe(receipt);
+  });
   test.each([
     {
       contractVersion: 1,
@@ -186,6 +220,24 @@ describe("session broker status command", () => {
 });
 
 describe("session broker release command", () => {
+  test("release accepts additive reset timing without stripping it", async () => {
+    const receipt = {
+      sessionUuid: SESSION_UUID,
+      outcome: "released",
+      timing: {
+        reset: {
+          mode: "erase",
+          outcome: "clean",
+          phases: { erase: 5 },
+          reuseCount: 1,
+          startedAtMs: 0,
+          totalMs: 5,
+        },
+      },
+    } as const;
+    const client = new FakeBrokerCommandClient(receipt);
+    expect(await releaseBrokerSession(releaseArgs, () => client)).toBe(receipt);
+  });
   test("keeps unknown_session explicit and uses the 240-second release timeout budget", async () => {
     const receipt = { sessionUuid: SESSION_UUID, outcome: "unknown_session" as const };
     const client = new FakeBrokerCommandClient(receipt);
@@ -197,6 +249,14 @@ describe("session broker release command", () => {
         options: { timeoutMs: SESSION_BROKER_RELEASE_TIMEOUT_MS },
       },
     ]);
+    expect(client.closeCalls).toBe(1);
+  });
+
+  test("returns cleanup_pending without retrying or claiming cleanup is complete", async () => {
+    const receipt = { sessionUuid: SESSION_UUID, outcome: "cleanup_pending" as const };
+    const client = new FakeBrokerCommandClient(receipt);
+    expect(await releaseBrokerSession(releaseArgs, () => client)).toEqual(receipt);
+    expect(client.calls).toHaveLength(1);
     expect(client.closeCalls).toBe(1);
   });
 
@@ -294,4 +354,53 @@ describe("session broker abandon command", () => {
     ]);
     expect(client.closeCalls).toBe(1);
   });
+});
+
+describe("session broker refusal CLI forwarding", () => {
+  for (const command of ["release-broker-session", "abandon-session-request"] as const) {
+    test.each([
+      {
+        code: "session_restart_handoff_pending",
+        retryable: true,
+        retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS,
+      },
+      { code: "session_owner_mismatch", retryable: false },
+      { code: "session_broker_unavailable", retryable: false },
+      {
+        code: "session_broker_unavailable",
+        retryable: true,
+        retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS,
+      },
+    ])(`${command} preserves $code retry hints in JSON`, async (fields) => {
+      const client = new FakeBrokerCommandClient(
+        undefined,
+        Object.assign(new Error(`Refused owner ${OWNER_TOKEN}`), fields),
+      );
+      const stdout: string[] = [];
+      const exited = new Error("fake exit");
+      const log = spyOn(console, "log").mockImplementation((line) => stdout.push(String(line)));
+      const exit = spyOn(process, "exit").mockImplementation(() => {
+        throw exited;
+      });
+      try {
+        await expect(
+          runDaemonCommand(
+            command,
+            command === "release-broker-session" ? releaseArgs : abandonArgs,
+            { clientFactory: () => client },
+            SafeDaemonManager,
+          ),
+        ).rejects.toBe(exited);
+        expect(JSON.parse(stdout[0])).toEqual({
+          ok: false,
+          error: "Refused owner [REDACTED]",
+          ...fields,
+        });
+        expect(client.closeCalls).toBe(1);
+      } finally {
+        exit.mockRestore();
+        log.mockRestore();
+      }
+    });
+  }
 });

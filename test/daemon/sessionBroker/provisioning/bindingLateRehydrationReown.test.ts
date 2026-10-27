@@ -151,9 +151,9 @@ describe("managed execution across a daemon restart", () => {
     let openGate!: () => void;
     const gate = new Promise<void>((resolve) => (openGate = resolve));
     // daemon.ts wires the same hook: late rows re-own only live managed executions.
-    after.setLateRehydrationListener((ids) =>
-      reowner().reown(ids.filter((id) => after.isLiveManagedExecutionSession(id))),
-    );
+    after.setLateRehydrationListener(async (ids) => {
+      await reowner().reown(ids.filter((id) => after.isLiveManagedExecutionSession(id)));
+    });
     const fast = assigner(after);
     const slow: SessionDeviceAssigner = {
       async assignDeviceToSession(id, platform, target) {

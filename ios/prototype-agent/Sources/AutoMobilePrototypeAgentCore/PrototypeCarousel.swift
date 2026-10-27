@@ -15,8 +15,7 @@ enum PrototypeCarousel {
     /// transient out-of-range value still fills exactly one dot.
     static func indicatorDots(count: Int, selected: Int) -> [Bool] {
         // `count` is the page count parameter, not a collection.
-        // swiftlint:disable:next empty_count
-        guard count > 0 else { return [] }
+        guard count >= 1 else { return [] }
         let current = min(max(selected, 0), count - 1)
         return (0 ..< count).map { $0 == current }
     }
@@ -39,6 +38,24 @@ extension PrototypeCarousel {
         .dataCorrupted(.init(codingPath: [], debugDescription: "\(path): \(message)"))
     }
 
+    private static func validateCarousel(_ node: [String: JSONValue], path: String) throws {
+        if let variant = node["variant"] {
+            let known = ["multiBrowse", "hero", "uncontained"].map(JSONValue.string)
+            guard known.contains(variant) else { throw violation("\(path).variant", "Invalid enum value") }
+        }
+        guard case let .number(width)? = node["itemWidth"] else {
+            throw violation("\(path).itemWidth", "Required")
+        }
+        guard width.isFinite, width > 0, width <= maxDp else {
+            throw violation("\(path).itemWidth", "Invalid number value")
+        }
+        if let spacing = node["itemSpacing"] {
+            guard case let .number(gap) = spacing, gap.isFinite, gap >= 0, gap <= maxDp else {
+                throw violation("\(path).itemSpacing", "Invalid number value")
+            }
+        }
+    }
+
     private static func visit(_ value: JSONValue, path: String) throws {
         guard case let .object(node) = value else { return }
         if node["type"] == .string("pager"), let indicator = node["indicator"],
@@ -47,21 +64,7 @@ extension PrototypeCarousel {
             throw violation("\(path).indicator", "Invalid enum value")
         }
         if node["type"] == .string("carousel") {
-            if let variant = node["variant"] {
-                let known = ["multiBrowse", "hero", "uncontained"].map(JSONValue.string)
-                guard known.contains(variant) else { throw violation("\(path).variant", "Invalid enum value") }
-            }
-            guard case let .number(width)? = node["itemWidth"] else {
-                throw violation("\(path).itemWidth", "Required")
-            }
-            guard width.isFinite, width > 0, width <= maxDp else {
-                throw violation("\(path).itemWidth", "Invalid number value")
-            }
-            if let spacing = node["itemSpacing"] {
-                guard case let .number(gap) = spacing, gap.isFinite, gap >= 0, gap <= maxDp else {
-                    throw violation("\(path).itemSpacing", "Invalid number value")
-                }
-            }
+            try validateCarousel(node, path: path)
         }
         if case let .array(children)? = node["children"] {
             for (index, child) in children.enumerated() {

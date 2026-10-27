@@ -1,4 +1,5 @@
 import { makePool } from "../helpers/makePool";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
@@ -47,12 +48,12 @@ describe("allocation after a partial refresh failure", () => {
       timer,
       deviceManager,
       devicePoolRefreshFactory: (port) => {
-        clearPool = () => port.getDevices().clear();
+        clearPool = () => void pool.removeDevice(device.deviceId);
         return new DevicePoolRefresh({
           ...port,
           setDeviceSessionTracking: async () => {
             if (busy) {
-              port.getDevices().get(device.deviceId)!.status = "busy";
+              patchDeviceBinding(port.getDevices().get(device.deviceId)!, { status: "busy" });
             }
             if (persistentFailure || trackingAttempts++ === 0) {
               throw new Error(failure);
@@ -401,11 +402,18 @@ describe("Android discovery failure refresh outcome", () => {
     const refusal = await handler({
       deviceId: "99999999-2222-3333-4444-555555555555",
       sessionUuid: "selection",
-    }).catch((error: unknown) => error as { message: string; code?: string; retryable?: boolean });
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
     expect(refusal).toMatchObject({
       message: "Device '99999999-2222-3333-4444-555555555555' not found in device pool",
     });
-    expect({ code: refusal?.code, retryable: refusal?.retryable }).toEqual({
+    const refusalFields = typeof refusal === "object" && refusal !== null ? refusal : {};
+    expect({
+      code: "code" in refusalFields ? refusalFields.code : undefined,
+      retryable: "retryable" in refusalFields ? refusalFields.retryable : undefined,
+    }).toEqual({
       code: undefined,
       retryable: undefined,
     });
@@ -504,9 +512,9 @@ describe("Android discovery failure refresh outcome", () => {
           { deviceId: "emulator-5600", name: "Pixel", platform: "android" },
         ]);
         const pooled = pool.getDevice("emulator-5600")!;
-        pooled.status = status;
+        patchDeviceBinding(pooled, { status });
         if (status === "busy") {
-          pooled.sessionId = "held-session";
+          patchDeviceBinding(pooled, { sessionId: "held-session" });
           await sessions.createSession("held-session", pooled.id, "android");
         }
         for (let refresh = 0; refresh < 4; refresh++) {

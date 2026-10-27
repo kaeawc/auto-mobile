@@ -309,6 +309,7 @@ export type WsPrototypeEventMessage = Omit<PrototypeEvent, "name" | "payload"> &
 };
 
 export interface WsHighlightResponseMessage extends WsMessageBase {
+  perfTiming?: AndroidPerfTiming[];
   type: "highlight_response";
   requestId?: string | null;
   success?: boolean;
@@ -369,7 +370,6 @@ export interface WsPreferenceFilesMessage extends WsMessageBase {
 export interface WsPreferencesMessage extends WsMessageBase {
   packageName?: string;
   fileName?: string;
-  data?: string;
   type: "preferences";
   requestId?: string | null;
   success?: boolean;

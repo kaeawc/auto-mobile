@@ -12,10 +12,11 @@ import {
   handleDaemonRequest,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { releasedSessionNotFoundFields } from "../../src/daemon/types";
 import { sessionReleaseReasonTraits } from "../../src/daemon/releaseReasons";
-import { SESSION_IDLE_TIMEOUT_ENV } from "../../src/daemon/sessionLivenessWindows";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import { SESSION_IDLE_TIMEOUT_ENV } from "../../src/daemon/wire/sessionLivenessWindows";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -24,6 +25,20 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 const SESSION = "00000000-0000-4000-8000-000000000011";
 const DEVICE = "emulator-5554";
+
+// Neither request under test reaches the device pool or the device-session registry.
+function stateFor(manager: SessionManager): DaemonStateAccess {
+  return {
+    isInitialized: () => true,
+    getSessionManager: () => manager,
+    getDevicePool: () => ({
+      refreshDevices: async () => 0,
+      releaseDevice: async () => {},
+      getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
+    }),
+    getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
+  };
+}
 
 class RecordingJournal implements TerminalReleaseJournal {
   readonly recorded: TerminalReleaseIntent[] = [];
@@ -116,7 +131,7 @@ describe("an idle release is terminal (#11258)", () => {
             method: "daemon/heartbeat",
             params: { sessionId: SESSION },
           },
-          { isInitialized: () => true, getSessionManager: () => manager } as DaemonStateAccess,
+          stateFor(manager),
         );
         if (path === "sweep") {
           manager.cleanupExpiredSessions();
@@ -151,7 +166,7 @@ describe("an idle release is terminal (#11258)", () => {
           method: "daemon/registerSession",
           params: { sessionId: SESSION, clientName: "late-client" },
         },
-        { isInitialized: () => true, getSessionManager: () => manager } as DaemonStateAccess,
+        stateFor(manager),
       );
       expect(registration).toMatchObject({ success: false, details: { reason, idle: true } });
 

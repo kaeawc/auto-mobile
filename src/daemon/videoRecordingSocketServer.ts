@@ -1,10 +1,7 @@
 import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { ConfigSocketServer, getSocketPath } from "./socketServer/index";
-import {
-  getVideoRecordingConfig,
-  updateVideoRecordingConfig,
-} from "../server/videoRecordingManager";
+import { getVideoRecordingConfig, updateVideoRecordingConfig } from "./videoRecordingManager";
 import { VIDEO_RECORDING_SOCKET_CONFIG } from "./daemonFiles";
 import {
   createDefaultStreamSocketAuthenticator,

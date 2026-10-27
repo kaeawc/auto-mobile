@@ -178,7 +178,7 @@ describe("DevicePool owner-disconnect release (#10503)", () => {
         {
           sessionId: OWNER_SESSION,
           deviceId: expect.any(String),
-          reason: "owned-by-other-connection",
+          reason: "owned-by-other-connection" as const,
         },
       ];
       expect(

@@ -1,4 +1,44 @@
 import Foundation
+#if canImport(XCTest) && os(iOS)
+    import CoreLocation
+    import XCTest
+#endif
+
+/// Reads and sets the system light/dark appearance (#14092). `@MainActor`: the default
+/// impl drives `XCUIDevice.shared.appearance`; the async `CommandHandler` `await`s it.
+protocol AppearanceControlling: Sendable {
+    /// "light", "dark", or "unspecified".
+    @MainActor
+    func appearance() throws -> String
+
+    @MainActor
+    func setAppearance(dark: Bool) throws
+}
+
+/// `XCUIDevice.appearance` (iOS 15+) works on simulators and physical devices. Stateless → `Sendable`.
+struct DefaultAppearanceControl: AppearanceControlling {
+    @MainActor
+    func appearance() throws -> String {
+        #if canImport(XCTest) && os(iOS)
+            switch XCUIDevice.shared.appearance {
+            case .light: return "light"
+            case .dark: return "dark"
+            default: return "unspecified"
+            }
+        #else
+            throw VerbatimLocalizedError(message: "Reading the system appearance requires an iOS runner.")
+        #endif
+    }
+
+    @MainActor
+    func setAppearance(dark: Bool) throws {
+        #if canImport(XCTest) && os(iOS)
+            XCUIDevice.shared.appearance = dark ? .dark : .light
+        #else
+            throw VerbatimLocalizedError(message: "Setting the system appearance requires an iOS runner.")
+        #endif
+    }
+}
 
 extension CommandHandler {
     // MARK: - Device Control
@@ -49,6 +89,24 @@ extension CommandHandler {
         )
     }
 
+    // MARK: - Appearance
+
+    func handleAppearance(_ request: RequestAppearance, startTime: Date) async throws -> WebSocketResponse {
+        if let requested = request.appearance {
+            guard requested == "light" || requested == "dark" else {
+                throw CommandError.invalidParameter("appearance", requested)
+            }
+            try await appearanceControl.setAppearance(dark: requested == "dark")
+        }
+        let current = try await appearanceControl.appearance()
+        return WebSocketResponse.success(
+            type: ResponseType.appearanceResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime),
+            text: current
+        )
+    }
+
     // MARK: - Clipboard
 
     func handleClipboard(_ request: RequestClipboard, startTime: Date) async throws -> WebSocketResponse {
@@ -59,6 +117,72 @@ extension CommandHandler {
             requestId: request.requestId,
             totalTimeMs: totalTimeMs(from: startTime),
             text: resultText
+        )
+    }
+}
+
+// MARK: - Location
+
+/// Sets or clears XCUITest's simulated device location (#14091). `@MainActor`: the default
+/// impl drives `XCUIDevice.shared.location` (iOS 16.4+); the async `CommandHandler` `await`s it.
+protocol LocationSimulating: Sendable {
+    @MainActor
+    func setLocation(latitude: Double, longitude: Double, altitude: Double?, horizontalAccuracy: Double?) throws
+
+    @MainActor
+    func clearLocation() throws
+}
+
+/// Works on physical devices, where simctl has no location verb. Stateless → `Sendable`.
+struct DefaultLocationSimulator: LocationSimulating {
+    @MainActor
+    func setLocation(latitude: Double, longitude: Double, altitude: Double?, horizontalAccuracy: Double?) throws {
+        #if canImport(XCTest) && os(iOS)
+            let location = CLLocation(
+                coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+                altitude: altitude ?? 0,
+                horizontalAccuracy: horizontalAccuracy ?? 5,
+                verticalAccuracy: altitude == nil ? -1 : 5,
+                timestamp: Date()
+            )
+            XCUIDevice.shared.location = XCUILocation(location: location)
+        #else
+            throw VerbatimLocalizedError(message: "Simulating location requires an iOS runner.")
+        #endif
+    }
+
+    @MainActor
+    func clearLocation() throws {
+        #if canImport(XCTest) && os(iOS)
+            XCUIDevice.shared.location = nil
+        #else
+            throw VerbatimLocalizedError(message: "Clearing a simulated location requires an iOS runner.")
+        #endif
+    }
+}
+
+extension CommandHandler {
+    func handleLocation(_ request: RequestLocation, startTime: Date) async throws -> WebSocketResponse {
+        if request.clear == true {
+            try await locationSimulator.clearLocation()
+        } else {
+            guard let latitude = request.latitude, latitude.isFinite, (-90 ... 90).contains(latitude) else {
+                throw CommandError.invalidParameter("latitude", request.latitude.map { String($0) } ?? "missing")
+            }
+            guard let longitude = request.longitude, longitude.isFinite, (-180 ... 180).contains(longitude) else {
+                throw CommandError.invalidParameter("longitude", request.longitude.map { String($0) } ?? "missing")
+            }
+            try await locationSimulator.setLocation(
+                latitude: latitude,
+                longitude: longitude,
+                altitude: request.altitude,
+                horizontalAccuracy: request.horizontalAccuracy
+            )
+        }
+        return WebSocketResponse.success(
+            type: ResponseType.locationResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
         )
     }
 }

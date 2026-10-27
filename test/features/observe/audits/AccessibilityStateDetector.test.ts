@@ -1,10 +1,11 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import { AccessibilityStateDetector } from "../../../../src/features/observe/audits/AccessibilityStateDetector";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../../src/utils/constants";
 import type { BootedDevice, ObserveResult } from "../../../../src/models";
-import { DefaultAccessibilityDetector } from "../../../../src/features/accessibility/AccessibilityDetector";
+import { DefaultAccessibilityDetector } from "../../../../src/ctrlProxy/accessibility/AccessibilityDetector";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeIosVoiceOverDetector } from "../../../fakes/FakeIosVoiceOverDetector";
 import { FakeIOSCtrlProxy } from "../../../fakes/FakeIOSCtrlProxy";
@@ -106,7 +107,7 @@ describe("AccessibilityStateDetector", () => {
 
   test("marks a checked, disabled service as confirmed", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("enabled_accessibility_services", { stdout: "null", stderr: "" });
+    adb.setCommandResponse("enabled_accessibility_services", createExecResult("null", ""));
     const flags: FeatureFlagReader = {
       isEnabled: (key: string) => key === "accessibility-auto-detect",
     };

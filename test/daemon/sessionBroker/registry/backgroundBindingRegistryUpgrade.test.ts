@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { BackgroundBindingRegistryUpgrade } from "../../../../src/daemon/sessionBroker/registry/BackgroundBindingRegistryUpgrade";
 import {
-  BackgroundBindingRegistryUpgrade,
   LegacySlotDeviceRetirement,
   type LegacySlotRetirementStore,
   type LegacySlotSnapshot,

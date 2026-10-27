@@ -4,7 +4,7 @@ import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import type { ViewHierarchyAndroidCtrlProxy } from "../../../src/features/observe/android/ViewHierarchyAndroidCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
-import type { ViewHierarchyResult } from "../../../src/models";
+import { wireCapture } from "../../helpers/wireCapture";
 
 const notUsedOnIos = (): never => {
   throw new Error("iOS hierarchy normalization never reads the Android CtrlProxy");
@@ -22,19 +22,23 @@ const normalizer = () =>
     unusedAndroidProxy,
     new FakeTimer(),
   );
-const capture: ViewHierarchyResult = {
+const capture = {
+  packageName: "com.example",
   screenWidth: 100,
   screenHeight: 100,
   updatedAt: 7,
   hierarchy: {
-    bounds: [0, 0, 100, 100],
+    bounds: [0, 0, 100, 100] satisfies [number, number, number, number],
     node: [
       {
         class: "WKWebView",
-        bounds: [0, 0, 100, 100],
-        node: { text: "Visible", bounds: [0, 0, 20, 20] },
+        bounds: [0, 0, 100, 100] satisfies [number, number, number, number],
+        node: {
+          text: "Visible",
+          bounds: [0, 0, 20, 20] satisfies [number, number, number, number],
+        },
       },
-      { text: "Offscreen", bounds: [0, 500, 20, 550] },
+      { text: "Offscreen", bounds: [0, 500, 20, 550] satisfies [number, number, number, number] },
     ],
   },
 };
@@ -61,7 +65,13 @@ describe("shared iOS capture normalization", () => {
   });
   test("secondary window projections cannot reintroduce offscreen nodes", () => {
     const reader = normalizer();
-    const source = { ...capture, windows: [{ windowLayer: 2, hierarchy: capture.hierarchy }] };
+    const source = {
+      ...capture,
+      windows: wireCapture({
+        hierarchy: {},
+        windows: [{ windowLayer: 2, hierarchy: capture.hierarchy }],
+      }).windows,
+    };
     const result = reader.projectActionableHierarchy(
       reader.normalizeIosHierarchy(convertIosHierarchy(source)),
     );

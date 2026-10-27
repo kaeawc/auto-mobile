@@ -2,6 +2,7 @@ import { ActionableError } from "../../models";
 import type { RTCIceServer } from "werift";
 import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
 import { SIMULATOR_FPS_MAX, SIMULATOR_FPS_MIN } from "../screen-stream/IosScreenCaptureHelper";
+import { ENV, readEnvBool, readEnvRaw } from "../../config/env";
 
 /**
  * Safe range for the iOS Simulator WebRTC capture rate. These mirror the
@@ -89,15 +90,15 @@ export interface WebRtcStreamingOverrides {
 
 /** Environment variable names read for default configuration. */
 export const WEBRTC_ENV = {
-  WHIP_ENDPOINT: "AUTOMOBILE_WEBRTC_WHIP_ENDPOINT",
-  WHIP_TOKEN: "AUTOMOBILE_WEBRTC_WHIP_TOKEN",
-  ICE_SERVERS: "AUTOMOBILE_WEBRTC_ICE_SERVERS",
-  BITRATE_KBPS: "AUTOMOBILE_WEBRTC_BITRATE_KBPS",
-  MAX_SIZE: "AUTOMOBILE_WEBRTC_MAX_SIZE",
-  IOS_SIMULATOR_FPS: "AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS",
-  ANDROID_FPS: "AUTOMOBILE_WEBRTC_ANDROID_FPS",
-  TRICKLE_ICE: "AUTOMOBILE_WEBRTC_TRICKLE_ICE",
-  AUDIO: "AUTOMOBILE_WEBRTC_AUDIO",
+  WHIP_ENDPOINT: ENV.WEBRTC_WHIP_ENDPOINT.name,
+  WHIP_TOKEN: ENV.WEBRTC_WHIP_TOKEN.name,
+  ICE_SERVERS: ENV.WEBRTC_ICE_SERVERS.name,
+  BITRATE_KBPS: ENV.WEBRTC_BITRATE_KBPS.name,
+  MAX_SIZE: ENV.WEBRTC_MAX_SIZE.name,
+  IOS_SIMULATOR_FPS: ENV.WEBRTC_IOS_SIMULATOR_FPS.name,
+  ANDROID_FPS: ENV.WEBRTC_ANDROID_FPS.name,
+  TRICKLE_ICE: ENV.WEBRTC_TRICKLE_ICE.name,
+  AUDIO: ENV.WEBRTC_AUDIO.name,
   /**
    * Escape hatch (issue #4751). When truthy, re-permits plaintext `http://`
    * WHIP endpoints on non-loopback hosts AND accepts an arbitrary (non
@@ -105,13 +106,13 @@ export const WEBRTC_ENV = {
    * and SDP travel in cleartext over `http://`, so this is for advanced setups
    * only.
    */
-  ALLOW_INSECURE_WHIP: "AUTOMOBILE_WEBRTC_ALLOW_INSECURE_WHIP",
+  ALLOW_INSECURE_WHIP: ENV.WEBRTC_ALLOW_INSECURE_WHIP.name,
   /**
    * Comma-separated allow-list of origins (or bare `host[:port]`) that a WHIP
    * endpoint supplied over the wire may target (issue #4751). Loopback and the
    * daemon's own {@link WHIP_ENDPOINT} origin are always trusted.
    */
-  WHIP_ALLOWED_ORIGINS: "AUTOMOBILE_WEBRTC_WHIP_ALLOWED_ORIGINS",
+  WHIP_ALLOWED_ORIGINS: ENV.WEBRTC_WHIP_ALLOWED_ORIGINS.name,
 } as const;
 
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
@@ -189,14 +190,6 @@ export function parseSize(raw: string | undefined): { width: number; height: num
   return validateSize({ width: Number(match[1]), height: Number(match[2]) });
 }
 
-/** Parse a boolean env flag (`1/true/yes/on`, case-insensitive). */
-export function parseBooleanFlag(raw: string | undefined): boolean {
-  if (!raw) {
-    return false;
-  }
-  return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
-}
-
 function parseBitrate(raw: string | undefined): number | undefined {
   if (!raw || !raw.trim()) {
     return undefined;
@@ -217,7 +210,7 @@ export function resolveWebRtcStreamingConfig(
   overrides: WebRtcStreamingOverrides = {},
   env: NodeJS.ProcessEnv = process.env,
 ): WebRtcStreamingConfig {
-  const whipEndpoint = overrides.whipEndpoint ?? env[WEBRTC_ENV.WHIP_ENDPOINT];
+  const whipEndpoint = overrides.whipEndpoint ?? readEnvRaw(ENV.WEBRTC_WHIP_ENDPOINT, env);
   if (!whipEndpoint || !whipEndpoint.trim()) {
     throw new ActionableError(
       `No WHIP endpoint configured. Set ${WEBRTC_ENV.WHIP_ENDPOINT} or pass whipEndpoint.`,
@@ -225,17 +218,19 @@ export function resolveWebRtcStreamingConfig(
   }
 
   const iceServers =
-    overrides.iceServers ?? parseIceServers(env[WEBRTC_ENV.ICE_SERVERS]) ?? DEFAULT_ICE_SERVERS;
+    overrides.iceServers ??
+    parseIceServers(readEnvRaw(ENV.WEBRTC_ICE_SERVERS, env)) ??
+    DEFAULT_ICE_SERVERS;
   const { bitrateKbps, size, iosSimulatorFps, androidFps } = resolveVideoEncodingConfig(
     overrides,
     env,
   );
-  const trickleIce = overrides.trickleIce ?? parseBooleanFlag(env[WEBRTC_ENV.TRICKLE_ICE]);
-  const audioEnabled = overrides.audioEnabled ?? parseBooleanFlag(env[WEBRTC_ENV.AUDIO]);
+  const trickleIce = overrides.trickleIce ?? readEnvBool(ENV.WEBRTC_TRICKLE_ICE, env);
+  const audioEnabled = overrides.audioEnabled ?? readEnvBool(ENV.WEBRTC_AUDIO, env);
 
   return {
     whipEndpoint: validateWhipEndpoint(whipEndpoint, env),
-    bearerToken: overrides.bearerToken ?? env[WEBRTC_ENV.WHIP_TOKEN] ?? undefined,
+    bearerToken: overrides.bearerToken ?? readEnvRaw(ENV.WEBRTC_WHIP_TOKEN, env) ?? undefined,
     iceServers,
     bitrateKbps,
     size,
@@ -252,20 +247,20 @@ function resolveVideoEncodingConfig(
 ): Pick<WebRtcStreamingConfig, "bitrateKbps" | "size" | "iosSimulatorFps" | "androidFps"> {
   const bitrateKbps =
     overrides.bitrateKbps === undefined
-      ? parseBitrate(env[WEBRTC_ENV.BITRATE_KBPS])
+      ? parseBitrate(readEnvRaw(ENV.WEBRTC_BITRATE_KBPS, env))
       : validateBitrate(overrides.bitrateKbps);
   const size =
     overrides.size === undefined
-      ? parseSize(env[WEBRTC_ENV.MAX_SIZE])
+      ? parseSize(readEnvRaw(ENV.WEBRTC_MAX_SIZE, env))
       : validateSize(overrides.size);
   const iosSimulatorFps =
     overrides.iosSimulatorFps === undefined
-      ? (parseIosSimulatorFps(env[WEBRTC_ENV.IOS_SIMULATOR_FPS]) ??
+      ? (parseIosSimulatorFps(readEnvRaw(ENV.WEBRTC_IOS_SIMULATOR_FPS, env)) ??
         WEBRTC_IOS_SIMULATOR_FPS_DEFAULT)
       : validateIosSimulatorFps(overrides.iosSimulatorFps);
   const androidFps =
     overrides.androidFps === undefined
-      ? (parseAndroidFps(env[WEBRTC_ENV.ANDROID_FPS]) ?? WEBRTC_ANDROID_FPS_DEFAULT)
+      ? (parseAndroidFps(readEnvRaw(ENV.WEBRTC_ANDROID_FPS, env)) ?? WEBRTC_ANDROID_FPS_DEFAULT)
       : validateAndroidFps(overrides.androidFps);
   return { bitrateKbps, size, iosSimulatorFps, androidFps };
 }
@@ -352,7 +347,7 @@ export function isLoopbackWhipHost(hostname: string): boolean {
 
 /** Whether the plaintext/arbitrary-WHIP escape hatch (issue #4751) is enabled. */
 export function isInsecureWhipAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
-  return parseBooleanFlag(env[WEBRTC_ENV.ALLOW_INSECURE_WHIP]);
+  return readEnvBool(ENV.WEBRTC_ALLOW_INSECURE_WHIP, env);
 }
 
 function whipUrlOrThrow(endpoint: string): URL {
@@ -438,14 +433,14 @@ export function assertWhipOverrideAllowed(
   }
 
   const allowedOrigins = new Set<string>();
-  const configured = env[WEBRTC_ENV.WHIP_ENDPOINT];
+  const configured = readEnvRaw(ENV.WEBRTC_WHIP_ENDPOINT, env);
   if (configured && configured.trim()) {
     const origin = toOrigin(configured.trim());
     if (origin) {
       allowedOrigins.add(origin);
     }
   }
-  for (const entry of parseWhipAllowedOrigins(env[WEBRTC_ENV.WHIP_ALLOWED_ORIGINS])) {
+  for (const entry of parseWhipAllowedOrigins(readEnvRaw(ENV.WEBRTC_WHIP_ALLOWED_ORIGINS, env))) {
     const origin = toOrigin(entry);
     if (origin) {
       allowedOrigins.add(origin);

@@ -1,4 +1,3 @@
-import type { ChildProcess } from "node:child_process";
 import { DaemonManager, type DaemonManagerOptions } from "../../src/daemon/manager";
 import { FakeDaemonSpawner } from "./FakeDaemonSpawner";
 import { FakeTimer } from "./FakeTimer";
@@ -25,7 +24,9 @@ export class FakeDaemonExitRecordFileSystem implements DaemonExitRecordFileSyste
 }
 
 /** Real manager behavior, with fake process I/O as the unit-test default. */
-export class SafeDaemonManager extends DaemonManager {
+type SafeDaemonManagerContract = Pick<DaemonManager, keyof DaemonManager>;
+
+export class SafeDaemonManager extends DaemonManager implements SafeDaemonManagerContract {
   readonly defaultSpawner: FakeDaemonSpawner;
   readonly defaultSignals: Array<{ pid: number; signal: NodeJS.Signals }>;
 
@@ -40,18 +41,14 @@ export class SafeDaemonManager extends DaemonManager {
         // Lock ownership still needs to recognize this test process.
         isProcessRunning: (pid) => pid === process.pid,
       },
-      processSpawner: options.processSpawner ?? {
-        // The manager's legacy spawner seam uses ChildProcess; the launcher only
-        // consumes the process interface implemented by FakeDaemonProcess.
-        spawn: (...spawnArgs) => spawner.spawn(...spawnArgs) as unknown as ChildProcess,
-      },
+      processSpawner: options.processSpawner ?? spawner,
       processSignaler: options.processSignaler ?? {
         signal: (pid, signal) => {
           signals.push({ pid, signal });
         },
       },
     });
-    this.exitRecordFileSystem = new FakeDaemonExitRecordFileSystem();
+    this.seams.exitRecordFileSystem = new FakeDaemonExitRecordFileSystem();
     this.defaultSpawner = spawner;
     this.defaultSignals = signals;
   }

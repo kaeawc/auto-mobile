@@ -19,7 +19,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     }
 
     private struct CachedConnection {
-        let db: OpaquePointer
+        let database: OpaquePointer
         let identity: FileIdentity
     }
 
@@ -92,16 +92,19 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         operationLock.lock()
         defer { operationLock.unlock() }
 
-        guard let db = openDatabase(path: databasePath, readOnly: true) else {
+        guard let database = openDatabase(path: databasePath, readOnly: true) else {
             return SQLiteTablesResult(tables: [], diagnostic: nil)
         }
 
         let query = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         var stmt: OpaquePointer?
-        let prepared = sqlite3_prepare_v2(db, query, -1, &stmt, nil)
+        let prepared = sqlite3_prepare_v2(database, query, -1, &stmt, nil)
         defer { sqlite3_finalize(stmt) }
         guard prepared == SQLITE_OK else {
-            return SQLiteTablesResult(tables: [], diagnostic: Self.failureDiagnostic(db: db, resultCode: prepared))
+            return SQLiteTablesResult(
+                tables: [],
+                diagnostic: Self.failureDiagnostic(database: database, resultCode: prepared)
+            )
         }
 
         var tables: [String] = []
@@ -117,7 +120,10 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             stepResult = sqlite3_step(stmt)
         }
         guard stepResult == SQLITE_DONE else {
-            return SQLiteTablesResult(tables: [], diagnostic: Self.failureDiagnostic(db: db, resultCode: stepResult))
+            return SQLiteTablesResult(
+                tables: [],
+                diagnostic: Self.failureDiagnostic(database: database, resultCode: stepResult)
+            )
         }
         return SQLiteTablesResult(tables: tables, diagnostic: nil)
     }
@@ -126,7 +132,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         operationLock.lock()
         defer { operationLock.unlock() }
 
-        guard let db = openDatabase(path: databasePath, readOnly: true) else {
+        guard let database = openDatabase(path: databasePath, readOnly: true) else {
             return TableDataResult(
                 columns: [],
                 rows: [],
@@ -137,8 +143,8 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
 
         // Keep the count and page in one read transaction so concurrent writes
         // cannot make the page and total describe different snapshots.
-        _ = sqlite3_exec(db, "BEGIN", nil, nil, nil)
-        defer { _ = sqlite3_exec(db, "ROLLBACK", nil, nil, nil) }
+        _ = sqlite3_exec(database, "BEGIN", nil, nil, nil)
+        defer { _ = sqlite3_exec(database, "ROLLBACK", nil, nil, nil) }
 
         let boundedLimit = max(0, min(limit, 500))
         let boundedOffset = max(0, offset)
@@ -147,13 +153,13 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         let countQuery = "SELECT COUNT(*) FROM \"\(sanitizeIdentifier(table))\""
         var countStmt: OpaquePointer?
         var totalRows = 0
-        let countPrepared = sqlite3_prepare_v2(db, countQuery, -1, &countStmt, nil)
+        let countPrepared = sqlite3_prepare_v2(database, countQuery, -1, &countStmt, nil)
         guard countPrepared == SQLITE_OK else {
             return TableDataResult(
                 columns: [],
                 rows: [],
                 totalRows: 0,
-                diagnostic: Self.failureDiagnostic(db: db, resultCode: countPrepared)
+                diagnostic: Self.failureDiagnostic(database: database, resultCode: countPrepared)
             )
         }
         defer { sqlite3_finalize(countStmt) }
@@ -163,7 +169,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
                 columns: [],
                 rows: [],
                 totalRows: 0,
-                diagnostic: Self.failureDiagnostic(db: db, resultCode: countStep)
+                diagnostic: Self.failureDiagnostic(database: database, resultCode: countStep)
             )
         }
         totalRows = Int(sqlite3_column_int64(countStmt, 0))
@@ -171,18 +177,18 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         // Get paginated data
         let dataQuery = "SELECT * FROM \"\(sanitizeIdentifier(table))\" ORDER BY rowid LIMIT ? OFFSET ?"
         var dataStmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, dataQuery, -1, &dataStmt, nil) != SQLITE_OK {
-            let order = primaryKeyOrder(db: db, table: table)
+        if sqlite3_prepare_v2(database, dataQuery, -1, &dataStmt, nil) != SQLITE_OK {
+            let order = primaryKeyOrder(database: database, table: table)
             let fallbackQuery = order.isEmpty
                 ? "SELECT * FROM \"\(sanitizeIdentifier(table))\" LIMIT ? OFFSET ?"
                 : "SELECT * FROM \"\(sanitizeIdentifier(table))\" ORDER BY \(order) LIMIT ? OFFSET ?"
-            let fallbackPrepared = sqlite3_prepare_v2(db, fallbackQuery, -1, &dataStmt, nil)
+            let fallbackPrepared = sqlite3_prepare_v2(database, fallbackQuery, -1, &dataStmt, nil)
             guard fallbackPrepared == SQLITE_OK else {
                 return TableDataResult(
                     columns: [],
                     rows: [],
                     totalRows: totalRows,
-                    diagnostic: Self.failureDiagnostic(db: db, resultCode: fallbackPrepared)
+                    diagnostic: Self.failureDiagnostic(database: database, resultCode: fallbackPrepared)
                 )
             }
         }
@@ -214,7 +220,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
                 columns: columns,
                 rows: rows,
                 totalRows: totalRows,
-                diagnostic: Self.failureDiagnostic(db: db, resultCode: stepResult)
+                diagnostic: Self.failureDiagnostic(database: database, resultCode: stepResult)
             )
         }
 
@@ -225,7 +231,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         operationLock.lock()
         defer { operationLock.unlock() }
 
-        guard let db = openDatabase(path: databasePath, readOnly: true) else {
+        guard let database = openDatabase(path: databasePath, readOnly: true) else {
             return TableStructureResult(
                 columns: [],
                 diagnostic: StorageDiagnostic(code: "store_unavailable", message: "Failed to open database read-only")
@@ -234,9 +240,12 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
 
         let query = "PRAGMA table_info(\"\(sanitizeIdentifier(table))\")"
         var stmt: OpaquePointer?
-        let prepared = sqlite3_prepare_v2(db, query, -1, &stmt, nil)
+        let prepared = sqlite3_prepare_v2(database, query, -1, &stmt, nil)
         guard prepared == SQLITE_OK else {
-            return TableStructureResult(columns: [], diagnostic: Self.failureDiagnostic(db: db, resultCode: prepared))
+            return TableStructureResult(
+                columns: [],
+                diagnostic: Self.failureDiagnostic(database: database, resultCode: prepared)
+            )
         }
         defer { sqlite3_finalize(stmt) }
 
@@ -247,13 +256,13 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             let type = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
             let notNull = sqlite3_column_int(stmt, 3) != 0
             let defaultValue = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
-            let pk = sqlite3_column_int(stmt, 5) != 0
+            let isPrimaryKey = sqlite3_column_int(stmt, 5) != 0
 
             columns.append(ColumnInfo(
                 name: name,
                 type: type,
                 isNullable: !notNull,
-                isPrimaryKey: pk,
+                isPrimaryKey: isPrimaryKey,
                 defaultValue: defaultValue
             ))
             stepResult = sqlite3_step(stmt)
@@ -261,7 +270,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         guard stepResult == SQLITE_DONE else {
             return TableStructureResult(
                 columns: [],
-                diagnostic: Self.failureDiagnostic(db: db, resultCode: stepResult)
+                diagnostic: Self.failureDiagnostic(database: database, resultCode: stepResult)
             )
         }
 
@@ -301,7 +310,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         }
         // Transaction control has no result columns and sqlite3_stmt_readonly reports it as
         // read-only. Keep it on the same connection as the writes it brackets.
-        guard let db = openDatabase(path: databasePath, readOnly: !classification.requiresWriteConnection) else {
+        guard let database = openDatabase(path: databasePath, readOnly: !classification.requiresWriteConnection) else {
             let diagnostic = StorageDiagnostic(
                 code: "store_unavailable",
                 message: "Failed to open database in \(classification.requiresWriteConnection ? "read-write" : "read-only") mode"
@@ -317,9 +326,14 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
 
         let wait = classification.requiresWriteConnection ? writeWait(deadline: deadline) : nil
         if classification.returnsRows {
-            return executeQuery(db: db, query: trimmed, includeRowsAffected: !classification.readOnly, wait: wait)
+            return executeQuery(
+                database: database,
+                query: trimmed,
+                includeRowsAffected: !classification.readOnly,
+                wait: wait
+            )
         } else {
-            return executeMutation(db: db, query: trimmed, wait: wait)
+            return executeMutation(database: database, query: trimmed, wait: wait)
         }
     }
 
@@ -348,16 +362,16 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
 
         let cacheKey = Self.cacheKey(path: path, readOnly: readOnly)
         if let existing = openDatabases[cacheKey] {
-            return existing.db
+            return existing.database
         }
 
         let flags = readOnly
             ? SQLITE_OPEN_READONLY
             : (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)
 
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK, let db else {
-            if let db { sqlite3_close(db) }
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(path, &database, flags, nil) == SQLITE_OK, let database else {
+            if let database { sqlite3_close(database) }
             return nil
         }
         // A read-write open may have just created the file, so only a file that existed before the
@@ -366,14 +380,14 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
               identityBeforeOpen == nil || identityBeforeOpen == identity
         else {
             // The file was swapped or removed while opening; the next call sees the file that is there.
-            sqlite3_close(db)
+            sqlite3_close(database)
             return nil
         }
 
         // Bounded waits for a lock the app holds; both stay under the runner's 2 s relay timeout.
-        sqlite3_busy_timeout(db, readOnly ? busyBudget.readMs : busyBudget.writeMs)
-        openDatabases[cacheKey] = CachedConnection(db: db, identity: identity)
-        return db
+        sqlite3_busy_timeout(database, readOnly ? busyBudget.readMs : busyBudget.writeMs)
+        openDatabases[cacheKey] = CachedConnection(database: database, identity: identity)
+        return database
     }
 
     private static func cacheKey(path: String, readOnly: Bool) -> String {
@@ -385,7 +399,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         for readOnly in [true, false] {
             let key = Self.cacheKey(path: path, readOnly: readOnly)
             guard let cached = openDatabases[key], cached.identity != current else { continue }
-            sqlite3_close(cached.db)
+            sqlite3_close(cached.database)
             openDatabases.removeValue(forKey: key)
         }
     }
@@ -526,61 +540,18 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     {
         var depth = 0
         var i = start
-        var inSingleQuote = false
-        var inDoubleQuote = false
-        var inBacktickQuote = false
-        var inBracketQuote = false
-        var inLineComment = false
-        var inBlockComment = false
+        var region: SQLScanRegion?
 
         while i < query.endIndex {
             let char = query[i]
             let nextIndex = query.index(after: i)
             let next = nextIndex < query.endIndex ? query[nextIndex] : nil
 
-            if inLineComment {
-                if char == "\n" || char == "\r" {
-                    inLineComment = false
-                }
-            } else if inBlockComment {
-                if char == "*", next == "/" {
-                    inBlockComment = false
-                    i = nextIndex
-                }
-            } else if inSingleQuote {
-                if char == "'", next == "'" {
-                    i = nextIndex
-                } else if char == "'" {
-                    inSingleQuote = false
-                }
-            } else if inDoubleQuote {
-                if char == "\"", next == "\"" {
-                    i = nextIndex
-                } else if char == "\"" {
-                    inDoubleQuote = false
-                }
-            } else if inBacktickQuote {
-                if char == "`" {
-                    inBacktickQuote = false
-                }
-            } else if inBracketQuote {
-                if char == "]" {
-                    inBracketQuote = false
-                }
-            } else if char == "-", next == "-" {
-                inLineComment = true
-                i = nextIndex
-            } else if char == "/", next == "*" {
-                inBlockComment = true
-                i = nextIndex
-            } else if char == "'" {
-                inSingleQuote = true
-            } else if char == "\"" {
-                inDoubleQuote = true
-            } else if char == "`" {
-                inBacktickQuote = true
-            } else if char == "[" {
-                inBracketQuote = true
+            if let activeRegion = region {
+                consumeRegion(activeRegion, char: char, next: next, index: &i, nextIndex: nextIndex, region: &region)
+            } else if let startedRegion = SQLScanRegion.start(char: char, next: next) {
+                region = startedRegion
+                if startedRegion == .lineComment || startedRegion == .blockComment { i = nextIndex }
             } else if char == "(" {
                 depth += 1
             } else if char == ")", depth > 0 {
@@ -595,36 +566,90 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         return nil
     }
 
+    private enum SQLScanRegion {
+        case lineComment, blockComment, singleQuote, doubleQuote, backtickQuote, bracketQuote
+
+        static func start(char: Character, next: Character?) -> Self? {
+            switch char {
+            case "-" where next == "-": return .lineComment
+            case "/" where next == "*": return .blockComment
+            case "'": return .singleQuote
+            case "\"": return .doubleQuote
+            case "`": return .backtickQuote
+            case "[": return .bracketQuote
+            default: return nil
+            }
+        }
+    }
+
+    private static func consumeRegion(
+        _ active: SQLScanRegion, char: Character, next: Character?,
+        index: inout String.Index, nextIndex: String.Index, region: inout SQLScanRegion?
+    ) {
+        switch active {
+        case .lineComment:
+            if char == "\n" || char == "\r" { region = nil }
+        case .blockComment:
+            if char == "*", next == "/" {
+                region = nil
+                index = nextIndex
+            }
+        case .singleQuote, .doubleQuote:
+            consumeQuotedRegion(active, char: char, next: next, index: &index, nextIndex: nextIndex, region: &region)
+        case .backtickQuote:
+            if char == "`" { region = nil }
+        case .bracketQuote:
+            if char == "]" { region = nil }
+        }
+    }
+
+    private static func consumeQuotedRegion(
+        _ active: SQLScanRegion, char: Character, next: Character?,
+        index: inout String.Index, nextIndex: String.Index, region: inout SQLScanRegion?
+    ) {
+        let quote: Character = active == .singleQuote ? "'" : "\""
+        if char == quote, next == quote {
+            index = nextIndex
+        } else if char == quote {
+            region = nil
+        }
+    }
+
+    private func columnNames(stmt: OpaquePointer?, count: Int) -> [String] {
+        var columns: [String] = []
+        for index in 0 ..< count {
+            if let name = sqlite3_column_name(stmt, Int32(index)) {
+                columns.append(String(cString: name))
+            }
+        }
+        return columns
+    }
+
     private func executeQuery(
-        db: OpaquePointer,
+        database: OpaquePointer,
         query: String,
         includeRowsAffected: Bool = false,
         wait: WriteWait? = nil
     )
         -> SQLExecutionResult
     {
-        guard wait?.arm(db) ?? true else { return Self.busyResult() }
+        guard wait?.arm(database) ?? true else { return Self.busyResult() }
         var stmt: OpaquePointer?
-        let prepared = sqlite3_prepare_v2(db, query, -1, &stmt, nil)
+        let prepared = sqlite3_prepare_v2(database, query, -1, &stmt, nil)
         guard prepared == SQLITE_OK else {
-            return Self.failureResult(db: db, resultCode: prepared)
+            return Self.failureResult(database: database, resultCode: prepared)
         }
         defer { sqlite3_finalize(stmt) }
 
         let columnCount = Int(sqlite3_column_count(stmt))
-        var columns: [String] = []
-        for i in 0 ..< columnCount {
-            if let name = sqlite3_column_name(stmt, Int32(i)) {
-                columns.append(String(cString: name))
-            }
-        }
+        let columns = columnNames(stmt: stmt, count: columnCount)
 
         var rows: [[String?]] = []
         var bytesRead = 0
         var truncated = false
-        let totalBefore = sqlite3_total_changes(db)
+        let totalBefore = sqlite3_total_changes(database)
         // Prepare may have spent part of the budget waiting for the schema; step gets only what is left.
-        guard wait?.arm(db) ?? true else { return Self.busyResult() }
+        guard wait?.arm(database) ?? true else { return Self.busyResult() }
         var stepResult = sqlite3_step(stmt)
         while stepResult == SQLITE_ROW {
             var row: [String?] = []
@@ -642,39 +667,34 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         }
 
         if !truncated && stepResult != SQLITE_DONE {
-            return Self.failureResult(db: db, resultCode: stepResult)
+            return Self.failureResult(database: database, resultCode: stepResult)
         }
 
         if truncated && includeRowsAffected { sqlite3_reset(stmt) }
-        let rowsAffected = includeRowsAffected ? self.rowsAffected(db: db, totalBefore: totalBefore) : 0
+        let rowsAffected = includeRowsAffected ? self.rowsAffected(database: database, totalBefore: totalBefore) : 0
         return SQLExecutionResult(columns: columns, rows: rows, rowsAffected: rowsAffected, truncated: truncated)
     }
 
-    private func executeMutation(db: OpaquePointer, query: String, wait: WriteWait?) -> SQLExecutionResult {
-        guard wait?.arm(db) ?? true else { return Self.busyResult() }
+    private func executeMutation(database: OpaquePointer, query: String, wait: WriteWait?) -> SQLExecutionResult {
+        guard wait?.arm(database) ?? true else { return Self.busyResult() }
         var stmt: OpaquePointer?
-        let prepared = sqlite3_prepare_v2(db, query, -1, &stmt, nil)
+        let prepared = sqlite3_prepare_v2(database, query, -1, &stmt, nil)
         guard prepared == SQLITE_OK else {
-            return Self.failureResult(db: db, resultCode: prepared)
+            return Self.failureResult(database: database, resultCode: prepared)
         }
         defer { sqlite3_finalize(stmt) }
 
-        let totalBefore = sqlite3_total_changes(db)
+        let totalBefore = sqlite3_total_changes(database)
         // Prepare may have spent part of the budget waiting for the schema; step gets only what is left.
-        guard wait?.arm(db) ?? true else { return Self.busyResult() }
+        guard wait?.arm(database) ?? true else { return Self.busyResult() }
         let result = sqlite3_step(stmt)
         if result == SQLITE_DONE {
-            let changes = rowsAffected(db: db, totalBefore: totalBefore)
+            let changes = rowsAffected(database: database, totalBefore: totalBefore)
             return SQLExecutionResult(columns: nil, rows: nil, rowsAffected: changes)
         } else if result == SQLITE_ROW {
             // RETURNING clause produces rows — collect them like a query
             let columnCount = Int(sqlite3_column_count(stmt))
-            var columns: [String] = []
-            for i in 0 ..< columnCount {
-                if let name = sqlite3_column_name(stmt, Int32(i)) {
-                    columns.append(String(cString: name))
-                }
-            }
+            let columns = columnNames(stmt: stmt, count: columnCount)
             var rows: [[String?]] = []
             var bytesRead = 0
             var truncated = false
@@ -695,20 +715,20 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
                 finalResult = sqlite3_step(stmt)
             } while finalResult == SQLITE_ROW
             guard truncated || finalResult == SQLITE_DONE else {
-                return Self.failureResult(db: db, resultCode: finalResult)
+                return Self.failureResult(database: database, resultCode: finalResult)
             }
             if truncated { sqlite3_reset(stmt) }
-            let changes = rowsAffected(db: db, totalBefore: totalBefore)
+            let changes = rowsAffected(database: database, totalBefore: totalBefore)
             return SQLExecutionResult(columns: columns, rows: rows, rowsAffected: changes, truncated: truncated)
         } else {
-            return Self.failureResult(db: db, resultCode: result)
+            return Self.failureResult(database: database, resultCode: result)
         }
     }
 
     /// Non-DML statements leave sqlite3_changes stale; total changes detects that
     /// while sqlite3_changes excludes trigger and foreign-key side effects.
-    private func rowsAffected(db: OpaquePointer, totalBefore: Int32) -> Int {
-        sqlite3_total_changes(db) == totalBefore ? 0 : Int(sqlite3_changes(db))
+    private func rowsAffected(database: OpaquePointer, totalBefore: Int32) -> Int {
+        sqlite3_total_changes(database) == totalBefore ? 0 : Int(sqlite3_changes(database))
     }
 
     static func isBusy(_ resultCode: Int32) -> Bool {
@@ -719,13 +739,13 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     /// Busy is decided from SQLite's result code alone. The message is data for the caller, never a
     /// signal: `no such column: is_locked` or `UNIQUE constraint failed: accounts.locked_by` are real
     /// SQL errors that happen to contain the word, and must keep their status and text.
-    private static func failureDiagnostic(db: OpaquePointer, resultCode: Int32) -> StorageDiagnostic {
-        let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
+    private static func failureDiagnostic(database: OpaquePointer, resultCode: Int32) -> StorageDiagnostic {
+        let message = sqlite3_errmsg(database).map { String(cString: $0) } ?? "Unknown error"
         return isBusy(resultCode) ? StorageDiagnostic(code: "busy_lock", message: message) : diagnostic(for: message)
     }
 
-    private static func failureResult(db: OpaquePointer, resultCode: Int32) -> SQLExecutionResult {
-        let diagnostic = failureDiagnostic(db: db, resultCode: resultCode)
+    private static func failureResult(database: OpaquePointer, resultCode: Int32) -> SQLExecutionResult {
+        let diagnostic = failureDiagnostic(database: database, resultCode: resultCode)
         return SQLExecutionResult(
             columns: nil,
             rows: nil,
@@ -778,13 +798,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             }
             return nil
         case SQLITE_BLOB:
-            if let bytes = sqlite3_column_blob(stmt, index) {
-                let count = Int(sqlite3_column_bytes(stmt, index))
-                guard count <= 512 * 1024 else { return "[TRUNCATED]" }
-                let data = Data(bytes: bytes, count: count)
-                return data.base64EncodedString()
-            }
-            return nil
+            return blobColumnValue(stmt: stmt, index: index)
         default:
             if let cString = sqlite3_column_text(stmt, index) {
                 return String(cString: cString)
@@ -793,10 +807,20 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         }
     }
 
-    private func primaryKeyOrder(db: OpaquePointer, table: String) -> String {
+    private func blobColumnValue(stmt: OpaquePointer, index: Int32) -> String? {
+        if let bytes = sqlite3_column_blob(stmt, index) {
+            let count = Int(sqlite3_column_bytes(stmt, index))
+            guard count <= 512 * 1024 else { return "[TRUNCATED]" }
+            let data = Data(bytes: bytes, count: count)
+            return data.base64EncodedString()
+        }
+        return nil
+    }
+
+    private func primaryKeyOrder(database: OpaquePointer, table: String) -> String {
         let query = "PRAGMA table_info(\"\(sanitizeIdentifier(table))\")"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return "" }
+        guard sqlite3_prepare_v2(database, query, -1, &stmt, nil) == SQLITE_OK else { return "" }
         defer { sqlite3_finalize(stmt) }
         var columns: [(Int, String)] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -821,7 +845,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
 
         lock.lock()
         for (_, cached) in openDatabases {
-            sqlite3_close(cached.db)
+            sqlite3_close(cached.database)
         }
         openDatabases.removeAll()
         lock.unlock()
@@ -863,9 +887,9 @@ struct WriteWait {
     }
 
     /// Installs `remainingMs()` as the connection's busy wait. False when the deadline has passed.
-    func arm(_ db: OpaquePointer) -> Bool {
+    func arm(_ database: OpaquePointer) -> Bool {
         guard let waitMs = remainingMs() else { return false }
-        sqlite3_busy_timeout(db, waitMs)
+        sqlite3_busy_timeout(database, waitMs)
         return true
     }
 }

@@ -1,5 +1,6 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import { join, relative, sep } from "node:path";
 import ts from "typescript";
 import { blankComments } from "./blankComments";
@@ -48,7 +49,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
   function walkSrc(dir: string = join(ROOT, "src"), files: string[] = []): string[] {
     // withFileTypes, not a statSync per entry: one syscall for the whole
     // directory instead of one per file across ~1000 files in src/.
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    for (const entry of guardDirectoryEntries(dir)) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
         walkSrc(full, files);
@@ -70,8 +71,30 @@ describe("device-addressed admission gate (issue #6863)", () => {
   const SCANNED = [
     "src/daemon/daemonStreamRouting.ts",
     "src/daemon/socketServer.ts",
+    "src/daemon/socketServerParts/ClientRequestCancellation.ts",
+    "src/daemon/socketServerParts/DaemonSocketQueueOverflowError.ts",
+    "src/daemon/socketServerParts/McpBindings.ts",
+    "src/daemon/socketServerParts/McpExecution.ts",
+    "src/daemon/socketServerParts/McpRouting.ts",
+    "src/daemon/socketServerParts/ReleasedBoundSessionError.ts",
+    "src/daemon/socketServerParts/SocketAdmission.ts",
+    "src/daemon/socketServerParts/SocketIdeRoutes.ts",
+    "src/daemon/socketServerParts/SocketInput.ts",
+    "src/daemon/socketServerParts/SocketLifecycle.ts",
+    "src/daemon/socketServerParts/SocketServerRuntime.ts",
+    "src/daemon/socketServerParts/SocketTextInput.ts",
+    "src/daemon/socketServerParts/SocketTransport.ts",
+    "src/daemon/socketServerParts/createSocketServerOperations.ts",
+    "src/daemon/socketServerParts/socketServerContracts.ts",
+    "src/daemon/socketServerParts/socketServerOperations.ts",
+
+    "src/daemon/socketServer/ideDeviceRoutes.ts",
+    "src/daemon/socketServer/inputDeviceGating.ts",
+    "src/daemon/socketServer/inputStrokes.ts",
     "src/daemon/deviceDataStreamSocketServer.ts",
     "src/daemon/videoStreamSocketServer.ts",
+    "src/daemon/videoStreamSocketDefaults.ts",
+    "src/daemon/videoStreamSocketSupport.ts",
     "src/daemon/webrtcStreamSocketServer.ts",
     "src/daemon/deviceGestureRecordingSocketServer.ts",
   ] as const;
@@ -97,14 +120,14 @@ describe("device-addressed admission gate (issue #6863)", () => {
         "so the socket server's preflight cannot run",
     },
     {
-      file: "src/daemon/socketServer.ts",
+      file: "src/daemon/socketServer/inputDeviceGating.ts",
       fn: "runTrackedDeviceInput",
       what:
         "input/tap, input/swipe, input/typeText, input/pressButton, input/key and the " +
         "gestureStart/Move/End stream — gated BEFORE the sessionless early return",
     },
     {
-      file: "src/daemon/socketServer.ts",
+      file: "src/daemon/socketServer/ideDeviceRoutes.ts",
       fn: "resolveKeyValueMutationClient",
       what: "ide/* SharedPreferences and key-value mutations",
     },
@@ -150,7 +173,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
    */
   const RESOLVERS_ONLY: readonly string[] = [
     "src/daemon/webrtcStreamSocketServer.ts#resolveWebRtcStreamDevice",
-    "src/daemon/videoStreamSocketServer.ts#resolveVideoStreamDevice",
+    "src/daemon/videoStreamSocketDefaults.ts#resolveVideoStreamDevice",
     "src/daemon/deviceGestureRecordingSocketServer.ts#resolveDeviceGestureRecordingDevice",
   ];
 
@@ -181,7 +204,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
     if (cached !== undefined) {
       return cached;
     }
-    const text = readFileSync(join(ROOT, file), "utf8");
+    const text = readGuardFile(join(ROOT, file));
     const blanked = blankComments(text);
     const source = ts.createSourceFile(
       file,
@@ -216,20 +239,22 @@ describe("device-addressed admission gate (issue #6863)", () => {
     for (const file of SCANNED) {
       namedFunctions(file);
     }
-    namedFunctions("src/devices/DeviceReadiness.ts");
-    poolSource = blankComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"));
+    namedFunctions("src/daemon/readiness/DeviceReadiness.ts");
+    poolSource = ["src/daemon/devicePoolParts/discovery.ts", "src/daemon/devicePoolParts/status.ts"]
+      .map((file) => blankComments(readGuardFile(join(ROOT, file))))
+      .join("\n");
     resolverSource = blankComments(
-      readFileSync(join(ROOT, "src/daemon/deviceSessionResolver.ts"), "utf8"),
+      readGuardFile(join(ROOT, "src/daemon/deviceSessionResolver.ts")),
     );
     factorySource = blankComments(
-      readFileSync(join(ROOT, "src/utils/android-cmdline-tools/AdbClientFactory.ts"), "utf8"),
+      readGuardFile(join(ROOT, "src/utils/android-cmdline-tools/AdbClientFactory.ts")),
     );
     ctrlProxyClientSource = blankComments(
-      readFileSync(join(ROOT, "src/features/observe/android/AndroidCtrlProxyClient.ts"), "utf8"),
+      readGuardFile(join(ROOT, "src/features/observe/android/AndroidCtrlProxyClient.ts")),
     );
     unadmittedFactoryUsers = walkSrc()
       .filter((file) => {
-        const source = readFileSync(file, "utf8");
+        const source = readGuardFile(file);
         return (
           source.includes("unadmittedAdbClientFactory") ||
           source.includes("androidTransportIdentityAdbFactory")
@@ -245,7 +270,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
     );
     // The session-keyed gate is a CALLER of the device gate, not a second gate.
     const sessionGate = poolSource.slice(
-      poolSource.indexOf("assertSessionReadyForAutomation(sessionId"),
+      poolSource.lastIndexOf("assertSessionReadyForAutomation(sessionId"),
     );
     expect(sessionGate.slice(0, sessionGate.indexOf("\n  }\n"))).toContain(GATE);
   });
@@ -306,7 +331,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
   });
 
   test("Android readiness gates before discovery and cached Window use", () => {
-    const target = namedFunctions("src/devices/DeviceReadiness.ts").find(
+    const target = namedFunctions("src/daemon/readiness/DeviceReadiness.ts").find(
       (fn) => fn.name === "verifyAndroidDevice",
     )!;
     const gate = target.body.indexOf(`this.admissionGate.${GATE}(deviceId`);
@@ -334,8 +359,8 @@ describe("device-addressed admission gate (issue #6863)", () => {
     // Their injected factory is consumed only by AndroidTransportAliases;
     // device-addressed feature actions still bind through the gated factory.
     expect(unadmittedFactoryUsers).toEqual([
-      "src/daemon/devicePool.ts",
-      "src/features/deviceLifecycle/deviceLifecycleCore.ts",
+      "src/daemon/devicePoolParts/contracts.ts",
+      "src/features/deviceLifecycle/core/dependencies.ts",
       "src/server/bootedDeviceResources.ts",
       "src/server/resourceDeviceResolver.ts",
       "src/utils/android-cmdline-tools/AdbClientFactory.ts",

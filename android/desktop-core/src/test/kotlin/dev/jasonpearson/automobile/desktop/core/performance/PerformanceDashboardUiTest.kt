@@ -16,8 +16,10 @@ class PerformanceDashboardUiTest {
     setContent {
       MaterialTheme {
         PerformanceDashboard(
-          dataSourceMode = DataSourceMode.Fake,
-          initialFps = 60f,
+          dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboardOptions(
+            dataSourceMode = DataSourceMode.Fake,
+            initialFps = 60f,
+          ),
         )
       }
     }
@@ -31,8 +33,10 @@ class PerformanceDashboardUiTest {
     setContent {
       MaterialTheme {
         PerformanceDashboard(
-          dataSourceMode = DataSourceMode.Fake,
-          initialMemoryMb = 128f,
+          dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboardOptions(
+            dataSourceMode = DataSourceMode.Fake,
+            initialMemoryMb = 128f,
+          ),
         )
       }
     }
@@ -46,11 +50,13 @@ class PerformanceDashboardUiTest {
     setContent {
       MaterialTheme {
         PerformanceDashboard(
-          dataSourceMode = DataSourceMode.Fake,
-          initialFps = 58f,
-          initialFrameTimeMs = 16f,
-          initialJankFrames = 3,
-          initialMemoryMb = 200f,
+          dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboardOptions(
+            dataSourceMode = DataSourceMode.Fake,
+            initialFps = 58f,
+            initialFrameTimeMs = 16f,
+            initialJankFrames = 3,
+            initialMemoryMb = 200f,
+          ),
         )
       }
     }
@@ -65,9 +71,11 @@ class PerformanceDashboardUiTest {
     setContent {
       MaterialTheme {
         PerformanceDashboard(
-          dataSourceMode = DataSourceMode.Fake,
-          initialFps = 60f,
-          initialTouchLatencyMs = 42f,
+          dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboardOptions(
+            dataSourceMode = DataSourceMode.Fake,
+            initialFps = 60f,
+            initialTouchLatencyMs = 42f,
+          ),
         )
       }
     }
@@ -80,9 +88,11 @@ class PerformanceDashboardUiTest {
     setContent {
       MaterialTheme {
         PerformanceDashboard(
-          dataSourceMode = DataSourceMode.Fake,
-          initialFps = 60f,
-          initialRecompositionRate = 5f,
+          dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboardOptions(
+            dataSourceMode = DataSourceMode.Fake,
+            initialFps = 60f,
+            initialRecompositionRate = 5f,
+          ),
         )
       }
     }

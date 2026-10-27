@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.slides.components
 
+import android.content.Context
 import android.util.Log
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -28,7 +29,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -37,6 +37,7 @@ import dev.jasonpearson.automobile.design.system.theme.AutoMobileRed
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileWhite
 import dev.jasonpearson.automobile.design.system.theme.PromoBlue
 import dev.jasonpearson.automobile.design.system.theme.PromoOrange
+import java.util.Locale
 import kotlinx.coroutines.delay
 
 /**
@@ -51,27 +52,13 @@ fun MermaidDiagramSlideItem(
   isDarkMode: Boolean = false,
 ) {
 
-  val TAG = "MermaidDiagramSlideItem"
-  val context = LocalContext.current
   var showLoading by remember { mutableStateOf(true) }
-  var zoomLevel by remember { mutableFloatStateOf(1f) }
-  var contentWidth by remember { mutableFloatStateOf(0f) }
+  val state = remember { MermaidDiagramState() }
 
   val backgroundColor = if (isDarkMode) AutoMobileBlack else AutoMobileWhite
   val textColor = if (isDarkMode) AutoMobileWhite else AutoMobileBlack
 
-  // Calculate opacity based on zoom level - fade out when zooming in
-  val contentOpacity by
-    animateFloatAsState(
-      targetValue =
-        when {
-          zoomLevel <= 1.2f -> 1f
-          zoomLevel >= 2f -> 0f
-          else -> 1f - ((zoomLevel - 1.2f) / 0.8f) // Linear fade between 1.2x and 2x zoom
-        },
-      animationSpec = tween(durationMillis = 300),
-      label = "contentOpacity",
-    )
+  val contentOpacity = mermaidContentOpacity(state.zoomLevel)
 
   // Hide loading overlay after 1 second
   LaunchedEffect(Unit) {
@@ -93,358 +80,13 @@ fun MermaidDiagramSlideItem(
       )
     }
 
-    // Mermaid diagram
-    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-      AndroidView(
-        factory = { context ->
-          WebView(context).apply {
-            settings.javaScriptEnabled = true
-            settings.loadWithOverviewMode = true
-            settings.useWideViewPort = true
-            settings.setSupportZoom(true)
-            settings.builtInZoomControls = true
-            settings.displayZoomControls = false
-
-            // Enhanced zoom gesture support
-            settings.allowFileAccess = true
-            settings.allowContentAccess = true
-            settings.domStorageEnabled = true
-
-            // Set background color to prevent white flashing
-            setBackgroundColor(backgroundColor.toArgb())
-
-            // Add JavaScript interface for zoom tracking
-            addJavascriptInterface(
-              object {
-                @android.webkit.JavascriptInterface
-                fun onZoomChanged(scale: Float) {
-                  // Post to main thread since this is called from JavaScript thread
-                  post {
-                    zoomLevel = scale
-                    Log.i(TAG, "AutoMobile: JS Zoom level: $scale")
-                  }
-                }
-              },
-              "Android",
-            )
-
-            // Custom WebViewClient to track zoom changes
-            webViewClient =
-              object : WebViewClient() {
-                override fun onScaleChanged(view: WebView?, oldScale: Float, newScale: Float) {
-                  super.onScaleChanged(view, oldScale, newScale)
-                  zoomLevel = newScale
-                  Log.i(TAG, "AutoMobile: Zoom changed from $oldScale to $newScale")
-                }
-
-                override fun onPageFinished(view: WebView?, url: String?) {
-                  super.onPageFinished(view, url)
-
-                  // Get content dimensions via JavaScript
-                  view?.postDelayed(
-                    {
-                      // Get the content width
-                      view.evaluateJavascript(
-                        "(function() { return JSON.stringify({width: document.body.scrollWidth, height: document.body.scrollHeight}); })();",
-                      ) { result ->
-                        try {
-                          val cleanResult = result?.replace("\"", "") ?: ""
-                          if (cleanResult.isNotEmpty() && cleanResult != "null") {
-                            // Parse the JSON-like string to get dimensions
-                            val contentData = cleanResult.substringAfter("{").substringBefore("}")
-                            val widthStr = contentData.substringAfter("width:").substringBefore(",")
-                            val parsedContentWidth = widthStr.toFloatOrNull() ?: 0f
-
-                            contentWidth = parsedContentWidth
-                          }
-                        } catch (e: Exception) {
-                          Log.i(
-                            TAG,
-                            "AutoMobile: Error parsing content dimensions: ${e.message}",
-                          )
-                        }
-                      }
-                    },
-                    1000,
-                  ) // Slightly longer delay to ensure Mermaid rendering is complete
-
-                  // Auto-zoom to fit or 2.5x when page loads
-                  view?.postDelayed(
-                    {
-                      // Get content dimensions via JavaScript
-                      view.evaluateJavascript(
-                        "(function() { return JSON.stringify({width: document.body.scrollWidth, height: document.body.scrollHeight}); })();",
-                      ) { result ->
-                        try {
-                          val cleanResult = result?.replace("\"", "") ?: ""
-                          if (cleanResult.isNotEmpty() && cleanResult != "null") {
-                            // Parse the JSON-like string to get dimensions
-                            val contentData = cleanResult.substringAfter("{").substringBefore("}")
-                            val widthStr = contentData.substringAfter("width:").substringBefore(",")
-                            Log.i(TAG, "widthStr: ${widthStr}")
-                            val contentWidth = widthStr.toFloatOrNull() ?: 0f
-                            Log.i(TAG, "contentWidth: ${contentWidth}")
-                            val viewWidth = view.width.toFloat()
-                            Log.i(TAG, "viewWidth: ${viewWidth}")
-
-                            if (contentWidth > 0 && viewWidth > 0) {
-                              // Calculate scale to fit content with some padding
-                              val scaleToFit = (viewWidth * 0.9f) / contentWidth
-
-                              // Choose between fit-to-window or 2.5x zoom
-                              val targetZoom =
-                                if (scaleToFit > 1f && scaleToFit < 2.5f) {
-                                  scaleToFit // Use fit-to-window if it's reasonable
-                                } else {
-                                  2.5f // Otherwise use 2.5x zoom
-                                }
-
-                              // Apply the zoom
-                              view.zoomBy(targetZoom)
-                              zoomLevel = targetZoom
-
-                              // Pan to top center after zoom
-                              view.postDelayed(
-                                {
-                                  // Use JavaScript to get the actual rendered
-                                  // dimensions after zoom
-                                  view.evaluateJavascript(
-                                    "(function() { return JSON.stringify({width: document.body.scrollWidth, height: document.body.scrollHeight}); })();",
-                                  ) { dimensionResult ->
-                                    try {
-                                      val cleanDimResult = dimensionResult?.replace("\"", "") ?: ""
-                                      if (cleanDimResult.isNotEmpty() && cleanDimResult != "null") {
-                                        val dimData =
-                                          cleanDimResult.substringAfter("{").substringBefore("}")
-                                        val actualWidthStr =
-                                          dimData.substringAfter("width:").substringBefore(",")
-                                        val actualContentWidth =
-                                          actualWidthStr.toFloatOrNull() ?: 0f
-                                        val viewWidth = view.width.toFloat()
-
-                                        // Calculate horizontal scroll to center
-                                        // the content
-                                        val scrollX =
-                                          if (actualContentWidth > viewWidth) {
-                                            ((actualContentWidth - viewWidth) / 2).toInt()
-                                          } else {
-                                            0 // Content fits in view, no
-                                            // horizontal scroll needed
-                                          }
-
-                                        val scrollY = 0 // Top of the content
-
-                                        Log.i(
-                                          TAG,
-                                          "view.scrollTo(scrollX, scrollY) (${scrollX}, ${scrollY})",
-                                        )
-                                        view.scrollTo(scrollX, scrollY)
-                                        Log.i(
-                                          TAG,
-                                          "AutoMobile: Panned to top center ($scrollX, $scrollY) - content: $actualContentWidth, view: $viewWidth",
-                                        )
-                                      } else {
-                                        // Fallback: try to center using initial
-                                        // calculation
-                                        val scaledContentWidth = (contentWidth * targetZoom).toInt()
-                                        val viewWidth = view.width
-                                        val scrollX = maxOf(0, (scaledContentWidth - viewWidth) / 2)
-                                        Log.i(
-                                          TAG,
-                                          "view.scrollTo(scrollX, 0) (${scrollX}, 0)",
-                                        )
-                                        view.scrollTo(scrollX, 0)
-                                        Log.i(
-                                          TAG,
-                                          "AutoMobile: Panned to top center (calc fallback) ($scrollX, 0)",
-                                        )
-                                      }
-                                    } catch (e: Exception) {
-                                      // Last resort: try basic centering
-                                      val scaledContentWidth = (contentWidth * targetZoom).toInt()
-                                      val viewWidth = view.width
-                                      val scrollX = maxOf(0, (scaledContentWidth - viewWidth) / 2)
-                                      Log.i(
-                                        TAG,
-                                        "view.scrollTo(scrollX, 0) (${scrollX}, 0)",
-                                      )
-                                      view.scrollTo(scrollX, 0)
-                                      Log.i(
-                                        TAG,
-                                        "AutoMobile: Panned to top center (error fallback) ($scrollX, 0): ${e.message}",
-                                      )
-                                    }
-                                  }
-                                },
-                                200,
-                              ) // Small delay after zoom to ensure it's
-                              // applied
-
-                              Log.i(
-                                TAG,
-                                "AutoMobile: Auto-zoomed to $targetZoom (scaleToFit: $scaleToFit)",
-                              )
-                            } else {
-                              // Fallback to 2.5x
-                              view.zoomBy(2.5f)
-                              zoomLevel = 2.5f
-
-                              // Pan to top center after zoom
-                              view.postDelayed(
-                                {
-                                  Log.i(TAG, "view.scrollTo(scrollX, 0) (${scrollX}, 0)")
-                                  view.scrollTo(scrollX, 0)
-
-                                  val scrollX = maxOf(0, (view.width * 0.75).toInt())
-                                  Log.i(
-                                    TAG,
-                                    "view.scrollTo(view.width / 2, 0) ($scrollX 0)",
-                                  )
-                                  view.scrollTo(scrollX, 0)
-                                  Log.i(
-                                    TAG,
-                                    "AutoMobile: Panned to top center (fallback) ($scrollX, 0)",
-                                  )
-                                },
-                                200,
-                              )
-
-                              Log.i(
-                                TAG,
-                                "AutoMobile: Auto-zoomed to 2.5x (dimensions fallback)",
-                              )
-                            }
-                          } else {
-                            // Fallback to 2.5x if JavaScript fails
-                            view.zoomBy(2.5f)
-                            zoomLevel = 2.5f
-
-                            // Pan to top center after zoom
-                            view.postDelayed(
-                              {
-                                Log.i(
-                                  TAG,
-                                  "view.scrollTo(view.width / 2, 0) (${view.width / 2} 0)",
-                                )
-                                view.scrollTo(view.width / 2, 0)
-                                Log.i(TAG, "AutoMobile: Panned to top center (JS fallback")
-                              },
-                              200,
-                            )
-
-                            Log.i(TAG, "AutoMobile: Auto-zoomed to 2.5x (JS fallback)")
-                          }
-                        } catch (e: Exception) {
-                          // Fallback to 2.5x if parsing fails
-                          view.zoomBy(2.5f)
-                          zoomLevel = 2.5f
-
-                          // Pan to top center after zoom
-                          view.postDelayed(
-                            {
-                              val scaledContentWidth = (contentWidth * 2.5f).toInt()
-                              val viewWidth = view.width
-                              val scrollX = maxOf(0, (scaledContentWidth - viewWidth) / 2)
-                              Log.i(TAG, "view.scrollTo(scrollX, 0) (${scrollX}, 0)")
-                              view.scrollTo(scrollX, 0)
-                              Log.i(
-                                TAG,
-                                "AutoMobile: Panned to top center (error fallback) ($scrollX, 0): ${e.message}",
-                              )
-                            },
-                            200,
-                          )
-
-                          Log.i(
-                            TAG,
-                            "AutoMobile: Auto-zoomed to 2.5x (error fallback): ${e.message}",
-                          )
-                        }
-                      }
-                    },
-                    1000,
-                  ) // Slightly longer delay to ensure Mermaid rendering is complete
-
-                  // Inject JavaScript to monitor zoom changes more reliably
-                  view?.evaluateJavascript(
-                    """
-                  (function() {
-                    let lastScale = 1;
-                    function checkZoom() {
-                      const currentScale = window.outerWidth / window.innerWidth;
-                      if (Math.abs(currentScale - lastScale) > 0.1) {
-                        lastScale = currentScale;
-                        Android.onZoomChanged(currentScale);
-                      }
-                    }
-                    setInterval(checkZoom, 100);
-                  })();
-                """,
-                    null,
-                  )
-                }
-              }
-
-            // Double tap to zoom gesture detector
-            val gestureDetector =
-              GestureDetector(
-                context,
-                object : GestureDetector.SimpleOnGestureListener() {
-                  override fun onDoubleTap(e: MotionEvent): Boolean {
-                    val currentZoom = zoomLevel
-                    val targetZoom =
-                      if (currentZoom > 1.5f) {
-                        1f // Zoom out to fit
-                      } else {
-                        2.5f // Zoom in
-                      }
-
-                    // Use zoomBy for smooth transition
-                    val zoomFactor = targetZoom / currentZoom
-                    zoomBy(zoomFactor)
-
-                    // Update zoom level immediately for responsive UI
-                    zoomLevel = targetZoom
-                    Log.i(TAG, "AutoMobile: Double tap zoom from $currentZoom to $targetZoom")
-
-                    return true
-                  }
-                },
-              )
-
-            // Set touch listener for double tap detection
-            setOnTouchListener { view, event ->
-              gestureDetector.onTouchEvent(event)
-              false // Let WebView handle other touch events normally
-            }
-
-            val htmlContent =
-              createMermaidDiagramHtml(
-                mermaidCode = mermaidCode,
-                isDarkMode = isDarkMode,
-                backgroundColor = backgroundColor,
-                textColor = textColor,
-              )
-
-            loadDataWithBaseURL(
-              "https://cdn.jsdelivr.net/",
-              htmlContent,
-              "text/html",
-              "UTF-8",
-              null,
-            )
-          }
-        },
-        modifier = Modifier.fillMaxSize(),
-      )
-
-      // Loading overlay
-      if (showLoading) {
-        Box(modifier = Modifier.fillMaxSize().background(backgroundColor)) {
-          CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-        }
-      }
-    }
+    MermaidDiagramContent(
+      mermaidCode,
+      state,
+      MermaidAppearance(isDarkMode, backgroundColor, textColor),
+      showLoading,
+      Modifier.weight(1f).fillMaxWidth(),
+    )
   }
 }
 
@@ -455,82 +97,25 @@ private fun createMermaidDiagramHtml(
   backgroundColor: Color,
   textColor: Color,
 ): String {
-  val bgColorHex = String.format("#%06X", 0xFFFFFF and backgroundColor.toArgb())
-  val textColorHex = String.format("#%06X", 0xFFFFFF and textColor.toArgb())
+  val bgColorHex = String.format(Locale.ROOT, "#%06X", 0xFFFFFF and backgroundColor.toArgb())
+  val textColorHex = String.format(Locale.ROOT, "#%06X", 0xFFFFFF and textColor.toArgb())
 
   // Design system colors
-  val autoMobileRedHex = String.format("#%06X", 0xFFFFFF and AutoMobileRed.toArgb())
-  val orangeHex = String.format("#%06X", 0xFFFFFF and PromoOrange.toArgb())
-  val blueHex = String.format("#%06X", 0xFFFFFF and PromoBlue.toArgb())
+  val autoMobileRedHex = String.format(Locale.ROOT, "#%06X", 0xFFFFFF and AutoMobileRed.toArgb())
+  val orangeHex = String.format(Locale.ROOT, "#%06X", 0xFFFFFF and PromoOrange.toArgb())
+  val blueHex = String.format(Locale.ROOT, "#%06X", 0xFFFFFF and PromoBlue.toArgb())
 
   // Mermaid theme configuration
-  val theme = if (isDarkMode) "dark" else "default"
+  val script = mermaidDiagramScript(bgColorHex, textColorHex, blueHex, isDarkMode)
 
+  val head = mermaidDiagramHead(bgColorHex, textColorHex)
   return """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
-            <style>
-                body {
-                    margin: 0;
-                    padding: 20px;
-                    background-color: $bgColorHex;
-                    font-color: $textColorHex;
-                    color: $textColorHex;
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    min-height: 100vh;
-                }
-                .mermaid {
-                    max-width: 100%;
-                    max-height: 100%;
-                }
-                .mermaid svg {
-                    max-width: 100% !important;
-                    height: auto !important;
-                }
-            </style>
-        </head>
+$head
         <body>
             <div class="mermaid">
                 ${mermaidCode.trim()}
             </div>
-            <script>
-                mermaid.initialize({
-                    startOnLoad: true,
-                    theme: '$theme',
-                    themeVariables: {
-                        primaryColor: '$bgColorHex',
-                        primaryTextColor: '$textColorHex',
-                        primaryBorderColor: '$textColorHex',
-                        lineColor: '$textColorHex',
-                        secondaryColor: '$blueHex',
-                        tertiaryColor: '$bgColorHex',
-                        background: '$bgColorHex',
-                        mainBkg: '$bgColorHex',
-                        secondaryBkg: '$blueHex',
-                        tertiaryBkg: '${if (isDarkMode) "#3c3c3c" else "#fafafa"}',
-                        cScale0: '$bgColorHex',
-                        cScale1: '$blueHex',
-                        cScale2: '${if (isDarkMode) "#cf6679" else "#e1bee7"}'
-                    },
-                    flowchart: {
-                        useMaxWidth: true,
-                        htmlLabels: true
-                    },
-                    sequence: {
-                        useMaxWidth: true
-                    },
-                    gantt: {
-                        useMaxWidth: true
-                    }
-                });
-            </script>
+$script
         </body>
         </html>
     """
@@ -587,4 +172,532 @@ fun MermaidDiagramSlideItemSequencePreview() {
       isDarkMode = true,
     )
   }
+}
+
+private const val TAG = "MermaidDiagramSlideItem"
+
+private class MermaidDiagramState {
+  var zoomLevel by mutableFloatStateOf(1f)
+  var contentWidth by mutableFloatStateOf(0f)
+}
+
+private data class MermaidAppearance(
+  val isDarkMode: Boolean,
+  val backgroundColor: Color,
+  val textColor: Color,
+)
+
+private fun createMermaidWebView(
+  context: Context,
+  state: MermaidDiagramState,
+  appearance: MermaidAppearance,
+  mermaidCode: String,
+): WebView {
+  val (isDarkMode, backgroundColor, textColor) = appearance
+  return WebView(context).apply {
+    settings.javaScriptEnabled = true
+    settings.loadWithOverviewMode = true
+    settings.useWideViewPort = true
+    settings.setSupportZoom(true)
+    settings.builtInZoomControls = true
+    settings.displayZoomControls = false
+
+    // Enhanced zoom gesture support
+    settings.allowFileAccess = true
+    settings.allowContentAccess = true
+    settings.domStorageEnabled = true
+
+    // Set background color to prevent white flashing
+    setBackgroundColor(backgroundColor.toArgb())
+
+    // Add JavaScript interface for zoom tracking
+    addJavascriptInterface(
+      object {
+        @android.webkit.JavascriptInterface
+        fun onZoomChanged(scale: Float) {
+          // Post to main thread since this is called from JavaScript thread
+          post {
+            state.zoomLevel = scale
+            Log.i(TAG, "AutoMobile: JS Zoom level: $scale")
+          }
+        }
+      },
+      "Android",
+    )
+
+    // Custom WebViewClient to track zoom changes
+    webViewClient = createMermaidWebViewClient(state)
+
+    configureMermaidGestures(context, state)
+
+    val htmlContent =
+      createMermaidDiagramHtml(
+        mermaidCode = mermaidCode,
+        isDarkMode = isDarkMode,
+        backgroundColor = backgroundColor,
+        textColor = textColor,
+      )
+
+    loadDataWithBaseURL(
+      "https://cdn.jsdelivr.net/",
+      htmlContent,
+      "text/html",
+      "UTF-8",
+      null,
+    )
+  }
+}
+
+private fun WebView.configureMermaidGestures(context: Context, state: MermaidDiagramState) {
+  // Double tap to zoom gesture detector
+  val gestureDetector =
+    GestureDetector(
+      context,
+      object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDoubleTap(e: MotionEvent): Boolean {
+          val currentZoom = state.zoomLevel
+          val targetZoom =
+            if (currentZoom > 1.5f) {
+              1f // Zoom out to fit
+            } else {
+              2.5f // Zoom in
+            }
+
+          // Use zoomBy for smooth transition
+          val zoomFactor = targetZoom / currentZoom
+          zoomBy(zoomFactor)
+
+          // Update zoom level immediately for responsive UI
+          state.zoomLevel = targetZoom
+          Log.i(TAG, "AutoMobile: Double tap zoom from $currentZoom to $targetZoom")
+
+          return true
+        }
+      },
+    )
+
+  // Set touch listener for double tap detection
+  setOnTouchListener { view, event ->
+    gestureDetector.onTouchEvent(event)
+    false // Let WebView handle other touch events normally
+  }
+}
+
+private fun WebView.createMermaidWebViewClient(state: MermaidDiagramState): WebViewClient =
+  object : WebViewClient() {
+    override fun onScaleChanged(view: WebView?, oldScale: Float, newScale: Float) {
+      super.onScaleChanged(view, oldScale, newScale)
+      state.zoomLevel = newScale
+      Log.i(TAG, "AutoMobile: Zoom changed from $oldScale to $newScale")
+    }
+
+    override fun onPageFinished(view: WebView?, url: String?) {
+      super.onPageFinished(view, url)
+
+      schedulePageSetup(view)
+    }
+
+    private fun panAfterZoom(
+      view: WebView,
+      dimensionResult: String?,
+      contentWidth: Float,
+      targetZoom: Float,
+    ) {
+      try {
+        val cleanDimResult = dimensionResult?.replace("\"", "") ?: ""
+        if (cleanDimResult.isNotEmpty() && cleanDimResult != "null") {
+          panToMeasuredWidth(view, cleanDimResult)
+        } else {
+          // Fallback: try to center using initial
+          // calculation
+          val scaledContentWidth = (contentWidth * targetZoom).toInt()
+          val viewWidth = view.width
+          val scrollX = maxOf(0, (scaledContentWidth - viewWidth) / 2)
+          Log.i(
+            TAG,
+            "view.scrollTo(scrollX, 0) (${scrollX}, 0)",
+          )
+          view.scrollTo(scrollX, 0)
+          Log.i(
+            TAG,
+            "AutoMobile: Panned to top center (calc fallback) ($scrollX, 0)",
+          )
+        }
+      } catch (e: Exception) {
+        // Last resort: try basic centering
+        val scaledContentWidth = (contentWidth * targetZoom).toInt()
+        val viewWidth = view.width
+        val scrollX = maxOf(0, (scaledContentWidth - viewWidth) / 2)
+        Log.i(
+          TAG,
+          "view.scrollTo(scrollX, 0) (${scrollX}, 0)",
+        )
+        view.scrollTo(scrollX, 0)
+        Log.i(
+          TAG,
+          "AutoMobile: Panned to top center (error fallback) ($scrollX, 0): ${e.message}",
+        )
+      }
+    }
+
+    private fun autoZoom(view: WebView, result: String?) {
+      try {
+        val cleanResult = result?.replace("\"", "") ?: ""
+        if (cleanResult.isNotEmpty() && cleanResult != "null") {
+          // Parse the JSON-like string to get dimensions
+          val contentData = cleanResult.substringAfter("{").substringBefore("}")
+          val widthStr = contentData.substringAfter("width:").substringBefore(",")
+          Log.i(TAG, "widthStr: ${widthStr}")
+          val contentWidth = widthStr.toFloatOrNull() ?: 0f
+          Log.i(TAG, "contentWidth: ${contentWidth}")
+          val viewWidth = view.width.toFloat()
+          Log.i(TAG, "viewWidth: ${viewWidth}")
+
+          if (contentWidth > 0 && viewWidth > 0) {
+            zoomToContent(view, contentWidth, viewWidth)
+          } else {
+            zoomWithoutDimensions(view)
+          }
+        } else {
+          zoomAfterEmptyResult(view)
+        }
+      } catch (e: Exception) {
+        zoomAfterError(view, e)
+      }
+    }
+
+    private fun schedulePageSetup(view: WebView?) {
+      // Get content dimensions via JavaScript
+      view?.postDelayed(
+        {
+          // Get the content width
+          view.evaluateJavascript(
+            "(function() { return JSON.stringify({width: document.body.scrollWidth, height: document.body.scrollHeight}); })();",
+          ) { result ->
+            rememberContentWidth(result)
+          }
+        },
+        1000,
+      ) // Slightly longer delay to ensure Mermaid rendering is complete
+
+      // Auto-zoom to fit or 2.5x when page loads
+      view?.postDelayed(
+        {
+          // Get content dimensions via JavaScript
+          view.evaluateJavascript(
+            "(function() { return JSON.stringify({width: document.body.scrollWidth, height: document.body.scrollHeight}); })();",
+          ) { result ->
+            autoZoom(view, result)
+          }
+        },
+        1000,
+      ) // Slightly longer delay to ensure Mermaid rendering is complete
+
+      monitorZoom(view)
+    }
+
+    private fun panToMeasuredWidth(view: WebView, cleanDimResult: String) {
+      val dimData = cleanDimResult.substringAfter("{").substringBefore("}")
+      val actualWidthStr = dimData.substringAfter("width:").substringBefore(",")
+      val actualContentWidth = actualWidthStr.toFloatOrNull() ?: 0f
+      val viewWidth = view.width.toFloat()
+
+      // Calculate horizontal scroll to center
+      // the content
+      val scrollX =
+        if (actualContentWidth > viewWidth) {
+          ((actualContentWidth - viewWidth) / 2).toInt()
+        } else {
+          0 // Content fits in view, no
+          // horizontal scroll needed
+        }
+
+      val scrollY = 0 // Top of the content
+
+      Log.i(
+        TAG,
+        "view.scrollTo(scrollX, scrollY) (${scrollX}, ${scrollY})",
+      )
+      view.scrollTo(scrollX, scrollY)
+      Log.i(
+        TAG,
+        "AutoMobile: Panned to top center ($scrollX, $scrollY) - content: $actualContentWidth, view: $viewWidth",
+      )
+    }
+
+    private fun zoomToContent(view: WebView, contentWidth: Float, viewWidth: Float) {
+      // Calculate scale to fit content with some padding
+      val scaleToFit = (viewWidth * 0.9f) / contentWidth
+
+      // Choose between fit-to-window or 2.5x zoom
+      val targetZoom =
+        if (scaleToFit > 1f && scaleToFit < 2.5f) {
+          scaleToFit // Use fit-to-window if it's reasonable
+        } else {
+          2.5f // Otherwise use 2.5x zoom
+        }
+
+      // Apply the zoom
+      view.zoomBy(targetZoom)
+      state.zoomLevel = targetZoom
+
+      // Pan to top center after zoom
+      view.postDelayed(
+        {
+          // Use JavaScript to get the actual rendered
+          // dimensions after zoom
+          view.evaluateJavascript(
+            "(function() { return JSON.stringify({width: document.body.scrollWidth, height: document.body.scrollHeight}); })();",
+          ) { dimensionResult ->
+            panAfterZoom(view, dimensionResult, contentWidth, targetZoom)
+          }
+        },
+        200,
+      ) // Small delay after zoom to ensure it's
+      // applied
+
+      Log.i(
+        TAG,
+        "AutoMobile: Auto-zoomed to $targetZoom (scaleToFit: $scaleToFit)",
+      )
+    }
+
+    private fun zoomWithoutDimensions(view: WebView) {
+      // Fallback to 2.5x
+      view.zoomBy(2.5f)
+      state.zoomLevel = 2.5f
+
+      // Pan to top center after zoom
+      view.postDelayed(
+        {
+          Log.i(TAG, "view.scrollTo(scrollX, 0) (${scrollX}, 0)")
+          view.scrollTo(scrollX, 0)
+
+          val scrollX = maxOf(0, (view.width * 0.75).toInt())
+          Log.i(
+            TAG,
+            "view.scrollTo(view.width / 2, 0) ($scrollX 0)",
+          )
+          view.scrollTo(scrollX, 0)
+          Log.i(
+            TAG,
+            "AutoMobile: Panned to top center (fallback) ($scrollX, 0)",
+          )
+        },
+        200,
+      )
+
+      Log.i(
+        TAG,
+        "AutoMobile: Auto-zoomed to 2.5x (dimensions fallback)",
+      )
+    }
+
+    private fun zoomAfterEmptyResult(view: WebView) {
+      // Fallback to 2.5x if JavaScript fails
+      view.zoomBy(2.5f)
+      state.zoomLevel = 2.5f
+
+      // Pan to top center after zoom
+      view.postDelayed(
+        {
+          Log.i(
+            TAG,
+            "view.scrollTo(view.width / 2, 0) (${view.width / 2} 0)",
+          )
+          view.scrollTo(view.width / 2, 0)
+          Log.i(TAG, "AutoMobile: Panned to top center (JS fallback")
+        },
+        200,
+      )
+
+      Log.i(TAG, "AutoMobile: Auto-zoomed to 2.5x (JS fallback)")
+    }
+
+    private fun zoomAfterError(view: WebView, e: Exception) {
+      // Fallback to 2.5x if parsing fails
+      view.zoomBy(2.5f)
+      state.zoomLevel = 2.5f
+
+      // Pan to top center after zoom
+      view.postDelayed(
+        {
+          val scaledContentWidth = (state.contentWidth * 2.5f).toInt()
+          val viewWidth = view.width
+          val scrollX = maxOf(0, (scaledContentWidth - viewWidth) / 2)
+          Log.i(TAG, "view.scrollTo(scrollX, 0) (${scrollX}, 0)")
+          view.scrollTo(scrollX, 0)
+          Log.i(
+            TAG,
+            "AutoMobile: Panned to top center (error fallback) ($scrollX, 0): ${e.message}",
+          )
+        },
+        200,
+      )
+
+      Log.i(
+        TAG,
+        "AutoMobile: Auto-zoomed to 2.5x (error fallback): ${e.message}",
+      )
+    }
+
+    private fun rememberContentWidth(result: String?) {
+      try {
+        val cleanResult = result?.replace("\"", "") ?: ""
+        if (cleanResult.isNotEmpty() && cleanResult != "null") {
+          // Parse the JSON-like string to get dimensions
+          val contentData = cleanResult.substringAfter("{").substringBefore("}")
+          val widthStr = contentData.substringAfter("width:").substringBefore(",")
+          val parsedContentWidth = widthStr.toFloatOrNull() ?: 0f
+
+          state.contentWidth = parsedContentWidth
+        }
+      } catch (e: Exception) {
+        Log.i(
+          TAG,
+          "AutoMobile: Error parsing content dimensions: ${e.message}",
+        )
+      }
+    }
+
+    private fun monitorZoom(view: WebView?) {
+      // Inject JavaScript to monitor zoom changes more reliably
+      view?.evaluateJavascript(
+        """
+    (function() {
+      let lastScale = 1;
+      function checkZoom() {
+        const currentScale = window.outerWidth / window.innerWidth;
+        if (Math.abs(currentScale - lastScale) > 0.1) {
+          lastScale = currentScale;
+          Android.onZoomChanged(currentScale);
+        }
+      }
+      setInterval(checkZoom, 100);
+    })();
+  """,
+        null,
+      )
+    }
+  }
+
+@Composable
+private fun mermaidContentOpacity(zoomLevel: Float): Float {
+  // Calculate opacity based on zoom level - fade out when zooming in
+  val opacity by
+    animateFloatAsState(
+      targetValue =
+        when {
+          zoomLevel <= 1.2f -> 1f
+          zoomLevel >= 2f -> 0f
+          else -> 1f - ((zoomLevel - 1.2f) / 0.8f) // Linear fade between 1.2x and 2x zoom
+        },
+      animationSpec = tween(durationMillis = 300),
+      label = "contentOpacity",
+    )
+
+  return opacity
+}
+
+@Composable
+private fun MermaidDiagramContent(
+  mermaidCode: String,
+  state: MermaidDiagramState,
+  appearance: MermaidAppearance,
+  showLoading: Boolean,
+  modifier: Modifier,
+) {
+  val backgroundColor = appearance.backgroundColor
+  // Mermaid diagram
+  Box(modifier = modifier) {
+    AndroidView(
+      factory = { context ->
+        createMermaidWebView(
+          context,
+          state,
+          appearance,
+          mermaidCode,
+        )
+      },
+      modifier = Modifier.fillMaxSize(),
+    )
+
+    // Loading overlay
+    if (showLoading) {
+      Box(modifier = Modifier.fillMaxSize().background(backgroundColor)) {
+        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+      }
+    }
+  }
+}
+
+private fun mermaidDiagramHead(bgColorHex: String, textColorHex: String): String =
+  """        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+            <style>
+                body {
+                    margin: 0;
+                    padding: 20px;
+                    background-color: $bgColorHex;
+                    font-color: $textColorHex;
+                    color: $textColorHex;
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    min-height: 100vh;
+                }
+                .mermaid {
+                    max-width: 100%;
+                    max-height: 100%;
+                }
+                .mermaid svg {
+                    max-width: 100% !important;
+                    height: auto !important;
+                }
+            </style>
+        </head>"""
+
+private fun mermaidDiagramScript(
+  bgColorHex: String,
+  textColorHex: String,
+  blueHex: String,
+  isDarkMode: Boolean,
+): String {
+  val theme = if (isDarkMode) "dark" else "default"
+  return """            <script>
+                mermaid.initialize({
+                    startOnLoad: true,
+                    theme: '$theme',
+                    themeVariables: {
+                        primaryColor: '$bgColorHex',
+                        primaryTextColor: '$textColorHex',
+                        primaryBorderColor: '$textColorHex',
+                        lineColor: '$textColorHex',
+                        secondaryColor: '$blueHex',
+                        tertiaryColor: '$bgColorHex',
+                        background: '$bgColorHex',
+                        mainBkg: '$bgColorHex',
+                        secondaryBkg: '$blueHex',
+                        tertiaryBkg: '${if (isDarkMode) "#3c3c3c" else "#fafafa"}',
+                        cScale0: '$bgColorHex',
+                        cScale1: '$blueHex',
+                        cScale2: '${if (isDarkMode) "#cf6679" else "#e1bee7"}'
+                    },
+                    flowchart: {
+                        useMaxWidth: true,
+                        htmlLabels: true
+                    },
+                    sequence: {
+                        useMaxWidth: true
+                    },
+                    gantt: {
+                        useMaxWidth: true
+                    }
+                });
+            </script>"""
 }

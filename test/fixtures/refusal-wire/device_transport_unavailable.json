@@ -1,0 +1,13 @@
+{
+  "code": "device_transport_unavailable",
+  "builder": "AdbDeviceTransportUnavailableError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"ADB transport unavailable for emulator-5554. Retry the operation: adb: device 'emulator-5554' not found\",\"code\":\"device_transport_unavailable\",\"retryable\":true,\"retryAfterMs\":1000,\"dispatched\":false,\"deviceId\":\"emulator-5554\"}"
+      }
+    ],
+    "isError": true
+  }
+}

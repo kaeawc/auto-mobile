@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import {
   TALKBACK_ACTIVATION_WARNING,
   TalkBackTapStrategy,
@@ -8,6 +8,10 @@ import type { Element } from "../../../src/models/Element";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { HierarchyTalkBackDriver } from "./HierarchyTalkBackDriver";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const device = { name: "test-device", platform: "android" as const, deviceId: "emulator-5554" };
 

@@ -15,13 +15,21 @@ import { MAX_CREDIBLE_DAEMON_STALL_MS } from "../../src/daemon/timerLateness";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS as SCAN_MS,
   SUSPECT_GRACE_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const ID = "connected-stall-session";
-let rig: Awaited<ReturnType<typeof setUp>> | undefined;
+type Rig = {
+  timer: FakeTimer;
+  manager: SessionManager;
+  session: NonNullable<ReturnType<SessionManager["getSession"]>>;
+  monitor: SessionHeartbeatMonitor;
+  heartbeat: () => Promise<void>;
+  reaped: string[];
+};
+let rig: Rig | undefined;
 // As in the neighbouring scenario suites, pay module/first-scan initialization outside tests.
 beforeAll(async () => {
   const warm = await setUp();
@@ -37,7 +45,7 @@ afterEach(async () => {
   rig = undefined;
 });
 
-async function setUp(connected: boolean | undefined = true) {
+async function setUp(connected: boolean | undefined = true): Promise<Rig> {
   const timer = new FakeTimer();
   timer.setCurrentTime(1_000_000);
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -48,6 +56,7 @@ async function setUp(connected: boolean | undefined = true) {
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
+      releaseDevice: async () => {},
     }),
     getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
   };
@@ -83,7 +92,7 @@ async function setUp(connected: boolean | undefined = true) {
   return rig;
 }
 
-async function silentScans(r: NonNullable<typeof rig>) {
+async function silentScans(r: Rig) {
   r.monitor.start();
   for (let i = 0; i < 3; i++) {
     r.timer.setCurrentTime(r.timer.now() + SCAN_MS);
@@ -91,17 +100,12 @@ async function silentScans(r: NonNullable<typeof rig>) {
   }
 }
 
-async function lateScan(r: NonNullable<typeof rig>, lostMs: number) {
+async function lateScan(r: Rig, lostMs: number) {
   r.timer.setCurrentTime(r.timer.now() + SCAN_MS + lostMs);
   await r.monitor.tick();
 }
 
-function forgive(
-  r: NonNullable<typeof rig>,
-  lostMs: number,
-  sleptMs = 0,
-  gapBeganAt = r.manager.sessionNow(),
-) {
+function forgive(r: Rig, lostMs: number, sleptMs = 0, gapBeganAt = r.manager.sessionNow()) {
   r.timer.setCurrentTime(r.timer.now() + lostMs + sleptMs);
   const before = judgedLeaseHeartbeat(r.session);
   r.manager.forgiveDaemonStall(r.manager.sessionNow(), lostMs, sleptMs, gapBeganAt);

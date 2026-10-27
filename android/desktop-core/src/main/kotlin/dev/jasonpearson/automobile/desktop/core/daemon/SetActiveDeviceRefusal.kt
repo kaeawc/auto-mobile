@@ -58,11 +58,17 @@ internal fun classifySetActiveDeviceRefusal(
 ): SetActiveDeviceRefusal? {
   val envelope = response as? JsonObject ?: return null
   if ((envelope["isError"] as? JsonPrimitive)?.booleanOrNull != true) return null
-  val text =
-    (envelope["content"] as? JsonArray)
-      ?.mapNotNull { it as? JsonObject }
-      ?.firstOrNull { (it["type"] as? JsonPrimitive)?.contentOrNull == "text" }
-      ?.let { (it["text"] as? JsonPrimitive)?.contentOrNull } ?: return null
+  val text = refusalText(envelope) ?: return null
+  return classifyRefusalText(json, text)
+}
+
+private fun refusalText(envelope: JsonObject): String? =
+  (envelope["content"] as? JsonArray)
+    ?.mapNotNull { it as? JsonObject }
+    ?.firstOrNull { (it["type"] as? JsonPrimitive)?.contentOrNull == "text" }
+    ?.let { (it["text"] as? JsonPrimitive)?.contentOrNull }
+
+private fun classifyRefusalText(json: Json, text: String): SetActiveDeviceRefusal? {
   val payload = runCatching { json.parseToJsonElement(text) }.getOrNull() as? JsonObject
   val code = ((payload?.get("error") as? JsonObject)?.get("code") as? JsonPrimitive)?.contentOrNull
   val topLevelCode = (payload?.get("code") as? JsonPrimitive)?.contentOrNull

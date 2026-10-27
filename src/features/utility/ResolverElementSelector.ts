@@ -11,7 +11,7 @@ import type { ElementSelectionResult } from "../../models/ElementSelectionResult
 import type { Element, ViewHierarchyResult } from "../../models";
 import { nodeAttributes } from "../../models/ViewHierarchyResult";
 import { ActionableError, type ContainerFailure } from "../../models/ActionableError";
-import type { ResolverSelector } from "../../server/elementSelectorSchemas";
+import type { ResolverSelector } from "../../models/elementSelectorSchemas";
 import {
   ElementResolver,
   isMissingContainerError,

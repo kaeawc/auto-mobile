@@ -1,7 +1,9 @@
 package dev.jasonpearson.automobile.desktop.core.control
 
-import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
+import dev.jasonpearson.automobile.desktop.core.daemon.SwipeInput
+import dev.jasonpearson.automobile.desktop.core.daemon.TapInput
+import dev.jasonpearson.automobile.desktop.core.daemon.TextInput
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 
 /**
@@ -46,30 +48,29 @@ class DeviceControlInputForwarder {
    * @param onError invoked with the daemon's actionable error message (or an exception message)
    *   when the tap fails. Never called for an out-of-bounds point or a successful tap.
    */
-  fun forwardTap(
-    point: DevicePoint,
-    client: AutoMobileClient?,
-    platform: String,
-    deviceId: String?,
-    onError: (String) -> Unit,
-    frameContext: String,
-  ) {
-    // Out of bounds: the mapping never clamps, so a click outside the device screen produces an
-    // off-screen coordinate. Dropping it honors the screen-control-mapping contract (the daemon
-    // must not receive an off-screen tap).
-    if (!point.inBounds) return
+  fun forwardTap(point: DevicePoint, target: DeviceInputTarget) {
+    with(target) {
 
-    // Nothing connected: drop silently rather than surfacing a spurious error.
-    if (client == null) return
+      // Out of bounds: the mapping never clamps, so a click outside the device screen produces an
+      // off-screen coordinate. Dropping it honors the screen-control-mapping contract (the daemon
+      // must not receive an off-screen tap).
+      if (!point.inBounds) return
 
-    forward(onError) {
-      client.inputTap(
-        x = point.x.toDouble(),
-        y = point.y.toDouble(),
-        platform = platform,
-        deviceId = deviceId,
-        frameContext = frameContext,
-      )
+      // Nothing connected: drop silently rather than surfacing a spurious error.
+      if (client == null) return
+
+      forward(onError) {
+        client.inputTap(
+          input =
+            TapInput(
+              x = point.x.toDouble(),
+              y = point.y.toDouble(),
+              platform = platform,
+              deviceId = deviceId,
+              frameContext = frameContext,
+            ),
+        )
+      }
     }
   }
 
@@ -87,29 +88,31 @@ class DeviceControlInputForwarder {
     start: DevicePoint,
     end: DevicePoint,
     durationMs: Int,
-    client: AutoMobileClient?,
-    platform: String,
-    deviceId: String?,
-    onError: (String) -> Unit,
-    frameContext: String,
+    target: DeviceInputTarget,
   ) {
-    // Either endpoint off-screen makes the whole gesture malformed: the daemon interpolates
-    // between the two, so a bad end is as damaging as a bad start.
-    if (!start.inBounds || !end.inBounds) return
+    with(target) {
 
-    if (client == null) return
+      // Either endpoint off-screen makes the whole gesture malformed: the daemon interpolates
+      // between the two, so a bad end is as damaging as a bad start.
+      if (!start.inBounds || !end.inBounds) return
 
-    forward(onError) {
-      client.inputSwipe(
-        startX = start.x.toDouble(),
-        startY = start.y.toDouble(),
-        endX = end.x.toDouble(),
-        endY = end.y.toDouble(),
-        platform = platform,
-        deviceId = deviceId,
-        durationMs = durationMs,
-        frameContext = frameContext,
-      )
+      if (client == null) return
+
+      forward(onError) {
+        client.inputSwipe(
+          input =
+            SwipeInput(
+              startX = start.x.toDouble(),
+              startY = start.y.toDouble(),
+              endX = end.x.toDouble(),
+              endY = end.y.toDouble(),
+              platform = platform,
+              deviceId = deviceId,
+              durationMs = durationMs,
+              frameContext = frameContext,
+            ),
+        )
+      }
     }
   }
 
@@ -122,22 +125,17 @@ class DeviceControlInputForwarder {
    * before the command was enqueued, so no key mapping is re-derived here. A null [client] drops
    * the press silently; a daemon failure or thrown client exception is routed to [onError].
    */
-  fun forwardPressButton(
-    button: String,
-    client: AutoMobileClient?,
-    platform: String,
-    deviceId: String?,
-    onError: (String) -> Unit,
-    frameContext: String,
-  ) {
-    if (client == null) return
-    forward(onError) {
-      client.inputPressButton(
-        button = button,
-        platform = platform,
-        deviceId = deviceId,
-        frameContext = frameContext,
-      )
+  fun forwardPressButton(button: String, target: DeviceInputTarget) {
+    with(target) {
+      if (client == null) return
+      forward(onError) {
+        client.inputPressButton(
+          button = button,
+          platform = platform,
+          deviceId = deviceId,
+          frameContext = frameContext,
+        )
+      }
     }
   }
 
@@ -158,24 +156,22 @@ class DeviceControlInputForwarder {
    * Append routes through real key events instead (issue #3351). The keyboard policy has already
    * refused to produce text for a platform without that mode.
    */
-  fun forwardTypeText(
-    text: String,
-    client: AutoMobileClient?,
-    platform: String,
-    deviceId: String?,
-    onError: (String) -> Unit,
-    frameContext: String,
-  ) {
-    if (text.isEmpty()) return
-    if (client == null) return
-    forward(onError) {
-      client.inputTypeText(
-        text = text,
-        platform = platform,
-        deviceId = deviceId,
-        append = true,
-        frameContext = frameContext,
-      )
+  fun forwardTypeText(text: String, target: DeviceInputTarget) {
+    with(target) {
+      if (text.isEmpty()) return
+      if (client == null) return
+      forward(onError) {
+        client.inputTypeText(
+          input =
+            TextInput(
+              text = text,
+              platform = platform,
+              deviceId = deviceId,
+              append = true,
+              frameContext = frameContext,
+            ),
+        )
+      }
     }
   }
 
@@ -186,22 +182,17 @@ class DeviceControlInputForwarder {
    * answers with an actionable error, which reaches [onError] like any other daemon rejection and
    * surfaces in the client's error banner rather than being swallowed.
    */
-  fun forwardKey(
-    key: String,
-    client: AutoMobileClient?,
-    platform: String,
-    deviceId: String?,
-    onError: (String) -> Unit,
-    frameContext: String,
-  ) {
-    if (client == null) return
-    forward(onError) {
-      client.inputKey(
-        key = key,
-        platform = platform,
-        deviceId = deviceId,
-        frameContext = frameContext,
-      )
+  fun forwardKey(key: String, target: DeviceInputTarget) {
+    with(target) {
+      if (client == null) return
+      forward(onError) {
+        client.inputKey(
+          key = key,
+          platform = platform,
+          deviceId = deviceId,
+          frameContext = frameContext,
+        )
+      }
     }
   }
 
@@ -217,7 +208,13 @@ class DeviceControlInputForwarder {
     val result =
       try {
         call()
-      } catch (error: Exception) {
+      } catch (error: dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException) {
+        // A transport/client failure must surface, not crash the UI. Reuse the client's own
+        // message.
+        onError(error.message ?: DEFAULT_INPUT_ERROR)
+        return
+      } catch (error: IllegalStateException) {
+        if (error is kotlin.coroutines.cancellation.CancellationException) throw error
         // A transport/client failure must surface, not crash the UI. Reuse the client's own
         // message.
         onError(error.message ?: DEFAULT_INPUT_ERROR)

@@ -9,6 +9,7 @@ import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { toolJson } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -85,18 +86,15 @@ afterEach(() => {
 });
 
 test("preserves registration order", () => {
-  expect(ToolRegistry.getAllTools({ includeUnavailable: true }).map((tool) => tool.name)).toEqual(
-    toolNames,
-  );
+  expect(ToolRegistry.getAllTools({ includeUnavailable: true }).map((tool) => tool.name)).toEqual([
+    "deleteKeychainItem",
+    ...toolNames,
+  ]);
 });
 
 test.each(["listDataStores", "getDataStore"])("%s preserves the read result", async (name) => {
   const result = await handler(name)(device, args);
-  const content = result.content[0];
-  if (content.type !== "text") {
-    throw new Error("Expected text result");
-  }
-  expect(JSON.parse(content.text)).toEqual(
+  expect(toolJson(result)).toEqual(
     name === "listDataStores"
       ? {
           success: true,

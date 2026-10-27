@@ -1,0 +1,42 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "scroll",
+          "child": {
+            "type": "spacer"
+          },
+          "id": "chat"
+        },
+        {
+          "type": "scroll",
+          "child": {
+            "type": "spacer"
+          },
+          "id": "chat"
+        },
+        {
+          "type": "button",
+          "label": "Go",
+          "onTap": [
+            {
+              "type": "scrollTo",
+              "scroll": "chat",
+              "to": "end"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[2].onTap[0].scroll",
+  "expectedMessage": "Duplicate scroll id"
+}

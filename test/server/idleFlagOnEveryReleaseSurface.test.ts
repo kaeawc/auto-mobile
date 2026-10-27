@@ -1,4 +1,7 @@
-import { expect, spyOn, test } from "bun:test";
+import { createHarnessServer } from "../daemon/helpers/UnixSocketServerHarness";
+import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -9,9 +12,8 @@ import {
   recoveryIdentityLossDetails,
   sessionOwnershipLostPayload,
   sessionReleasedDuringCallPayload,
-} from "../../src/server/deviceSessionResult";
+} from "../../src/daemon/deviceSessionResult";
 import { DaemonConnectionSessionReleasedError } from "../../src/daemon/daemonMcpProxy";
-import { DaemonState } from "../../src/daemon/daemonState";
 import { TerminalSessionError, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { isIdleReleaseReason, type SessionReleaseReason } from "../../src/daemon/releaseReasons";
@@ -21,7 +23,7 @@ import {
   sanitizeBoundSessionLoss,
   type DaemonNotification,
 } from "../../src/daemon/types";
-import { UnixSocketServer, mcpRequestFailureDetails } from "../../src/daemon/socketServer";
+import { type UnixSocketServer, mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { planBaseEndFields } from "../../src/server/planExecutionOrchestrator";
 import { REFUSAL_FIXTURES_DIR, REFUSAL_SURFACES_DIR } from "../helpers/refusalWireFixtures";
 
@@ -42,31 +44,30 @@ const snapshot = (reason: string): SessionReleaseSnapshot => ({
   heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 1, ageMs: 1 },
 });
 
-interface ReleaseSocketHarness {
-  admitReleasedBoundSession(sessionUuid: string): Promise<void>;
-  broadcastSessionReleased(sessionUuid: string, reason: string): void;
-}
-
-// Drive the real private payload methods on a narrow fake receiver: the full socket harness
-// also owns transport lifecycle, which these serialization checks do not need.
+// Serialization checks use the real state and transport with a fake socket.
 function socketHarness(reason: string, capture?: (frame: DaemonNotification) => void) {
-  return Object.assign(Object.create(UnixSocketServer.prototype), {
-    daemonState: {
-      getSessionManager: () => ({ getTerminalReleaseSnapshot: () => snapshot(reason) }),
-    },
-    notificationSubscribers: new Set(["subscriber"]),
-    clientSockets: new Map([["subscriber", {}]]),
-    pendingSessionReleaseWrites: new Set<Promise<void>>(),
-    writeFrame: (
-      _socket: unknown,
-      _session: string,
-      frame: DaemonNotification,
-      flushed: () => void,
-    ) => {
-      capture?.(JSON.parse(JSON.stringify(frame)));
-      flushed();
-    },
-  }) as ReleaseSocketHarness;
+  const manager: ReturnType<DaemonStateAccess["getSessionManager"]> = {
+    hasSession: () => false,
+    getSession: () => null,
+    getTerminalReleaseSnapshot: () => snapshot(reason),
+    getDeviceLabels: () => undefined,
+    releaseSession: async () => null,
+  };
+  const unexpectedState = (): never => {
+    throw new Error("Unexpected daemon state access");
+  };
+  const state: ConstructorParameters<typeof UnixSocketServer>[1] = {
+    isInitialized: () => true,
+    getSessionManager: () => manager,
+    getDevicePool: unexpectedState,
+    getDeviceSessionRegistry: unexpectedState,
+  };
+  const server = createHarnessServer("unused", state, new FakeTimer());
+  const socket = new FakeSocket<DaemonNotification>();
+  socket.onWrite = (frame) => capture?.(JSON.parse(frame));
+  server.state.notificationSubscribers.add("subscriber");
+  server.state.clientSockets.set("subscriber", socket);
+  return server.testHooks.release;
 }
 
 async function boundLoss(reason: string): Promise<Holder> {
@@ -91,7 +92,7 @@ interface Surface {
 const surfaces: Surface[] = [
   {
     name: "default proxy tool result",
-    builders: ["src/server/proxyServer.ts#noActiveDeviceSessionPayload"],
+    builders: ["src/daemon/deviceSessionResult.ts#noActiveDeviceSessionPayload"],
     reasonKey: "reason",
     holder: (reason) => {
       const content = noActiveDeviceSessionResult(new DaemonConnectionSessionReleasedError(reason))
@@ -128,7 +129,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "ownership lost",
-    builders: ["src/server/deviceSessionResult.ts#sessionOwnershipLostPayload"],
+    builders: ["src/daemon/deviceSessionResult.ts#sessionOwnershipLostPayload"],
     reasonKey: "reason",
     holder: (reason) =>
       sessionOwnershipLostPayload({ message: "Released", sessionUuid: SESSION, reason }).error,
@@ -136,7 +137,7 @@ const surfaces: Surface[] = [
   {
     name: "released during call MCP",
     builders: [
-      "src/server/deviceSessionResult.ts#sessionOwnershipLostPayload",
+      "src/daemon/deviceSessionResult.ts#sessionOwnershipLostPayload",
       "src/daemon/sessionReleasedDuringCall.ts#SessionReleasedDuringCallError.constructor",
     ],
     reasonKey: "reason",
@@ -163,7 +164,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "bound session loss construction",
-    builders: ["src/daemon/socketServer.ts#UnixSocketServer.admitReleasedBoundSession"],
+    builders: ["src/daemon/socketServerParts/McpBindings.ts#McpBindings.admitReleasedBoundSession"],
     reasonKey: "reason",
     holder: boundLoss,
   },
@@ -171,7 +172,7 @@ const surfaces: Surface[] = [
     name: "bound session loss sanitizer round trip",
     builders: [
       "src/daemon/types.ts#sanitizeBoundSessionLoss",
-      "src/daemon/socketServer.ts#UnixSocketServer.admitReleasedBoundSession",
+      "src/daemon/socketServerParts/McpBindings.ts#McpBindings.admitReleasedBoundSession",
     ],
     reasonKey: "reason",
     holder: async (reason) =>
@@ -211,28 +212,21 @@ const surfaces: Surface[] = [
   },
   {
     name: "plan base end fields",
-    builders: ["src/server/planExecutionOrchestrator.ts#planBaseEndFields"],
+    builders: ["src/server/planExecutionRecords.ts#planBaseEndFields"],
     reasonKey: "reason",
     holder: (reason) => {
       const ended = new TerminalSessionError(SESSION, snapshot(reason));
-      const state = spyOn(DaemonState, "getInstance").mockReturnValue({
-        isInitialized: () => true,
-        getSessionManager: () => ({ peekTerminalAnswerForEndedSession: () => ended }),
-      } as unknown as DaemonState);
-      try {
-        return planBaseEndFields(SESSION, false, {
-          error: String(ended),
-          stepIndex: 0,
-          tool: "homeScreen",
-        }).details as Holder;
-      } finally {
-        state.mockRestore();
-      }
+      return planBaseEndFields(
+        SESSION,
+        false,
+        { error: String(ended), stepIndex: 0, tool: "homeScreen" },
+        { sessionManager: () => ({ peekTerminalAnswerForEndedSession: () => ended }) },
+      ).details as Holder;
     },
   },
   {
     name: "recovery identity loss details",
-    builders: ["src/server/deviceSessionResult.ts#recoveryIdentityLossDetails"],
+    builders: ["src/daemon/deviceSessionResult.ts#recoveryIdentityLossDetails"],
     reasonKey: "reason",
     holder: (reason) =>
       recoveryIdentityLossDetails({
@@ -245,7 +239,7 @@ const surfaces: Surface[] = [
   {
     name: "terminal registration refusal",
     builders: [
-      "src/daemon/daemonRequestHandlers.ts#terminalSessionRegistrationRefusal",
+      "src/daemon/daemonRequestHandlersParts/registration.ts#terminalSessionRegistrationRefusal",
       "src/daemon/types.ts#releasedSessionNotFoundFields",
     ],
     reasonKey: "reason",
@@ -272,7 +266,7 @@ const surfaces: Surface[] = [
       } as DaemonStateAccess;
       const refusal = await handleDaemonRequest(
         {
-          type: "request",
+          type: "daemon_request",
           id: "registration-surface",
           method: "daemon/registerSession",
           params: { sessionId: SESSION, clientName: "surface-test" },

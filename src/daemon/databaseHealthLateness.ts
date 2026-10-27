@@ -1,6 +1,6 @@
 import type { Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
-import { DatabaseHealthProbeTimeoutError } from "../db/DatabaseHealthProbe";
+import { DatabaseHealthProbeTimeoutError } from "../db/DatabaseHealthProbeTimeoutError";
 import {
   DEFAULT_STALL_MARGIN_MS,
   MAX_CREDIBLE_DAEMON_STALL_MS,

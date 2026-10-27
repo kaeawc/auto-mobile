@@ -15,14 +15,14 @@ import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod/v4";
-import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
+import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/wire/constants";
 import { InProcessMcpDispatcher } from "../../src/daemon/inProcessMcpDispatcher";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { StatelessMcpRequestScope } from "../../src/daemon/statelessMcpHttpEndpoint";
 import { createStatelessMcpServer } from "../../src/daemon/statelessMcpServerFactory";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
@@ -35,6 +35,7 @@ import {
   sendRawSocketRequest,
   sendRequestOnPersistentSocket,
 } from "./helpers/socketRequest";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 
 /**
  * Control-socket forwards run in process (#11820): every forward reaches its own real
@@ -48,6 +49,7 @@ function fakeDaemonState() {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
@@ -58,6 +60,7 @@ function fakeDaemonState() {
       releaseDevice: async () => {},
       resolveAutolockSessionForMcpSession: () => undefined,
     }),
+    getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
   };
 }
 

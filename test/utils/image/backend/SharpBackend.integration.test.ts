@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { SharpBackend } from "../../../../src/utils/image/backend/SharpBackend";
+import {
+  SharpBackend,
+  type SharpPipeline,
+  type SharpPort,
+  type SharpRawResult,
+} from "../../../../src/utils/image/backend/SharpBackend";
 import type { ImagePipeline } from "../../../../src/utils/image/backend/ImageBackend";
-import type { SharpFactory } from "../../../../src/utils/image/loadSharp";
 
 async function makeSourcePng(width = 8, height = 8): Promise<Buffer> {
   const { Jimp, rgbaToInt } = await import("jimp");
@@ -16,18 +20,23 @@ async function makeSourcePng(width = 8, height = 8): Promise<Buffer> {
 
 const PNG_MAGIC = "89504e47";
 
-interface FakeSharpImage {
-  resize(options: unknown): FakeSharpImage;
-  extract(options: unknown): FakeSharpImage;
-  png(): FakeSharpImage;
-  webp(options?: unknown): FakeSharpImage;
-  toBuffer(): Promise<Buffer>;
-}
-
-function makeRecordingSharpFactory(events: string[]): SharpFactory {
-  const image: FakeSharpImage = {
+function makeRecordingSharpFactory(events: string[]): SharpPort {
+  function toBuffer(): Promise<Buffer>;
+  function toBuffer(options: { resolveWithObject: true }): Promise<SharpRawResult>;
+  async function toBuffer(options?: { resolveWithObject: true }): Promise<Buffer | SharpRawResult> {
+    events.push("toBuffer");
+    if (options) {
+      throw new Error("Recording factory only supports encoded output");
+    }
+    return Buffer.from("encoded");
+  }
+  const image: SharpPipeline = {
     resize(options) {
       events.push(`resize:${JSON.stringify(options)}`);
+      return image;
+    },
+    rotate(degrees) {
+      events.push(`rotate:${degrees}`);
       return image;
     },
     extract(options) {
@@ -38,20 +47,33 @@ function makeRecordingSharpFactory(events: string[]): SharpFactory {
       events.push("png");
       return image;
     },
+    jpeg(options) {
+      events.push(`jpeg:${JSON.stringify(options)}`);
+      return image;
+    },
     webp(options) {
       events.push(`webp:${JSON.stringify(options)}`);
       return image;
     },
-    async toBuffer() {
-      events.push("toBuffer");
-      return Buffer.from("encoded");
+    ensureAlpha() {
+      events.push("ensureAlpha");
+      return image;
     },
+    raw() {
+      events.push("raw");
+      return image;
+    },
+    async metadata() {
+      events.push("metadata");
+      return {};
+    },
+    toBuffer,
   };
 
-  return ((source: Buffer) => {
+  return (source: Buffer) => {
     events.push(`sharp:${source.toString("utf8")}`);
     return image;
-  }) as unknown as SharpFactory;
+  };
 }
 
 // Production keeps Windows on Jimp because sharp can abort under Bun there.

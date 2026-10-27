@@ -1,11 +1,10 @@
-import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   AppearanceSocketServer,
   type AppearanceDeviceSource,
   type AppearanceSocketServerDependencies,
 } from "../../src/daemon/appearanceSocketServer";
-import type { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
+import type { AppearanceSocketResponse } from "../../src/daemon/wire/appearanceSocketTypes";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -14,7 +13,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import {
   DeviceSettingDefaults,
   installDeviceSettingDefaults,
@@ -25,7 +24,7 @@ import {
   FakeDeviceSettingDefaultsPersistence,
   FakeDeviceSettings,
 } from "../fakes/FakeDeviceSettingDefaults";
-import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
@@ -51,14 +50,9 @@ const LEASE_MS = SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
 class TestableAppearanceSocketServer extends AppearanceSocketServer {
   async request(line: Record<string, unknown>): Promise<AppearanceSocketResponse> {
     const socket = new FakeSocket();
-    const internals = this as unknown as {
-      server: unknown;
-      processLine(socket: Socket, line: string): Promise<void>;
-      pendingBySocket: Map<unknown, Promise<void>>;
-    };
-    internals.server = { listening: true };
-    await internals.processLine(socket as unknown as Socket, JSON.stringify(line));
-    await internals.pendingBySocket.get(socket);
+    this.server = new FakeListeningNetServer();
+    await this.processLine(socket, JSON.stringify(line));
+    await this.pendingBySocket.get(socket);
     const written = socket.getWrittenData();
     return JSON.parse(written[written.length - 1]!) as AppearanceSocketResponse;
   }
@@ -78,6 +72,7 @@ describe("appearance socket set_appearance as a control call on the holder's ses
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
@@ -138,7 +133,7 @@ describe("appearance socket set_appearance as a control call on the holder's ses
     };
     const deviceSource: AppearanceDeviceSource = {
       getPooledDevices: () => [DEVICE],
-      getCurrentDevice: () => undefined,
+      getSessionDevice: () => undefined,
       getSessionForDevice: (deviceId) => sessionManager.getSessionForDevice(deviceId),
       // As the default device source resolves it from the daemon state.
       getSessionManager: () => sessionManager,

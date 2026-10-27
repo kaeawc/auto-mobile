@@ -18,12 +18,13 @@ import {
   DAEMON_RELEASED_SESSION_HEADER,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_HEADER,
-} from "../../src/daemon/constants";
-import { MCP_SESSION_KEY_HEADER } from "../../src/server/mcpSessionKey";
+} from "../../src/daemon/wire/constants";
+import { MCP_SESSION_KEY_HEADER } from "../../src/daemon/mcpSessionKey";
 import {
   daemonLifecycleAllowed,
   runWithoutDaemonLifecycle,
 } from "../../src/daemon/proxyLivenessRecovery";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { InProcessMcpDispatcher } from "../../src/daemon/inProcessMcpDispatcher";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
@@ -46,7 +47,7 @@ import {
   runWithSelectedDisplayPin,
 } from "../../src/features/observe/SessionDisplayContext";
 import { ActionableError } from "../../src/models/ActionableError";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
@@ -83,11 +84,17 @@ const PROBE_TOOL = "parityContextProbe";
 const IO_DEADLINE_MS = 5_000;
 
 const refusals = new Map(buildRefusalWireFixtures().map((fixture) => [fixture.code, fixture]));
+// The refusal parity test sends one call per code, in order, on each of two forward paths, and
+// each call builds its own MCP server (#14695). Size its timeout from the table so a loaded
+// safe-tier run, or a new refusal code, cannot push it past a fixed 20 s.
+const REFUSAL_CALL_BUDGET_MS = 500;
+const REFUSAL_PARITY_TIMEOUT_MS = Math.max(20_000, refusals.size * 2 * REFUSAL_CALL_BUDGET_MS);
 
-function fakeDaemonState() {
+function fakeDaemonState(): DaemonStateAccess {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
@@ -98,6 +105,7 @@ function fakeDaemonState() {
       releaseDevice: async () => {},
       resolveAutolockSessionForMcpSession: () => undefined,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
 }
 
@@ -532,19 +540,23 @@ describe("control-socket forward byte parity: HTTP loopback vs in process (#1182
     expect(lines.map((line) => JSON.parse(line).id).sort()).toEqual(["cancel", "hold"]);
   });
 
-  test("every refusal fixture crosses both paths unchanged", async () => {
-    const codes = [...refusals.keys()];
-    const lines = await expectByteParity(async (conversation) => {
-      for (const code of codes) {
-        conversation.send(toolCall(`refusal:${code}`, REFUSAL_TOOL, { code }));
-        await conversation.answer(`refusal:${code}`);
+  test(
+    "every refusal fixture crosses both paths unchanged",
+    async () => {
+      const codes = [...refusals.keys()];
+      const lines = await expectByteParity(async (conversation) => {
+        for (const code of codes) {
+          conversation.send(toolCall(`refusal:${code}`, REFUSAL_TOOL, { code }));
+          await conversation.answer(`refusal:${code}`);
+        }
+      });
+      expect(lines).toHaveLength(codes.length);
+      for (const [index, code] of codes.entries()) {
+        expect(JSON.parse(lines[index]).result).toEqual(refusals.get(code)!.result);
       }
-    });
-    expect(lines).toHaveLength(codes.length);
-    for (const [index, code] of codes.entries()) {
-      expect(JSON.parse(lines[index]).result).toEqual(refusals.get(code)!.result);
-    }
-  });
+    },
+    REFUSAL_PARITY_TIMEOUT_MS,
+  );
 
   test("context-leak probe: a handler sees its own request's stores, never the socket chain's", async () => {
     const run = async (path: ForwardPath) => {

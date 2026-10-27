@@ -1,9 +1,12 @@
+import { WindowsDaemonProcessFinder } from "./WindowsDaemonProcessFinder";
+export { WindowsDaemonProcessFinder };
+export { execSync as defaultProcessTableCommandRunner };
 import { posix, win32 } from "node:path";
 import { execSync } from "node:child_process";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS } from "./constants";
+import { DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS } from "./wire/constants";
 import { isDaemonEntryScriptPath } from "./DaemonLauncher";
 import { isProcessRunning as isDaemonProcessRunning } from "./daemonFiles";
 import {
@@ -106,7 +109,7 @@ export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
  */
 const MIN_PROCESS_TABLE_SCAN_TIMEOUT_MS = 1;
 
-type ProcessTableCommandRunner = (
+export type ProcessTableCommandRunner = (
   command: string,
   options: { encoding: "utf-8"; maxBuffer: number; timeout: number },
 ) => string;
@@ -452,7 +455,7 @@ export interface DaemonProcessLivenessChecker {
 export interface DaemonProcessSignaler {
   signal(pid: number, signal: NodeJS.Signals): void;
 }
-function boundedProcessTableScanTimeout(timeoutMs: number | undefined): number {
+export function boundedProcessTableScanTimeout(timeoutMs: number | undefined): number {
   return Math.max(
     MIN_PROCESS_TABLE_SCAN_TIMEOUT_MS,
     Math.min(
@@ -538,33 +541,6 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
       return readDarwinProcessGenerationToken(pid);
     }
     return this.platform === "linux" ? this.linuxProcessGenerationTokenForPid(pid) : undefined;
-  }
-}
-
-export class WindowsDaemonProcessFinder
-  implements DaemonProcessFinder, DaemonProcessLivenessChecker
-{
-  constructor(
-    private readonly runCommand: ProcessTableCommandRunner = execSync,
-    private readonly activeEntryScript: string | undefined = process.argv[1],
-  ) {}
-
-  findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
-    // CIM returns local DateTime values. Publish absolute UTC birth times so
-    // neither the host time zone nor PowerShell startup/scan latency shifts them.
-    const processTableJson = this.runCommand(
-      "powershell.exe -NoProfile -NonInteractive -Command \"Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,@{Name='StartedAt';Expression={([DateTimeOffset]$_.CreationDate.ToUniversalTime()).ToUnixTimeMilliseconds()}} | ConvertTo-Json -Compress\"",
-      {
-        encoding: "utf-8",
-        maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
-        timeout: boundedProcessTableScanTimeout(timeoutMs),
-      },
-    );
-    return parseWindowsDaemonProcessTable(processTableJson, this.activeEntryScript);
-  }
-
-  isProcessRunning(pid: number): boolean {
-    return isDaemonProcessRunning(pid, { debugLog: logger.debug });
   }
 }
 

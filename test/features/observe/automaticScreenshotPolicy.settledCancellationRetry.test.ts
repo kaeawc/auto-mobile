@@ -225,7 +225,7 @@ describe("settled cancellation retry", () => {
     })).promise;
     expect(await pending).toBe(fake.path);
     expect(fake.attempts).toBe(2);
-    expect(fake.options).toEqual([
+    expect<unknown>(fake.options).toEqual([
       { queueAfterPending: true, parentSignal: undefined },
       { queueAfterPending: true, parentSignal: undefined },
     ]);

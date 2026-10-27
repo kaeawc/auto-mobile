@@ -15,8 +15,8 @@ export const EXCEPTIONS = new Map<string, string>([
     "Collects app metrics, not CtrlProxy lifecycle state.",
   ],
   [
-    "src/features/iosSimFleet/FleetHostSource.ts",
-    "Read-only ps snapshot for simulator fleet cost (#6696); never touches the iOS runner.",
+    "src/devices/bootAdmission/readHostProcessTable.ts",
+    "Read-only ps snapshot for simulator fleet cost (#6696) and Android boot admission; never touches the iOS runner.",
   ],
   [
     "src/features/observe/android/CtrlProxyForwardClientProbe.ts",

@@ -2,7 +2,7 @@ import type {
   AccessibilityDetector,
   AccessibilityService,
   AndroidAccessibilityState,
-} from "../../src/features/accessibility/interfaces/AccessibilityDetector";
+} from "../../src/ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { FeatureFlagReader } from "../../src/features/featureFlags/FeatureFlagService";
 

@@ -1,5 +1,8 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
+import { hierarchyFingerprint } from "../../../src/utils/hierarchyFingerprint";
 import { SelectionStateTracker } from "../../../src/features/navigation/SelectionStateTracker";
+import { SelectionStateDetector } from "../../../src/features/navigation/SelectionStateDetector";
 import { FakeSelectionStateDetector } from "../../fakes/FakeSelectionStateDetector";
 import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
@@ -11,14 +14,64 @@ const createHierarchy = (node: Record<string, any>): ViewHierarchyResult =>
     },
   }) as ViewHierarchyResult;
 
-const createObservation = (viewHierarchy: ViewHierarchyResult): ObserveResult => ({
-  updatedAt: Date.now(),
-  screenSize: { width: 100, height: 100 },
-  systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  viewHierarchy,
-});
+const createObservation = (viewHierarchy: ViewHierarchyResult): ObserveResult =>
+  buildObserveResult({
+    updatedAt: Date.now(),
+    screenSize: { width: 100, height: 100 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    viewHierarchy,
+  });
 
 describe("SelectionStateTracker", () => {
+  test("selection tracking preserves fingerprinted before/after captures", async () => {
+    const detector = new SelectionStateDetector();
+    const capturer = new FakeScreenshotCapturer();
+    capturer.setPaths(["before.png", "after.png"]);
+    const tracker = new SelectionStateTracker({
+      detector,
+      screenshotCapturer: capturer,
+      isUiPerfModeEnabled: () => true,
+    });
+    const before: ViewHierarchyResult = {
+      hierarchy: { node: { text: "Tab1", selected: "false" } },
+    };
+    const after: ViewHierarchyResult = {
+      hierarchy: { node: { text: "Tab1", selected: "true" } },
+    };
+    const beforeJson = JSON.stringify(before);
+    const afterJson = JSON.stringify(after);
+    const beforeHash = hierarchyFingerprint(before);
+    const afterHash = hierarchyFingerprint(after);
+    const element: Element = {
+      text: "Tab1",
+      clickable: true,
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+    };
+    const previousObservation = createObservation(before);
+    const currentObservation = createObservation(after);
+    const selectionState = await tracker.prepare({
+      action: "tap",
+      observation: previousObservation,
+      element,
+    });
+    expect(selectionState).not.toBeNull();
+    const selected = await tracker.finalize({
+      action: "tap",
+      selectionState,
+      previousObservation,
+      currentObservation,
+      element,
+    });
+    expect(selected).toHaveLength(1);
+    expect(JSON.stringify(before)).toBe(beforeJson);
+    expect(JSON.stringify(after)).toBe(afterJson);
+    expect(currentObservation.viewHierarchy).toBe(after);
+    expect(hierarchyFingerprint(before)).toBe(beforeHash);
+    expect(hierarchyFingerprint(currentObservation.viewHierarchy)).toBe(afterHash);
+    expect(afterHash).not.toBe(beforeHash);
+    expect(hierarchyFingerprint(structuredClone(after))).toBe(afterHash);
+  });
+
   test("skips capture entirely when ui perf mode is disabled (--no-ui-perf-mode)", async () => {
     const detector = new FakeSelectionStateDetector();
     const capturer = new FakeScreenshotCapturer();

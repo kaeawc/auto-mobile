@@ -6,6 +6,8 @@ import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.protocol.SdkHandledExceptionEvent
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -146,5 +148,21 @@ class FailureReceiversTest {
     receiver.onReceive(context, null)
 
     assertEquals("unknown", host.crashes.single().threadName)
+  }
+
+  @Test
+  fun `plain runtime extras failures are contained before dispatch`() = runTest {
+    val intent = mockk<Intent>()
+    every { intent.getStringExtra(any()) } throws RuntimeException("Parcel.readValue failed")
+    val host = FakeHost()
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+
+    every { intent.action } returns AutoMobileFailures.ACTION_HANDLED_EXCEPTION
+    HandledExceptionReceiver(scope, host).onReceive(context, intent)
+    every { intent.action } returns AutoMobileCrashes.ACTION_CRASH
+    CrashReceiver(scope, host).onReceive(context, intent)
+
+    assertTrue(host.handled.isEmpty())
+    assertTrue(host.crashes.isEmpty())
   }
 }

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import {
   BrokerExecutionRelease,
   MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF,
@@ -9,6 +9,18 @@ import { logger } from "../../../../src/utils/logger";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { drainMicrotasks } from "../../../helpers/fakeTimerStepping";
+
+let warnSpy: ReturnType<typeof spyOn<typeof logger, "warn">>;
+let infoSpy: ReturnType<typeof spyOn<typeof logger, "info">>;
+let debugSpy: ReturnType<typeof spyOn<typeof logger, "debug">>;
+beforeEach(() => {
+  warnSpy = spyOn(logger, "warn");
+  infoSpy = spyOn(logger, "info");
+  debugSpy = spyOn(logger, "debug");
+});
+afterEach(() => {
+  mock.restore();
+});
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -106,11 +118,11 @@ async function makeHarness() {
     },
   });
   const warnedAt: number[] = [];
-  const warn = spyOn(logger, "warn").mockImplementation(() => {
+  const warn = warnSpy.mockImplementation(() => {
     warnedAt.push(timer.now());
   });
-  const info = spyOn(logger, "info").mockImplementation(() => {});
-  const debug = spyOn(logger, "debug").mockImplementation(() => {});
+  const info = infoSpy.mockImplementation(() => {});
+  const debug = debugSpy.mockImplementation(() => {});
   cleanups.push(async () => {
     release.close();
     await release.whenIdle();
@@ -330,7 +342,10 @@ test("busy settled-binding recovery gates the rehydrated session until ready the
   await reowner.reown(["session-a"], { rehydrated: true });
   for (let i = 0; i < 3; i++) {
     expect(reowner.automationRefusal("session-a")).toBeInstanceOf(BindingOwnershipUnconfirmedError);
-    expect(reowner.automationRefusal("session-a")?.code).toBe("binding_ownership_unconfirmed");
+    expect(reowner.automationRefusal("session-a")).toHaveProperty(
+      "code",
+      "binding_ownership_unconfirmed",
+    );
     expect((await h.registry.getAssignment(h.key))?.state).toBe("settling");
     await h.step(1_000);
   }
@@ -393,7 +408,7 @@ test("other drain registry steps retain the default 250 ms to five second policy
   expect(h.warn.mock.calls[0]?.[0]).toContain("retrying in 250ms");
 });
 
-test("wired recovery and re-own pacers alternate blocking failures on the daemon timer", async () => {
+test("wired recovery and re-own pacers keep alternating beyond fifteen seconds", async () => {
   const h = await harness();
   h.behavior.failures = Infinity;
   h.behavior.blocked = 3_300;
@@ -435,6 +450,7 @@ test("wired recovery and re-own pacers alternate blocking failures on the daemon
   expect(h.calls.map((c) => c.at)).toEqual([0, 13_200]);
   await h.step(3_300);
   expect(reownStarts).toEqual([6_600, 19_800]);
+  expect(reowner.ownershipState("session-a")).toBe("unconfirmed");
   reowner.close();
   h.release.close();
   await recovery;

@@ -49,6 +49,7 @@ Use these for stable, repeatable AutoMobile demos tied to docs/using workflows.
 - **Contrast Demo**: `automobile:playground/demos/a11y/contrast`
 - **Tap Targets Demo**: `automobile:playground/demos/a11y/tap_targets`
 - **Bug Repro Demo**: `automobile:playground/demos/bugs/repro`
+- **Pointer Probe Demo**: `automobile:playground/demos/input/pointer_probe`
 
 ## Testing with ADB
 

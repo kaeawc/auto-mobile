@@ -14,6 +14,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
 // Capture each observation before parking, so later discovery can proceed independently.
 class ParkingDiscovery extends FakeDeviceUtils {
@@ -222,7 +223,14 @@ for (const path of ["bind", "autolock"] as const) {
         if (source === "ios-physical") {
           manager.retainedIosDevices = [device];
         }
-        expect(String(await acquire(path, device).result)).toContain("Unable to verify iOS");
+        // The failed listing is re-tried after backoff delays (#15289) before the typed refusal.
+        expect(
+          String(
+            await settleByFakeEvents(timer, acquire(path, device).result, {
+              description: "iOS liveness re-listing",
+            }),
+          ),
+        ).toContain("Unable to verify iOS");
         expect(pool.getDevice(device.deviceId)?.sessionId ?? null).toBeNull();
       });
     }
@@ -553,7 +561,9 @@ for (const path of ["bind", "autolock"] as const) {
           await (
             await readiness
           )();
-          await a.result;
+          await settleByFakeEvents(timer, a.result, {
+            description: "failed discovery acquisition",
+          });
         }
         expect(pool.getDevice(device.deviceId)).toBe(original);
         if (platform === "android") {

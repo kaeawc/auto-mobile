@@ -82,30 +82,21 @@ internal fun fuzzyMatch(target: String, query: String): Boolean {
 }
 
 /** Builds the default set of commands for the application. */
-fun buildDefaultCommands(
-  onToggleLeftPane: () -> Unit,
-  onToggleRightPane: () -> Unit,
-  onToggleBottomPane: () -> Unit,
-  onClearTelemetry: () -> Unit,
-  onExportEvents: () -> Unit,
-  onSwitchToDarkMode: () -> Unit,
-  onSwitchToLightMode: () -> Unit,
-  onOpenSettings: () -> Unit,
-  onTakeScreenshot: () -> Unit,
-  onToggleLiveLayout: () -> Unit,
-): List<Command> =
-  listOf(
-    Command("toggle_left_pane", "Toggle Left Pane", "Cmd+1", onToggleLeftPane),
-    Command("toggle_right_pane", "Toggle Right Pane", "Cmd+2", onToggleRightPane),
-    Command("toggle_bottom_pane", "Toggle Bottom Pane", "Cmd+3", onToggleBottomPane),
-    Command("clear_telemetry", "Clear Telemetry Events", "", onClearTelemetry),
-    Command("export_events", "Export Events as JSON", "", onExportEvents),
-    Command("dark_mode", "Switch to Dark Mode", "", onSwitchToDarkMode),
-    Command("light_mode", "Switch to Light Mode", "", onSwitchToLightMode),
-    Command("open_settings", "Open Settings", "Cmd+,", onOpenSettings),
-    Command("take_screenshot", "Take Screenshot", "", onTakeScreenshot),
-    Command("toggle_live_layout", "Toggle Live Layout", "", onToggleLiveLayout),
-  )
+fun buildDefaultCommands(options: DefaultCommandActions): List<Command> =
+  with(options) {
+    listOf(
+      Command("toggle_left_pane", "Toggle Left Pane", "Cmd+1", onToggleLeftPane),
+      Command("toggle_right_pane", "Toggle Right Pane", "Cmd+2", onToggleRightPane),
+      Command("toggle_bottom_pane", "Toggle Bottom Pane", "Cmd+3", onToggleBottomPane),
+      Command("clear_telemetry", "Clear Telemetry Events", "", onClearTelemetry),
+      Command("export_events", "Export Events as JSON", "", onExportEvents),
+      Command("dark_mode", "Switch to Dark Mode", "", onSwitchToDarkMode),
+      Command("light_mode", "Switch to Light Mode", "", onSwitchToLightMode),
+      Command("open_settings", "Open Settings", "Cmd+,", onOpenSettings),
+      Command("take_screenshot", "Take Screenshot", "", onTakeScreenshot),
+      Command("toggle_live_layout", "Toggle Live Layout", "", onToggleLiveLayout),
+    )
+  }
 
 /**
  * VS Code-style command palette overlay triggered by Cmd+Shift+P. Full-screen semi-transparent
@@ -118,7 +109,8 @@ fun CommandPalette(
 ) {
   val colors = SharedTheme.globalColors
   var query by remember { mutableStateOf("") }
-  var selectedIndex by remember { mutableIntStateOf(0) }
+  val selectedIndexState = remember { mutableIntStateOf(0) }
+  var selectedIndex by selectedIndexState
   val results = remember(query) { registry.search(query.trim()) }
   val focusRequester = remember { FocusRequester() }
 
@@ -142,33 +134,7 @@ fun CommandPalette(
           .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
           .clickable(enabled = false, onClick = {}) // block click-through
           .onPreviewKeyEvent { event ->
-            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-            when (event.key) {
-              Key.Escape -> {
-                onDismiss()
-                true
-              }
-              Key.DirectionDown -> {
-                if (results.isNotEmpty()) {
-                  selectedIndex = (selectedIndex + 1).mod(results.size)
-                }
-                true
-              }
-              Key.DirectionUp -> {
-                if (results.isNotEmpty()) {
-                  selectedIndex = (selectedIndex - 1).mod(results.size)
-                }
-                true
-              }
-              Key.Enter -> {
-                results.getOrNull(selectedIndex)?.let {
-                  it.action()
-                  onDismiss()
-                }
-                true
-              }
-              else -> false
-            }
+            handlePaletteKey(event, results, selectedIndexState, onDismiss)
           },
     ) {
       TextField(
@@ -181,44 +147,7 @@ fun CommandPalette(
         textStyle = MaterialTheme.typography.bodyLarge,
       )
 
-      LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
-        itemsIndexed(results) { index, command ->
-          val isSelected = index == selectedIndex
-          val bg =
-            if (isSelected) {
-              MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-            } else {
-              MaterialTheme.colorScheme.surface
-            }
-          Row(
-            modifier =
-              Modifier.fillMaxWidth()
-                .background(bg)
-                .clickable {
-                  command.action()
-                  onDismiss()
-                }
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            Text(
-              text = command.label,
-              fontSize = 14.sp,
-              color = colors.text.normal,
-              modifier = Modifier.weight(1f),
-            )
-            if (command.shortcut.isNotEmpty()) {
-              Spacer(Modifier.width(8.dp))
-              Text(
-                text = command.shortcut,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Light,
-                color = colors.text.normal.copy(alpha = 0.5f),
-              )
-            }
-          }
-        }
-      }
+      PaletteResults(results, selectedIndex, onDismiss)
 
       if (results.isEmpty() && query.isNotBlank()) {
         Box(
@@ -228,6 +157,99 @@ fun CommandPalette(
           Text(
             text = "No matching commands",
             fontSize = 13.sp,
+            color = colors.text.normal.copy(alpha = 0.5f),
+          )
+        }
+      }
+    }
+  }
+}
+
+data class DefaultCommandActions(
+  val onToggleLeftPane: () -> Unit,
+  val onToggleRightPane: () -> Unit,
+  val onToggleBottomPane: () -> Unit,
+  val onClearTelemetry: () -> Unit,
+  val onExportEvents: () -> Unit,
+  val onSwitchToDarkMode: () -> Unit,
+  val onSwitchToLightMode: () -> Unit,
+  val onOpenSettings: () -> Unit,
+  val onTakeScreenshot: () -> Unit,
+  val onToggleLiveLayout: () -> Unit,
+)
+
+private fun handlePaletteKey(
+  event: androidx.compose.ui.input.key.KeyEvent,
+  results: List<Command>,
+  selectedIndexState: androidx.compose.runtime.MutableState<Int>,
+  onDismiss: () -> Unit,
+): Boolean = run {
+  var selectedIndex by selectedIndexState
+
+  if (event.type != KeyEventType.KeyDown) return@run false
+  when (event.key) {
+    Key.Escape -> {
+      onDismiss()
+      true
+    }
+    Key.DirectionDown -> {
+      if (results.isNotEmpty()) {
+        selectedIndex = (selectedIndex + 1).mod(results.size)
+      }
+      true
+    }
+    Key.DirectionUp -> {
+      if (results.isNotEmpty()) {
+        selectedIndex = (selectedIndex - 1).mod(results.size)
+      }
+      true
+    }
+    Key.Enter -> {
+      results.getOrNull(selectedIndex)?.let {
+        it.action()
+        onDismiss()
+      }
+      true
+    }
+    else -> false
+  }
+}
+
+@Composable
+private fun PaletteResults(results: List<Command>, selectedIndex: Int, onDismiss: () -> Unit) {
+  val colors = SharedTheme.globalColors
+  LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
+    itemsIndexed(results) { index, command ->
+      val isSelected = index == selectedIndex
+      val bg =
+        if (isSelected) {
+          MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+        } else {
+          MaterialTheme.colorScheme.surface
+        }
+      Row(
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(bg)
+            .clickable {
+              command.action()
+              onDismiss()
+            }
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          text = command.label,
+          fontSize = 14.sp,
+          color = colors.text.normal,
+          modifier = Modifier.weight(1f),
+        )
+        if (command.shortcut.isNotEmpty()) {
+          Spacer(Modifier.width(8.dp))
+          Text(
+            text = command.shortcut,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Light,
             color = colors.text.normal.copy(alpha = 0.5f),
           )
         }

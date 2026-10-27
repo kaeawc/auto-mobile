@@ -1,3 +1,4 @@
+import type { AdjustableDeadline } from "./AdjustableDeadline";
 import type { Timer } from "./SystemTimer";
 import { raceWithDeadline } from "./raceWithDeadline";
 
@@ -11,6 +12,8 @@ function isDefaultAbortReason(reason: unknown): boolean {
 interface PhaseOptions {
   timer: PhaseTimer;
   timeoutMs: number;
+  /** When set, replaces `timeoutMs`: the phase deadline may move while the phase runs. */
+  deadline?: AdjustableDeadline;
   signal?: AbortSignal;
   graceMs: number;
   label: string;
@@ -117,7 +120,7 @@ export async function runPhaseWithSettlement<T>(
   options: PhaseOptions,
   operation: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
-  const { timer, timeoutMs, signal, label, timeoutError, onRaceSettled } = options;
+  const { timer, timeoutMs, deadline, signal, label, timeoutError, onRaceSettled } = options;
   if (signal?.aborted) {
     throw externalAbortReason(signal, options);
   }
@@ -141,7 +144,7 @@ export async function runPhaseWithSettlement<T>(
         },
         {
           timer,
-          timeoutMs,
+          ...(deadline ? { deadline } : { timeoutMs }),
           signal,
           label,
           timeoutError: () => {

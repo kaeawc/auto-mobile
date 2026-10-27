@@ -4,8 +4,15 @@ import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 
-/** Public SDK signatures, shared by the Gradle tasks and their JVM regression tests. */
-class SdkApiSignature(private val javapExecutable: String = "javap") {
+/**
+ * Public API signatures of compiled classes, shared by the Gradle tasks and their JVM regression
+ * tests. A non-empty [includedPackages] limits the signature to classes declared directly in those
+ * packages (not their subpackages), for libraries whose stable API is one package.
+ */
+class SdkApiSignature(
+  private val javapExecutable: String = "javap",
+  private val includedPackages: Set<String> = emptySet(),
+) {
   fun generate(classDirectories: Collection<File>): String {
     val classNames = selectClassNames(classDirectories)
     if (classNames.isEmpty()) return ""
@@ -32,6 +39,8 @@ class SdkApiSignature(private val javapExecutable: String = "javap") {
             else null
           } ?: return@mapNotNull null
         val name = relativePath.removeSuffix(".class").replace('/', '.')
+        if (includedPackages.isNotEmpty() && name.substringBeforeLast('.', "") !in includedPackages)
+          return@mapNotNull null
         val lastSegment = name.substringAfterLast('$')
         val anonymous = lastSegment.isNotEmpty() && lastSegment.all { it.isDigit() }
         if ("\$\$" in name || "BuildConfig" in name || anonymous) null else name
@@ -41,13 +50,16 @@ class SdkApiSignature(private val javapExecutable: String = "javap") {
     // Redirect to a file so reading stdout cannot block before the bounded wait begins.
     val outputFile = Files.createTempFile("sdk-api-javap-", ".txt")
     try {
-      val process =
+      val builder =
         ProcessBuilder(
             listOf(javapExecutable, "-public", "-constants", "-classpath", classpath) + classNames,
           )
           .redirectErrorStream(true)
           .redirectOutput(outputFile.toFile())
-          .start()
+      // The JVM announces these variables on stderr ("Picked up JAVA_TOOL_OPTIONS: ..."), which
+      // would land in the signature and make it depend on the machine that generated it.
+      builder.environment().keys.removeAll(JVM_OPTION_VARIABLES)
+      val process = builder.start()
       try {
         check(process.waitFor(JAVAP_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
           "javap timed out after 60 seconds"
@@ -98,6 +110,7 @@ class SdkApiSignature(private val javapExecutable: String = "javap") {
 
   private companion object {
     const val JAVAP_TIMEOUT_SECONDS = 60L
+    val JVM_OPTION_VARIABLES = setOf("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS")
     val CLASS_DECLARATION = Regex("""^((?:\w+\s+)*)(?:class|interface)\s+([^\s<{]+).* \{$""")
   }
 }

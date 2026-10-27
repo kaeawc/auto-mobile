@@ -10,6 +10,11 @@ export interface RunningAvdNameResult {
   name: string;
   diagnostic?: ReadinessDiagnostic;
   consoleBusyDuringProbe?: boolean;
+  /**
+   * Point-in-time: the AVD-name probe exhausted its budget without an answer.
+   * Host load or a stalled daemon event loop supplies no AVD identity evidence (#14333).
+   */
+  nameProbeTimedOut?: boolean;
 }
 
 export interface RunningAvdNameDeps {
@@ -32,11 +37,12 @@ export async function resolveRunningAvdNameOnce(
   device: BootedDevice,
   infoTimeoutMs: number,
   signal?: AbortSignal,
+  consoleExclusiveOwner = false,
 ): Promise<RunningAvdNameResult> {
   const { consoleBusyRegistry, adbFactory, timer } = deps;
   const deviceId = device.deviceId;
   const busyBeforeDispatch = consoleBusyRegistry.isBusy(deviceId);
-  if (busyBeforeDispatch) {
+  if (busyBeforeDispatch && !consoleExclusiveOwner) {
     // `adb devices` has already established that the serial exists. During a
     // daemon-owned snapshot operation, both identity probes can transiently
     // lose the ADB transport; leave identity unresolved instead of creating
@@ -80,7 +86,7 @@ export async function resolveRunningAvdNameOnce(
     logger.debug(
       `AVD name resolution for ${deviceId} spent its ${infoTimeoutMs}ms budget on the console probe; skipping the property fallback`,
     );
-    return { name: "", diagnostic, consoleBusyDuringProbe };
+    return { name: "", diagnostic, consoleBusyDuringProbe, nameProbeTimedOut: true };
   }
 
   try {
@@ -93,7 +99,14 @@ export async function resolveRunningAvdNameOnce(
     logger.debug(
       `AVD name property fallback for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`,
     );
-    return avdName ? { name: avdName } : { name: "", diagnostic, consoleBusyDuringProbe };
+    return avdName
+      ? { name: avdName }
+      : {
+          name: "",
+          diagnostic,
+          consoleBusyDuringProbe,
+          ...(timer.now() >= deadlineMs && { nameProbeTimedOut: true }),
+        };
   } catch (error) {
     throwIfReadinessAborted(signal);
     logger.debug(`Failed to get AVD name property for ${deviceId}: ${error}`);
@@ -101,6 +114,7 @@ export async function resolveRunningAvdNameOnce(
       name: "",
       diagnostic: readinessDiagnostic("avd-name-resolution", error, deviceId),
       consoleBusyDuringProbe,
+      nameProbeTimedOut: timer.now() >= deadlineMs,
     };
   }
 }

@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.update
 
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,7 +21,10 @@ private val LOG = LoggerFactory.getLogger("ConveyorUpdateController")
  * The probe runs on [Dispatchers.IO] (it performs network I/O); [applyUpdate] hands off to
  * Conveyor, which downloads, installs and restarts — so the app process is expected to exit.
  */
-class ConveyorUpdateController(private val gateway: SoftwareUpdateGateway) : UpdateController {
+class ConveyorUpdateController(
+  private val gateway: SoftwareUpdateGateway,
+  private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : UpdateController {
 
   private val mutableStatus = MutableStateFlow<UpdateStatus>(UpdateStatus.Idle)
   override val status: StateFlow<UpdateStatus> = mutableStatus.asStateFlow()
@@ -37,11 +41,11 @@ class ConveyorUpdateController(private val gateway: SoftwareUpdateGateway) : Upd
     mutableStatus.value = UpdateStatus.Checking
     val probe =
       try {
-        withContext(Dispatchers.IO) { gateway.probe() }
+        withContext(ioDispatcher) { gateway.probe() }
       } catch (cancellation: CancellationException) {
         mutableStatus.value = previousStatus
         throw cancellation
-      } catch (error: Exception) {
+      } catch (error: UpdateProbeException) {
         // Typed failure surfaced to the UI; the check is best-effort and must never crash the app.
         LOG.warn("Conveyor update check failed: ${error.message}", error)
         mutableStatus.value = UpdateStatus.Failed(error.message ?: "Update check failed")
@@ -63,6 +67,6 @@ class ConveyorUpdateController(private val gateway: SoftwareUpdateGateway) : Upd
     // off
     // the UI thread. Guarded by canApplyUpdate() at the call site, but harmless if the gateway is
     // asked when unsupported.
-    withContext(Dispatchers.IO) { gateway.apply() }
+    withContext(ioDispatcher) { gateway.apply() }
   }
 }

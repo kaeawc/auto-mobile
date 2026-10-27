@@ -17,13 +17,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private val LOG = LoggerFactory.getLogger("DevicePickerViewModel")
 private const val BOOTED_URI = "automobile:devices/booted"
-private const val IMAGES_URI = "automobile:devices/images"
+internal const val IMAGES_URI = "automobile:devices/images"
 
 private data class PickerInventory(val devices: List<PickerDevice>, val warning: String?)
 
@@ -110,15 +109,15 @@ sealed interface DevicePickerEffect {
  * state. Only **booted** devices can be observed (a non-booted selection is ignored).
  */
 class DevicePickerViewModel(
-  private val resourceClient: McpResourceClient,
+  internal val resourceClient: McpResourceClient,
   private val bootController: DeviceBootController,
-  private val scope: CoroutineScope,
+  internal val scope: CoroutineScope,
   private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
-  private val _state = MutableStateFlow<DevicePickerUiState>(DevicePickerUiState.Loading)
+  internal val _state = MutableStateFlow<DevicePickerUiState>(DevicePickerUiState.Loading)
   val state: StateFlow<DevicePickerUiState> = _state.asStateFlow()
 
-  private val _effect = Channel<DevicePickerEffect>(Channel.BUFFERED)
+  internal val _effect = Channel<DevicePickerEffect>(Channel.BUFFERED)
   val effect = _effect.receiveAsFlow()
 
   // Persistent, accumulating UI state that is authoritative HERE, not on the replaceable Content.
@@ -127,11 +126,11 @@ class DevicePickerViewModel(
   // second startDevice, or dropping selections made across earlier boots. They survive every load()
   // and are merged, pruned against the fresh device list, into every emitted Content. Loads replace
   // only the device LIST, never these.
-  private var bootingIds: Set<String> = emptySet()
-  private var bootErrors: Map<String, String> = emptyMap()
-  private var finishingPreviousSessionIds: Set<String> = emptySet()
-  private var selectedIds: Set<String> = emptySet()
-  private var filters: PickerFilters = PickerFilters()
+  internal var bootingIds: Set<String> = emptySet()
+  internal var bootErrors: Map<String, String> = emptyMap()
+  internal var finishingPreviousSessionIds: Set<String> = emptySet()
+  internal var selectedIds: Set<String> = emptySet()
+  internal var filters: PickerFilters = PickerFilters()
 
   // In-session boot attribution: source image id -> the runtime id the daemon assigned it on boot.
   // Lets the merge hide a re-keyed booted device's EXACT source image (not a positional same-named
@@ -144,7 +143,7 @@ class DevicePickerViewModel(
   // the
   // new device from the old one; a changed epoch at the same key drops that key's selection and
   // attribution (#4881). Devices without an epoch (older daemons) keep the bare-key behavior.
-  private var trackedEpochs: Map<String, String> = emptyMap()
+  internal var trackedEpochs: Map<String, String> = emptyMap()
 
   // Source ids whose boot coroutine is still running (bootController.boot has not returned). The
   // serialization guard in bootingIds must survive against THIS set, not only the live device list:
@@ -175,18 +174,6 @@ class DevicePickerViewModel(
 
   fun onAction(action: DevicePickerAction) {
     when (action) {
-      is DevicePickerAction.ToggleState ->
-        updateFilters { it.copy(states = it.states.toggle(action.state)) }
-      is DevicePickerAction.TogglePlatform ->
-        updateFilters { it.copy(platforms = it.platforms.toggle(action.platform)) }
-      is DevicePickerAction.ToggleOs ->
-        updateFilters { it.copy(osKeys = it.osKeys.toggle(action.osKey)) }
-      is DevicePickerAction.ToggleArch ->
-        updateFilters { it.copy(architectures = it.architectures.toggle(action.arch)) }
-      is DevicePickerAction.ToggleFormFactor ->
-        updateFilters { it.copy(formFactors = it.formFactors.toggle(action.formFactor)) }
-      is DevicePickerAction.SetQuery -> updateFilters { it.copy(query = action.query) }
-      is DevicePickerAction.ClearFilter -> clearFilter(action.dimension)
       is DevicePickerAction.ToggleSelect -> toggleSelect(action.deviceId)
       is DevicePickerAction.ObserveOne -> observeDevice(action.deviceId)
       is DevicePickerAction.BootDevice -> bootDevice(action.deviceId)
@@ -194,6 +181,7 @@ class DevicePickerViewModel(
       is DevicePickerAction.ObserveSelected -> observeSelected()
       is DevicePickerAction.Refresh -> load()
       is DevicePickerAction.SilentRefresh -> load(silent = true)
+      else -> onFilterAction(action)
     }
   }
 
@@ -222,7 +210,7 @@ class DevicePickerViewModel(
         emitIfCurrent(generation, inventory)
       } catch (c: CancellationException) {
         throw c // don't turn cancellation into a load error
-      } catch (e: Exception) {
+      } catch (e: IllegalStateException) {
         LOG.warn("Failed to load picker devices: ${e.message}", e)
         resolveFetchFailure(generation, e)
       } finally {
@@ -246,14 +234,7 @@ class DevicePickerViewModel(
           "ios-simulator" to Platform.Ios,
           "ios-physical" to Platform.Ios,
         )
-      val completeSources =
-        sourcePlatforms
-          .filter { (source, platform) ->
-            observation.sourceObservations[source]?.observationComplete
-              ?: observation.platformObservations[platform.name.lowercase()]?.observationComplete
-              ?: observation.observationComplete
-          }
-          .keys
+      val completeSources = completePickerSources(sourcePlatforms, observation)
       // Simulator definitions depend only on simctl, not the independent devicectl sweep.
       // Older daemons fall back to their platform-level completeness contract.
       val images =
@@ -262,18 +243,7 @@ class DevicePickerViewModel(
         }
       // Separate resource reads can straddle a boot. Absence from the earlier booted snapshot
       // cannot turn an image explicitly observed as Booting/Booted into a bootable Shutdown row.
-      check(
-        images.none { image ->
-          image.platform.equals("ios", ignoreCase = true) &&
-            image.runtime.lifecycle.state in setOf("booting", "booted", "shutting-down") &&
-            booted.none {
-              it.platform.equals(image.platform, ignoreCase = true) &&
-                (it.runtime.deviceId ?: it.identity.stableId) == image.identity.stableId
-            }
-        },
-      ) {
-        "Device inventory changed during discovery; refresh to get its current state"
-      }
+      validateIosInventory(images, booted)
       val devices =
         Platform.entries
           .flatMap { platform ->
@@ -291,19 +261,7 @@ class DevicePickerViewModel(
       // A runtime whose AVD name probe failed may be one of these saved images. Neither
       // row order nor an unknown name proves which image is shut down; preserve the previous
       // snapshot until discovery resolves the identity or a successful boot supplies attribution.
-      check(
-        devices.none { it.platform == Platform.Android && it.state == DeviceState.Shutdown } ||
-          booted.none {
-            val deviceId = it.runtime.deviceId ?: it.identity.stableId
-            it.platform.equals("android", ignoreCase = true) &&
-              it.isVirtual &&
-              it.knownSourceImageId() == null &&
-              (it.name == deviceId || it.name == "Unknown ($deviceId)") &&
-              deviceId !in bootedImageRuntimeIds[Platform.Android].orEmpty().values
-          },
-      ) {
-        "Android emulator identity is unavailable; refresh after its AVD name can be discovered"
-      }
+      validateAndroidInventory(devices, booted, bootedImageRuntimeIds)
       val present = devices.map { it.platform to it.id }.toSet()
       val sourceIds =
         booted
@@ -347,15 +305,6 @@ class DevicePickerViewModel(
           }
       is ResourceReadResult.Error ->
         throw IllegalStateException("Failed to read booted devices: ${result.message}")
-    }
-
-  private suspend fun readDeviceImages(): List<DeviceImageInfo> =
-    when (val result = resourceClient.readResource(IMAGES_URI)) {
-      is ResourceReadResult.Success ->
-        DeviceResourceParser.parseDeviceImages(result.content)?.images
-          ?: throw IllegalStateException("Malformed device-images payload")
-      is ResourceReadResult.Error ->
-        throw IllegalStateException("Failed to read device images: ${result.message}")
     }
 
   /**
@@ -455,18 +404,6 @@ class DevicePickerViewModel(
       .toSet()
 
   /** Reflect the persistent state onto the live Content (no device reload). */
-  private fun syncState() {
-    updateContent {
-      it.copy(
-        filters = filters,
-        selectedIds = selectedIds,
-        bootingIds = bootingIds,
-        bootErrors = bootErrors,
-        finishingPreviousSessionIds = finishingPreviousSessionIds,
-      )
-    }
-  }
-
   private fun bootDevice(selector: String) {
     // Boots are serialized: at most one in flight. A click on any shut-down card while a boot is
     // running is a no-op. This structurally removes overlapping reloads (and their generation
@@ -535,7 +472,7 @@ class DevicePickerViewModel(
         fetchDevices()
       } catch (c: CancellationException) {
         throw c // don't turn cancellation into a boot failure
-      } catch (e: Exception) {
+      } catch (e: IllegalStateException) {
         LOG.warn("Reload after boot failed for ${bootedDevice.name}: ${e.message}", e)
         bootingIds = bootingIds - bootedDevice.uiKey
         bootErrors = bootErrors + (bootedDevice.uiKey to (e.message ?: "Reload after boot failed"))
@@ -584,99 +521,70 @@ class DevicePickerViewModel(
     }
   }
 
-  private fun toggleSelect(selector: String) {
-    val content = _state.value as? DevicePickerUiState.Content ?: return
-    // Booted-only: ignore selection of non-booted devices.
-    val device =
-      content.devices.singleOrNull { it.uiKey == selector }
-        ?: content.devices.singleOrNull { it.id == selector }
-        ?: return
-    val deviceId = device.uiKey
-    if (device.state != DeviceState.Booted) return
-    selectedIds = selectedIds.toggle(deviceId)
-    device.deviceSessionUuid?.let { trackedEpochs = trackedEpochs + (deviceId to it) }
-    syncState()
-  }
-
-  private fun clearSelection() {
-    selectedIds = emptySet()
-    syncState()
-  }
-
-  private fun observeSelected() {
-    val content = _state.value as? DevicePickerUiState.Content ?: return
-    val columns =
-      content.devices
-        .filter { it.uiKey in selectedIds && it.state == DeviceState.Booted }
-        .map(::columnOf)
-    if (columns.isNotEmpty()) {
-      // Observed devices leave the selection: otherwise reopening the grid shows them still
-      // selected as a stale "Observe (N)" (#5220). Selection is a transient staging area for the
-      // multi-select gesture, not a record of what's observed.
-      selectedIds =
-        selectedIds - columns.map { "${it.platform.name.lowercase()}:${it.deviceId}" }.toSet()
-      syncState()
-      scope.launch { _effect.send(DevicePickerEffect.Observe(columns)) }
-    }
-  }
-
   /**
    * Observe a single booted device immediately — the plain-click path. A non-booted or unknown id
    * is a no-op (shut-down cards boot instead, and a boot auto-observes on completion).
    */
-  private fun observeDevice(selector: String) {
-    val content = _state.value as? DevicePickerUiState.Content ?: return
-    val device =
-      content.devices.singleOrNull { it.uiKey == selector }
-        ?: content.devices.singleOrNull { it.id == selector }
-        ?: return
-    val deviceId = device.uiKey
-    if (device.state != DeviceState.Booted) return
-    // A plain click doesn't select, but a modifier-selected device can also be plain-clicked; clear
-    // it either way so an observed device never lingers selected (#5220).
-    selectedIds = selectedIds - deviceId
-    syncState()
-    scope.launch { _effect.send(DevicePickerEffect.Observe(listOf(columnOf(device)))) }
-  }
 
   /**
    * Build the observed [DeviceColumn] for a booted picker device, seeding its lock/virtual state.
    */
-  private fun columnOf(device: PickerDevice): DeviceColumn =
-    // Seed the pane's lock state from the booted snapshot; the host's poll keeps it fresh.
-    DeviceColumn(
-      deviceId = device.id,
-      name = device.name,
-      platform = device.platform,
-      locked = device.locked,
-      isVirtual = device.isVirtual,
-      deviceSessionUuid = device.deviceSessionUuid,
-    )
+}
 
-  private fun clearFilter(dimension: FilterDimension) {
-    updateFilters {
-      when (dimension) {
-        FilterDimension.State -> it.copy(states = emptySet())
-        FilterDimension.Platform -> it.copy(platforms = emptySet(), osKeys = emptySet())
-        FilterDimension.OsVersion -> it.copy(osKeys = emptySet())
-        FilterDimension.Architecture -> it.copy(architectures = emptySet())
-        FilterDimension.FormFactor -> it.copy(formFactors = emptySet())
-      }
-    }
-  }
+internal fun <T> Set<T>.toggle(value: T): Set<T> = if (value in this) this - value else this + value
 
-  private fun updateFilters(transform: (PickerFilters) -> PickerFilters) {
-    filters = transform(filters)
-    syncState()
-  }
-
-  private fun updateContent(
-    transform: (DevicePickerUiState.Content) -> DevicePickerUiState.Content,
-  ) {
-    _state.update { current ->
-      (current as? DevicePickerUiState.Content)?.let(transform) ?: current
-    }
+internal fun DevicePickerViewModel.onFilterAction(action: DevicePickerAction) {
+  when (action) {
+    is DevicePickerAction.ToggleState ->
+      updateFilters { it.copy(states = it.states.toggle(action.state)) }
+    is DevicePickerAction.TogglePlatform ->
+      updateFilters { it.copy(platforms = it.platforms.toggle(action.platform)) }
+    is DevicePickerAction.ToggleOs ->
+      updateFilters { it.copy(osKeys = it.osKeys.toggle(action.osKey)) }
+    is DevicePickerAction.ToggleArch ->
+      updateFilters { it.copy(architectures = it.architectures.toggle(action.arch)) }
+    is DevicePickerAction.ToggleFormFactor ->
+      updateFilters { it.copy(formFactors = it.formFactors.toggle(action.formFactor)) }
+    is DevicePickerAction.SetQuery -> updateFilters { it.copy(query = action.query) }
+    is DevicePickerAction.ClearFilter -> clearFilter(action.dimension)
+    else -> Unit
   }
 }
 
-private fun <T> Set<T>.toggle(value: T): Set<T> = if (value in this) this - value else this + value
+private fun validateIosInventory(
+  images: List<DeviceImageInfo>,
+  booted: List<dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo>,
+) {
+  check(
+    images.none { image ->
+      image.platform.equals("ios", ignoreCase = true) &&
+        image.runtime.lifecycle.state in setOf("booting", "booted", "shutting-down") &&
+        booted.none {
+          it.platform.equals(image.platform, ignoreCase = true) &&
+            (it.runtime.deviceId ?: it.identity.stableId) == image.identity.stableId
+        }
+    },
+  ) {
+    "Device inventory changed during discovery; refresh to get its current state"
+  }
+}
+
+private fun validateAndroidInventory(
+  devices: List<PickerDevice>,
+  booted: List<dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo>,
+  bootedImageRuntimeIds: Map<Platform, Map<String, String>>,
+) {
+  check(
+    devices.none { it.platform == Platform.Android && it.state == DeviceState.Shutdown } ||
+      booted.none {
+        val deviceId = it.runtime.deviceId ?: it.identity.stableId
+        it.platform.equals("android", ignoreCase = true) &&
+          it.isVirtual &&
+          it.knownSourceImageId() == null &&
+          (it.name == deviceId || it.name == "Unknown ($deviceId)") &&
+          deviceId !in bootedImageRuntimeIds[Platform.Android].orEmpty().values
+      },
+  ) {
+    "Android emulator identity is unavailable; refresh after its AVD name can be discovered"
+  }
+}

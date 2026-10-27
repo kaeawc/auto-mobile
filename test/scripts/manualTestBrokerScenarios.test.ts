@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import captured from "../fixtures/session-broker/fake-lifecycle.json";
+import capturedJson from "../fixtures/session-broker/fake-lifecycle.json";
 import { beforeAll, expect, test } from "bun:test";
 import {
   brokerScenarios,
@@ -7,12 +7,29 @@ import {
   type BrokerScenario,
 } from "../../scripts/manual-test/brokerScenarios";
 import { runBrokerScenarioCli } from "../../scripts/manual-test/broker-scenario";
-import { createFrameBrokerDaemonClient } from "../../scripts/manual-test/brokerDaemonClient";
+import {
+  parseBrokerResult,
+  createFrameBrokerDaemonClient,
+} from "../../scripts/manual-test/brokerDaemonClient";
 import { createFakeBrokerScenarioContext } from "../helpers/fakeBrokerScenarioContext";
 import { createFakeBrokerDaemon } from "../helpers/fakeBrokerDaemon";
 import type { FrameConnection } from "../../scripts/manual-test/frameWire";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+const captured = {
+  ...capturedJson,
+  prepareSession: parseBrokerResult(
+    capturedJson.prepareSession,
+    capturedJson.prepareSession.requestId,
+  ),
+  status: parseBrokerResult(capturedJson.status, capturedJson.status.requestId),
+  refusal: parseBrokerResult(capturedJson.refusal, capturedJson.refusal.requestId),
+  releasedStatus: parseBrokerResult(
+    capturedJson.releasedStatus,
+    capturedJson.releasedStatus.requestId,
+  ),
+};
 
 beforeAll(async () => {
   // Warm SQLite migrations and the SDK once, outside the per-test budget.
@@ -197,16 +214,18 @@ test("real in-memory broker status and release replies pass the frame parsers", 
     expect(await harness.host.client.status(c.config.requestId, c.token)).toEqual(captured.status);
     const other = harness.context.clients[1];
     expect(await harness.host.prepare(other.config, other.token)).toEqual(captured.refusal);
-    expect(await harness.host.controls.tools(captured.refusal as typeof ready)).toEqual([]);
+    expect(await harness.host.controls.tools(captured.refusal)).toEqual([]);
     reply = captured.status;
     expect(await wire.status(c.config.requestId, c.token)).toEqual(ready);
-    reply = await harness.host.client.release(ready.sessionUuid!, c.token);
-    expect(reply).toEqual(captured.release);
-    expect(await wire.release(ready.sessionUuid!, c.token)).toEqual(reply);
-    reply = await harness.host.client.status(c.config.requestId, c.token);
-    expect(reply).toEqual(captured.releasedStatus);
-    expect(await wire.status(c.config.requestId, c.token)).toEqual(reply);
-    reply = { ...(reply as object), requestId: "wrong" };
+    const released = await harness.host.client.release(ready.sessionUuid!, c.token);
+    reply = released;
+    expect(captured.release).toEqual(released);
+    expect(await wire.release(ready.sessionUuid!, c.token)).toEqual(released);
+    const releasedStatus = await harness.host.client.status(c.config.requestId, c.token);
+    reply = releasedStatus;
+    expect(releasedStatus).toEqual(captured.releasedStatus);
+    expect(await wire.status(c.config.requestId, c.token)).toEqual(releasedStatus);
+    reply = { ...releasedStatus, requestId: "wrong" };
     await expect(wire.status(c.config.requestId, c.token)).rejects.toThrow(
       "Invalid broker result envelope",
     );

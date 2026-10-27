@@ -5,10 +5,10 @@ import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from "no
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../../src/daemon/constants";
+import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../../src/daemon/wire/constants";
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
-import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import {
   getAndroidSchema,
   getAppleSchema,
@@ -85,6 +85,10 @@ const androidArgs: AcceptanceArgs = {
   timeoutMs: 10_000,
   confirmLive: false,
   testOwnedDevices: false,
+  operatorKey: Buffer.from("test-only-operator-key-material-32-bytes"),
+  operatorKeyPath: "test-only.key",
+  ownershipManifestPath: "test-only.manifest",
+  build: { entryScript: "/test/dist/src/index.js", buildId: "test-build" },
 };
 
 const iosArgs: AcceptanceArgs = {
@@ -251,6 +255,8 @@ function deviceDescriptionFixture({
 
 function createHarness(
   options: {
+    activeSessions?: number;
+    activeExecutions?: number;
     failObserveFor?: string;
     failReleaseFor?: string;
     failClientCloseFor?: string[];
@@ -786,13 +792,13 @@ function createHarness(
           androidSiblingPresent = !(options.removeAndroidSiblingAfterDuplicateCleanup ?? false);
         } else if (device.deviceId === androidTargetSerial && !options.unchangedAndroidIdentity) {
           if (restartedSessionUuid) {
-            persistedStates.set(restartedSessionUuid, "absent");
+            persistedStates.set(restartedSessionUuid, "target-absent");
             androidTargetPresent = false;
           } else {
             androidTargetSerial = "emulator-5560";
           }
         } else if (device.deviceId === IOS_UDID && restartedSessionUuid) {
-          persistedStates.set(restartedSessionUuid, "absent");
+          persistedStates.set(restartedSessionUuid, "target-absent");
           iosTargetPresent = false;
         }
         return { structuredContent: { killed: true } };
@@ -1033,22 +1039,12 @@ describe("live device acceptance harness", () => {
     expect(commands).toHaveLength(0);
   });
 
-  test("rejects the unsupported recovery scenario before any device mutation", async () => {
+  // `AcceptanceArgs.scenario` is the literal "full", so runAcceptanceMatrix can only see another
+  // value if parseArgs let it through; this is the boundary that has to refuse it.
+  test("parseArgs rejects the unsupported recovery scenario before any device work", () => {
     expect(() => parseArgs(["--platform", "android", "--scenario", "recovery"])).toThrow(
       "--scenario must be full; recovery is not implemented",
     );
-
-    const harness = createHarness();
-    const unsupportedArgs = {
-      ...androidArgs,
-      scenario: "recovery",
-    } as unknown as AcceptanceArgs;
-    await expect(runAcceptanceMatrix(unsupportedArgs, harness.dependencies)).rejects.toThrow(
-      "--scenario must be full; recovery is not implemented",
-    );
-    expect(harness.calls).toHaveLength(0);
-    expect(harness.cliCommands).toHaveLength(0);
-    expect(harness.evidence).toHaveLength(0);
   });
 
   test.each([
@@ -2198,7 +2194,7 @@ describe("live device acceptance harness", () => {
       writeFile: async (_path, _content, signal) => {
         started.resolve();
         await new Promise<void>((resolve) => {
-          signal.addEventListener("abort", resolve, { once: true });
+          signal.addEventListener("abort", () => resolve(), { once: true });
         });
         lateSuccess = !signal.aborted;
       },
@@ -3750,7 +3746,7 @@ describe("private broker acceptance lane", () => {
         },
       },
     });
-    expect(result.dryRun).toBe(true);
+    expect("dryRun" in result && result.dryRun).toBe(true);
     expect(JSON.parse(logs[0]).plan.filter((p: { crash: boolean }) => p.crash)).toEqual([
       { name: "daemon-restart-with-live-sessions", crash: true },
     ]);

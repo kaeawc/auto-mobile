@@ -1,9 +1,9 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 
@@ -14,15 +14,17 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
  * client's `_meta.progressToken` across the daemon round trip.
  */
 describe("Proxy tools/call relays progress tagged with the client's own token (issue #6205)", () => {
-  let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
+  let isAvailableSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+  });
 
   afterEach(() => {
-    isAvailableSpy?.mockRestore();
-    isAvailableSpy = null;
+    isAvailableSpy.mockRestore();
   });
 
   async function setup(fakeClient: FakeDaemonClient) {
-    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const daemonManager = new FakeDaemonManager();
     daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
     const { server, proxy } = createProxyMcpServer({

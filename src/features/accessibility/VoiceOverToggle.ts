@@ -11,7 +11,7 @@ import {
 } from "../../utils/HostCommandExecutor";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 
 const VOICEOVER_CONFIRMATION_TIMEOUT_MS = 10_000;
 const VOICEOVER_CONFIRMATION_POLL_INTERVAL_MS = 500;
@@ -24,7 +24,7 @@ export class VoiceOverToggle {
     private readonly timer: Timer = defaultTimer,
     // Resolve lazily so the iOS singleton is only touched when the toggle runs,
     // and so tests can inject a fake CtrlProxy for the physical-device path.
-    private readonly clientProvider: () => IOSCtrlProxy = () =>
+    private readonly clientProvider: () => IosCtrlProxy = () =>
       IOSCtrlProxyClient.getInstance(this.device),
   ) {}
 
@@ -43,6 +43,11 @@ export class VoiceOverToggle {
    * from the request is reported: an unreadable state cannot be restored to, and
    * the toggle still proceeds exactly as before.
    */
+  async getEnabled(): Promise<boolean | null> {
+    this.detector.invalidateCache(this.device.deviceId);
+    return this.detector.resolveState(this.device.deviceId, this.clientProvider());
+  }
+
   private async reportPreviousState(
     enabled: boolean,
     options: ScreenReaderToggleOptions | undefined,
@@ -52,8 +57,7 @@ export class VoiceOverToggle {
     }
     let previous: boolean | null = null;
     try {
-      this.detector.invalidateCache(this.device.deviceId);
-      previous = await this.detector.resolveState(this.device.deviceId, this.clientProvider());
+      previous = await this.getEnabled();
     } catch (error) {
       logger.warn(`[VoiceOverToggle] Could not read VoiceOver state: ${errorMessage(error)}`);
     }
@@ -215,7 +219,7 @@ export class VoiceOverToggle {
    * never actually read, which the caller must report as unconfirmed rather
    * than a coincidental match.
    */
-  private async waitForState(enabled: boolean, client: IOSCtrlProxy): Promise<boolean | null> {
+  private async waitForState(enabled: boolean, client: IosCtrlProxy): Promise<boolean | null> {
     const deadline = this.timer.now() + VOICEOVER_CONFIRMATION_TIMEOUT_MS;
     let lastObservedState: boolean | null = null;
 

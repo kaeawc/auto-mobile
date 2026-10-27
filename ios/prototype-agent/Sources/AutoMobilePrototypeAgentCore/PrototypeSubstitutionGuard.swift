@@ -155,43 +155,58 @@ private struct PrototypeSubstitutionGuard {
         }
     }
 
+    private mutating func optionFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
+        if case let .array(options)? = fields["options"] {
+            for (index, option) in options.enumerated() {
+                if case let .object(part) = option {
+                    try field(part, "label", path: "\(path).options[\(index)]", text: true, scope: scope)
+                }
+            }
+        }
+    }
+
+    private mutating func swipeFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
+        if case let .object(swipe)? = fields["swipeActions"] {
+            for side in ["start", "end"] {
+                guard case let .array(entries)? = swipe[side] else { continue }
+                for (index, entry) in entries.enumerated() {
+                    try part(entry, path: "\(path).swipeActions.\(side)[\(index)]", scope: scope)
+                }
+            }
+        }
+    }
+
+    private mutating func appBarFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
+        try field(fields, "title", path: path, text: true, scope: scope)
+        try part(fields["navigationIcon"], path: "\(path).navigationIcon", scope: scope)
+        if case let .array(parts)? = fields["actions"] {
+            for (index, value) in parts.enumerated() {
+                try part(value, path: "\(path).actions[\(index)]", scope: scope)
+            }
+        }
+    }
+
     private mutating func componentFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
         switch fields["type"]?.stringValue {
         case "text": try field(fields, "text", path: path, text: true, scope: scope)
         case "button", "fab": try field(fields, "label", path: path, text: true, scope: scope)
         case "segmentedButton":
-            if case let .array(options)? = fields["options"] {
-                for (index, option) in options.enumerated() {
-                    if case let .object(part) = option {
-                        try field(part, "label", path: "\(path).options[\(index)]", text: true, scope: scope)
-                    }
-                }
-            }
+            try optionFields(fields, path: path, scope: scope)
         case "textField":
             try part(fields["trailingIcon"], path: "\(path).trailingIcon", scope: scope)
             try actions(fields, path: path, scope: scope, list: "onSubmit")
         case "row", "listItem":
-            if case let .object(swipe)? = fields["swipeActions"] {
-                for side in ["start", "end"] {
-                    guard case let .array(entries)? = swipe[side] else { continue }
-                    for (index, entry) in entries.enumerated() {
-                        try part(entry, path: "\(path).swipeActions.\(side)[\(index)]", scope: scope)
-                    }
-                }
-            }
+            try swipeFields(fields, path: path, scope: scope)
         case "topAppBar":
-            try field(fields, "title", path: path, text: true, scope: scope)
-            try part(fields["navigationIcon"], path: "\(path).navigationIcon", scope: scope)
-            if case let .array(parts)? = fields["actions"] {
-                for (index, value) in parts.enumerated() {
-                    try part(value, path: "\(path).actions[\(index)]", scope: scope)
-                }
-            }
+            try appBarFields(fields, path: path, scope: scope)
         case "dialog":
             try field(fields, "title", path: path, text: true, scope: scope)
             try field(fields, "text", path: path, text: true, scope: scope)
             try part(fields["confirm"], path: "\(path).confirm", scope: scope)
             try part(fields["dismiss"], path: "\(path).dismiss", scope: scope)
+        case "tooltip":
+            try field(fields, "text", path: path, text: true, scope: scope)
+            try actions(fields, path: path, scope: scope, list: "onDismiss")
         case "snackbar":
             try field(fields, "text", path: path, text: true, scope: scope)
             try part(fields["action"], path: "\(path).action", scope: scope)
@@ -228,6 +243,8 @@ private struct PrototypeSubstitutionGuard {
             try field(action, "value", path: path, scope: scope)
         case "emit": try field(action, "name", path: path, scope: scope)
         case "setData", "appendData", "removeData": try field(action, "path", path: path, scope: scope)
+        case "startTimer":
+            try actions(action, path: path, scope: scope, list: "actions")
         case "request":
             try field(action, "url", path: path, text: true, scope: scope)
             try field(action, "statusKey", path: path, scope: scope)

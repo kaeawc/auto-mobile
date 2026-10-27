@@ -1,4 +1,6 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { readToolResponse } from "../helpers/toolResponse";
+import { observeToolScreen } from "../helpers/observeToolScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
@@ -31,7 +33,8 @@ test("observe description and docs agree with the fixed retention contract", () 
   );
   expect(description.toLowerCase()).toContain("new captures are never refused");
   expect(docs).toContain("**at least 10 minutes after return**");
-  expect(docs).toContain(`**128 MiB and ${MAX_SCREENSHOT_PATH_PROTECTIONS} files**`);
+  expect(docs).toContain("Retention starts at **128 MiB**");
+  expect(docs).toContain(`**${MAX_SCREENSHOT_PATH_PROTECTIONS} files**`);
   expect(docs).toContain("process-start grace");
   expect(docs).toContain("screenshotExpiresAt");
 });
@@ -65,18 +68,14 @@ test("display all paths carry recomputed deadlines through finalization", async 
   try {
     registerObserveTools({
       pathProtection: protection,
-      createScreen: () => ({
-        execute: screen.execute.bind(screen),
-        executeDeviceRead: screen.execute.bind(screen),
-        captureScreenshot: screen.captureScreenshot.bind(screen),
-        appendRawViewHierarchy: screen.appendRawViewHierarchy.bind(screen),
-        getMostRecentCachedObserveResult: screen.getMostRecentCachedObserveResult.bind(screen),
-      }),
+      createScreen: () => observeToolScreen(screen),
     });
     const tool = ToolRegistry.getTool("observe")!;
-    const response = await tool.deviceAwareHandler!(
-      { deviceId: "display-retention", name: "Fake", platform: "android" },
-      tool.schema.parse({ display: "all" }),
+    const response = readToolResponse(
+      await tool.deviceAwareHandler!(
+        { deviceId: "display-retention", name: "Fake", platform: "android" },
+        tool.schema.parse({ display: "all" }),
+      ),
     );
     const finalized = finalizeToolResponse(response, { name: "observe", args: { display: "all" } });
     expect(finalized.structuredContent).toMatchObject({

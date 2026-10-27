@@ -16,6 +16,7 @@ const pooledDevice = (overrides: Partial<PooledDevice> & { id: string }): Pooled
   status: "idle",
   lastUsedAt: 0,
   assignmentCount: 0,
+  incarnation: 0,
   errorCount: 0,
   ...overrides,
 });

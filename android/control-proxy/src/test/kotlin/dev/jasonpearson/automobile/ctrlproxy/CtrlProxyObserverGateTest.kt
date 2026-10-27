@@ -3,7 +3,8 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -21,6 +22,7 @@ import org.robolectric.RobolectricTestRunner
  * (request_hierarchy) stays functional with zero observers and zero prior push activity.
  */
 @RunWith(RobolectricTestRunner::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class CtrlProxyObserverGateTest {
 
   /** Event types exercising both gated push paths: an interaction and a hierarchy refresh. */
@@ -93,11 +95,14 @@ class CtrlProxyObserverGateTest {
     val expected = ViewHierarchy(packageName = "com.example.pull")
     val debouncer =
       HierarchyDebouncer(
-        scope = CoroutineScope(Dispatchers.Unconfined),
-        extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions ->
-          extractCalls.incrementAndGet()
-          expected
-        },
+        scope = CoroutineScope(UnconfinedTestDispatcher()),
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions ->
+              extractCalls.incrementAndGet()
+              expected
+            },
+          ),
       )
 
     // No onAccessibilityEvent() has ever run — the push path is fully idle/gated.

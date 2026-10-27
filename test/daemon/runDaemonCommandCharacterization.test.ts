@@ -6,11 +6,12 @@ import {
   runDaemonCommand,
   daemonBuildIdentityStatusLines,
 } from "../../src/daemon/cli/runDaemonCommand";
-import { getCurrentBuildIdentity } from "../../src/daemon/buildIdentity";
+import { getCurrentBuildIdentity } from "../../src/daemon/wire/buildIdentity";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DAEMON_LIVENESS_OWNER_IS_PROXY_CODE, type DaemonStatus } from "../../src/daemon/types";
 import * as debugTools from "../../src/daemon/debugTools";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
+import type { DaemonRestartResult, DaemonStartResult } from "../../src/daemon/manager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { CodedError } from "../helpers/CodedError";
 import { parseJsonUnknown } from "../helpers/parseJsonUnknown";
@@ -228,20 +229,24 @@ describe("daemon command characterization with fake I/O", () => {
   ])("%s dispatches only to the injected fake manager", async (command, args) => {
     const events: string[] = [];
     class Manager extends SafeDaemonManager {
-      override async start() {
+      override async start(): Promise<DaemonStartResult> {
         events.push("start");
+        return "started";
       }
       override async stop() {
         events.push("stop");
       }
-      override async restart() {
+      override async restart(): Promise<DaemonRestartResult> {
         events.push("restart");
+        return "restarted";
       }
-      override async restartAdmitted() {
+      override async restartAdmitted(): Promise<DaemonRestartResult> {
         events.push("restart-admitted");
+        return "restarted";
       }
-      override async restartAcceptanceSession() {
+      override async restartAcceptanceSession(): Promise<DaemonRestartResult> {
         events.push("restart-acceptance-session");
+        return "restarted";
       }
     }
     await runDaemonCommand(command, args, {}, Manager);
@@ -358,6 +363,9 @@ describe("daemon command characterization with fake I/O", () => {
       const session = buildSession({
         sessionId: "fake",
         assignedDevice: "device",
+        stableDeviceId: "Pixel",
+        deviceGeneration: 2,
+        previousDeviceId: "old-device",
         createdAt: 1,
         lastUsedAt: 2,
         expiresAt: 3,
@@ -402,6 +410,9 @@ describe("daemon command characterization with fake I/O", () => {
           JSON.stringify({
             sessionId: "fake",
             assignedDevice: "device",
+            deviceGeneration: 2,
+            stableDeviceId: "Pixel",
+            previousDeviceId: "old-device",
             createdAt: 1,
             lastUsedAt: 2,
             expiresAt: 3,

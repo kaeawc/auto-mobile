@@ -1,3 +1,4 @@
+import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, expect, test } from "bun:test";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -144,12 +145,9 @@ describe("SessionManager", () => {
 
     const timeoutRelease = manager.releaseSession("killed-session", "heartbeat-timeout");
     await persistence.releaseStarted.promise;
-    const killedRelease = manager.releaseSessionIfOwned(
-      "killed-session",
-      session,
-      "emulator-5554",
-      "device-killed",
-    );
+    const killedRelease = manager.releaseSession("killed-session", "device-killed", {
+      expectedOwner: { session: session, deviceId: "emulator-5554" },
+    });
     persistence.finishRelease.resolve();
     await Promise.all([timeoutRelease, killedRelease]);
 
@@ -174,12 +172,9 @@ describe("SessionManager", () => {
     manager.onSessionRelease((_sessionId, _deviceId, reason) => callbacks.push(reason));
 
     await manager.releaseSession("killed-session", "heartbeat-timeout");
-    await manager.releaseSessionIfOwned(
-      "killed-session",
-      session,
-      "emulator-5554",
-      "device-killed",
-    );
+    await manager.releaseSession("killed-session", "device-killed", {
+      expectedOwner: { session: session, deviceId: "emulator-5554" },
+    });
 
     expect(reasons).toEqual(["heartbeat-timeout", "device-killed"]);
     expect(callbacks).toEqual(["heartbeat-timeout", "device-killed"]);
@@ -244,12 +239,9 @@ describe("SessionManager", () => {
     manager.onSessionRelease((_sessionId, _deviceId, reason) => callbacks.push(reason));
     const ordinaryRelease = manager.releaseSession("killed-session", PLAN_AUTO_RELEASE_REASON);
     await persistence.releaseStarted.promise;
-    const killedRelease = manager.releaseSessionIfOwned(
-      "killed-session",
-      session,
-      "emulator-5554",
-      "device-killed",
-    );
+    const killedRelease = manager.releaseSession("killed-session", "device-killed", {
+      expectedOwner: { session: session, deviceId: "emulator-5554" },
+    });
     persistence.finishRelease.resolve();
 
     await expect(Promise.all([ordinaryRelease, killedRelease])).rejects.toThrow(
@@ -262,7 +254,9 @@ describe("SessionManager", () => {
       "emulator-5554",
     );
     await expect(
-      manager.releaseSessionIfOwned("killed-session", session, "emulator-5554", "device-killed"),
+      manager.releaseSession("killed-session", "device-killed", {
+        expectedOwner: { session: session, deviceId: "emulator-5554" },
+      }),
     ).resolves.toBe("emulator-5554");
 
     expect(persistence.reasons).toEqual([
@@ -336,11 +330,10 @@ describe("SessionManager", () => {
     let disconnectedRelease: Promise<string | null> | undefined;
     manager.onSessionRelease((_sessionId, _deviceId, reason) => {
       if (reason === PLAN_AUTO_RELEASE_REASON) {
-        disconnectedRelease = manager.releaseSessionIfOwned(
+        disconnectedRelease = manager.releaseSession(
           "disconnected-session",
-          session,
-          "emulator-5554",
           "device-disconnected:emulator-5554",
+          { expectedOwner: { session: session, deviceId: "emulator-5554" } },
         );
       }
     });
@@ -361,12 +354,9 @@ describe("SessionManager", () => {
     const session = await manager.createSession("disconnected-session", "emulator-5554", "android");
 
     await manager.releaseSession("disconnected-session", PLAN_AUTO_RELEASE_REASON);
-    await manager.releaseSessionIfOwned(
-      "disconnected-session",
-      session,
-      "emulator-5554",
-      "device-disconnected:emulator-5554",
-    );
+    await manager.releaseSession("disconnected-session", "device-disconnected:emulator-5554", {
+      expectedOwner: { session: session, deviceId: "emulator-5554" },
+    });
 
     expect(manager.getTerminalReleaseSnapshot("disconnected-session")).toMatchObject({
       releaseReason: "device-disconnected:emulator-5554",
@@ -391,10 +381,14 @@ describe("SessionManager", () => {
     await manager.releaseSession("killed-session", "explicit-release");
 
     await expect(
-      manager.releaseSessionIfOwned("killed-session", session, "emulator-5554", "device-killed"),
+      manager.releaseSession("killed-session", "device-killed", {
+        expectedOwner: { session: session, deviceId: "emulator-5554" },
+      }),
     ).rejects.toThrow("Failed to persist terminal release");
     await expect(
-      manager.releaseSessionIfOwned("killed-session", session, "emulator-5554", "device-killed"),
+      manager.releaseSession("killed-session", "device-killed", {
+        expectedOwner: { session: session, deviceId: "emulator-5554" },
+      }),
     ).resolves.toBe("emulator-5554");
 
     expect(reasons).toEqual(["explicit-release", "device-killed", "device-killed"]);
@@ -421,7 +415,9 @@ describe("SessionManager", () => {
     );
 
     await expect(
-      manager.releaseSessionIfOwned("reused-session", oldSession, "old-device", "device-killed"),
+      manager.releaseSession("reused-session", "device-killed", {
+        expectedOwner: { session: oldSession, deviceId: "old-device" },
+      }),
     ).resolves.toBeNull();
 
     expect(reasons).toEqual([
@@ -455,7 +451,9 @@ describe("SessionManager", () => {
       await newerReleaseStarted.promise;
 
       await expect(
-        manager.releaseSessionIfOwned("reused-session", oldSession, "old-device", "device-killed"),
+        manager.releaseSession("reused-session", "device-killed", {
+          expectedOwner: { session: oldSession, deviceId: "old-device" },
+        }),
       ).resolves.toBeNull();
       finishNewerRelease.resolve();
       await newerRelease;
@@ -482,7 +480,9 @@ describe("SessionManager", () => {
       await manager.releaseSession("reused-session", PLAN_AUTO_RELEASE_REASON);
 
       await expect(
-        manager.releaseSessionIfOwned("reused-session", oldSession, "old-device", "device-killed"),
+        manager.releaseSession("reused-session", "device-killed", {
+          expectedOwner: { session: oldSession, deviceId: "old-device" },
+        }),
       ).resolves.toBeNull();
 
       expect(persistence.reasons).toEqual([PLAN_AUTO_RELEASE_REASON, PLAN_AUTO_RELEASE_REASON]);
@@ -530,7 +530,9 @@ describe("SessionManager", () => {
       await persistence.waitForUpsert();
 
       await expect(
-        manager.releaseSessionIfOwned("reused-session", oldSession, "old-device", "device-killed"),
+        manager.releaseSession("reused-session", "device-killed", {
+          expectedOwner: { session: oldSession, deviceId: "old-device" },
+        }),
       ).resolves.toBeNull();
       persistence.finishUpsert();
       await expect(newerCreation).resolves.toMatchObject({ assignedDevice: "new-device" });
@@ -563,7 +565,9 @@ describe("SessionManager", () => {
       await assignmentStarted.promise;
 
       await expect(
-        manager.releaseSessionIfOwned("reused-session", oldSession, "old-device", "device-killed"),
+        manager.releaseSession("reused-session", "device-killed", {
+          expectedOwner: { session: oldSession, deviceId: "old-device" },
+        }),
       ).resolves.toBeNull();
       finishAssignment.resolve();
       await expect(newerAssignment).resolves.toMatchObject({ assignedDevice: "new-device" });
@@ -802,7 +806,12 @@ describe("explicit-release regression", () => {
       await expect(manager.createSession("plan-uuid", "handset", "android")).resolves.toMatchObject(
         { assignedDevice: "handset" },
       );
-      for (const releaseReason of ["heartbeat-timeout", "cli-idle-timeout", "device-killed"]) {
+      const terminalReasons: SessionReleaseReason[] = [
+        "heartbeat-timeout",
+        "cli-idle-timeout",
+        "device-killed",
+      ];
+      for (const releaseReason of terminalReasons) {
         const sessionUuid = `terminal-${releaseReason}`;
         await manager.createSession(sessionUuid, "other-handset", "android");
         await manager.releaseSession(sessionUuid, releaseReason);
@@ -811,7 +820,12 @@ describe("explicit-release regression", () => {
             "Acquire a new device with getAndroid or getApple.",
         );
       }
-      for (const releaseReason of ["daemon-shutdown", "daemon-restart", "device-restart:handset"]) {
+      const recoverableReasons: SessionReleaseReason[] = [
+        "daemon-shutdown",
+        "daemon-restart",
+        "device-restart:handset",
+      ];
+      for (const releaseReason of recoverableReasons) {
         const sessionUuid = `recoverable-${releaseReason}`;
         await manager.createSession(sessionUuid, "other-handset", "android");
         await manager.releaseSession(sessionUuid, releaseReason);
@@ -977,9 +991,11 @@ test.each(["explicit-release", "heartbeat-timeout", "device-killed"])(
       stableDeviceId: "Pixel",
     });
     await manager.releaseSession("owned", "device-restart:Pixel");
-    expect(await manager.releaseSessionIfOwned("owned", session, "emulator-5554", reason)).toBe(
-      "emulator-5554",
-    );
+    expect(
+      await manager.releaseSession("owned", reason, {
+        expectedOwner: { session: session, deviceId: "emulator-5554" },
+      }),
+    ).toBe("emulator-5554");
     expect(await manager.isReleasedSessionInRestartRecoveryWindow("owned")).toBe(false);
     expect(await persistence.getSession("owned")).toMatchObject({ release_reason: reason });
     await expect(manager.admitIssuedSessionForAutomation("owned")).rejects.toThrow(

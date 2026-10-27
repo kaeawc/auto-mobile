@@ -56,50 +56,21 @@ import org.robolectric.util.ReflectionHelpers
 class QueuedWebSocketMessageHandlerIntegrationTest {
   @Test
   fun `real read loops use stable distinct keys and preserve connection order`() = runTest {
-    val held = CompletableDeferred<Unit>()
-    val started = CompletableDeferred<Unit>()
-    val calls = mutableListOf<String?>()
-    val delegate =
-      object : WebSocketMessageHandler {
-        override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
-          calls += request.requestId
-          if (request.requestId == "held") {
-            started.complete(Unit)
-            held.await()
-          }
-          return CorrelatedErrorReporter.frame(request.requestId, "reply")
-        }
-      }
-    val dispatcher = StandardTestDispatcher(testScheduler)
-    val scope = CoroutineScope(backgroundScope.coroutineContext + dispatcher)
-    val proxy = Robolectric.buildService(CtrlProxy::class.java).get()
-    ReflectionHelpers.getField<CoroutineScope>(proxy, "serviceScope").cancel()
-    val queuedHandler = proxy.queuedMessageHandler(delegate, scope, dispatcher)
-    val readLoops = ConcurrentHashMap.newKeySet<Job>()
-    val server =
-      WebSocketServer(
-        port = 0,
-        scope = scope,
-        onClientDisconnected = queuedHandler::disconnect,
-        messageHandler =
-          handler { request ->
-            readLoops +=
-              checkNotNull(currentCoroutineContext()[CommandOriginContext]).origin.lifetime
-            queuedHandler.handleMessage(request)
-          },
-      )
-    ReflectionHelpers.setField(proxy, "webSocketServer", server)
-    val client = HttpClient(CIO) { install(WebSockets) }
+    val heldCommand = HeldCommand()
+    val fixture = LoopbackFixture(this, heldCommand.delegate, INBOUND_COMMAND_CAPACITY)
+    val server = fixture.server
+    val queuedHandler = fixture.queued
+    val held = heldCommand.held
+    val started = heldCommand.started
+    val calls = heldCommand.calls
     try {
       server.start()
       runCurrent()
       assertTrue(server.isRunning())
-      val port = requireNotNull(server.getActualPort())
-      val first = client.webSocketSession(urlString = "ws://127.0.0.1:$port/ws")
-      val second = client.webSocketSession(urlString = "ws://127.0.0.1:$port/ws")
+      fixture.connect()
+      val first = fixture.first
+      val second = fixture.second
       try {
-        first.incoming.receive() // Greeting precedes command dispatch.
-        second.incoming.receive()
         first.send(Frame.Text("""{"type":"request_clipboard","requestId":"held","action":"get"}"""))
         started.await()
         first.send(Frame.Text("""{"type":"request_clipboard","requestId":"next","action":"get"}"""))
@@ -120,17 +91,33 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
         first.close()
         second.close()
         // Join the actual server read loops, rather than polling for asynchronous close delivery.
-        readLoops.forEach { it.join() }
+        fixture.joinReadLoops()
         runCurrent()
         assertEquals("closed read loops must remove their queues", 0, queuedHandler.connectionCount)
       }
     } finally {
       held.complete(Unit)
-      client.close()
-      server.stop()
+      fixture.close()
       runCurrent()
       assertEquals("closed read loops must remove their queues", 0, queuedHandler.connectionCount)
     }
+  }
+
+  private class HeldCommand {
+    val held = CompletableDeferred<Unit>()
+    val started = CompletableDeferred<Unit>()
+    val calls = mutableListOf<String?>()
+    val delegate =
+      object : WebSocketMessageHandler {
+        override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
+          calls += request.requestId
+          if (request.requestId == "held") {
+            started.complete(Unit)
+            held.await()
+          }
+          return CorrelatedErrorReporter.frame(request.requestId, "reply")
+        }
+      }
   }
 
   private class RecordingTransport(private val stalled: Boolean = false) :
@@ -164,9 +151,12 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
       WebSocketServer(
         port = 0,
         scope = scope,
-        messageHandler = handler,
-        sendTimeoutMs = sendTimeoutMs,
-        onClientDisconnected = handler::disconnect,
+        options =
+          WebSocketServerOptions(
+            messageHandler = handler,
+            sendTimeoutMs = sendTimeoutMs,
+            onClientDisconnected = handler::disconnect,
+          ),
       )
     val first = RecordingTransport(stallFirst)
     val second = RecordingTransport()
@@ -387,15 +377,55 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
   @Test
   fun `detached commit cancellation bypasses slow unrelated command and preserves its result`() =
     runTest {
-      val finishCommit = CompletableDeferred<Unit>()
-      val slow = CompletableDeferred<Unit>()
-      var cancelSeen = false
-      val slowStarted = CompletableDeferred<Unit>()
-      var slowFinished = false
-      lateinit var fixture: RoutingFixture
+      val commit = DetachedCommit(this)
+      val fixture = commit.fixture
+      fixture.server.registerRequestOwner("commit", fixture.owner)
+      val loop = backgroundScope.launch {
+        fixture.dispatch(RequestCommitText(requestId = "commit", text = "abcd"))
+        fixture.dispatch(RequestHierarchy(requestId = "slow"))
+        commit.slowStarted.await()
+        fixture.dispatch(RequestCancelImeCommit(targetRequestId = "commit"))
+        awaitCancellation()
+      }
+      try {
+        runCurrent()
+        assertTrue(commit.cancelSeen)
+        assertTrue(commit.slowStarted.isCompleted)
+        assertFalse(commit.slowFinished)
+        assertTrue(fixture.first.frames.isEmpty())
+        commit.finishCommit.complete(Unit)
+        runCurrent()
+        val result = Json.parseToJsonElement(fixture.first.frames.single()).jsonObject
+        assertEquals("commit_text_result", result.getValue("type").jsonPrimitive.content)
+        assertEquals("IME commit cancelled", result.getValue("error").jsonPrimitive.content)
+        assertEquals("true", result.getValue("partialApplication").jsonPrimitive.content)
+        assertEquals("2", result.getValue("committedUnits").jsonPrimitive.content)
+        assertTrue(fixture.second.frames.isEmpty())
+        commit.slow.complete(Unit)
+        runCurrent()
+        assertTrue(commit.slowFinished)
+        assertEquals(1, fixture.first.frames.size)
+        assertTrue(fixture.first.frames.none { it.contains("Command cancelled") })
+      } finally {
+        commit.finishCommit.complete(Unit)
+        commit.slow.complete(Unit)
+        loop.cancelAndJoin()
+        fixture.close()
+      }
+    }
+
+  private inner class DetachedCommit(test: TestScope) {
+    val finishCommit = CompletableDeferred<Unit>()
+    val slow = CompletableDeferred<Unit>()
+    var cancelSeen = false
+    val slowStarted = CompletableDeferred<Unit>()
+    var slowFinished = false
+    val fixture: RoutingFixture
+
+    init {
       fixture =
         RoutingFixture(
-          this,
+          test,
           handler { request ->
             when {
               request is RequestCommitText ->
@@ -426,40 +456,8 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
             null
           },
         )
-      fixture.server.registerRequestOwner("commit", fixture.owner)
-      val loop = backgroundScope.launch {
-        fixture.dispatch(RequestCommitText(requestId = "commit", text = "abcd"))
-        fixture.dispatch(RequestHierarchy(requestId = "slow"))
-        slowStarted.await()
-        fixture.dispatch(RequestCancelImeCommit(targetRequestId = "commit"))
-        awaitCancellation()
-      }
-      try {
-        runCurrent()
-        assertTrue(cancelSeen)
-        assertTrue(slowStarted.isCompleted)
-        assertFalse(slowFinished)
-        assertTrue(fixture.first.frames.isEmpty())
-        finishCommit.complete(Unit)
-        runCurrent()
-        val result = Json.parseToJsonElement(fixture.first.frames.single()).jsonObject
-        assertEquals("commit_text_result", result.getValue("type").jsonPrimitive.content)
-        assertEquals("IME commit cancelled", result.getValue("error").jsonPrimitive.content)
-        assertEquals("true", result.getValue("partialApplication").jsonPrimitive.content)
-        assertEquals("2", result.getValue("committedUnits").jsonPrimitive.content)
-        assertTrue(fixture.second.frames.isEmpty())
-        slow.complete(Unit)
-        runCurrent()
-        assertTrue(slowFinished)
-        assertEquals(1, fixture.first.frames.size)
-        assertTrue(fixture.first.frames.none { it.contains("Command cancelled") })
-      } finally {
-        finishCommit.complete(Unit)
-        slow.complete(Unit)
-        loop.cancelAndJoin()
-        fixture.close()
-      }
     }
+  }
 
   private class LoopbackFixture(
     test: TestScope,
@@ -476,17 +474,20 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
       WebSocketServer(
         port = 0,
         scope = scope,
-        onClientDisconnected = queued::disconnect,
-        messageHandler =
-          object : WebSocketMessageHandler {
-            override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
-              val origin = checkNotNull(currentCoroutineContext()[CommandOriginContext]).origin
-              loops += origin.lifetime
-              val response = queued.handleMessage(request)
-              accepted.trySend(request.requestId)
-              return response
-            }
-          },
+        options =
+          WebSocketServerOptions(
+            onClientDisconnected = queued::disconnect,
+            messageHandler =
+              object : WebSocketMessageHandler {
+                override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
+                  val origin = checkNotNull(currentCoroutineContext()[CommandOriginContext]).origin
+                  loops += origin.lifetime
+                  val response = queued.handleMessage(request)
+                  accepted.trySend(request.requestId)
+                  return response
+                }
+              },
+          ),
       )
     val client = HttpClient(CIO) { install(WebSockets) }
     lateinit var first: DefaultClientWebSocketSession
@@ -505,10 +506,14 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
       second.incoming.receive()
     }
 
+    suspend fun joinReadLoops() {
+      loops.forEach { it.join() }
+    }
+
     suspend fun close() {
       if (::first.isInitialized) first.close()
       if (::second.isInitialized) second.close()
-      loops.forEach { it.join() }
+      joinReadLoops()
       client.close()
       server.stop()
     }

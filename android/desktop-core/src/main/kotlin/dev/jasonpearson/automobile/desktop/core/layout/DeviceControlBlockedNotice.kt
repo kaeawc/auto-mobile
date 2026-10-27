@@ -36,37 +36,38 @@ internal const val DEVICE_CONTROL_BLOCK_NOTICE_HOLD_MS: Long = 1_500L
  * NotRealDeviceMode is null for the same shape of reason: mock data is a mode the user chose.
  */
 internal fun deviceControlBlockReasonText(reason: DeviceControlBlockReason): String? =
-  when (reason) {
-    DeviceControlBlockReason.NotEnabled -> null
-    DeviceControlBlockReason.NotRealDeviceMode -> null
-    DeviceControlBlockReason.NoDeviceSelected -> "Device control needs a device selected"
-    DeviceControlBlockReason.TransportCannotCarryInput ->
-      "Device control unavailable: this connection cannot carry input"
-    DeviceControlBlockReason.ObservationStreamDisconnected ->
-      "Device control paused: observation stream disconnected"
-    DeviceControlBlockReason.NoFrame -> "Device control waiting for the first frame"
-    DeviceControlBlockReason.DeviceMismatch ->
-      "Device control paused: displayed frame is from a different device"
-    DeviceControlBlockReason.UnpairedHierarchy ->
-      "Device control paused: waiting for screenshot and layout to sync"
-    DeviceControlBlockReason.CaptureIdentityUnavailable ->
-      "Device control unavailable: daemon does not report capture identity"
-    DeviceControlBlockReason.FrameContextUnavailable ->
-      "Device control unavailable: runner does not report frame context"
-    DeviceControlBlockReason.FrameContextMismatch ->
-      "Device control paused: screenshot and layout frame contexts disagree"
+  deviceControlReasonTexts[reason]
+
+private val deviceControlReasonTexts: Map<DeviceControlBlockReason, String> =
+  mapOf(
+    DeviceControlBlockReason.NoDeviceSelected to "Device control needs a device selected",
+    DeviceControlBlockReason.TransportCannotCarryInput to
+      "Device control unavailable: this connection cannot carry input",
+    DeviceControlBlockReason.ObservationStreamDisconnected to
+      "Device control paused: observation stream disconnected",
+    DeviceControlBlockReason.NoFrame to "Device control waiting for the first frame",
+    DeviceControlBlockReason.DeviceMismatch to
+      "Device control paused: displayed frame is from a different device",
+    DeviceControlBlockReason.UnpairedHierarchy to
+      "Device control paused: waiting for screenshot and layout to sync",
+    DeviceControlBlockReason.CaptureIdentityUnavailable to
+      "Device control unavailable: daemon does not report capture identity",
+    DeviceControlBlockReason.FrameContextUnavailable to
+      "Device control unavailable: runner does not report frame context",
+    DeviceControlBlockReason.FrameContextMismatch to
+      "Device control paused: screenshot and layout frame contexts disagree",
     // A permanent, actionable condition rather than a transient one: the daemon is newer than this
     // client, so the wording points at the fix (update) instead of implying it will resolve itself.
-    DeviceControlBlockReason.UnsupportedCoordinateSpace ->
-      "Device control unavailable: daemon uses a newer coordinate space — update the app"
-    DeviceControlBlockReason.RotationMismatch ->
-      "Device control paused: screenshot and layout rotation disagree"
-    DeviceControlBlockReason.StaleFrame -> "Device control paused: frame is stale"
-    DeviceControlBlockReason.GeometryMismatch ->
-      "Device control paused: screenshot and layout geometry disagree"
-    DeviceControlBlockReason.LiveFrameGeometryUnverifiable ->
-      "Device control paused: live mirror resolution does not match the device"
-  }
+    DeviceControlBlockReason.UnsupportedCoordinateSpace to
+      "Device control unavailable: daemon uses a newer coordinate space — update the app",
+    DeviceControlBlockReason.RotationMismatch to
+      "Device control paused: screenshot and layout rotation disagree",
+    DeviceControlBlockReason.StaleFrame to "Device control paused: frame is stale",
+    DeviceControlBlockReason.GeometryMismatch to
+      "Device control paused: screenshot and layout geometry disagree",
+    DeviceControlBlockReason.LiveFrameGeometryUnverifiable to
+      "Device control paused: live mirror resolution does not match the device",
+  )
 
 /**
  * Small non-intrusive badge explaining why client device control is currently unavailable

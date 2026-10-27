@@ -32,9 +32,12 @@ class LayoutFacetTest {
       MaterialTheme {
         if (visible.value) {
           LayoutFacet(
-            column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
-            observationStreamFactory = { fake },
-            videoSourceFactory = { FakeVideoStreamSource() },
+            dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacetOptions(
+              column =
+                DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+              observationStreamFactory = { fake },
+              videoSourceFactory = { FakeVideoStreamSource() },
+            ),
           )
         }
       }
@@ -58,10 +61,16 @@ class LayoutFacetTest {
       setContent {
         MaterialTheme {
           LayoutFacet(
-            column =
-              DeviceColumn(deviceId = deviceId.value, name = "Pixel", platform = Platform.Android),
-            observationStreamFactory = factory,
-            videoSourceFactory = { FakeVideoStreamSource() },
+            dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacetOptions(
+              column =
+                DeviceColumn(
+                  deviceId = deviceId.value,
+                  name = "Pixel",
+                  platform = Platform.Android,
+                ),
+              observationStreamFactory = factory,
+              videoSourceFactory = { FakeVideoStreamSource() },
+            ),
           )
         }
       }
@@ -89,14 +98,19 @@ class LayoutFacetTest {
       MaterialTheme {
         Column {
           LayoutFacet(
-            column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
-            observationStreamFactory = factory,
-            videoSourceFactory = { FakeVideoStreamSource() },
+            dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacetOptions(
+              column =
+                DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+              observationStreamFactory = factory,
+              videoSourceFactory = { FakeVideoStreamSource() },
+            ),
           )
           LayoutFacet(
-            column = DeviceColumn(deviceId = "dev-2", name = "iPhone", platform = Platform.Ios),
-            observationStreamFactory = factory,
-            videoSourceFactory = { FakeVideoStreamSource() },
+            dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacetOptions(
+              column = DeviceColumn(deviceId = "dev-2", name = "iPhone", platform = Platform.Ios),
+              observationStreamFactory = factory,
+              videoSourceFactory = { FakeVideoStreamSource() },
+            ),
           )
         }
       }
@@ -116,11 +130,13 @@ class LayoutFacetTest {
     setContent {
       MaterialTheme {
         LayoutFacet(
-          column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
-          observationStreamFactory = { fake },
-          backoffDelay = { backoff.await() },
-          socketAvailable = { true },
-          videoSourceFactory = { FakeVideoStreamSource() },
+          dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacetOptions(
+            column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+            observationStreamFactory = { fake },
+            backoffDelay = { backoff.await() },
+            socketAvailable = { true },
+            videoSourceFactory = { FakeVideoStreamSource() },
+          ),
         )
       }
     }
@@ -142,11 +158,13 @@ class LayoutFacetTest {
     setContent {
       MaterialTheme {
         LayoutFacet(
-          column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
-          observationStreamFactory = { fake },
-          backoffDelay = {},
-          socketAvailable = { true },
-          videoSourceFactory = { FakeVideoStreamSource() },
+          dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacetOptions(
+            column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+            observationStreamFactory = { fake },
+            backoffDelay = {},
+            socketAvailable = { true },
+            videoSourceFactory = { FakeVideoStreamSource() },
+          ),
         )
       }
     }
@@ -176,10 +194,12 @@ class LayoutFacetTest {
         MaterialTheme {
           if (visible.value) {
             LayoutFacet(
-              column =
-                DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
-              observationStreamFactory = { FakeObservationStream() },
-              videoSourceFactory = { video },
+              dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacetOptions(
+                column =
+                  DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+                observationStreamFactory = { FakeObservationStream() },
+                videoSourceFactory = { video },
+              ),
             )
           }
         }

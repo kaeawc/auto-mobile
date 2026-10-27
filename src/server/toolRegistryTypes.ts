@@ -1,10 +1,12 @@
 import type { ZodType } from "zod/v4";
+import type { DeviceMutationRecording } from "./deviceMutationRecording";
+export type { DeviceMutationRecording };
 import type { McpToolCallResult } from "./toolCallDispatch";
-import type { DeviceReadOnlyArgShape } from "./deviceReadOnlyArgShapes";
+import type { DeviceReadOnlyArgShape } from "../daemon/deviceReadOnlyArgShapes";
 
-import { type ToolTransportRecovery } from "./toolTransportRecovery";
+import { type ToolTransportRecovery } from "../daemon/toolTransportRecovery";
 
-import { DeviceSessionManager, type DeviceReadinessLevel } from "../devices/DeviceSessionManager";
+import { DeviceReadiness, type DeviceReadinessLevel } from "../daemon/readiness/DeviceReadiness";
 import { ActionableError, BootedDevice, SomePlatform } from "../models";
 
 import { type DisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
@@ -142,14 +144,61 @@ export interface ToolTraits {
   replacesProcess?: boolean;
   /** A UI interaction that may cause in-app navigation; excludes lifecycle tools (not replayable paths). */
   recordsNavigation?: boolean;
+  /** A UI interaction run behind the device's `systemAlerts` policy, before and after (#14106). */
+  answersSystemAlerts?: boolean;
   /** Read-only: nothing happened on the device, so an artifact write failure stays loud. */
   loudArtifactWrites?: boolean;
+  /**
+   * An action whose embedded observation defaults to the compact skeleton (#5872, #5886). Declared
+   * only by tools that also expose the `raw`/`project` opt-out, so the default never becomes a
+   * one-way door (`test/server/skeletonDefaultDrift.test.ts`).
+   */
+  defaultsToSkeletonObservation?: boolean;
+  /** Writes caller-supplied files, from a host `sourcePath` or inline content (recorder skips host paths). */
+  stagesFiles?: boolean;
+  /**
+   * A successful call changes device or app state a plan can replay, so the recorder keeps it as a
+   * step. Infrastructure tools (device management, recording meta-tools, read-only queries) leave it
+   * unset; `test/features/record/ToolCallRecorderCoverage.test.ts` requires every registered tool
+   * to declare it or be excluded there with a reason (#9928).
+   */
+  planRelevant?: boolean;
 }
+
+/** Spread into the options of a tool that declares {@link ToolTraits.defaultsToSkeletonObservation}. */
+export const SKELETON_OBSERVATION = { defaultsToSkeletonObservation: true } as const;
+
+/** Spread into the options of a UI interaction that declares {@link ToolTraits.answersSystemAlerts}. */
+export const ANSWERS_SYSTEM_ALERTS = { answersSystemAlerts: true } as const;
+
+/** Spread into the options of a tool that declares {@link ToolTraits.planRelevant}. */
+export const PLAN_RELEVANT = { planRelevant: true } as const;
+
+/** Both {@link PLAN_RELEVANT} and {@link SKELETON_OBSERVATION}, for the many tools that declare the pair. */
+export const PLAN_SKELETON = { ...PLAN_RELEVANT, ...SKELETON_OBSERVATION } as const;
 
 /** Just the trait fields of a registration's options, for the registered tool and the recorder. */
 export function pickToolTraits(options: ToolTraits): ToolTraits {
-  const { stopsApp, replacesProcess, recordsNavigation, loudArtifactWrites } = options;
-  return { stopsApp, replacesProcess, recordsNavigation, loudArtifactWrites };
+  const {
+    stopsApp,
+    replacesProcess,
+    recordsNavigation,
+    answersSystemAlerts,
+    loudArtifactWrites,
+    defaultsToSkeletonObservation,
+    stagesFiles,
+    planRelevant,
+  } = options;
+  return {
+    stopsApp,
+    replacesProcess,
+    recordsNavigation,
+    answersSystemAlerts,
+    loudArtifactWrites,
+    defaultsToSkeletonObservation,
+    stagesFiles,
+    planRelevant,
+  };
 }
 
 export interface DeviceAwareToolOptions<T = Record<string, unknown>>
@@ -194,6 +243,9 @@ export interface ToolListingOptions {
 }
 
 export interface CachedToolDefinitionSchemas {
+  /** The Zod sources these were built from; a re-registered tool with the same ones reuses them. */
+  readonly sourceSchema: ToolSchema;
+  readonly sourceOutputSchema: ZodType | undefined;
   inputSchema: Record<string, unknown>;
   outputSchemasByRuntimeFlags: Map<string, Record<string, unknown> | undefined>;
 }
@@ -254,7 +306,7 @@ export function toolHasOutputSchema(tool: Pick<RegisteredTool, "outputSchema">):
 
 /** The collaborators a test may read and swap on the ToolRegistry singleton. */
 export interface ToolRegistryCollaborators {
-  deviceSessionManager: DeviceSessionManager;
+  deviceReadiness: DeviceReadiness;
   toolCallRepository: Pick<ToolCallRepository, "recordToolCall">;
   timer: Timer;
   navigationToolCallRecorder: NavigationToolCallRecorder;
@@ -268,6 +320,7 @@ export interface ToolRegistryPipelineOverrides {
   /** Booted-device listing for the read-only device path (#10830). */
   deviceReadAccess?: DeviceObservationAccess;
   auditRunner?: AuditRunner;
+  mutationRecording?: DeviceMutationRecording;
   afterToolCall?: AfterToolCallHandler;
   planLifecycleManager?: PlanLifecycleManager;
 }

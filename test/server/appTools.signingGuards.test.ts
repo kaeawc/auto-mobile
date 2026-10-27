@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { installAppSchema, uninstallAppSchema } from "../../src/server/appTools";
+import type { InstallAppCall } from "../../src/features/action/InstallApp";
+import type { UninstallAppCall } from "../../src/features/action/UninstallApp";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SigningGuardError } from "../../src/models/SigningGuardError";
 import { SIGNER_A } from "../helpers/signedApkFixtures";
@@ -37,11 +39,11 @@ describe("install/uninstall signing guard arguments", () => {
   });
 
   test("uninstallApp forwards the guard; without one the call shape is unchanged", async () => {
-    const calls: unknown[][] = [];
+    const calls: Array<UninstallAppCall | undefined> = [];
     appTools.configure("uninstallApp", {
       createUninstallApp: () => ({
-        execute: async (...args) => {
-          calls.push(args);
+        execute: async (_appId, call) => {
+          calls.push(call);
           return { success: true, packageName: "a.b", keepData: false, wasInstalled: true };
         },
       }),
@@ -49,18 +51,18 @@ describe("install/uninstall signing guard arguments", () => {
     const handler = ToolRegistry.getTool("uninstallApp")?.deviceAwareHandler;
     await handler?.(device, { appId: "a.b", expectedSigningSha256: [SIGNER_A] });
     await handler?.(device, { appId: "a.b" });
-    expect((calls[0]?.[1] as UninstallAppCall | undefined)?.guard).toEqual({
+    expect(calls[0]?.guard).toEqual({
       expectedSigningSha256: [SIGNER_A],
     });
-    expect((calls[1]?.[1] as UninstallAppCall | undefined)?.guard).toBeUndefined();
+    expect(calls[1]?.guard).toBeUndefined();
   });
 
   test("installApp forwards guards and surfaces a typed refusal", async () => {
-    const calls: unknown[][] = [];
+    const calls: Array<InstallAppCall | undefined> = [];
     appTools.configure("installApp", {
       createInstallApp: () => ({
-        execute: async (...args) => {
-          calls.push(args);
+        execute: async (_artifactPath, call) => {
+          calls.push(call);
           throw new SigningGuardError("mismatch", "signed by a different key", {
             appId: "a.b",
             userId: 0,
@@ -77,7 +79,7 @@ describe("install/uninstall signing guard arguments", () => {
         allowDestructiveRecovery: false,
       }),
     ).rejects.toBeInstanceOf(SigningGuardError);
-    expect((calls[0]?.[1] as InstallAppCall | undefined)?.guard).toEqual({
+    expect(calls[0]?.guard).toEqual({
       expectedSigningSha256: [SIGNER_A],
       allowDestructiveRecovery: false,
     });

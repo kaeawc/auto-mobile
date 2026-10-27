@@ -125,7 +125,7 @@ class HierarchyWriteSerializationWiringTest {
     )
 
     // The guarded body lives in deliverResult (moved verbatim out of the onEach lambda).
-    val deliverStart = source.indexOf("private suspend fun deliverResult(")
+    val deliverStart = source.indexOf("suspend fun deliverResult(")
     assertTrue("deliverResult not found", deliverStart >= 0)
     val deliverOpen = source.indexOf('{', deliverStart)
     val deliverBody =

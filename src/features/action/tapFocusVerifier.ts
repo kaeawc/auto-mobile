@@ -51,6 +51,102 @@ function sameChain(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((id, index) => id === b[index]);
 }
 
+/** WebKit page focus does not identify a native browser input's keyboard focus. */
+function isInsideWebView(node: SearchableEntry, nodes: readonly SearchableEntry[]): boolean {
+  for (let parent = node.parentIndex; parent !== undefined; parent = nodes[parent].parentIndex) {
+    if (nodes[parent].className === "WKWebView") {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Expansion must enclose the compact target and exceed capture jitter in at least one axis. */
+function isExpandedFocusFrame(target: Element, candidate: Element): boolean {
+  const epsilon = ANDROID_PRE_TAP_BOUNDS_EPSILON_PX;
+  const before = target.bounds;
+  const after = candidate.bounds;
+  return (
+    after.left <= before.left + epsilon &&
+    after.top <= before.top + epsilon &&
+    after.right >= before.right - epsilon &&
+    after.bottom >= before.bottom - epsilon &&
+    (after.right - after.left > before.right - before.left + epsilon ||
+      after.bottom - after.top > before.bottom - before.top + epsilon)
+  );
+}
+
+/** A settled keyboard permits a wider relocated editor or the same stable native field. */
+function isKeyboardNativeEditor(
+  target: Element,
+  candidate: Element,
+  nodes: readonly SearchableEntry[],
+  screenHeight: number | undefined,
+): boolean {
+  const epsilon = ANDROID_PRE_TAP_BOUNDS_EPSILON_PX;
+  const keyboardBelowEditor =
+    screenHeight !== undefined &&
+    nodes.some(
+      (node) =>
+        node.className === "UIKeyboard" &&
+        node.bounds !== undefined &&
+        node.bounds.top < screenHeight &&
+        candidate.bounds.bottom <= node.bounds.top + epsilon,
+    );
+  const sameNativeId = (["resource-id", "view-id"] as const).some((key) => {
+    const id = target[key];
+    return id && !(key === "view-id" && id.startsWith("s2-")) && id === candidate[key];
+  });
+  return (
+    keyboardBelowEditor &&
+    (candidate.bounds.right - candidate.bounds.left >
+      target.bounds.right - target.bounds.left + epsilon ||
+      (sameNativeId && boundsNearlyEqual(target.bounds, candidate.bounds, epsilon)))
+  );
+}
+
+/**
+ * Safari replaces its compact URL field with an expanded native editor without a focused flag.
+ * A sole native field of that class, expansion (or a keyboard-backed stable identity)
+ * and non-conflicting labels identify the editor;
+ * another native field holding keyboard focus rules it out.
+ */
+function findSoleExpandedNativeFocusField(
+  target: Element,
+  nodes: readonly SearchableEntry[],
+  screenHeight: number | undefined,
+  labelText?: string,
+): Element | undefined {
+  const nativeFields = distinctFocusFields(
+    nodes.filter(
+      (node) =>
+        node.element && isFocusEditableElement(node.properties) && !isInsideWebView(node, nodes),
+    ),
+  );
+  const candidates = nativeFields.filter((node) => node.className === target.class);
+  if (candidates.length !== 1) {
+    return undefined;
+  }
+  const candidate = candidates[0].element!;
+  if (
+    (!isExpandedFocusFrame(target, candidate) &&
+      !isKeyboardNativeEditor(target, candidate, nodes, screenHeight)) ||
+    nativeFields.some(
+      (node) => node.element !== candidate && isElementKeyboardFocused(node.element!),
+    )
+  ) {
+    return undefined;
+  }
+  const targetLabel = labelText ?? target.text;
+  return typeof targetLabel === "string" &&
+    targetLabel.length > 0 &&
+    typeof candidate.text === "string" &&
+    candidate.text.length > 0 &&
+    targetLabel !== candidate.text
+    ? undefined
+    : candidate;
+}
+
 /** What the focus verifier needs from the owning tap action (kept narrow on purpose). */
 export interface FocusVerifierDeps {
   device: BootedDevice;
@@ -102,6 +198,36 @@ export class FocusVerifier {
         candidate.bounds,
         ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
       )
+      ? candidate
+      : undefined;
+  }
+
+  /**
+   * iOS re-labels a text field once it is focused: a field holding text exposes its
+   * value rather than the label it was resolved by while unfocused (#13539). The
+   * sole focused field at the target's pre-tap bounds, with no conflicting identity,
+   * is the target.
+   */
+  private findSoleFocusedFieldAtTargetBounds(
+    target: Element,
+    nodes: readonly SearchableEntry[],
+    labelText?: string,
+  ): Element | undefined {
+    if (this.deps.device.platform !== "ios") {
+      return undefined;
+    }
+    const focusedFields = distinctFocusFields(
+      nodes.filter(
+        (node) =>
+          node.element &&
+          isFocusEditableElement(node.properties) &&
+          isElementKeyboardFocused(node.element),
+      ),
+    );
+    const candidate = focusedFields.length === 1 ? focusedFields[0].element : undefined;
+    return candidate &&
+      boundsNearlyEqual(target.bounds, candidate.bounds, ANDROID_PRE_TAP_BOUNDS_EPSILON_PX) &&
+      !this.focusIdentitySignals(target, candidate, labelText).conflict
       ? candidate
       : undefined;
   }
@@ -364,7 +490,12 @@ export class FocusVerifier {
         target,
         observation.viewHierarchy,
         nodes,
-        { labelText, selectedIndex, preTapHierarchy },
+        {
+          labelText,
+          selectedIndex,
+          preTapHierarchy,
+          screenHeight: observation.screenSize?.height ?? observation.viewHierarchy.screenHeight,
+        },
       );
     } catch (error) {
       // The selector is re-resolved against a capture taken while the layout may still be
@@ -454,7 +585,13 @@ export class FocusVerifier {
       labelText,
       selectedIndex,
       preTapHierarchy,
-    }: { labelText?: string; selectedIndex?: number; preTapHierarchy?: ViewHierarchyResult },
+      screenHeight,
+    }: {
+      labelText?: string;
+      selectedIndex?: number;
+      preTapHierarchy?: ViewHierarchyResult;
+      screenHeight?: number;
+    },
   ): boolean {
     const identifier = findFocusIdentifier(target, nodes);
     if (identifier?.shared) {
@@ -466,14 +603,19 @@ export class FocusVerifier {
         selectedIndex,
       );
     }
+    const iosNativeEditorFallback = () =>
+      this.deps.device.platform === "ios" &&
+      Boolean(findSoleExpandedNativeFocusField(target, nodes, screenHeight, labelText));
     if (identifier) {
-      return nodes.some(
-        (node) =>
-          node.element &&
-          isFocusEditableElement(node.properties) &&
-          isElementKeyboardFocused(node.element) &&
-          node.element[identifier.key] === identifier.value &&
-          isSameFocusTarget(target, node.element, nodes),
+      return (
+        nodes.some(
+          (node) =>
+            node.element &&
+            isFocusEditableElement(node.properties) &&
+            isElementKeyboardFocused(node.element) &&
+            node.element[identifier.key] === identifier.value &&
+            isSameFocusTarget(target, node.element, nodes),
+        ) || iosNativeEditorFallback()
       );
     }
     const focused = nodes.find((node) => this.isFocusedMatchingNode(target, node, nodes));
@@ -481,6 +623,12 @@ export class FocusVerifier {
       return true;
     }
     if (this.findSoleFocusedFieldByStableIdentity(target, nodes, labelText, preTapHierarchy)) {
+      return true;
+    }
+    if (this.findSoleFocusedFieldAtTargetBounds(target, nodes, labelText)) {
+      return true;
+    }
+    if (iosNativeEditorFallback()) {
       return true;
     }
     if (!options.testTag && !(options.elementId && target["resource-id"])) {

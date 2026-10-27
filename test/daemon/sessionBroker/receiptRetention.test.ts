@@ -1,4 +1,5 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import {
   RECEIPT_PRUNE_BATCH,
   RECEIPT_RETENTION_MS,
@@ -19,6 +20,11 @@ import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FAKE_BROKER_OWNER, FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
+import { drainUntil } from "../../helpers/fakeTimerStepping";
+
+afterEach(() => {
+  mock.restore();
+});
 
 function config(requestId: string): SessionConfig {
   return {
@@ -159,6 +165,9 @@ describe("terminal receipt recovery cost and retention", () => {
     devices.canDestroy = true;
     await broker.recover();
     const cleaned = await broker.status("dirty");
+    if (!cleaned) {
+      throw new Error("Expected a receipt status after confirmed cleanup");
+    }
     expect(cleaned).toMatchObject({ outcome: "failed", cleanupPending: false });
     // Confirmed cleanup changed the answer, so the replay window restarts from it.
     timer.advanceTime(RECEIPT_RETENTION_MS - 1);
@@ -171,15 +180,32 @@ describe("terminal receipt recovery cost and retention", () => {
   test("the service prunes at most once per interval", async () => {
     const lock = { acquire: () => undefined, release: () => undefined };
     const prune = spyOn(broker, "pruneReceipts");
-    const recover = spyOn(broker, "recover").mockResolvedValue(undefined);
-    const service = new SessionBrokerService(broker, "scope", lock, timer);
+    const recover = spyOn(broker, "recoverReceipts").mockResolvedValue(undefined);
+    spyOn(broker, "recoverCleanup").mockResolvedValue(undefined);
+    const service = new SessionBrokerService(
+      broker,
+      "scope",
+      lock,
+      timer,
+      new InMemoryMutationRecordingGaps(),
+    );
     service.start();
+    await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
+      description: "immediate recovery parked before retention",
+    });
+    expect(prune).not.toHaveBeenCalled();
     for (let pass = 0; pass < 3; pass++) {
-      await timer.advanceTimeAsync(5_000);
+      timer.advanceTime(5_000);
+      await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
+        description: "recovery and retention pass completed",
+      });
     }
-    expect(recover.mock.calls.length).toBe(3);
+    expect(recover.mock.calls.length).toBe(4);
     expect(prune).toHaveBeenCalledTimes(1);
-    await timer.advanceTimeAsync(RECEIPT_PRUNE_INTERVAL_MS);
+    timer.advanceTime(RECEIPT_PRUNE_INTERVAL_MS);
+    await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
+      description: "hourly retention completed",
+    });
     expect(prune).toHaveBeenCalledTimes(2);
     await service.close();
   });
@@ -190,15 +216,31 @@ describe("terminal receipt recovery cost and retention", () => {
       .mockResolvedValueOnce(RECEIPT_PRUNE_BATCH)
       .mockResolvedValueOnce(RECEIPT_PRUNE_BATCH)
       .mockResolvedValue(3);
-    spyOn(broker, "recover").mockResolvedValue(undefined);
-    const service = new SessionBrokerService(broker, "scope", lock, timer);
+    spyOn(broker, "recoverReceipts").mockResolvedValue(undefined);
+    spyOn(broker, "recoverCleanup").mockResolvedValue(undefined);
+    const service = new SessionBrokerService(
+      broker,
+      "scope",
+      lock,
+      timer,
+      new InMemoryMutationRecordingGaps(),
+    );
     service.start();
+    await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
+      description: "immediate recovery parked before retention backlog",
+    });
     for (let pass = 0; pass < 5; pass++) {
-      await timer.advanceTimeAsync(5_000);
+      timer.advanceTime(5_000);
+      await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
+        description: "retention backlog pass completed",
+      });
     }
     // Two full batches and the short one that ends the backlog; then the interval applies again.
     expect(prune).toHaveBeenCalledTimes(3);
-    await timer.advanceTimeAsync(RECEIPT_PRUNE_INTERVAL_MS);
+    timer.advanceTime(RECEIPT_PRUNE_INTERVAL_MS);
+    await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
+      description: "retention after backlog interval completed",
+    });
     expect(prune).toHaveBeenCalledTimes(4);
     await service.close();
   });

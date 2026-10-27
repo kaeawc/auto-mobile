@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { GrantAndroidPermissions } from "../../../src/features/action/GrantAndroidPermissions";
@@ -30,7 +31,7 @@ function harness(before = egg, after = before) {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponseSequence(
     "shell dumpsys package",
-    [before, after].map((stdout) => ({ stdout, stderr: "" })),
+    [before, after].map((stdout) => createExecResult(stdout, "")),
   );
   const factory = new FakeAdbClientFactory(adb);
   return {
@@ -106,7 +107,7 @@ test("not-changeable install permission fails with pm's SecurityException", asyn
   const h = harness(playground);
   const reason =
     "java.lang.SecurityException: Permission android.permission.INTERNET requested by dev.jasonpearson.automobile.playground is not a changeable permission type";
-  h.adb.setCommandResponse("shell pm revoke", { stdout: "", stderr: reason });
+  h.adb.setCommandResponse("shell pm revoke", createExecResult("", reason));
   const result = await h.action.execute("dev.jasonpearson.automobile.playground", {
     action: "revoke",
     permissions: ["android.permission.INTERNET"],
@@ -214,7 +215,7 @@ test("mixed list counts only verified changes and handler retains partial succes
     permissions: [read, post, camera],
     userId: 0,
   });
-  expect(response.isError ?? false).toBe(false);
+  expect("isError" in response ? response.isError : false).toBe(false);
   const data = JSON.parse(response.content[0].text);
   expect(data).toMatchObject({ success: false, changedCount: 1, failedCount: 1 });
   expect(data?.operations).toMatchObject([
@@ -238,7 +239,7 @@ test("all failed handler sets isError", async () => {
     permissions: [camera],
     userId: 0,
   });
-  expect(response.isError).toBe(true);
+  expect("isError" in response ? response.isError : undefined).toBe(true);
 });
 
 test("all unchanged handler explains that no changes were needed", async () => {
@@ -249,7 +250,7 @@ test("all unchanged handler explains that no changes were needed", async () => {
     permissions: [post],
     userId: 0,
   });
-  expect(response.isError ?? false).toBe(false);
+  expect("isError" in response ? response.isError : false).toBe(false);
   expect(JSON.parse(response.content[0].text)).toMatchObject({
     success: true,
     changedCount: 0,
@@ -258,15 +259,22 @@ test("all unchanged handler explains that no changes were needed", async () => {
   });
 });
 
-test.each([
-  "",
-  fixture("dumpsys-package-not-installed"),
-  egg.replace("requested permissions:", "unreadable permissions:"),
-])("unparseable pre-read fails without pm", async (capture) => {
-  const h = harness(capture);
-  await expect(
-    h.action.execute("com.android.egg", { permissions: [read], userId: 0 }),
-  ).rejects.toThrow("permission state");
+test.each(["", fixture("dumpsys-package-not-installed")])(
+  "unparseable pre-read fails without pm",
+  async (capture) => {
+    const h = harness(capture);
+    await expect(
+      h.action.execute("com.android.egg", { permissions: [read], userId: 0 }),
+    ).rejects.toThrow("permission state");
+    expect(h.adb.wasCommandExecuted("shell pm grant")).toBe(false);
+  },
+);
+
+test("a missing requested-permissions section returns a per-permission rejection without pm", async () => {
+  const h = harness(egg.replace("requested permissions:", "unreadable permissions:"));
+  const result = await h.action.execute("com.android.egg", { permissions: [read], userId: 0 });
+  expect(result.success).toBe(false);
+  expect(result.results[0].error).toContain("not requested");
   expect(h.adb.wasCommandExecuted("shell pm grant")).toBe(false);
 });
 
@@ -341,7 +349,7 @@ test.each(["runtime", "install"] as const)(
 test("absent runtime state retains pm's has-not-requested reason after re-read", async () => {
   const h = harness(egg.replace("      runtime permissions:", "      unreadable permissions:"));
   const reason = `java.lang.SecurityException: Package com.android.egg has not requested permission ${read}`;
-  h.adb.setCommandResponse("shell pm grant", { stdout: "", stderr: reason });
+  h.adb.setCommandResponse("shell pm grant", createExecResult("", reason));
   const result = await h.action.execute("com.android.egg", { permissions: [read], userId: 0 });
   expect(result.success).toBe(false);
   expect(result.results[0].error).toBe(reason);
@@ -366,16 +374,16 @@ test("app installed only for user 10 uses that user for get and grant verificati
     { userId: 0, name: "Owner", flags: 0x13, running: true },
     { userId: 10, name: "Work", flags: 0x30, running: true },
   ]);
-  h.adb.setCommandResponse("shell pm list packages --user 0", { stdout: "", stderr: "" });
-  h.adb.setCommandResponse("shell pm list packages --user 10", {
-    stdout: "package:com.android.egg",
-    stderr: "",
-  });
+  h.adb.setCommandResponse("shell pm list packages --user 0", createExecResult("", ""));
+  h.adb.setCommandResponse(
+    "shell pm list packages --user 10",
+    createExecResult("package:com.android.egg", ""),
+  );
   const before = await h.permissions.getPermissions("com.android.egg", { permissions: [read] });
   expect(before.permissions[0].state).toBe("denied");
   h.adb.setCommandResponseSequence(
     "shell dumpsys package",
-    [user10, flip(user10, read, true)].map((stdout) => ({ stdout, stderr: "" })),
+    [user10, flip(user10, read, true)].map((stdout) => createExecResult(stdout, "")),
   );
   const result = await h.action.execute("com.android.egg", { permissions: [read] });
   expect(result).toMatchObject({ success: true, userId: 10 });

@@ -1,0 +1,32 @@
+{
+  "id": "platform-requires",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["test"],
+    "permissions": [
+      {
+        "name": "camera",
+        "purpose": "Scan a code"
+      },
+      {
+        "name": "notifications",
+        "purpose": "Alerts when a new episode is out"
+      }
+    ],
+    "background": ["audio"]
+  },
+  "root": {
+    "type": "button",
+    "label": "Go",
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "test.protected"
+      }
+    ]
+  }
+}

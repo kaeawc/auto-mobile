@@ -165,7 +165,7 @@ describe("checkWorkProfileAccessibility", () => {
     },
   ])("does not warn for $name", async ({ users, expected }) => {
     fakeAdb.setDevices([{ name: "emulator-5554", platform: "android", deviceId: "emulator-5554" }]);
-    fakeAdb.setUsers(users);
+    fakeAdb.setUsers([...users]);
 
     const result = await checkWorkProfileAccessibility(fakeFactory);
 

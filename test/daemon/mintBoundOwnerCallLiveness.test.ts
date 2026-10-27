@@ -1,11 +1,13 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
+import { fakeBindLock, unreachableMcpDispatcher } from "../helpers/createTestUnixSocketServer";
+import type { McpForwardRoute } from "../../src/daemon/socketServer";
+import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
 import { expect, spyOn } from "bun:test";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { sessionOwnerLeaseSnapshot } from "../../src/daemon/livenessOwnerLease";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -18,6 +20,16 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { warmedTests } from "../helpers/warmedTests";
 
 const test = warmedTests(() => {});
+
+// The route a forwarded call takes is scripted; everything downstream of it is the real server.
+class OwnerCallServer extends UnixSocketServerHarness {
+  onRoute: () => void = () => {};
+
+  protected override getMcpForwardRoute(): McpForwardRoute {
+    this.onRoute();
+    return { executionKey: "test", clientKey: "test" };
+  }
+}
 
 function setup(markAutolockSession: () => Promise<void> = async () => {}) {
   const timer = new FakeTimer();
@@ -256,6 +268,7 @@ for (const outcome of [
     let ends = 0;
     const pool = {
       refreshDevices: async () => 0,
+      releaseDevice: async () => {},
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       declareMcpSessionLivenessOwnerToken: () => {
         events.push("declare");
@@ -282,28 +295,37 @@ for (const outcome of [
         };
       },
     };
-    const server = createTestUnixSocketServer(
+    const server = new OwnerCallServer(
       "/fake/owner-call.sock",
       {
         isInitialized: () => outcome !== "uninitialized",
+        getSessionManager: () => ({
+          hasSession: () => false,
+          getSession: () => null,
+          getDeviceLabels: () => undefined,
+          releaseSession: async () => null,
+        }),
         getDevicePool: () => pool,
+        getDeviceSessionRegistry: () => ({ list: () => [] }),
       },
       new FakeTimer(),
+      undefined,
+      { mcpDispatcher: unreachableMcpDispatcher },
+      undefined,
+      { bindLock: fakeBindLock },
     );
-    server["acceptingRequests"] = true;
+    server.allowRequests();
     const socket = new FakeSocket();
-    server["handleConnection"](socket);
-    const connection = [...server["sessions"].keys()][0]!;
-    const local = spyOn(server, "runLocalSocketRequest").mockResolvedValue(undefined);
-    const startup = spyOn(server, "waitForStartup").mockResolvedValue(undefined);
-    const route = spyOn(server, "getMcpForwardRoute").mockImplementation(() => {
+    server.connect(socket);
+    const connection = server.sessionIds[0]!;
+    server.localRequestHandler = async () => undefined;
+    server.onRoute = () => {
       events.push("route");
       if (outcome === "route-throw") {
         throw new Error("route failed");
       }
-      return { executionKey: "test", clientKey: "test" };
-    });
-    const forward = spyOn(server, "runMcpForwardForCurrentRoute").mockImplementation(async () => {
+    };
+    server.mcpForwarder = async () => {
       events.push("forward");
       if (outcome === "cancel" || outcome === "restore-close") {
         socket.destroy();
@@ -313,30 +335,35 @@ for (const outcome of [
         throw new Error("forward failed");
       }
       return { content: [], ...(outcome === "tool-error" ? { isError: true } : {}) };
-    });
+    };
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const hasToken = !["no-token", "blank-token", "uninitialized", "restore-close"].includes(
         outcome,
       );
-      const response = await server["handleRequest"](connection, socket, {
-        id: "owner-call",
-        type: "mcp_request",
-        method: "tools/call",
-        params: {
-          name: "observe",
-          arguments:
-            outcome === "no-token"
-              ? {}
-              : {
-                  [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]:
-                    outcome === "blank-token" ? "  " : "minter",
-                  ...(outcome === "restore-close"
-                    ? { [DAEMON_OWNED_SESSIONS_PARAM]: ["retained"] }
-                    : {}),
-                },
+      const response = await server.dispatchRequest(
+        connection,
+        socket,
+        {
+          id: "owner-call",
+          type: "mcp_request",
+          method: "tools/call",
+          params: {
+            name: "observe",
+            arguments:
+              outcome === "no-token"
+                ? {}
+                : {
+                    [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]:
+                      outcome === "blank-token" ? "  " : "minter",
+                    ...(outcome === "restore-close"
+                      ? { [DAEMON_OWNED_SESSIONS_PARAM]: ["retained"] }
+                      : {}),
+                  },
+          },
         },
-      });
+        0,
+      );
       expect(calls).toEqual(hasToken ? [[connection, "minter"]] : []);
       expect(ends).toBe(hasToken && outcome !== "begin-throw" ? 1 : 0);
       if (hasToken) {
@@ -357,10 +384,6 @@ for (const outcome of [
         ).toBe(true);
       }
     } finally {
-      local.mockRestore();
-      startup.mockRestore();
-      route.mockRestore();
-      forward.mockRestore();
       warn.mockRestore();
       socket.destroy();
       await server.close();

@@ -12,6 +12,7 @@ import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrap
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSession
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionBinding
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionOptions
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionState
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketOptions
@@ -46,7 +47,7 @@ import kotlinx.coroutines.awaitCancellation
  * transport under virtual time, with counting client factories in place of sockets.
  */
 @OptIn(ExperimentalTestApi::class)
-class PaneSessionProviderStabilityTest {
+internal class PaneSessionProviderStabilityTest : PaneSessionProviderStabilityDispatcherFixture() {
   private val pixel = DesktopDaemonSessionBinding("dev-1", "android")
   private val pixelFold = DesktopDaemonSessionBinding("dev-2", "android")
 
@@ -177,26 +178,30 @@ class PaneSessionProviderStabilityTest {
       },
     )
     rememberWorkspaceDeviceControl(
-      column = column,
-      clientProvider = { null },
-      enabled = true,
-      sessionUuidProvider = provider,
-      streamFactory = {
-        root.counts.control++
-        FakeObservationStream()
-      },
+      dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceDeviceControlOptions(
+        column = column,
+        clientProvider = { null },
+        enabled = true,
+        sessionUuidProvider = provider,
+        streamFactory = {
+          root.counts.control++
+          FakeObservationStream()
+        },
+      ),
     )
   }
 
   @Composable
   private fun rememberSession(root: Root): DesktopDaemonSessionState =
     rememberDesktopDaemonSession(
-      socketPath = "in-memory",
-      panes = root.panes,
-      sessionFactory = {
-        DesktopDaemonSession(McpDaemonClient(root.transport, sessionUuid = "desktop-session"))
-      },
-      ioDispatcher = Dispatchers.Unconfined,
+      DesktopDaemonSessionOptions(
+        socketPath = "in-memory",
+        panes = root.panes,
+        sessionFactory = {
+          DesktopDaemonSession(McpDaemonClient(root.transport, sessionUuid = "desktop-session"))
+        },
+        ioDispatcher = testDispatcher,
+      ),
     )
 
   @Composable
@@ -207,7 +212,7 @@ class PaneSessionProviderStabilityTest {
     FailuresPushSocketClient(
       openSocket = { error("the idle failures client never opens a socket") },
       retryDelay = FailuresRetryDelay { awaitCancellation() },
-      scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+      scope = CoroutineScope(SupervisorJob() + testDispatcher),
       socketAvailable = { false },
       options =
         FailuresPushSocketOptions(
@@ -232,3 +237,7 @@ class PaneSessionProviderStabilityTest {
     const val HEARTBEAT_MS = 2_000L
   }
 }
+
+internal abstract class PaneSessionProviderStabilityDispatcherFixture(
+  protected val testDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined,
+)

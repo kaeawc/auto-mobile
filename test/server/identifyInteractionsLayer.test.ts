@@ -24,14 +24,14 @@ async function identify(result: ObserveResult, args: Record<string, unknown>) {
   const screen = new FakeObserveScreen();
   screen.setObserveResult(result);
   const navigation = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-    new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
+    new FakeNavigationGraphManager(),
   );
   try {
     registerObserveTools({
       timer: new FakeTimer(),
       createScreen: () => ({
         execute: screen.execute.bind(screen),
-        executeDeviceRead: screen.execute.bind(screen),
+        executeDeviceRead: () => screen.execute(),
         captureScreenshot: screen.captureScreenshot.bind(screen),
         appendRawViewHierarchy: screen.appendRawViewHierarchy.bind(screen),
         getMostRecentCachedObserveResult: screen.getMostRecentCachedObserveResult.bind(screen),

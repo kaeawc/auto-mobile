@@ -9,6 +9,7 @@ import {
   discoveryRefreshOutcome,
   type DevicePoolRefreshPort,
 } from "../../src/daemon/devicePoolRefresh";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { recoveryCoordinatorHarness } from "../helpers/recoveryCoordinatorHarness";
 
@@ -42,8 +43,8 @@ function harness(
     devices: [booted],
     succeededPlatforms: new Set<Platform>(["android", "ios"]),
   };
-  const manager = {
-    getBootedDevicesDetailed: async () => {
+  const manager: PlatformDeviceManager = new (class extends FakeDeviceManager {
+    override async getBootedDevicesDetailed(): Promise<BootedDeviceDiscovery> {
       calls.push("discover");
       if (!pendingDiscovery) {
         return nextDiscovery;
@@ -51,9 +52,10 @@ function harness(
       return new Promise<BootedDeviceDiscovery>((resolve) => {
         resolveDiscoveries.push(resolve);
       });
-    },
-  } as PlatformDeviceManager;
+    }
+  })();
   const port: DevicePoolRefreshPort = {
+    createInsertionFence: () => ({ wasFenced: () => false }),
     getTimer: () => timer,
     getDeviceManager: () => manager,
     getDevices: () => devices,

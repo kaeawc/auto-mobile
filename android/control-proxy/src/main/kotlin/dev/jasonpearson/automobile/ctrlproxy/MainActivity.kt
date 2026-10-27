@@ -5,7 +5,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
-import android.view.accessibility.AccessibilityManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -141,8 +140,6 @@ fun CtrlProxyTheme(content: @Composable () -> Unit) {
 private fun checkAccessibilityServiceStatus(context: android.content.Context): Boolean {
   Log.i("MainActivity", "checkAccessibilityServiceStatus")
   return try {
-    val accessibilityManager =
-      context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
     val enabledServices =
       Settings.Secure.getString(
         context.contentResolver,
@@ -151,7 +148,7 @@ private fun checkAccessibilityServiceStatus(context: android.content.Context): B
 
     val serviceName = "${context.packageName}/${CtrlProxy::class.java.canonicalName}"
     enabledServices?.contains(serviceName) == true
-  } catch (e: Exception) {
+  } catch (e: SecurityException) {
     Log.e("MainActivity", "Error checking accessibility service status", e)
     false
   }
@@ -163,7 +160,9 @@ private fun openAccessibilitySettings(context: android.content.Context) {
     val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
     context.startActivity(intent)
     Log.i("MainActivity", "Opened accessibility settings")
-  } catch (e: Exception) {
+  } catch (e: android.content.ActivityNotFoundException) {
+    Log.e("MainActivity", "Error opening accessibility settings", e)
+  } catch (e: SecurityException) {
     Log.e("MainActivity", "Error opening accessibility settings", e)
   }
 }

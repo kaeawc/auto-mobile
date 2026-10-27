@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop
 
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -17,6 +18,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.ApplicationScope
+import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Window
@@ -30,6 +33,7 @@ import dev.jasonpearson.automobile.desktop.core.connection.DaemonConnectionMonit
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.platform.uncaughtUiErrorMessage
+import dev.jasonpearson.automobile.desktop.core.shell.MacOSTitleBarConfig
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.workspace.isCommandPaletteShortcut
 import dev.jasonpearson.automobile.desktop.di.AutoMobileGraph
@@ -38,6 +42,7 @@ import java.io.RandomAccessFile
 import java.nio.channels.FileLock
 import java.nio.file.Path
 import javax.swing.JOptionPane
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -92,85 +97,103 @@ fun main() {
   // Force dark window decorations on macOS
   System.setProperty("apple.awt.application.appearance", "NSAppearanceNameDarkAqua")
 
-  // Enable macOS native transparent title bar
-  if (System.getProperty("os.name")?.lowercase()?.contains("mac") == true) {
-    System.setProperty("apple.awt.fullWindowContent", "true")
-    System.setProperty("apple.awt.transparentTitleBar", "true")
-  }
+  // Enable macOS native transparent title bar (no-op on other platforms)
+  MacOSTitleBarConfig.configure()
 
   // Set the macOS Dock icon. Runs after apple.awt.application.name is set above, since
   // Taskbar.getTaskbar() initializes the AWT toolkit.
   setDockIcon()
 
-  application {
-    var isWindowVisible by remember { mutableStateOf(true) }
+  application { DesktopApplication(graph) }
+}
 
-    // Poll daemon connectivity through the same injectable, timeout-bounded seam that backs the
-    // in-window status dot (#4858), so the tray and the dot share one daemon-health source rather
-    // than running two overlapping 5s loops.
-    val daemonMonitor = remember {
-      DaemonConnectionMonitor(
-        probe = { withContext(Dispatchers.IO) { graph.autoMobileClient.getDaemonStatus() } },
-        // A failed status call means the daemon socket is unreachable; the dot/tray go red via the
-        // returned Disconnected state, and this keeps a trace behind them.
-        onProbeFailure = { error ->
-          LOG.warn("Daemon status poll failed: ${error.message}", error)
-        },
-      )
-    }
-    val daemonState by
-      daemonMonitor.connectionStates.collectAsState(initial = ConnectionState.Connecting)
-    val isDaemonConnected = daemonState is ConnectionState.Connected
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun ApplicationScope.DesktopApplication(graph: AutoMobileGraph) {
 
-    AutoMobileSystemTray(
-      isConnected = isDaemonConnected,
-      isWindowVisible = isWindowVisible,
-      onToggleWindow = { isWindowVisible = !isWindowVisible },
-      onQuit = ::exitApplication,
+  var isWindowVisible by remember { mutableStateOf(true) }
+
+  // Poll daemon connectivity through the same injectable, timeout-bounded seam that backs the
+  // in-window status dot (#4858), so the tray and the dot share one daemon-health source rather
+  // than running two overlapping 5s loops.
+  val daemonMonitor = rememberDaemonMonitor(graph)
+  val daemonState by
+    daemonMonitor.connectionStates.collectAsState(initial = ConnectionState.Connecting)
+  val isDaemonConnected = daemonState is ConnectionState.Connected
+
+  AutoMobileSystemTray(
+    isConnected = isDaemonConnected,
+    isWindowVisible = isWindowVisible,
+    onToggleWindow = { isWindowVisible = !isWindowVisible },
+    onQuit = ::exitApplication,
+  )
+
+  val windowState =
+    rememberWindowState(
+      size = DpSize(1440.dp, 900.dp),
+      position = WindowPosition(Alignment.Center),
     )
 
-    val windowState =
-      rememberWindowState(
-        size = DpSize(1440.dp, 900.dp),
-        position = WindowPosition(Alignment.Center),
-      )
+  // Shared callback bridge between the native MenuBar and the Compose UI tree.
+  // AutoMobileContent wires pane-visibility state and action callbacks into this
+  // object, so the menu items below toggle real UI state.
+  val menuBarActions = remember { MenuBarActions() }
 
-    // Shared callback bridge between the native MenuBar and the Compose UI tree.
-    // AutoMobileContent wires pane-visibility state and action callbacks into this
-    // object, so the menu items below toggle real UI state.
-    val menuBarActions = remember { MenuBarActions() }
+  // Global ⌘K/Ctrl+K opens the command palette. The window key handler only decides *whether* the
+  // shortcut fired (via the pure, tested isCommandPaletteShortcut) and bumps this counter; the
+  // workspace observes the bump and opens the palette (guarding onboarding/picker). A counter,
+  // not a Boolean, so repeat presses each register even while the palette is already open.
+  var openPaletteRequest by remember { mutableStateOf(0) }
 
-    // Global ⌘K/Ctrl+K opens the command palette. The window key handler only decides *whether* the
-    // shortcut fired (via the pure, tested isCommandPaletteShortcut) and bumps this counter; the
-    // workspace observes the bump and opens the palette (guarding onboarding/picker). A counter,
-    // not a Boolean, so repeat presses each register even while the palette is already open.
-    var openPaletteRequest by remember { mutableStateOf(0) }
+  // Last-resort handler for uncaught exceptions on the UI thread. Compose Desktop's default
+  // shows a bare Swing dialog containing only the throwable's toString() (a NoClassDefFoundError
+  // renders as an unreadable slash-form class path) and logs nothing. Ours logs the full stack
+  // and shows a readable message with a restart hint for the rebuilt-jar case. The dialog stays
+  // native (JOptionPane) on purpose: this surface exists precisely for "composition is broken",
+  // so it must not depend on Compose rendering. See uncaughtUiErrorMessage.
+  val uiExceptionHandlerFactory = rememberUiExceptionHandlerFactory()
 
-    // Last-resort handler for uncaught exceptions on the UI thread. Compose Desktop's default
-    // shows a bare Swing dialog containing only the throwable's toString() (a NoClassDefFoundError
-    // renders as an unreadable slash-form class path) and logs nothing. Ours logs the full stack
-    // and shows a readable message with a restart hint for the rebuilt-jar case. The dialog stays
-    // native (JOptionPane) on purpose: this surface exists precisely for "composition is broken",
-    // so it must not depend on Compose rendering. See uncaughtUiErrorMessage.
-    val uiExceptionHandlerFactory = remember {
-      WindowExceptionHandlerFactory { window ->
-        WindowExceptionHandler { throwable ->
-          LOG.error("Uncaught UI exception: ${throwable.message}", throwable)
-          JOptionPane.showMessageDialog(
-            window,
-            uncaughtUiErrorMessage(throwable),
-            "AutoMobile",
-            JOptionPane.ERROR_MESSAGE,
-          )
-        }
-      }
-    }
+  DesktopWindow(
+    DesktopWindowPresentation(
+      graph,
+      isWindowVisible,
+      daemonState,
+      menuBarActions,
+      openPaletteRequest,
+      windowState,
+      uiExceptionHandlerFactory,
+    ),
+    onHide = { isWindowVisible = false },
+    onPaletteRequest = { openPaletteRequest++ },
+    onQuit = ::exitApplication,
+  )
+}
 
+@OptIn(ExperimentalComposeUiApi::class)
+private data class DesktopWindowPresentation(
+  val graph: AutoMobileGraph,
+  val isWindowVisible: Boolean,
+  val daemonState: ConnectionState,
+  val menuBarActions: MenuBarActions,
+  val openPaletteRequest: Int,
+  val windowState: androidx.compose.ui.window.WindowState,
+  val uiExceptionHandlerFactory: WindowExceptionHandlerFactory,
+)
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun DesktopWindow(
+  presentation: DesktopWindowPresentation,
+  onHide: () -> Unit,
+  onPaletteRequest: () -> Unit,
+  onQuit: () -> Unit,
+) =
+  with(presentation) {
     CompositionLocalProvider(
       LocalWindowExceptionHandlerFactory provides uiExceptionHandlerFactory,
     ) {
       Window(
-        onCloseRequest = { isWindowVisible = false },
+        onCloseRequest = { onHide() },
         title = "AutoMobile",
         state = windowState,
         visible = isWindowVisible,
@@ -179,7 +202,7 @@ fun main() {
             event.type == KeyEventType.KeyDown &&
               isCommandPaletteShortcut(event.key, event.isMetaPressed, event.isCtrlPressed)
           ) {
-            openPaletteRequest++
+            onPaletteRequest()
             true
           } else {
             false
@@ -187,37 +210,7 @@ fun main() {
         },
       ) {
         CompositionLocalProvider(LocalAutoMobileGraph provides graph) {
-          MenuBar {
-            Menu("File", mnemonic = 'F') {
-              Item(
-                "Settings",
-                onClick = { menuBarActions.showSettings = true },
-                shortcut = platformShortcut(Key.Comma),
-              )
-              Separator()
-              Item(
-                "Quit",
-                onClick = { exitApplication() },
-                shortcut = platformShortcut(Key.Q),
-              )
-            }
-            Menu("Tools", mnemonic = 'T') {
-              Item(
-                "Command Palette",
-                onClick = { menuBarActions.showCommandPalette = true },
-                shortcut = platformShortcut(Key.P, shift = true),
-              )
-              Separator()
-              Item(
-                "Take Screenshot",
-                onClick = { menuBarActions.onTakeScreenshot?.invoke() },
-                shortcut = platformShortcut(Key.S, shift = true),
-              )
-            }
-            Menu("Help", mnemonic = 'H') {
-              Item("About AutoMobile", onClick = { menuBarActions.showAbout = true })
-            }
-          }
+          DesktopMenu(menuBarActions, onQuit)
           AutoMobileDesktopApp(
             menuBarActions = menuBarActions,
             openPaletteRequest = openPaletteRequest,
@@ -228,4 +221,75 @@ fun main() {
       }
     }
   }
+
+@Composable
+private fun FrameWindowScope.DesktopMenu(menuBarActions: MenuBarActions, onQuit: () -> Unit) {
+  MenuBar {
+    Menu("File", mnemonic = 'F') {
+      Item(
+        "Settings",
+        onClick = { menuBarActions.showSettings = true },
+        shortcut = platformShortcut(Key.Comma),
+      )
+      Separator()
+      Item(
+        "Quit",
+        onClick = { onQuit() },
+        shortcut = platformShortcut(Key.Q),
+      )
+    }
+    Menu("Tools", mnemonic = 'T') {
+      Item(
+        "Command Palette",
+        onClick = { menuBarActions.showCommandPalette = true },
+        shortcut = platformShortcut(Key.P, shift = true),
+      )
+      Separator()
+      Item(
+        "Take Screenshot",
+        onClick = { menuBarActions.onTakeScreenshot?.invoke() },
+        shortcut = platformShortcut(Key.S, shift = true),
+      )
+    }
+    Menu("Help", mnemonic = 'H') {
+      Item("About AutoMobile", onClick = { menuBarActions.showAbout = true })
+    }
+  }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun rememberUiExceptionHandlerFactory(): WindowExceptionHandlerFactory {
+  val uiExceptionHandlerFactory = remember {
+    WindowExceptionHandlerFactory { window ->
+      WindowExceptionHandler { throwable ->
+        LOG.error("Uncaught UI exception: ${throwable.message}", throwable)
+        JOptionPane.showMessageDialog(
+          window,
+          uncaughtUiErrorMessage(throwable),
+          "AutoMobile",
+          JOptionPane.ERROR_MESSAGE,
+        )
+      }
+    }
+  }
+  return uiExceptionHandlerFactory
+}
+
+@Composable
+private fun rememberDaemonMonitor(
+  graph: AutoMobileGraph,
+  ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+): DaemonConnectionMonitor {
+  val daemonMonitor = remember {
+    DaemonConnectionMonitor(
+      probe = { withContext(ioDispatcher) { graph.autoMobileClient.getDaemonStatus() } },
+      // A failed status call means the daemon socket is unreachable; the dot/tray go red via the
+      // returned Disconnected state, and this keeps a trace behind them.
+      onProbeFailure = { error ->
+        LOG.warn("Daemon status poll failed: ${error.message}", error)
+      },
+    )
+  }
+  return daemonMonitor
 }

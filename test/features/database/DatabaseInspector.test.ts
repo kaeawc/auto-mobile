@@ -10,6 +10,7 @@ import {
   ProviderUnavailableError,
   resourceErrorFields,
 } from "../../../src/features/storage/ProviderUnavailableError";
+import { SdkCapabilityQueryError } from "../../../src/features/observe/ios/SdkCapabilityQueryError";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("DatabaseInspector", () => {
@@ -125,6 +126,11 @@ describe("DatabaseInspector", () => {
         minimumSdkVersion: "0.0.85",
         retryable: false,
       });
+    });
+
+    test("resource error fields keep the typed SDK capability query payload", () => {
+      const error = new SdkCapabilityQueryError("not_connected", "SDK probe not connected");
+      expect(resourceErrorFields(error)).toEqual({ errorCode: "not_connected", retryable: true });
     });
 
     test("disabled inspection propagates without issuing SQL or caching the probe", async () => {

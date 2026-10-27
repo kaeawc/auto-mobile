@@ -1,11 +1,12 @@
-import { describe, expect, spyOn, test } from "bun:test";
-import type { DaemonMethodCallOptions } from "../../src/daemon/client";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import type { DaemonClientLike, DaemonMethodCallOptions } from "../../src/daemon/client";
 import { DaemonUnavailableError } from "../../src/daemon/client";
 import {
   DAEMON_CAPABILITIES_COMMAND_USAGE,
   DAEMON_CAPABILITIES_TIMEOUT_MS,
   queryExistingDaemonCapabilities,
   type DaemonCapabilitiesCommandClient,
+  type DaemonCapabilitiesResult,
 } from "../../src/daemon/cli/daemonCapabilitiesCommand";
 import {
   daemonCommandArgumentError,
@@ -14,7 +15,19 @@ import {
 import { DAEMON_CAPABILITIES_METHOD } from "../../src/daemon/daemonRequestHandlers";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 
-class FakeCapabilitiesClient implements DaemonCapabilitiesCommandClient {
+let logSpy: ReturnType<typeof spyOn<typeof console, "log">>;
+let errorSpy: ReturnType<typeof spyOn<typeof console, "error">>;
+let exitSpy: ReturnType<typeof spyOn<typeof process, "exit">>;
+beforeEach(() => {
+  logSpy = spyOn(console, "log");
+  errorSpy = spyOn(console, "error");
+  exitSpy = spyOn(process, "exit");
+});
+afterEach(() => {
+  mock.restore();
+});
+
+class FakeCapabilitiesClient implements DaemonCapabilitiesCommandClient, DaemonClientLike {
   readonly events: unknown[] = [];
 
   constructor(
@@ -45,6 +58,14 @@ class FakeCapabilitiesClient implements DaemonCapabilitiesCommandClient {
   async close(): Promise<void> {
     this.events.push("close");
   }
+
+  async callTool(): Promise<never> {
+    throw new Error("capabilities command must not call a tool");
+  }
+
+  async readResource(): Promise<never> {
+    throw new Error("capabilities command must not read a resource");
+  }
 }
 
 async function runCommand(client: FakeCapabilitiesClient) {
@@ -52,9 +73,9 @@ async function runCommand(client: FakeCapabilitiesClient) {
   const stderr: string[] = [];
   const exits: unknown[] = [];
   const exited = new Error("fake exit");
-  const log = spyOn(console, "log").mockImplementation((line) => stdout.push(String(line)));
-  const error = spyOn(console, "error").mockImplementation((line) => stderr.push(String(line)));
-  const exit = spyOn(process, "exit").mockImplementation((code) => {
+  const log = logSpy.mockImplementation((line) => stdout.push(String(line)));
+  const error = errorSpy.mockImplementation((line) => stderr.push(String(line)));
+  const exit = exitSpy.mockImplementation((code) => {
     exits.push(code);
     throw exited;
   });
@@ -78,7 +99,7 @@ async function runCommand(client: FakeCapabilitiesClient) {
 }
 
 describe("daemon capabilities query", () => {
-  test.each([
+  test.each<DaemonCapabilitiesResult>([
     { capabilities: ["input/gestureStream", "session-broker/v1"] },
     {
       capabilities: ["input/gestureStream", "session-broker/v1"],
@@ -108,7 +129,7 @@ describe("daemon capabilities query", () => {
     ]);
   });
 
-  test.each([
+  test.each<{ name: string; client: FakeCapabilitiesClient; error: string; events: unknown[] }>([
     {
       name: "stopped daemon",
       client: new FakeCapabilitiesClient(
@@ -177,7 +198,7 @@ describe("daemon capabilities query", () => {
 });
 
 describe("daemon capabilities arguments", () => {
-  test.each([
+  test.each<{ args: string[]; error: string }>([
     { args: [], error: DAEMON_CAPABILITIES_COMMAND_USAGE },
     { args: ["--json=false"], error: DAEMON_CAPABILITIES_COMMAND_USAGE },
     { args: ["--json", "--json"], error: DAEMON_CAPABILITIES_COMMAND_USAGE },

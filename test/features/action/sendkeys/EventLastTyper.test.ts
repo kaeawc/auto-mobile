@@ -37,7 +37,12 @@ describe("EventLastTyper", () => {
         insert: "😀",
         options: {
           expectedSuffix: "a",
-          precedingState: { text: "old", selectionStart: 3, selectionEnd: 3 },
+          precedingState: {
+            text: "old",
+            isShowingHintText: false,
+            selectionStart: 3,
+            selectionEnd: 3,
+          },
         },
         signal,
       },
@@ -50,8 +55,8 @@ describe("EventLastTyper", () => {
     let reads = 0;
     host.textClient.readInsertTextState = async () =>
       ++reads === 1
-        ? { text: "", selectionStart: 0, selectionEnd: 0 }
-        : { text: "😀", selectionStart: 2, selectionEnd: 2 };
+        ? { text: "", isShowingHintText: false, selectionStart: 0, selectionEnd: 0 }
+        : { text: "😀", isShowingHintText: false, selectionStart: 2, selectionEnd: 2 };
     const warning =
       "Text was inserted, but the caret could not be placed after it (test); the caret position is unknown, so insert any further text with request_insert_text rather than key events";
     expect(CARET_UNKNOWN_WARNING.test(warning)).toBe(true);

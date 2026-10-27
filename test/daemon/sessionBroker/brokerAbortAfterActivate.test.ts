@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
 import type { SessionLiveness } from "../../../src/daemon/sessionBroker/sessionDisposition";
 import {
@@ -9,6 +9,10 @@ import type { SessionConfig } from "../../../src/devices/sessionConfig";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 import { FAKE_BROKER_OWNER, FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
+
+afterEach(() => {
+  mock.restore();
+});
 
 function config(requestId: string): SessionConfig {
   return {
@@ -68,18 +72,14 @@ describe("caller abort around session activation", () => {
     await registry.close();
   });
 
-  function abortRightAfterActivation(controller: AbortController) {
+  test("an abort after activation commits keeps the session for a replaying client", async () => {
+    const controller = new AbortController();
     const activate = options.store.activate.bind(options.store);
     spyOn(options.store, "activate").mockImplementationOnce(async (...args) => {
       const request = await activate(...args);
       controller.abort(new Error("client connection closed"));
       return request;
     });
-  }
-
-  test("an abort after activation commits keeps the session for a replaying client", async () => {
-    const controller = new AbortController();
-    abortRightAfterActivation(controller);
     const first = await broker.prepare(config("reconnect"), "owner-token", controller.signal);
     expect(first).toMatchObject({ outcome: "ready" });
     expect(devices.destroyed).toEqual([]);
@@ -93,7 +93,12 @@ describe("caller abort around session activation", () => {
 
   test("a handed-back session the client never reclaims is released once its liveness lapses", async () => {
     const controller = new AbortController();
-    abortRightAfterActivation(controller);
+    const activate = options.store.activate.bind(options.store);
+    spyOn(options.store, "activate").mockImplementationOnce(async (...args) => {
+      const request = await activate(...args);
+      controller.abort(new Error("client connection closed"));
+      return request;
+    });
     const first = await broker.prepare(config("never-returns"), "owner-token", controller.signal);
     await broker.recover();
     expect(await broker.status("never-returns")).toMatchObject({ outcome: "ready" });

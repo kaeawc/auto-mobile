@@ -11,7 +11,7 @@ import type { BootedDevice } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
-import { toolJson } from "../helpers/toolResponse";
+import { schemaProperty, toolJson } from "../helpers/toolResponse";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
@@ -435,7 +435,7 @@ describe("storageTools Android user targeting for the direct-file fallback (#996
     });
   const warningOf = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
     const response = await toolHandler(name)(ANDROID_DEVICE, args);
-    return JSON.parse((response.content[0] as { text: string }).text).warning;
+    return toolJson(response).warning;
   };
 
   test.each(toolCalls)(
@@ -503,7 +503,7 @@ describe("storageTools Android user targeting for the direct-file fallback (#996
 
   test.each(toolCalls)("%s advertises an optional non-negative integer userId", (name) => {
     const definition = ToolRegistry.getToolDefinitions().find((item) => item.name === name);
-    expect(definition?.inputSchema.properties?.userId).toMatchObject({
+    expect(schemaProperty(definition?.inputSchema.properties, "userId")).toMatchObject({
       type: "integer",
       minimum: 0,
     });

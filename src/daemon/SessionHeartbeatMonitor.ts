@@ -26,7 +26,11 @@ import {
   UnsettledExecutionVeto,
   type SessionExecutionProbeInput,
 } from "./unsettledExecutionVeto";
-import { getSessionHeartbeatCheckIntervalMs, SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
+import {
+  getSessionHeartbeatCheckIntervalMs,
+  SUSPECT_GRACE_MS,
+} from "./wire/sessionLivenessWindows";
+import { ENV } from "../config/env";
 
 /**
  * Minimal view of the session store the heartbeat monitor needs.
@@ -122,7 +126,7 @@ const STALE_REASON_DESCRIPTION: Record<SessionHeartbeatReleaseReason, string> = 
 };
 
 export interface SessionHeartbeatMonitorConfig {
-  /** How often to scan for stale sessions. Default: 2s (see `./sessionLivenessWindows`). */
+  /** How often to scan for stale sessions. Default: 2s (see `./wire/sessionLivenessWindows`). */
   checkIntervalMs?: number;
   /** Grace period before default-heartbeat sessions that never sent a heartbeat are reaped. Default: 5s. */
   preFirstHeartbeatGraceMs?: number;
@@ -141,7 +145,7 @@ export interface SessionHeartbeatMonitorConfig {
   stallThresholdMs?: number;
   /**
    * Only consulted when the timer's monotonic clock runs through host sleep
-   * (`Timer.monotonicIncludesHostSleep`: Windows, Linux), so sleep and a daemon stall look alike.
+   * (`Timer.monotonicIncludesHostSleep`: Windows), so sleep and a daemon stall look alike.
    * A gap later than this is then judged to be host sleep, which counts toward idle, rather than
    * a stall, which is forgiven in full. A shorter sleep is still forgiven as a stall, so a session
    * can be held for up to this much longer than its idle window after a short sleep. Default:
@@ -248,8 +252,8 @@ export class SessionHeartbeatMonitor {
     this.graceMs =
       config.graceMs ??
       readPositiveMsEnv(
-        "AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS",
-        "AUTO_MOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS",
+        ENV.SESSION_HEARTBEAT_INITIAL_GRACE_MS.name,
+        ENV.SESSION_HEARTBEAT_INITIAL_GRACE_MS.legacyName,
       ) ??
       DEFAULT_INITIAL_GRACE_MS;
     this.preFirstHeartbeatGraceMs =
@@ -257,8 +261,8 @@ export class SessionHeartbeatMonitor {
     this.defaultHeartbeatTimeoutMs =
       config.heartbeatTimeoutMs ??
       readPositiveMsEnv(
-        "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
-        "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+        ENV.SESSION_HEARTBEAT_TIMEOUT_MS.name,
+        ENV.SESSION_HEARTBEAT_TIMEOUT_MS.legacyName,
       ) ??
       getDefaultSessionHeartbeatTimeoutMs();
     this.stallThresholdMs = config.stallThresholdMs ?? DEFAULT_STALL_MARGIN_MS;
@@ -439,7 +443,7 @@ export class SessionHeartbeatMonitor {
    * not by length: a daemon stall of any length is forgiven in full for owners live at its start
    * (the daemon could not hear them), while host sleep of any length counts toward the idle
    * deadline (owner policy) and only excuses the heartbeat lease, since no owner on a sleeping
-   * host could heartbeat either. Where the monotonic clock runs through sleep (Windows, Linux) the
+   * host could heartbeat either. Where the monotonic clock runs through sleep (Windows) the
    * two cannot be told apart and length decides instead (`maxCredibleStallMs`).
    *
    * Full lease forgiveness requires an owner live at the gap start (#11080). The session source

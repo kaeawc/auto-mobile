@@ -129,7 +129,7 @@ cmd_rerun() {
   local job_id job_name log_fetch_status log_fetch_attempt log_text
   while IFS=$'\t' read -r job_id job_name; do
     case "$job_name" in
-      'Node Unit Tests'*|'Node TypeScript Build and Test'*) ;;
+      'Node Unit Tests'*|'Node TypeScript Build and Test'*|'TypeScript Code Coverage') ;;
       *)
         echo "Skipping run $run_id: failed job '$job_name' is not a unit lane."
         return 0

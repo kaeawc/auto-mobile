@@ -9,7 +9,6 @@ import type { BootedDevice, ExecResult } from "../../../src/models";
 const DEVICE: BootedDevice = {
   deviceId: "emulator-5554",
   platform: "android",
-  isEmulator: true,
   name: "Test Device",
 };
 
@@ -24,16 +23,12 @@ function ok(stdout: string): ExecResult {
 }
 
 function buildClient(): AdbClient {
-  const client = new AdbClient(
-    DEVICE,
-    async () => ok(""),
-    null,
-    defaultRetryExecutor,
-    new FakeTimer(),
-  );
+  const client = new AdbClient(DEVICE, async () => ok(""), {
+    retryExecutor: defaultRetryExecutor,
+    timer: new FakeTimer(),
+  });
   // Skip real adb path resolution so the test never shells out.
-  (client as unknown as { getBaseCommandParts: () => Promise<unknown> }).getBaseCommandParts =
-    async () => ({ adbPath: "adb", baseArgs: [] });
+  client.getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
   return client;
 }
 

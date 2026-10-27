@@ -9,7 +9,7 @@ function readJson<T>(relativePath: string): T {
 }
 
 // Tool binaries invoked from shell scripts, which knip cannot see.
-const SHELL_ONLY_TOOLS = ["oxlint", "oxlint-tsgolint"];
+const SHELL_ONLY_TOOLS = ["oxlint", "oxlint-tsgolint", "@typescript/native-preview"];
 
 describe("knip.json ignoreDependencies", () => {
   const graph = readJson<{ roots: string[]; dependencies: Record<string, string> }>(

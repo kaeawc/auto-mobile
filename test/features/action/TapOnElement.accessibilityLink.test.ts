@@ -1,7 +1,11 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import type { ViewHierarchyNode } from "../../../src/models/ViewHierarchyResult";
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { describe, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import type { Element, ObserveResult } from "../../../src/models";
+import type { ObserveResult } from "../../../src/models";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -24,14 +28,22 @@ describe("tapOn semantic link outcomes", () => {
           timer.enableAutoAdvance();
           const android = new FakeCtrlProxy(timer);
           const ios = new FakeIOSCtrlProxy();
+          const androidClient = AndroidCtrlProxyClient.createForTesting(
+            { deviceId: "semantic-link", name: "Test Device", platform: "android" },
+            new FakeAdbExecutor(),
+            { timer },
+          );
+          androidClient.requestActivateAccessibilityLink = (...args) =>
+            android.requestActivateAccessibilityLink(...args);
+          androidClient.invalidateCache = () => android.invalidateCache();
           const androidInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-            android,
+            androidClient,
           );
           const iosInstance = spyOnIosClientInstance(ios);
           const androidExisting = spyOn(
             AndroidCtrlProxyClient,
             "getExistingInstance",
-          ).mockReturnValue(android);
+          ).mockReturnValue(androidClient);
           const iosExisting = spyOnIosExistingInstance(ios);
           const client = platform === "android" ? android : ios;
           const unconfirmed = mode === "timeout" || mode === "transport";
@@ -71,24 +83,25 @@ describe("tapOn semantic link outcomes", () => {
               selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
             },
           );
-          const element: Element = {
+          const element: ViewHierarchyNode = {
             text: "Owner",
             "resource-id": "owner",
             clickable: true,
             bounds: { left: 0, top: 0, right: 100, bottom: 100 },
           };
-          const observation: ObserveResult = {
-            timestamp: 1,
+          const observation: ObserveResult = buildObserveResult({
+            updatedAt: 1,
             screenSize: { width: 100, height: 100 },
             viewHierarchy: { hierarchy: { node: element } },
             systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
-          };
+          });
           const capture = spyOn(tap, "prepareSelectionCapture").mockResolvedValue(null);
           const controller = new AbortController();
           let thrown: unknown;
-          tap.observedInteraction = async (run) => {
+          const runObservedBlock = runBlockWith(observation);
+          tap.observedInteraction = async (run, options) => {
             try {
-              return await run(observation);
+              return await runObservedBlock(run, options);
             } catch (error) {
               thrown = error;
               throw error;
@@ -121,7 +134,7 @@ describe("tapOn semantic link outcomes", () => {
               }
             }
             expect(activate).toHaveBeenCalledTimes(1);
-            expect(activate.mock.calls[0][5]).toBe(controller.signal);
+            expect(activate.mock.calls[0][0]?.signal).toBe(controller.signal);
             expect(android.getTapHistory()).toHaveLength(0);
             expect(ios.getTapHistory()).toHaveLength(0);
             expect(adb.getCommandCalls()).toEqual([]);
@@ -164,18 +177,18 @@ describe("tapOn semantic link runner warning (#10082)", () => {
           acknowledged: true,
           ...(warning ? { warning } : {}),
         });
-        const element: Element = {
+        const element: ViewHierarchyNode = {
           text: "Owner",
           "resource-id": "owner",
           clickable: true,
           bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         };
-        const observation: ObserveResult = {
-          timestamp: 1,
+        const observation: ObserveResult = buildObserveResult({
+          updatedAt: 1,
           screenSize: { width: 100, height: 100 },
           viewHierarchy: { hierarchy: { node: element } },
           systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
-        };
+        });
         const tap = new TapOnElement(
           { deviceId: "semantic-link-warning", name: "Test Device", platform: "ios" },
           new FakeAdbClient(),
@@ -188,7 +201,7 @@ describe("tapOn semantic link runner warning (#10082)", () => {
           },
         );
         const capture = spyOn(tap, "prepareSelectionCapture").mockResolvedValue(null);
-        tap.observedInteraction = async (run) => run(observation);
+        tap.observedInteraction = runBlockWith(observation);
         try {
           const outcome = await tap.execute({
             action: "tap",

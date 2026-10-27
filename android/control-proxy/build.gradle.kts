@@ -2,7 +2,9 @@ import com.android.build.api.artifact.ScopedArtifact
 import com.android.build.api.artifact.SingleArtifact
 import com.android.build.api.variant.ScopedArtifacts
 import dev.jasonpearson.automobile.buildlogic.r8.VerifyR8KeptClassesTask
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.tasks.PathSensitivity
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
   id("automobile.kotlin-common")
@@ -25,7 +27,6 @@ android {
   defaultConfig {
     applicationId = "dev.jasonpearson.automobile.ctrlproxy"
     versionCode = 1
-    versionName = "0.0.86-SNAPSHOT"
   }
 
   buildTypes {
@@ -46,6 +47,9 @@ android {
   // verifyRobolectricSdkPin guard checks the properties pin; the guard caps pins at SDK 35 (36+
   // fails on JDK 21).
   testOptions { unitTests.isIncludeAndroidResources = true }
+
+  // Preserve the screenshot fixtures verbatim after request() became a host extension.
+  sourceSets.named("test") { kotlin.directories.add("src/testCompatibility/kotlin") }
 
   packaging {
     resources {
@@ -87,6 +91,13 @@ androidComponents {
   }
 }
 
+kotlin {
+  compilerOptions {
+    // CtrlProxy is the renderer's own host and builds on its unstable internals.
+    optIn.add("dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi")
+  }
+}
+
 dependencies {
   implementation(libs.androidx.core)
   implementation(libs.androidx.window)
@@ -96,6 +107,11 @@ dependencies {
 
   // Protocol module for type-safe WebSocket messages
   implementation(projects.protocol)
+
+  // Embeddable prototype renderer; CtrlProxy adds the overlay host around it.
+  implementation(projects.prototypeCompose)
+  // Saved-prototype store and device HTTP transport that the unprivileged ProtoViewer also links.
+  implementation(projects.prototypeSaved)
 
   // Compose BOM
   implementation(platform(libs.compose.bom))
@@ -131,6 +147,8 @@ dependencies {
   implementation(libs.retrofit)
 
   // Test dependencies
+  testImplementation(projects.prototypeCompose)
+  testImplementation(projects.prototypeSaved)
   testImplementation(libs.bundles.unit.test)
   testImplementation(projects.junitRunner)
   testImplementation(libs.robolectric)
@@ -194,6 +212,10 @@ tasks.withType<Test>().configureEach {
   screenshotProperties.forEach { key ->
     System.getProperty(key)?.let { value -> systemProperty(key, value) }
   }
+  // The prototype screenshot harness pins the date picker's "today" by statically mocking
+  // LocalDate.now(); MockK then calls LocalDate's other (private) statics reflectively, which
+  // needs java.time opened to the test classpath.
+  jvmArgs("--add-opens=java.base/java.time=ALL-UNNAMED")
   // A preview reads spec files Gradle does not track, so never reuse an up-to-date or cached
   // result.
   if (System.getProperty("prototype.preview.spec") != null) {
@@ -201,3 +223,40 @@ tasks.withType<Test>().configureEach {
     outputs.doNotCacheIf("prototype preview reads untracked spec files") { true }
   }
 }
+
+// Host integration and screenshot tests deliberately stay here. Give only test compilation friend
+// access to renderer internals, without widening the library's production API for test probes.
+configurations
+  .matching { it.name.endsWith("UnitTestCompileClasspath") }
+  .configureEach {
+    val compileTaskName =
+      "compile${name.removeSuffix("CompileClasspath").replaceFirstChar { it.titlecase() }}Kotlin"
+    val prototypeTestFriends =
+      incoming
+        .artifactView {
+          componentFilter { id ->
+            id is ProjectComponentIdentifier &&
+              (id.buildTreePath == ":prototype-compose" || id.buildTreePath == ":prototype-saved")
+          }
+          attributes.attribute(
+            Attribute.of("artifactType", String::class.java),
+            "android-classes-jar",
+          )
+        }
+        .files
+    tasks.withType<KotlinCompile>().configureEach {
+      if (name == compileTaskName) friendPaths.from(prototypeTestFriends)
+    }
+  }
+
+// Existing CtrlProxy unit-test CI entry points must continue to run every extracted test.
+tasks
+  .matching { it.name.startsWith("test") && it.name.endsWith("UnitTest") }
+  .configureEach {
+    dependsOn(
+      ":prototype-compose:$name",
+      ":prototype-compose:verifyRendererDependencies",
+      ":prototype-saved:$name",
+      ":prototype-saved:verifySavedPrototypeDependencies",
+    )
+  }

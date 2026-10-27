@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import { Shake } from "../../../src/features/action/Shake";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -15,10 +16,10 @@ describe("Shake emulator console failure", () => {
       timer.enableAutoAdvance();
       // Output from test/features/device/AndroidHingeAngleConsole.test.ts.
       const output = "KO: unknown sensor";
-      fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", {
-        stdout: stream === "stdout" ? output : "",
-        stderr: stream === "stderr" ? output : "",
-      });
+      fakeAdb.setCommandResponse(
+        "emu sensor set acceleration 100:100:100",
+        createExecResult(stream === "stdout" ? output : "", stream === "stderr" ? output : ""),
+      );
       const shake = new Shake(
         { name: "pixel", platform: "android", deviceId: "emulator-5554" },
         fakeAdb,

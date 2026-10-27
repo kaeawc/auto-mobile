@@ -71,44 +71,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
 
     Column(modifier = Modifier.fillMaxSize()) {
       // Chat Header
-      AutoMobileTopAppBar(
-        title = {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-          ) {
-            Box(
-              modifier =
-                Modifier.size(40.dp)
-                  .clip(CircleShape)
-                  .background(MaterialTheme.colorScheme.primary),
-            ) {
-              Text(
-                text = "AI",
-                color = MaterialTheme.colorScheme.onPrimary,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.align(Alignment.Center),
-              )
-            }
-            Column {
-              Text(text = "Chat Assistant", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-              Text(
-                text = "Online",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-              )
-            }
-          }
-        },
-        actions = {
-          AutoMobileContentButton(
-            onClick = { viewModel.requestNewIncomingMessage() },
-            modifier = Modifier.padding(end = 8.dp),
-          ) {
-            Text("Request Message")
-          }
-        },
-      )
+      ChatHeader { viewModel.requestNewIncomingMessage() }
 
       // Messages List
       LazyColumn(
@@ -154,81 +117,17 @@ fun MessageBubble(message: ChatMessage, modifier: Modifier = Modifier) {
   ) {
     if (!message.isFromUser) {
       // Profile image for bot messages
-      Box(
-        modifier =
-          Modifier.size(32.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.secondaryContainer),
-      ) {
-        if (message.profileImageUrl != null) {
-          AsyncImage(
-            model = message.profileImageUrl,
-            contentDescription = "Profile",
-            modifier = Modifier.fillMaxSize(),
-          )
-        } else {
-          Text(
-            text = "AI",
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.align(Alignment.Center),
-          )
-        }
-      }
+      BotAvatar(message)
       Spacer(modifier = Modifier.width(8.dp))
     }
 
     // Message bubble
-    AutoMobileContentCard(
-      modifier = Modifier.weight(1f, fill = false),
-      colors =
-        CardDefaults.cardColors(
-          containerColor =
-            if (message.isFromUser) {
-              MaterialTheme.colorScheme.primary
-            } else {
-              MaterialTheme.colorScheme.surfaceVariant
-            },
-        ),
-      shape =
-        RoundedCornerShape(
-          topStart = 16.dp,
-          topEnd = 16.dp,
-          bottomStart = if (message.isFromUser) 16.dp else 4.dp,
-          bottomEnd = if (message.isFromUser) 4.dp else 16.dp,
-        ),
-    ) {
-      SelectionContainer {
-        Text(
-          text = message.text,
-          color =
-            if (message.isFromUser) {
-              MaterialTheme.colorScheme.onPrimary
-            } else {
-              MaterialTheme.colorScheme.onSurfaceVariant
-            },
-          modifier = Modifier.padding(12.dp),
-          fontSize = 14.sp,
-        )
-      }
-    }
+    MessageContentCard(message, Modifier.weight(1f, fill = false))
 
     if (message.isFromUser) {
       Spacer(modifier = Modifier.width(8.dp))
       // Profile image for user messages
-      Box(
-        modifier =
-          Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
-      ) {
-        Text(
-          text = "You",
-          color = MaterialTheme.colorScheme.onPrimary,
-          fontSize = 10.sp,
-          fontWeight = FontWeight.Bold,
-          modifier = Modifier.align(Alignment.Center),
-        )
-      }
+      UserAvatar()
     }
   }
 }
@@ -363,5 +262,124 @@ fun PreviewChatScreenKeyboardOpen() {
         )
       }
     }
+  }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatHeader(onRequestMessage: () -> Unit) {
+  AutoMobileTopAppBar(
+    title = {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Box(
+          modifier =
+            Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
+        ) {
+          Text(
+            text = "AI",
+            color = MaterialTheme.colorScheme.onPrimary,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.Center),
+          )
+        }
+        Column {
+          Text(text = "Chat Assistant", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+          Text(
+            text = "Online",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+      }
+    },
+    actions = {
+      AutoMobileContentButton(
+        onClick = onRequestMessage,
+        modifier = Modifier.padding(end = 8.dp),
+      ) {
+        Text("Request Message")
+      }
+    },
+  )
+}
+
+@Composable
+private fun BotAvatar(message: ChatMessage) {
+  Box(
+    modifier =
+      Modifier.size(32.dp)
+        .clip(CircleShape)
+        .background(MaterialTheme.colorScheme.secondaryContainer),
+  ) {
+    if (message.profileImageUrl != null) {
+      AsyncImage(
+        model = message.profileImageUrl,
+        contentDescription = "Profile",
+        modifier = Modifier.fillMaxSize(),
+      )
+    } else {
+      Text(
+        text = "AI",
+        color = MaterialTheme.colorScheme.onSecondaryContainer,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.align(Alignment.Center),
+      )
+    }
+  }
+}
+
+@Composable
+private fun MessageContentCard(message: ChatMessage, modifier: Modifier) {
+  AutoMobileContentCard(
+    modifier = modifier,
+    colors =
+      CardDefaults.cardColors(
+        containerColor =
+          if (message.isFromUser) {
+            MaterialTheme.colorScheme.primary
+          } else {
+            MaterialTheme.colorScheme.surfaceVariant
+          },
+      ),
+    shape =
+      RoundedCornerShape(
+        topStart = 16.dp,
+        topEnd = 16.dp,
+        bottomStart = if (message.isFromUser) 16.dp else 4.dp,
+        bottomEnd = if (message.isFromUser) 4.dp else 16.dp,
+      ),
+  ) {
+    SelectionContainer {
+      Text(
+        text = message.text,
+        color =
+          if (message.isFromUser) {
+            MaterialTheme.colorScheme.onPrimary
+          } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+          },
+        modifier = Modifier.padding(12.dp),
+        fontSize = 14.sp,
+      )
+    }
+  }
+}
+
+@Composable
+private fun UserAvatar() {
+  Box(
+    modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
+  ) {
+    Text(
+      text = "You",
+      color = MaterialTheme.colorScheme.onPrimary,
+      fontSize = 10.sp,
+      fontWeight = FontWeight.Bold,
+      modifier = Modifier.align(Alignment.Center),
+    )
   }
 }

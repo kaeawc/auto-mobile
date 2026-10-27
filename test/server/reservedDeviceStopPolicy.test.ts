@@ -1,3 +1,5 @@
+import { z } from "zod/v4";
+import { readToolEnvelopePayload } from "../../src/utils/toolEnvelopePayload";
 import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { describe, expect, spyOn } from "bun:test";
 import {
@@ -5,7 +7,7 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
 import { TerminalSessionError } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
@@ -20,13 +22,18 @@ describe("reserved device stop policy", () => {
 
   async function snapshot(f: Fixture) {
     const hold = f.internals.rehydrationReservations.get(f.holder)!;
+    const row = await f.persistence.getSession!(f.holder);
+    if (!row) {
+      throw new Error("Expected persisted restart holder");
+    }
+    const device = f.pool.getDevice(f.device.deviceId);
     return {
       hold,
       value: { ...hold },
-      row: { ...(await f.persistence.getSession!(f.holder)) },
+      row: { ...row },
       timers: f.timer.getPendingTimeouts(),
-      device: f.pool.getDevice(f.device.deviceId),
-      pooled: { ...f.pool.getDevice(f.device.deviceId) },
+      device,
+      pooled: device ? { ...device } : null,
     };
   }
   async function unchanged(f: Fixture, before: Awaited<ReturnType<typeof snapshot>>) {
@@ -43,18 +50,19 @@ describe("reserved device stop policy", () => {
       );
       expect(error).toBeInstanceOf(InputDeviceOwnedError);
       expect(error).toMatchObject(fields);
-      expect((error as Error).message).toContain(
-        `reserved for session ${BASE}'s device-restart recovery`,
-      );
+      if (!(error instanceof InputDeviceOwnedError)) {
+        throw new Error("Expected device ownership refusal");
+      }
+      expect(error.message).toContain(`reserved for session ${BASE}'s device-restart recovery`);
     } else {
-      const result = JSON.parse((await pending).content[0].text);
+      const result = readToolEnvelopePayload(await pending)?.payload;
       expect(result).toMatchObject({
         success: false,
         failure: { phase: "precondition", ...fields },
       });
-      expect(result.failure.message).toContain(
-        `reserved for session ${BASE}'s device-restart recovery`,
-      );
+      expect(
+        z.object({ failure: z.object({ message: z.string() }) }).parse(result).failure.message,
+      ).toContain(`reserved for session ${BASE}'s device-restart recovery`);
     }
   }
   async function terminal(f: Fixture) {
@@ -87,7 +95,7 @@ describe("reserved device stop policy", () => {
     for (const method of ["daemon/heartbeat", "daemon/sessionInfo"]) {
       expect(
         await handleDaemonRequest(
-          { id: "stop-read", method, params: { sessionId: BASE } },
+          { type: "daemon_request", id: "stop-read", method, params: { sessionId: BASE } },
           DaemonState.getInstance(),
         ),
       ).toMatchObject({ success: false, releaseReason: "device-killed" });
@@ -113,10 +121,17 @@ describe("reserved device stop policy", () => {
       for (const requester of [undefined, "other-session"]) {
         test(`android ${tool}: recycled serial unrelated AVD, pooled ${pooled} × ${requester ?? "sessionless"}`, async () => {
           const f = await fixture("android");
-          await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+          await f.pool.removeDevice(
+            f.device.deviceId,
+            true,
+            f.pool.getDevice(f.device.deviceId) ?? undefined,
+          );
           const unrelated = { ...f.device, name: "unrelated-phone" };
           f.manager.setBootedDevices("android", [unrelated]);
-          f.manager.setDeviceImages("android", [f.device, unrelated]);
+          f.manager.setDeviceImages("android", [
+            { ...f.device, isRunning: true },
+            { ...unrelated, isRunning: true },
+          ]);
           if (pooled) {
             await f.pool.initializeWithDevices([unrelated]);
           }
@@ -132,10 +147,14 @@ describe("reserved device stop policy", () => {
       for (const caller of ["other-session", "sessionless", "owner"] as const) {
         test(`android ${tool}: reserved AVD on another serial, pooled ${pooled} × ${caller}`, async () => {
           const f = await fixture("android");
-          await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+          await f.pool.removeDevice(
+            f.device.deviceId,
+            true,
+            f.pool.getDevice(f.device.deviceId) ?? undefined,
+          );
           const returned = { ...f.device, deviceId: "emulator-5556" };
           f.manager.setBootedDevices("android", [returned]);
-          f.manager.setDeviceImages("android", [returned]);
+          f.manager.setDeviceImages("android", [{ ...returned, isRunning: true }]);
           if (pooled) {
             await f.pool.initializeWithDevices([returned]);
             expect(f.pool.genericAvailability(returned.deviceId)).toBe("reserved");
@@ -181,7 +200,11 @@ describe("reserved device stop policy", () => {
     for (const requester of [undefined, "other-session", BASE]) {
       test(`android killDevice: forced unknown identity, pooled ${pooled} × ${requester ?? "sessionless"}`, async () => {
         const f = await fixture("android");
-        await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+        await f.pool.removeDevice(
+          f.device.deviceId,
+          true,
+          f.pool.getDevice(f.device.deviceId) ?? undefined,
+        );
         const unknown = { ...f.device, name: `Unknown (${f.device.deviceId})` };
         f.manager.setBootedDevices("android", [unknown]);
         if (pooled) {
@@ -209,7 +232,11 @@ describe("reserved device stop policy", () => {
         test(`ios ${tool}: reserved UDID, pooled ${pooled} × ${caller}`, async () => {
           const f = await fixture("ios");
           if (!pooled) {
-            await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+            await f.pool.removeDevice(
+              f.device.deviceId,
+              true,
+              f.pool.getDevice(f.device.deviceId) ?? undefined,
+            );
           }
           f.timer.advanceTime(1_234);
           const before = await snapshot(f);
@@ -248,7 +275,11 @@ describe("reserved device stop policy", () => {
 
   // These two timelines are Android-only: iOS UDID is both serial and daemon-known stable id.
   async function unknownTarget(f: Fixture, deviceId: string, pooled: boolean, runtimeName: string) {
-    await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+    await f.pool.removeDevice(
+      f.device.deviceId,
+      true,
+      f.pool.getDevice(f.device.deviceId) ?? undefined,
+    );
     const target = { ...f.device, deviceId, name: `Unknown (${deviceId})` };
     f.manager.setBootedDevices("android", [target]);
     if (pooled) {
@@ -300,7 +331,7 @@ describe("reserved device stop policy", () => {
             expect(f.manager.killed).toEqual([f.device.deviceId]);
             expect(f.manager.killedTargets[0]!.name).toBe("unrelated-phone");
           } else {
-            expect(JSON.parse(response.content[0].text)).toMatchObject({
+            expect(readToolEnvelopePayload(response)?.payload).toMatchObject({
               success: false,
               failure: {
                 phase: "stop",
@@ -330,7 +361,7 @@ describe("reserved device stop policy", () => {
               tool === "killDevice" ? returned : { ...returned, name: f.device.name },
             ]);
             f.manager.confirmedRuntimeAvdName = f.device.name;
-            f.manager.setDeviceImages("android", [f.device]);
+            f.manager.setDeviceImages("android", [{ ...f.device, isRunning: true }]);
             f.manager.compareAvdName = true;
             f.timer.advanceTime(1_234);
             const before = await snapshot(f);
@@ -391,7 +422,7 @@ describe("reserved device stop policy", () => {
                 retryable: true,
               });
             } else {
-              expect(JSON.parse((await pending).content[0].text)).toMatchObject({
+              expect(readToolEnvelopePayload(await pending)?.payload).toMatchObject({
                 success: false,
                 failure: { phase: "precondition", code: "discovery_incomplete", retryable: true },
               });
@@ -404,8 +435,12 @@ describe("reserved device stop policy", () => {
     }
     test(`identity unconfirmed killDevice: no reservation skips probe, force ${force}`, async () => {
       const f = await fixture("android");
-      f.pool.releaseDeviceRestartReservation(BASE);
-      await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+      f.pool.testHooks.releaseDeviceRestartReservation(BASE);
+      await f.pool.removeDevice(
+        f.device.deviceId,
+        true,
+        f.pool.getDevice(f.device.deviceId) ?? undefined,
+      );
       const target = { ...f.device, name: `Unknown (${f.device.deviceId})` };
       f.manager.setBootedDevices("android", [target]);
       const probe = spyOn(
@@ -435,7 +470,7 @@ describe("reserved device stop policy", () => {
               retryable: true,
             });
           } else {
-            expect(JSON.parse((await pending).content[0].text)).toMatchObject({
+            expect(readToolEnvelopePayload(await pending)?.payload).toMatchObject({
               success: false,
               failure: { phase: "precondition", code: "discovery_incomplete", retryable: true },
             });
@@ -501,7 +536,7 @@ describe("reserved device stop policy", () => {
             retryable: true,
           });
         } else {
-          expect(JSON.parse((await pending).content[0].text)).toMatchObject({
+          expect(readToolEnvelopePayload(await pending)?.payload).toMatchObject({
             success: false,
             failure: { code: "discovery_incomplete", retryable: true },
           });
@@ -644,7 +679,7 @@ describe("reserved device stop policy", () => {
             retryable: true,
           });
         } else {
-          expect(JSON.parse((await pending).content[0].text)).toMatchObject({
+          expect(readToolEnvelopePayload(await pending)?.payload).toMatchObject({
             failure: { phase: "stop", code: "device_owned_by_other_session", retryable: true },
           });
         }
@@ -694,7 +729,7 @@ describe("reserved device stop policy", () => {
       });
       test(`${platform} ${tool}: daemon-rehydration-only reservation keeps today's behavior`, async () => {
         const f = await fixture(platform);
-        f.pool.releaseDeviceRestartReservation(BASE);
+        f.pool.testHooks.releaseDeviceRestartReservation(BASE);
         await f.pool.reserveDevicesForRehydration([
           {
             sessionId: BASE,
@@ -756,7 +791,7 @@ describe("reserved device stop policy", () => {
             if (tool === "killDevice") {
               expect(result).toBeInstanceOf(Error);
             } else {
-              expect(JSON.parse(result.content[0].text)).toMatchObject({ success: false });
+              expect(readToolEnvelopePayload(result)?.payload).toMatchObject({ success: false });
             }
             expect(f.internals.rehydrationReservations.get(BASE)).toBe(before.hold);
             expect(before.hold).toEqual(before.value);
@@ -774,7 +809,7 @@ describe("reserved device stop policy", () => {
           const f = await fixture(platform);
           const warn = spyOn(logger, "warn").mockImplementation(() => {});
           cleanups.push(() => warn.mockRestore());
-          let saved: object | undefined;
+          let saved: Awaited<ReturnType<typeof f.persistence.getSession>>;
           f.manager.beforeKill = async () => {
             const row = (await f.persistence.getSession!(BASE))!;
             if (rowState === "peer") {
@@ -818,7 +853,11 @@ describe("reserved device stop policy", () => {
         f.manager.beforeKill = () => {
           f.internals.rehydrationReservations.set(BASE, replacement);
         };
-        const row = { ...(await f.persistence.getSession!(BASE)) };
+        const persisted = await f.persistence.getSession!(BASE);
+        if (!persisted) {
+          throw new Error("Expected persisted restart holder");
+        }
+        const row = { ...persisted };
         await f.call(tool);
         expect(f.internals.rehydrationReservations.get(BASE)).toBe(replacement);
         expect(replacement.restartHandoff).toBe(true);
@@ -859,7 +898,7 @@ describe("reserved device stop policy", () => {
                   retryable: false,
                 });
               } else {
-                expect(JSON.parse((await pending).content[0].text)).toMatchObject({
+                expect(readToolEnvelopePayload(await pending)?.payload).toMatchObject({
                   failure: { code: "device_owned_by_other_session", retryable: false },
                 });
               }
@@ -891,14 +930,18 @@ describe("reserved device stop policy", () => {
     });
     test(`${platform} deleteDevice stopped image: failed destroy changes nothing`, async () => {
       const f = await fixture(platform);
-      await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+      await f.pool.removeDevice(
+        f.device.deviceId,
+        true,
+        f.pool.getDevice(f.device.deviceId) ?? undefined,
+      );
       f.manager.setBootedDevices(platform, []);
       const before = await snapshot(f);
       const destroy = spyOn(f.manager, "destroyDevice").mockRejectedValue(
         new Error("destroy failed"),
       );
       cleanups.push(() => destroy.mockRestore());
-      expect(JSON.parse((await f.call("deleteDevice")).content[0].text)).toMatchObject({
+      expect(readToolEnvelopePayload(await f.call("deleteDevice"))?.payload).toMatchObject({
         success: false,
         failure: { phase: "destroy" },
       });
@@ -907,7 +950,11 @@ describe("reserved device stop policy", () => {
     for (const mode of ["unconfirmed", "cancelled", "command timeout"] as const) {
       test(`${platform} deleteDevice stopped image: ${mode} destroy changes nothing`, async () => {
         const f = await fixture(platform);
-        await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+        await f.pool.removeDevice(
+          f.device.deviceId,
+          true,
+          f.pool.getDevice(f.device.deviceId) ?? undefined,
+        );
         f.manager.setBootedDevices(platform, []);
         const before = await snapshot(f);
         const gate = Promise.withResolvers<void>();
@@ -927,7 +974,7 @@ describe("reserved device stop policy", () => {
         try {
           await drainUntil(() => attempted, { description: "stopped image destroy" });
           const response = await settleByFakeEvents(f.timer, pending, { description: mode });
-          expect(JSON.parse(response.content[0].text)).toMatchObject({ success: false });
+          expect(readToolEnvelopePayload(response)?.payload).toMatchObject({ success: false });
           expect(f.internals.rehydrationReservations.get(BASE)).toBe(before.hold);
           expect(before.hold).toEqual(before.value);
           expect(await f.persistence.getSession!(BASE)).toEqual(before.row);
@@ -942,7 +989,11 @@ describe("reserved device stop policy", () => {
     for (const caller of ["other-session", "sessionless", "owner"] as const) {
       test(`${platform} deleteDevice stopped image: reserved × ${caller}`, async () => {
         const f = await fixture(platform);
-        await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+        await f.pool.removeDevice(
+          f.device.deviceId,
+          true,
+          f.pool.getDevice(f.device.deviceId) ?? undefined,
+        );
         f.manager.setBootedDevices(platform, []);
         const before = await snapshot(f);
         const pending = f.call(

@@ -56,7 +56,7 @@ test("SqliteFeatureFlagRepository stamps ensureFlags and upsertFlag from the inj
       label: "A",
       description: "d",
       defaultValue: true,
-      defaultConfig: null,
+      defaultConfig: undefined,
     },
   ]);
   expect((await repo.listFlags())[0]?.updatedAt).toBe("2026-02-03T04:05:06.000Z");

@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import path from "path";
 import os from "os";
@@ -10,16 +11,18 @@ import {
 } from "../../../../src/features/observe/cache/FileSystemObserveCacheStore";
 import { capLayoutWarnings } from "../../../../src/features/observe/audits/SafeAreaAuditor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { FakeFileSystem } from "../../../fakes/FakeFileSystem";
 import { CountingIdGenerator } from "../../../../src/utils/IdGenerator";
 import { logger } from "../../../../src/utils/logger";
 import type { ObserveResult } from "../../../../src/models";
 
 function makeResult(label: string): ObserveResult {
-  return {
+  return buildObserveResult({
+    observationId: label,
     updatedAt: label,
     screenSize: { width: 100, height: 200 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  };
+  });
 }
 
 describe("FileSystemObserveCacheStore", function () {
@@ -40,6 +43,138 @@ describe("FileSystemObserveCacheStore", function () {
     if (existsSync(cacheDir)) {
       rmSync(cacheDir, { recursive: true, force: true });
     }
+  });
+
+  function fakeDiskStore() {
+    const fs = new FakeFileSystem();
+    fs.setDirectory(cacheDir);
+    const readdir = spyOn(fs, "readdir");
+    const stat = spyOn(fs, "stat");
+    const cache = new FileSystemObserveCacheStore(
+      timer,
+      cacheDir,
+      (file, data) => fs.writeFile(file, data),
+      idGenerator,
+      (file) => fs.unlink(String(file)),
+      fs,
+    );
+    return { fs, cache, readdir, stat };
+  }
+
+  test("persists compact JSON with elements and the same sanitized snapshot as memory", async () => {
+    const { fs, cache } = fakeDiskStore();
+    const result = {
+      ...makeResult("compact"),
+      elements: {
+        clickable: [],
+        scrollable: [],
+        text: [{ text: "two words", bounds: { left: 0, top: 0, right: 1, bottom: 1 } }],
+        media: [],
+      },
+      screenshotExpiresAt: 123,
+    };
+    await cache.put("device-1", result);
+    const [serialized] = fs.getWrittenFiles().values();
+    expect(serialized).toBe(JSON.stringify(cache.getRecentInMemoryForDevice("device-1")));
+    expect(serialized).not.toContain("\n");
+    expect(serialized).not.toContain('\": ');
+    expect(JSON.parse(serialized).elements).toEqual(result.elements);
+    expect(JSON.parse(serialized).screenshotExpiresAt).toBeUndefined();
+    expect(result.screenshotExpiresAt).toBe(123);
+  });
+
+  test("clones the result only once for memory and disk publication", async () => {
+    const { cache } = fakeDiskStore();
+    const clone = spyOn(globalThis, "structuredClone");
+    try {
+      await cache.put("device-1", makeResult("single-clone"));
+      expect(clone).toHaveBeenCalledTimes(1);
+    } finally {
+      clone.mockRestore();
+    }
+  });
+
+  test("reaps with one listing and no stats for timestamped names at the TTL boundary", async () => {
+    const { fs, cache, readdir, stat } = fakeDiskStore();
+    const expiredAt = timer.now() - OBSERVE_RESULT_CACHE_TTL_MS;
+    const expiredNames = [
+      `observe_device-1_${expiredAt}_iprocess-1_g0.json`,
+      `observe_device-1_${expiredAt - 1}_g0.json`,
+      `observe_device-1_${expiredAt - 2}.json`,
+    ];
+    const freshName = `observe_device-1_${expiredAt + 1}_iprocess-1_g0.json`;
+    const untouchedNames = [
+      `observe_device-2_${expiredAt}_iprocess-1_g0.json`,
+      `observe_device-1_${expiredAt}.txt`,
+      "unrelated.json",
+    ];
+    for (const name of [...expiredNames, freshName, ...untouchedNames]) {
+      fs.setFile(path.join(cacheDir, name), "{}");
+    }
+
+    await cache.put("device-1", makeResult("fresh"));
+
+    expect(readdir).toHaveBeenCalledTimes(1);
+    expect(readdir).toHaveBeenCalledWith(cacheDir);
+    expect(stat).not.toHaveBeenCalled();
+    for (const name of expiredNames) {
+      expect(fs.existsSync(path.join(cacheDir, name))).toBe(false);
+    }
+    for (const name of [freshName, ...untouchedNames]) {
+      expect(fs.existsSync(path.join(cacheDir, name))).toBe(true);
+    }
+    expect(cache.getRecentInMemoryForDevice("device-1")?.updatedAt).toBe("fresh");
+  });
+
+  test("falls back to mtime only for cache names without a parseable timestamp", async () => {
+    const { fs, cache, readdir, stat } = fakeDiskStore();
+    const expired = path.join(cacheDir, "observe_device-1_legacy.json");
+    const fresh = path.join(cacheDir, "observe_device-1_other.json");
+    fs.setBinaryFile(expired, Buffer.from("{}"), timer.now() - OBSERVE_RESULT_CACHE_TTL_MS);
+    fs.setBinaryFile(fresh, Buffer.from("{}"), timer.now() - OBSERVE_RESULT_CACHE_TTL_MS + 1);
+
+    await cache.put("device-1", makeResult("current"));
+
+    expect(readdir).toHaveBeenCalledTimes(1);
+    expect(stat).toHaveBeenCalledTimes(2);
+    expect(stat).toHaveBeenCalledWith(expired);
+    expect(stat).toHaveBeenCalledWith(fresh);
+    expect(fs.existsSync(expired)).toBe(false);
+    expect(fs.existsSync(fresh)).toBe(true);
+  });
+
+  test("keeps memory available while persistence is pending and fences a clear during write", async () => {
+    const { fs } = fakeDiskStore();
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const cache = new FileSystemObserveCacheStore(
+      timer,
+      cacheDir,
+      async (file, data) => {
+        started.resolve();
+        await release.promise;
+        await fs.writeFile(file, data);
+      },
+      idGenerator,
+      (file) => fs.unlink(String(file)),
+      fs,
+    );
+    const pending = cache.put("device-1", makeResult("stale"), cache.currentGeneration("device-1"));
+    await started.promise;
+    expect(cache.getRecentInMemoryForDevice("device-1")?.updatedAt).toBe("stale");
+    cache.clear("device-1");
+    release.resolve();
+    await pending;
+    expect(cache.getRecentInMemoryForDevice("device-1")).toBeUndefined();
+    expect(fs.getWrittenFiles().size).toBe(0);
+
+    await cache.put("device-1", makeResult("fresh"), cache.currentGeneration("device-1"));
+    expect(cache.getRecentInMemoryForDevice("device-1")?.updatedAt).toBe("fresh");
+    expect([...fs.getWrittenFiles().keys()]).toEqual([
+      path
+        .join(cacheDir, `observe_device-1_${timer.now()}_iprocess-1_g1.json`)
+        .replaceAll("\\", "/"),
+    ]);
   });
 
   test("creates the cache directory on construction if missing", function () {
@@ -336,10 +471,7 @@ describe("FileSystemObserveCacheStore", function () {
     await store.put("device-1", makeResult("old"));
     const oldFile = readdirSync(cacheDir).find((file) => file.endsWith(".json"));
     expect(oldFile).toBeDefined();
-    const expiredAt = timer.now() - OBSERVE_RESULT_CACHE_TTL_MS - 1;
-    utimesSync(path.join(cacheDir, oldFile!), new Date(expiredAt), new Date(expiredAt));
-
-    timer.advanceTime(1);
+    timer.advanceTime(OBSERVE_RESULT_CACHE_TTL_MS);
     await store.put("device-1", makeResult("fresh"));
 
     expect(store.getRecentInMemoryForDevice("device-1")?.updatedAt).toBe("fresh");

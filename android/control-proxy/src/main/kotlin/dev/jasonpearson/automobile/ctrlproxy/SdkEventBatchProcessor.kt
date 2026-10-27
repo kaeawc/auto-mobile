@@ -17,14 +17,7 @@ internal class SdkEventBatchProcessor(
   private sealed interface QueuedEvent {
     data class Batch(val batch: SdkEventBatch) : QueuedEvent
 
-    data class Navigation(
-      val destination: String,
-      val source: String,
-      val arguments: Map<String, String>,
-      val metadata: Map<String, String>,
-      val applicationId: String?,
-      val timestamp: Long,
-    ) : QueuedEvent
+    data class Navigation(val event: NavigationEventInput) : QueuedEvent
   }
 
   // BroadcastReceiver.onReceive cannot suspend. Keep a bounded handoff queue so a stalled
@@ -60,41 +53,16 @@ internal class SdkEventBatchProcessor(
     scope.isActive && queuedEvents.trySend(QueuedEvent.Batch(batch)).isSuccess
 
   /** Queues a single navigation event from the legacy navigation broadcast receiver. */
-  fun enqueueNavigationEvent(
-    destination: String,
-    source: String,
-    arguments: Map<String, String>,
-    metadata: Map<String, String>,
-    applicationId: String?,
-    timestamp: Long,
-  ): Boolean =
-    queuedEvents
-      .trySend(
-        QueuedEvent.Navigation(
-          destination = destination,
-          source = source,
-          arguments = arguments,
-          metadata = metadata,
-          applicationId = applicationId,
-          timestamp = timestamp,
-        ),
-      )
-      .isSuccess
+  fun enqueueNavigationEvent(event: NavigationEventInput): Boolean {
+    return queuedEvents.trySend(QueuedEvent.Navigation(event)).isSuccess
+  }
 
   private suspend fun process(event: QueuedEvent) {
     when (event) {
       is QueuedEvent.Batch -> process(event.batch)
       is QueuedEvent.Navigation -> {
         deliverNavigationEvent(
-          navigationEventAccumulator.addEvent(
-            destination = event.destination,
-            source = event.source,
-            arguments = event.arguments,
-            metadata = event.metadata,
-            applicationId = event.applicationId,
-            timestamp = event.timestamp,
-            publishLatestEvent = false,
-          ),
+          navigationEventAccumulator.addEvent(event.event, publishLatestEvent = false),
         )
       }
     }

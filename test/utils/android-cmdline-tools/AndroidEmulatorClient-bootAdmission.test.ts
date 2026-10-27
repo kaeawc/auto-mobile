@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { EventEmitter } from "node:events";
-import { Readable } from "node:stream";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import type { ChildProcess } from "node:child_process";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import type { BootedDevice, DeviceInfo, ExecResult } from "../../../src/models";
+import type { BootedDevice, ExecResult } from "../../../src/models";
 import type { AdmitColdBoot } from "../../../src/models/BootAdmission";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import {
@@ -26,16 +25,8 @@ const execResult = (stdout = ""): ExecResult => ({
   includes: (value) => stdout.includes(value),
 });
 
-function createChild(): ChildProcess & EventEmitter {
-  const child = new EventEmitter() as ChildProcess & EventEmitter;
-  child.stdout = new Readable({ read() {} }) as never;
-  child.stderr = new Readable({ read() {} }) as never;
-  child.killed = false;
-  child.kill = (() => {
-    child.killed = true;
-    return true;
-  }) as ChildProcess["kill"];
-  return child;
+function createChild(): FakeChildProcess {
+  return new FakeChildProcess();
 }
 
 function createClient(
@@ -47,23 +38,17 @@ function createClient(
   adb.setCommandResponse("emu avd name", execResult(`${AVD}\n`));
   const adbFactory: AdbClientFactory = { create: (): AdbExecutor => adb };
   const client = new AndroidEmulatorClient({
+    emulatorPathLocator: async () => "emulator",
     execAsync: async () => execResult(),
-    spawnFn: spawnFn as never,
+    spawnFn,
     timer: new FakeTimer(),
     adbFactory,
     avdConfigReader: { readConfig: async () => ({ ramSizeMb: 2048 }) },
     hostPortAvailabilityChecker: { isPortAvailable: () => true },
   });
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
-    async () => "emulator";
-  (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [
-    { name: AVD, platform: "android", isRunning: false },
-  ];
-  (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () =>
-    false;
-  (
-    client as unknown as { checkArchitectureCompatibility: () => Promise<{ compatible: boolean }> }
-  ).checkArchitectureCompatibility = async () => ({ compatible: true });
+  client.listAvds = async () => [{ name: AVD, platform: "android", isRunning: false }];
+  client.isAvdStarting = async () => false;
+  client.checkArchitectureCompatibility = async () => ({ compatible: true, hostArch: "arm64" });
   return client;
 }
 
@@ -86,14 +71,14 @@ function recordingAdmission(events: string[]): AdmitColdBoot {
 
 function spawnReportingStartup(events: string[]): {
   spawn: (command: string, args: string[]) => ChildProcess;
-  child: ChildProcess & EventEmitter;
+  child: FakeChildProcess;
 } {
   const child = createChild();
   return {
     child,
     spawn: () => {
       events.push("spawn");
-      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
       return child;
     },
   };
@@ -150,7 +135,7 @@ describe("AndroidEmulatorClient boot admission (#11181)", () => {
 
     expect(events).toEqual(["admit", "spawn", expect.stringMatching(/^handOff:emulator-\d+$/)]);
 
-    child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
     await launching;
     expect(events).toEqual(["admit", "spawn", events[2], events[2]]);
   });

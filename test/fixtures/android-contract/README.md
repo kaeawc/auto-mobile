@@ -14,8 +14,8 @@ cd android && AUTOMOBILE_FIXTURE_OUT_DIR=$PWD/../test/fixtures/android-contract 
 Without the environment variable, the Kotlin test asserts byte equality against the
 committed fixture. `AndroidWireContract.contract.test.ts` checks the host's exhaustive
 field manifests against it; `ctrlProxyProtocol.test.ts` also checks builder frames.
-Hand-built response additions are explicitly documented in the contract test pending
-#11877. Descriptor kinds describe the Kotlin schema, including JSON/bridge boundaries;
+Every device frame is encoded from its `WebSocketResponse` class (#11877), so a field the
+device sends is a field the descriptor declares. Descriptor kinds describe the Kotlin schema, including JSON/bridge boundaries;
 this guard is at the name/optionality level: it compares top-level field names,
 nullability and requiredness only. Field TYPES and nested-type contents are not
 compared.

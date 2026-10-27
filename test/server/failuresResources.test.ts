@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { registerFailuresResources } from "../../src/server/failuresResources";
 import { FakeFailureAnalyticsRepository } from "../fakes/FakeFailureAnalyticsRepository";
+import type { TimeAggregation } from "../../src/daemon/failuresStreamSocketTypes";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const NOW = Date.UTC(2026, 9, 5, 12, 0, 0);
@@ -34,7 +35,7 @@ describe("failures timeline resource (#10119)", () => {
     return JSON.parse(content.text ?? "{}") as Record<string, unknown>;
   }
 
-  test.each([
+  const timelineRows: Array<[string, string, string, TimeAggregation, number]> = [
     ["the bare URI", "automobile:failures/timeline", "24h", "hour", DAY],
     ["dateRange alone", "automobile:failures/timeline?dateRange=7d", "7d", "hour", 7 * DAY],
     ["aggregation alone", "automobile:failures/timeline?aggregation=day", "24h", "day", DAY],
@@ -52,7 +53,8 @@ describe("failures timeline resource (#10119)", () => {
       "week",
       30 * DAY,
     ],
-  ])(
+  ];
+  test.each(timelineRows)(
     "%s resolves with defaults and queries the requested window",
     async (_name, uri, dateRange, aggregation, duration) => {
       const body = await read(uri);

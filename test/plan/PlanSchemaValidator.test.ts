@@ -50,6 +50,59 @@ steps:
     }
   });
 
+  it("accepts the deviceCondition fixtures the tool offers, and rejects values it does not", () => {
+    const plan = (condition: string) => `
+name: fixture-plan
+steps:
+  - tool: setDeviceState
+    params:
+      deviceCondition:
+${condition}
+`;
+    const accepted = validator.validateYaml(
+      plan(
+        "        rootState: rooted-detectable\n        faults:\n          battery: low\n          thermal: critical\n          storage: full\n          dontKeepActivities: on",
+      ),
+    );
+    expect(accepted.errors ?? []).toEqual([]);
+    expect(accepted.valid).toBe(true);
+
+    for (const accepts of [
+      "        faults:\n          revokePermission:\n            package: com.example.app\n            permission: android.permission.CAMERA",
+      "        faults:\n          revokePermission: unset",
+      "        faults:\n          disablePackage:\n            package: com.example.app\n          clearPackageData: unset",
+      "        faults:\n          killApp:\n            package: com.example.app\n            mode: forceStop\n          trimMemory:\n            package: com.example.app\n            level: RUNNING_CRITICAL",
+      "        faults:\n          killApp: unset\n          trimMemory: unset",
+      "        faults:\n          corruptAppFile:\n            package: com.example.app\n            path: databases/app.db\n            mode: overwrite",
+      "        faults:\n          corruptAppFile: unset",
+    ]) {
+      const result = validator.validateYaml(plan(accepts));
+      expect(result.errors ?? []).toEqual([]);
+      expect(result.valid).toBe(true);
+    }
+
+    for (const rejected of [
+      "        rootState: god-mode",
+      "        faults:\n          battery: explode",
+      "        faults:\n          dontKeepActivities: off",
+      "        faults:\n          storage: overflowing",
+      "        faults:\n          gravity: low",
+      "        faults:\n          revokePermission: on",
+      "        faults:\n          disablePackage: on",
+      "        faults:\n          corruptAppFile:\n            package: com.example.app\n            path: ../other/app.db\n            mode: overwrite",
+      "        faults:\n          corruptAppFile:\n            package: com.example.app\n            path: databases/app.db\n            mode: shred",
+      "        faults:\n          killApp:\n            package: com.example.app\n            mode: terminate",
+      "        faults:\n          trimMemory:\n            package: com.example.app\n            level: LOW",
+      "        faults:\n          trimMemory:\n            package: com.example.app",
+      "        faults:\n          clearPackageData:\n            package: nodots",
+      "        faults:\n          revokePermission:\n            package: com.example.app",
+      "        faults:\n          revokePermission:\n            package: nodots\n            permission: CAMERA",
+      "        faults:\n          revokePermission:\n            package: com.example.app\n            permission: CAMERA\n            user: 10",
+    ]) {
+      expect(validator.validateYaml(plan(rejected)).valid).toBe(false);
+    }
+  });
+
   it("reports the window error for an unquoted out-of-window clock instant", () => {
     const result = validator.validateYaml(`
 name: clock-plan
@@ -102,6 +155,13 @@ steps:
         ).valid,
       ).toBe(false);
     }
+  });
+
+  it("accepts a screenLock step and rejects a recorded, still-redacted credential", () => {
+    const plan = (credential: string) =>
+      `name: lock\nsteps: [{tool: setDeviceState, params: {screenLock: {type: pin, credential: "${credential}"}}}]`;
+    expect(validator.validateYaml(plan("1357")).valid).toBe(true);
+    expect(validator.validateYaml(plan("<redacted>")).valid).toBe(false);
   });
 
   it("validates native tap geometry and rejects incomplete provenance", () => {
@@ -210,12 +270,11 @@ steps:
   it("matches the live dragAndDrop endpoint and recursive container shapes", () => {
     const live = toolDefinitions.find((tool) => tool.name === "dragAndDrop")?.inputSchema;
     const endpoint = live?.properties?.source?.anyOf?.[0];
-    expect(planSchema.$defs.dragAndDropSelector.properties.container).toEqual({
-      ...endpoint?.properties?.container,
-      $ref: "#/$defs/dragAndDropContainer",
-    });
-    expect(planSchema.$defs.dragAndDropSelector.properties.selectionStrategy).toEqual(
-      endpoint?.properties?.selectionStrategy,
+    expect({ ...endpoint?.properties?.container, $ref: "#/$defs/dragAndDropContainer" }).toEqual(
+      planSchema.$defs.dragAndDropSelector.properties.container,
+    );
+    expect(endpoint?.properties?.selectionStrategy).toEqual(
+      planSchema.$defs.dragAndDropSelector.properties.selectionStrategy,
     );
     const container = JSON.parse(
       JSON.stringify(live?.$defs?.__schema0).replaceAll(

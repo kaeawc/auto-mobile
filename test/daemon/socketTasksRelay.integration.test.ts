@@ -1,3 +1,4 @@
+import { taskEligibleByName } from "../../src/server/tasks/toolCallTasks";
 import {
   afterAll,
   afterEach,
@@ -15,9 +16,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
 import { z } from "zod/v4";
-import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DaemonClient, type DaemonMethodCallOptions } from "../../src/daemon/client";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { InProcessMcpDispatcher } from "../../src/daemon/inProcessMcpDispatcher";
+import type { Session } from "../../src/daemon/sessionManager";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { StatelessMcpRequestScope } from "../../src/daemon/statelessMcpHttpEndpoint";
 import {
@@ -32,15 +35,15 @@ import type {
   McpTaskStore,
   NewMcpTask,
 } from "../../src/db/mcpTaskRepository";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
-import { TASKS_EXTENSION_ID } from "../../src/server/tasks/mcpTasksExtension";
+import { TASKS_EXTENSION_ID } from "../../src/daemon/tasks/mcpTasksExtension";
 import {
   DefaultTaskManager,
   TASK_INTERRUPTED_MESSAGE,
   type TaskManager,
-} from "../../src/server/tasks/TaskManager";
+} from "../../src/daemon/tasks/TaskManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer } from "../../src/utils/SystemTimer";
@@ -63,7 +66,7 @@ const CAPTURE = "__tasks_relay_capture__";
 /** The device-binding tool the proxy binds a session from: a fake boot behind a gate. */
 const START_DEVICE = "startDevice";
 const BOOTED_SESSION = "tasks-relay-booted-session";
-const ELIGIBLE = new Set([ECHO, WAIT, START_DEVICE]);
+const ELIGIBLE = taskEligibleByName(new Set([ECHO, WAIT, START_DEVICE]));
 const DECLARED_META = {
   "io.modelcontextprotocol/clientCapabilities": { extensions: { [TASKS_EXTENSION_ID]: {} } },
 };
@@ -184,22 +187,44 @@ class RecordingDaemonClient extends DaemonClient {
 
   override callDaemonMethod(
     method: string,
-    params: Record<string, any>,
-    ...rest: DropFirstTwo<Parameters<DaemonClient["callDaemonMethod"]>>
+    params: Record<string, any> = {},
+    options?: DaemonMethodCallOptions,
   ): Promise<any> {
     this.methods.push({ method, params });
-    return super.callDaemonMethod(method, params, ...rest);
+    return super.callDaemonMethod(method, params, options);
   }
 }
 
 type DropFirstTwo<T extends unknown[]> = T extends [unknown, unknown, ...infer Rest] ? Rest : never;
 
-function fakeDaemonState() {
+function bootedSession(sessionId: string): Session {
+  return {
+    sessionId,
+    assignedDevice: "emulator-5554",
+    platform: "android",
+    createdAt: 0,
+    lastUsedAt: 0,
+    activityGeneration: 0,
+    expiresAt: Number.MAX_SAFE_INTEGER,
+    cacheData: {},
+    lastHeartbeat: 0,
+    sessionTimeoutMs: 60_000,
+    heartbeatTimeoutMs: 60_000,
+    heartbeatTimeoutSource: "default",
+    hasReceivedHeartbeat: true,
+    ownership: "owned",
+    livenessPolicy: "heartbeat",
+  };
+}
+
+function fakeDaemonState(): DaemonStateAccess {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: (sessionId: string) => sessionId === BOOTED_SESSION,
       // The session the fake boot minted is live, so the proxy's binding heartbeat is answered.
-      getSession: (sessionId: string) => (sessionId === BOOTED_SESSION ? { sessionId } : null),
+      getSession: (sessionId: string) =>
+        sessionId === BOOTED_SESSION ? bootedSession(sessionId) : null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
     }),
@@ -209,6 +234,7 @@ function fakeDaemonState() {
       releaseDevice: async () => {},
       resolveAutolockSessionForMcpSession: () => undefined,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
 }
 

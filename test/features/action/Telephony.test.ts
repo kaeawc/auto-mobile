@@ -4,6 +4,7 @@ import { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeEmulatorConsoleClient } from "../../fakes/FakeEmulatorConsoleClient";
 import { FakeIosSdkTriggerSender } from "../../fakes/FakeIosSdkTriggerSender";
+import { FakeDeviceTraits, androidDeviceTraits } from "../../fakes/FakeDeviceTraits";
 
 const iosDevice = {
   deviceId: "00008101-001C711E0EE0001E",
@@ -16,14 +17,15 @@ describe("Telephony", () => {
   let consoleClient: FakeEmulatorConsoleClient;
   let device: BootedDevice;
   let telephony: Telephony;
+  let deviceTraits: FakeDeviceTraits;
 
   beforeEach(() => {
     adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "1", stderr: "" });
+    deviceTraits = new FakeDeviceTraits(androidDeviceTraits());
 
     consoleClient = new FakeEmulatorConsoleClient();
     device = { deviceId: "emulator-5554", platform: "android", name: "Pixel_5" } as BootedDevice;
-    telephony = new Telephony(device, adb, () => consoleClient);
+    telephony = new Telephony(device, adb, () => consoleClient, undefined, deviceTraits);
   });
 
   describe("phoneCall", () => {
@@ -81,7 +83,7 @@ describe("Telephony", () => {
 
     test("returns supported:false for a physical Android device (non-emulator serial)", async () => {
       device = { deviceId: "HT85N1A02890", platform: "android", name: "Pixel" } as BootedDevice;
-      telephony = new Telephony(device, adb, () => consoleClient);
+      telephony = new Telephony(device, adb, () => consoleClient, undefined, deviceTraits);
 
       const result = await telephony.phoneCall({ action: "call", phoneNumber: "5551234567" });
 
@@ -91,8 +93,8 @@ describe("Telephony", () => {
       expect(consoleClient.calls.length).toBe(0);
     });
 
-    test("returns supported:false when ro.kernel.qemu is not '1' even for emulator-NNNN serials", async () => {
-      adb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "", stderr: "" });
+    test("returns supported:false when the emulator flag is not set even for emulator-NNNN serials", async () => {
+      deviceTraits.setTraits(androidDeviceTraits({ isEmulator: false }));
 
       const result = await telephony.phoneCall({ action: "call", phoneNumber: "5551234567" });
 
@@ -132,7 +134,7 @@ describe("Telephony", () => {
 
     test("returns supported:false on physical devices", async () => {
       device = { deviceId: "HT85N1A02890", platform: "android", name: "Pixel" } as BootedDevice;
-      telephony = new Telephony(device, adb, () => consoleClient);
+      telephony = new Telephony(device, adb, () => consoleClient, undefined, deviceTraits);
 
       const result = await telephony.sendSms({ phoneNumber: "5551234567", message: "hi" });
 
@@ -157,10 +159,16 @@ describe("Telephony", () => {
     test("uses port from the device serial when constructing the console client", async () => {
       let receivedPort = -1;
       device = { deviceId: "emulator-5560", platform: "android", name: "Pixel_5" } as BootedDevice;
-      telephony = new Telephony(device, adb, (port) => {
-        receivedPort = port;
-        return consoleClient;
-      });
+      telephony = new Telephony(
+        device,
+        adb,
+        (port) => {
+          receivedPort = port;
+          return consoleClient;
+        },
+        undefined,
+        deviceTraits,
+      );
 
       await telephony.sendSms({ phoneNumber: "5551234567", message: "hi" });
 

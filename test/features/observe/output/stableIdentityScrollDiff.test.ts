@@ -1,3 +1,5 @@
+import { wireCapture } from "../../../helpers/wireCapture";
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import {
   diffObserveResult,
@@ -180,7 +182,12 @@ test("label-only row identity avoids a false changed label when a list scrolls (
       })),
     };
     assignStableViewIds(root);
-    return { viewHierarchy: { hierarchy: { node: root } } } as ObserveResult;
+    return buildObserveResult({
+      updatedAt: 0,
+      screenSize: { width: 200, height: 200 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: wireCapture({ hierarchy: { node: root } }),
+    });
   };
   const before = capture(["Alice", "Bob", "Carol"]);
   const after = capture(["Bob", "Carol", "Dave"]);

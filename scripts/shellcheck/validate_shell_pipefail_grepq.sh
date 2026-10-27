@@ -15,7 +15,7 @@
 set -euo pipefail
 export LC_ALL=C
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/lib/file-selection.sh disable=SC1091
+# shellcheck source=scripts/lib/file-selection.sh
 source "$SCRIPT_DIR/../lib/file-selection.sh"
 ROOT="${SHELL_PIPEFAIL_GREPQ_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 BASELINE="${SHELL_PIPEFAIL_GREPQ_BASELINE:-$ROOT/scripts/shellcheck/pipefail-grepq-baseline.txt}"

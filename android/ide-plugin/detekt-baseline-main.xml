@@ -2,22 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:TestPlanQuickFixes.kt:TestPlanQuickFixFactory$fun createQuickFixes: List&lt;LocalQuickFix&gt;</ID>
-    <ID>CyclomaticComplexMethod:TestTimingPanel.kt:@Composable fun TestTimingPanel</ID>
-    <ID>InjectDispatcher:FeatureFlagsConfigurable.kt:FeatureFlagsViewModel$IO</ID>
-    <ID>InjectDispatcher:TestTimingPanel.kt:IO</ID>
-    <ID>LongMethod:AutoMobileSettingsConfigurable.kt:@Composable private fun AutoMobileSettingsContent</ID>
-    <ID>LongMethod:FeatureFlagsConfigurable.kt:@Composable private fun AccessibilityConfigPanel</ID>
-    <ID>LongMethod:TestTimingPanel.kt:@Composable fun TestTimingPanel</ID>
-    <ID>NestedBlockDepth:TestPlanExternalAnnotator.kt:TestPlanExternalAnnotator$private fun findTextRange: TextRange</ID>
-    <ID>SwallowedException:TestPlanDetector.kt:TestPlanDetector$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:FeatureFlagsConfigurable.kt:FeatureFlagsViewModel$error: Exception</ID>
-    <ID>TooGenericExceptionCaught:TestPlanDetector.kt:TestPlanDetector$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:TestTimingPanel.kt:e: Exception</ID>
-    <ID>TooManyFunctions:JsonSchemaIntrospector.kt:JsonSchemaIntrospector</ID>
-    <ID>TooManyFunctions:TestPlanCompletionProvider.kt:TestPlanCompletionProvider : CompletionProvider</ID>
-    <ID>TooManyFunctions:TestPlanSchemaStore.kt:TestPlanSchemaStore</ID>
-    <ID>TooManyFunctions:TestTimingPanel.kt:dev.jasonpearson.automobile.ide.TestTimingPanel.kt</ID>
-    <ID>UnsafeCallOnNullableType:TestPlanSchemaStore.kt:TestPlanSchemaStore$rootSchema!!</ID>
   </CurrentIssues>
 </SmellBaseline>

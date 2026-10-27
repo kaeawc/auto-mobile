@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
 import ts from "typescript";
 
@@ -7,6 +8,7 @@ const ROOT = join(import.meta.dir, "..", "..");
 const FILES = [
   "src/features/action/LaunchApp.ts",
   "src/features/action/InstallApp.ts",
+  "src/features/action/IosAppInstaller.ts",
   "src/features/action/TerminateApp.ts",
   "src/features/action/UninstallApp.ts",
   "src/features/action/ClearAppData.ts",
@@ -72,7 +74,7 @@ function udidShapeReferences(source: string): number[] {
 
 // Read and parse each scoped file once, outside per-test timing.
 const references = new Map(
-  FILES.map((file) => [file, udidShapeReferences(readFileSync(join(ROOT, file), "utf8"))]),
+  FILES.map((file) => [file, udidShapeReferences(readGuardFile(join(ROOT, file)))]),
 );
 
 describe("iOS app operations use backend kind rather than UDID shape", () => {

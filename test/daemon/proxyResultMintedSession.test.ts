@@ -4,12 +4,12 @@ import { DaemonMcpProxy, DaemonToolOutcomeUnknownError } from "../../src/daemon/
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import {
   DAEMON_VERSION,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -193,7 +193,7 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
   });
 
   test.each(["listDevices", "listDeviceImages"])(
-    "platform filters retain bound policy for %s",
+    "platform-filtered %s never inherits the proxy binding (#13796)",
     async (name) => {
       const client = new FakeDaemonClient({
         toolResultFor: (tool) =>
@@ -211,7 +211,6 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
         expect(client.callToolCalls.at(-1)?.params).toEqual(
           withProxyOwnerToken({
             platform: "android",
-            sessionUuid: "android-session",
           }),
         );
       } finally {
@@ -818,11 +817,11 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
       manager.statusResult = { running: false };
       const boundMs = DAEMON_SHUTDOWN_TIMEOUT_MS + DAEMON_RESTART_HANDOFF_TIMEOUT_MS;
       await timer.advanceTimeAsync(DAEMON_SHUTDOWN_TIMEOUT_MS - 1);
-      expect(Reflect.get(proxy, "daemonShutdownDisconnect")).toBeInstanceOf(Promise);
+      expect(proxy.getInternalsForTesting().daemonShutdownBarrier.pending).toBeInstanceOf(Promise);
       await timer.advanceTimeAsync(1);
       await timer.advanceTimeAsync(DAEMON_RESTART_HANDOFF_TIMEOUT_MS);
       expect(timer.now()).toBe(boundMs);
-      expect(Reflect.get(proxy, "daemonShutdownDisconnect")).toBeNull();
+      expect(proxy.getInternalsForTesting().daemonShutdownBarrier.pending).toBeNull();
       expect(settled).toBe(true);
       expect(error).toMatchObject({ reason: "daemon_stalled", handover: { attempts: 3 } });
       expect(manager.startCallCount).toBe(0);

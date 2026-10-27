@@ -11,7 +11,7 @@ import {
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
   SUSPECT_GRACE_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -30,6 +30,7 @@ const IDLE_MS = 60_000;
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
+  releaseDevice: async () => {},
 };
 
 interface Rig {

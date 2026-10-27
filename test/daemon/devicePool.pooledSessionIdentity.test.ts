@@ -60,8 +60,10 @@ function dispose({ manager, timer }: Context): void {
 test("a session bound through the pool is recorded as that device's identity", async () => {
   const context = await createContext();
   try {
-    expect(context.pool["pooledSessionIdentities"].get(context.original)).toBe(context.session);
-    expect(context.pool.reserveShutdownSessionIdentity(ORIGINAL.deviceId).session).toBe(
+    expect(context.pool.testHooks.pooledSessionIdentities.get(context.original)).toBe(
+      context.session,
+    );
+    expect(context.pool.testHooks.reserveShutdownSessionIdentity(ORIGINAL.deviceId).session).toBe(
       context.session,
     );
   } finally {
@@ -74,8 +76,8 @@ test("System UI ANR recovery moves the session identity to the replacement devic
   const { pool, session, original, replacement } = context;
   try {
     // System UI recovery reserves the session for terminal release before rebinding it.
-    expect(pool.reserveShutdownSessionIdentity(ORIGINAL.deviceId).session).toBe(session);
-    await pool["restoreSystemUiAnrRecoverySession"](
+    expect(pool.testHooks.reserveShutdownSessionIdentity(ORIGINAL.deviceId).session).toBe(session);
+    await pool.testHooks.restoreSystemUiAnrRecoverySession(
       session,
       ORIGINAL.deviceId,
       replacement,
@@ -83,15 +85,17 @@ test("System UI ANR recovery moves the session identity to the replacement devic
     );
 
     expect(session.assignedDevice).toBe(REPLACEMENT.deviceId);
-    expect(pool["pooledSessionIdentities"].get(replacement)).toBe(session);
+    expect(pool.testHooks.pooledSessionIdentities.get(replacement)).toBe(session);
     // The replacement's identity is trusted: reserving it reaches the session, which is already
     // reserved for terminal release by the recovery above.
-    expect(() => pool.reserveShutdownSessionIdentity(REPLACEMENT.deviceId)).toThrow(
+    expect(() => pool.testHooks.reserveShutdownSessionIdentity(REPLACEMENT.deviceId)).toThrow(
       SessionTerminalReleaseInProgressError,
     );
     // The original entry still maps to the session object, but the session has moved on.
-    expect(pool["pooledSessionIdentities"].get(original)).toBe(session);
-    expect(pool.reserveShutdownSessionIdentity(ORIGINAL.deviceId).session).toBeUndefined();
+    expect(pool.testHooks.pooledSessionIdentities.get(original)).toBe(session);
+    expect(
+      pool.testHooks.reserveShutdownSessionIdentity(ORIGINAL.deviceId).session,
+    ).toBeUndefined();
   } finally {
     dispose(context);
   }
@@ -101,7 +105,7 @@ test("System UI ANR recovery moves the session identity to the replacement devic
 async function bindWithSnapshot(context: Context) {
   const { pool, manager } = context;
   const device = pool.getDevice(REPLACEMENT.deviceId)!;
-  const snapshot = pool["snapshotSessionAssignment"](device);
+  const snapshot = pool.testHooks.snapshotSessionAssignment(device);
   await pool.bindOrReuseDeviceSession({
     sessionId: "autolock-session",
     deviceId: REPLACEMENT.deviceId,
@@ -115,9 +119,9 @@ test("a cancelled autolock acquisition restores the device when the pool still h
   const context = await createContext();
   try {
     const { device, snapshot, session } = await bindWithSnapshot(context);
-    expect(context.pool["pooledSessionIdentities"].get(device)).toBe(session);
+    expect(context.pool.testHooks.pooledSessionIdentities.get(device)).toBe(session);
 
-    context.pool["autolockManager"]["restoreCancelledAutolockAssignment"](
+    context.pool.testHooks.autolockManager["restoreCancelledAutolockAssignment"](
       device,
       session,
       snapshot,
@@ -134,9 +138,9 @@ test("a cancelled autolock acquisition does not roll back when no matching sessi
   try {
     const { device, snapshot, session } = await bindWithSnapshot(context);
     // Models createSessionOrRestore returning early, which records no identity for the device.
-    context.pool["pooledSessionIdentities"].delete(device);
+    context.pool.testHooks.pooledSessionIdentities.delete(device);
 
-    context.pool["autolockManager"]["restoreCancelledAutolockAssignment"](
+    context.pool.testHooks.autolockManager["restoreCancelledAutolockAssignment"](
       device,
       session,
       snapshot,
@@ -159,11 +163,11 @@ test("shutdown identity completion ignores a recorded session that a same-id rep
       heartbeatTimeoutMs: 1_000,
     });
     expect(live).not.toBe(stale);
-    expect(pool["pooledSessionIdentities"].get(original)).toBe(stale);
-    const identity = pool.reserveShutdownSessionIdentity(ORIGINAL.deviceId);
+    expect(pool.testHooks.pooledSessionIdentities.get(original)).toBe(stale);
+    const identity = pool.testHooks.reserveShutdownSessionIdentity(ORIGINAL.deviceId);
     expect(identity.session).toBeUndefined();
 
-    pool["completeShutdownSessionIdentity"](ORIGINAL.deviceId, original, identity);
+    pool.testHooks.completeShutdownSessionIdentity(ORIGINAL.deviceId, original, identity);
 
     expect(identity.session).toBeUndefined();
     expect(identity.releaseSession).toBeUndefined();
@@ -186,11 +190,13 @@ test("an in-flight session creation is not captured for shutdown until the pool 
     });
     // Published in the session manager, but the pool has not validated or recorded it yet, so a
     // lookup derived from the session manager would capture it mid-creation.
-    expect(pool["pooledSessionIdentities"].get(context.replacement)).toBeUndefined();
-    expect(pool.reserveShutdownSessionIdentity(REPLACEMENT.deviceId).session).toBeUndefined();
+    expect(pool.testHooks.pooledSessionIdentities.get(context.replacement)).toBeUndefined();
+    expect(
+      pool.testHooks.reserveShutdownSessionIdentity(REPLACEMENT.deviceId).session,
+    ).toBeUndefined();
 
     await creating;
-    expect(pool["pooledSessionIdentities"].get(context.replacement)).toBe(
+    expect(pool.testHooks.pooledSessionIdentities.get(context.replacement)).toBe(
       manager.getSession("creating-session")!,
     );
   } finally {

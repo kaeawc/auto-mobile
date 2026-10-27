@@ -1,3 +1,5 @@
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
+import { forbiddenHeaderOf } from "./prototypeEgressPolicy";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import {
@@ -113,26 +115,32 @@ function urlError(url: string): string | undefined {
   }
 }
 
-function intoError(into: string): string | undefined {
+/** The `into` rule `request` and `platform` share: a `/data` object member, never an element. */
+export function prototypeIntoError(into: string, action: string): string | undefined {
   const bound = into
     .split("/")
     .map((segment) => (segment === "{index}" ? "0" : segment))
     .join("/");
   const pointer = prototypeDataPathPointer(bound);
   if (pointer === undefined) {
-    return "request into is /data/<RFC 6901 pointer> and addresses a member of data";
+    return `${action} into is /data/<RFC 6901 pointer> and addresses a member of data`;
   }
   const last = pointer.slice(pointer.lastIndexOf("/") + 1);
   return /^\d+$/.test(last) || last === "-"
-    ? "request into must name an object member, not an array element, so into__meta can be written beside it"
+    ? `${action} into must name an object member, not an array element, so into__meta can be written beside it`
     : undefined;
 }
 
 const memberPath = (path: string, name: string): string =>
-  /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? `${path}.${name}` : `${path}[${JSON.stringify(name)}]`;
+  prototypeContractPatterns.pathKey.test(name)
+    ? `${path}.${name}`
+    : `${path}[${JSON.stringify(name)}]`;
 
 /** An invalid header name, or one repeated in another letter case (names are case-insensitive). */
 function headerNameProblem(name: string, seen: Set<string>): string | undefined {
+  if (forbiddenHeaderOf({ [name]: "" }) !== undefined) {
+    return "Forbidden request header";
+  }
   if (!HEADER_NAME.test(name)) {
     return "Invalid header name";
   }
@@ -142,6 +150,11 @@ function headerNameProblem(name: string, seen: Set<string>): string | undefined 
   }
   seen.add(lower);
   return undefined;
+}
+
+function headerLineProblem(field: string, value: unknown, literal: unknown): boolean {
+  const text = typeof value === "string" ? value : literal;
+  return field === "headers" && typeof text === "string" && /[\r\n]/.test(text);
 }
 
 function literalEntryError(
@@ -160,6 +173,9 @@ function literalEntryError(
       return { path: entryPath, message: nameProblem };
     }
     const literal = (value as { value?: unknown } | null)?.value;
+    if (headerLineProblem(field, value, literal)) {
+      return { path: entryPath, message: "CR/LF in header value" };
+    }
     if (
       typeof value === "object" &&
       value !== null &&
@@ -188,7 +204,8 @@ function requestActionError(
   if (action.body !== undefined && (method === "GET" || method === "HEAD")) {
     return { path: `${at}.body`, message: "A GET or HEAD request cannot have a body" };
   }
-  const into = typeof action.into === "string" ? intoError(action.into) : undefined;
+  const into =
+    typeof action.into === "string" ? prototypeIntoError(action.into, "request") : undefined;
   if (into !== undefined) {
     return { path: `${at}.into`, message: into };
   }
@@ -225,15 +242,17 @@ export function prototypeRequestsError(
 }
 
 /**
- * `statusKey` must be a declared state key holding a string, because the runtime writes
- * `loading`, `success` and `error` to it. `state` is the spec's declared state.
+ * `statusKey` (on `request` and `platform`) must be a declared state key holding a string,
+ * because the runtime writes `loading`, `success` and `error` to it. `state` is the spec's
+ * declared state.
  */
 export function prototypeRequestStatusKeyError(
   action: Record<string, unknown>,
   at: string,
   state: Record<string, unknown>,
 ): PrototypeRequestActionError | undefined {
-  const key = action.type === "request" ? action.statusKey : undefined;
+  const key =
+    action.type === "request" || action.type === "platform" ? action.statusKey : undefined;
   if (typeof key !== "string") {
     return undefined;
   }

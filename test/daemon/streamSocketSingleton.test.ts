@@ -1,3 +1,7 @@
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
+import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { describe, test, expect, spyOn } from "bun:test";
 import { logger } from "../../src/utils/logger";
 import * as appearanceSocketServer from "../../src/daemon/appearanceSocketServer";
@@ -72,7 +76,12 @@ const cases = [
   {
     name: "DeviceGestureRecording",
     Server: deviceGestureRecordingSocketServer.DeviceGestureRecordingSocketServer,
-    start: deviceGestureRecordingSocketServer.startDeviceGestureRecordingSocketServer,
+    start: () =>
+      deviceGestureRecordingSocketServer.startDeviceGestureRecordingSocketServer(
+        DeviceReadiness.createInstance(
+          new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils()),
+        ),
+      ),
     stop: deviceGestureRecordingSocketServer.stopDeviceGestureRecordingSocketServer,
     path: deviceGestureRecordingSocketServer.getDeviceGestureRecordingSocketPath,
   },
@@ -115,7 +124,9 @@ describe("stream singleton characterization", () => {
       ];
       const path = spyOn(row.Server.prototype, "getSocketPath").mockReturnValue("singleton-test");
       const state = spyOn(row.Server.prototype, "isListening").mockImplementation(() => listening);
-      const start = spyOn(row.Server.prototype, "start").mockImplementation(async function () {
+      const start = spyOn(row.Server.prototype, "start").mockImplementation(async function (
+        this: object,
+      ) {
         instances.push(this);
         if (startError) {
           throw startError;

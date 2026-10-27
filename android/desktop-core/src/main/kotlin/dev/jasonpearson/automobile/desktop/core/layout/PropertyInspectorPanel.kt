@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -78,101 +77,14 @@ fun PropertyInspectorPanel(
           }
         }
       } else {
-        // Identity section
-        PropertySection(title = "Identity") {
-          PropertyRow("Class", getSimpleClassName(element.className))
-          PropertyRow("Full Class", element.className, isSecondary = true)
-          element.resourceId?.let { PropertyRow("Resource ID", it) }
-          element.contentDescription?.let { PropertyRow("Content Desc", it) }
-          PropertyRow("Element ID", element.id, isSecondary = true)
-          Spacer(Modifier.height(4.dp))
-          CopySelectorButton(element)
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        // Bounds section
-        PropertySection(title = "Bounds") {
-          PropertyRow("Position", "${element.bounds.left}, ${element.bounds.top}")
-          PropertyRow("Size", "${element.bounds.width} x ${element.bounds.height}")
-          PropertyRow("Right", "${element.bounds.right}", isSecondary = true)
-          PropertyRow("Bottom", "${element.bounds.bottom}", isSecondary = true)
-          PropertyRow(
-            "Center",
-            "${element.bounds.centerX}, ${element.bounds.centerY}",
-            isSecondary = true,
-          )
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        // State section
-        PropertySection(title = "State") {
-          StateCheckbox("Clickable", element.isClickable)
-          StateCheckbox("Enabled", element.isEnabled)
-          StateCheckbox("Focused", element.isFocused)
-          StateCheckbox("Selected", element.isSelected)
-          StateCheckbox("Scrollable", element.isScrollable)
-          StateCheckbox("Checkable", element.isCheckable)
-          if (element.isCheckable) {
-            StateCheckbox("Checked", element.isChecked)
-          }
-        }
-
-        // SDK extras section (if present)
-        if (element.extras.isNotEmpty()) {
-          Spacer(Modifier.height(16.dp))
-          PropertySection(title = "SDK Properties") {
-            for ((key, value) in element.extras.toSortedMap()) {
-              val label = key.removePrefix("sdk.")
-              PropertyRow(label, value)
-            }
-          }
-        }
-
-        // Text content section (if present)
-        if (!element.text.isNullOrEmpty()) {
-          Spacer(Modifier.height(16.dp))
-          PropertySection(title = "Content") {
-            Column {
-              Text(
-                "Text",
-                fontSize = 10.sp,
-                color = colors.text.normal.copy(alpha = 0.5f),
-              )
-              Box(
-                modifier =
-                  Modifier.fillMaxWidth()
-                    .padding(top = 4.dp)
-                    .background(
-                      colors.text.normal.copy(alpha = 0.05f),
-                      RoundedCornerShape(4.dp),
-                    )
-                    .padding(8.dp),
-              ) {
-                Text(
-                  element.text!!,
-                  fontSize = 11.sp,
-                  color = colors.text.normal,
-                )
-              }
-            }
-          }
-        }
-
-        // Hierarchy info
-        Spacer(Modifier.height(16.dp))
-        PropertySection(title = "Hierarchy") {
-          PropertyRow("Depth", "${element.depth}")
-          PropertyRow("Children", "${element.children.size}")
-        }
+        ElementProperties(element)
       }
     }
   }
 }
 
 @Composable
-private fun PropertySection(
+internal fun PropertySection(
   title: String,
   content: @Composable () -> Unit,
 ) {
@@ -203,7 +115,7 @@ private fun PropertySection(
 }
 
 @Composable
-private fun PropertyRow(
+internal fun PropertyRow(
   label: String,
   value: String,
   isSecondary: Boolean = false,
@@ -251,7 +163,7 @@ private fun PropertyRow(
  * Gives the property inspector the same "copy selector" affordance as the hierarchy tree (#5205).
  */
 @Composable
-private fun CopySelectorButton(element: UIElementInfo) {
+internal fun CopySelectorButton(element: UIElementInfo) {
   val colors = SharedTheme.globalColors
   val clipboard = LocalClipboardWriter.current
   Row(
@@ -277,7 +189,7 @@ private fun CopySelectorButton(element: UIElementInfo) {
 }
 
 @Composable
-private fun StateCheckbox(
+internal fun StateCheckbox(
   label: String,
   isChecked: Boolean,
 ) {
@@ -314,8 +226,4 @@ private fun StateCheckbox(
       }
     }
   }
-}
-
-private fun getSimpleClassName(fullName: String): String {
-  return fullName.substringAfterLast(".")
 }

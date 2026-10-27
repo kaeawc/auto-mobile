@@ -18,7 +18,8 @@ const EXCLUDED_WITH_REASON: Readonly<Record<string, string>> = {
   "ffmpeg-execution-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh",
   "sdkmanager-execution-boundary":
     "PR node-host-integration-tests: sdkManagerExecutionBoundary.integration.test.ts scans src/",
-  "archive-extraction-boundary": "PR node-unit-tests: archiveExtractionBoundary.test.ts scans src/",
+  "archive-extraction-boundary":
+    "PR ts-build-and-test: archiveExtractionBoundary.test.ts scans src/",
   "xcodebuild-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh (diff ratchet)",
   "daemon-launcher-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh",
   "process-safety": "PR ts-build-and-test: lint -> check-boundaries.sh",
@@ -90,7 +91,12 @@ describe("Fast Validation registry coverage", () => {
       // Neighbouring contract: offline links remain a separate step, and the
       // existing docs guards stay in the main fan-out.
       expect(mainSelected).toEqual(
-        expect.arrayContaining(["docs-assets", "env-var-docs", "lfs-pointers"]),
+        expect.arrayContaining([
+          "docs-assets",
+          "env-var-docs",
+          "lfs-pointers",
+          "prototype-spec-models",
+        ]),
       );
       // BATS is path-filtered (#10889), so the real-tree scans it used to be
       // the only PR coverage for must run in Fast Validation on every PR.

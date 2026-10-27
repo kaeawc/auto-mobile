@@ -38,13 +38,19 @@ import {
   linuxProcessGenerationToken,
 } from "../../src/daemon/processGeneration";
 import { DaemonLauncher } from "../../src/daemon/DaemonLauncher";
-import type { BuildIdentity } from "../../src/daemon/buildIdentity";
+import { spyOnPrivate } from "../helpers/spyOnPrivate";
+import type { BuildIdentity } from "../../src/daemon/wire/buildIdentity";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
-import type { DaemonProcessSpawner, ExtractionCleaner } from "../../src/daemon/manager";
+import type {
+  DaemonProcessSpawner,
+  DaemonStartResult,
+  ExtractionCleaner,
+} from "../../src/daemon/manager";
 import type { DaemonLaunchedProcess } from "../../src/daemon/DaemonLauncher";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { DaemonClientLike } from "../../src/daemon/client";
+import { RESTART_ADMISSION_TIMEOUT_MS } from "../../src/daemon/manager/DaemonRestartCoordinator";
 import { ActionableError } from "../../src/models";
 import {
   DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
@@ -76,7 +82,14 @@ import {
   CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
+
+/** `startUnlocked` is private: it requires the caller to already hold the startup lock. */
+const spyOnStartUnlocked = (manager: object) =>
+  spyOnPrivate<[DaemonOptions, AbortSignal?, boolean?], Promise<DaemonStartResult>>(
+    manager,
+    "startUnlocked",
+  );
 
 function writeStopPidFile(
   pidFilePath: string,
@@ -433,13 +446,17 @@ describe("DaemonManager restart", () => {
     try {
       await expect(manager.restart({}, expected)).resolves.toBe("joined");
 
-      expect(prepareSpy).toHaveBeenCalledWith("ide/prepareRestart", {
-        pid: incumbentPid,
-        startedAt: 100,
-        version: "0.0.73",
-        buildId: "incumbent-build",
-        entryScript: "/old/dist/src/index.js",
-      });
+      expect(prepareSpy).toHaveBeenCalledWith(
+        "ide/prepareRestart",
+        {
+          pid: incumbentPid,
+          startedAt: 100,
+          version: "0.0.73",
+          buildId: "incumbent-build",
+          entryScript: "/old/dist/src/index.js",
+        },
+        { timeoutMs: RESTART_ADMISSION_TIMEOUT_MS },
+      );
       expect(clientOptions).toEqual({ clientIdentity: null });
       expect(signaler.signals).toEqual([]);
       expect(livePids).toEqual(new Set([unrelatedPid]));
@@ -601,7 +618,7 @@ describe("DaemonManager restart", () => {
       startedAt: 100,
       socketPath,
     });
-    const startSpy = spyOn(manager, "startUnlocked").mockImplementation(async () => {
+    const startSpy = spyOnStartUnlocked(manager).mockImplementation(async () => {
       expect(contender.acquireLock()).toBe(false);
       expect(existsSync(pidFilePath)).toBe(false);
       expect(existsSync(socketPath)).toBe(false);
@@ -779,7 +796,7 @@ describe("DaemonManager acceptance-session restart", () => {
       buildId: "acceptance-build",
       entryScript: "/acceptance/dist/src/index.js",
     });
-    const startSpy = spyOn(manager, "startUnlocked").mockResolvedValue("started");
+    const startSpy = spyOnStartUnlocked(manager).mockResolvedValue("started");
 
     try {
       await expect(
@@ -879,7 +896,7 @@ describe("DaemonManager acceptance-session restart", () => {
       entryScript: "/acceptance/dist/src/index.js",
       socketPath,
     });
-    const startSpy = spyOn(manager, "startUnlocked").mockImplementation(async () => {
+    const startSpy = spyOnStartUnlocked(manager).mockImplementation(async () => {
       expect(existsSync(lockPath)).toBe(true);
       return "started";
     });
@@ -982,7 +999,7 @@ describe("DaemonManager acceptance-session restart", () => {
       entryScript: "/acceptance/dist/src/index.js",
       socketPath,
     });
-    const startSpy = spyOn(manager, "startUnlocked").mockResolvedValue("started");
+    const startSpy = spyOnStartUnlocked(manager).mockResolvedValue("started");
 
     try {
       await expect(
@@ -1086,7 +1103,7 @@ describe("DaemonManager control-state recovery", () => {
       processGenerationToken: "old-generation",
       entryScript: "/old/dist/src/index.js",
     });
-    const startSpy = spyOn(manager, "startUnlocked").mockResolvedValue("started");
+    const startSpy = spyOnStartUnlocked(manager).mockResolvedValue("started");
 
     try {
       await expect(manager.recoverControlState({}, async () => false)).resolves.toBe("restarted");
@@ -2568,6 +2585,7 @@ describe("DaemonLauncher command resolution", () => {
     expect(launch).toEqual({
       command: "/tools/bunx",
       args: ["-y", "@kaeawc/auto-mobile@1.2.3", "--daemon-mode"],
+      packageRunner: true,
     });
   });
 
@@ -2598,6 +2616,7 @@ describe("DaemonLauncher command resolution", () => {
     expect(launch).toEqual({
       command: "/tools/bunx",
       args: ["-y", "@kaeawc/auto-mobile@0.0.39", "--daemon-mode"],
+      packageRunner: true,
     });
   });
 });
@@ -3679,7 +3698,7 @@ describe("Daemon manager process detection", () => {
       socketPath: join(directory, "daemon.sock"),
       processFinder,
       launcher,
-      peerSocketReachability: { isReachable: async () => false },
+      peerSocketReachability: { probe: async () => "absent" },
       portAvailabilityChecker: portChecker,
     });
 
@@ -5612,7 +5631,7 @@ describe("Daemon manager process detection", () => {
           command: process.execPath,
           args: [entryScript, "--daemon-mode"],
         }),
-        peerSocketReachability: { isReachable: async () => false },
+        peerSocketReachability: { probe: async () => "absent" },
       });
 
       await expect(manager.start()).rejects.toThrow(
@@ -5679,7 +5698,7 @@ describe("Daemon manager process detection", () => {
           command: process.execPath,
           args: [entryScript, "--daemon-mode"],
         }),
-        peerSocketReachability: { isReachable: async () => false },
+        peerSocketReachability: { probe: async () => "absent" },
       });
 
       await manager.start({ port: 1234 });
@@ -5876,7 +5895,7 @@ describe("Daemon manager process detection", () => {
           command: process.execPath,
           args: [entryScript, "--daemon-mode"],
         }),
-        peerSocketReachability: { isReachable: async () => false },
+        peerSocketReachability: { probe: async () => "absent" },
       });
 
       await expect(manager.start()).rejects.toThrow(
@@ -5927,7 +5946,7 @@ describe("Daemon manager process detection", () => {
           command: process.execPath,
           args: [join(dir, "entry.js"), "--daemon-mode"],
         }),
-        peerSocketReachability: { isReachable: async () => false },
+        peerSocketReachability: { probe: async () => "absent" },
       });
 
       await expect(manager.start()).rejects.toThrow(

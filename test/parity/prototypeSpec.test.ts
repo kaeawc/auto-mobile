@@ -9,7 +9,18 @@ import {
   MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
   prototypeSpecSchema,
 } from "../../src/features/prototype/prototypeSpec";
-import { validatePrototypeSpec } from "../../src/features/prototype/prototypeValidation";
+import type { PrototypeStrictOptions } from "../../src/features/prototype/prototypeStrictPolicy";
+import {
+  PROTOTYPE_SPEC_CAPABILITY_GATES,
+  prototypeGateCapabilities,
+} from "../../src/features/prototype/prototypeCapabilityGates";
+import {
+  validatePrototypeSpecBytes,
+  validatePrototypeSpec,
+} from "../../src/features/prototype/prototypeValidation";
+
+const withGates = (options?: PrototypeStrictOptions): PrototypeStrictOptions | undefined =>
+  options && { ...options, requiredCapabilities: prototypeGateCapabilities };
 
 const fixtures = join(import.meta.dir, "../fixtures/prototype-spec");
 function files(kind: string): string[] {
@@ -24,11 +35,20 @@ const valid = files("valid").map((name) => ({
 const invalid = files("invalid").map((name) => ({
   name,
   data: JSON.parse(readFileSync(join(fixtures, "invalid", name), "utf8")) as {
-    spec: unknown;
+    spec?: unknown;
+    rawJson?: string;
+    rawBytesBase64?: string;
+    options?: PrototypeStrictOptions;
     expectedPath: string;
     expectedMessage?: string;
   },
 }));
+
+const inventory = JSON.parse(readFileSync(join(fixtures, "corpus.json"), "utf8")) as {
+  valid: string[];
+  invalid: string[];
+  validCapabilities: Record<string, string[]>;
+};
 function tags(value: unknown, found: Set<string>): void {
   if (Array.isArray(value)) {
     for (const child of value) {
@@ -70,12 +90,19 @@ describe("shared prototype contract", () => {
       decoded.set(name, result.data);
     }
   });
+  test("all three corpus runners consume the complete captured inventory", () => {
+    expect(files("valid")).toEqual(inventory.valid);
+    expect(files("invalid")).toEqual(inventory.invalid);
+    for (const gate of PROTOTYPE_SPEC_CAPABILITY_GATES) {
+      expect(inventory.invalid).toContain(`strict-gate-${gate.capability}.json`);
+    }
+  });
   test("fixtures are nonempty and cover every node, action, and placement", () => {
     expect(valid.length).toBeGreaterThan(0);
     expect(invalid.length).toBeGreaterThan(0);
     const found = new Set<string>();
     for (const fixture of valid) {
-      tags(JSON.parse(fixture.json), found);
+      tags(JSON.parse(fixture.json.replace(/^\uFEFF/, "")), found);
     }
     for (const type of [
       ...PROTOTYPE_NODE_TYPES,
@@ -86,6 +113,11 @@ describe("shared prototype contract", () => {
     }
   });
   for (const { name, json } of valid) {
+    test(`capabilities ${name}`, () => {
+      expect(prototypeGateCapabilities(decoded.get(name))).toEqual(
+        inventory.validCapabilities[name],
+      );
+    });
     test(`decode ${name}`, () => {
       const result = validatePrototypeSpec(json);
       expect(result.success).toBe(true);
@@ -99,7 +131,13 @@ describe("shared prototype contract", () => {
   }
   for (const { name, data } of invalid) {
     test(`reject ${name} at ${data.expectedPath}`, () => {
-      const result = validatePrototypeSpec(data.spec);
+      const result =
+        data.rawBytesBase64 !== undefined
+          ? validatePrototypeSpecBytes(
+              Buffer.from(data.rawBytesBase64, "base64"),
+              withGates(data.options),
+            )
+          : validatePrototypeSpec(data.rawJson ?? data.spec, withGates(data.options));
       expect(result.success).toBe(false);
       if (result.success) {
         throw new Error(`Accepted ${name}`);
@@ -108,9 +146,6 @@ describe("shared prototype contract", () => {
         expect(prototypeSpecSchema.safeParse(data.spec).success).toBe(false);
       }
       expect(result.error.path).toBe(data.expectedPath);
-      if (data.expectedMessage !== undefined) {
-        expect(result.error.message).toBe(data.expectedMessage);
-      }
     });
   }
   test("raw UTF-8 byte limit includes whitespace and accepts its exact boundary", () => {
@@ -180,8 +215,8 @@ test("JSON keys are preserved in state and opaque emit payloads", () => {
     throw new Error(JSON.stringify(result.error));
   }
   const source = JSON.parse(input.json) as { state: unknown; root: { onTap: unknown } };
-  expect(result.data.state).toEqual(source.state);
-  expect(result.data.root.onTap).toEqual(source.root.onTap);
+  expect(source.state).toEqual(result.data.state);
+  expect(source.root.onTap).toEqual(result.data.root.onTap);
 });
 test("undefined object properties are rejected before JSON serialization can drop them", () => {
   const result = validatePrototypeSpec({

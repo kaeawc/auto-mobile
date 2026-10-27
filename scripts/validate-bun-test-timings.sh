@@ -4,6 +4,14 @@
 # less") against the JUnit reporter's per-test time, which already excludes
 # beforeAll/beforeEach fixture work.
 #
+# Modes (in precedence order):
+# - BUN_TEST_TIMING_BASE_REF: measure changed tests or reuse lane reports, as in CI.
+# - --run-unit-lane (anywhere) or BUN_TEST_TIMING_RUN_LANE=1: run the full unit
+#   lane; the optional positional argument is its output path.
+# - An existing .xml file or directory containing *.xml: measure those reports
+#   directly, running only isolated rechecks of provisional offenders.
+# Without a base ref, running a lane always requires explicit opt-in.
+#
 # A single wall-clock sample on a shared CI runner is not evidence: GC pauses,
 # module warm-up, and co-tenant load are charged to whichever test happens to be
 # running when they land. Three tests have gone red on a 1-3ms overshoot that
@@ -32,17 +40,69 @@ if ! { : 3>&1; } 2>/dev/null; then
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-# shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
+# shellcheck source=scripts/lib/bun-unit-test.sh
 source "$ROOT/scripts/lib/bun-unit-test.sh"
 runner_os="${RUNNER_OS:-}"
 if [[ -z "$runner_os" && "$(uname -s)" == Darwin ]]; then
   runner_os=macOS
 fi
 configure_bun_unit_test "$ROOT" "$runner_os"
-# shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+# shellcheck source=scripts/ios/run_with_timeout.sh
 source "$ROOT/scripts/ios/run_with_timeout.sh"
 
-report_path="${1:-scratch/bun-test-report.xml}"
+usage() {
+  cat >&2 <<'EOF'
+Usage: scripts/validate-bun-test-timings.sh [--run-unit-lane] [report.xml|report-directory]
+
+An existing .xml file or directory containing *.xml is measured directly.
+To run the full unit lane, pass --run-unit-lane (anywhere) or set
+BUN_TEST_TIMING_RUN_LANE=1; only then is the positional argument an output path
+(default: scratch/bun-test-report.xml).
+BUN_TEST_TIMING_BASE_REF takes precedence and preserves changed-test/CI mode.
+EOF
+}
+
+report_path=""
+run_unit_lane="${BUN_TEST_TIMING_RUN_LANE:-0}"
+for arg in "$@"; do
+  case "$arg" in
+    --run-unit-lane) run_unit_lane=1 ;;
+    -*) usage; exit 2 ;;
+    *)
+      if [[ -n "$report_path" || -z "$arg" ]]; then
+        usage
+        exit 2
+      fi
+      report_path="$arg"
+      ;;
+  esac
+done
+
+if [[ -z "${BUN_TEST_TIMING_BASE_REF:-}" && "$run_unit_lane" != 1 ]]; then
+  has_report=false
+  if [[ -f "$report_path" && "$report_path" == *.xml ]]; then
+    has_report=true
+  elif [[ -d "$report_path" ]]; then
+    for source_report in "$report_path"/*.xml; do
+      if [[ -f "$source_report" ]]; then
+        has_report=true
+        break
+      fi
+    done
+  fi
+  if [[ "$has_report" != true ]]; then
+    echo "Expected an existing JUnit XML file or directory of XML reports; a full lane requires --run-unit-lane." >&2
+    usage
+    exit 2
+  fi
+fi
+
+report_path="${report_path:-scratch/bun-test-report.xml}"
+# Keep direct-directory recheck scratch outside its inputs, preserving legacy
+# output paths in BASE_REF and explicit lane modes.
+if [[ -z "${BUN_TEST_TIMING_BASE_REF:-}" && "$run_unit_lane" != 1 && -d "$report_path" ]]; then
+  while [[ "$report_path" == */ && "$report_path" != / ]]; do report_path="${report_path%/}"; done
+fi
 report_dir="${report_path%.xml}.d"
 recheck_dir="${report_path%.xml}.recheck.d"
 max_ms="${BUN_TEST_MAX_MS:-100}"
@@ -87,6 +147,39 @@ fi
 
 mkdir -p "$(dirname "$report_path")"
 
+# The staging/recheck directories are derived from the caller-supplied report
+# path (`<report>.d`, `<report>.recheck.d`), so an unrelated sibling directory
+# can sit at the same name. Only a directory this script created earlier (it
+# carries the marker) may be deleted; anything else non-empty is refused rather
+# than removed (#14500).
+scratch_marker=".bun-test-timings-scratch"
+reset_scratch_dir() {
+  local dir="$1"
+  case "$dir" in
+    "" | / | . | .. | "$HOME" | "$HOME/")
+      echo "Refusing to use '${dir}' as timing scratch." >&2
+      exit 2
+      ;;
+  esac
+  if [[ -L "$dir" ]]; then
+    echo "Refusing to reuse symlinked timing scratch '${dir}'; remove it and retry." >&2
+    exit 2
+  fi
+  if [[ -d "$dir" && ! -e "$dir/$scratch_marker" ]]; then
+    if [[ -n "$(ls -A "$dir" 2> /dev/null)" ]]; then
+      echo "Refusing to delete '${dir}': it was not created by this script (no ${scratch_marker}). Remove it or pick another report path." >&2
+      exit 2
+    fi
+  elif [[ -d "$dir" ]]; then
+    rm -rf "$dir"
+  elif [[ -e "$dir" ]]; then
+    echo "Refusing to replace non-directory '${dir}' with timing scratch." >&2
+    exit 2
+  fi
+  mkdir -p "$dir"
+  : > "$dir/$scratch_marker"
+}
+
 # Rows are separated by US (0x1f) rather than tab: a parameterized test title can
 # contain a literal tab, and a tab-delimited row would shift the duration out of
 # its field and read as zero, silently clearing an over-budget test.
@@ -107,8 +200,7 @@ testcase_rows() {
 changed_test_files=()
 
 if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
-  rm -rf "$report_dir"
-  mkdir -p "$report_dir"
+  reset_scratch_dir "$report_dir"
   changed_files=()
   while IFS= read -r file; do
     changed_files+=("$file")
@@ -146,7 +238,10 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
     esac
   done
 
-  if [[ "$affects_unit_tests" == "true" ]]; then
+  # Instrumented reports screen the complete merged suite, even for a docs-only
+  # merge. Their durations never decide failure: offenders run below using the
+  # uninstrumented canonical unit command and its isolated median.
+  if [[ "$affects_unit_tests" == true || "${BUN_TEST_TIMING_REPORTS_INSTRUMENTED:-false}" == true ]]; then
     source_report_dir="${BUN_TEST_TIMING_REPORT_DIR:-}"
     if [[ -n "$source_report_dir" ]]; then
       has_source_report=false
@@ -193,8 +288,21 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
     echo "No changed unit tests to validate against the ${max_ms}ms budget." || true
     exit 0
   fi
-else
+elif [[ "$run_unit_lane" == 1 ]]; then
   AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir" bash scripts/test-ts.sh unit
+elif [[ -d "$report_path" ]]; then
+  report_dir="$report_path"
+else
+  # Stage a single report for the same glob/calibration/recheck path as shards.
+  reset_scratch_dir "$report_dir"
+  # A fixed, visible name also includes dot-prefixed inputs in the shard glob.
+  cp "$report_path" "$report_dir/report.xml"
+fi
+
+# A unit lane may recreate its junit directory and drop the marker. The derived
+# directory is scratch this run populated, so re-mark it for the next run.
+if [[ "$report_dir" == "${report_path%.xml}.d" && -d "$report_dir" && ! -L "$report_dir" ]]; then
+  : > "$report_dir/$scratch_marker"
 fi
 
 set -- "$report_dir"/*.xml
@@ -223,6 +331,11 @@ max_slowdown="${BUN_TEST_TIMING_MAX_SLOWDOWN:-4}"
 infra_slowdown="${BUN_TEST_TIMING_INFRA_SLOWDOWN:-4}"
 require_positive_int BUN_TEST_TIMING_MAX_SLOWDOWN "$max_slowdown"
 require_positive_int BUN_TEST_TIMING_INFRA_SLOWDOWN "$infra_slowdown"
+if [[ "${BUN_TEST_TIMING_REPORTS_INSTRUMENTED:-false}" == true ]]; then
+  # Instrumentation is not runner contention. Screen at the unscaled 100ms
+  # threshold and fail closed if a plain recheck cannot verify every offender.
+  export BUN_TEST_TIMING_SLOWDOWN=1
+fi
 runner_slowdown="${BUN_TEST_TIMING_SLOWDOWN:-}"
 if [[ -z "$runner_slowdown" ]]; then
   if ! runner_slowdown="$(bun "$ROOT/scripts/lib/runner-calibration.ts" slowdown "$report_dir")"; then
@@ -254,8 +367,7 @@ if [[ -n "$runner_slowdown" ]]; then
   echo "$calibration_note" || true
 fi
 
-rm -rf "$recheck_dir"
-mkdir -p "$recheck_dir"
+reset_scratch_dir "$recheck_dir"
 # Per-shard slowdowns (final attempt only) scope the budget to the shard that
 # produced each sample. An explicit BUN_TEST_TIMING_SLOWDOWN applies to all.
 shard_slowdowns_file="$recheck_dir/shard-slowdowns.tsv"
@@ -529,8 +641,12 @@ recheck_probe_slowdown() {
   if [[ -n "${BUN_TEST_TIMING_PROBE_COMMAND:-}" ]]; then
     value="$("$BUN_TEST_TIMING_PROBE_COMMAND" 2> /dev/null)" || value=""
   else
-    # shellcheck disable=SC2310 # Deliberate: a probe failure must not exit the gate.
-    value="$(run_with_timeout 15 bun "$ROOT/scripts/lib/runner-calibration.ts" measure 2> /dev/null)" || value=""
+    local probe_status caller_options="$-"
+    set +e
+    value="$(run_with_timeout 15 bun "$ROOT/scripts/lib/runner-calibration.ts" measure 2> /dev/null)"
+    probe_status=$?
+    if [[ "$caller_options" == *e* ]]; then set -e; fi
+    if [[ "$probe_status" -ne 0 ]]; then value=""; fi
   fi
   if [[ ! "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
     echo "Recheck runner probe returned no usable slowdown; treating it as 1.00x." >&2 || true

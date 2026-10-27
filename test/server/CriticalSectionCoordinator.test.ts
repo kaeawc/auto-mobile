@@ -1,9 +1,14 @@
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
-import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
+import { mock, describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
-import { DeviceLostError, rememberDeviceLossAbort } from "../../src/models/DeviceLostError";
+import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { rememberDeviceLossAbort } from "../../src/utils/deviceLossAbortRegistry";
 import { ActionableError } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 describe("CriticalSectionCoordinator", () => {
   let coordinator: CriticalSectionCoordinator;
@@ -83,12 +88,9 @@ describe("CriticalSectionCoordinator", () => {
         try {
           expect(error).toBe(reason);
           expect(entered).toBe(false);
-          const state = coordinator as unknown as {
-            barrierCounts: Map<string, Set<string>>;
-            barrierResolvers: Map<string, unknown[]>;
-          };
-          expect(state.barrierCounts.get("abort-lock")?.has("A")).toBe(false);
-          expect(state.barrierResolvers.get("abort-lock")).toHaveLength(0);
+          const state = coordinator.getBarrierState("abort-lock");
+          expect(state.arrivedDeviceIds).not.toContain("A");
+          expect(state.waiterCount).toBe(0);
           expect(fakeTimer.getPendingTimeouts()).toEqual([]);
           expect(removed).toHaveBeenCalledWith("abort", expect.any(Function));
         } finally {
@@ -383,12 +385,9 @@ describe("CriticalSectionCoordinator", () => {
     fakeTimer.advanceTime(100);
     await expect(firstRound).rejects.toThrow(/Timeout waiting for critical section/);
 
-    const state = coordinator as unknown as {
-      barrierCounts: Map<string, Set<string>>;
-      barrierResolvers: Map<string, unknown[]>;
-    };
-    expect(state.barrierCounts.get(lockName)?.has("device-1")).toBe(false);
-    expect(state.barrierResolvers.get(lockName)).toHaveLength(0);
+    const state = coordinator.getBarrierState(lockName);
+    expect(state.arrivedDeviceIds).not.toContain("device-1");
+    expect(state.waiterCount).toBe(0);
 
     const device2 = coordinator.awaitBarrier(lockName, "device-2", 2, 100);
     let device2Entered = false;

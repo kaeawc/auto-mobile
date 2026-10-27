@@ -63,3 +63,63 @@ export interface PackageSigningInspection {
   signing: PackageSigning;
   observation: PackageSigningObservation;
 }
+
+/** The `embedded.mobileprovision` summary of an installed iOS bundle (#14099). */
+export interface IosProvisioningProfileSummary {
+  name: string;
+  uuid: string;
+  teamIds: string[];
+  teamName?: string;
+  /** ISO 8601, or null when the profile's ExpirationDate is unreadable. */
+  expirationDate: string | null;
+  /** Compared against host time at the read. */
+  expired: boolean | null;
+  /** UDIDs the profile lists; null for profiles that provision all devices or list none. */
+  provisionedDeviceCount: number | null;
+  provisionsAllDevices: boolean;
+}
+
+/** iOS has no APK signer set: the identity is the CodeDirectory hash plus team and chain. */
+export type IosPackageSigning =
+  | {
+      status: "available";
+      /** Lowercase hex CDHash of the main executable's CodeDirectory. */
+      cdHash: string | null;
+      /** Signed bundle identifier. */
+      identifier: string | null;
+      /** Null for ad-hoc signatures (Simulator builds). */
+      teamId: string | null;
+      /** Leaf certificate common name; null for ad-hoc signatures. */
+      signingIdentity: string | null;
+      adHoc: boolean;
+      /** Certificate chain, leaf first. */
+      authorities: string[];
+      /** Signed entitlements as JSON; null when the signature carries none. */
+      entitlements: Record<string, unknown> | null;
+      /** Null when the bundle embeds no provisioning profile (Simulator and App Store builds). */
+      provisioningProfile: IosProvisioningProfileSummary | null;
+      /** Per-part read failures that left a field null instead of failing the whole read. */
+      warnings?: string[];
+    }
+  | { status: "unsigned"; reason: string }
+  | { status: "unavailable"; reason: string };
+
+export interface IosPackageSigningObservation {
+  /** Simulator bundles are read in place; physical bundles are copied off the device first. */
+  source: "simctl-app-container+codesign" | "devicectl-copy+codesign";
+  fresh: true;
+  observedAt: string;
+  scope: { deviceId: string; appId: string };
+}
+
+/** iOS variant of the `inspectPackageSigning` result; the Android shape above is unchanged. */
+export interface IosPackageSigningInspection {
+  appId: string;
+  platform: "ios";
+  deviceId: string;
+  deviceKind: "simulator" | "physical";
+  presence: PackagePresence;
+  unknownReason?: string;
+  signing: IosPackageSigning;
+  observation: IosPackageSigningObservation;
+}

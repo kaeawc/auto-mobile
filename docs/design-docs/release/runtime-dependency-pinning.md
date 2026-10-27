@@ -58,18 +58,11 @@ small `bundledDependencies` set for the conflicting Jimp paths:
   the package. The native `@img/sharp-*` binaries remain unbundled and
   platform-selected.
 
-The selected bundle adds about 17 MiB to the package. Source maps no longer embed
-sources by default; opt out for local debugging with
-`AUTOMOBILE_SOURCEMAP_STRIP_SOURCES=false bun run build`.
-The historical unpacked-size guard assumed trimming was enabled: 22.5 MiB (23,592,960 bytes).
-On 2026-10-05, staged `npm pack --dry-run --json` measured 18,345,761 trimmed
-bytes; adding 3 MiB and rounding up to a whole MiB set a 21 MiB cap (#9571). #12457
-raised it to 22.5 MiB after the static migration bundle (#12449) added about
-0.2 MB; the trimmed pack now measures 22,369,648 bytes.
-Since 2026-10-18 the external source maps are excluded from the tarball (unused at runtime), so the pack measures 14,073,766 bytes under a 15 MiB (15,728,640 byte) cap.
-The same staging copy measured 23,838,787 bytes untrimmed for reference. It used
-the worktree's existing `dist/`, schemas, package metadata, README, pack hooks,
-and complete bundled dependency closure; the worktree's `node_modules` was untouched.
+The selected bundle adds about 17 MiB to the package. Source maps do not embed sources by default
+(opt out locally with `AUTOMOBILE_SOURCEMAP_STRIP_SOURCES=false bun run build`) and external source
+maps are excluded from the tarball (unused at runtime). The unpacked-size guard runs on the trimmed
+pack and is capped at 20,132,659 bytes (16 MiB + 20%; #9571, #12457); a pack with source maps restored
+(23,061,125 bytes) fails, and an untrimmed pack is larger still.
 
 The pinned graph is mirrored in `scripts/release/runtime-graph.json` (the
 manifest) and enforced by:
@@ -108,43 +101,34 @@ require the `dependabot[bot]` actor and a head repository matching this reposito
 They use read-only permissions, bounded timeouts, and checkouts that disable LFS
 and persist no credentials. All actions are pinned to full commit SHAs.
 
-The **regenerate** job checks out the exact PR head SHA, installs dependencies,
-builds, runs `pin-runtime-deps.ts --write`, installs again, and formats. It receives
-no secrets. It runs `--check` before uploading an artifact containing only
-`package.json`, `bun.lock`, and `scripts/release/runtime-graph.json`, preserving
-their repository-relative paths. A failed check fails the job: no artifact is
-uploaded and the dependent push job does not run. The artifact name includes the
-PR number, run ID, and run attempt; retention is one day.
+The **regenerate** job checks out the exact PR head SHA, installs, builds, runs
+`pin-runtime-deps.ts --write`, installs again, formats, and runs `--check` before uploading an
+artifact holding only `package.json`, `bun.lock` and `scripts/release/runtime-graph.json` (repo-relative
+paths; name includes PR number, run ID and attempt; one-day retention). It receives no secrets. A
+failed check fails the job, so no artifact is uploaded and the push job does not run.
 
-The split addresses a specific threat: lifecycle scripts and dependency code
-executed on the PR runner can rewrite the commit script, plant Git hooks, change
-Git config, shadow commands through `PATH`/`GITHUB_PATH`, or poison later steps
-through `GITHUB_ENV` (for example `BASH_ENV` or loader variables). A final-step
-secret in that same job would still be exposed to the tampered environment.
+The split exists because lifecycle scripts and dependency code on the PR runner can rewrite the
+commit script, plant Git hooks, change Git config, shadow commands via `PATH`/`GITHUB_PATH`, or
+poison later steps via `GITHUB_ENV` (`BASH_ENV`, loader variables); a secret in that same job would
+be exposed to the tampered environment.
 
-The **push** job uses a fresh runner, never executes PR code, and restores no
-cache. It sparse-checks out the trusted commit script from the repository's
-**default branch** into a separate directory and downloads only the named
-artifact. Only the final trusted script step receives `AUTO_MOBILE_PR_TOKEN` via
-its environment. The script validates the artifact as data: exactly three
-regular files and the necessary directories, no symlinks, hardlinks, extra paths
-or dotfiles, a 20 MiB cap per file (well above current pin-file sizes), and one
-JSON object each for the package and graph manifests, parsed with `jq`.
+The **push** job uses a fresh runner, never executes PR code, and restores no cache. It sparse-checks
+out the trusted commit script from the **default branch** and downloads only the named artifact. Only
+the final script step receives `AUTO_MOBILE_PR_TOKEN`. The script:
 
-The script creates a temporary repository with templates disabled, ignores
-global/system Git config, and disables hooks, filesystem monitors, external
-protocol helpers, credential helpers, and commit signing on every Git invocation.
-It fetches only the PR branch and verifies that its head still equals the starting
-SHA. It populates only the index, never the PR working tree, avoiding PR symlinks
-while copying the three validated files. It stages their exact bytes with
-`hash-object --no-filters` and `update-index --cacheinfo`, bypassing PR attribute
-filters and encoding conversions; directory conflicts fail without pushing. It
-commits as `github-actions[bot]` and uses a normal fast-forward push; concurrent
-branch updates are rejected. No changes produce a successful notice. The raw
-PAT and its base64 encoding are registered with Actions masking; authentication
-uses an HTTP extraheader supplied through `GIT_CONFIG_COUNT` environment entries,
-never a remote URL, command argument, or persisted Git configuration. The temporary
-repository is removed on exit.
+- validates the artifact as data: exactly three regular files plus needed directories, no symlinks,
+  hardlinks, extra paths or dotfiles, a 20 MiB cap per file, and one JSON object each for the package
+  and graph manifests (parsed with `jq`);
+- builds a temporary repository with templates disabled, global/system config ignored, and hooks,
+  filesystem monitors, external protocol helpers, credential helpers and signing disabled on every Git call;
+- fetches only the PR branch and verifies its head still equals the starting SHA;
+- populates only the index (never the PR working tree), staging exact bytes with
+  `hash-object --no-filters` and `update-index --cacheinfo` to bypass attribute filters and encoding
+  conversions; directory conflicts fail without pushing;
+- commits as `github-actions[bot]` and does a normal fast-forward push (concurrent updates are rejected;
+  no changes is a successful notice);
+- masks the raw PAT and its base64 form, authenticates via an HTTP extraheader through
+  `GIT_CONFIG_COUNT` env entries (never a URL, argument or persisted config), and removes the temp repo on exit.
 
 The trigger is `pull_request`, not `pull_request_target`: dependency code runs
 with read-only permissions rather than a privileged base-repository context.
@@ -158,19 +142,14 @@ runner can tamper with its own check and artifact, so its check is a correctness
 gate, not a security attestation. The default branch and pinned actions remain
 part of the trusted boundary.
 
-**Owner setup:** configure the existing `AUTO_MOBILE_PR_TOKEN` PAT in this
-repository's **Dependabot secrets** store too, with branch push access. Dependabot
-`pull_request` runs receive Dependabot secrets, not Actions secrets. Missing
-configuration produces a clear error even when the artifact has no changes.
-The trusted script must first be present on the default branch before this
-workflow can use it. The default `GITHUB_TOKEN` is read-only here and its pushes
-would not retrigger CI. The PAT follow-up commit retriggers `pull_request` CI,
-giving the new head fresh required checks. That run's actor is the PAT owner,
-so the Dependabot-only guard prevents a loop. No skip-CI marker is used.
-
-A human/PAT push makes Dependabot stop auto-rebasing that PR. Use
-`@dependabot recreate` when it needs to be regenerated; Dependabot's new update
-reruns this workflow.
+**Owner setup:** configure the existing `AUTO_MOBILE_PR_TOKEN` PAT in this repository's **Dependabot
+secrets** store too, with branch push access (Dependabot `pull_request` runs receive Dependabot
+secrets, not Actions secrets). Missing configuration errors clearly even when the artifact has no
+changes. The trusted script must already be on the default branch. The default `GITHUB_TOKEN` is
+read-only here and its pushes would not retrigger CI; the PAT follow-up commit retriggers
+`pull_request` CI with fresh required checks, and its actor (the PAT owner) means the Dependabot-only
+guard prevents a loop. No skip-CI marker is used. A human/PAT push makes Dependabot stop auto-rebasing
+that PR; use `@dependabot recreate` to regenerate.
 
 Real version conflicts still need human intervention, as do coordinated
 `sharp`/`@img` updates ignored by `.github/dependabot.yml`. There is no new
@@ -180,8 +159,6 @@ redundant nested entry. For example, #8330 retained
 If regeneration or `--check` reports
 `Residual runtime dependency owners are not bundled: file-type`, the job fails
 loudly and a human must prune the redundant entry and refresh the graph.
-Reviewing `.github/dependabot.yml` ignore rules after this workflow lands is a
-follow-up; this change leaves those rules unchanged.
 
 ### Manual refresh
 

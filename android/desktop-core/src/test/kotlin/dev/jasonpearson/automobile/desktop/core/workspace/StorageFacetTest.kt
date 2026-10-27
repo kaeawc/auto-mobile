@@ -20,6 +20,7 @@ import dev.jasonpearson.automobile.desktop.core.platform.AppVersion
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.storage.DatabaseInspector
+import dev.jasonpearson.automobile.desktop.core.storage.DatabaseInspectorData
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.update.FakeUpdateController
@@ -81,7 +82,9 @@ class StorageFacetTest {
     val platform = mutableStateOf(StoragePlatform.iOS)
     setContent {
       MaterialTheme {
-        DatabaseInspector(databases = emptyList(), platform = platform.value)
+        DatabaseInspector(
+          data = DatabaseInspectorData(databases = emptyList(), platform = platform.value),
+        )
       }
     }
     onNodeWithText("No databases detected").assertIsDisplayed()
@@ -98,8 +101,11 @@ class StorageFacetTest {
     setContent {
       MaterialTheme {
         StorageFacet(
-          column = DeviceColumn(deviceId = "d", name = "Pixel", platform = Platform.Android),
-          loadInstalledApps = { Result.Success(emptyList()) },
+          options =
+            StorageFacetOptions(
+              column = DeviceColumn(deviceId = "d", name = "Pixel", platform = Platform.Android),
+              loadInstalledApps = { Result.Success(emptyList()) },
+            ),
         )
       }
     }
@@ -113,9 +119,12 @@ class StorageFacetTest {
     setContent {
       MaterialTheme {
         StorageFacet(
-          column =
-            DeviceColumn(deviceId = "ios-sim-1", name = "iPhone 16", platform = Platform.Ios),
-          loadInstalledApps = { Result.Success(emptyList()) },
+          options =
+            StorageFacetOptions(
+              column =
+                DeviceColumn(deviceId = "ios-sim-1", name = "iPhone 16", platform = Platform.Ios),
+              loadInstalledApps = { Result.Success(emptyList()) },
+            ),
         )
       }
     }
@@ -128,8 +137,11 @@ class StorageFacetTest {
     setContent {
       MaterialTheme {
         StorageFacet(
-          column = DeviceColumn(deviceId = "d", name = "Pixel", platform = Platform.Android),
-          loadInstalledApps = { Result.Error(RuntimeException("daemon down")) },
+          options =
+            StorageFacetOptions(
+              column = DeviceColumn(deviceId = "d", name = "Pixel", platform = Platform.Android),
+              loadInstalledApps = { Result.Error(RuntimeException("daemon down")) },
+            ),
         )
       }
     }
@@ -151,15 +163,18 @@ class StorageFacetTest {
           MaterialTheme {
             if (visible.value) {
               StorageFacet(
-                column =
-                  DeviceColumn(
-                    deviceId = "dev-1",
-                    name = "Pixel",
-                    platform = Platform.Android,
-                    deviceSessionUuid = "epoch-a",
+                options =
+                  StorageFacetOptions(
+                    column =
+                      DeviceColumn(
+                        deviceId = "dev-1",
+                        name = "Pixel",
+                        platform = Platform.Android,
+                        deviceSessionUuid = "epoch-a",
+                      ),
+                    loadInstalledApps = { resolvedApps() },
+                    observationStreamFactory = { fake },
                   ),
-                loadInstalledApps = { resolvedApps() },
-                observationStreamFactory = { fake },
               )
             }
           }
@@ -185,10 +200,13 @@ class StorageFacetTest {
         CompositionLocalProvider(LocalAutoMobileGraph provides fakeGraph()) {
           MaterialTheme {
             StorageFacet(
-              column =
-                DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
-              loadInstalledApps = { resolvedApps() },
-              observationStreamFactory = { fake },
+              options =
+                StorageFacetOptions(
+                  column =
+                    DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+                  loadInstalledApps = { resolvedApps() },
+                  observationStreamFactory = { fake },
+                ),
             )
           }
         }
@@ -206,15 +224,18 @@ class StorageFacetTest {
       CompositionLocalProvider(LocalAutoMobileGraph provides fakeGraph()) {
         MaterialTheme {
           StorageFacet(
-            column =
-              DeviceColumn(
-                deviceId = deviceId.value,
-                name = "Pixel",
-                platform = Platform.Android,
-                deviceSessionUuid = "epoch-a",
+            options =
+              StorageFacetOptions(
+                column =
+                  DeviceColumn(
+                    deviceId = deviceId.value,
+                    name = "Pixel",
+                    platform = Platform.Android,
+                    deviceSessionUuid = "epoch-a",
+                  ),
+                loadInstalledApps = { resolvedApps() },
+                observationStreamFactory = { fake },
               ),
-            loadInstalledApps = { resolvedApps() },
-            observationStreamFactory = { fake },
           )
         }
       }
@@ -240,17 +261,20 @@ class StorageFacetTest {
       CompositionLocalProvider(LocalAutoMobileGraph provides fakeGraph()) {
         MaterialTheme {
           StorageFacet(
-            column =
-              DeviceColumn(
-                deviceId = "dev-1",
-                name = "Pixel",
-                platform = Platform.Android,
-                deviceSessionUuid = "epoch-a",
+            options =
+              StorageFacetOptions(
+                column =
+                  DeviceColumn(
+                    deviceId = "dev-1",
+                    name = "Pixel",
+                    platform = Platform.Android,
+                    deviceSessionUuid = "epoch-a",
+                  ),
+                loadInstalledApps = { resolvedApps() },
+                observationStreamFactory = { fake },
+                backoffDelay = { backoff.await() },
+                socketAvailable = { true },
               ),
-            loadInstalledApps = { resolvedApps() },
-            observationStreamFactory = { fake },
-            backoffDelay = { backoff.await() },
-            socketAvailable = { true },
           )
         }
       }
@@ -276,15 +300,18 @@ class StorageFacetTest {
         CompositionLocalProvider(LocalAutoMobileGraph provides fakeGraph()) {
           MaterialTheme {
             StorageFacet(
-              column =
-                DeviceColumn(
-                  deviceId = "dev-1",
-                  name = "Pixel",
-                  platform = Platform.Android,
-                  deviceSessionUuid = sessionUuid.value,
+              options =
+                StorageFacetOptions(
+                  column =
+                    DeviceColumn(
+                      deviceId = "dev-1",
+                      name = "Pixel",
+                      platform = Platform.Android,
+                      deviceSessionUuid = sessionUuid.value,
+                    ),
+                  loadInstalledApps = { resolvedApps() },
+                  observationStreamFactory = { fake },
                 ),
-              loadInstalledApps = { resolvedApps() },
-              observationStreamFactory = { fake },
             )
           }
         }

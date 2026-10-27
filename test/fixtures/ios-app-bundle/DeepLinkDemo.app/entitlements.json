@@ -1,0 +1,8 @@
+{
+  "application-identifier": "ABCDE12345.com.example.deeplinkdemo",
+  "com.apple.developer.associated-domains": [
+    "applinks:demo.example.com",
+    "applinks:*.demo.example.com",
+    "webcredentials:demo.example.com"
+  ]
+}

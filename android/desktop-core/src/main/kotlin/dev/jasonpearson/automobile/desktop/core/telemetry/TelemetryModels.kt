@@ -1,20 +1,11 @@
 package dev.jasonpearson.automobile.desktop.core.telemetry
 
-import androidx.compose.ui.graphics.vector.ImageVector
-import dev.jasonpearson.automobile.desktop.core.theme.AppIcons
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.longOrNull
 
 /** Subscribe/unsubscribe/pong commands sent to the telemetry push socket server. */
 @Serializable
@@ -90,7 +81,9 @@ sealed class TelemetryDisplayEvent {
       requestBody?.let {
         try {
           telemetryJson.parseToJsonElement(it).jsonObject
-        } catch (_: Exception) {
+        } catch (error: IllegalArgumentException) {
+          dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory.getLogger("Telemetry")
+            .debug("Invalid optional event data: ${error.message}")
           null
         }
       }
@@ -101,7 +94,9 @@ sealed class TelemetryDisplayEvent {
       responseBody?.let {
         try {
           telemetryJson.parseToJsonElement(it).jsonObject
-        } catch (_: Exception) {
+        } catch (error: IllegalArgumentException) {
+          dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory.getLogger("Telemetry")
+            .debug("Invalid optional event data: ${error.message}")
           null
         }
       }
@@ -223,7 +218,9 @@ sealed class TelemetryDisplayEvent {
       detailsJson?.let {
         try {
           telemetryJson.parseToJsonElement(it).jsonObject
-        } catch (_: Exception) {
+        } catch (error: IllegalArgumentException) {
+          dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory.getLogger("Telemetry")
+            .debug("Invalid optional event data: ${error.message}")
           null
         }
       }
@@ -231,7 +228,7 @@ sealed class TelemetryDisplayEvent {
   }
 }
 
-private val telemetryJson = Json { ignoreUnknownKeys = true }
+internal val telemetryJson = Json { ignoreUnknownKeys = true }
 
 /**
  * Converts a [TelemetryEventEnvelope] into a typed [TelemetryDisplayEvent] by extracting fields
@@ -241,429 +238,20 @@ fun parseTelemetryEvent(
   envelope: TelemetryEventEnvelope,
   onFieldMismatch: (String) -> Unit = {},
 ): TelemetryDisplayEvent? {
-  val d = envelope.data
-  fun JsonElement?.stringMap(key: String): Map<String, String> {
-    val value = this ?: return emptyMap()
-    if (value is JsonNull) return emptyMap()
-    if (value !is JsonObject) {
-      onFieldMismatch(key)
-      return emptyMap()
-    }
-    return value.mapValues { (_, item) ->
-      if (item !is JsonPrimitive) onFieldMismatch(key)
-      item.displayString()
-    }
-  }
-  fun JsonObject.primitiveOrNull(key: String): JsonPrimitive? {
-    val value = this[key]
-    if (value != null && value !is JsonPrimitive) onFieldMismatch(key)
-    return value as? JsonPrimitive
-  }
-  fun JsonObject.objectOrNull(key: String): JsonObject? {
-    val value = this[key]
-    if (value != null && value !is JsonNull && value !is JsonObject) onFieldMismatch(key)
-    return value as? JsonObject
-  }
-  fun JsonObject.stringOrDefault(key: String, default: String): String =
-    primitiveOrNull(key)?.content ?: default
-  fun JsonObject.stringOrNull(key: String): String? = primitiveOrNull(key)?.contentOrNull
-
+  val reader = TelemetryEventReader(envelope, onFieldMismatch)
   return when (envelope.category) {
-    "network" -> {
-      val reqHeaders = d["requestHeaders"].stringMap("requestHeaders").toMutableMap()
-      val respHeaders = d["responseHeaders"].stringMap("responseHeaders").toMutableMap()
-      // Also check snake_case variants from backfill
-      if (reqHeaders.isEmpty()) {
-        val reqJson = d.stringOrNull("request_headers_json")
-        if (reqJson != null) {
-          try {
-            reqHeaders.putAll(telemetryJson.parseToJsonElement(reqJson).stringMap("requestHeaders"))
-          } catch (_: Exception) {}
-        }
-      }
-      if (respHeaders.isEmpty()) {
-        val respJson = d.stringOrNull("response_headers_json")
-        if (respJson != null) {
-          try {
-            respHeaders.putAll(
-              telemetryJson.parseToJsonElement(respJson).stringMap("responseHeaders"),
-            )
-          } catch (_: Exception) {}
-        }
-      }
-      TelemetryDisplayEvent.Network(
-        timestamp = envelope.timestamp,
-        method = d.stringOrDefault("method", "?"),
-        statusCode =
-          d.primitiveOrNull("statusCode")?.intOrNull
-            ?: d.primitiveOrNull("status_code")?.intOrNull
-            ?: 0,
-        url = d.stringOrDefault("url", ""),
-        durationMs =
-          d.primitiveOrNull("durationMs")?.longOrNull
-            ?: d.primitiveOrNull("duration_ms")?.longOrNull
-            ?: 0,
-        host = d.stringOrNull("host"),
-        path = d.stringOrNull("path"),
-        error = d.stringOrNull("error"),
-        requestHeaders = reqHeaders.ifEmpty { null },
-        responseHeaders = respHeaders.ifEmpty { null },
-        requestBody = d.stringOrNull("requestBody") ?: d.stringOrNull("request_body"),
-        responseBody = d.stringOrNull("responseBody") ?: d.stringOrNull("response_body"),
-        contentType = d.stringOrNull("contentType") ?: d.stringOrNull("content_type"),
-      )
-    }
-    "log" ->
-      TelemetryDisplayEvent.Log(
-        timestamp = envelope.timestamp,
-        level = d.primitiveOrNull("level")?.intOrNull ?: 4, // default INFO
-        tag = d.stringOrDefault("tag", ""),
-        message = d.stringOrDefault("message", ""),
-      )
-    "custom" -> {
-      // Custom events are merged into log events
-      val name = d.stringOrDefault("name", "unknown")
-      val props = mutableMapOf<String, String>()
-      props.putAll(d["properties"].stringMap("properties"))
-      val propsJson = d.stringOrNull("properties_json")
-      if (props.isEmpty() && propsJson != null) {
-        try {
-          props.putAll(telemetryJson.parseToJsonElement(propsJson).stringMap("properties"))
-        } catch (_: Exception) {
-          /* ignore parse failures */
-        }
-      }
-      val propsStr =
-        if (props.isNotEmpty()) {
-          " {${props.entries.joinToString(", ") { "${it.key}:${it.value}" }}}"
-        } else ""
-      TelemetryDisplayEvent.Log(
-        timestamp = envelope.timestamp,
-        level = 4, // INFO
-        tag = "CustomEvent",
-        message = "$name$propsStr",
-      )
-    }
-    "os" -> {
-      val details = mutableMapOf<String, String>()
-      details.putAll(d["details"].stringMap("details"))
-      val detailsJson = d.stringOrNull("details_json")
-      if (details.isEmpty() && detailsJson != null) {
-        try {
-          details.putAll(telemetryJson.parseToJsonElement(detailsJson).stringMap("details"))
-        } catch (_: Exception) {
-          /* ignore parse failures */
-        }
-      }
-      TelemetryDisplayEvent.Os(
-        timestamp = envelope.timestamp,
-        category = d.stringOrDefault("category", "unknown"),
-        kind = d.stringOrDefault("kind", "unknown"),
-        details = details.ifEmpty { null },
-      )
-    }
-    "navigation" -> {
-      val args = d["arguments"].stringMap("arguments")
-      val meta = d["metadata"].stringMap("metadata")
-      // Build human-readable triggering interaction summary
-      val trigInteraction =
-        d.objectOrNull("triggeringInteraction")?.let { ti ->
-          val interType = ti.stringOrNull("type") ?: "interaction"
-          val elText = ti.stringOrNull("elementText")
-          val elResId = ti.stringOrNull("elementResourceId")
-          val target = elText ?: elResId
-          if (target != null) "$interType on '$target'" else interType
-        }
-      TelemetryDisplayEvent.Navigation(
-        timestamp = envelope.timestamp,
-        destination = d.stringOrDefault("destination", "unknown"),
-        source = d.stringOrNull("source"),
-        arguments = args.ifEmpty { null },
-        metadata = meta.ifEmpty { null },
-        triggeringInteraction = trigInteraction,
-        screenshotUri = d.stringOrNull("screenshotUri"),
-      )
-    }
+    "network" -> reader.parseNetwork()
+    "log" -> reader.parseLog()
+    "custom" -> reader.parseCustom()
+    "os" -> reader.parseOs()
+    "navigation" -> reader.parseNavigation()
     "crash",
     "anr",
-    "nonfatal" -> {
-      val frames =
-        try {
-          d["stackTrace"]
-            ?.takeIf { it !is JsonNull }
-            ?.jsonArray
-            ?.map { frame ->
-              val f = frame.jsonObject
-              StackTraceFrame(
-                className = f.stringOrDefault("className", ""),
-                methodName = f.stringOrDefault("methodName", ""),
-                fileName = f.stringOrNull("fileName"),
-                lineNumber = f.primitiveOrNull("lineNumber")?.intOrNull,
-                isAppCode = f.primitiveOrNull("isAppCode")?.booleanOrNull ?: false,
-              )
-            }
-        } catch (_: Exception) {
-          null
-        }
-      TelemetryDisplayEvent.Failure(
-        timestamp = envelope.timestamp,
-        type = envelope.category,
-        occurrenceId = d.stringOrDefault("occurrenceId", ""),
-        severity = d.stringOrDefault("severity", "medium"),
-        title = d.stringOrDefault("title", "Unknown failure"),
-        exceptionType = d.stringOrNull("exceptionType"),
-        screen = d.stringOrNull("screen"),
-        stackTrace = frames,
-      )
-    }
-    "storage" -> {
-      if (d["value"]?.let { it !is JsonPrimitive && it !is JsonNull } == true) {
-        onFieldMismatch("value")
-      }
-      TelemetryDisplayEvent.Storage(
-        timestamp = envelope.timestamp,
-        fileName = d.stringOrDefault("fileName", d.stringOrDefault("file_name", "unknown")),
-        key = d.stringOrNull("key"),
-        value = d["value"]?.takeIf { it !is JsonNull }?.displayString(),
-        valueType = d.stringOrNull("valueType") ?: d.stringOrNull("value_type"),
-        changeType = d.stringOrDefault("changeType", d.stringOrDefault("change_type", "modify")),
-        previousValue = d.stringOrNull("previousValue") ?: d.stringOrNull("previous_value"),
-      )
-    }
-    "layout" ->
-      TelemetryDisplayEvent.Layout(
-        timestamp = envelope.timestamp,
-        subType = d.stringOrDefault("subType", d.stringOrDefault("sub_type", "unknown")),
-        composableName = d.stringOrNull("composableName") ?: d.stringOrNull("composable_name"),
-        recompositionCount =
-          d.primitiveOrNull("recompositionCount")?.intOrNull
-            ?: d.primitiveOrNull("recomposition_count")?.intOrNull,
-        screenName = d.stringOrNull("screenName") ?: d.stringOrNull("screen_name"),
-        detailsJson = d.stringOrNull("detailsJson") ?: d.stringOrNull("details_json"),
-        durationMs =
-          d.primitiveOrNull("durationMs")?.longOrNull
-            ?: d.primitiveOrNull("duration_ms")?.longOrNull,
-        likelyCause = d.stringOrNull("likelyCause") ?: d.stringOrNull("likely_cause"),
-      )
-    "toolcall" ->
-      TelemetryDisplayEvent.ToolCall(
-        timestamp = envelope.timestamp,
-        toolName = d.stringOrDefault("toolName", "unknown"),
-        durationMs = d.primitiveOrNull("durationMs")?.longOrNull ?: 0,
-        success = d.primitiveOrNull("success")?.booleanOrNull ?: true,
-        error = d.stringOrNull("error"),
-      )
-    "accessibility" -> {
-      val violationsList =
-        try {
-          d["violations"]?.jsonArray?.map { v ->
-            val vObj = v.jsonObject
-            AccessibilityViolationInfo(
-              type = vObj.stringOrDefault("type", "unknown"),
-              severity = vObj.stringOrDefault("severity", "warning"),
-              criterion = vObj.stringOrDefault("criterion", ""),
-              message = vObj.stringOrDefault("message", ""),
-            )
-          } ?: emptyList()
-        } catch (_: Exception) {
-          emptyList()
-        }
-      TelemetryDisplayEvent.Accessibility(
-        timestamp = envelope.timestamp,
-        packageName = d.stringOrDefault("packageName", "unknown"),
-        screenId = d.stringOrDefault("screenId", ""),
-        totalViolations = d.primitiveOrNull("totalViolations")?.intOrNull ?: 0,
-        newViolations = d.primitiveOrNull("newViolations")?.intOrNull ?: 0,
-        baselinedCount = d.primitiveOrNull("baselinedCount")?.intOrNull ?: 0,
-        violations = violationsList,
-      )
-    }
-    "interaction",
-    "gesture",
-    "input" -> null // Filtered out — too noisy
-    "memory" -> {
-      val violations =
-        try {
-          d["violations"]?.jsonArray?.map { it.displayString() } ?: emptyList()
-        } catch (_: Exception) {
-          emptyList()
-        }
-      TelemetryDisplayEvent.Memory(
-        timestamp = envelope.timestamp,
-        packageName = d.stringOrDefault("packageName", "unknown"),
-        passed = d.primitiveOrNull("passed")?.booleanOrNull ?: true,
-        javaHeapGrowthMb = d.primitiveOrNull("javaHeapGrowthMb")?.doubleOrNull,
-        nativeHeapGrowthMb = d.primitiveOrNull("nativeHeapGrowthMb")?.doubleOrNull,
-        gcCount = d.primitiveOrNull("gcCount")?.intOrNull,
-        gcDurationMs = d.primitiveOrNull("gcDurationMs")?.longOrNull,
-        unreachableObjects = d.primitiveOrNull("unreachableObjects")?.intOrNull,
-        violations = violations,
-      )
-    }
-    "performance" -> {
-      val changed =
-        try {
-          d["changedMetrics"]?.jsonArray?.map { it.displayString() } ?: emptyList()
-        } catch (_: Exception) {
-          emptyList()
-        }
-      TelemetryDisplayEvent.Performance(
-        timestamp = envelope.timestamp,
-        fps = d.primitiveOrNull("fps")?.doubleOrNull,
-        frameTimeMs = d.primitiveOrNull("frameTimeMs")?.doubleOrNull,
-        jankFrames = d.primitiveOrNull("jankFrames")?.intOrNull,
-        touchLatencyMs = d.primitiveOrNull("touchLatencyMs")?.doubleOrNull,
-        memoryUsageMb = d.primitiveOrNull("memoryUsageMb")?.doubleOrNull,
-        cpuUsagePercent = d.primitiveOrNull("cpuUsagePercent")?.doubleOrNull,
-        health = d.stringOrDefault("health", "healthy"),
-        changedMetrics = changed,
-      )
-    }
-    else -> null
+    "nonfatal" -> reader.parseCrash()
+    "storage" -> reader.parseStorage()
+    else -> reader.parseRuntimeCategory()
   }
 }
 
-private fun JsonElement.displayString(): String = if (this is JsonPrimitive) content else toString()
-
-/** Severity classification for telemetry events, used for filter toggles. */
-enum class EventSeverity(val label: String, val icon: ImageVector, val color: Long) {
-  Error("Errors", AppIcons.SeverityError, 0xFFFF6B6B),
-  Warning("Warnings", AppIcons.SeverityWarning, 0xFFE0C040),
-  Info("Info", AppIcons.SeverityInfo, 0xFF74C0FC),
-}
-
-/**
- * Classify a telemetry event into a severity level.
- *
- * @param slowNetworkThresholdMs Requests slower than this are classified as Warning (default
- *   3000ms)
- */
-fun TelemetryDisplayEvent.classifyEventSeverity(
-  slowNetworkThresholdMs: Long = 3000,
-): EventSeverity =
-  when (this) {
-    is TelemetryDisplayEvent.Failure ->
-      when (type) {
-        "crash",
-        "anr" -> EventSeverity.Error
-        "nonfatal" -> EventSeverity.Warning
-        else -> EventSeverity.Warning
-      }
-    is TelemetryDisplayEvent.Log ->
-      when (level) {
-        6,
-        7 -> EventSeverity.Error
-        5 -> EventSeverity.Warning
-        else -> EventSeverity.Info
-      }
-    is TelemetryDisplayEvent.Network ->
-      when {
-        error != null -> EventSeverity.Error
-        statusCode == 0 -> EventSeverity.Error
-        statusCode >= 400 -> EventSeverity.Error
-        durationMs >= slowNetworkThresholdMs -> EventSeverity.Warning
-        else -> EventSeverity.Info
-      }
-    is TelemetryDisplayEvent.Layout ->
-      when (subType) {
-        "excessive_recomposition" -> EventSeverity.Warning
-        else -> EventSeverity.Info
-      }
-    is TelemetryDisplayEvent.Performance ->
-      when (health) {
-        "critical" -> EventSeverity.Error
-        "warning" -> EventSeverity.Warning
-        else -> EventSeverity.Info
-      }
-    is TelemetryDisplayEvent.ToolCall ->
-      when {
-        !success -> EventSeverity.Error
-        durationMs > 5000 -> EventSeverity.Warning
-        else -> EventSeverity.Info
-      }
-    is TelemetryDisplayEvent.Accessibility ->
-      when {
-        newViolations > 0 -> EventSeverity.Warning
-        else -> EventSeverity.Info
-      }
-    is TelemetryDisplayEvent.Memory ->
-      when {
-        !passed -> EventSeverity.Error
-        else -> EventSeverity.Info
-      }
-    else -> EventSeverity.Info
-  }
-
-/** Convenience property using default threshold */
-val TelemetryDisplayEvent.eventSeverity: EventSeverity
-  get() = classifyEventSeverity()
-
-/**
- * Full-text search across all relevant fields of a telemetry event.
- *
- * @param useRegex When true, [query] is compiled as a case-insensitive regex. Invalid regex
- *   patterns gracefully return false (no match).
- */
-fun TelemetryDisplayEvent.matchesSearch(query: String, useRegex: Boolean = false): Boolean {
-  if (query.isBlank()) return true
-
-  if (useRegex) {
-    val regex =
-      try {
-        Regex(query, RegexOption.IGNORE_CASE)
-      } catch (_: java.util.regex.PatternSyntaxException) {
-        return false
-      }
-    return anyField { regex.containsMatchIn(it) }
-  }
-
-  val q = query.lowercase()
-  return anyField { it.lowercase().contains(q) }
-}
-
-/**
- * Short-circuit iteration over searchable fields. Avoids allocating intermediate lists -- the
- * [predicate] is tested lazily and returns as soon as the first match is found.
- */
-private inline fun TelemetryDisplayEvent.anyField(predicate: (String) -> Boolean): Boolean =
-  when (this) {
-    is TelemetryDisplayEvent.Network ->
-      predicate(method) ||
-        predicate("$statusCode") ||
-        predicate(url) ||
-        host?.let(predicate) == true ||
-        path?.let(predicate) == true ||
-        error?.let(predicate) == true
-    is TelemetryDisplayEvent.Log -> predicate(tag) || predicate(message)
-    is TelemetryDisplayEvent.Navigation ->
-      predicate(destination) ||
-        source?.let(predicate) == true ||
-        triggeringInteraction?.let(predicate) == true ||
-        arguments?.values?.any(predicate) == true
-    is TelemetryDisplayEvent.Os ->
-      predicate(category) || predicate(kind) || details?.values?.any(predicate) == true
-    is TelemetryDisplayEvent.Failure ->
-      predicate(type) ||
-        predicate(title) ||
-        exceptionType?.let(predicate) == true ||
-        screen?.let(predicate) == true
-    is TelemetryDisplayEvent.Storage ->
-      predicate(fileName) ||
-        key?.let(predicate) == true ||
-        value?.let(predicate) == true ||
-        predicate(changeType)
-    is TelemetryDisplayEvent.Layout ->
-      predicate(subType) ||
-        composableName?.let(predicate) == true ||
-        screenName?.let(predicate) == true ||
-        likelyCause?.let(predicate) == true
-    is TelemetryDisplayEvent.Performance ->
-      predicate(health) || changedMetrics.any(predicate) || predicate("performance")
-    is TelemetryDisplayEvent.ToolCall -> predicate(toolName) || error?.let(predicate) == true
-    is TelemetryDisplayEvent.Accessibility ->
-      predicate(packageName) ||
-        predicate(screenId) ||
-        violations.any { predicate(it.type) || predicate(it.message) }
-    is TelemetryDisplayEvent.Memory ->
-      predicate(packageName) || violations.any(predicate) || predicate("memory")
-  }
+internal fun JsonElement.displayString(): String =
+  if (this is JsonPrimitive) content else toString()

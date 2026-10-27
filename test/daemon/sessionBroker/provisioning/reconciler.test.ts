@@ -7,6 +7,7 @@ import {
   bindingDeviceName,
   type BindingReconcileRequest,
   type BindingReconcileResult,
+  type BindingRequestedSpec,
   chooseIosDeviceType,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
 import type {
@@ -126,7 +127,7 @@ describe("BindingReconciler", () => {
   });
 
   function request(
-    spec: ExactDeviceSpecification = SPEC_18,
+    spec: BindingRequestedSpec = SPEC_18,
     overrides: Partial<BindingReconcileRequest> = {},
   ): BindingReconcileRequest {
     return {
@@ -153,14 +154,119 @@ describe("BindingReconciler", () => {
     return result;
   }
 
-  async function seedAssigned(spec = SPEC_18): Promise<string> {
+  test("retained identity must match the journal's requested creation name", async () => {
+    provisioner.beforeReturn = async () => {
+      throw new ProvisionDeviceError("timeout", "original readiness timeout", true, {
+        retainedDevice: { platform: "ios", stableId: "foreign-device", name: "foreign-name" },
+      });
+    };
+    const result = expectFailed(await reconciler.reconcile(request()));
+    expect(result.failure).toMatchObject({
+      code: "provision_failed",
+      provision: { code: "timeout" },
+    });
+    expect(result.failure).not.toHaveProperty("retainedDevice");
+    expect(await registry.listOpenBindingJournal(key)).toEqual([]);
+    expect(deleter.stableIds()).toEqual(["UDID-1"]);
+  });
+
+  test("a failed retained journal write preserves the readiness failure", async () => {
+    const advance = registry.advanceBindingJournal.bind(registry);
+    registry.advanceBindingJournal = async (id, input) => {
+      if (input.phase === "created") {
+        throw new Error("journal unavailable");
+      }
+      return advance(id, input);
+    };
+    provisioner.beforeReturn = async (call) => {
+      throw new ProvisionDeviceError("timeout", "original readiness timeout", true, {
+        retainedDevice: { platform: "ios", stableId: "UDID-1", name: call.name },
+      });
+    };
+    const result = expectFailed(await reconciler.reconcile(request()));
+    expect(result.failure).toMatchObject({
+      code: "provision_failed",
+      message: "original readiness timeout",
+      provision: { code: "timeout" },
+    });
+    expect(result.failure).not.toHaveProperty("retainedDevice");
+    expect(await registry.listOpenBindingJournal(key)).toMatchObject([{ phase: "creating" }]);
+  });
+
+  test("retains retryable timeout at created and reuses it on reconcile", async () => {
+    const code = "timeout";
+    provisioner.beforeReturn = async (call) => {
+      const device = inventory.devices.find((candidate) => candidate.name === call.name)!;
+      throw new ProvisionDeviceError(code, "runner deadline", true, {
+        retainedDevice: { platform: "ios", stableId: device.deviceId!, name: device.name },
+      });
+    };
+    const first = expectFailed(await reconciler.reconcile(request()));
+    expect(first.failure).toMatchObject({
+      code: "provision_failed",
+      retryable: true,
+      provision: { code },
+    });
+    expect(await registry.listOpenBindingJournal(key)).toMatchObject([
+      {
+        phase: "created",
+        target: { newStableId: "UDID-1" },
+      },
+    ]);
+    expect((await registry.listOpenBindingJournal(key))[0]?.target.removalRequested).not.toBe(true);
+    expect(inventory.has("UDID-1")).toBe(true);
+    expect(deleter.calls).toEqual([]);
+    expect((await registry.getAssignment(key))?.state).toBe("provisioning");
+    provisioner.beforeReturn = undefined;
+    const retried = expectReady(await reconciler.reconcile(request()));
+    expect(retried.disposition).toBe("reused");
+    expect(retried.assignment).toMatchObject({ stableDeviceId: "UDID-1", state: "ready" });
+    expect(provisioner.created()).toHaveLength(1);
+    expect(provisioner.calls.map((call) => call.mode)).toEqual(["create", "adopt"]);
+    expect(provisioner.calls[1]?.deviceId).toBe("UDID-1");
+    expect(await registry.listOpenBindingJournal(key)).toEqual([]);
+    expect(deleter.calls).toEqual([]);
+  });
+
+  async function seedAssigned(spec: BindingRequestedSpec = SPEC_18): Promise<string> {
     const result = expectReady(await reconciler.reconcile(request(spec)));
     provisioner.calls.length = 0;
     return result.device.stableId;
   }
 
+  test.each([
+    { disposition: "replaced", provisionDeadlineMs: 40_000 },
+    { disposition: "created", provisionDeadlineMs: 40_000 },
+    { disposition: "reused", provisionDeadlineMs: 60_000 },
+  ] as const)(
+    "only a device-making path stops at the create deadline: $disposition (#14643, #14799)",
+    async ({ disposition, provisionDeadlineMs }) => {
+      if (disposition === "replaced") {
+        inventory.devices.push({
+          name: bindingDeviceName(key, 1, "leftover"),
+          platform: "ios",
+          deviceId: "UDID-LEFTOVER",
+          isRunning: false,
+          runtime: IOS_18,
+          deviceType: IPHONE_16,
+        });
+      } else if (disposition === "reused") {
+        await seedAssigned();
+      }
+
+      const result = expectReady(
+        await reconciler.reconcile(
+          request(SPEC_18, { deadlineMs: 60_000, createDeadlineMs: 40_000 }),
+        ),
+      );
+
+      expect(result.disposition).toBe(disposition);
+      expect(provisioner.calls.map((call) => call.deadlineMs)).toEqual([provisionDeadlineMs]);
+    },
+  );
+
   test.each(["ios", "android"] as const)(
-    "upgrade adopts a legacy %s interrupted creation without creating a replacement",
+    "upgrade reclaims a legacy %s orphan by deleting and recreating it",
     async (platform) => {
       const spec =
         platform === "ios"
@@ -179,10 +285,12 @@ describe("BindingReconciler", () => {
         isRunning: false,
       });
       const ready = expectReady(await reconciler.reconcile(request(spec, { platform })));
-      expect(ready.disposition).toBe("adopted");
-      expect(ready.device.name).toBe(name);
-      expect(provisioner.created()).toEqual([]);
-      expect((await registry.getAssignment(key))?.deviceName).toBe(name);
+      expect(ready.disposition).toBe("replaced");
+      expect(ready.evidence.adoptedFrom).toBe("orphan");
+      expect(ready.device.name).not.toBe(name);
+      expect(deleter.stableIds()).toEqual([platform === "ios" ? "SIM-UPGRADE" : name]);
+      expect(provisioner.calls.map((call) => call.mode)).toEqual(["create"]);
+      expect((await registry.getAssignment(key))?.deviceName).toBe(ready.device.name);
     },
   );
 
@@ -206,7 +314,7 @@ describe("BindingReconciler", () => {
       expect(capacity.checks).toBe(0);
     });
 
-    test("an adopted leftover device is provisioned without asking the probe", async () => {
+    test("a booting orphan reserves its freed slot before deletion and fresh creation", async () => {
       inventory.devices.push({
         name: bindingDeviceName(key, 1, "earlier"),
         platform: "ios",
@@ -220,12 +328,117 @@ describe("BindingReconciler", () => {
 
       const result = expectReady(await reconciler.reconcile(request()));
 
-      expect(result.disposition).toBe("adopted");
-      expect(capacity.checks).toBe(0);
+      expect(result.disposition).toBe("replaced");
+      expect(capacity.checks).toBe(1);
+      expect(deleter.stableIds()).toEqual(["UDID-LEFTOVER"]);
+      expect(provisioner.calls.map((call) => call.mode)).toEqual(["create"]);
     });
   });
 
   describe("empty binding", () => {
+    test("reclaims an orphan by verified deletion and fresh creation, never adoption", async () => {
+      inventory.devices.push({
+        name: bindingDeviceName(key, 1, "earlier"),
+        platform: "ios",
+        deviceId: "UDID-ORPHAN",
+        isRunning: true,
+        runtime: IOS_18,
+        deviceType: IPHONE_16,
+      });
+
+      const result = expectReady(await reconciler.reconcile(request()));
+
+      expect(result.disposition).toBe("replaced");
+      expect(result.evidence.adoptedFrom).toBe("orphan");
+      expect(result.evidence.deletedStableId).toBe("UDID-ORPHAN");
+      expect(deleter.stableIds()).toEqual(["UDID-ORPHAN"]);
+      expect(provisioner.created()).toHaveLength(1);
+      expect(provisioner.calls.map((call) => call.mode)).toEqual(["create"]);
+      expect(result.device.stableId).not.toBe("UDID-ORPHAN");
+    });
+
+    test.each(["held", "unknown"] as const)(
+      "skips an orphan whose claim is %s and creates a fresh device",
+      async (kind) => {
+        inventory.devices.push({
+          name: bindingDeviceName(key, 1, "earlier"),
+          platform: "ios",
+          deviceId: "UDID-ORPHAN",
+          isRunning: false,
+          runtime: IOS_18,
+          deviceType: IPHONE_16,
+        });
+        claims.claims.set("UDID-ORPHAN", { kind, reason: "another daemon's claim" });
+
+        const result = expectReady(await reconciler.reconcile(request()));
+
+        expect(result.disposition).toBe("created");
+        expect(result.device.stableId).not.toBe("UDID-ORPHAN");
+        expect(deleter.calls).toEqual([]);
+        expect(inventory.has("UDID-ORPHAN")).toBe(true);
+        expect(provisioner.calls.map((call) => call.mode)).toEqual(["create"]);
+      },
+    );
+
+    test.each(["failed deletion", "crash after journal open"])(
+      "%s keeps the orphan journaled until a retry deletes and recreates it",
+      async (interruption) => {
+        const name = bindingDeviceName(key, 1, "earlier");
+        inventory.devices.push({
+          name,
+          platform: "ios",
+          deviceId: "UDID-ORPHAN",
+          isRunning: true,
+          runtime: IOS_18,
+          deviceType: IPHONE_16,
+        });
+        deleter.beforeDelete = async () => {
+          const assignment = await registry.getAssignment(key);
+          expect(assignment).toMatchObject({
+            stableDeviceId: "UDID-ORPHAN",
+            state: "replacing",
+          });
+          expect(await registry.listOpenBindingJournal(key)).toMatchObject([
+            {
+              kind: "replace",
+              phase: "deleting",
+              binding: { generation: assignment!.generation, stableDeviceId: "UDID-ORPHAN" },
+              target: { oldStableId: "UDID-ORPHAN", oldName: name, newName: null },
+            },
+          ]);
+          if (interruption === "crash after journal open") {
+            throw new Error("interrupted after atomic journal open");
+          }
+        };
+        deleter.failWith = "deletion blocked";
+
+        const first = expectFailed(await reconciler.reconcile(request()));
+        expect(first.assignment?.state).not.toBe("ready");
+        expect(first.evidence.adoptedFrom).toBe("orphan");
+        expect(await registry.listOpenBindingJournal(key)).toHaveLength(1);
+        expect(inventory.has("UDID-ORPHAN")).toBe(true);
+        expect(provisioner.calls).toEqual([]);
+
+        // An unsuccessful retry still cannot reuse the orphan.
+        deleter.beforeDelete = undefined;
+        timer.advanceTime(1_000);
+        const blocked = expectFailed(await reconciler.reconcile(request()));
+        expect(blocked.assignment?.state).toBe("cleanup_pending");
+        expect(await registry.listOpenBindingJournal(key)).toHaveLength(1);
+        expect(provisioner.calls).toEqual([]);
+
+        deleter.failWith = undefined;
+        timer.advanceTime(5_000);
+        const retried = expectReady(await reconciler.reconcile(request()));
+        expect(["created", "replaced"]).toContain(retried.disposition);
+        expect(retried.device.stableId).not.toBe("UDID-ORPHAN");
+        expect(inventory.has("UDID-ORPHAN")).toBe(false);
+        expect(new Set(deleter.stableIds())).toEqual(new Set(["UDID-ORPHAN"]));
+        expect(provisioner.calls.map((call) => call.mode)).toEqual(["create"]);
+        expect(await registry.listOpenBindingJournal(key)).toEqual([]);
+      },
+    );
+
     test("creates a device under the generated name and commits it ready at generation 1", async () => {
       const result = expectReady(await reconciler.reconcile(request()));
 
@@ -241,7 +454,7 @@ describe("BindingReconciler", () => {
       expect(provisioner.created()).toHaveLength(1);
     });
 
-    test("adopts this binding's own uncommitted leftover, but never a matching unmanaged device", async () => {
+    test("reclaims this binding's orphan, but never touches a matching unmanaged device", async () => {
       inventory.devices.push(
         {
           name: "My iPhone",
@@ -263,9 +476,11 @@ describe("BindingReconciler", () => {
 
       const result = expectReady(await reconciler.reconcile(request()));
 
-      expect(result.disposition).toBe("adopted");
+      expect(result.disposition).toBe("replaced");
       expect(result.evidence.adoptedFrom).toBe("orphan");
-      expect(result.device.stableId).toBe("UDID-LEFTOVER");
+      expect(result.device.stableId).not.toBe("UDID-LEFTOVER");
+      expect(deleter.stableIds()).toEqual(["UDID-LEFTOVER"]);
+      expect(inventory.has("UDID-USER")).toBe(true);
     });
 
     test("never adopts a matching device another valid binding holds", async () => {
@@ -791,7 +1006,8 @@ describe("BindingReconciler", () => {
               name: `${bindingDeviceName(key, 1, "orphan")}orphan`,
               deviceType: "simulator",
               state: "Shutdown",
-              platformVersion: "18.0",
+              isRunning: false,
+              isRunningStateKnown: false,
             },
           ];
           const findDeviceHolder = registry.findDeviceHolder.bind(registry);
@@ -907,7 +1123,6 @@ describe("BindingReconciler", () => {
           } else {
             timer.advanceTime(60_001);
           }
-          return [];
         };
         const failed = expectFailed(await reconciler.reconcile(pending));
         expect(failed.failure).toEqual({
@@ -1016,7 +1231,7 @@ describe("BindingReconciler", () => {
           orphaned: 0,
         },
         charged: [],
-        retained: [{ stableDeviceId: "held", reason: "session_holds_device" }],
+        retained: [{ platform: "ios", stableDeviceId: "held", reason: "session_holds_device" }],
         evictionFailures: [],
       };
       budget = { admitCreation: async () => admission };
@@ -1055,7 +1270,7 @@ describe("BindingReconciler", () => {
             orphaned: 0,
           },
           charged: [],
-          retained: [{ stableDeviceId: "held", reason: "session_holds_device" }],
+          retained: [{ platform: "ios", stableDeviceId: "held", reason: "session_holds_device" }],
           evictionFailures: [],
         },
       });
@@ -1170,7 +1385,7 @@ describe("BindingReconciler", () => {
           orphaned: 0,
         },
         charged: [],
-        retained: [{ stableDeviceId: "held", reason: "session_holds_device" }],
+        retained: [{ platform: "ios", stableDeviceId: "held", reason: "session_holds_device" }],
         evictionFailures: [],
       });
       expect(await registry.listOpenBindingJournal(key)).toEqual([]);
@@ -1907,6 +2122,18 @@ describe("BindingReconciler", () => {
     });
 
     test("an assigned simulator of any model on the runtime is reused, never replaced", async () => {
+      const ownId = await seedAssigned({ runtime: IOS_18, deviceType: IPHONE_15 });
+      const first = expectReady(await reconciler.reconcile(request({ runtime: IOS_18 })));
+      expect(first.disposition).toBe("reused");
+
+      const again = expectReady(await reconciler.reconcile(request({ runtime: IOS_18 })));
+
+      expect(again.disposition).toBe("reused");
+      expect(again.device.stableId).toBe(ownId);
+      expect(deleter.calls).toHaveLength(0);
+    });
+
+    test("reclaiming an older-model orphan creates the resolver's chosen model", async () => {
       inventory.devices.push({
         name: bindingDeviceName(key, 1, "earlier"),
         platform: "ios",
@@ -1915,14 +2142,16 @@ describe("BindingReconciler", () => {
         runtime: IOS_18,
         deviceType: IPHONE_15,
       });
-      const first = expectReady(await reconciler.reconcile(request({ runtime: IOS_18 })));
-      expect(first.disposition).toBe("adopted");
 
-      const again = expectReady(await reconciler.reconcile(request({ runtime: IOS_18 })));
+      const result = expectReady(await reconciler.reconcile(request({ runtime: IOS_18 })));
 
-      expect(again.disposition).toBe("reused");
-      expect(again.device.stableId).toBe("UDID-OLD-MODEL");
-      expect(deleter.calls).toHaveLength(0);
+      expect(result.disposition).toBe("replaced");
+      expect(result.resolvedSpec.deviceType).toBe(IPHONE_16);
+      expect(result.assignment.resolvedSpec).toMatchObject({ deviceType: IPHONE_16 });
+      expect(deleter.stableIds()).toEqual(["UDID-OLD-MODEL"]);
+      expect(provisioner.calls).toMatchObject([
+        { mode: "create", spec: { deviceType: IPHONE_16 } },
+      ]);
     });
 
     test("a different runtime still replaces an any-model binding", async () => {

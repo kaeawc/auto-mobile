@@ -1,18 +1,17 @@
-import { promises as fsPromises } from "node:fs";
-import path from "node:path";
+import { FilePlanHealthWriter, type PlanHealthWriter } from "./filePlanHealthWriter";
+
 import type { PlanExecutionResult } from "../models/Plan";
 import type {
   ExecutePlanStepDebugInfo,
   PlanHealthSummary,
   PlanToolHealth,
 } from "../models/ExecutePlanResult";
-import { createTimestampedId, defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+
 import type { Timer } from "../utils/SystemTimer";
-import { logger } from "../utils/logger";
-import { errorMessage } from "../utils/describeUnknownError";
+import { ENV } from "../config/env";
 
 /** Opt-in env var: a directory that receives one health-summary JSON file per plan run (#2306). */
-export const PLAN_HEALTH_DIR_ENV = "AUTOMOBILE_PLAN_HEALTH_DIR";
+export const PLAN_HEALTH_DIR_ENV = ENV.PLAN_HEALTH_DIR.name;
 
 export interface PlanHealthRunInfo {
   success: boolean;
@@ -80,30 +79,6 @@ export function buildPlanHealthSummary(
     collector.recordStep(step);
   }
   return collector.summarize(run);
-}
-
-/** Persists a summary; the production implementation writes JSON under a directory. */
-export interface PlanHealthWriter {
-  write(summary: PlanHealthSummary): Promise<void>;
-}
-
-export class FilePlanHealthWriter implements PlanHealthWriter {
-  constructor(
-    private readonly dir: string,
-    private readonly timer: Pick<Timer, "now">,
-    private readonly idGenerator: IdGenerator = defaultIdGenerator,
-  ) {}
-
-  async write(summary: PlanHealthSummary): Promise<void> {
-    try {
-      await fsPromises.mkdir(this.dir, { recursive: true });
-      const name = `${createTimestampedId("plan-health", this.timer, this.idGenerator)}.json`;
-      await fsPromises.writeFile(path.join(this.dir, name), JSON.stringify(summary, null, 2));
-    } catch (error) {
-      // Diagnostics must never fail the plan; leave a trace and carry on.
-      logger.warn(`Failed to write plan health summary to ${this.dir}: ${errorMessage(error)}`);
-    }
-  }
 }
 
 /** The writer selected by {@link PLAN_HEALTH_DIR_ENV}, or undefined when it is unset. */

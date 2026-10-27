@@ -28,7 +28,7 @@ class AsyncActionRunnerTest {
       )
 
     runner.launch(requestId = "req-1", action = "screenshot") {
-      throw RuntimeException("boom")
+      throw IllegalStateException("boom")
     }
     advanceUntilIdle()
 
@@ -128,14 +128,14 @@ class AsyncActionRunnerTest {
     val runner =
       AsyncActionRunner(
         scope = this,
-        broadcastResponse = { throw RuntimeException("socket closed") },
+        broadcastResponse = { throw IllegalStateException("socket closed") },
         logError = { message, _ -> logged.add(message) },
       )
 
     // A broadcast failure during error reporting must not escape the coroutine (which would crash
     // the launch and defeat the whole point). It is logged and swallowed.
     runner.launch(requestId = "req-2", action = "subscribe_storage") {
-      throw RuntimeException("original failure")
+      throw IllegalStateException("original failure")
     }
     advanceUntilIdle()
 

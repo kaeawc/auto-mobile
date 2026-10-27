@@ -43,8 +43,24 @@
 
 # The uninstaller is intentionally sourced only in a subshell; its PROJECT_ROOT
 # assignment must not change this watcher's root.
-# shellcheck disable=SC2031
 set -euo pipefail
+
+# The development checkout includes the standalone uninstaller. Reuse its
+# namespace/PID/identity helpers in a subshell so its globals and traps stay local.
+# Define this before initializing watcher globals so analysis sees their ownership.
+stop_namespace_daemon_for_reload() (
+  export UNINSTALL_SH_SOURCE_ONLY=true
+  # shellcheck source=scripts/uninstall.sh
+  source "${PROJECT_ROOT}/scripts/uninstall.sh"
+  # Shared stop verifies identity, shutdown, socket and unchanged PID record.
+  # Reload alone may escalate, with the same identity recheck before KILL.
+  daemon_check stop_daemon reload
+  local stop_status="${DAEMON_CHECK_STATUS}"
+  if [[ "${stop_status}" != 0 ]]; then
+    log_error "Hot reload blocked: skipped daemon restart/replacement. Run auto-mobile --daemon stop, then retry."
+  fi
+  return "${stop_status}"
+)
 
 # Run a command the way an `if` condition would (errexit is ignored inside it)
 # and record its exit status in RUN_STATUS, so callers can branch on it without
@@ -58,20 +74,22 @@ RUN_STATUS="${run_rc}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${PROJECT_ROOT}/scripts/lib/spotlight-exclude.sh"
 export PROJECT_ROOT
 
 # Source library files
-# shellcheck disable=SC1091
+# shellcheck source=scripts/local-dev/lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
-# shellcheck disable=SC1091
+# shellcheck source=scripts/local-dev/lib/deps.sh
 source "${SCRIPT_DIR}/lib/deps.sh"
-# shellcheck disable=SC1091
+# shellcheck source=scripts/local-dev/lib/adb.sh
 source "${SCRIPT_DIR}/lib/adb.sh"
-# shellcheck disable=SC1091
+# shellcheck source=scripts/local-dev/lib/apk.sh
 source "${SCRIPT_DIR}/lib/apk.sh"
-# shellcheck disable=SC1091
+# shellcheck source=scripts/local-dev/lib/ide-plugin.sh
 source "${SCRIPT_DIR}/lib/ide-plugin.sh"
-# shellcheck disable=SC1091
+# shellcheck source=scripts/local-dev/lib/ctrl-proxy-ios.sh
 source "${SCRIPT_DIR}/lib/ctrl-proxy-ios.sh"
 
 # Path constants
@@ -83,6 +101,7 @@ VIDEO_SERVER_JAR_PATH="${VIDEO_SERVER_DIR}/build/libs/automobile-video.jar"
 VIDEO_SERVER_REMOTE_JAR_PATH="/data/local/tmp/automobile-video.jar"
 CTRL_PROXY_IOS_DIR="${PROJECT_ROOT}/ios/control-proxy"
 DERIVED_DATA_PATH="/tmp/automobile-ctrl-proxy"
+spotlight_exclude_dir "${DERIVED_DATA_PATH}"
 PID_FILE="${PROJECT_ROOT}/.automobile-hot-reload.pid"
 
 # CLI options with defaults
@@ -169,7 +188,7 @@ EOF
 kill_ctrl_proxy_ios_xcodebuild_processes() {
   # The sourced runner helper persists the exact watcher-owned PID. Never scan
   # or signal other worktrees' or simulators' xcodebuild processes.
-  stop_ctrl_proxy_ios || true
+  run_capture_status stop_ctrl_proxy_ios
 }
 
 # Kill any previous hot-reload processes
@@ -287,22 +306,6 @@ reload_mcp_daemon() {
   fi
 }
 
-# The development checkout includes the standalone uninstaller. Reuse its
-# namespace/PID/identity helpers in a subshell so its globals and traps stay local.
-stop_namespace_daemon_for_reload() (
-  export UNINSTALL_SH_SOURCE_ONLY=true
-  # shellcheck disable=SC1091
-  source "${PROJECT_ROOT}/scripts/uninstall.sh"
-  # Shared stop verifies identity, shutdown, socket and unchanged PID record.
-  # Reload alone may escalate, with the same identity recheck before KILL.
-  daemon_check stop_daemon reload
-  local stop_status="${DAEMON_CHECK_STATUS}"
-  if [[ "${stop_status}" != 0 ]]; then
-    log_error "Hot reload blocked: skipped daemon restart/replacement. Run auto-mobile --daemon stop, then retry."
-  fi
-  return "${stop_status}"
-)
-
 # List TypeScript source files to watch
 list_ts_files() {
   local src_dir="${PROJECT_ROOT}/src"
@@ -315,7 +318,7 @@ list_ts_files() {
 hash_ts_state() {
   list_ts_files | while read -r file; do
     if [[ -f "${file}" ]]; then
-      stat_entry "${file}" 2>/dev/null || true
+      run_capture_status stat_entry "${file}" 2>/dev/null
     fi
   done | sort | hash_stream
 }
@@ -361,7 +364,7 @@ list_ios_watch_files() {
 hash_ios_watch_state() {
   list_ios_watch_files | while read -r file; do
     if [[ -f "${file}" ]]; then
-      stat_entry "${file}" 2>/dev/null || true
+      run_capture_status stat_entry "${file}" 2>/dev/null
     fi
   done | sort | hash_stream
 }
@@ -395,7 +398,7 @@ list_apk_watch_files() {
 hash_apk_watch_state() {
   list_apk_watch_files | while read -r file; do
     if [[ -f "${file}" ]]; then
-      stat_entry "${file}" 2>/dev/null || true
+      run_capture_status stat_entry "${file}" 2>/dev/null
     fi
   done | sort | hash_stream
 }
@@ -428,7 +431,7 @@ list_video_server_watch_files() {
 hash_video_server_watch_state() {
   list_video_server_watch_files | while read -r file; do
     if [[ -f "${file}" ]]; then
-      stat_entry "${file}" 2>/dev/null || true
+      run_capture_status stat_entry "${file}" 2>/dev/null
     fi
   done | sort | hash_stream
 }
@@ -502,7 +505,8 @@ install_video_server() {
 # Setup desktop app
 setup_desktop_app() {
   log_info "Building desktop app (desktop-core + desktop-app)..."
-  if ! build_desktop_app; then
+  run_capture_status build_desktop_app
+  if (( RUN_STATUS != 0 )); then
     log_error "Desktop app build failed. Fix errors and retry."
     return 1
   fi
@@ -513,7 +517,8 @@ setup_desktop_app() {
 setup_android() {
   resolve_adb
 
-  if resolve_device; then
+  run_capture_status resolve_device
+  if (( RUN_STATUS == 0 )); then
     HAVE_DEVICE=true
   fi
 
@@ -528,7 +533,8 @@ setup_android() {
   log_info "APK path: ${APK_PATH}"
   log_info "Building AccessibilityService..."
 
-  if ! build_apk; then
+  run_capture_status build_apk
+  if (( RUN_STATUS != 0 )); then
     log_error "Initial APK build failed. Fix errors and retry."
     return 1
   fi
@@ -555,7 +561,8 @@ setup_android() {
   fi
 
   if [[ "${HAVE_DEVICE}" == "true" ]]; then
-    if ! install_apk; then
+    run_capture_status install_apk
+    if (( RUN_STATUS != 0 )); then
       log_warn "Initial install failed. Will retry when devices connect."
     fi
     if [[ "${video_server_built}" == "true" ]]; then
@@ -601,7 +608,8 @@ setup_ios() {
   log_info "Derived data: ${DERIVED_DATA_PATH}"
   log_info "Building CtrlProxy iOS..."
 
-  if ! build_ctrl_proxy_ios; then
+  run_capture_status build_ctrl_proxy_ios
+  if (( RUN_STATUS != 0 )); then
     log_warn "Initial CtrlProxy iOS build failed. Will retry on changes."
     return 1
   fi
@@ -781,7 +789,8 @@ unified_watch_loop() {
       # Rebuild APK if files changed
       if [[ "${apk_files_changed}" == "true" ]]; then
         log_info "[Android] Change detected. Rebuilding..."
-        if build_apk; then
+        run_capture_status build_apk
+        if (( RUN_STATUS == 0 )); then
           APK_NEEDS_INSTALL=true
           LAST_APK_HASH="$(hash_apk_watch_state)"
           # Update SHA after successful build (regardless of device availability)
@@ -816,7 +825,8 @@ unified_watch_loop() {
       # Install if pending and devices available
       if [[ "${APK_NEEDS_INSTALL}" == "true" ]] || [[ "${devices_changed}" == "true" ]]; then
         if [[ -n "${current_devices}" ]] && [[ -f "${APK_PATH}" ]]; then
-          if install_apk; then
+          run_capture_status install_apk
+          if (( RUN_STATUS == 0 )); then
             APK_NEEDS_INSTALL=false
             log_info "[Android] APK installed to device(s)."
           else
@@ -877,7 +887,8 @@ unified_watch_loop() {
 
       if [[ "${next_ios_hash}" != "${LAST_IOS_HASH}" ]]; then
         log_info "[iOS] Change detected. Rebuilding..."
-        if build_ctrl_proxy_ios; then
+        run_capture_status build_ctrl_proxy_ios
+        if (( RUN_STATUS == 0 )); then
           LAST_IOS_HASH="$(hash_ios_watch_state)"
           IOS_NEEDS_RESTART=true
           # Update TypeScript checksum after iOS build
@@ -1018,13 +1029,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Set up cleanup trap
-trap cleanup EXIT INT TERM
+trap 'cleanup' EXIT INT TERM
 
 # Ensure scratch directory exists
-mkdir -p "${PROJECT_ROOT}/scratch"
+mkdir_spotlight_excluded "${PROJECT_ROOT}/scratch"
 
 # Check and install dependencies
-if ! ensure_dependencies; then
+run_capture_status ensure_dependencies
+if (( RUN_STATUS != 0 )); then
   log_error "Dependency check failed. Exiting."
   exit 1
 fi
@@ -1101,7 +1113,6 @@ WATCHER_LOG="${PROJECT_ROOT}/scratch/hot-reload.log"
 
 (
   # Background watcher cleanup: stops CtrlProxy iOS and removes PID file
-  # shellcheck disable=SC2317,SC2329 # invoked indirectly via trap
   watcher_cleanup() {
     log_info "Watcher stopping..."
     stop_desktop_app
@@ -1112,7 +1123,9 @@ WATCHER_LOG="${PROJECT_ROOT}/scratch/hot-reload.log"
     fi
     rm -f "${PID_FILE}"
   }
-  trap watcher_cleanup EXIT TERM INT HUP
+  # Static reference for indirect callers; this branch never executes.
+  if false; then watcher_cleanup "$@"; fi
+  trap 'watcher_cleanup' EXIT TERM INT HUP
 
   WATCHER_START_TIME=$(date +%s)
   MAX_DURATION=$(( TIMEOUT_MINUTES * 60 ))

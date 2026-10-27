@@ -10,9 +10,6 @@ import type { AdbClientFactory } from "./AdbClientFactory";
 import { DefaultEmulatorBootUnlock, type EmulatorBootUnlock } from "./EmulatorBootUnlock";
 import {
   READINESS_NAME_TIMEOUT_MS,
-  type AndroidDeviceInventoryScanner,
-  type BootedDeviceScan,
-  type BootedDeviceScanOptions,
   type ReadinessDiagnostic,
 } from "./AndroidDeviceInventoryScanner";
 import { EmulatorExitedDuringReadinessError } from "./EmulatorLauncher";
@@ -31,6 +28,17 @@ import {
   unmetReadinessPredicate,
   type TargetReadinessState,
 } from "./emulatorReadinessEvaluation";
+import type {
+  EmulatorReadinessContext,
+  EmulatorReadinessHost,
+  EmulatorReadinessPoller,
+  EmulatorReadinessState,
+  OfflineTracker,
+  ReadinessPollCycle,
+  ReadinessPollOutcome,
+  ReadinessPollingState,
+} from "./EmulatorReadinessTypes";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 
 const DEFAULT_EMULATOR_POLLING_INTERVAL_MS = 500;
 export const MIN_EMULATOR_POLLING_INTERVAL_MS = 100;
@@ -38,45 +46,11 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const MAX_POLLING_SLEEP_CHUNK_MS = 500;
 const READINESS_PROBE_TIMEOUT_MS = 10_000;
 
-export interface OfflineTracker {
-  deviceId: string | null;
-  since: number | null;
-  state?: TargetReadinessState;
-  /** A bounded `adb -s <serial> reconnect` recovery has been dispatched during this readiness invocation (monotonic once set). */
-  recoveryAttempted?: boolean;
-}
-
-interface EmulatorReadinessState {
-  processExitError: ActionableError | null;
-  foundDeviceId: string | null;
-  foundEmulatorName: string;
-  foundDeviceModel?: string;
-  resolvedTargetDeviceId?: string;
-  correlationFailure?: string;
-  lastDiagnostic?: ReadinessDiagnostic;
-}
-
-interface ReadinessPollingState {
-  active: boolean;
-  failure?: unknown;
-}
-
-interface EmulatorReadinessContext {
-  avdName: string;
-  timeoutMs: number;
-  childProcess?: ChildProcess | null;
-  targetDeviceId?: string;
-  signal?: AbortSignal;
-  options?: AndroidEmulatorReadinessOptions;
-  startTime: number;
-  perf: ReturnType<typeof createGlobalPerformanceTracker>;
-  polling: ReadinessPollingState;
-  state: EmulatorReadinessState;
-  pollingIntervalMs: number;
-  probedNameSerials: Set<string>;
-  unresolvedNameSerials: Set<string>;
-  offlineTracker: OfflineTracker;
-}
+export type {
+  EmulatorReadinessHost,
+  EmulatorReadinessPoller,
+  OfflineTracker,
+} from "./EmulatorReadinessTypes";
 
 export function resolveEmulatorPollingInterval(value: string | undefined): number {
   const configuredInterval = Number(value);
@@ -88,78 +62,6 @@ export function resolveEmulatorPollingInterval(value: string | undefined): numbe
     return DEFAULT_EMULATOR_POLLING_INTERVAL_MS;
   }
   return Math.max(configuredInterval, MIN_EMULATOR_POLLING_INTERVAL_MS);
-}
-
-/**
- * Client-owned behaviour the poller needs. Every member resolves through the client at call
- * time, so patched client methods and reassigned fields still take effect.
- */
-export interface EmulatorReadinessHost {
-  timer(): Timer;
-  adbFactory(): AdbClientFactory;
-  getLaunchError(childProcess?: ChildProcess | null): ActionableError | undefined;
-  getLaunchErrorFinalization(
-    childProcess?: ChildProcess | null,
-  ): Promise<ActionableError | undefined> | undefined;
-  throwLaunchError(error?: ActionableError): void;
-  getLaunchTargetDeviceId(childProcess?: ChildProcess | null): string | undefined;
-  captureLaunchTargetDeviceId(childProcess: ChildProcess, output: string): void;
-  maybeRecoverFreshOffline(
-    tracker: OfflineTracker,
-    options: AndroidEmulatorReadinessOptions | undefined,
-    deviceId: string | undefined,
-    startTime: number,
-    timeoutMs: number,
-    context: { avdName: string; signal: AbortSignal | undefined },
-  ): Promise<void>;
-  nextPollingDelayMs(
-    tracker: OfflineTracker,
-    options: AndroidEmulatorReadinessOptions | undefined,
-    deviceId: string | undefined,
-    now: number,
-    pollingIntervalMs: number,
-    remainingPollingTimeMs: number,
-  ): number;
-  getBootedDevicesWithDiagnostics(
-    onlyEmulators?: boolean,
-    options?: BootedDeviceScanOptions,
-    signal?: AbortSignal,
-  ): Promise<BootedDeviceScan>;
-  findNamedEmulator(
-    avdName: string,
-    childProcess: ChildProcess | null | undefined,
-    runningEmulators: BootedDevice[],
-  ): { emulator?: BootedDevice; failure?: string };
-  resolvedReadyAvdName(
-    ...args: Parameters<AndroidDeviceInventoryScanner["resolvedReadyAvdName"]>
-  ): Promise<string>;
-  resolveFoundDeviceModel(
-    ...args: Parameters<AndroidDeviceInventoryScanner["resolveFoundDeviceModel"]>
-  ): Promise<string | undefined>;
-  foundBootedDevice(
-    ...args: Parameters<AndroidDeviceInventoryScanner["foundBootedDevice"]>
-  ): BootedDevice;
-  /** Maps captured emulator output to a known fatal startup failure, or null when none matches. */
-  classifyEmulatorExitOutput(output: string): ActionableError | null;
-}
-
-export interface EmulatorReadinessPoller {
-  waitForEmulatorReady(
-    avdName: string,
-    timeoutMs?: number,
-    childProcess?: ChildProcess | null,
-    targetDeviceId?: string,
-    signal?: AbortSignal,
-    options?: AndroidEmulatorReadinessOptions,
-  ): Promise<BootedDevice>;
-  wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void>;
-  detectOfflineFailure(
-    deviceId: string | undefined,
-    tracker: OfflineTracker,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-    observedStates?: AdbDeviceState[],
-  ): Promise<ActionableError | null>;
 }
 
 export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
@@ -293,7 +195,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     if (signal?.aborted) {
       polling.active = false;
       if (!deadlineReached) {
-        polling.failure = signal.reason;
+        polling.failure = { reason: signal.reason };
       }
       return undefined;
     }
@@ -318,6 +220,12 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     return this.timer.now() - startTime >= timeoutMs;
   }
 
+  private wakeReadinessWaiters(polling: ReadinessPollingState): void {
+    for (const wake of polling.wakeWaiters) {
+      wake();
+    }
+  }
+
   private waitForReadinessDelay(
     delayMs: number,
     signal: AbortSignal | undefined,
@@ -336,16 +244,19 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
         if (aborted) {
           polling.active = false;
           if (!this.readinessDeadlineReached(startTime, timeoutMs)) {
-            polling.failure = signal?.reason;
+            polling.failure = { reason: signal?.reason };
           }
         }
         if (waitState.timeoutHandle) {
           this.timer.clearTimeout(waitState.timeoutHandle);
         }
         signal?.removeEventListener("abort", abort);
+        polling.wakeWaiters.delete(wake);
         resolve();
       };
       const abort = () => settle(true);
+      const wake = () => settle(false);
+      polling.wakeWaiters.add(wake);
       signal?.addEventListener("abort", abort, { once: true });
       waitState.timeoutHandle = this.timer.setTimeout(() => settle(false), delayMs);
       if (signal?.aborted) {
@@ -356,7 +267,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
 
   private throwPollingFailure(polling: ReadinessPollingState): void {
     if (polling.failure !== undefined) {
-      throw polling.failure;
+      throw polling.failure.reason;
     }
   }
 
@@ -389,7 +300,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
 
     // Read polling interval from environment variable (default: 500ms, minimum: 100ms)
     const pollingIntervalMs = resolveEmulatorPollingInterval(
-      process.env.EMULATOR_POLLING_INTERVAL_MS,
+      readEnvRaw(AMBIENT_ENV.EMULATOR_POLLING_INTERVAL_MS),
     );
     logger.info(
       `Waiting for emulator '${avdName}' to be ready... (polling interval: ${pollingIntervalMs}ms)`,
@@ -403,13 +314,12 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     this.host.throwLaunchError(recordedLaunchError);
 
     // Monitor child process for early exit if provided
-    const polling: ReadinessPollingState = { active: true };
+    const polling: ReadinessPollingState = { active: true, wakeWaiters: new Set() };
     const state: EmulatorReadinessState = {
       processExitError: null,
       foundDeviceId: null,
       foundEmulatorName: avdName,
     };
-    const cleanupProcessListeners = this.monitorReadinessProcess(avdName, childProcess, state);
 
     // Start background polling immediately with configurable intervals
     const probedNameSerials = new Set<string>();
@@ -433,8 +343,9 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       unresolvedNameSerials,
       offlineTracker,
     };
+    const cleanupProcessListeners = this.monitorReadinessProcess(context);
     // Start background polling immediately
-    const pollingPromise = this.pollEmulatorReadiness(context);
+    const pollingPromise = this.startReadinessPolling(context);
 
     // Main timeout loop
     while (this.readinessWaitActive(polling, startTime, timeoutMs)) {
@@ -445,6 +356,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
           readinessFailure,
           async (finalizedReadinessFailure) => {
             polling.active = false;
+            this.wakeReadinessWaiters(polling);
             await pollingPromise;
             perf.endOperation("devicePolling");
             cleanupProcessListeners();
@@ -452,6 +364,8 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
           },
         );
         state.processExitError = null;
+        // Release a poller parked on this exit's settlement (#14430).
+        this.wakeReadinessWaiters(polling);
         continue;
       }
 
@@ -485,8 +399,9 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
         return bootedDevice;
       }
 
-      // Check less frequently in main loop since background polling is doing the work
-      await this.waitForReadinessDelay(500, signal, polling, startTime, timeoutMs);
+      // Poller completion and process exits wake this bounded fallback delay immediately.
+      const delayMs = Math.min(500, timeoutMs - (this.timer.now() - startTime));
+      await this.waitForReadinessDelay(delayMs, signal, polling, startTime, timeoutMs);
     }
 
     // Stop background polling
@@ -722,131 +637,35 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     ]);
   }
 
+  private startReadinessPolling(context: EmulatorReadinessContext): Promise<void> {
+    const { polling } = context;
+    return this.pollEmulatorReadiness(context)
+      .catch((error: unknown) => {
+        logger.warn(`Emulator readiness poller failed: ${errorMessage(error)}`, error);
+        polling.failure = { reason: error };
+        polling.active = false;
+      })
+      .finally(() => {
+        this.wakeReadinessWaiters(polling);
+      });
+  }
+
   private async pollEmulatorReadiness(context: EmulatorReadinessContext): Promise<void> {
-    const {
-      avdName,
-      timeoutMs,
-      childProcess,
-      targetDeviceId,
-      signal,
-      options,
-      startTime,
-      perf,
-      polling,
-      state,
-      pollingIntervalMs,
-      unresolvedNameSerials,
-      offlineTracker,
-    } = context;
+    const { signal, options, startTime, timeoutMs, polling, state } = context;
 
     // Let the main loop register its wake-up first. When both sleeps share a
     // deadline, this lets a process-exit failure stop the poller before it
     // schedules another cycle.
     await Promise.resolve();
     while (polling.active && !state.foundDeviceId) {
-      let correlatedTargetDeviceId: string | undefined;
+      await this.awaitExitSettlement(context);
+      if (!polling.active) {
+        break;
+      }
+      const cycle: ReadinessPollCycle = { correlatedTargetDeviceId: undefined };
+      let outcome: ReadinessPollOutcome = "continue";
       try {
-        this.recordLaunchError(childProcess, (error) => {
-          state.processExitError = error;
-        });
-        logger.debug(`Background polling iteration - checking for emulator '${avdName}'...`);
-
-        correlatedTargetDeviceId = this.readinessTargetDeviceId(
-          targetDeviceId,
-          childProcess,
-          state.resolvedTargetDeviceId,
-        );
-        const remainingTimeoutMs = timeoutMs - (this.timer.now() - startTime);
-        if (remainingTimeoutMs <= 0) {
-          polling.active = false;
-          break;
-        }
-        const discoveryAdb = this.adbFactory.create(null);
-        let snapshot:
-          | Awaited<ReturnType<NonNullable<typeof discoveryAdb.getReadinessDeviceSnapshot>>>
-          | undefined;
-        try {
-          snapshot = discoveryAdb.getReadinessDeviceSnapshot
-            ? await discoveryAdb.getReadinessDeviceSnapshot({
-                timeoutMs: Math.min(AdbClient.DEVICE_LIST_TIMEOUT_MS, remainingTimeoutMs),
-                signal,
-              })
-            : undefined;
-        } catch (error) {
-          // A failed snapshot is a gap in offline observations, not continued offline time.
-          this.clearOfflineTracker(offlineTracker);
-          throw error;
-        }
-        await this.detectOfflineFailure(
-          correlatedTargetDeviceId,
-          offlineTracker,
-          Math.min(AdbClient.DEVICE_LIST_TIMEOUT_MS, remainingTimeoutMs),
-          signal,
-          snapshot?.states,
-        );
-        await this.host.maybeRecoverFreshOffline(
-          offlineTracker,
-          options,
-          correlatedTargetDeviceId,
-          startTime,
-          timeoutMs,
-          { avdName, signal },
-        );
-        if (!polling.active || this.timer.now() - startTime >= timeoutMs) {
-          break;
-        }
-
-        // For local emulators, check for running devices
-        logger.debug(`Checking for running local emulators...`);
-        const scan = await this.scanReadinessDevices(context, snapshot, correlatedTargetDeviceId);
-        const scanDiagnostic = relevantScanDiagnostic(scan, correlatedTargetDeviceId);
-        retryUnresolvedReadinessNames(scan.devices, unresolvedNameSerials);
-        state.lastDiagnostic = scanDiagnostic;
-        const runningEmulators = scan.devices;
-        logger.debug(`Device scan complete - found ${runningEmulators.length} running emulators`);
-        const readinessTimeoutMs = Math.max(
-          0,
-          Math.min(READINESS_PROBE_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
-        );
-        if (readinessTimeoutMs <= 0) {
-          break;
-        }
-
-        const emulator = this.selectReadinessEmulator(
-          context,
-          runningEmulators,
-          correlatedTargetDeviceId,
-        );
-        if (emulator && emulator.deviceId) {
-          this.markTargetNotReady(offlineTracker, correlatedTargetDeviceId);
-          state.correlationFailure = undefined;
-          logger.debug(
-            `Target emulator found: ${emulator.name} (${emulator.deviceId}) - starting readiness checks`,
-          );
-          // Check if the device is online and ready.
-          // Run ADB state, package manager, and boot-complete checks in parallel for faster detection.
-          logger.debug(
-            `[PARALLEL] Running device state, package manager, and boot-complete checks for ${emulator.deviceId}...`,
-          );
-          const adb = this.adbFactory.create(emulator);
-          try {
-            perf.startOperation("adbParallelChecks");
-            const results = await this.dispatchReadinessProbes(adb, readinessTimeoutMs, signal);
-            perf.endOperation("adbParallelChecks");
-
-            if (this.applyReadinessProbeResults(context, emulator, scanDiagnostic, results)) {
-              return;
-            }
-          } catch (parallelError) {
-            // Transient readiness probe failures are retried until the deadline.
-            throwIfReadinessAborted(signal);
-            logger.debug(
-              `[PARALLEL] ❌ Parallel checks failed for ${emulator.deviceId}: ${parallelError}`,
-            );
-          }
-        } else if (runningEmulators.length > 0) {
-          logger.debug(`No suitable emulator found for '${avdName}' - will continue polling`);
-        }
+        outcome = await this.runReadinessPollCycle(context, cycle);
       } catch (error) {
         // Transient discovery failures remain diagnostic evidence while polling continues.
         state.lastDiagnostic =
@@ -858,30 +677,11 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
           ) ?? state.lastDiagnostic;
         logger.debug(`Background polling error (will continue): ${error}`);
       }
-
-      const now = this.timer.now();
-      const remainingPollingTimeMs = timeoutMs - (now - startTime);
-      if (remainingPollingTimeMs <= 0) {
-        polling.active = false;
-        break;
+      if (outcome === "ready") {
+        return;
       }
-      let remainingPollingDelayMs = this.host.nextPollingDelayMs(
-        offlineTracker,
-        options,
-        correlatedTargetDeviceId,
-        now,
-        pollingIntervalMs,
-        remainingPollingTimeMs,
-      );
-
-      // Never let the background poller sleep past the readiness deadline.
-      logger.debug(
-        `Background polling cycle complete - sleeping ${remainingPollingDelayMs}ms before next check`,
-      );
-      while (polling.active && !state.foundDeviceId && remainingPollingDelayMs > 0) {
-        const sleepChunkMs = Math.min(remainingPollingDelayMs, MAX_POLLING_SLEEP_CHUNK_MS);
-        await this.waitForReadinessDelay(sleepChunkMs, signal, polling, startTime, timeoutMs);
-        remainingPollingDelayMs -= sleepChunkMs;
+      if (outcome === "stop" || !(await this.sleepBeforeNextPoll(context, cycle, options))) {
+        break;
       }
     }
     logger.debug(
@@ -889,11 +689,208 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     );
   }
 
-  private monitorReadinessProcess(
-    avdName: string,
-    childProcess: ChildProcess | null | undefined,
-    state: EmulatorReadinessState,
-  ): () => void {
+  /**
+   * Parks the poller while the main waiter settles an observed process exit (#14430).
+   * The exit wakes every readiness sleep, and the launcher's exit finalization can
+   * outlast a polling interval, so a cycle started in that window would leave the
+   * fatal path awaiting a scan or probe bounded only by the caller's signal. A fatal
+   * settlement stops polling; a non-fatal one clears the error and wakes the poller.
+   */
+  private async awaitExitSettlement(context: EmulatorReadinessContext): Promise<void> {
+    const { signal, startTime, timeoutMs, polling, state } = context;
+    while (polling.active && state.processExitError) {
+      const remainingMs = timeoutMs - (this.timer.now() - startTime);
+      if (remainingMs <= 0) {
+        polling.active = false;
+        return;
+      }
+      const delayMs = Math.min(remainingMs, MAX_POLLING_SLEEP_CHUNK_MS);
+      await this.waitForReadinessDelay(delayMs, signal, polling, startTime, timeoutMs);
+    }
+  }
+
+  /** One discovery-and-probe pass: "ready" ends polling successfully, "stop" ends it, else sleep. */
+  private async runReadinessPollCycle(
+    context: EmulatorReadinessContext,
+    cycle: ReadinessPollCycle,
+  ): Promise<ReadinessPollOutcome> {
+    const {
+      avdName,
+      timeoutMs,
+      childProcess,
+      targetDeviceId,
+      signal,
+      options,
+      startTime,
+      state,
+      polling,
+      unresolvedNameSerials,
+      offlineTracker,
+    } = context;
+    this.recordLaunchError(childProcess, (error) => {
+      state.processExitError = error;
+      this.wakeReadinessWaiters(polling);
+    });
+    logger.debug(`Background polling iteration - checking for emulator '${avdName}'...`);
+
+    const correlatedTargetDeviceId = this.readinessTargetDeviceId(
+      targetDeviceId,
+      childProcess,
+      state.resolvedTargetDeviceId,
+    );
+    cycle.correlatedTargetDeviceId = correlatedTargetDeviceId;
+    const remainingTimeoutMs = timeoutMs - (this.timer.now() - startTime);
+    if (remainingTimeoutMs <= 0) {
+      polling.active = false;
+      return "stop";
+    }
+    const snapshotTimeoutMs = Math.min(AdbClient.DEVICE_LIST_TIMEOUT_MS, remainingTimeoutMs);
+    const snapshot = await this.readReadinessSnapshot(snapshotTimeoutMs, signal, offlineTracker);
+    await this.detectOfflineFailure(
+      correlatedTargetDeviceId,
+      offlineTracker,
+      snapshotTimeoutMs,
+      signal,
+      snapshot?.states,
+    );
+    await this.host.maybeRecoverFreshOffline(
+      offlineTracker,
+      options,
+      correlatedTargetDeviceId,
+      startTime,
+      timeoutMs,
+      { avdName, signal },
+    );
+    if (!polling.active || this.timer.now() - startTime >= timeoutMs) {
+      return "stop";
+    }
+
+    // For local emulators, check for running devices
+    logger.debug(`Checking for running local emulators...`);
+    const scan = await this.scanReadinessDevices(context, snapshot, correlatedTargetDeviceId);
+    const scanDiagnostic = relevantScanDiagnostic(scan, correlatedTargetDeviceId);
+    retryUnresolvedReadinessNames(scan.devices, unresolvedNameSerials);
+    state.lastDiagnostic = scanDiagnostic;
+    const runningEmulators = scan.devices.filter((device) => !device.foreignOwned);
+    logger.debug(`Device scan complete - found ${runningEmulators.length} running emulators`);
+    const readinessTimeoutMs = Math.max(
+      0,
+      Math.min(READINESS_PROBE_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
+    );
+    if (readinessTimeoutMs <= 0) {
+      return "stop";
+    }
+
+    const emulator = this.selectReadinessEmulator(
+      context,
+      runningEmulators,
+      correlatedTargetDeviceId,
+    );
+    if (emulator && emulator.deviceId) {
+      const ready = await this.probeSelectedEmulator(
+        context,
+        emulator,
+        scanDiagnostic,
+        readinessTimeoutMs,
+        correlatedTargetDeviceId,
+      );
+      return ready ? "ready" : "continue";
+    }
+    if (runningEmulators.length > 0) {
+      logger.debug(`No suitable emulator found for '${avdName}' - will continue polling`);
+    }
+    return "continue";
+  }
+
+  private async readReadinessSnapshot(
+    timeoutMs: number,
+    signal: AbortSignal | undefined,
+    offlineTracker: OfflineTracker,
+  ) {
+    const discoveryAdb = this.adbFactory.create(null);
+    try {
+      return discoveryAdb.getReadinessDeviceSnapshot
+        ? await discoveryAdb.getReadinessDeviceSnapshot({ timeoutMs, signal })
+        : undefined;
+    } catch (error) {
+      // A failed snapshot is a gap in offline observations, not continued offline time.
+      this.clearOfflineTracker(offlineTracker);
+      throw error;
+    }
+  }
+
+  /** Runs the parallel state/package/boot probes against the selected emulator; true when ready. */
+  private async probeSelectedEmulator(
+    context: EmulatorReadinessContext,
+    emulator: BootedDevice,
+    scanDiagnostic: ReturnType<typeof relevantScanDiagnostic>,
+    readinessTimeoutMs: number,
+    correlatedTargetDeviceId: string | undefined,
+  ): Promise<boolean> {
+    const { signal, state, perf, offlineTracker } = context;
+    this.markTargetNotReady(offlineTracker, correlatedTargetDeviceId);
+    state.correlationFailure = undefined;
+    logger.debug(
+      `Target emulator found: ${emulator.name} (${emulator.deviceId}) - starting readiness checks`,
+    );
+    // Check if the device is online and ready.
+    // Run ADB state, package manager, and boot-complete checks in parallel for faster detection.
+    logger.debug(
+      `[PARALLEL] Running device state, package manager, and boot-complete checks for ${emulator.deviceId}...`,
+    );
+    const adb = this.adbFactory.create(emulator);
+    try {
+      perf.startOperation("adbParallelChecks");
+      const results = await this.dispatchReadinessProbes(adb, readinessTimeoutMs, signal);
+      perf.endOperation("adbParallelChecks");
+      return this.applyReadinessProbeResults(context, emulator, scanDiagnostic, results);
+    } catch (parallelError) {
+      // Transient readiness probe failures are retried until the deadline.
+      throwIfReadinessAborted(signal);
+      logger.debug(
+        `[PARALLEL] ❌ Parallel checks failed for ${emulator.deviceId}: ${parallelError}`,
+      );
+      return false;
+    }
+  }
+
+  /** Sleeps out the polling interval in bounded chunks; false when the deadline has passed. */
+  private async sleepBeforeNextPoll(
+    context: EmulatorReadinessContext,
+    cycle: ReadinessPollCycle,
+    options: AndroidEmulatorReadinessOptions | undefined,
+  ): Promise<boolean> {
+    const { signal, startTime, timeoutMs, polling, state, pollingIntervalMs, offlineTracker } =
+      context;
+    const now = this.timer.now();
+    const remainingPollingTimeMs = timeoutMs - (now - startTime);
+    if (remainingPollingTimeMs <= 0) {
+      polling.active = false;
+      return false;
+    }
+    let remainingPollingDelayMs = this.host.nextPollingDelayMs(
+      offlineTracker,
+      options,
+      cycle.correlatedTargetDeviceId,
+      now,
+      pollingIntervalMs,
+      remainingPollingTimeMs,
+    );
+
+    // Never let the background poller sleep past the readiness deadline.
+    logger.debug(
+      `Background polling cycle complete - sleeping ${remainingPollingDelayMs}ms before next check`,
+    );
+    while (polling.active && !state.foundDeviceId && remainingPollingDelayMs > 0) {
+      const sleepChunkMs = Math.min(remainingPollingDelayMs, MAX_POLLING_SLEEP_CHUNK_MS);
+      await this.waitForReadinessDelay(sleepChunkMs, signal, polling, startTime, timeoutMs);
+      remainingPollingDelayMs -= sleepChunkMs;
+    }
+    return true;
+  }
+
+  private monitorReadinessProcess(context: EmulatorReadinessContext): () => void {
+    const { avdName, childProcess, state, polling } = context;
     if (childProcess && childProcess.pid) {
       const processOutput: string[] = [];
       const stdoutDecoder = new StringDecoder("utf8");
@@ -931,6 +928,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
         logger.error(
           `Emulator process exited during readiness wait: ${state.processExitError.message}`,
         );
+        this.wakeReadinessWaiters(polling);
       };
       const stdoutCapture = (data: Buffer | string) => captureOutput(stdoutDecoder, data);
       const stderrCapture = (data: Buffer | string) => captureOutput(stderrDecoder, data);

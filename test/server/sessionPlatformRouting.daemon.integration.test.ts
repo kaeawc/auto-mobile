@@ -1,5 +1,8 @@
 import { makePool } from "../helpers/makePool";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import type { DaemonRequest } from "../../src/daemon/types";
+import { isRecord } from "../../src/server/pipeline/isRecord";
+import { toolJson } from "../helpers/toolResponse";
 import {
   DaemonBoundSessionExpiredError,
   DaemonConnectionSessionReleasedError,
@@ -7,9 +10,9 @@ import {
 } from "../../src/daemon/daemonMcpProxy";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { DaemonClient } from "../../src/daemon/client";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
-import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
+import { routedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -38,7 +41,7 @@ import { registerUtilityTools } from "../../src/server/utilityTools";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
@@ -66,14 +69,14 @@ let originalRepository: ReturnType<
   typeof ToolRegistry.getCollaboratorsForTesting
 >["toolCallRepository"];
 let originalCollaborators: ToolRegistryCollaborators;
-let deviceSessionManager: FakeDeviceSessionManager;
+let deviceReadiness: FakeDeviceReadiness;
 let restorePipelineOverrides: (() => void) | undefined;
 
 beforeEach(async () => {
   originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-  deviceSessionManager = new FakeDeviceSessionManager();
-  deviceSessionManager.setConnectedDevices(devices);
-  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessionManager });
+  deviceReadiness = new FakeDeviceReadiness();
+  deviceReadiness.setConnectedDevices(devices);
+  ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: deviceReadiness });
   previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
   process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   db = new Kysely<Database>({
@@ -177,7 +180,7 @@ test("setActiveDevice selects an acquired session without an explicit UUID", asy
     platform: "android",
     __mcpSessionId: "client",
   });
-  expect(JSON.parse(result.content[0].text).sessionUuid).toBe(androidSession);
+  expect(toolJson(result).sessionUuid).toBe(androidSession);
   expect(pool.resolveAutolockSessionForMcpSession("client")).toBe(androidSession);
 }, 30000);
 
@@ -195,13 +198,22 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
   const fixtures = new Map<string, McpTestFixture>();
   const received: string[] = [];
   const routes: string[] = [];
+  const boundRoutes: Array<{ clientKey: string; sessionUuid: string }> = [];
   const acquisitionOwners: Array<string | undefined> = [];
   let socketSessionId = "client";
   const dispatch = async (name: string, args: Record<string, unknown>) => {
-    const request = { id: "routing", method: "tools/call", params: { name, arguments: args } };
+    const request: DaemonRequest = {
+      id: "routing",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name, arguments: args },
+    };
     await socket.testHooks.restoreSelectorSessions(args, socketSessionId);
-    const route = socket.testHooks.getMcpForwardRoute(request, socketSessionId);
+    const route = await socket.testHooks.getMcpForwardRoute(request, socketSessionId);
     routes.push(route.clientKey);
+    if (route.sessionUuid) {
+      boundRoutes.push({ clientKey: route.clientKey, sessionUuid: route.sessionUuid });
+    }
     let fixture = fixtures.get(route.clientKey);
     if (!fixture) {
       fixture = new McpTestFixture({
@@ -284,6 +296,9 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
       );
     }
     const forwarded = socket.testHooks.withSocketSessionAutolockKey(args, socketSessionId, 10000);
+    if (!isRecord(forwarded)) {
+      throw new Error("Expected forwarded tool arguments to be an object");
+    }
     const result = await fixture.client.callTool({ name, arguments: forwarded });
     socket.testHooks.recordBoundMcpClientKey(request, socketSessionId, route, true, result);
     return result;
@@ -438,8 +453,8 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, apple, "heartbeat-timeout");
     const receivedBeforeFence = received.length;
     const forwardedBeforeFence = client.callToolCalls.length;
-    const scansBeforeFence = deviceSessionManager.getDetectConnectedPlatformsCallCount();
-    const readinessBeforeFence = deviceSessionManager.getEnsureDeviceReadyCallCount();
+    const scansBeforeFence = deviceReadiness.getDetectConnectedPlatformsCallCount();
+    const readinessBeforeFence = deviceReadiness.getEnsureDeviceReadyCallCount();
     const refusedIos = await proxy
       .callTool("routingProbe", { platform: "ios", keepScreenAwake: false })
       .catch((error: unknown) => error);
@@ -447,8 +462,8 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     expect(refusedIos).toMatchObject({ reason: "heartbeat-timeout" });
     expect(received.length).toBe(receivedBeforeFence);
     expect(client.callToolCalls.length).toBe(forwardedBeforeFence);
-    expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeFence);
-    expect(deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(readinessBeforeFence);
+    expect(deviceReadiness.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeFence);
+    expect(deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(readinessBeforeFence);
     await expect(proxy.callTool("routingProbe", {})).rejects.toBeInstanceOf(
       DaemonConnectionSessionReleasedError,
     );
@@ -490,6 +505,10 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     await proxy.callTool("setActiveDevice", { deviceId: devices[2].deviceId, platform: "android" });
     await proxy.callTool("routingProbe", { keepScreenAwake: false });
     expect(received.at(-1)).toBe(devices[2].deviceId);
+    // Capture the active Android-bound connection now: later calls (the stale Apple one
+    // below) append their own bound routes, so the last bound route is not this one.
+    const activeAndroidRoute = boundRoutes.at(-1);
+    expect(activeAndroidRoute?.sessionUuid).toBe(android);
     const staleResult = await proxy.callTool("routingProbe", {
       sessionUuid: apple,
       keepScreenAwake: false,
@@ -500,16 +519,16 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     // With the fence lifted and no held iOS session, platform falls through to ordinary
     // discovery without false ambiguity (#11167), and never reaches the Android default.
     const receivedBeforeIos = received.length;
-    const scansBeforeIos = deviceSessionManager.getDetectConnectedPlatformsCallCount();
-    const readinessBeforeIos = deviceSessionManager.getEnsureDeviceReadyCallCount();
+    const scansBeforeIos = deviceReadiness.getDetectConnectedPlatformsCallCount();
+    const readinessBeforeIos = deviceReadiness.getEnsureDeviceReadyCallCount();
     const discovered = await proxy.callTool("routingProbe", {
       platform: "ios",
       keepScreenAwake: false,
     });
     expect(discovered.isError).toBeFalsy();
-    expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeIos + 1);
-    expect(deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(readinessBeforeIos + 1);
-    expect(deviceSessionManager.getLastEnsureDeviceReadyPlatform()).toBe("ios");
+    expect(deviceReadiness.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeIos + 1);
+    expect(deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(readinessBeforeIos + 1);
+    expect(deviceReadiness.getLastEnsureDeviceReadyPlatform()).toBe("ios");
     expect(received.slice(receivedBeforeIos)).toEqual([devices[1].deviceId]);
     expect(received.slice(receivedBeforeIos)).not.toContain(devices[0].deviceId);
     const fakeDeviceManager = new FakeDeviceManager();
@@ -541,7 +560,10 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
               : "";
         expect(failureText).not.toMatch(/disabled/i);
         expect(failureText).not.toMatch(/unknown tool/i);
-        const fixture = fixtures.get(routes.at(-1)!);
+        // Inventory listings never inherit the proxy's binding (#13796), so the call's own
+        // route is unbound; the advertisement under test is the active Android-bound
+        // connection's, not that of whichever bound route happened to run last.
+        const fixture = fixtures.get(activeAndroidRoute!.clientKey);
         expect(fixture).toBeDefined();
         const advertisedToolNames = (await fixture!.client.listTools()).tools.map(
           (tool) => tool.name,
@@ -569,7 +591,7 @@ test("setActiveDevice rebinds the session of the device's platform, never the ot
     platform: "android",
     __mcpSessionId: "client",
   });
-  expect(JSON.parse(result.content[0].text).sessionUuid).toBe(androidSession);
+  expect(toolJson(result).sessionUuid).toBe(androidSession);
   expect(manager.getSession(androidSession!)?.assignedDevice).toBe(devices[2].deviceId);
   expect(manager.getSession(iosSession!)?.platform).toBe("ios");
   expect(manager.getSession(iosSession!)?.assignedDevice).toBe(devices[1].deviceId);

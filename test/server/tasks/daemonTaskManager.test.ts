@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   daemonTaskLeaseKeepalive,
   releaseDaemonTaskLeases,
-} from "../../../src/server/tasks/daemonTaskManager";
+} from "../../../src/daemon/tasks/daemonTaskManager";
 
 describe("daemonTaskLeaseKeepalive (#13143)", () => {
   test("a daemon started after a shutdown in the same process gets a keeper that still holds", () => {

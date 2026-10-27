@@ -24,7 +24,7 @@ import { resolveDaemonInstallSpecifier } from "../constants/release";
 import {
   DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
-} from "../server/deviceSessionResult";
+} from "../daemon/deviceSessionResult";
 import { AUTOMATIC_TOOL_OUTPUT_RETENTION } from "../server/toolRegistry";
 import { JsonToolOutputArtifactWriter } from "../server/toolOutputArtifactWriter";
 import type { ObservationArtifactWriter } from "../server/finalizeToolResponse";
@@ -33,7 +33,7 @@ import { serverConfig } from "../utils/ServerConfig";
 import { cliStderr, cliStdout, renderCliToolOutput, type CliByteSink } from "./toolOutput";
 import type { CliTerminationRequest } from "./termination";
 import { cliDeviceOwnershipHint } from "./deviceOwnershipHint";
-import { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS } from "../daemon/constants";
+import { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS } from "../daemon/wire/constants";
 import {
   ensureCliToolSelectionProfileStoreWritable,
   loadPersistedCliToolSelectionProfile,
@@ -83,11 +83,29 @@ function readLeadingSessionUuid(args: string[]): {
   return { sessionUuid: value, toolNameIndex };
 }
 
-export function parseCliArgs(args: string[]): {
+type DeclaredParamTypes = ReturnType<typeof getDeclaredParamTypes>;
+
+interface ParsedCliArgs {
   toolName: string;
   sessionUuid?: string;
   params: Record<string, any>;
-} {
+}
+
+export function parseCliArgs(args: string[]): ParsedCliArgs {
+  return parseCliArgsWith(args, getDeclaredParamTypes);
+}
+
+/** A parameter's declared type, read as an own key so `--constructor` never resolves `Object`. */
+function declaredTypeOf(declaredTypes: DeclaredParamTypes, paramName: string) {
+  return declaredTypes && Object.hasOwn(declaredTypes, paramName)
+    ? declaredTypes[paramName]
+    : undefined;
+}
+
+function parseCliArgsWith(
+  args: string[],
+  resolveDeclaredTypes: (toolName: string) => DeclaredParamTypes,
+): ParsedCliArgs {
   if (args.length === 0) {
     throw new ActionableError(
       "No tool name provided. Usage: --cli [--session-uuid <uuid>] <tool-name> [--param value ...]",
@@ -97,8 +115,10 @@ export function parseCliArgs(args: string[]): {
   const { sessionUuid, toolNameIndex } = readLeadingSessionUuid(args);
 
   const toolName = args[toolNameIndex];
-  const params: Record<string, any> = {};
-  const declaredTypes = getDeclaredParamTypes(toolName);
+  // A Map, not `{}`: assigning a `--__proto__` key onto an object literal invokes the inherited
+  // prototype setter instead of recording the flag, hiding it from unknown-flag checks (#14534).
+  const params = new Map<string, unknown>();
+  const declaredTypes = resolveDeclaredTypes(toolName);
 
   // Parse remaining arguments as key-value pairs or boolean flags
   for (let i = toolNameIndex + 1; i < args.length; i++) {
@@ -115,7 +135,7 @@ export function parseCliArgs(args: string[]): {
     const { flag: keyFlag, inlineValue } = splitFlagToken(key);
     const paramName = keyFlag.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
     if (inlineValue !== undefined) {
-      params[paramName] = coerceCliValue(inlineValue, declaredTypes?.[paramName]);
+      params.set(paramName, coerceCliValue(inlineValue, declaredTypeOf(declaredTypes, paramName)));
       continue;
     }
 
@@ -126,19 +146,20 @@ export function parseCliArgs(args: string[]): {
     const startsYamlDocument = nextArg !== undefined && /^---(?:\s|$)/.test(nextArg);
     if (nextArg === undefined || (nextArg.startsWith("--") && !startsYamlDocument)) {
       // Boolean flag without value - treat as true
-      params[paramName] = true;
+      params.set(paramName, true);
     } else {
       // Key-value pair
       i++; // Skip the value in the next iteration
 
-      params[paramName] = coerceCliValue(nextArg, declaredTypes?.[paramName]);
+      params.set(paramName, coerceCliValue(nextArg, declaredTypeOf(declaredTypes, paramName)));
     }
   }
 
   // The trailing form (`observe --session-uuid ""`) names a session just as the leading one does.
-  requireNonBlankSessionUuid(params.sessionUuid);
+  requireNonBlankSessionUuid(params.get("sessionUuid"));
 
-  return { toolName, sessionUuid, params };
+  // Object.fromEntries defines own data properties, so `__proto__` stays an enumerable key.
+  return { toolName, sessionUuid, params: Object.fromEntries(params) };
 }
 
 /**
@@ -408,14 +429,77 @@ interface DoctorCommandOptions {
   exit?: (code: number) => void;
 }
 
+export function doctorUsage(): string {
+  return `Usage: auto-mobile --cli doctor [options]
+
+Status: status-only and read-only diagnostics.
+
+Options:
+  --android  Filter to Android checks
+  --ios      Filter to iOS checks
+  --json     Machine-readable JSON output
+  --help     Print this help
+
+The universal --session-uuid option is accepted and ignored.`;
+}
+
+/** Why these doctor flags are rejected, or undefined when every flag is supported. */
+function doctorFlagError(params: Record<string, unknown>): string | undefined {
+  if (Object.hasOwn(params, "repair") || Object.hasOwn(params, "timeoutMs")) {
+    return "doctor is status-only; --repair and --timeout-ms were removed. Use --daemon restart to recover the daemon; --daemon diagnose only gathers further diagnostics.";
+  }
+
+  // The CLI forwards an explicit universal session UUID; local diagnosis ignores it.
+  const supportedParams = ["android", "ios", "json", "help", "sessionUuid"];
+  const unknownFlags = Object.keys(params)
+    .filter((key) => !supportedParams.includes(key))
+    .map((key) => `--${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`);
+  if (unknownFlags.length > 0) {
+    return `Unknown doctor flags: ${unknownFlags.join(", ")}. Supported flags: --android, --ios, --json, --help (the universal --session-uuid option is accepted and ignored).`;
+  }
+  return undefined;
+}
+
+function validateDoctorFlags(params: Record<string, unknown>): void {
+  const error = doctorFlagError(params);
+  if (error !== undefined) {
+    throw new ActionableError(error);
+  }
+}
+
+/**
+ * Whether a `--cli` invocation is answered before the server bootstrap (#14533): a `doctor`
+ * call that only prints its usage (`--help`) or rejects its flags talks to no device, so
+ * startup must not register tools, run maintenance or start CtrlProxy prefetches first. Any
+ * other invocation, and one that fails to parse, keeps the normal startup path.
+ *
+ * Declared types only coerce flag values, and doctor declares neither `help` nor an unknown
+ * flag, so classifying without them gives runDoctorCommand's verdict without registering the
+ * CLI tools ahead of the bootstrap.
+ */
+export function cliCommandSkipsServerBootstrap(cliArgs: string[]): boolean {
+  let parsed: ParsedCliArgs;
+  try {
+    parsed = parseCliArgsWith(cliArgs, () => null);
+  } catch (error) {
+    // Safe to swallow: runCliCommand re-parses on the normal path and reports this error.
+    logger.debug(`CLI bootstrap routing kept the normal path: ${errorMessage(error)}`);
+    return false;
+  }
+  if (parsed.toolName !== "doctor") {
+    return false;
+  }
+  return doctorFlagError(parsed.params) !== undefined || Boolean(parsed.params.help);
+}
+
 export async function runDoctorCommand(
   params: Record<string, any>,
   options: DoctorCommandOptions = {},
 ): Promise<CliTerminationRequest | undefined> {
-  if (Object.hasOwn(params, "repair") || Object.hasOwn(params, "timeoutMs")) {
-    throw new ActionableError(
-      "doctor is status-only; --repair and --timeout-ms were removed. Use --daemon restart to recover the daemon; --daemon diagnose only gathers further diagnostics.",
-    );
+  validateDoctorFlags(params);
+  if (params.help) {
+    (options.writeOutput ?? console.log)(doctorUsage());
+    return undefined;
   }
 
   const doctor = await import("../doctor");
@@ -669,6 +753,8 @@ AutoMobile CLI - Android Device Automation
 Usage:
   bunx ${installSpecifier} --cli [--session-uuid <uuid>] <tool-name> [--param value ...]
   bunx ${installSpecifier} --cli help [tool-name]
+  bunx ${installSpecifier} --ios-templates build --runtime <identifier> --device-type <identifier>
+  bunx ${installSpecifier} --ios-templates clean (--all | --stale | --runtime <identifier> [--device-type <identifier>]) [--force]
 
 Examples:
   bunx ${installSpecifier} --cli listDeviceImages

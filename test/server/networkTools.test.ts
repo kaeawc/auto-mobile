@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import type { IosNetworkErrorSimulationConfig } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import {
@@ -6,8 +7,8 @@ import {
   type IosMockRuleSyncResult,
 } from "../../src/features/observe/ios";
 import type { BootedDevice } from "../../src/models";
-import { NetworkState } from "../../src/server/NetworkState";
-import type { NetworkMockSyncReport } from "../../src/server/networkMockRules";
+import { NetworkState } from "../../src/utils/NetworkState";
+import type { NetworkMockSyncReport } from "../../src/utils/networkMockRules";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   isIosNetworkErrorSimulationAvailable,
@@ -25,6 +26,12 @@ import * as path from "path";
 import * as os from "os";
 import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import {
+  clearMockNetworkResultSchema,
+  getNetworkGraphResultSchema,
+  mockNetworkResultSchema,
+  networkResultSchema,
+} from "../../src/server/networkToolOutputSchemas";
 
 isolateToolRegistry();
 
@@ -41,7 +48,7 @@ function parseToolJson(response: any): any {
 describe("network tool schema", () => {
   let iosMessages: string[];
   let androidMessages: string[];
-  let iosErrorSimulations: unknown[];
+  let iosErrorSimulations: IosNetworkErrorSimulationConfig[];
   let iosMockRuleSyncCalls: number;
   let iosMockRuleSyncResult: IosMockRuleSyncOutcome | IosMockRuleSyncResult | Error;
   let iosGetInstanceSpy: ReturnType<typeof spyOn>;
@@ -89,7 +96,7 @@ describe("network tool schema", () => {
         iosMessages.push(message);
         return true;
       },
-      setNetworkErrorSimulation: async (config: unknown) => {
+      setNetworkErrorSimulation: async (config: IosNetworkErrorSimulationConfig) => {
         iosErrorSimulations.push(config);
         return { success: true, totalTimeMs: 0 };
       },
@@ -261,7 +268,7 @@ describe("network tool schema", () => {
     const nowSpy = spyOn(state.timer, "now").mockImplementation(() => nowMs);
     iosGetInstanceSpy.mockRestore();
     iosGetInstanceSpy = spyOnIosClientInstance({
-      setNetworkErrorSimulation: async (config: unknown) => {
+      setNetworkErrorSimulation: async (config: IosNetworkErrorSimulationConfig) => {
         iosErrorSimulations.push(config);
         nowMs += 5_000;
         return { success: true, totalTimeMs: 0 };
@@ -277,10 +284,10 @@ describe("network tool schema", () => {
         },
       });
 
-      const sent = iosErrorSimulations[0] as { expiresAtEpochMs: number };
-      expect(sent.expiresAtEpochMs).toBe(31_000);
-      expect((sent as { remainingMs: number }).remainingMs).toBe(30_000);
-      expect(state.getSimulation(iosDevice.deviceId)?.expiresAt).toBe(sent.expiresAtEpochMs);
+      const sent = iosErrorSimulations[0];
+      expect(sent?.expiresAtEpochMs).toBe(31_000);
+      expect(sent?.remainingMs).toBe(30_000);
+      expect(state.getSimulation(iosDevice.deviceId)?.expiresAt).toBe(31_000);
       expect(state.getSnapshot(iosDevice.deviceId).simulatingErrors?.remainingSeconds).toBe(25);
     } finally {
       nowSpy.mockRestore();
@@ -1181,5 +1188,49 @@ describe("network tool schema", () => {
       },
     });
     expect(iosMockRuleSyncCalls).toBe(3);
+  });
+
+  describe("output schemas (#11830)", () => {
+    const structured = (response: unknown): unknown =>
+      (response as { structuredContent?: unknown }).structuredContent;
+
+    test.each([
+      ["network", networkResultSchema],
+      ["mockNetwork", mockNetworkResultSchema],
+      ["clearMockNetwork", clearMockNetworkResultSchema],
+      ["getNetworkGraph", getNetworkGraphResultSchema],
+    ] as const)("%s declares its outputSchema", (name, schema) => {
+      expect(ToolRegistry.getTool(name)?.outputSchema).toBe(schema);
+    });
+
+    test("each tool's text payload equals structuredContent, which validates", async () => {
+      const call = (name: string, args: Record<string, unknown>) =>
+        ToolRegistry.getTool(name)!.deviceAwareHandler!(androidDevice, args);
+      const repositorySpy = spyOn(networkEventRepository, "getNetworkEvents").mockResolvedValue([]);
+      try {
+        const responses = [
+          [networkResultSchema, await call("network", { capture: true })],
+          [mockNetworkResultSchema, await call("mockNetwork", { host: "api", path: "/x" })],
+          [clearMockNetworkResultSchema, await call("clearMockNetwork", {})],
+          [getNetworkGraphResultSchema, await call("getNetworkGraph", {})],
+        ] as const;
+        for (const [schema, response] of responses) {
+          expect(parseToolJson(response)).toEqual(JSON.parse(JSON.stringify(structured(response))));
+          expect(schema.safeParse(structured(response)).success).toBe(true);
+        }
+      } finally {
+        repositorySpy.mockRestore();
+      }
+    });
+
+    test("a device that did not sync still validates", async () => {
+      androidSendResult = false;
+      const response = await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(
+        androidDevice,
+        { host: "api", path: "/x" },
+      );
+      expect(structured(response)).toMatchObject({ deviceSynced: false });
+      expect(mockNetworkResultSchema.safeParse(structured(response)).success).toBe(true);
+    });
   });
 });

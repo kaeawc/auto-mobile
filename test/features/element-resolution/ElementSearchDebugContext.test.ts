@@ -69,7 +69,7 @@ test("near miss reports source element, property, value, reason, and checked cou
       searchCriteria: { text: "SaveNow" },
       nearMisses: [
         {
-          element: nodes[1].element,
+          element: nodes[1].element!,
           property: "text",
           value: "Save",
           reason: "Similar but did not match the selected mode",

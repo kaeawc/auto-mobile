@@ -4,7 +4,7 @@
  * Production resolves the client through the static registry accessors
  * `IOSCtrlProxyClient.getInstance` / `getExistingInstance`, which are declared to
  * return the concrete class. A test double (`FakeIOSCtrlProxy`, or a partial stub
- * of a few methods) can only satisfy the narrow `IOSCtrlProxy` interface, so
+ * of a few methods) can only satisfy the narrow `IosCtrlProxy` interface, so
  * handing it to `mockReturnValue` needs a cast. These helpers confine that cast to
  * one documented place instead of repeating a double cast to `IOSCtrlProxyClient` at
  * every call site (#11863).
@@ -68,6 +68,7 @@ export interface IosClientOverrides {
   requestHierarchySyncWithoutObservationStreamPush?: IOSCtrlProxyClient["requestHierarchySyncWithoutObservationStreamPush"];
   setPreference?: IOSCtrlProxyClient["setPreference"];
   removePreference?: IOSCtrlProxyClient["removePreference"];
+  deleteKeychainItemForIos?: IOSCtrlProxyClient["deleteKeychainItemForIos"];
   clearPreferenceStore?: IOSCtrlProxyClient["clearPreferenceStore"];
 }
 
@@ -116,6 +117,11 @@ export function createIosTestClient(
   }
   if (overrides.removePreference) {
     spyOn(client, "removePreference").mockImplementation(overrides.removePreference);
+  }
+  if (overrides.deleteKeychainItemForIos) {
+    spyOn(client, "deleteKeychainItemForIos").mockImplementation(
+      overrides.deleteKeychainItemForIos,
+    );
   }
   if (overrides.clearPreferenceStore) {
     spyOn(client, "clearPreferenceStore").mockImplementation(overrides.clearPreferenceStore);

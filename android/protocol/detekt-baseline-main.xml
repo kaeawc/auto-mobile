@@ -2,54 +2,7 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ComplexCondition:PrototypeCheckPattern.kt:PrototypeCheckPattern.Parser$repeated &amp;&amp; atom != null &amp;&amp; (atom.variable || atom.alternation)</ID>
-    <ID>ComplexCondition:PrototypeChecks.kt:PrototypeChecks$parts.size != 3 || parts[0].length != 4 || parts[1].length != 2 || parts[2].length != 2</ID>
-    <ID>ComplexCondition:PrototypeChecks.kt:PrototypeChecks$value == null || value == JsonNull || (primitive?.isString == true &amp;&amp; primitive.content.isEmpty())</ID>
-    <ID>ComplexCondition:PrototypeData.kt:PrototypeDataPointer$token == "0" || (token.isNotEmpty() &amp;&amp; token[0] in '1'..'9' &amp;&amp; token.all { it in '0'..'9' })</ID>
-    <ID>ComplexCondition:PrototypePatch.kt:PrototypePatch$!path.startsWith('/') || prefix !in listOf("data", "state") || (suffix.isNotEmpty() &amp;&amp; !PrototypeDataPointer.isValid(suffix))</ID>
-    <ID>ComplexCondition:PrototypePatch.kt:PrototypePatch$token != "0" &amp;&amp; !(token.isNotEmpty() &amp;&amp; token[0] in '1'..'9' &amp;&amp; token.all { it in '0'..'9' })</ID>
-    <ID>ComplexCondition:PrototypeRepeatTemplate.kt:PrototypeRepeatValidator$(kind == PrototypeBindableKind.TEXT || kind == PrototypeBindableKind.REQUEST_TEXT) &amp;&amp; text != null &amp;&amp; state.data.text(text) { chargeText(state, it) } == null</ID>
-    <ID>ComplexCondition:PrototypeRepeatTemplate.kt:PrototypeRepeatValidator$kind == PrototypeBindableKind.EMIT_BINDING &amp;&amp; binding != null &amp;&amp; ("item" in binding || "index" in binding)</ID>
-    <ID>ComplexCondition:PrototypeSpec.kt:PrototypeGridColumnsSerializer$count != null &amp;&amp; count.isFinite() &amp;&amp; count &gt;= 1 &amp;&amp; count &lt;= Int.MAX_VALUE &amp;&amp; count % 1.0 == 0.0</ID>
-    <ID>ComplexCondition:PrototypeSpecValidator.kt:PrototypeSpecValidator$!value.isString &amp;&amp; value != JsonNull &amp;&amp; value.booleanOrNull == null &amp;&amp; !numberTokenPattern.matches(value.content)</ID>
-    <ID>ComplexCondition:PrototypeSpecValidator.kt:PrototypeSpecValidator$bound &amp;&amp; (stored == null || stored.isString || stored.booleanOrNull == null)</ID>
-    <ID>ComplexCondition:PrototypeSpecValidator.kt:PrototypeSpecValidator$literal != null &amp;&amp; !(literal is JsonPrimitive &amp;&amp; literal != JsonNull &amp;&amp; isScalarLiteral(literal))</ID>
-    <ID>ComplexCondition:PrototypeSpecValidator.kt:PrototypeSpecValidator$number == null || !number.isFinite() || number &lt; 0 || number % 1.0 != 0.0</ID>
-    <ID>ComplexCondition:PrototypeSpecValidator.kt:PrototypeSpecValidator$number == null || !number.isFinite() || number &lt; 0 || number &gt; max</ID>
-    <ID>ComplexCondition:PrototypeSpecValidator.kt:PrototypeSpecValidator$number == null || !number.isFinite() || number &lt; min || number &gt; max</ID>
-    <ID>ComplexCondition:PrototypeSpecValidator.kt:PrototypeSpecValidator$number == null || number % 1.0 != 0.0 || number &lt; 0 || number &gt; max</ID>
-    <ID>ComplexCondition:PrototypeSpecValidator.kt:PrototypeSpecValidator$state.containsKey(key) &amp;&amp; (stored == null || stored.isString || stored.booleanOrNull == null)</ID>
-    <ID>ComplexCondition:PrototypeSpecValidator.kt:PrototypeSpecValidator$value.text("activeKey") != null &amp;&amp; (active == null || active.isString || active.booleanOrNull == null)</ID>
-    <ID>ComplexCondition:PrototypeSpecValidator.kt:PrototypeSpecValidator$value.text("axis") == "vertical" &amp;&amp; context.nodes.any { (ancestor, ancestorPath) -&gt; ancestor.text("type") == "scroll" &amp;&amp; ancestor.text("axis") != "horizontal" &amp;&amp; path.startsWith("$ancestorPath.") }</ID>
-    <ID>ComplexCondition:PrototypeSpecValidator.kt:PrototypeSpecValidator$value.text("type") in setOf("switch", "checkbox") &amp;&amp; (stored == null || stored.isString || stored.booleanOrNull == null)</ID>
-    <ID>ComplexCondition:PrototypeValues.kt:PrototypePageTargetSerializer$number == null || !number.isFinite() || number &lt; 0 || number &gt; Int.MAX_VALUE || number % 1.0 != 0.0</ID>
-    <ID>CyclomaticComplexMethod:PrototypeCheckPattern.kt:PrototypeCheckPattern$private fun source: String</ID>
-    <ID>CyclomaticComplexMethod:PrototypeCheckPattern.kt:PrototypeCheckPattern.Parser$fun body: Body</ID>
-    <ID>CyclomaticComplexMethod:PrototypeChecks.kt:PrototypeChecks$private fun numeric: Double?</ID>
-    <ID>CyclomaticComplexMethod:PrototypeChecks.kt:PrototypeChecks$private fun passes: Boolean</ID>
-    <ID>CyclomaticComplexMethod:PrototypeRepeatTemplate.kt:PrototypeBindableFields.Visitor$fun component: T?</ID>
-    <ID>CyclomaticComplexMethod:PrototypeRepeatTemplate.kt:PrototypeRepeatValidator$private fun bindKeys: JsonObject</ID>
-    <ID>CyclomaticComplexMethod:PrototypeRepeatTemplate.kt:PrototypeRepeatValidator$private fun checkLiteralKeys: PrototypeSpecError?</ID>
-    <ID>CyclomaticComplexMethod:PrototypeRepeatTemplate.kt:PrototypeRepeatValidator$private fun fieldError: PrototypeSpecError?</ID>
-    <ID>CyclomaticComplexMethod:PrototypeRepeatTemplate.kt:PrototypeRepeatValidator$private fun repeatTextError: PrototypeSpecError?</ID>
-    <ID>CyclomaticComplexMethod:PrototypeRequest.kt:PrototypeRequestOutcome$inline fun complete: PrototypeRequestResult</ID>
-    <ID>CyclomaticComplexMethod:PrototypeSpecValidator.kt:PrototypeSpecValidator$private fun nodeBindingErrors: PrototypeSpecError?</ID>
-    <ID>CyclomaticComplexMethod:PrototypeSpecValidator.kt:PrototypeSpecValidator$private fun pagerErrors: PrototypeSpecError?</ID>
-    <ID>CyclomaticComplexMethod:PrototypeSpecValidator.kt:PrototypeSpecValidator$private fun primitiveValid: Boolean</ID>
-    <ID>CyclomaticComplexMethod:PrototypeSpecValidator.kt:PrototypeSpecValidator$private fun stateActionErrors: PrototypeSpecError?</ID>
-    <ID>CyclomaticComplexMethod:PrototypeSpecValidator.kt:PrototypeSpecValidator$private fun visitObject: PrototypeSpecError?</ID>
-    <ID>LargeClass:PrototypeSpecValidator.kt:PrototypeSpecValidator</ID>
-    <ID>LongParameterList:PrototypeRepeatTemplate.kt:PrototypeRepeatValidator$private fun repeatTextError: PrototypeSpecError?</ID>
     <ID>LongParameterList:PrototypeRequest.kt:PrototypeRequestEvent$fun payload: JsonObject</ID>
-    <ID>SwallowedException:SdkEventSerializer.kt:SdkEventSerializer$e: Exception</ID>
-    <ID>SwallowedException:StorageProtocol.kt:StorageProtocolSerializer$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:SdkEventSerializer.kt:SdkEventSerializer$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:StorageProtocol.kt:StorageProtocolSerializer$e: Exception</ID>
-    <ID>TooManyFunctions:PrototypePatch.kt:PrototypePatch</ID>
-    <ID>TooManyFunctions:PrototypeRepeatTemplate.kt:PrototypeBindableFields$Visitor&lt;T : Any&gt;</ID>
-    <ID>TooManyFunctions:PrototypeRepeatTemplate.kt:PrototypeRepeatTemplate</ID>
-    <ID>TooManyFunctions:PrototypeRepeatTemplate.kt:PrototypeRepeatValidator</ID>
-    <ID>TooManyFunctions:PrototypeSpecValidator.kt:PrototypeSpecValidator</ID>
     <ID>TooManyFunctions:SdkEventSerializer.kt:SdkEventSerializer</ID>
   </CurrentIssues>
 </SmellBaseline>

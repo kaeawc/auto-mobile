@@ -52,7 +52,7 @@ if [[ ! ${requested} =~ ^(latest|[0-9]+(\.[0-9]+)*)$ ]]; then
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+# shellcheck source=scripts/ios/run_with_timeout.sh
 source "${script_dir}/run_with_timeout.sh"
 
 bundle_id="com.apple.Preferences"

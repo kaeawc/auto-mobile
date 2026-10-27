@@ -2,8 +2,8 @@ import { BootedDevice } from "../../models";
 import { ObserveResult } from "../../models/ObserveResult";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
-import { ToolRegistry } from "../../server/toolRegistry";
-import { throwIfInternalToolFailed } from "../../server/internalToolCall";
+import { registeredInternalToolCaller, type InternalToolCaller } from "./InternalToolCaller";
+import { throwIfInternalToolFailed } from "../../daemon/internalToolCall";
 import { NavigationEdge, UIState } from "./NavigationGraphManager";
 import { ModalState, ScrollPosition } from "../../utils/interfaces/NavigationGraph";
 import { UIStateExtractor } from "./UIStateExtractor";
@@ -12,11 +12,12 @@ import { PressButton } from "../action/PressButton";
 import { throwIfAborted, awaitWhileRequestIsLive, getStructuredField } from "../../utils/toolUtils";
 import { UIStateSetup } from "./interfaces/UIStateSetup";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
-import { ActionableError } from "../../models/ActionableError";
 import { isTruthy } from "../../models/Element";
 import { ElementResolver, matchedSourceNode } from "../utility/ElementResolver";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
+import { UIStateSetupScreenChangedError } from "./UIStateSetupScreenChangedError";
+export { UIStateSetupScreenChangedError } from "./UIStateSetupScreenChangedError";
 
 // Setup taps need time to update the UI.
 const SETUP_TAP_SETTLE_MS = 100;
@@ -59,14 +60,12 @@ export function createDefaultObserveScreen(
   return create(device, { create: () => adb });
 }
 
-/** A setup gesture left the source screen; replay must stop, including fallback edges. */
-export class UIStateSetupScreenChangedError extends ActionableError {}
-
 export class DefaultUIStateSetup implements UIStateSetup {
   private device: BootedDevice;
   private adb: AdbExecutor;
   private observeScreenProvider: () => ObserveScreenLike;
   private timer: Timer;
+  private readonly internalTools: InternalToolCaller;
   private sessionUuid?: string;
 
   constructor(
@@ -75,7 +74,9 @@ export class DefaultUIStateSetup implements UIStateSetup {
     observeScreenProvider?: () => ObserveScreenLike,
     timer: Timer = defaultTimer,
     sessionUuid?: string,
+    internalToolCaller: InternalToolCaller = registeredInternalToolCaller,
   ) {
+    this.internalTools = internalToolCaller;
     this.device = device;
     this.adb = adb;
     this.timer = timer;
@@ -180,7 +181,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       throwIfAborted(signal);
       // Resolve swipeOn first so a missing tool degrades gracefully (return null)
       // rather than throwing out of the `callInternalTyped` seam below.
-      const swipeOnTool = ToolRegistry.getTool("swipeOn");
+      const swipeOnTool = this.internalTools.getTool("swipeOn");
       if (!swipeOnTool) {
         logger.warn(`[UI_STATE_SETUP] swipeOn tool not found, skipping scroll setup`);
         return null;
@@ -237,7 +238,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       // `result.found` is a compile error and the `getStructuredField` keys are
       // checked against the payload.
       throwIfAborted(signal);
-      const result = await ToolRegistry.callInternalTyped(
+      const result = await this.internalTools.callInternalTyped(
         "swipeOn",
         swipeOnArgs,
         undefined,
@@ -350,7 +351,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     platform: string,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    const tapTool = ToolRegistry.getTool("tapOn");
+    const tapTool = this.internalTools.getTool("tapOn");
     if (!tapTool) {
       logger.warn(`[UI_STATE_SETUP] tapOn tool not found`);
       return false;
@@ -387,7 +388,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       // Internal setup tap (#3087) via the callInternal seam (#3108): no
       // diff/strip, no baseline advance.
       throwIfAborted(signal);
-      const response = await ToolRegistry.callInternal(tapTool, args, undefined, signal);
+      const response = await this.internalTools.callInternal(tapTool, args, undefined, signal);
       throwIfAborted(signal);
       throwIfInternalToolFailed(response, "tapOn", platform);
 
@@ -670,7 +671,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       // returned undefined, so this whole branch was dead code and bottom
       // sheets that only dismiss via swipe-down silently fell through to the
       // back-button fallback below (issue #3106).
-      const swipeTool = ToolRegistry.getTool("swipeOn");
+      const swipeTool = this.internalTools.getTool("swipeOn");
       if (swipeTool) {
         // Swipe down from mid-screen to drag the sheet down and dismiss it.
         // `swipeOn` takes `direction` (no `action` field). `autoTarget: false`
@@ -680,7 +681,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
         // want the full-screen downward swipe (executeScreenSwipe) that a
         // dismissal needs. Internal setup swipe (#3087) via the callInternal
         // seam (#3108): no diff/strip, no baseline advance.
-        await ToolRegistry.callInternal(
+        await this.internalTools.callInternal(
           swipeTool,
           {
             direction: "down",
@@ -798,7 +799,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     platform: string,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    const tapTool = ToolRegistry.getTool("tapOn");
+    const tapTool = this.internalTools.getTool("tapOn");
     if (!tapTool) {
       return false;
     }
@@ -811,7 +812,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
         throwIfAborted(signal);
         // Internal close-button tap (#3087) via the callInternal seam (#3108):
         // no diff/strip, no baseline advance.
-        const response = await ToolRegistry.callInternal(
+        const response = await this.internalTools.callInternal(
           tapTool,
           {
             selector: { text },
@@ -868,7 +869,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       return;
     }
 
-    const response = await ToolRegistry.callInternal(
+    const response = await this.internalTools.callInternal(
       "pressButton",
       {
         button: "back",

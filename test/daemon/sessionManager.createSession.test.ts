@@ -1,4 +1,4 @@
-import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
+import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test } from "bun:test";
 import { SessionManager, PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
@@ -127,7 +127,9 @@ describe("SessionManager", () => {
       try {
         repository.deferNextUpsert();
         const creating = runWithAbortSignal(controller.signal, () =>
-          manager.createSession("expired-acquisition", "emulator-5554", "android"),
+          manager.createSession("expired-acquisition", "emulator-5554", "android", {
+            signal: controller.signal,
+          }),
         );
         await repository.waitForUpsert();
         controller.abort(new Error("provision deadline exhausted"));

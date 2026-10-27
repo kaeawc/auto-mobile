@@ -11,8 +11,9 @@ import {
   CLI_SESSION_LIVENESS_POLICY,
   DAEMON_VERSION,
   getCliSessionIdleTimeoutMs,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
+import { ScenarioDaemon } from "./scenarioDaemon";
 import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
 import { FakeDaemonExitRecordFileSystem } from "../fakes/SafeDaemonManager";
 import {
@@ -22,12 +23,11 @@ import {
 import { IncumbentOwnerGuard } from "../../src/daemon/incumbentOwnerGuard";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
-import { defaultRecordingSessionCleanupDeps } from "../../src/server/recordingSessionCleanup";
+import { defaultRecordingSessionCleanupDeps } from "../../src/daemon/recordingSessionCleanup";
 import { DaemonMcpProxy, type DaemonMcpProxyConfig } from "../../src/daemon/daemonMcpProxy";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { AppearanceSocketServer } from "../../src/daemon/appearanceSocketServer";
-import type { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
+import type { AppearanceSocketResponse } from "../../src/daemon/wire/appearanceSocketTypes";
 import { appearanceSocketResponseSchema } from "./wireMessageSchemas";
 import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -38,20 +38,21 @@ import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import {
   SESSION_REHYDRATION_DEADLINE_MS,
   SessionManager,
   getDefaultSessionHeartbeatTimeoutMs,
 } from "../../src/daemon/sessionManager";
 import { DefaultDeviceSettingsAccess } from "../../src/features/utility/DeviceSettingDefaults";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
-import { executionTracker } from "../../src/server/executionTracker";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
 import { FakeSocket } from "../fakes/FakeNetServer";
+import { AppearanceSocketServerHarness } from "./appearanceSocketServerHarness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -60,12 +61,11 @@ import { FakeToolSelectionProfileProvenanceLoader } from "../fakes/FakeToolSelec
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
 import { createDaemonTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
-import type {
-  BindingExecOwner,
-  BindingProcessIdentity,
-  BindingRegistry,
-} from "../../src/daemon/sessionBroker/registry/bindingRegistry";
-import { openSqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import type { BindingExecOwner } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
+import {
+  openSqliteBindingRegistry,
+  type SqliteBindingRegistry,
+} from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import type { McpClientFactory } from "../../src/daemon/socketServer";
 import { toolErrorResult, type WireFixture } from "../daemon/helpers/desktopWireHarness";
 import {
@@ -80,7 +80,7 @@ import {
   type WireEnvelope,
 } from "./inMemoryDaemonWire";
 import { drainMicrotasks } from "./fakeTimerStepping";
-import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResult";
 import {
   registerDeviceTools,
   setDeviceToolsDependencies,
@@ -200,11 +200,6 @@ export interface LivenessScenarioOptions {
   proxyFactory?: (config: DaemonMcpProxyConfig) => DaemonMcpProxy;
 }
 
-/** Drops a dead daemon's listeners on process-wide registries. Teardown only, never wiring. */
-interface DaemonProcessTeardown {
-  stopSessionTimers(): void;
-}
-
 interface DaemonSide {
   daemon: Daemon;
   exitFiles: FakeDaemonExitRecordFileSystem;
@@ -257,7 +252,6 @@ const HOST_TOUCHING_DAEMON_METHODS = [
   "writeEarlyOwnerRecord",
   "writePidFile",
   "persistPidFileData",
-  "startHttpIngress",
   "bindControlSocket",
   "startServicesAfterSocketBind",
   "startAuxiliarySocket",
@@ -454,7 +448,7 @@ export class LivenessScenario {
   private readonly loopbackTransports = new Set<{ sessionUuid: string | undefined }>();
   private readonly bindingsEnabled: boolean;
   private readonly proxyFactory: (config: DaemonMcpProxyConfig) => DaemonMcpProxy;
-  private bindings: BindingRegistry | undefined;
+  private bindings: SqliteBindingRegistry | undefined;
   daemon!: DaemonSide;
   proxy!: DaemonMcpProxy;
   private readonly deviceNames: Record<string, string>;
@@ -651,7 +645,8 @@ export class LivenessScenario {
    * (#11441). Its constructor and its start sequence do all the wiring; this method only supplies
    * the device boundary, the in-memory "disk" and the steps of `start()` that touch the machine.
    */
-  private async createDaemonSide(startupMs = 0): Promise<DaemonSide> {
+  /** Restart-scenario helpers boot successor daemons through this. */
+  async createDaemonSide(startupMs = 0): Promise<DaemonSide> {
     // One database across daemon "processes", so a restart rehydrates what the last one persisted.
     this.repository ??= new DeviceSessionRepository(await createTestDatabase(), this.timer);
     const repository = this.repository;
@@ -661,7 +656,7 @@ export class LivenessScenario {
     const daemonInstance = daemonIds.next();
     // The process's own timers: they die with it, while the proxies' run on.
     const clock = new ProcessTimer(this.timer);
-    const daemon = new Daemon(
+    const daemon = new ScenarioDaemon(
       {},
       {
         installedAppsRepository: new FakeInstalledAppsRepository(),
@@ -693,35 +688,26 @@ export class LivenessScenario {
         }),
         avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
         bindingExclusionFactory: () => NO_BINDINGS,
-        foreignCtrlProxyForwardEvidence: () => undefined,
+        foreignCtrlProxyForwardEvidence: { read: async () => ({ kind: "none" }) },
       },
     );
     const exitFiles = new FakeDaemonExitRecordFileSystem();
-    (
-      daemon as unknown as { exitRecordFileSystem: FakeDaemonExitRecordFileSystem }
-    ).exitRecordFileSystem = exitFiles;
+    daemon.testHooks.setExitRecordFileSystem(exitFiles);
     armHostTripwires(daemon);
     if (this.bindingsEnabled) {
       // The registry is a file on the host that outlives the daemon; each process finds it open.
       this.bindings ??= await openSqliteBindingRegistry({ dbPath: ":memory:", timer: this.timer });
-      (daemon as unknown as { bindingRegistry: Promise<BindingRegistry> }).bindingRegistry =
-        Promise.resolve(this.bindings);
+      daemon.testHooks.setBindingRegistry(Promise.resolve(this.bindings));
     }
     const manager = daemon.getSessionManager();
     const pool = daemon.getDevicePool();
     // The Daemon builds its pool over the real multi-platform device manager and the forwarding
     // lease files, and takes no injection; swap the fakes in before anything discovers a device.
-    const poolInternals = pool as unknown as {
-      deviceManager: unknown;
-      idleDeviceReaper: { deviceManager: unknown };
-      foreignDeviceOwnership: unknown;
-      iosForeignDeviceOwnership: unknown;
-    };
-    poolInternals.deviceManager = this.discovery;
-    // The idle-device reaper captured the pool's device manager when the pool was built.
-    poolInternals.idleDeviceReaper.deviceManager = this.discovery;
-    poolInternals.foreignDeviceOwnership = this.peerAwareOwnership(clock);
-    poolInternals.iosForeignDeviceOwnership = undefined;
+    pool.testHooks.installHostCollaborators({
+      deviceManager: this.discovery,
+      foreignDeviceOwnership: this.peerAwareOwnership(clock),
+      iosForeignDeviceOwnership: undefined,
+    });
     manager.onSessionRelease((sessionId, deviceId, reason) => {
       this.releases.push({ at: this.timer.now(), sessionId, deviceId, reason: reason ?? "" });
     });
@@ -765,6 +751,8 @@ export class LivenessScenario {
         });
       },
       startHttpIngress: async () => void steps.push("startHttpIngress"),
+      prepareHttpToken: () => void steps.push("prepareHttpToken"),
+      publishHttpToken: () => void steps.push("publishHttpToken"),
       sweepStaleAppearanceConfigs: async () => void steps.push("sweepStaleAppearanceConfigs"),
       redriveRecorderTeardowns: async () => true,
       bindControlSocket: async () => {
@@ -879,10 +867,11 @@ export class LivenessScenario {
           return;
         }
         if (stall.lateAckDelayMs === undefined || stall.lateAckTaken) {
-          await new Promise<void>(() => {});
+          return await new Promise<void>(() => {});
         }
+        const delayMs = stall.lateAckDelayMs;
         stall.lateAckTaken = true;
-        await new Promise<void>((resolve) => this.timer.setTimeout(resolve, stall.lateAckDelayMs));
+        await new Promise<void>((resolve) => this.timer.setTimeout(resolve, delayMs));
       },
       delivered: (params: Record<string, unknown>) => {
         if (typeof params.livenessOwnerToken === "string") {
@@ -980,10 +969,14 @@ export class LivenessScenario {
         });
       }
       // Acquisition prepared the device, as getAndroid's readiness setup records.
-      manager.setDeviceReadiness(this.minted, "automationReady");
+      const minted = this.minted;
+      if (!minted) {
+        throw new Error("Scenario acquisition did not mint a session");
+      }
+      manager.setDeviceReadiness(minted, "automationReady");
       return tool === "provisionDevice"
-        ? provisionDeviceResult(this.minted, deviceId)
-        : deviceStartResult(this.minted);
+        ? provisionDeviceResult(minted, deviceId)
+        : deviceStartResult(minted);
     }
     try {
       return await this.tools.call(tool, args, requestSignal);
@@ -1065,14 +1058,7 @@ export class LivenessScenario {
   /** Device-loss handoff, followed by discovery forgetting the stopped emulator. */
   async loseDevice(sessionId: string, deviceId = this.deviceIds[0]!): Promise<void> {
     const pool = this.daemon.pool;
-    const release = pool as unknown as {
-      releaseDisconnectedRecoverySessionWithRetry(
-        id: string,
-        deviceId: string,
-        reason: `device-restart:${string}`,
-      ): Promise<void>;
-    };
-    await release.releaseDisconnectedRecoverySessionWithRetry(
+    await pool.testHooks.releaseDisconnectedRecoverySessionWithRetry(
       sessionId,
       deviceId,
       `device-restart:${this.device(deviceId).name}`,
@@ -1083,7 +1069,7 @@ export class LivenessScenario {
       PLATFORM,
       this.deviceIds.map((id) => ({ ...this.device(id), source: "local", isRunning: false })),
     );
-    await pool.removeDevice(deviceId, true, pool.getDevice(deviceId));
+    await pool.removeDevice(deviceId, true, pool.getDevice(deviceId) ?? undefined);
     await drainMicrotasks(TURNS_PER_EVENT);
   }
 
@@ -1168,7 +1154,7 @@ export class LivenessScenario {
 
   /**
    * `set_appearance` on the appearance socket as `sessionUuid` (none: a caller with no session),
-   * answered by the real {@link AppearanceSocketServer} over this daemon's session ownership.
+   * answered by the real AppearanceSocketServer over this daemon's session ownership.
    * Resolves with the response and the devices the mode was applied to.
    */
   async appearanceSet(
@@ -1178,13 +1164,13 @@ export class LivenessScenario {
     const applied: string[] = [];
     let config = { syncWithHost: false, defaultMode: "light", applyOnConnect: true };
     const manager = this.daemon.manager;
-    const server = new AppearanceSocketServer(
+    const server = new AppearanceSocketServerHarness(
       "unused",
       this.timer,
       new SessionScopedStreamAuthenticator(() => manager, "appearance"),
       {
         getPooledDevices: () => this.deviceIds.map((id) => this.device(id) as never),
-        getCurrentDevice: () => undefined,
+        getSessionDevice: () => undefined,
         getSessionForDevice: (deviceId) => manager.getSessionForDevice(deviceId) ?? null,
         getSessionManager: () => manager,
       },
@@ -1203,11 +1189,7 @@ export class LivenessScenario {
       },
     );
     const socket = new FakeSocket();
-    const internals = server as unknown as {
-      processLine(socket: unknown, line: string): Promise<void>;
-      pendingBySocket: Map<unknown, Promise<void>>;
-    };
-    await internals.processLine(
+    await server.handleLineAndSettle(
       socket,
       JSON.stringify({
         id: "appearance",
@@ -1216,7 +1198,6 @@ export class LivenessScenario {
         params: { mode },
       }),
     );
-    await internals.pendingBySocket.get(socket);
     const response = socket.getWrittenMessages(appearanceSocketResponseSchema)[0]!;
     return { response, applied };
   }
@@ -1503,7 +1484,7 @@ export class LivenessScenario {
    * A refused call must not add to it: "refuse before readiness" (#10828).
    */
   get readinessTouches(): number {
-    return this.tools.deviceSessionManager.getEnsureDeviceReadyCalls();
+    return this.tools.deviceReadiness.getEnsureDeviceReadyCalls();
   }
 
   /** Devices the read-only watcher path resolved, and captured, without a session (#10830). */
@@ -1516,9 +1497,7 @@ export class LivenessScenario {
    * hands the scheduler (`startAppearanceSyncScheduler({ getTargets })`).
    */
   appearanceSyncTargets(): AppearanceSyncTarget[] {
-    return (
-      this.daemon.daemon as unknown as { getAppearanceSyncTargets(): AppearanceSyncTarget[] }
-    ).getAppearanceSyncTargets();
+    return this.daemon.daemon.testHooks.getAppearanceSyncTargets();
   }
 
   /** Tool bodies that reached the device boundary (what actually drove a device). */
@@ -1551,8 +1530,8 @@ export class LivenessScenario {
     return this.daemonInternals().bindingJournalOwner().daemonId;
   }
 
-  private daemonInternals(): { bindingJournalOwner(): BindingProcessIdentity } {
-    return this.daemon.daemon as unknown as { bindingJournalOwner(): BindingProcessIdentity };
+  private daemonInternals() {
+    return this.daemon.daemon.testHooks;
   }
 
   /**
@@ -1602,10 +1581,7 @@ export class LivenessScenario {
 
   /** Who the host registry records as owning the slot `sessionId` executes in, if any. */
   async holdBrokerExecution(sessionId: string): Promise<void> {
-    const keeper = this.proxy as unknown as {
-      holdBrokerSession(requestId: string, sessionUuid: string): Promise<void>;
-    };
-    await keeper.holdBrokerSession(`request-${sessionId}`, sessionId);
+    await this.proxy.holdBrokerSession(`request-${sessionId}`, sessionId);
   }
 
   async bindingOwnerOf(sessionId: string): Promise<BindingExecOwner | undefined> {
@@ -1662,11 +1638,12 @@ export class LivenessScenario {
   }
 
   /** The process is gone: its connections drop and none of its timers fires again. */
-  private killDaemonSide(side: DaemonSide): void {
+  /** Restart-scenario helpers end the first daemon process through this. */
+  killDaemonSide(side: DaemonSide): void {
     this.loopbackTransports.clear();
     side.socket.kill();
     side.clock.kill();
-    (side.daemon as unknown as DaemonProcessTeardown).stopSessionTimers();
+    side.daemon.testHooks.stopSessionTimers();
   }
 
   async stop(): Promise<void> {

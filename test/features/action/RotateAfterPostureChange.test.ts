@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -96,14 +97,14 @@ class InventorySource {
 }
 
 function observation(): ObserveResult {
-  return {
-    timestamp: 0,
+  return buildObserveResult({
+    updatedAt: 0,
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} },
+    viewHierarchy: { hierarchy: { node: {} } },
     display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
     deviceLock: { locked: false, keyguardShowing: false },
-  } as ObserveResult;
+  });
 }
 
 function rotateOn(adb: FakeAdbExecutor, timer: FakeTimer): Rotate {

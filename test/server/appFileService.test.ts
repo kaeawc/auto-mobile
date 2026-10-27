@@ -1,3 +1,9 @@
+import { SimulatorContainerOwnershipError } from "../../src/utils/ios-cmdline-tools/simulatorOwnContainer";
+import { cloneContainerFixture } from "../helpers/simulatorContainerFixture";
+import { simulatorOwnership } from "../helpers/simulatorContainerFixture";
+import { FakeDeviceServicePreflight } from "../fakes/FakeDeviceServicePreflight";
+import { DeviceServiceDisabledError } from "../../src/models/DeviceServiceDisabledError";
+import { IosSimulatorMediaLibraryProvider } from "../../src/server/IosSimulatorMediaLibraryProvider";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
@@ -8,14 +14,22 @@ import {
   type ForegroundAppLookup,
   type AppFileFileSystem,
   type AppFileStats,
-  createAppFileServiceForTesting,
-  executeAndroidAppFileCommand,
-  resolveAndroidTarget,
-  type AppFileProvider,
+  createAppFileServiceForTesting as createService,
+  type AppFileListProvider,
+  type AppFileReadProvider,
   type AppFileWriteProvider,
-  IosSimulatorAppFileProvider,
   type PutAppFileProviderRequest,
 } from "../../src/server/appFileService";
+
+function createAppFileServiceForTesting(deps: Parameters<typeof createService>[0] = {}) {
+  return createService({ containerOwnership: simulatorOwnership, ...deps });
+}
+
+import { IosSimulatorAppFileProvider } from "../../src/server/IosSimulatorAppFileProvider";
+import {
+  executeAndroidAppFileCommand,
+  resolveAndroidTarget,
+} from "../../src/server/appFileSupport";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import {
   APP_FILE_RESOURCE_TEMPLATES,
@@ -854,7 +868,8 @@ describe("AppFileService", () => {
 
   describe("running-app warnings", () => {
     const appId = "com.example.app";
-    const dataRoot = "/simulators/SIM-1/data";
+    const dataRoot =
+      "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968";
     const processArgs = ["spawn", iosSimulatorDevice.deviceId, "launchctl", "list"];
     const androidDevice: BootedDevice = {
       deviceId: "emulator-5554",
@@ -871,7 +886,7 @@ describe("AppFileService", () => {
       const fileSystem = new TestAppFileFileSystem();
       const simctl = new FakeSimctl();
       simctl.setCommandResult(
-        `get_app_container '${iosSimulatorDevice.deviceId}' '${appId}' data`,
+        `'get_app_container' '${iosSimulatorDevice.deviceId}' '${appId}' 'data'`,
         dataRoot,
       );
       const service = createAppFileServiceForTesting({
@@ -1156,7 +1171,9 @@ describe("AppFileService", () => {
     const provider = new RecordingStorageWriteProvider("android", "user_files", {
       effects: [{ type: "media_index", status: "notRequested", reason: "not media" }],
     });
-    const service = createAppFileServiceForTesting({ providers: [provider] });
+    const service = createAppFileServiceForTesting({
+      providers: [provider],
+    });
 
     const result = await service.putFile({
       device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
@@ -1209,7 +1226,9 @@ describe("AppFileService", () => {
         },
       }),
     });
-    const service = createAppFileServiceForTesting({ sharedStorageService });
+    const service = createAppFileServiceForTesting({
+      sharedStorageService,
+    });
 
     const result = await service.putFile({
       device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
@@ -1372,7 +1391,9 @@ describe("AppFileService", () => {
         resolve: async () => ({ userId: 12, source: "managedProfile" }),
       }),
     });
-    const service = createAppFileServiceForTesting({ sharedStorageService });
+    const service = createAppFileServiceForTesting({
+      sharedStorageService,
+    });
 
     await expect(
       service.putFile({
@@ -1419,7 +1440,9 @@ describe("AppFileService", () => {
         resolve: async () => ({ userId: 12, source: "managedProfile" }),
       }),
     });
-    const service = createAppFileServiceForTesting({ sharedStorageService });
+    const service = createAppFileServiceForTesting({
+      sharedStorageService,
+    });
 
     await expect(
       service.putFile({
@@ -1450,7 +1473,9 @@ describe("AppFileService", () => {
         resolve: async () => ({ userId: 12, source: "managedProfile" }),
       }),
     });
-    const service = createAppFileServiceForTesting({ sharedStorageService });
+    const service = createAppFileServiceForTesting({
+      sharedStorageService,
+    });
 
     await expect(
       service.putFile({
@@ -1485,7 +1510,9 @@ describe("AppFileService", () => {
         resolve: async () => ({ userId: 12, source: "managedProfile" }),
       }),
     });
-    const service = createAppFileServiceForTesting({ sharedStorageService });
+    const service = createAppFileServiceForTesting({
+      sharedStorageService,
+    });
     const warnings: string[] = [];
     const warnSpy = spyOn(logger, "warn").mockImplementation((message) => warnings.push(message));
 
@@ -1513,11 +1540,65 @@ describe("AppFileService", () => {
     expect(rollbackWarnings[0]).toContain("second.png");
   });
 
+  test("putAppFile preserves a disabled media service refusal before provider staging or import", async () => {
+    const fileSystem = new TestAppFileFileSystem();
+    const servicePreflight = new FakeDeviceServicePreflight();
+    const error = new DeviceServiceDisabledError({
+      tool: "putAppFile",
+      resource: "mediaTranscoding",
+      labels: ["com.apple.photos.ImageConversionService"],
+      disabledLabels: ["com.apple.photos.ImageConversionService"],
+      unavailable: "Media import",
+      deviceId: iosSimulatorDevice.deviceId,
+    });
+    servicePreflight.error = error;
+    let imports = 0;
+    const mediaClient = {
+      importMedia: async () => {
+        imports++;
+      },
+    };
+    const provider = new IosSimulatorMediaLibraryProvider(
+      mediaClient,
+      fileSystem,
+      servicePreflight,
+    );
+    const mkdtemp = spyOn(fileSystem, "mkdtemp");
+    await expect(
+      provider.putFiles([
+        {
+          device: iosSimulatorDevice,
+          target: { domain: "media_library" },
+          sourcePath: "/fake/photo.png",
+          destinationPath: "photo.png",
+          byteCount: 3,
+        },
+      ]),
+    ).rejects.toBe(error);
+    expect(mkdtemp).not.toHaveBeenCalled();
+    const service = createAppFileServiceForTesting({
+      fileSystem,
+      iosSimulatorMediaClient: mediaClient,
+      servicePreflight,
+      timer: new FakeTimer(),
+    });
+    await expect(
+      service.putFile({
+        device: iosSimulatorDevice,
+        target: { domain: "media_library" },
+        files: [{ destinationPath: "photo.png", contentBase64: "AQID" }],
+      }),
+    ).rejects.toMatchObject({ code: "device_service_disabled", retryable: false });
+    expect(imports).toBe(0);
+    expect(servicePreflight.calls).toHaveLength(2);
+  });
+
   test("imports iOS Simulator media through an injected argv-safe client and preserves filenames", async () => {
     const fileSystem = new TestAppFileFileSystem();
     const imports: Array<{ deviceId: string; paths: string[] }> = [];
     const service = createAppFileServiceForTesting({
       fileSystem,
+      servicePreflight: new FakeDeviceServicePreflight(),
       iosSimulatorMediaClient: {
         importMedia: async (device, paths) => {
           imports.push({ deviceId: device.deviceId, paths: [...paths] });
@@ -1574,7 +1655,9 @@ describe("AppFileService", () => {
 
   test("prepares every file and rejects conflicts before provider mutation", async () => {
     const provider = new RecordingStorageWriteProvider("android", "app_containers");
-    const service = createAppFileServiceForTesting({ providers: [provider] });
+    const service = createAppFileServiceForTesting({
+      providers: [provider],
+    });
     const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 
     await expect(
@@ -1598,7 +1681,10 @@ describe("AppFileService", () => {
       undefined,
       new Error("write failed"),
     );
-    const service = createAppFileServiceForTesting({ providers: [provider], fileSystem });
+    const service = createAppFileServiceForTesting({
+      providers: [provider],
+      fileSystem,
+    });
 
     await expect(
       service.putFile({
@@ -1821,7 +1907,9 @@ describe("AppFileService", () => {
 
   test("uses a transfer budget for Android externalFiles pushes", async () => {
     const adbFactory = new FakeAdbClientFactory();
-    const service = createAppFileServiceForTesting({ adbFactory });
+    const service = createAppFileServiceForTesting({
+      adbFactory,
+    });
 
     await service.putFile({
       device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
@@ -1926,10 +2014,11 @@ describe("AppFileService", () => {
 
   test("writes iOS files through the provider resolved app data container", async () => {
     const fileSystem = new TestAppFileFileSystem();
-    const dataRoot = "/simulators/SIM-1/data";
+    const dataRoot =
+      "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968";
     const simctl = new FakeSimctl();
     simctl.setCommandResult(
-      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+      `'get_app_container' '${iosSimulatorDevice.deviceId}' 'com.example.app' 'data'`,
       dataRoot,
     );
     const service = createAppFileServiceForTesting({
@@ -1960,7 +2049,8 @@ describe("AppFileService", () => {
   });
 
   test("stages an iOS app file beside its destination before replacing it", async () => {
-    const target = "/simulators/SIM-1/data/Documents/fixtures/value.txt";
+    const target =
+      "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968/Documents/fixtures/value.txt";
     const writes: string[] = [];
     class TrackingFileSystem extends TestAppFileFileSystem {
       override async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
@@ -1976,8 +2066,8 @@ describe("AppFileService", () => {
     const fileSystem = new TrackingFileSystem();
     const simctl = new FakeSimctl();
     simctl.setCommandResult(
-      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
-      "/simulators/SIM-1/data",
+      `'get_app_container' '${iosSimulatorDevice.deviceId}' 'com.example.app' 'data'`,
+      "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968",
     );
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl,
@@ -2002,7 +2092,8 @@ describe("AppFileService", () => {
 
   for (const destinationExists of [true, false]) {
     test(`preserves ${destinationExists ? "existing" : "absent"} iOS destination after a partial copy`, async () => {
-      const target = "/simulators/SIM-1/data/Documents/fixtures/value.txt";
+      const target =
+        "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968/Documents/fixtures/value.txt";
       const failure = new Error("copy failed");
       class FailingCopyFileSystem extends TestAppFileFileSystem {
         override async copyFile(_sourcePath: string, destinationPath: string): Promise<void> {
@@ -2016,8 +2107,8 @@ describe("AppFileService", () => {
       }
       const simctl = new FakeSimctl();
       simctl.setCommandResult(
-        `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
-        "/simulators/SIM-1/data",
+        `'get_app_container' '${iosSimulatorDevice.deviceId}' 'com.example.app' 'data'`,
+        "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968",
       );
       const service = createAppFileServiceForTesting({
         simctlFactory: () => simctl,
@@ -2050,7 +2141,8 @@ describe("AppFileService", () => {
   }
 
   test("removes the iOS temporary file when rename fails", async () => {
-    const target = "/simulators/SIM-1/data/Documents/fixtures/value.txt";
+    const target =
+      "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968/Documents/fixtures/value.txt";
     const failure = new Error("rename failed");
     class FailingRenameFileSystem extends TestAppFileFileSystem {
       override async rename(): Promise<void> {
@@ -2061,8 +2153,8 @@ describe("AppFileService", () => {
     await fileSystem.writeFileBuffer(target, Buffer.from("original"));
     const simctl = new FakeSimctl();
     simctl.setCommandResult(
-      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
-      "/simulators/SIM-1/data",
+      `'get_app_container' '${iosSimulatorDevice.deviceId}' 'com.example.app' 'data'`,
+      "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968",
     );
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl,
@@ -2086,7 +2178,8 @@ describe("AppFileService", () => {
   });
 
   test("serializes concurrent iOS puts to the same destination", async () => {
-    const target = "/simulators/SIM-1/data/Documents/fixtures/value.txt";
+    const target =
+      "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968/Documents/fixtures/value.txt";
     const writes: string[] = [];
     class TrackingFileSystem extends TestAppFileFileSystem {
       override async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
@@ -2104,8 +2197,8 @@ describe("AppFileService", () => {
     const fileSystem = new TrackingFileSystem();
     const simctl = new FakeSimctl();
     simctl.setCommandResult(
-      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
-      "/simulators/SIM-1/data",
+      `'get_app_container' '${iosSimulatorDevice.deviceId}' 'com.example.app' 'data'`,
+      "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968",
     );
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl,
@@ -2136,8 +2229,9 @@ describe("AppFileService", () => {
   });
 
   describe("iOS batch writes", () => {
-    const dataRoot = "/simulators/SIM-1/data";
-    const command = `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`;
+    const dataRoot =
+      "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968";
+    const command = `'get_app_container' '${iosSimulatorDevice.deviceId}' 'com.example.app' 'data'`;
 
     class BatchFileSystem extends TestAppFileFileSystem {
       readonly writes: string[] = [];
@@ -2167,7 +2261,11 @@ describe("AppFileService", () => {
       simctl.setCommandResult(command, dataRoot);
       // The service rejects duplicate destinations and accepts only one target per batch.
       // Build the iOS app-container provider directly to exercise its batch contract.
-      const provider = new IosSimulatorAppFileProvider(() => simctl, fileSystem);
+      const provider = new IosSimulatorAppFileProvider(
+        () => simctl,
+        fileSystem,
+        simulatorOwnership,
+      );
       const service = createAppFileServiceForTesting({
         simctlFactory: () => simctl,
         fileSystem,
@@ -2234,7 +2332,8 @@ describe("AppFileService", () => {
       });
       expect(simctl.getMethodCalls("executeCommand")).toHaveLength(1);
 
-      const newRoot = "/simulators/SIM-1/reinstalled-data";
+      const newRoot =
+        "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/977F3F94-D9DE-4772-A0BA-38F2F5794968";
       simctl.setCommandResult(command, newRoot);
       await fileSystem.writeFileBuffer("/fixtures/second.txt", Buffer.from("second"));
       await provider.putFile(request("/fixtures/second.txt"));
@@ -2488,16 +2587,16 @@ describe("AppFileService", () => {
         ...iosSimulatorDevice,
         deviceId: "FFFFFFFF-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
       };
-      const otherDeviceCommand = `get_app_container '${otherDevice.deviceId}' 'com.example.app' data`;
-      const otherAppCommand = `get_app_container '${iosSimulatorDevice.deviceId}' 'com.other.app' data`;
+      const otherDeviceCommand = `'get_app_container' '${otherDevice.deviceId}' 'com.example.app' 'data'`;
+      const otherAppCommand = `'get_app_container' '${iosSimulatorDevice.deviceId}' 'com.other.app' 'data'`;
       const execute = spyOn(simctl, "executeCommand").mockImplementation(async (command) => {
         expect(fileSystem.createdDirectories).toEqual([]);
         expect(fileSystem.writes).toEqual([]);
         return execResult(
           command === otherDeviceCommand
-            ? "/simulators/SIM-2/data"
+            ? "/simulators/FFFFFFFF-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968"
             : command === otherAppCommand
-              ? "/simulators/SIM-1/other-data"
+              ? "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/A77F3F94-D9DE-4772-A0BA-38F2F5794968"
               : dataRoot,
         );
       });
@@ -2526,8 +2625,8 @@ describe("AppFileService", () => {
         for (const target of [
           join(dataRoot, "Documents", "fixtures/value.txt"),
           join(dataRoot, "Documents", "fixtures/second.txt"),
-          "/simulators/SIM-2/data/Documents/fixtures/value.txt",
-          "/simulators/SIM-1/other-data/Documents/fixtures/value.txt",
+          "/simulators/FFFFFFFF-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968/Documents/fixtures/value.txt",
+          "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/A77F3F94-D9DE-4772-A0BA-38F2F5794968/Documents/fixtures/value.txt",
           join(dataRoot, "Library", "Caches", "fixtures/value.txt"),
         ]) {
           expect(await fileSystem.readText(target)).toBe("value");
@@ -2559,10 +2658,11 @@ describe("AppFileService", () => {
 
   test("maps iOS logical containers to simulator data container folders", async () => {
     const fileSystem = new TestAppFileFileSystem();
-    const dataRoot = "/simulators/SIM-1/data";
+    const dataRoot =
+      "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968";
     const simctl = new FakeSimctl();
     simctl.setCommandResult(
-      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+      `'get_app_container' '${iosSimulatorDevice.deviceId}' 'com.example.app' 'data'`,
       dataRoot,
     );
     const service = createAppFileServiceForTesting({
@@ -2605,10 +2705,11 @@ describe("AppFileService", () => {
 
   test("preserves iOS binary app files exactly when writing and reading", async () => {
     const fileSystem = new TestAppFileFileSystem();
-    const dataRoot = "/simulators/SIM-1/data";
+    const dataRoot =
+      "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968";
     const simctl = new FakeSimctl();
     simctl.setCommandResult(
-      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+      `'get_app_container' '${iosSimulatorDevice.deviceId}' 'com.example.app' 'data'`,
       dataRoot,
     );
     const service = createAppFileServiceForTesting({
@@ -2654,10 +2755,11 @@ describe("AppFileService", () => {
     process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
     try {
       const fileSystem = new TestAppFileFileSystem();
-      const dataRoot = "/simulators/SIM-1/data";
+      const dataRoot =
+        "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968";
       const simctl = new FakeSimctl();
       simctl.setCommandResult(
-        `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+        `'get_app_container' '${iosSimulatorDevice.deviceId}' 'com.example.app' 'data'`,
         dataRoot,
       );
       const service = createAppFileServiceForTesting({
@@ -2690,7 +2792,8 @@ describe("AppFileService", () => {
 
   test("lists iOS app files and directories with relative metadata only", async () => {
     const fileSystem = new TestAppFileFileSystem();
-    const dataRoot = "/simulators/SIM-1/data";
+    const dataRoot =
+      "/simulators/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968";
     await fileSystem.mkdir(join(dataRoot, "Documents", "fixtures"));
     await fileSystem.writeFileBuffer(join(dataRoot, "Documents", "root.txt"), Buffer.from("root"));
     await fileSystem.writeFileBuffer(
@@ -2700,7 +2803,7 @@ describe("AppFileService", () => {
     fileSystem.setSymlink(join(dataRoot, "Documents", "broken-link"));
     const simctl = new FakeSimctl();
     simctl.setCommandResult(
-      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+      `'get_app_container' '${iosSimulatorDevice.deviceId}' 'com.example.app' 'data'`,
       dataRoot,
     );
     const service = createAppFileServiceForTesting({
@@ -2772,7 +2875,7 @@ describe("AppFileService", () => {
   test("maps missing iOS app containers to actionable simulator errors", async () => {
     const simctl = new FakeSimctl();
     simctl.setCommandError(
-      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.missing.app' data`,
+      `'get_app_container' '${iosSimulatorDevice.deviceId}' 'com.missing.app' 'data'`,
       new Error(
         "An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=2): The application is not installed.",
       ),
@@ -2796,7 +2899,7 @@ describe("AppFileService", () => {
   test("maps unavailable iOS simulators to actionable errors", async () => {
     const simctl = new FakeSimctl();
     simctl.setCommandError(
-      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+      `'get_app_container' '${iosSimulatorDevice.deviceId}' 'com.example.app' 'data'`,
       new Error("No such device or device is shutdown"),
     );
     const service = createAppFileServiceForTesting({
@@ -3414,7 +3517,9 @@ describe("Android app-file running candidates", () => {
     for (const userId of [0, 10]) {
       adb.setCommandResponse(
         `shell pm list packages --user ${userId}`,
-        execResult(scenario.installed.includes(userId) ? "package:com.example.app\n" : ""),
+        execResult(
+          scenario.installed.some((id) => id === userId) ? "package:com.example.app\n" : "",
+        ),
       );
     }
     const foreground = new FakeForegroundAppLookup();
@@ -3459,7 +3564,9 @@ for (const operation of ["put", "list", "read"] as const) {
           // Constructed, not captured from a device: exact package-list entry or empty listing.
           adb.setCommandResponse(
             `shell pm list packages --user ${userId}`,
-            execResult(scenario.installed.includes(userId) ? "package:com.example.app\n" : ""),
+            execResult(
+              scenario.installed.some((id) => id === userId) ? "package:com.example.app\n" : "",
+            ),
           );
         }
         if (scenario.current !== undefined) {
@@ -3613,11 +3720,15 @@ describe("Android app-file resource user round trips", () => {
       test.each(scenarios)(`${operation} ${container}: $name URI round trip`, async (scenario) => {
         const adb = new AppFileUserAdb();
         const users = scenario.users ?? [0, 10];
-        adb.setUsers(users.map((userId) => ({ userId, name: `User ${userId}` })));
+        adb.setUsers(
+          users.map((userId) => ({ userId, name: `User ${userId}`, running: false, flags: 0 })),
+        );
         for (const userId of users) {
           adb.setCommandResponse(
             `shell pm list packages --user ${userId}`,
-            execResult(scenario.installed.includes(userId) ? "package:com.example.app\n" : ""),
+            execResult(
+              scenario.installed.some((id) => id === userId) ? "package:com.example.app\n" : "",
+            ),
           );
         }
         adb.setCommandResponse(
@@ -3714,8 +3825,8 @@ describe("Android app-file profile details", () => {
   test("default foreground lookup delegates to the operation's adb client", async () => {
     const adb = new AppFileUserAdb();
     adb.setUsers([
-      { userId: 0, name: "Owner" },
-      { userId: 10, name: "Work" },
+      { userId: 0, name: "Owner", running: false, flags: 0 },
+      { userId: 10, name: "Work", running: false, flags: 0 },
     ]);
     // Constructed, not captured from a device: work app resumed, parent remains current.
     adb.setForegroundApp({ packageName: "com.example.app", userId: 10 });
@@ -3734,8 +3845,8 @@ describe("Android app-file profile details", () => {
   test("foreground lookup abort propagates without current-user fallback", async () => {
     const adb = new AppFileUserAdb();
     adb.setUsers([
-      { userId: 0, name: "Owner" },
-      { userId: 10, name: "Work" },
+      { userId: 0, name: "Owner", running: false, flags: 0 },
+      { userId: 10, name: "Work", running: false, flags: 0 },
     ]);
     // Constructed, not captured from a device: both users have the package.
     adb.setCommandResponse("shell pm list packages", execResult("package:com.example.app\n"));
@@ -3783,8 +3894,8 @@ describe("Android app-file profile details", () => {
   test("putFiles batch resolves once even when foreground state could change", async () => {
     const adb = new AppFileUserAdb();
     adb.setUsers([
-      { userId: 0, name: "Owner" },
-      { userId: 10, name: "Work" },
+      { userId: 0, name: "Owner", running: false, flags: 0 },
+      { userId: 10, name: "Work", running: false, flags: 0 },
     ]);
     // Constructed, not captured from a device: both users have the package, current user changes.
     adb.setCommandResponse("shell pm list packages", execResult("package:com.example.app\n"));
@@ -3907,7 +4018,9 @@ describe("Android app-file profile details", () => {
   });
 });
 
-class RecordingAppFileProvider implements AppFileProvider {
+class RecordingAppFileProvider
+  implements AppFileWriteProvider, AppFileListProvider, AppFileReadProvider
+{
   readonly putRequests: PutAppFileProviderRequest[] = [];
   readonly domain = "app_containers" as const;
 
@@ -4110,4 +4223,77 @@ class TestAppFileFileSystem implements AppFileFileSystem {
     error.code = "ENOENT";
     return error;
   }
+}
+
+for (const proven of [true, false]) {
+  test(`iOS app file clone ownership: ${proven}`, async () => {
+    const device: BootedDevice = {
+      platform: "ios",
+      deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+      name: "clone",
+    };
+    const clone = cloneContainerFixture(device.deviceId, proven ? "com.apple.mobilesafari" : null);
+    const fs = new TestAppFileFileSystem();
+    await fs.writeFileBuffer("/host/input", Buffer.from("clone"));
+    const mkdir = spyOn(fs, "mkdir");
+    const writeFile = spyOn(fs, "writeFileBuffer");
+    const readFile = spyOn(fs, "readFileBuffer");
+    const simctl = new FakeSimctl();
+    simctl.setCommandResult(
+      `'get_app_container' '${device.deviceId}' 'com.apple.mobilesafari' 'data'`,
+      clone.reported,
+    );
+    const provider = new IosSimulatorAppFileProvider(() => simctl, fs, clone.ownership);
+    const target = {
+      domain: "app_containers" as const,
+      appId: "com.apple.mobilesafari",
+      container: "documents" as const,
+    };
+    const request = {
+      device,
+      target,
+      sourcePath: "/host/input",
+      destinationPath: "clone.txt",
+      byteCount: 5,
+    };
+    if (!proven) {
+      await expect(provider.putFile(request)).rejects.toBeInstanceOf(
+        SimulatorContainerOwnershipError,
+      );
+      await expect(
+        provider.readFile({
+          device,
+          deviceId: device.deviceId,
+          appId: target.appId,
+          container: target.container,
+          path: "clone.txt",
+        }),
+      ).rejects.toBeInstanceOf(SimulatorContainerOwnershipError);
+      expect(mkdir).not.toHaveBeenCalled();
+      expect(writeFile).not.toHaveBeenCalled();
+      expect(readFile).not.toHaveBeenCalled();
+      return;
+    }
+    await provider.putFile(request);
+    const read = await provider.readFile({
+      device,
+      deviceId: device.deviceId,
+      appId: target.appId,
+      container: target.container,
+      path: "clone.txt",
+    });
+    expect(read).toMatchObject({ text: "clone" });
+    expect(mkdir).toHaveBeenCalled();
+    expect(writeFile).toHaveBeenCalled();
+    expect(readFile).toHaveBeenCalled();
+    expect(mkdir.mock.calls.every(([path]) => path.startsWith(join(clone.own, "Documents")))).toBe(
+      true,
+    );
+    expect(
+      [...writeFile.mock.calls, ...readFile.mock.calls].every(
+        ([path]) => path === "/host/input" || path.startsWith(join(clone.own, "Documents")),
+      ),
+    ).toBe(true);
+    expect(clone.inspected).toEqual([clone.own, clone.own]);
+  });
 }

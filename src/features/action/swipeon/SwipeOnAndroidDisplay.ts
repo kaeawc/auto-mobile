@@ -41,7 +41,7 @@ import { resolveSwipeDirection } from "./swipeOnUtils";
 import {
   AccessibilityDetector,
   TALKBACK_STATE_UNKNOWN_WARNING,
-} from "../../accessibility/interfaces/AccessibilityDetector";
+} from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { talkBackDisplayRefusal } from "../../talkback/talkBackDisplayRefusal";
 import { SwipeOnResolvedOptions, BoomerangConfig } from "./types";
 import {
@@ -356,23 +356,23 @@ export class SwipeOnAndroidDisplay {
     }
     target.assertCurrent();
     const { x1, y1, x2, y2 } = coordinates;
-    const swipe = await this.ctx().talkBackExecutor.executeSwipeGesture(
+    const swipe = await this.ctx().talkBackExecutor.executeSwipeGesture({
       x1,
       y1,
       x2,
       y2,
-      direction.direction,
-      element ?? null,
-      {
+      direction: direction.direction,
+      containerElement: element ?? null,
+      gestureOptions: {
         displayFence: { assertCurrent: target.assertCurrent },
         duration,
         durationExplicit: explicitDuration(options),
         scrollMode: options.scrollMode,
       },
-      undefined,
+      perf: undefined,
       boomerang,
       signal,
-    );
+    });
     throwIfAborted(signal);
     if (!swipe.success) {
       throw new ActionableError(swipe.error ?? "TalkBack swipe failed");
@@ -558,23 +558,23 @@ export class SwipeOnAndroidDisplay {
     onDispatched?: () => void;
   }): Promise<SwipeResult> {
     input.onDispatched?.();
-    return this.ctx().talkBackExecutor.executeSwipeGesture(
-      input.x1,
-      input.y1,
-      input.x2,
-      input.y2,
-      input.direction,
-      null,
-      {
+    return this.ctx().talkBackExecutor.executeSwipeGesture({
+      x1: input.x1,
+      y1: input.y1,
+      x2: input.x2,
+      y2: input.y2,
+      direction: input.direction,
+      containerElement: null,
+      gestureOptions: {
         displayFence: { assertCurrent: input.target.assertCurrent },
         duration: input.duration,
         scrollMode: input.options.scrollMode,
         searchDragState: input.searchDragState,
       },
-      undefined,
-      undefined,
-      input.signal,
-    );
+      perf: undefined,
+      boomerang: undefined,
+      signal: input.signal,
+    });
   }
 
   /**

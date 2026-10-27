@@ -2,7 +2,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { CtrlProxyStaleRunnerCacheError } from "../ctrlProxy/IosCtrlProxyBuilder";
+import { CtrlProxyStaleRunnerCacheError } from "../ctrlProxy/CtrlProxyStaleRunnerCacheError";
 import type { Platform } from "../models";
 import type { PassiveWorkPolicy } from "./PassiveWorkPolicy";
 

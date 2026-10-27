@@ -213,7 +213,12 @@ export function directlyExecutesSdkManager(source: string): boolean {
         }
       }
     }
-    if (ts.isFunctionLike(node)) {
+    if (
+      ts.isFunctionDeclaration(node) ||
+      ts.isMethodDeclaration(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isArrowFunction(node)
+    ) {
       const name = functionLikeName(node);
       if (name) {
         functionsByName.set(name, [...(functionsByName.get(name) ?? []), node]);

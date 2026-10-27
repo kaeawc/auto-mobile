@@ -3,8 +3,8 @@ import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
-import { foreignOwnedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
+import { foreignOwnedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -28,11 +28,13 @@ import type { Database } from "../../src/db/types";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
+import type { DaemonRequest } from "../../src/daemon/types";
+import { isRecord } from "../../src/server/pipeline/isRecord";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import type { BootedDevice } from "../../src/models";
 
@@ -54,7 +56,7 @@ let originalRepository: ReturnType<
   typeof ToolRegistry.getCollaboratorsForTesting
 >["toolCallRepository"];
 let originalCollaborators: ToolRegistryCollaborators;
-let deviceSessionManager: FakeDeviceSessionManager;
+let deviceReadiness: FakeDeviceReadiness;
 let restorePipelineOverrides: (() => void) | undefined;
 const fixtures = new Map<string, McpTestFixture>();
 const proxies: DaemonMcpProxy[] = [];
@@ -63,9 +65,9 @@ let restoreSpies: Array<() => void> = [];
 
 beforeEach(async () => {
   originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-  deviceSessionManager = new FakeDeviceSessionManager();
-  deviceSessionManager.setConnectedDevices(devices);
-  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessionManager });
+  deviceReadiness = new FakeDeviceReadiness();
+  deviceReadiness.setConnectedDevices(devices);
+  ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: deviceReadiness });
   previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
   process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   db = new Kysely<Database>({
@@ -142,34 +144,6 @@ afterEach(async () => {
   }
 });
 
-interface ForwardRoute {
-  clientKey: string;
-  sessionUuid?: string;
-}
-
-/** The socket server's forwarding steps, driven here exactly as its request loop runs them. */
-interface SocketForwardInternals {
-  restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void>;
-  getMcpForwardRoute(request: unknown, socketSessionId: string): ForwardRoute;
-  withSocketSessionAutolockKey(
-    args: unknown,
-    socketSessionId: string,
-    timeoutMs: number,
-  ): Record<string, unknown>;
-  recordBoundMcpClientKey(
-    request: unknown,
-    socketSessionId: string,
-    route: ForwardRoute,
-    sessionWasActiveBeforeForward: boolean,
-    response: unknown,
-  ): void;
-  boundMcpClientKeysBySocketSession: Map<string, { sessionUuid?: string }>;
-}
-
-function internals(socket: UnixSocketServer): SocketForwardInternals {
-  return socket as unknown as SocketForwardInternals;
-}
-
 function registerTools(): void {
   ToolRegistry.register(
     "getAndroid",
@@ -230,9 +204,14 @@ function registerTools(): void {
 /** One MCP connection: its own proxy and daemon socket session, sharing the daemon's pool. */
 function connect(socket: UnixSocketServer, socketSessionId: string): DaemonMcpProxy {
   const dispatch = async (name: string, args: Record<string, unknown>) => {
-    const request = { id: "routing", method: "tools/call", params: { name, arguments: args } };
-    await internals(socket).restoreSelectorSessions(args, socketSessionId);
-    const route = internals(socket).getMcpForwardRoute(request, socketSessionId);
+    const request: DaemonRequest = {
+      id: "routing",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name, arguments: args },
+    };
+    await socket.testHooks.restoreSelectorSessions(args, socketSessionId);
+    const route = await socket.testHooks.getMcpForwardRoute(request, socketSessionId);
     let fixture = fixtures.get(route.clientKey);
     if (!fixture) {
       fixture = new McpTestFixture({
@@ -246,13 +225,17 @@ function connect(socket: UnixSocketServer, socketSessionId: string): DaemonMcpPr
       fixtures.set(route.clientKey, fixture);
       registerTools();
     }
-    const forwarded = internals(socket).withSocketSessionAutolockKey(args, socketSessionId, 10000);
+    const forwarded = socket.testHooks.withSocketSessionAutolockKey(args, socketSessionId, 10000);
+    if (!isRecord(forwarded)) {
+      throw new Error("Expected forwarded tool arguments to be an object");
+    }
     // The first call pays one-time cold-start cost (~0.4 s locally, ~3.5-4.3 s on Windows CI,
     // which sits on the fixture's 4 s default); the tests carry a 30 s timeout of their own.
-    const result = await fixture.client.callTool({ name, arguments: forwarded }, undefined, {
-      timeout: 20_000,
-    });
-    internals(socket).recordBoundMcpClientKey(request, socketSessionId, route, true, result);
+    const result = await fixture.client.callTool(
+      { name, arguments: forwarded },
+      { timeout: 20_000 },
+    );
+    socket.testHooks.recordBoundMcpClientKey(request, socketSessionId, route, true, result);
     return result;
   };
   const daemon = new FakeDaemonManager();
@@ -292,14 +275,12 @@ test("a read naming another connection's session watches it without binding the 
   // proxy: the daemon marks the session as another connection's.
   expect(pool.isSessionOwnedByOtherConnection(ownerSession!, "other")).toBe(true);
   expect(foreignOwnedSessionUuidFromResult(named)).toBe(ownerSession);
-  expect(internals(socket).boundMcpClientKeysBySocketSession.has("other")).toBe(false);
+  expect(socket.testHooks.boundMcpClientFor("other")).toBeUndefined();
 
   // The other connection's next untargeted call must not be routed to the owner's device.
-  const scansBeforeUntargeted = deviceSessionManager.getDetectConnectedPlatformsCallCount();
+  const scansBeforeUntargeted = deviceReadiness.getDetectConnectedPlatformsCallCount();
   const untargeted = await otherProxy.callTool("routingProbe", { keepScreenAwake: false });
-  expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(
-    scansBeforeUntargeted + 1,
-  );
+  expect(deviceReadiness.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeUntargeted + 1);
   expect(untargeted.isError).toBe(true);
   expect(JSON.stringify(untargeted.content)).toContain("Multiple Android devices detected");
   const reachedOwnerDevice = !untargeted.isError && received.at(-1) === devices[0].deviceId;
@@ -318,9 +299,7 @@ test("the owner naming its own autolock session is not marked foreign and still 
   });
   expect(named.isError).toBeFalsy();
   expect(foreignOwnedSessionUuidFromResult(named)).toBeUndefined();
-  expect(internals(socket).boundMcpClientKeysBySocketSession.get("owner")?.sessionUuid).toBe(
-    ownerSession,
-  );
+  expect(socket.testHooks.boundMcpClientFor("owner")?.sessionUuid).toBe(ownerSession);
   await ownerProxy.callTool("routingProbe", { keepScreenAwake: false });
   expect(received).toEqual([devices[0].deviceId, devices[0].deviceId]);
 }, 30000);
@@ -382,13 +361,11 @@ for (const autolock of ["1", "0"]) {
     expect(named.isError).toBe(true);
     expect(refusalCode(named)).toBe("device_owned_by_other_session");
     expect(received).toEqual([]);
-    expect(internals(socket).boundMcpClientKeysBySocketSession.has("other")).toBe(false);
+    expect(socket.testHooks.boundMcpClientFor("other")).toBeUndefined();
 
-    const scansBeforeUntargeted = deviceSessionManager.getDetectConnectedPlatformsCallCount();
+    const scansBeforeUntargeted = deviceReadiness.getDetectConnectedPlatformsCallCount();
     const untargeted = await otherProxy.callTool("routingProbe", { keepScreenAwake: false });
-    expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(
-      scansBeforeUntargeted + 1,
-    );
+    expect(deviceReadiness.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeUntargeted + 1);
     expect(untargeted.isError).toBe(true);
     expect(JSON.stringify(untargeted.content)).toContain("Multiple Android devices detected");
     const reachedOwnerDevice = !untargeted.isError && received.at(-1) === devices[0].deviceId;
@@ -424,8 +401,7 @@ for (const autolock of ["1", "0"]) {
     );
     const selected = await proxy.callTool("setActiveDevice", { deviceId: devices[0].deviceId });
     expect(selected.isError).toBeFalsy();
-    const socketRoute = () =>
-      internals(socket).boundMcpClientKeysBySocketSession.get("client")?.sessionUuid;
+    const socketRoute = () => socket.testHooks.boundMcpClientFor("client")?.sessionUuid;
 
     // The named session takes that one call ...
     await proxy.callTool("routingProbe", { sessionUuid: second, keepScreenAwake: false });

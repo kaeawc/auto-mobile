@@ -32,18 +32,10 @@ function handle(platform: "ios" | "android", pid: number | undefined = 42): Reco
 }
 
 function backend(readToken: (pid: number) => string | undefined) {
-  return new FfmpegVideoProcessingBackend(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    new FakeTimer(),
-    undefined,
-    undefined,
-    undefined,
-    readToken,
-  );
+  return new FfmpegVideoProcessingBackend(undefined, {
+    timer: new FakeTimer(),
+    readHostStartToken: readToken,
+  });
 }
 
 test("iOS handle describes its persisted host generation, udid and raw path", () => {
@@ -111,19 +103,11 @@ test("Android ffmpeg-pipe handle never probes a host token", () => {
 test("FFmpeg background orphan teardown retains a slow-finalizing host without SIGKILL", async () => {
   const timer = new FakeTimer();
   const control = new FakeHostRecorderProcessControl();
-  const recorder = new FfmpegVideoProcessingBackend(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+  const recorder = new FfmpegVideoProcessingBackend(undefined, {
     timer,
-    undefined,
-    undefined,
-    undefined,
-    () => "generation-a",
-    control,
-  );
+    readHostStartToken: () => "generation-a",
+    hostRecorderControl: control,
+  });
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
     let failure: unknown;

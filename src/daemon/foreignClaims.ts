@@ -1,9 +1,11 @@
+import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
+import { SingleFlight } from "../utils/cache/SingleFlight";
 import { holderOf } from "./deviceBinding";
 import type { Platform } from "../models";
 import type { Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { DeviceOwnedByOtherDaemonError } from "./deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
 import type { PooledDevice } from "./devicePool";
 import type { ForeignDeviceOwnership } from "./foreignDeviceOwnership";
 
@@ -11,6 +13,7 @@ export interface ForeignClaimsPort {
   readonly foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
   readonly iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
   readonly timer: Pick<Timer, "now">;
+  readonly inventoryProbeBackoff?: BackoffPolicy;
   getDevice(deviceId: string): Pick<PooledDevice, "sessionId"> | undefined;
   getDevicesByPlatform(platform?: Platform): PooledDevice[];
 }
@@ -24,7 +27,80 @@ export class ForeignClaims {
     { readAt: number; verdict: Promise<{ ownerPid: number | undefined; unreadable: boolean }> }
   >();
 
-  constructor(private readonly port: ForeignClaimsPort) {}
+  private readonly inventoryFlight = new SingleFlight<string, void>();
+  private readonly inventorySnapshots = new Map<
+    string,
+    { staleAt: number; foreign: boolean; streak: number }
+  >();
+  private readonly inventoryProbeBackoff: BackoffPolicy;
+
+  constructor(private readonly port: ForeignClaimsPort) {
+    this.inventoryProbeBackoff =
+      port.inventoryProbeBackoff ??
+      exponentialBackoff({ initialDelayMs: 1_000, multiplier: 2, maxDelayMs: 8_000 });
+  }
+
+  /** Inventory excludes only positively foreign Android serials, never our session holders. */
+  async foreignSerials(
+    serials: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<ReadonlySet<string>> {
+    signal?.throwIfAborted();
+    const ownership = this.port.foreignDeviceOwnership;
+    if (!ownership) {
+      return new Set<string>();
+    }
+    const inventory = new Set(serials);
+    for (const serial of this.inventorySnapshots.keys()) {
+      if (!inventory.has(serial)) {
+        this.inventorySnapshots.delete(serial);
+      }
+    }
+    const missing = [...inventory].filter(
+      (serial) =>
+        (this.inventorySnapshots.get(serial)?.staleAt ?? -Infinity) <= this.port.timer.now(),
+    );
+    try {
+      // Inventory evidence may be reused briefly; explicit binds still refresh afresh.
+      if (missing.length > 0) {
+        await this.inventoryFlight.run(
+          JSON.stringify(missing.toSorted()),
+          async (flightSignal) => {
+            await ownership.refresh(missing, flightSignal);
+            flightSignal?.throwIfAborted();
+            for (const serial of missing) {
+              const foreign = ownership.foreignOwnerPid(serial) !== undefined;
+              const streak = foreign ? (this.inventorySnapshots.get(serial)?.streak ?? 0) + 1 : 0;
+              this.inventorySnapshots.set(serial, {
+                staleAt:
+                  this.port.timer.now() + this.inventoryProbeBackoff.delayForAttempt(streak || 1),
+                foreign,
+                streak,
+              });
+            }
+          },
+          signal,
+          { cancelWhenAllWaitersAbort: true },
+        );
+      }
+      return new Set(
+        serials.filter(
+          (serial) =>
+            this.inventorySnapshots.get(serial)?.foreign && !holderOf(this.port.getDevice(serial)),
+        ),
+      );
+    } catch (error) {
+      for (const serial of missing) {
+        this.inventorySnapshots.delete(serial);
+      }
+      signal?.throwIfAborted();
+      logger.warn(
+        `[DevicePool] Android inventory ownership refresh failed: ${errorMessage(error)}`,
+        error,
+      );
+      return new Set<string>();
+    }
+  }
 
   /** Who else drives devices of `platform`: Android by adb server, iOS by UDID (#10980). */
   foreignOwnershipFor(platform: Platform | undefined): ForeignDeviceOwnership | undefined {

@@ -22,7 +22,7 @@
 #     < <(local_sim_build_args)
 #   xcodebuild ... "${EXTRA_ARGS[@]}"
 
-# shellcheck source=scripts/lib/shell-core.sh disable=SC1091
+# shellcheck source=scripts/lib/shell-core.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/shell-core.sh"
 
 local_sim_build_args() {

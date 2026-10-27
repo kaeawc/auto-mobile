@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { TerminateApp } from "../../../src/features/action/TerminateApp";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -123,11 +124,13 @@ describe("TerminateApp Android termination verification", () => {
         }
       }
       return {
+        observationId: "termination-test",
+        display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
         updatedAt: timer.now(),
         screenSize: { width: 1170, height: 2532 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
         viewHierarchy: {
-          hierarchy: { node: [] },
+          hierarchy: { node: createFlatNodeForTest({ node: [] }) },
           packageName: "com.android.settings",
           updatedAt: timer.now(),
         },
@@ -222,10 +225,15 @@ describe("TerminateApp Android termination verification", () => {
     // Even a lingering foreground record must not hide a confirmed restart.
     adb.foregroundDeathMs = Infinity;
     observe.setObserveResult({
+      observationId: "termination-test",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
       updatedAt: timer.now(),
       screenSize: { width: 1170, height: 2532 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: { hierarchy: { node: [] }, updatedAt: timer.now() },
+      viewHierarchy: {
+        hierarchy: { node: createFlatNodeForTest({ node: [] }) },
+        updatedAt: timer.now(),
+      },
     });
     const result = await executeObserved();
     expect(elapsed()).toBe(0);

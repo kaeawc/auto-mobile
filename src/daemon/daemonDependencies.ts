@@ -1,4 +1,7 @@
-import { createServer as createHttpServer, type Server as HttpServer } from "http";
+import { FileDaemonHttpTokenStore, type DaemonHttpTokenStore } from "./daemonHttpToken";
+import { createServer as createHttpServer } from "http";
+import type { HttpListener } from "./daemonHttpIngress";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import {
   createDefaultBindingExclusion,
   type BindingExclusion,
@@ -15,7 +18,10 @@ import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseI
 import { DatabaseHealthProbe, DefaultDatabaseHealthProbe } from "../db/DatabaseHealthProbe";
 import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
-import { DeviceSessionRepository } from "../db/deviceSessionRepository";
+import {
+  DeviceSessionRepository,
+  type DeviceSessionPersistence,
+} from "../db/deviceSessionRepository";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
@@ -24,7 +30,7 @@ import { stopManagedAdbServer } from "../utils/android-cmdline-tools/AdbServerLi
 import {
   defaultToolSelectionProfileRegistry,
   type ToolSelectionProfileProvenanceLoader,
-} from "../server/toolSelectionProfileRegistry";
+} from "./toolSelectionProfileRegistry";
 
 export type DaemonProcessBirthTimeProvider = () => number;
 export type DaemonProcessGenerationTokenProvider = () => string | undefined;
@@ -35,10 +41,15 @@ export type ManagedAdbServerShutdown = () => Promise<void>;
  * Injectable collaborators of `Daemon`. Every field is optional and defaults to the
  * production implementation; tests pass fakes by name instead of by position.
  */
+/** The session store the daemon drives: persistence plus its startup expiry and autolock stamps. */
+export type DaemonDeviceSessionStore = DeviceSessionPersistence &
+  Pick<DeviceSessionRepository, "markAutolockSession" | "markStaleActiveSessionsExpired">;
+
 export interface DaemonDependencies {
+  deviceReadiness?: DeviceReadiness;
   installedAppsRepository?: InstalledAppsStore;
   timer?: Timer;
-  deviceSessionRepository?: DeviceSessionRepository;
+  deviceSessionRepository?: DaemonDeviceSessionStore;
   idGenerator?: IdGenerator;
   databaseInitializer?: DatabaseInitializer;
   startupFailureTracker?: StartupFailureTracker;
@@ -47,16 +58,26 @@ export interface DaemonDependencies {
   recoveryPolicyEnvironment?: NodeJS.ProcessEnv;
   managedAdbServerShutdown?: ManagedAdbServerShutdown;
   toolSelectionProfileProvenanceLoader?: ToolSelectionProfileProvenanceLoader;
-  httpServerFactory?: () => HttpServer;
+  httpToken?: string;
+  httpTokenStore?: DaemonHttpTokenStore;
+  httpServerFactory?: () => HttpListener;
   processBirthTime?: DaemonProcessBirthTimeProvider;
   processGenerationToken?: DaemonProcessGenerationTokenProvider;
   liveDaemonSessionIdProvider?: LiveDaemonSessionIdProvider;
   incumbentOwnerGuard?: IncumbentOwnerGuard;
   avdManagerFactory?: () => Pick<AvdManager, "listDeviceImages">;
+  /** The readiness service iOS startup warm-up verifies simulators through. */
+  iosDeviceVerifier?: () => Pick<DeviceReadiness, "verifyIosDevice">;
   /** Managed-binding exclusion for the pool (#11174); defaults to the host-wide SQLite registry. */
   bindingExclusionFactory?: (timer: Timer) => BindingExclusion;
   /** Host forward evidence is supplied by the production entry point only (#12220). */
   foreignCtrlProxyForwardEvidence?: ForeignCtrlProxyForwardEvidence;
+  /**
+   * Whether host disk I/O is stalled, which excuses database health-probe timeouts (#11990).
+   * Defaults to the process-wide log sink's stall evidence; tests inject a fixed answer so a
+   * stall reported by an unrelated file cannot decide their strike count.
+   */
+  hostIoStalled?: () => boolean;
   /** Where the daemon registers its sessions and pool; defaults to the process-wide state. */
   daemonState?: DaemonStateWrites;
 }
@@ -68,6 +89,7 @@ export type ResolvedDaemonDependencies = Required<
     | "installedAppsRepository"
     | "recoverFromDatabaseHealthFailure"
     | "foreignCtrlProxyForwardEvidence"
+    | "hostIoStalled"
   >
 > &
   Pick<
@@ -75,6 +97,7 @@ export type ResolvedDaemonDependencies = Required<
     | "installedAppsRepository"
     | "recoverFromDatabaseHealthFailure"
     | "foreignCtrlProxyForwardEvidence"
+    | "hostIoStalled"
   >;
 
 /**
@@ -112,12 +135,17 @@ function resolveProcessIdentity(dependencies: DaemonDependencies) {
 }
 
 function resolveFactories(dependencies: DaemonDependencies) {
+  const deviceReadiness = dependencies.deviceReadiness ?? DeviceReadiness.createInstance();
   return {
     managedAdbServerShutdown: dependencies.managedAdbServerShutdown ?? stopManagedAdbServer,
     toolSelectionProfileProvenanceLoader:
       dependencies.toolSelectionProfileProvenanceLoader ?? defaultToolSelectionProfileRegistry,
+    httpToken: dependencies.httpToken ?? "",
+    httpTokenStore: dependencies.httpTokenStore ?? new FileDaemonHttpTokenStore(),
     httpServerFactory: dependencies.httpServerFactory ?? (() => createHttpServer()),
     avdManagerFactory: dependencies.avdManagerFactory ?? (() => new AvdManagerService()),
+    deviceReadiness,
+    iosDeviceVerifier: dependencies.iosDeviceVerifier ?? (() => deviceReadiness),
     bindingExclusionFactory: dependencies.bindingExclusionFactory ?? createDefaultBindingExclusion,
     daemonState: dependencies.daemonState ?? defaultDaemonStateWrites,
   };

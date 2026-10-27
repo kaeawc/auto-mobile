@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 describe("turbo lint inputs cover the shell script chain", () => {
@@ -17,7 +18,7 @@ describe("turbo lint inputs cover the shell script chain", () => {
   }
 
   function loadTurbo(): TurboConfig {
-    return JSON.parse(readFileSync(join(ROOT, "turbo.json"), "utf8")) as TurboConfig;
+    return JSON.parse(readGuardFile(join(ROOT, "turbo.json"))) as TurboConfig;
   }
 
   test("PR target is forwarded and hashed for the lint ratchet", () => {
@@ -43,8 +44,8 @@ describe("turbo lint inputs cover the shell script chain", () => {
     const lintScript = "scripts/lint.sh";
     const boundaryScript = "scripts/check-boundaries.sh";
     const referenced = [
-      ...referencedShellScripts(readFileSync(join(ROOT, lintScript), "utf8")),
-      ...referencedShellScripts(readFileSync(join(ROOT, boundaryScript), "utf8")),
+      ...referencedShellScripts(readGuardFile(join(ROOT, lintScript))),
+      ...referencedShellScripts(readGuardFile(join(ROOT, boundaryScript))),
     ];
     const scripts = [...new Set([lintScript, boundaryScript, ...referenced])];
     const inputs = lintInputs();
@@ -62,11 +63,11 @@ describe("turbo lint inputs cover the shell script chain", () => {
     const oxlintConfig = ".oxlintrc.json";
     // .oxlintrc.json is JSONC (comments), so a naive JSON.parse throws; Bun's
     // built-in JSONC parser is the standard-library reader for it.
-    const oxlint = Bun.JSONC.parse(readFileSync(join(ROOT, oxlintConfig), "utf8")) as OxlintConfig;
+    const oxlint = Bun.JSONC.parse(readGuardFile(join(ROOT, oxlintConfig))) as OxlintConfig;
     const plugins = (oxlint.jsPlugins ?? []).map((plugin) => plugin.replace(/^\.\//, ""));
     expect(plugins.length).toBeGreaterThan(0);
 
-    const baselineScript = readFileSync(join(ROOT, "scripts/oxlint-baseline.sh"), "utf8");
+    const baselineScript = readGuardFile(join(ROOT, "scripts/oxlint-baseline.sh"));
     const baseline = /\$ROOT\/(scripts\/oxlint-baseline\.txt)/.exec(baselineScript)?.[1];
     expect(baseline).toBeDefined();
 

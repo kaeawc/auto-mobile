@@ -20,7 +20,7 @@ fi
 # Start the timer
 start_time=$(bash -c "$(pwd)/scripts/utils/get_timestamp.sh")
 
-# shellcheck disable=SC1091 # Resolved relative to this script's location.
+# shellcheck source=scripts/lib/vcs-diff.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/vcs-diff.sh"
 
 # A newer local shellcheck than CI passes things CI rejects (2026-10-10: three
@@ -35,23 +35,24 @@ fi
 
 # CI parity: a disable directive naming SC2329 must also name SC2317, otherwise
 # the older CI shellcheck still reports the same finding as SC2317.
-# shellcheck disable=SC2016
-parity_errors=$(vcs_list_files |
+parity_errors=$(vcs_list_files @ |
   grep -z '\.sh$' |
-  xargs -0 awk -v ci="$CI_SHELLCHECK_VERSION" '
+  xargs -0 awk -v ci="$CI_SHELLCHECK_VERSION" "$(cat <<'LITERAL_PROGRAM'
+
     /^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+disable=/ && /SC2329/ && !/SC2317/ {
       printf "%s:%d: disable=SC2329 without SC2317 (CI shellcheck %s reports SC2317): %s\n", FILENAME, FNR, ci, $0
-    }' 2>&1)
+    }
+LITERAL_PROGRAM
+)" 2>&1)
 
 # Portable CPU count: nproc (GNU) is absent on stock macOS, where an empty
 # `$(nproc)` made `xargs -P ""` fail. Fall back to sysctl/getconf (#3653).
 NPROC="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 
 # Find shell scripts and validate in parallel.
-# shellcheck disable=SC2016
-errors=$(vcs_list_files |
+errors=$(vcs_list_files @ |
   grep -z '\.sh$' |
-  xargs -0 -n 1 -P "$NPROC" bash -c '"$SHELLCHECK_CMD" "$0"' 2>&1)
+  xargs -0 -n 1 -P "$NPROC" bash -c "\"\$SHELLCHECK_CMD\" \"\$0\"" 2>&1)
 if [[ -n $parity_errors ]]; then
   errors="${errors:+$errors$'\n'}${parity_errors}"
 fi

@@ -8,7 +8,7 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { DAEMON_SESSION_NOT_FOUND_CODE as NOT_FOUND } from "../../src/daemon/types";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
+import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -27,6 +27,7 @@ const SCAN_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
+  releaseDevice: async () => {},
 };
 
 interface Rig {
@@ -234,7 +235,11 @@ describe("not-found answers for a session whose terminal release is still writin
   });
 });
 
-const bare = { success: false, error: `Session not found: ${SESSION}`, code: NOT_FOUND };
+const bare: DaemonMethodResult = {
+  success: false,
+  error: `Session not found: ${SESSION}`,
+  code: NOT_FOUND,
+};
 
 /** Poll both daemon wires at each write boundary; exact equality also checks for no idle key. */
 async function expectNotFoundWires(r: Rig, expected: DaemonMethodResult): Promise<void> {
@@ -413,7 +418,11 @@ describe("terminal snapshot fallback without an in-flight operation", () => {
   test("a never-issued UUID stays plain not-found", async () => {
     rig = await setUpRig(120_000);
     const sessionId = "00000000-0000-4000-8000-000000000099";
-    const expected = { success: false, error: `Session not found: ${sessionId}`, code: NOT_FOUND };
+    const expected: DaemonMethodResult = {
+      success: false,
+      error: `Session not found: ${sessionId}`,
+      code: NOT_FOUND,
+    };
     for (const method of ["daemon/heartbeat", "daemon/sessionInfo"]) {
       expect(await rig.request(method, { sessionId })).toEqual(expected);
     }

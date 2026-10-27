@@ -1,0 +1,135 @@
+package dev.jasonpearson.automobile.desktop.core
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
+import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
+
+@Composable
+internal fun DeviceSectionHeader(title: String) {
+  val colors = SharedTheme.globalColors
+  Text(
+    title,
+    fontSize = 11.sp,
+    color = colors.text.normal.copy(alpha = 0.6f),
+  )
+}
+
+@Composable
+internal fun DeviceListItem(
+  name: String,
+  status: String,
+  icon: String,
+  onClick: () -> Unit,
+) {
+  val colors = SharedTheme.globalColors
+
+  Row(
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 8.dp, vertical = 6.dp),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text(icon, fontSize = 14.sp)
+    Column(modifier = Modifier.weight(1f)) {
+      Text(name, fontSize = 11.sp, maxLines = 1)
+      Text(
+        status,
+        fontSize = 9.sp,
+        color = Color(0xFF4CAF50),
+      )
+    }
+  }
+}
+
+@Composable
+internal fun EmulatorListItem(
+  name: String,
+  apiLevel: String?,
+  isIos: Boolean,
+  onClick: () -> Unit,
+) {
+  val colors = SharedTheme.globalColors
+
+  Row(
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(4.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 8.dp, vertical = 6.dp),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Icon(
+      imageVector = PlatformIcons.logo(isIos),
+      contentDescription = PlatformIcons.contentDescription(isIos),
+      tint = PlatformIcons.tint(isIos),
+      modifier = Modifier.size(16.dp),
+    )
+    Column(modifier = Modifier.weight(1f)) {
+      Text(name, fontSize = 11.sp, maxLines = 1)
+      if (apiLevel != null) {
+        Text(
+          "API $apiLevel",
+          fontSize = 9.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
+        )
+      }
+    }
+    Text("Boot", fontSize = 10.sp, color = Color(0xFF2196F3))
+  }
+}
+
+@Composable
+internal fun SystemImageListItem(
+  name: String,
+  apiLevel: String,
+  icon: String,
+  onClick: () -> Unit,
+) {
+  val colors = SharedTheme.globalColors
+
+  Row(
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(4.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 8.dp, vertical = 6.dp),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text(icon, fontSize = 14.sp)
+    Column(modifier = Modifier.weight(1f)) {
+      Text(name, fontSize = 11.sp, maxLines = 1)
+      Text(
+        "API $apiLevel",
+        fontSize = 9.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
+      )
+    }
+    Text("Create", fontSize = 10.sp, color = Color(0xFF2196F3))
+  }
+}

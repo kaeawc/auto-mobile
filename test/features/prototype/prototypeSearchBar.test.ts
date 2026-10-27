@@ -3,16 +3,13 @@ import {
   prototypeSearchBarFields,
   prototypeSearchBarUnsupportedMessage,
 } from "../../../src/features/prototype/prototypeSearchBar";
-import {
-  prototypeSpecSchema,
-  type PrototypeSpec,
-} from "../../../src/features/prototype/prototypeSpec";
+import { prototypeSpecSchema } from "../../../src/features/prototype/prototypeSpec";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 import { prototypePlatformNotes } from "../../../src/features/prototype/prototypePlatformNotes";
 
 const spec = {
   id: "search",
-  window: { placement: { type: "fullscreen" as const } },
+  window: { placement: { type: "fullscreen" as const }, opacity: 1 },
   state: { query: "", active: true },
   root: {
     type: "searchBar" as const,
@@ -36,7 +33,7 @@ beforeAll(() => {
 
 test("fields identify nodes depth-first through both child slots without mutating the spec", () => {
   const before = JSON.stringify(spec);
-  expect(prototypeSearchBarFields(spec as PrototypeSpec)).toEqual([
+  expect(prototypeSearchBarFields(prototypeSpecSchema.parse(spec))).toEqual([
     "root",
     "root.child.children[0]",
   ]);
@@ -113,7 +110,7 @@ test("searchBar state, child and action validation walk the ordinary subtree", (
 });
 
 test("iOS notes describe the drawn field and SF Symbol search icons", () => {
-  const notes = prototypePlatformNotes(spec as PrototypeSpec, "ios", () => true);
+  const notes = prototypePlatformNotes(prototypeSpecSchema.parse(spec), "ios", () => true);
   expect(notes).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
@@ -126,5 +123,7 @@ test("iOS notes describe the drawn field and SF Symbol search icons", () => {
       }),
     ]),
   );
-  expect(prototypePlatformNotes(spec as PrototypeSpec, "android", () => true)).toEqual([]);
+  expect(prototypePlatformNotes(prototypeSpecSchema.parse(spec), "android", () => true)).toEqual(
+    [],
+  );
 });

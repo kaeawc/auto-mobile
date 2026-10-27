@@ -200,17 +200,11 @@ describe("DaemonClient platform-aware connect (#6140)", () => {
       `daemon-client-win32-test-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`,
     );
 
-    const client = new DaemonClient(
-      nonExistentSocketPath,
-      100,
-      undefined,
-      {},
-      null,
-      undefined,
-      "win32",
-    );
+    const client = new DaemonClient(nonExistentSocketPath, 100, undefined, {}, null, {
+      platformOverride: "win32",
+    });
 
-    const internals = client as unknown as { socketPathObservable(): boolean };
+    const internals = client.testHooks;
     expect(internals.socketPathObservable()).toBe(true);
   });
 

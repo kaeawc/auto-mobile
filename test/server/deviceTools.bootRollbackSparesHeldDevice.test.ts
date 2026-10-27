@@ -1,6 +1,6 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { ChildProcess } from "child_process";
-import { EventEmitter } from "node:events";
+import { readToolResponse } from "../helpers/toolResponse";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { RealBootGatesOverFakeFleet } from "../helpers/realBootGatesOverFakeFleet";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
@@ -10,7 +10,7 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -62,21 +62,20 @@ describe("a failed start does not stop the device it booted once another session
   };
 
   /** The boot's process handle: `kill` is what stops the cold-booted device. */
-  class RecordingBootHandle extends EventEmitter {
-    readonly pid = 4242;
-    exitCode: number | null = null;
-    readonly signalCode: NodeJS.Signals | null = null;
-    killed = false;
-
+  class RecordingBootHandle extends FakeChildProcess {
     constructor(private readonly onKill: () => void) {
       super();
+      this.pid = 4242;
     }
 
-    kill(): boolean {
+    override kill(): boolean {
       this.killed = true;
       this.onKill();
       this.exitCode = 0;
-      queueMicrotask(() => this.emit("exit", 0, null));
+      queueMicrotask(() => {
+        this.emit("exit", 0, null);
+        this.emit("close", 0, null);
+      });
       return true;
     }
   }
@@ -106,8 +105,8 @@ describe("a failed start does not stop the device it booted once another session
       devices.setBootedDevices("android", []);
       devices.setBootedDevices("ios", []);
     });
-    devices.setMockChildProcess(avd.name, bootHandle as unknown as ChildProcess);
-    devices.setMockChildProcess(simulator.name, bootHandle as unknown as ChildProcess);
+    devices.setMockChildProcess(avd.name, bootHandle);
+    devices.setMockChildProcess(simulator.name, bootHandle);
     // Every boot is admitted through the real gates, at a limit of one device a platform.
     gates = new RealBootGatesOverFakeFleet(devices, timer, 1);
     const idGenerator = new CountingIdGenerator("booter");
@@ -159,7 +158,19 @@ describe("a failed start does not stop the device it booted once another session
     PlatformDeviceManagerFactory.reset();
     timer.reset();
   };
-  beforeEach(arrange);
+
+  function arrangedEach<T>(table: readonly T[]) {
+    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+      test.each(table.map((row) => [row] as const))(
+        name,
+        async (row: T) => {
+          await arrange();
+          await fn(row);
+        },
+        timeout,
+      );
+    };
+  }
   afterEach(dispose);
 
   /** Give deferred cleanup and its grace timers room to run. */
@@ -220,7 +231,7 @@ describe("a failed start does not stop the device it booted once another session
     expect(await gates.admitsOneMoreBoot(platform)).toBe(false);
   };
 
-  test.each(TARGETS)(
+  arrangedEach(TARGETS)(
     "$platform: runner readiness fails after another session selected the device",
     async ({ platform, args, deviceId }) => {
       duringReadiness = async () => {
@@ -237,7 +248,7 @@ describe("a failed start does not stop the device it booted once another session
     },
   );
 
-  test.each(TARGETS)(
+  arrangedEach(TARGETS)(
     "$platform: the booting call loses its bind to another session's selection",
     async ({ platform, args, deviceId }) => {
       duringReadiness = async () => await otherSessionSelects(deviceId, platform);
@@ -250,7 +261,7 @@ describe("a failed start does not stop the device it booted once another session
     },
   );
 
-  test.each(TARGETS)(
+  arrangedEach(TARGETS)(
     "$platform: a device the other session let go again is stopped with the failed start",
     async ({ platform, args, deviceId }) => {
       duringReadiness = async () => {
@@ -271,7 +282,7 @@ describe("a failed start does not stop the device it booted once another session
   );
 
   // Same serial is not provenance: only a recovery of this call's cold boot owns its replacement.
-  test.each([false, true])(
+  arrangedEach([false, true])(
     "android: failed ANR handoff respects running-before provenance (%s)",
     async (runningBefore) => {
       let held = "owner-session";
@@ -281,7 +292,7 @@ describe("a failed start does not stop the device it booted once another session
           name: avd.name,
           __mcpSessionId: "client-a",
         });
-        expect(started.isError).not.toBe(true);
+        expect(readToolResponse(started).isError).not.toBe(true);
         const sessionId = pool.getDevice(AVD_SERIAL)?.sessionId;
         expect(sessionId).toBeString();
         held = sessionId!;
@@ -293,7 +304,7 @@ describe("a failed start does not stop the device it booted once another session
         devices.setBootedDevices("android", []);
         bootHandle.kill();
         await Promise.resolve();
-        devices.setMockChildProcess(avd.name, replacement as unknown as ChildProcess);
+        devices.setMockChildProcess(avd.name, replacement);
       };
       duringReadiness = async () => {
         if (!runningBefore) {
@@ -307,10 +318,13 @@ describe("a failed start does not stop the device it booted once another session
         expect(pool.getDevice(AVD_SERIAL)?.sessionId).toBe(held);
         throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
       };
-      const handoff = spyOn(
-        DevicePool.prototype as unknown as { cancelOldDeviceWorkForSystemUiAnr(): Promise<void> },
-        "cancelOldDeviceWorkForSystemUiAnr",
-      ).mockRejectedValue(new Error("handoff failed"));
+      let handoffCalls = 0;
+      const restoreHandoff = pool.testHooks.cancelOldDeviceWorkForSystemUiAnr.intercept(
+        () => async () => {
+          handoffCalls++;
+          throw new Error("handoff failed");
+        },
+      );
 
       try {
         // startDevice strips sessionUuid arguments; admitted caller identity is ambient.
@@ -320,7 +334,7 @@ describe("a failed start does not stop the device it booted once another session
         await drain();
 
         expect(failure).toBeInstanceOf(Error);
-        expect(handoff).toHaveBeenCalled();
+        expect(handoffCalls).toBeGreaterThan(0);
         expect(replacement.killed).toBe(!runningBefore);
         expect(await gates.capacity("android")).toEqual({
           booted: runningBefore ? 1 : 0,
@@ -329,7 +343,7 @@ describe("a failed start does not stop the device it booted once another session
         expect(sessions.getSession(held)).toBeNull();
         expect(pool.getDevice(AVD_SERIAL)).toBeNull();
       } finally {
-        handoff.mockRestore();
+        restoreHandoff();
       }
     },
   );

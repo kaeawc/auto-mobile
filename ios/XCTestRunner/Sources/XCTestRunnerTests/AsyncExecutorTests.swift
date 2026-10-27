@@ -6,6 +6,16 @@ import XCTestRunnerTestSupport
 
 @MainActor
 final class AsyncExecutorTests: XCTestCase {
+    func testExecutePlanUsesDaemonFloorAndPreservesLargerConfiguredTimeout() async throws {
+        for (configured, expected): (TimeInterval, TimeInterval) in [(300, 600), (900, 900)] {
+            let client = AsyncExecutorClient()
+            let executor = makeExecutor(client: client, handler: AsyncExecutorRecovery(), timeout: configured)
+            _ = try await executor.execute()
+            XCTAssertEqual(client.initializeTimeouts, [configured])
+            XCTAssertEqual(client.toolTimeouts, [configured, expected])
+        }
+    }
+
     func testExecutePlanReturnsResultAndPassesOneSessionAndMetadataAcrossAwait() async throws {
         let client = AsyncExecutorClient()
         let generator = ExecutorSessionProbe()
@@ -383,6 +393,7 @@ final class AsyncExecutorTests: XCTestCase {
         client: AsyncExecutorClient,
         handler: AsyncExecutorRecovery,
         retries: Int = 2,
+        timeout: TimeInterval = 300,
         scheduler: any DeadlineScheduler = VirtualDeadlineScheduler(),
         transport: AutoMobilePlanExecutor.Transport = .daemonUnixSocket(path: "/unused/async-executor.sock"),
         daemonEnsurer: any AutoMobileDaemonEnsuring = AsyncExecutorDaemonEnsurer(),
@@ -397,6 +408,7 @@ final class AsyncExecutorTests: XCTestCase {
                 transport: transport,
                 planPath: "unused",
                 retryCount: retries,
+                timeoutSeconds: timeout,
                 retryDelaySeconds: 10
             ),
             planLoader: AsyncExecutorPlanLoader(),
@@ -514,6 +526,8 @@ private final class AsyncExecutorRecovery: PlanRecoveryHandler {
 
 private final class AsyncExecutorClient: AutoMobileMCPClient {
     private struct State: Sendable {
+        var initializeTimeouts: [TimeInterval] = []
+        var toolTimeouts: [TimeInterval] = []
         var testClasses: [String?] = []
         var testMethods: [String?] = []
         var names: [String] = []
@@ -532,6 +546,8 @@ private final class AsyncExecutorClient: AutoMobileMCPClient {
     let cancellations = TransportEvents()
     let initializeGate = SingleResumeCell<Void>()
     let callGate = SingleResumeCell<Void>()
+    var initializeTimeouts: [TimeInterval] { state.withLock { $0.initializeTimeouts } }
+    var toolTimeouts: [TimeInterval] { state.withLock { $0.toolTimeouts } }
     var testClasses: [String?] { state.withLock { $0.testClasses } }
     var testMethods: [String?] { state.withLock { $0.testMethods } }
     var names: [String] { state.withLock { $0.names } }
@@ -554,9 +570,10 @@ private final class AsyncExecutorClient: AutoMobileMCPClient {
         self.cancellationError = cancellationError
     }
 
-    func initialize(timeout _: TimeInterval) async throws {
+    func initialize(timeout: TimeInterval) async throws {
         // Each cell can be waited on once, even when retries or recovery initialize again.
         let shouldPause = state.withLock { current in
+            current.initializeTimeouts.append(timeout)
             let shouldPause = current.pauseNextInitialization
             current.pauseNextInitialization = false
             return shouldPause
@@ -566,13 +583,14 @@ private final class AsyncExecutorClient: AutoMobileMCPClient {
         try Task.checkCancellation()
     }
 
-    func callTool(name: String, arguments: [String: Any], timeout _: TimeInterval) async throws -> MCPToolResponse {
+    func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) async throws -> MCPToolResponse {
         // Record only Sendable routing values, never retain the dynamic wire dictionary.
         let sessionUuid = arguments["sessionUuid"] as? String
         let metadata = arguments["testMetadata"] as? [String: Any]
         let testClass = metadata?["testClass"] as? String
         let testMethod = metadata?["testMethod"] as? String
         let response = state.withLock { current -> Result<MCPToolResponse, any Error> in
+            current.toolTimeouts.append(timeout)
             current.names.append(name)
             current.sessions.append(sessionUuid)
             if name != "executePlan" { return .success(MCPToolResponse(text: "{}")) }

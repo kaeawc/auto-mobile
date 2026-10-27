@@ -77,36 +77,11 @@ export class AndroidHierarchyUpdateHandler {
       observerResponse && ctx.observerHierarchyRequestIds.get(requestId!) === true;
     ctx.hierarchy.resolvePendingHierarchy(requestId, incomingHierarchy);
     // Consume correlated responses even when too old for the shared cache or observer-only.
-    let suppressObservationStreamPush =
+    const suppressObservationStreamPush =
       !!requestId && ctx.removeHierarchyObservationStreamSuppression(requestId);
     if (observerResponse) {
       ctx.observerHierarchyRequestIds.delete(requestId);
-      if (
-        ctx.transientObserver ||
-        // Aggregate and explicit-panel observer frames cannot seed the owner's active frame.
-        isolatedObserverResponse ||
-        (ctx.cachedHierarchy !== null &&
-          isDeepStrictEqual(
-            {
-              hierarchy: data.hierarchy,
-              packageName: data.packageName,
-              windows: data.windows,
-              screenWidth: data.screenWidth,
-              screenHeight: data.screenHeight,
-              rotation: data.rotation,
-              displayId: data.displayId,
-            },
-            {
-              hierarchy: ctx.cachedHierarchy.hierarchy.hierarchy,
-              packageName: ctx.cachedHierarchy.hierarchy.packageName,
-              windows: ctx.cachedHierarchy.hierarchy.windows,
-              screenWidth: ctx.cachedHierarchy.hierarchy.screenWidth,
-              screenHeight: ctx.cachedHierarchy.hierarchy.screenHeight,
-              rotation: ctx.cachedHierarchy.hierarchy.rotation,
-              displayId: ctx.cachedHierarchy.hierarchy.displayId,
-            },
-          ))
-      ) {
+      if (this.observerFrameIsDiscarded(data, isolatedObserverResponse)) {
         return;
       }
     }
@@ -128,16 +103,37 @@ export class AndroidHierarchyUpdateHandler {
     // Update cached screen dimensions
     ctx.updateCachedScreenDimensions(data);
 
+    this.publishObservationFrame(data, frameContext, requestId, suppressObservationStreamPush);
+
+    this.trackForegroundPackage(data);
+
+    // Record layout telemetry (throttled to max 1 per 500ms)
+    if (now - this.lastLayoutTelemetryTimestamp >= 500) {
+      this.lastLayoutTelemetryTimestamp = now;
+      this.recordLayoutTelemetry(data, now);
+    }
+
+    this.notifyNavigationDetector(data);
+  }
+
+  private publishObservationFrame(
+    data: AccessibilityHierarchy,
+    frameContext: string | undefined,
+    requestId: string | null | undefined,
+    suppressInitial: boolean,
+  ): void {
+    const { context: ctx } = this;
+    let suppress = suppressInitial;
     // Old APKs have no echo capability advertisement. Until the first correlated frame on a
     // fresh connection, an idless broadcast can still consume the oldest token (legacy behavior).
     // Once ANY echoed id is seen, idless/foreign frames never consume another request's token.
     // Keep legacy consumption after the cache/observer guards, exactly as the anonymous Set was.
     if (!requestId && !ctx.hierarchy.hasSeenCorrelatedFrames()) {
       const oldestId = ctx.hierarchyObservationStreamSuppressions.keys().next().value;
-      suppressObservationStreamPush =
+      suppress =
         oldestId !== undefined && ctx.removeHierarchyObservationStreamSuppression(oldestId);
     }
-    if (!suppressObservationStreamPush) {
+    if (!suppress) {
       // Push to observation stream
       ctx.pushHierarchyToObservationStream(data, frameContext);
 
@@ -148,7 +144,43 @@ export class AndroidHierarchyUpdateHandler {
         "[CTRL_PROXY] Suppressed hierarchy observation stream push for explicit initial-frame request",
       );
     }
+  }
 
+  private observerFrameIsDiscarded(
+    data: AccessibilityHierarchy,
+    isolatedObserverResponse: boolean,
+  ): boolean {
+    const { context: ctx } = this;
+    return (
+      ctx.transientObserver ||
+      // Aggregate and explicit-panel observer frames cannot seed the owner's active frame.
+      isolatedObserverResponse ||
+      (ctx.cachedHierarchy !== null &&
+        isDeepStrictEqual(
+          {
+            hierarchy: data.hierarchy,
+            packageName: data.packageName,
+            windows: data.windows,
+            screenWidth: data.screenWidth,
+            screenHeight: data.screenHeight,
+            rotation: data.rotation,
+            displayId: data.displayId,
+          },
+          {
+            hierarchy: ctx.cachedHierarchy.hierarchy.hierarchy,
+            packageName: ctx.cachedHierarchy.hierarchy.packageName,
+            windows: ctx.cachedHierarchy.hierarchy.windows,
+            screenWidth: ctx.cachedHierarchy.hierarchy.screenWidth,
+            screenHeight: ctx.cachedHierarchy.hierarchy.screenHeight,
+            rotation: ctx.cachedHierarchy.hierarchy.rotation,
+            displayId: ctx.cachedHierarchy.hierarchy.displayId,
+          },
+        ))
+    );
+  }
+
+  private trackForegroundPackage(data: AccessibilityHierarchy): void {
+    const { context: ctx } = this;
     // Track foreground package for context and start performance monitoring
     if (data.packageName && data.packageName !== ctx.lastForegroundPackage) {
       ctx.lastForegroundPackage = data.packageName;
@@ -156,41 +188,43 @@ export class AndroidHierarchyUpdateHandler {
       const monitor = getPerformanceMonitor();
       monitor.startMonitoring(ctx.deviceId, data.packageName);
     }
+  }
 
-    // Record layout telemetry (throttled to max 1 per 500ms)
-    if (now - this.lastLayoutTelemetryTimestamp >= 500) {
-      this.lastLayoutTelemetryTimestamp = now;
-      const recorder = TelemetryRecorder.getInstance();
-      recorder.setContext(ctx.deviceId, null);
-      const screenName = data.foregroundActivity ?? data.packageName ?? null;
-      const windowCount = data.windows?.length ?? 0;
-      // Include a compact hierarchy tree (~2-5KB) with just the display properties.
-      // The full hierarchy (~10-50KB with bounds/states/extras) is available via
-      // the observation stream and would cause excessive traffic at 500ms intervals.
-      const compactHierarchy = data.hierarchy ? { node: compactifyNode(data.hierarchy) } : null;
-      recorder
-        .recordLayoutEvent({
-          timestamp: now,
-          applicationId: data.packageName ?? null,
-          subType: "hierarchy_change",
-          composableName: null,
-          composableId: null,
-          recompositionCount: null,
-          durationMs: null,
-          likelyCause: null,
-          detailsJson: JSON.stringify({
-            screenName,
-            windowCount,
-            foregroundActivity: data.foregroundActivity ?? null,
-            hierarchy: compactHierarchy,
-          }),
+  private recordLayoutTelemetry(data: AccessibilityHierarchy, now: number): void {
+    const { context: ctx } = this;
+    const recorder = TelemetryRecorder.getInstance();
+    recorder.setContext(ctx.deviceId, null);
+    const screenName = data.foregroundActivity ?? data.packageName ?? null;
+    const windowCount = data.windows?.length ?? 0;
+    // Include a compact hierarchy tree (~2-5KB) with just the display properties.
+    // The full hierarchy (~10-50KB with bounds/states/extras) is available via
+    // the observation stream and would cause excessive traffic at 500ms intervals.
+    const compactHierarchy = data.hierarchy ? { node: compactifyNode(data.hierarchy) } : null;
+    recorder
+      .recordLayoutEvent({
+        timestamp: now,
+        applicationId: data.packageName ?? null,
+        subType: "hierarchy_change",
+        composableName: null,
+        composableId: null,
+        recompositionCount: null,
+        durationMs: null,
+        likelyCause: null,
+        detailsJson: JSON.stringify({
           screenName,
-        })
-        .catch((error) => {
-          logger.warn(`[CTRL_PROXY] Layout telemetry failed: ${errorMessage(error)}`, error);
-        });
-    }
+          windowCount,
+          foregroundActivity: data.foregroundActivity ?? null,
+          hierarchy: compactHierarchy,
+        }),
+        screenName,
+      })
+      .catch((error) => {
+        logger.warn(`[CTRL_PROXY] Layout telemetry failed: ${errorMessage(error)}`, error);
+      });
+  }
 
+  private notifyNavigationDetector(data: AccessibilityHierarchy): void {
+    const { context: ctx } = this;
     // Notify hierarchy navigation detector. Screen identity follows the app windows only
     // (#9305): AutoMobile's own prototype is removed and the capture attributed to the app behind it,
     // so showing, paging or dismissing a prototype records no navigation.

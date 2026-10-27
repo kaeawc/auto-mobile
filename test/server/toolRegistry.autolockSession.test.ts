@@ -1,8 +1,12 @@
-import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
+import {
+  registerDirectSessionDevice,
+  unregisterDirectSession,
+} from "../../src/utils/directSessionDeviceRegistry";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { ActionableError, BootedDevice } from "../../src/models";
 import { z } from "zod/v4";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -48,7 +52,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     platform: "ios",
   };
 
-  let fakeDeviceSessionManager: FakeDeviceSessionManager;
+  let fakeDeviceReadiness: FakeDeviceReadiness;
   let originalCollaborators: ToolRegistryCollaborators;
   let daemonSessionManager: SessionManager | undefined;
   let restorePipelineOverrides: (() => void) | undefined;
@@ -80,9 +84,9 @@ describe("ToolRegistry autolock session enforcement", () => {
 
   beforeEach(() => {
     ToolRegistry.clearTools();
-    fakeDeviceSessionManager = new FakeDeviceSessionManager();
+    fakeDeviceReadiness = new FakeDeviceReadiness();
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       env,
       displayInventory: new FakeDisplayInventoryProvider(),
@@ -92,6 +96,7 @@ describe("ToolRegistry autolock session enforcement", () => {
   });
 
   afterEach(() => {
+    unregisterDirectSession("session-123");
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
@@ -106,7 +111,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     "autolock ambiguity read=%s is typed with only candidate ids",
     async (readOnly) => {
       setAutolock(true);
-      fakeDeviceSessionManager.setConnectedDevices([androidA, iosA]);
+      fakeDeviceReadiness.setConnectedDevices([androidA, iosA]);
       const tool = registerTool("typedAmbiguity", { deviceReadOnly: readOnly });
       const error = await tool.handler({}).catch((error: unknown) => error);
       expect(error).toBeInstanceOf(AmbiguousDeviceTargetError);
@@ -122,8 +127,8 @@ describe("ToolRegistry autolock session enforcement", () => {
       expect((error as Error).message).toContain(
         readOnly ? "Provide a deviceId" : "Call getAndroid or getApple",
       );
-      expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(1);
-      expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(fakeDeviceReadiness.getDetectConnectedPlatformsCallCount()).toBe(1);
+      expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
     },
   );
 
@@ -141,7 +146,7 @@ describe("ToolRegistry autolock session enforcement", () => {
       await pool.initializeWithDevices([androidA]);
       pool.getDevice(androidA.deviceId)!.autolockSessionId = "other-owner";
       DaemonState.getInstance().initialize(daemonSessionManager, pool);
-      fakeDeviceSessionManager.setConnectedDevices([androidA]);
+      fakeDeviceReadiness.setConnectedDevices([androidA]);
     }
 
     test("a non-owner mutating call is refused with the typed ownership code", async () => {
@@ -151,7 +156,7 @@ describe("ToolRegistry autolock session enforcement", () => {
       const error = await tool.handler({ deviceId: androidA.deviceId }).catch((e: unknown) => e);
       expect(error).toMatchObject({ code: "device_owned_by_other_session" });
       // Refused before readiness acts on the holder's device.
-      expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
     });
 
     test("a non-owner call with no deviceId that would land on the held device does no readiness", async () => {
@@ -160,7 +165,7 @@ describe("ToolRegistry autolock session enforcement", () => {
       const tool = registerTool("mutateHeldImplicit");
       const error = await tool.handler({ platform: "android" }).catch((e: unknown) => e);
       expect(error).toMatchObject({ code: "device_owned_by_other_session" });
-      expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
     });
 
     test("a deviceReadOnly (watching) call on the held device is allowed", async () => {
@@ -168,7 +173,7 @@ describe("ToolRegistry autolock session enforcement", () => {
       await lockedPool();
       const tool = registerTool("watchHeld", { deviceReadOnly: true });
       await expect(tool.handler({ deviceId: androidA.deviceId })).resolves.toBeDefined();
-      expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
     });
   });
 
@@ -188,11 +193,11 @@ describe("ToolRegistry autolock session enforcement", () => {
       await pool.initializeWithDevices([androidA]);
       pool.getDevice(androidA.deviceId)!.autolockSessionId = "other-owner";
       DaemonState.getInstance().initialize(daemonSessionManager, pool);
-      fakeDeviceSessionManager.setConnectedDevices([androidA]);
+      fakeDeviceReadiness.setConnectedDevices([androidA]);
       const entered = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
-      const ensureReady = fakeDeviceSessionManager.ensureDeviceReady.bind(fakeDeviceSessionManager);
-      fakeDeviceSessionManager.ensureDeviceReady = async (...args) => {
+      const ensureReady = fakeDeviceReadiness.ensureDeviceReady.bind(fakeDeviceReadiness);
+      fakeDeviceReadiness.ensureDeviceReady = async (...args) => {
         entered.resolve();
         await release.promise;
         return ensureReady(...args);
@@ -211,7 +216,7 @@ describe("ToolRegistry autolock session enforcement", () => {
       release.resolve();
       const outcome = await first;
       if (initiallyEnabled) {
-        expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+        expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
         expect(outcome).toBeInstanceOf(ActionableError);
         expect(String(outcome)).toContain("held by another session");
       } else {
@@ -230,7 +235,7 @@ describe("ToolRegistry autolock session enforcement", () => {
 
   test("the always-on Android ambiguity guard takes precedence when autolock is on", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
+    fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
 
     const tool = registerTool("autolockMultiAndroid");
 
@@ -248,64 +253,63 @@ describe("ToolRegistry autolock session enforcement", () => {
     expect((error as Error).message).toContain(
       "Multiple Android devices detected. Provide sessionUuid to target a specific device.",
     );
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("allows the call when a sessionUuid is provided", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
+    fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
 
     const tool = registerTool("autolockWithSession");
+    registerDirectSessionDevice("session-123", androidA);
 
     const response = await tool.handler({ platform: "android", sessionUuid: "session-123" });
     expect(response).toEqual({ success: true });
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(1);
   });
 
   test("allows the call when an explicit deviceId is provided", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
+    fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
 
     const tool = registerTool("autolockWithDeviceId");
 
     const response = await tool.handler({ platform: "android", deviceId: "emulator-5556" });
     expect(response).toEqual({ success: true });
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(1);
   });
 
   test("does not require sessionUuid when only one Android device exists", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA]);
+    fakeDeviceReadiness.setConnectedDevices([androidA]);
 
     const tool = registerTool("autolockSingleAndroid");
 
     const response = await tool.handler({ platform: "android" });
     expect(response).toEqual({ success: true });
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
-    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(1);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(1);
+    expect(fakeDeviceReadiness.getDetectConnectedPlatformsCallCount()).toBe(1);
   });
 
   test("shares one cancellable device scan across untargeted resolution", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA]);
+    fakeDeviceReadiness.setConnectedDevices([androidA]);
     const tool = registerTool("autolockCancellableSingleAndroid");
     const controller = new AbortController();
 
     const response = await tool.handler({ platform: "android" }, undefined, controller.signal);
 
     expect(response).toEqual({ success: true });
-    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(1);
-    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsSignals()).toEqual([
-      controller.signal,
-    ]);
+    expect(fakeDeviceReadiness.getDetectConnectedPlatformsCallCount()).toBe(1);
+    expect(fakeDeviceReadiness.getDetectConnectedPlatformsSignals()).toEqual([controller.signal]);
   });
 
   test("an abort during device discovery prevents further scans", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA]);
+    fakeDeviceReadiness.setConnectedDevices([androidA]);
     const scanStarted = Promise.withResolvers<void>();
     let finishScan!: (devices: BootedDevice[]) => void;
-    fakeDeviceSessionManager.setDetectConnectedPlatformsHook(() => {
+    fakeDeviceReadiness.setDetectConnectedPlatformsHook(() => {
       scanStarted.resolve();
       return new Promise((resolve) => (finishScan = resolve));
     });
@@ -314,33 +318,31 @@ describe("ToolRegistry autolock session enforcement", () => {
 
     const call = tool.handler({ platform: "android" }, undefined, controller.signal);
     await scanStarted.promise;
-    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(1);
-    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsSignals()).toEqual([
-      controller.signal,
-    ]);
+    expect(fakeDeviceReadiness.getDetectConnectedPlatformsCallCount()).toBe(1);
+    expect(fakeDeviceReadiness.getDetectConnectedPlatformsSignals()).toEqual([controller.signal]);
     controller.abort();
     finishScan([androidA]);
 
     await expect(call).rejects.toThrow();
-    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(1);
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(fakeDeviceReadiness.getDetectConnectedPlatformsCallCount()).toBe(1);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("requires an explicit target for multiple Android devices when autolock is disabled", async () => {
     setAutolock(false);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
+    fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
 
     const tool = registerTool("autolockDisabledMultiAndroid");
 
     await expect(tool.handler({ platform: "android" })).rejects.toThrow(
       "Multiple Android devices detected. Provide sessionUuid to target a specific device.",
     );
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("keeps the broader autolock guard for mixed-platform ambiguity", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, iosA]);
+    fakeDeviceReadiness.setConnectedDevices([androidA, iosA]);
 
     const tool = registerTool("autolockEitherPlatform");
 
@@ -349,12 +351,12 @@ describe("ToolRegistry autolock session enforcement", () => {
     await expect(ambiguousCall).rejects.toThrow(
       "Device pool autolock is enabled and multiple devices are available.",
     );
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("a read under mixed-platform ambiguity is asked for a deviceId, never a session (#11351)", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, iosA]);
+    fakeDeviceReadiness.setConnectedDevices([androidA, iosA]);
 
     const tool = registerTool("autolockEitherPlatformRead", { deviceReadOnly: true });
 
@@ -366,112 +368,111 @@ describe("ToolRegistry autolock session enforcement", () => {
 
   test("rejects mixed-platform ambiguity after a deviceId-only resolution", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, iosA]);
+    fakeDeviceReadiness.setConnectedDevices([androidA, iosA]);
     const tool = registerTool("autolockAfterResolution");
 
     await tool.handler({ deviceId: androidA.deviceId });
-    expect(fakeDeviceSessionManager.getSetCurrentDeviceCalls()).toEqual([androidA]);
+    expect(fakeDeviceReadiness.getExplicitDevicePin()).toBeUndefined();
     await expect(tool.handler({})).rejects.toThrow(
       "Device pool autolock is enabled and multiple devices are available.",
     );
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(1);
   });
 
   test("rejects ambiguity after the previously resolved device is removed", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, iosA]);
+    fakeDeviceReadiness.setConnectedDevices([androidA, iosA]);
     const tool = registerTool("autolockAfterRemoval");
 
     await tool.handler({ deviceId: androidA.deviceId });
-    fakeDeviceSessionManager.setConnectedDevices([androidB, iosA]);
+    fakeDeviceReadiness.setConnectedDevices([androidB, iosA]);
     await expect(tool.handler({})).rejects.toThrow(
       "Device pool autolock is enabled and multiple devices are available.",
     );
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(1);
   });
 
   test("rejects same-platform ambiguity after a deviceId-only resolution", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
+    fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
     const tool = registerTool("autolockSamePlatformAfterResolution");
 
     await tool.handler({ platform: "android", deviceId: androidA.deviceId });
     await expect(tool.handler({ platform: "android" })).rejects.toThrow(
       "Multiple Android devices detected. Provide sessionUuid to target a specific device.",
     );
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(1);
   });
 
   test("allows the call when a device was pinned via setActiveDevice", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
-    fakeDeviceSessionManager.setCurrentDevice(androidA, "android");
-    fakeDeviceSessionManager.setExplicitDevicePin(androidA);
+    fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
+    fakeDeviceReadiness.setExplicitDevicePin(androidA);
 
     const tool = registerTool("autolockActiveDevice");
 
     const response = await tool.handler({ platform: "android" });
     expect(response).toEqual({ success: true });
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(1);
   });
 
   test("an explicit pin survives a later deviceId-only resolution", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
-    fakeDeviceSessionManager.setCurrentDevice(androidA, "android");
-    fakeDeviceSessionManager.setExplicitDevicePin(androidA);
+    fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
+    fakeDeviceReadiness.setExplicitDevicePin(androidA);
+    fakeDeviceReadiness.setExplicitDevicePin(androidA);
     const tool = registerTool("autolockPinnedAfterOtherDevice");
 
     await tool.handler({ platform: "android", deviceId: androidB.deviceId });
-    expect(fakeDeviceSessionManager.getCurrentDevice()?.deviceId).toBe(androidB.deviceId);
+    expect(fakeDeviceReadiness.getExplicitDevicePin()?.deviceId).toBe(androidA.deviceId);
     await tool.handler({ platform: "android" });
-    expect(fakeDeviceSessionManager.getCurrentDevice()?.deviceId).toBe(androidA.deviceId);
+    expect(fakeDeviceReadiness.getExplicitDevicePin()?.deviceId).toBe(androidA.deviceId);
   });
 
   test("a released explicit pin no longer exempts an untargeted call", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
-    fakeDeviceSessionManager.setCurrentDevice(androidA, "android");
-    fakeDeviceSessionManager.setExplicitDevicePin(androidA);
-    fakeDeviceSessionManager.clearExplicitDevicePin(androidA.deviceId);
+    fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
+    fakeDeviceReadiness.setExplicitDevicePin(androidA);
+    fakeDeviceReadiness.setExplicitDevicePin(androidA);
+    fakeDeviceReadiness.clearExplicitDevicePin(androidA.deviceId);
     const tool = registerTool("autolockAfterRelease");
 
     await expect(tool.handler({ platform: "android" })).rejects.toThrow(
       "Multiple Android devices detected. Provide sessionUuid to target a specific device.",
     );
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("a removed explicit pin is invalidated before the ambiguity checks", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidB, iosA]);
-    fakeDeviceSessionManager.setCurrentDevice(androidA, "android");
-    fakeDeviceSessionManager.setExplicitDevicePin(androidA);
+    fakeDeviceReadiness.setConnectedDevices([androidB, iosA]);
+    fakeDeviceReadiness.setExplicitDevicePin(androidA);
+    fakeDeviceReadiness.setExplicitDevicePin(androidA);
     const tool = registerTool("autolockStalePin");
 
     await expect(tool.handler({})).rejects.toThrow(
       "Device pool autolock is enabled and multiple devices are available.",
     );
-    expect(fakeDeviceSessionManager.getExplicitDevicePin()).toBeUndefined();
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(fakeDeviceReadiness.getExplicitDevicePin()).toBeUndefined();
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("keeps an iOS pin when simctl scan fails during autolock enforcement", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, iosA]);
-    fakeDeviceSessionManager.setCurrentDevice(iosA, "ios");
-    fakeDeviceSessionManager.setExplicitDevicePin(iosA);
-    fakeDeviceSessionManager.setPlatformScanFailure("ios", true);
+    fakeDeviceReadiness.setConnectedDevices([androidA, iosA]);
+    fakeDeviceReadiness.setExplicitDevicePin(iosA);
+    fakeDeviceReadiness.setExplicitDevicePin(iosA);
+    fakeDeviceReadiness.setPlatformScanFailure("ios", true);
     const tool = registerTool("autolockFailedIosScanPin");
 
     await tool.handler({ platform: "ios" });
 
-    expect(fakeDeviceSessionManager.getExplicitDevicePin()).toEqual(iosA);
+    expect(fakeDeviceReadiness.getExplicitDevicePin()).toEqual(iosA);
   });
 
   test("resolves the autolock session from the MCP session when sessionUuid is omitted", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
+    fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
 
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -511,7 +512,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     expect(response).toEqual({ success: true });
     expect(handledDevice?.deviceId).toBe(androidA.deviceId);
     expect(handledArgs?.sessionUuid).toBe(sessionId);
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("rejects an unknown session UUID before it can access an owned device", async () => {
@@ -566,7 +567,7 @@ describe("ToolRegistry autolock session enforcement", () => {
 
   test("resolves the MCP autolock session when the provided deviceId belongs to it", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
+    fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
 
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -606,12 +607,12 @@ describe("ToolRegistry autolock session enforcement", () => {
     expect(response).toEqual({ success: true });
     expect(handledDevice?.deviceId).toBe(androidA.deviceId);
     expect(handledArgs?.sessionUuid).toBe(sessionId);
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(fakeDeviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("does not apply an MCP autolock session to a different provided deviceId", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
+    fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
 
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

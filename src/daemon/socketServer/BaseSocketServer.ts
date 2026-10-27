@@ -1,16 +1,27 @@
 import { createServer, Server as NetServer, Socket } from "node:net";
-import { existsSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import path from "node:path";
 import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
 } from "../daemonSocketReachability";
+import { AuxiliarySocketBindConflict } from "../auxiliarySocketAvailability";
+import { AuxiliarySocketOwner } from "../auxiliarySocketOwner";
+import {
+  classifySocketPath,
+  readSocketFileIdentity,
+  statFileIdentity,
+  type SocketFileIdentity,
+  type SocketPathFs,
+} from "../socketFileIdentity";
+import { decideStaleAuxSocketReclaim } from "../staleAuxSocketReclaim";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { ensureSecureDir, secureFile } from "../../utils/filesystem/securePermissions";
-import { AUX_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./LineFramer";
+import { AUX_SOCKET_MAX_FRAME_BYTES, LineFramer } from "../wire/LineFramer";
 import { DEFAULT_SOCKET_IDLE_TIMEOUT_MS } from "./SocketServerTypes";
 
 /** Open connections across every auxiliary socket server in this process. */
@@ -39,9 +50,11 @@ export const AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS = 1_000;
  */
 export abstract class BaseSocketServer {
   protected server: NetServer | null = null;
+  protected readonly platform: NodeJS.Platform = process.platform;
+  protected readonly socketPathFs: SocketPathFs = { exists: existsSync, stat: statFileIdentity };
   // Identity of the socket inode this server created, so close() never unlinks a
   // socket a successor process has already rebound at the same path.
-  private socketFileIdentity: { dev: number; ino: number } | null = null;
+  private socketFileIdentity: SocketFileIdentity | null = null;
   protected readonly socketPath: string;
   protected readonly timer: Timer;
   protected readonly serverName: string;
@@ -56,6 +69,7 @@ export abstract class BaseSocketServer {
     serverName: string = "Socket",
     idleTimeoutMs: number = DEFAULT_SOCKET_IDLE_TIMEOUT_MS,
     socketReachability: DaemonSocketReachabilityLike = new DaemonSocketReachability(),
+    private readonly socketOwner: AuxiliarySocketOwner = new AuxiliarySocketOwner(),
   ) {
     this.socketPath = socketPath;
     this.timer = timer;
@@ -89,6 +103,17 @@ export abstract class BaseSocketServer {
         // creates the socket at the umask default (issue #4750).
         secureFile(this.socketPath)
           .then(() => {
+            if (this.socketFileIdentity) {
+              try {
+                this.socketOwner.publish(this.socketPath, this.serverName, this.socketFileIdentity);
+              } catch (error) {
+                // Advisory holder metadata must not disable an already-bound socket.
+                logger.warn(
+                  `[${this.serverName}] Unable to publish socket owner: ${errorMessage(error)}`,
+                  error,
+                );
+              }
+            }
             this.onServerStarted();
             resolve();
           })
@@ -108,26 +133,27 @@ export abstract class BaseSocketServer {
    * the shared PID record or create a bind lock for every stream socket.
    */
   private async reclaimExistingSocketBeforeBind(): Promise<void> {
-    if (!existsSync(this.socketPath)) {
+    const decision = await decideStaleAuxSocketReclaim({
+      socketPath: this.socketPath,
+      platform: this.platform,
+      reachability: this.socketReachability,
+      probeTimeoutMs: AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS,
+      fs: this.socketPathFs,
+    });
+    if (decision === "absent") {
       return;
     }
-
-    const originalIdentity = this.readSocketFileIdentity();
-    const reachable = await this.socketReachability.isReachable(
-      this.socketPath,
-      AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS,
-    );
-    if (!reachable && !existsSync(this.socketPath)) {
-      return;
+    if (decision === "held") {
+      throw this.socketOwner.conflict(this.socketPath, this.serverName);
     }
-    // Option 1: compare dev+ino across the async probe, then unlink synchronously
-    // without another event-loop yield. A successor's rebound path must survive;
-    // reuse the close-time identity check instead of adding a per-stream lock.
-    if (reachable || !this.isOwnedSocketFile(originalIdentity)) {
-      throw new ActionableError(
-        `[${this.serverName}] Refusing to bind auxiliary socket ${this.socketPath}: another daemon is listening. Stop the daemon that owns it or use \`--daemon restart\` to replace it.`,
-      );
+    if (decision === "unknown") {
+      throw new AuxiliarySocketBindConflict(this.socketPath, this.serverName, "unverified");
     }
+    if (decision === "conflict") {
+      throw new AuxiliarySocketBindConflict(this.socketPath, this.serverName);
+    }
+    // Unlink synchronously without another event-loop yield after the decision, so the
+    // identity check (POSIX) or the second probe (Windows) is as fresh as possible.
 
     try {
       unlinkSync(this.socketPath);
@@ -161,9 +187,14 @@ export abstract class BaseSocketServer {
     // (fast restart) we must NOT close — that would remove their socket and sever
     // live subscribers (e.g. IDE-plugin observation streams). Instead unref and
     // leave the dead listener for process teardown.
-    const ownsSocketPath = this.isOwnedSocketFile();
+    const state = classifySocketPath(this.socketFileIdentity, this.socketPath);
+    const ownsSocketPath = state === "owned";
 
-    if (ownsSocketPath || !existsSync(this.socketPath)) {
+    if (ownsSocketPath) {
+      this.socketOwner.remove(this.socketPath);
+    }
+
+    if (state !== "replaced") {
       await new Promise<void>((resolve) => {
         this.server!.close(() => resolve());
       });
@@ -181,24 +212,8 @@ export abstract class BaseSocketServer {
     this.socketFileIdentity = null;
   }
 
-  private readSocketFileIdentity(): { dev: number; ino: number } | null {
-    try {
-      const stats = statSync(this.socketPath);
-      return { dev: stats.dev, ino: stats.ino };
-    } catch (error) {
-      // The socket file may already be gone (e.g. removed by another process);
-      // returning null lets ownership checks treat it as "not our socket".
-      logger.debug(`src/daemon/socketServer/BaseSocketServer.ts stat failed: ${error}`, error);
-      return null;
-    }
-  }
-
-  private isOwnedSocketFile(identity = this.socketFileIdentity): boolean {
-    if (!identity || !existsSync(this.socketPath)) {
-      return false;
-    }
-    const currentIdentity = this.readSocketFileIdentity();
-    return currentIdentity?.dev === identity.dev && currentIdentity.ino === identity.ino;
+  private readSocketFileIdentity(): SocketFileIdentity | null {
+    return readSocketFileIdentity(this.socketPath);
   }
 
   /**
@@ -216,12 +231,13 @@ export abstract class BaseSocketServer {
   }
 
   /**
-   * Return true only while this server is listening through the same socket file
-   * it created. A listening Unix server whose path was unlinked or replaced is
+   * Return true while the socket path is owned or its identity cannot be verified.
+   * A listening Unix server whose path was unlinked or replaced is
    * still alive for existing connections, but new clients cannot reach it there.
    */
   hasActiveSocketPath(): boolean {
-    return this.isOwnedSocketFile();
+    const state = classifySocketPath(this.socketFileIdentity, this.socketPath);
+    return state === "owned" || state === "unverifiable";
   }
 
   /**

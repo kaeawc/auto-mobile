@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
-import { SESSION_IDLE_TIMEOUT_ENV } from "../../src/daemon/sessionLivenessWindows";
+import { SESSION_IDLE_TIMEOUT_ENV } from "../../src/daemon/wire/sessionLivenessWindows";
 import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettledExecutionVeto";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
-import { ExecutionTracker, type ActiveExecution } from "../../src/server/executionTracker";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
+import { ExecutionTracker, type ActiveExecution } from "../../src/daemon/executionTracker";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";

@@ -51,7 +51,7 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
         gate = options.gate
     }
 
-    /// The frozen P0 daemon-socket `mcp_request` envelope plus its trailing `\n` framing, extracted
+    /// The daemon-socket `mcp_request` envelope, including request-budget opt-in, plus trailing `\n`, extracted
     /// (the reference built the dict inline) so the wire is unit-testable without a socket.
     static func encodeRequestLine(
         id: String,
@@ -68,6 +68,7 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
             "method": method,
             "params": params,
             "timeoutMs": timeoutMs,
+            "acceptsRequestBudget": true,
             // Declared for the daemon's server-side version handshake gate (#2744).
             "clientVersion": clientVersion,
         ]
@@ -173,7 +174,7 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
         try await gate.acquire()
         defer { gate.release() }
         try Task.checkCancellation()
-        // Assign ids in gate order; encode the entire frozen envelope before spawning deadline children.
+        // Assign ids in gate order; encode the entire envelope before spawning deadline children.
         let id = state.withLock { current in
             current.requestId += 1
             return String(current.requestId)
@@ -186,21 +187,25 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
         else { throw MCPClientError.requestFailed("Failed to encode daemon request") }
         let connection = currentConnection()
         PerfTimer.log("sendRequest START: method=\(method)")
+        let budget = RequestBudget(seconds: Double(TimeoutConversion.milliseconds(forSeconds: timeout)) / 1000)
         let timeoutError = OSAllocatedUnfairLock(
-            initialState:
-            MCPClientError.requestFailed("Timed out connecting to daemon socket")
+            initialState: MCPClientError.requestFailed("Timed out sending daemon request")
         )
         let responseData: Data
         do {
-            responseData = try await withDeadline(
+            // Connection setup has its own fixed deadline. Start the adjustable budget immediately
+            // before sendLine so time spent connecting never consumes the daemon's send-based budget.
+            try await withDeadline(
                 seconds: timeout, scheduler: scheduler, onTimeout: { connection.cancel() },
+                timeoutError: MCPClientError.requestFailed("Timed out connecting to daemon socket"),
+                operation: { try await connection.connect(timeout: timeout) }
+            )
+            responseData = try await withDeadline(
+                budget: budget, scheduler: scheduler, onTimeout: { connection.cancel() },
                 timeoutError: timeoutError.withLock { $0 },
                 operation: {
                     try await withTaskCancellationHandler {
                         try Task.checkCancellation()
-                        try await connection.connect(timeout: timeout)
-                        try Task.checkCancellation()
-                        timeoutError.withLock { $0 = .requestFailed("Timed out sending daemon request") }
                         PerfTimer.log("sendRequest: sending \(payload.count) bytes")
                         try await connection.sendLine(payload, timeout: timeout)
                         timeoutError.withLock { $0 = .requestFailed("Timed out waiting for daemon response") }
@@ -211,6 +216,10 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
                             let object = try JSONSerialization.jsonObject(with: line)
                             guard let response = object as? [String: Any] else {
                                 throw MCPClientError.invalidResponse("Expected JSON object response from daemon")
+                            }
+                            if response["type"] as? String == "daemon_notification" {
+                                Self.adoptRequestBudget(response, requestId: id, budget: budget)
+                                continue
                             }
                             guard Self.jsonId(response["id"]) == id else {
                                 self.logger.info("Skipping daemon frame with non-matching id")
@@ -250,6 +259,17 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
         }
         PerfTimer.log("sendRequest END: method=\(method)")
         return result
+    }
+
+    /// JSONSerialization is the socket's dynamic wire boundary; reject booleans that bridge to NSNumber.
+    private static func adoptRequestBudget(_ frame: [String: Any], requestId: String, budget: RequestBudget) {
+        guard frame["method"] as? String == "notifications/automobile/requestBudget",
+              frame["requestId"] as? String == requestId,
+              let timeoutMs = frame["timeoutMs"] as? NSNumber,
+              CFGetTypeID(timeoutMs) != CFBooleanGetTypeID(),
+              timeoutMs.doubleValue.isFinite, timeoutMs.doubleValue > 0
+        else { return }
+        budget.update(seconds: timeoutMs.doubleValue / 1000)
     }
 
     private static func jsonId(_ value: Any?) -> String? {

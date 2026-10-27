@@ -1,0 +1,1 @@
+The device does not support lock screen - ignoring the command.

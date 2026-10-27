@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { createHash, X509Certificate } from "crypto";
 import { join, resolve } from "path";
-import { XcodeSigningManager } from "../../../src/utils/ios-cmdline-tools/XcodeSigning";
+import {
+  XcodeSigningManager,
+  type XcodeSigningDependencies,
+} from "../../../src/utils/ios-cmdline-tools/XcodeSigning";
+import { createExecResult } from "../../../src/utils/execResult";
 import { parsePlist, type PlistValue } from "../../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 import { logger } from "../../../src/utils/logger";
@@ -66,69 +70,40 @@ const createFakeDependencies = (options?: { identities?: string; profiles?: stri
   const writtenFiles: string[] = [];
   const writtenData: string[] = [];
   const xcodebuildArgs: string[][] = [];
-  return {
-    deps: {
-      platform: () => "darwin" as const,
-      securityClient: {
-        getDiagnostics: async () => ({ available: true, version: null }),
-        listCodeSigningIdentities: async () => {
-          const output = options?.identities ?? "";
-          const match = output.match(/^\s*\d+\)\s+([0-9A-F]{40,64})\s+"([^\"]+)"/im);
-          return match ? [{ fingerprint: match[1].toUpperCase(), name: match[2] }] : [];
-        },
-        decodeCms: async () => profileXml,
+  const deps: XcodeSigningDependencies = {
+    platform: () => "darwin" as const,
+    securityClient: {
+      getDiagnostics: async () => ({ available: true, version: null }),
+      listCodeSigningIdentities: async () => {
+        const output = options?.identities ?? "";
+        const match = output.match(/^\s*\d+\)\s+([0-9A-F]{40,64})\s+"([^\"]+)"/im);
+        return match ? [{ fingerprint: match[1].toUpperCase(), name: match[2] }] : [];
       },
-      xcodebuild: {
-        executeCommand: async (args: string[]) => {
-          xcodebuildArgs.push([...args]);
-          if (args.includes("-showBuildSettings")) {
-            return {
-              stdout: `DEVELOPMENT_TEAM = ${teamId}`,
-              stderr: "",
-              toString() {
-                return this.stdout;
-              },
-              trim() {
-                return this.stdout.trim();
-              },
-              includes(searchString: string) {
-                return this.stdout.includes(searchString);
-              },
-            };
-          }
-          return {
-            stdout: "",
-            stderr: "",
-            toString() {
-              return this.stdout;
-            },
-            trim() {
-              return this.stdout.trim();
-            },
-            includes(searchString: string) {
-              return this.stdout.includes(searchString);
-            },
-          };
-        },
-        isAvailable: async () => true,
-      },
-      readDir: async () => options?.profiles ?? ["test.mobileprovision"],
-      readFile: async () => "",
-      stat: async () => ({ isFile: () => true }),
-      writeFile: async (path: string, data: string) => {
-        writtenFiles.push(path);
-        writtenData.push(data);
-      },
-      mkdir: async () => {},
-      homedir: () => "/Users/test",
-      now: () => fakeTimer.now(),
-      timer: fakeTimer,
+      decodeCms: async () => profileXml,
     },
-    writtenFiles,
-    writtenData,
-    xcodebuildArgs,
-    fakeTimer,
+    xcodebuild: {
+      executeCommand: async (args: string[]) => {
+        xcodebuildArgs.push([...args]);
+        return createExecResult(
+          args.includes("-showBuildSettings") ? `DEVELOPMENT_TEAM = ${teamId}` : "",
+          "",
+        );
+      },
+      isAvailable: async () => true,
+    },
+    readDir: async () => options?.profiles ?? ["test.mobileprovision"],
+    readFile: async () => "",
+    stat: async () => ({ isFile: () => true }),
+    writeFile: async (path: string, data: string) => {
+      writtenFiles.push(path);
+      writtenData.push(data);
+    },
+    mkdir: async () => {},
+    homedir: () => "/Users/test",
+    now: () => fakeTimer.now(),
+    timer: fakeTimer,
   };
+  return { deps, writtenFiles, writtenData, xcodebuildArgs, fakeTimer };
 };
 
 test("warns on unreadable provisioning profiles and returns an empty list", async () => {

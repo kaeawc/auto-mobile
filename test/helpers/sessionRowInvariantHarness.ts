@@ -1,3 +1,4 @@
+import type { SessionReleaseReason } from "../../src/models/releaseReasons";
 import type { Kysely } from "kysely";
 import { isTerminalReleaseReason } from "../../src/daemon/releaseReasons";
 import {
@@ -166,7 +167,7 @@ class MemoryJournal implements TerminalReleaseJournal {
   }
 }
 
-type ReleaseReason = string;
+type ReleaseReason = SessionReleaseReason;
 
 /** One issue of the session id: the session the manager held for it, and what was asked of it. */
 interface Incarnation {
@@ -175,7 +176,7 @@ interface Incarnation {
   /** The release reasons announced for it, in order. */
   notified: string[];
   /** The release reasons asked of it. */
-  requested: Set<ReleaseReason>;
+  requested: Set<string>;
   /** Releases whose persistence failed: their owner issues them again (see `retryFailedReleases`). */
   failedReleases: Set<ReleaseReason>;
   deviceLossCommitted: boolean;
@@ -871,7 +872,8 @@ export async function runSessionRowInterleaving(
     const lastReason = current.notified.at(-1);
     // A terminal release that never reached its row left its intent: the next daemon applies it.
     const fencedAtExit =
-      journal.intents.has(sessionId) || manager["sessionSlots"].hasTerminalSnapshot(sessionId);
+      journal.intents.has(sessionId) ||
+      manager.testHooks.wiring.host.sessionSlots.hasTerminalSnapshot(sessionId);
     const handedOffAfterRelease = !liveAtShutdown && lastReason === SHUTDOWN_RELEASE;
     const expected =
       !ownTerminal &&

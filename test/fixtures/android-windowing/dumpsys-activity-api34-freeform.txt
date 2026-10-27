@@ -1,0 +1,44 @@
+ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+Display #0 (activities from top to bottom):
+  * Task{9c0b7d1 #23 type=standard A=10150:dev.jasonpearson.automobile.playground U=0 visible=true visibleRequested=true mode=freeform translucent=false sz=1}
+    mBounds=Rect(120, 300 - 960, 1500)
+    mLastNonFullscreenBounds=Rect(120, 300 - 960, 1500)
+    isSleeping=false
+    topResumedActivity=ActivityRecord{51e7a3c u0 dev.jasonpearson.automobile.playground/.MainActivity t23}
+    * Hist  #0: ActivityRecord{51e7a3c u0 dev.jasonpearson.automobile.playground/.MainActivity t23}
+      packageName=dev.jasonpearson.automobile.playground processName=dev.jasonpearson.automobile.playground
+      launchedFromUid=2000 launchedFromPackage=com.android.shell launchedFromFeature=null userId=0
+      app=ProcessRecord{c3a1d07 5310:dev.jasonpearson.automobile.playground/u0a150}
+      Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 cmp=dev.jasonpearson.automobile.playground/.MainActivity }
+      rootOfTask=true task=Task{9c0b7d1 #23 type=standard A=10150:dev.jasonpearson.automobile.playground}
+      taskAffinity=10150:dev.jasonpearson.automobile.playground
+      mActivityComponent=dev.jasonpearson.automobile.playground/.MainActivity
+      CurrentConfiguration={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h457dp 420dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(120, 300 - 960, 1500) mAppBounds=Rect(120, 300 - 960, 1500) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=freeform mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.7 fontWeightAdjustment=0}
+      state=RESUMED delayedResume=false finishing=false
+      mLastReportedMultiWindowMode=true mLastReportedPictureInPictureMode=false
+
+  * Task{a7d327b #1 type=home U=0 visible=true visibleRequested=true mode=fullscreen translucent=false sz=1}
+    * Task{7db8c83 #7 type=home I=com.google.android.apps.nexuslauncher/.NexusLauncherActivity U=0 rootTaskId=1 visible=true visibleRequested=true mode=fullscreen translucent=false sz=1}
+      isSleeping=false
+      * Hist  #0: ActivityRecord{4bd5732 u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t7}
+        packageName=com.google.android.apps.nexuslauncher processName=com.google.android.apps.nexuslauncher
+        rootOfTask=true task=Task{7db8c83 #7 type=home I=com.google.android.apps.nexuslauncher/.NexusLauncherActivity}
+        CurrentConfiguration={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h890dp 420dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.3 fontWeightAdjustment=0}
+
+  Resumed activities in task display areas (from top to bottom):
+    Resumed: ActivityRecord{51e7a3c u0 dev.jasonpearson.automobile.playground/.MainActivity t23}
+
+  ResumedActivity: ActivityRecord{51e7a3c u0 dev.jasonpearson.automobile.playground/.MainActivity t23}
+
+ActivityTaskSupervisor state:
+  topDisplayFocusedRootTask=Task{9c0b7d1 #23 type=standard A=10150:dev.jasonpearson.automobile.playground}
+  Display: mDisplayId=0 (organized)
+      Application tokens in top down Z order:
+      * Task{9c0b7d1 #23 type=standard A=10150:dev.jasonpearson.automobile.playground U=0 visible=true visibleRequested=true mode=freeform translucent=false sz=1}
+        bounds=[120,300][960,1500]
+        * ActivityRecord{51e7a3c u0 dev.jasonpearson.automobile.playground/.MainActivity t23}
+      * Task{a7d327b #1 type=home U=0 visible=true visibleRequested=true mode=fullscreen translucent=false sz=1}
+        bounds=[0,0][1080,2400]
+        * Task{7db8c83 #7 type=home I=com.google.android.apps.nexuslauncher/.NexusLauncherActivity U=0 rootTaskId=1 visible=true visibleRequested=true mode=fullscreen translucent=false sz=1}
+          bounds=[0,0][1080,2400]
+          * ActivityRecord{4bd5732 u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t7}

@@ -1,3 +1,6 @@
+import { createFlatNodeForTest, capturedFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { buildObserveResult, viewHierarchyFromFixture } from "../../helpers/observeFixture";
 import { issue8379Hierarchy } from "../../fixtures/issue8379Hierarchy";
 import { RealWaitForCondition } from "../../../src/features/observe/WaitForCondition";
 import { afterAll, afterEach, beforeAll, expect, spyOn, test } from "bun:test";
@@ -52,7 +55,17 @@ afterAll(async () => {
 });
 
 function androidCapture(duplicates = false): ViewHierarchyResult {
-  const capture = structuredClone(androidHome.viewHierarchy);
+  const rawCapture = structuredClone(androidHome.viewHierarchy);
+  const capture: ViewHierarchyResult = {
+    ...viewHierarchyFromFixture(rawCapture, "Android home"),
+    contentHiddenRegions: rawCapture.contentHiddenRegions ?? undefined,
+    ctrlProxyIncomplete: rawCapture.ctrlProxyIncomplete ?? undefined,
+    hierarchy: { node: capturedFlatNodeForTest(rawCapture.hierarchy.node) },
+  };
+  // The wiring under test derives the screen size from the hierarchy, not capture metadata.
+  delete capture.screenWidth;
+  delete capture.screenHeight;
+  delete capture.packageName;
   const entry = new SearchableHierarchy()
     .project(capture)
     .find((node) => node.affordances.includes("tap") && node.element?.text);
@@ -67,15 +80,14 @@ function androidCapture(duplicates = false): ViewHierarchyResult {
   const offscreen = structuredClone(target);
   offscreen.bounds = { left: 40, top: 2500, right: 140, bottom: 2600 };
   offscreen["view-id"] = "derived-offscreen";
-  capture.hierarchy.node = duplicates ? [offscreen, target] : [target];
-  delete capture.screenWidth;
-  delete capture.screenHeight;
-  delete capture.packageName;
+  capture.hierarchy.node = createFlatNodeForTest({
+    node: duplicates ? [offscreen, target] : [target],
+  });
   return capture;
 }
 
 function observation(viewHierarchy: ViewHierarchyResult): ObserveResult {
-  return {
+  return buildObserveResult({
     observationId: "screen-size-wiring",
     display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
     updatedAt: 1,
@@ -83,7 +95,7 @@ function observation(viewHierarchy: ViewHierarchyResult): ObserveResult {
     systemInsets: { left: 0, right: 0, top: 0, bottom: 0 },
     viewHierarchy,
     activeWindow: { appId: "fixture", activityName: "Before", layoutSeqSum: 1 },
-  };
+  });
 }
 
 function tapHarness(initial: ObserveResult, capturedAfterTap = initial.viewHierarchy!) {
@@ -122,9 +134,10 @@ function tapHarness(initial: ObserveResult, capturedAfterTap = initial.viewHiera
   });
   tap.observeScreen = observe;
   const window = spyOn(tap.window, "getCachedActiveWindow").mockResolvedValue(null);
-  const dispatch = spyOn(tap["accessibilityService"], "requestTapCoordinates").mockResolvedValue({
-    success: true,
-  });
+  const dispatch = spyOn(
+    AndroidCtrlProxyClient.getInstance(device),
+    "requestTapCoordinates",
+  ).mockResolvedValue({ totalTimeMs: 0, success: true });
   restores.push(
     () => window.mockRestore(),
     () => dispatch.mockRestore(),
@@ -134,7 +147,7 @@ function tapHarness(initial: ObserveResult, capturedAfterTap = initial.viewHiera
 
 test("tapOn refreshed Android display without metadata keeps unknown size tappable", async () => {
   const initialCapture = androidCapture();
-  initialCapture.hierarchy.node = [];
+  initialCapture.hierarchy.node = createFlatNodeForTest({ node: [] });
   initialCapture.displayId = 0;
   initialCapture.panelUniqueId = "default";
   const refreshed = androidCapture();
@@ -168,12 +181,12 @@ test("tapOn first selection filters off-screen duplicate with observation fallba
   expect(result.error).toBeUndefined();
   expect(result.success).toBe(true);
   expect(result.element?.bounds).toEqual({ left: 40, top: 100, right: 140, bottom: 200 });
-  expect(dispatch.mock.calls[0].slice(0, 2)).toEqual([90, 150]);
+  expect(dispatch.mock.calls[0][0]).toMatchObject({ x: 90, y: 150 });
 });
 
 test("tapOn incompatible observation size leaves Android matches unfiltered and taps", async () => {
   const initialCapture = androidCapture();
-  initialCapture.hierarchy.node = [];
+  initialCapture.hierarchy.node = createFlatNodeForTest({ node: [] });
   initialCapture.displayId = 0;
   initialCapture.panelUniqueId = "default";
   const refreshed = androidCapture(true);
@@ -190,7 +203,7 @@ test("tapOn incompatible observation size leaves Android matches unfiltered and 
   expect(result.error).toBeUndefined();
   expect(result.success).toBe(true);
   expect(result.element?.bounds).toEqual({ left: 40, top: 2500, right: 140, bottom: 2600 });
-  expect(dispatch.mock.calls[0].slice(0, 2)).toEqual([90, 2550]);
+  expect(dispatch.mock.calls[0][0]).toMatchObject({ x: 90, y: 2550 });
 });
 
 test.each(["TapOnElement", "TapAnyElement", "DragAndDrop", "SetUIState"] as const)(
@@ -213,11 +226,13 @@ test.each(["TapOnElement", "TapAnyElement", "DragAndDrop", "SetUIState"] as cons
       TapOnElement: () => new TapOnElement(device, adb, { timer })["elementSelector"],
       TapAnyElement: () => new TapAnyElement(device, adb, { timer })["elementSelector"],
       DragAndDrop: () => new DragAndDrop(device, adb, timer)["selector"],
-      SetUIState: () => new SetUIState(device, adb, { timer })["selector"],
     };
     // No size or platform options are supplied to the constructed selector.
-    expect(selectors[action]().selectByText(capture, duoSelectionText).element?.bounds).toEqual(
-      duoSelectionBounds,
-    );
+    const bounds =
+      action === "SetUIState"
+        ? new SetUIState(device, adb, { timer }).findElement({ text: duoSelectionText }, capture)
+            ?.bounds
+        : selectors[action]().selectByText(capture, duoSelectionText).element?.bounds;
+    expect(bounds).toEqual(duoSelectionBounds);
   },
 );

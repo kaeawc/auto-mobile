@@ -1,36 +1,13 @@
 import type { SessionReleaseReason } from "./releaseReasons";
-/**
- * Release a device session shortly after the client connection that acquired it
- * closes, when no other connection owns it and its owner has gone silent (#10503).
- *
- * Without this, a one-shot client that exits without releasing its session holds
- * the device until the heartbeat monitor reaps the session, and every other
- * client's explicit `getAndroid {deviceId}` is refused in the meantime. The grace
- * window is the lease plus the suspect window an owner gets after missing it
- * (#10051): a proxy whose socket merely dropped reconnects and heartbeats well
- * inside it, which cancels the release.
- *
- * A release the pool defers because the session still has a control call in flight is
- * re-armed, not dropped (#10663): it is retried when the vetoing call ends
- * ({@link OwnerDisconnectRelease.executionsEnded}, #10712), and in any case once
- * the veto's bound passes, so an execution that never settles keeps the session
- * only as long as the shared unsettled-execution veto policy allows. A read in flight never
- * defers release and is cut with the typed terminal refusal (#11381).
- */
-
 import { DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS } from "./inputDeviceOwnership";
 import type { Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { ownerLeaseHeartbeat, SUSPECT_GRACE_MS } from "./livenessOwnerLease";
 import { holdsOwnerHeartbeatLease } from "./sessionBroker/provisioning/executionLiveness";
-import {
-  UNSETTLED_EXECUTION_VETO_CEILING_MS,
-  UnsettledExecutionVeto,
-  type SessionExecutionProbeInput,
-} from "./unsettledExecutionVeto";
 import type { Session } from "./sessionManager";
-import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "./sessionLivenessWindows";
+import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "./wire/sessionLivenessWindows";
+import { type OwnerDisconnectReleaseDeferral } from "./OwnerDisconnectExecutionVeto";
 
 /** The release reason recorded for a session whose owning connection closed. */
 export const OWNER_DISCONNECTED_RELEASE_REASON =
@@ -42,21 +19,6 @@ export const OWNER_DISCONNECTED_RELEASE_REASON =
  * merely dropped can reconnect and heartbeat inside it.
  */
 export const OWNER_DISCONNECT_GRACE_MS = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS;
-
-/**
- * Longest an active control call may keep a session whose owner disconnected (#10663): the same
- * bound the heartbeat monitor applies, from the shared policy in `./unsettledExecutionVeto`.
- */
-export const OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS = UNSETTLED_EXECUTION_VETO_CEILING_MS;
-
-/** A release the pool deferred because an in-flight control call vetoed it. */
-export interface OwnerDisconnectReleaseDeferral {
-  /**
-   * When the veto stops holding, on the release's clock (the session clock, #11162); the release
-   * is retried then if no call end re-arms it first.
-   */
-  deferredUntil: number;
-}
 
 /** What the grace tracker needs from the pool. */
 export interface OwnerDisconnectReleasePort {
@@ -126,51 +88,6 @@ function ownerHeartbeatSince(session: OwnerSession): number {
   return session.lastOwnerHeartbeat === undefined
     ? (session.stallForgivenAt ?? Number.NEGATIVE_INFINITY)
     : ownerLeaseHeartbeat(session);
-}
-
-/**
- * Bounds how long active control calls may veto the owner-disconnect release of a session
- * (#10663). The #5343 "never reap mid-control-call" rule holds while the shared unsettled-execution veto
- * policy allows; past its bound the session is released anyway.
- */
-export class OwnerDisconnectExecutionVeto {
-  private readonly veto: UnsettledExecutionVeto;
-
-  constructor(
-    executions: SessionExecutionProbeInput,
-    timer: Timer,
-    ceilingMs: number = OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
-    /** The veto's clock; the daemon passes its session clock (#11162). */
-    now?: () => number,
-  ) {
-    this.veto = new UnsettledExecutionVeto(executions, timer, ceilingMs, now);
-  }
-
-  /**
-   * The deferral while active executions still keep this session from its owner-disconnect
-   * release, or undefined when it may be released now.
-   */
-  keeps(session: Session): OwnerDisconnectReleaseDeferral | undefined {
-    const verdict = this.veto.judge(session);
-    if (verdict.kind === "kept") {
-      if (verdict.firstKept) {
-        logger.info(
-          `[OwnerDisconnectRelease] Kept session ${session.sessionId} after its owner disconnected: ` +
-            `executions are still active; retrying the release once they end`,
-        );
-      }
-      return { deferredUntil: verdict.until };
-    }
-    if (verdict.kind === "expired") {
-      this.veto.forget(session);
-      logger.warn(
-        `[OwnerDisconnectRelease] Session ${session.sessionId} was kept for ${verdict.vetoedMs}ms after its ` +
-          `owner disconnected by executions that never settled; releasing it anyway past their ` +
-          `${verdict.bound} bound`,
-      );
-    }
-    return undefined;
-  }
 }
 
 interface PendingRelease {
@@ -363,4 +280,14 @@ export class OwnerDisconnectRelease {
     );
     pending.handle = this.timer.setTimeout(() => this.fire(sessionId), delayMs);
   }
+  /** @internal Read-only state used by deterministic ownership tests. */
+  get testHooks() {
+    return { pending: this.pending as ReadonlyMap<string, Readonly<PendingRelease>> };
+  }
 }
+
+export { OwnerDisconnectExecutionVeto } from "./OwnerDisconnectExecutionVeto";
+
+export { OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS } from "./OwnerDisconnectExecutionVeto";
+
+export { type OwnerDisconnectReleaseDeferral } from "./OwnerDisconnectExecutionVeto";

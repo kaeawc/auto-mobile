@@ -544,11 +544,13 @@ export class PerformanceAuditor {
         const auditResult = await performanceAudit.runAudit(
           result.activeWindow!.appId,
           thresholds,
-          result.screenSize,
-          perf,
-          windowBounds,
-          touchPoint,
-          skipTouchLatency,
+          {
+            screenSize: result.screenSize,
+            perf,
+            windowBounds,
+            touchPoint,
+            skipTouchLatency,
+          },
         );
 
         // Attach audit result to observe result

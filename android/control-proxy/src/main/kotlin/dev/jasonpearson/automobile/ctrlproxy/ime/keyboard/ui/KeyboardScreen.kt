@@ -137,27 +137,7 @@ private fun KeyCap(
               try {
                 if (key.type == KeyType.BACKSPACE) {
                   currentOnKey(currentKey)
-                  coroutineScope {
-                    val repeatJob = launch {
-                      var elapsedMs = schedule.initialDelayMs
-                      var fired = 1
-                      delay(schedule.initialDelayMs)
-                      while (true) {
-                        val due = schedule.firesAt(elapsedMs)
-                        while (fired < due) {
-                          currentOnKey(currentKey)
-                          fired++
-                        }
-                        delay(schedule.intervalMs)
-                        elapsedMs += schedule.intervalMs
-                      }
-                    }
-                    try {
-                      tryAwaitRelease()
-                    } finally {
-                      repeatJob.cancel()
-                    }
-                  }
+                  repeatUntilRelease(schedule) { currentOnKey(currentKey) }
                 } else {
                   tryAwaitRelease()
                 }
@@ -231,5 +211,36 @@ private fun ProfileMenu(
         presentation.callbacks.onShowImePicker()
       },
     )
+  }
+}
+
+private suspend fun repeatBackspace(schedule: KeyRepeatSchedule, onKey: () -> Unit) {
+  var elapsedMs = schedule.initialDelayMs
+  var fired = 1
+  delay(schedule.initialDelayMs)
+  while (true) {
+    val due = schedule.firesAt(elapsedMs)
+    while (fired < due) {
+      onKey()
+      fired++
+    }
+    delay(schedule.intervalMs)
+    elapsedMs += schedule.intervalMs
+  }
+}
+
+private suspend fun androidx.compose.foundation.gestures.PressGestureScope.repeatUntilRelease(
+  schedule: KeyRepeatSchedule,
+  onKey: () -> Unit,
+) {
+  coroutineScope {
+    val repeatJob = launch {
+      repeatBackspace(schedule, onKey)
+    }
+    try {
+      tryAwaitRelease()
+    } finally {
+      repeatJob.cancel()
+    }
   }
 }

@@ -1,3 +1,4 @@
+import { readToolEnvelopePayload } from "../../../src/utils/toolEnvelopePayload";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { PROTOTYPE_PAGER_OPTIONS_CAPABILITY } from "../../../src/features/observe/android/ctrlProxyProtocol";
 import {
@@ -28,7 +29,7 @@ const ios: BootedDevice = { deviceId: "pager-ios", platform: "ios", name: "Fake"
 const pager = { type: "pager", id: "pages", children: [{ type: "spacer" }, { type: "spacer" }] };
 const spec = (root: unknown = pager) => ({
   id: "panel",
-  window: { placement: { type: "fullscreen" } },
+  window: { placement: { type: "fullscreen" }, opacity: 1 },
   root,
 });
 const componentSpec = () => ({
@@ -232,7 +233,7 @@ describe("pager options host refusal", () => {
     async (device) => {
       const candidate = componentSpec();
       const result = prototypeOutputSchema.parse(
-        (await runSpec(device, candidate)).structuredContent,
+        readToolEnvelopePayload(await runSpec(device, candidate))?.payload,
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain(
@@ -251,7 +252,7 @@ describe("pager options host refusal", () => {
       const candidate = componentSpec();
       candidate.components.pageDeck.root.peek.start = -1;
       const result = prototypeOutputSchema.parse(
-        (await runSpec(device, candidate)).structuredContent,
+        readToolEnvelopePayload(await runSpec(device, candidate))?.payload,
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain("root (use pageDeck) → components.pageDeck.root.peek.start");
@@ -272,7 +273,9 @@ describe("pager options host refusal", () => {
         { pageSize: "fill" },
       ]) {
         const root = { ...pager, ...options };
-        const result = prototypeOutputSchema.parse((await run(device, root)).structuredContent);
+        const result = prototypeOutputSchema.parse(
+          readToolEnvelopePayload(await run(device, root))?.payload,
+        );
         expect(result.success).toBe(false);
         expect(result.error).toContain(
           prototypePagerOptionsUnsupportedMessage(
@@ -289,15 +292,15 @@ describe("pager options host refusal", () => {
     client.setSupportedCommands([PROTOTYPE_PAGER_OPTIONS_CAPABILITY]);
     agent.handshake.capabilities.push(PROTOTYPE_PAGER_OPTIONS_CAPABILITY);
     const result = prototypeOutputSchema.parse(
-      (
+      readToolEnvelopePayload(
         await run(device, {
           ...pager,
           axis: "vertical",
           peek: {},
           pageSpacing: 8,
           pageSize: { dp: 120 },
-        })
-      ).structuredContent,
+        }),
+      )?.payload,
     );
     expect(result.success).toBe(true);
     expect(
@@ -311,7 +314,9 @@ describe("pager options host refusal", () => {
     async (device) => {
       const iosLookup = spyOn(IosPrototypeTransport.prototype, "supportsCapability");
       try {
-        const result = prototypeOutputSchema.parse((await run(device, pager)).structuredContent);
+        const result = prototypeOutputSchema.parse(
+          readToolEnvelopePayload(await run(device, pager))?.payload,
+        );
         expect(result.success).toBe(true);
         expect(lookups).not.toContain(PROTOTYPE_PAGER_OPTIONS_CAPABILITY);
         expect(iosLookup.mock.calls.map(([capability]) => capability)).not.toContain(

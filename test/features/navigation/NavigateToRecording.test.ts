@@ -16,7 +16,7 @@ import {
 } from "../../helpers/navigationTestHarness";
 
 const APP = "com.example.navigate-recording";
-const device: BootedDevice = { platform: "android", deviceId: "emulator-5600" };
+const device: BootedDevice = { platform: "android", deviceId: "emulator-5600", name: "Test" };
 const backArgs = { selector: { elementId: "demo_index_back" }, action: "tap" };
 const demosArgs = { selector: { text: "Demos" } };
 
@@ -46,6 +46,9 @@ describe("NavigateTo replay through navigation recording", () => {
           shouldResolveDevice: true,
           device,
           internalCall: true,
+          args: {},
+          baseSessionUuid: undefined,
+          sessionUuid: undefined,
         }),
       },
       auditRunner: {
@@ -122,16 +125,17 @@ describe("NavigateTo replay through navigation recording", () => {
     await tap(demosArgs);
     const before = await repository.getStats(APP);
     const traversalCount = (await repository.getEdges(APP)).length;
-    const navigation = new NavigateTo(
-      device,
-      new FakeAdbClientFactory(),
-      { setupUIState: async () => [], setupScrollPosition: async () => null },
-      { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
-      manager,
+    const navigation = new NavigateTo(device, new FakeAdbClientFactory(), {
+      uiStateSetup: { setupUIState: async () => [], setupScrollPosition: async () => null },
+      screenWaiter: { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
+      navigationManager: manager,
       timer,
-    );
+    });
 
-    const result = await navigation.execute({ targetScreen: "HomeDestination" });
+    const result = await navigation.execute({
+      targetScreen: "HomeDestination",
+      platform: "android",
+    });
 
     expect(result.success).toBe(true);
     expect(result.stepsExecuted).toBe(1);

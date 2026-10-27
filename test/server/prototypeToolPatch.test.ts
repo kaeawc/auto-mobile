@@ -1,3 +1,4 @@
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   PROTOTYPE_PATCH_CAPABILITY,
@@ -102,9 +103,9 @@ describe("prototype patch host", () => {
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
     });
   }
-  async function call(input: unknown, device = android) {
+  async function call(input: Record<string, unknown>, device = android) {
     const result = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
-    return prototypeOutputSchema.parse(result.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(result));
   }
   const show = (device = android) => call({ action: "show", spec }, device);
   const patch = (ops: unknown = replace, extra: Record<string, unknown> = {}, device = android) =>
@@ -144,7 +145,7 @@ describe("prototype patch host", () => {
           ),
         });
       }
-      expect(proxy.patchRequests).toEqual([]);
+      expect<unknown>(proxy.patchRequests).toEqual([]);
       expect(agent.requests).toEqual([]);
     },
   );
@@ -167,7 +168,7 @@ describe("prototype patch host", () => {
       expect(refused.success).toBe(false);
       expect(refused.error).toContain("root.children[0].spans");
       expect(refused.error).toContain(PROTOTYPE_RICH_TEXT_CAPABILITY);
-      expect(proxy.patchRequests).toEqual([]);
+      expect<unknown>(proxy.patchRequests).toEqual([]);
       expect(agent.patchRequests).toEqual([]);
       expect((await patch(replace, {}, device)).success).toBe(true);
       proxy.setSupportedCommands([
@@ -314,7 +315,7 @@ describe("prototype patch host", () => {
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain("Components are not expanded in a patch");
-      expect(proxy.patchRequests).toEqual([]);
+      expect<unknown>(proxy.patchRequests).toEqual([]);
       expect(agent.patchRequests).toEqual([]);
     },
   );
@@ -345,7 +346,7 @@ describe("prototype patch host", () => {
     await show();
     proxy.emitPrototypeEvent({ ...event(1), id: "orders", kind: "dismissed" });
     expect((await patch()).error).toContain("not tracking its spec");
-    expect(proxy.patchRequests).toEqual([]);
+    expect<unknown>(proxy.patchRequests).toEqual([]);
   });
   test("inspect retains only the same tracked id", async () => {
     await show();
@@ -380,7 +381,7 @@ describe("prototype patch host", () => {
       { op: "replaceNode", id: "label", node: { id: "label", type: "nonsense" } },
     ]);
     expect(invalid.error).toStartWith("Invalid patch result at spec.root.children[0].type:");
-    expect(proxy.patchRequests).toEqual([]);
+    expect<unknown>(proxy.patchRequests).toEqual([]);
     expect((await patch([{ op: "test", path: "/data/cartCount", value: 1 }])).success).toBe(true);
   });
   test("state requires baseRevision and leaves state tests to the device", async () => {
@@ -390,7 +391,7 @@ describe("prototype patch host", () => {
       "Invalid patch at baseRevision: required when a patch has /state ops",
     );
     expect((await patch(ops, { baseRevision: 12 })).success).toBe(true);
-    expect(proxy.patchRequests).toEqual([{ id: "orders", ops, baseRevision: 12 }]);
+    expect<unknown>(proxy.patchRequests).toEqual([{ id: "orders", ops, baseRevision: 12 }]);
   });
   test("success revision and atomic conflict reply; malformed fields are dropped", async () => {
     await show();
@@ -415,7 +416,7 @@ describe("prototype patch host", () => {
     const timeout = {
       success: false,
       error: "prototype_result timed out after 50ms",
-      delivery: "indeterminate",
+      delivery: "indeterminate" as const,
     };
     proxy.setPatchResult(timeout);
     const output = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(android, {
@@ -423,8 +424,8 @@ describe("prototype patch host", () => {
       id: "orders",
       ops: replace,
     });
-    expect(output.structuredContent).not.toHaveProperty("delivery");
-    expect(prototypeOutputSchema.parse(output.structuredContent).error).toEndWith(
+    expect(toolStructured(output)).not.toHaveProperty("delivery");
+    expect(prototypeOutputSchema.parse(toolStructured(output)).error).toEndWith(
       " The device may or may not have applied the patch: show the prototype again before the next patch.",
     );
     proxy.setPatchResult({ success: true });
@@ -447,7 +448,7 @@ describe("prototype patch host", () => {
     timer.setTimeout(() => {
       heldPatch.resolve({
         success: false,
-        delivery: "indeterminate",
+        delivery: "indeterminate" as const,
         error: "prototype_result timed out after 50ms",
       });
     }, 50);
@@ -511,7 +512,7 @@ describe("prototype patch host", () => {
         baseRevision: undefined,
         ops: [{ op: "add", path: "/data/deep", value }],
       });
-      expect(proxy.patchRequests).toEqual([]);
+      expect<unknown>(proxy.patchRequests).toEqual([]);
     } finally {
       serialize.mockRestore();
     }
@@ -588,7 +589,7 @@ describe("prototype patch host", () => {
       },
     ];
     expect((await patch(ops)).success).toBe(true);
-    expect(proxy.patchRequests[0].ops).toEqual(ops);
+    expect<unknown>(proxy.patchRequests[0].ops).toEqual(ops);
     expect(
       (
         await patch([
@@ -606,7 +607,7 @@ describe("prototype patch host", () => {
         ])
       ).error,
     ).toBe("Invalid patch at ops: Patch byte limit exceeded");
-    expect(proxy.patchRequests).toEqual([]);
+    expect<unknown>(proxy.patchRequests).toEqual([]);
   });
   test("strict schema action fields, op counts and revisions", () => {
     const input = { action: "patch", id: "orders", ops: replace };

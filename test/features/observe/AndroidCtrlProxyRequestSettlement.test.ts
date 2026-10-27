@@ -30,7 +30,7 @@ async function harness() {
   const timer = new FakeTimer();
   const socket = new RecordingSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "client-send-command", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "client-send-command", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
       webSocketFactory: () => socket,
@@ -41,7 +41,7 @@ async function harness() {
   );
   await Promise.resolve();
   client.connectionTestHooks.socket = socket;
-  client["supportedCommands"] = new Set([
+  client.connectionTestHooks.supportedCommands = new Set([
     ...ANDROID_CAPABILITY_GATED_COMMANDS,
     "request_activate_accessibility_link",
     "discover_keystore",
@@ -49,12 +49,12 @@ async function harness() {
     SDK_CAPABILITIES_USER_ID_CAPABILITY,
     "tap_double_v1",
   ]);
-  const manager = client["requestManager"];
+  const manager = client.connectionTestHooks.requestManager;
   const ids = new CountingIdGenerator("wire");
   manager.generateId = (prefix) => `${prefix}_${ids.next()}`;
   client.ensureConnected = async () => true;
-  client["connectWebSocket"] = async () => true;
-  client["cancelScreenshotBackoff"] = () => {};
+  client.testHooks.overrideConnectWebSocket(async () => true);
+  client.testHooks.overrideCancelScreenshotBackoff(() => {});
   return { client, timer, socket, manager };
 }
 type Harness = Awaited<ReturnType<typeof harness>>;
@@ -107,7 +107,13 @@ const methods: Method[] = [
     name: "accessibility link",
     signal: true,
     invoke: (h, signal) =>
-      h.client.requestActivateAccessibilityLink("link", 0, undefined, 50, perf, signal),
+      h.client.requestActivateAccessibilityLink({
+        text: "link",
+        occurrence: 0,
+        timeoutMs: 50,
+        perf,
+        signal,
+      }),
   },
   ...(["copy", "paste", "get", "clear"] as const).map((action): Method => ({
     name: `clipboard ${action}`,
@@ -130,19 +136,26 @@ const methods: Method[] = [
     name: "tap",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestTapCoordinates(1, 2, 0, 50, perf, undefined, signal),
+      h.client.testHooks.gestures().requestTapCoordinates({
+        x: 1,
+        y: 2,
+        duration: 0,
+        timeoutMs: 50,
+        perf,
+        signal,
+      }),
   },
   {
     name: "double tap",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestDoubleTapCoordinates(1, 2, undefined, { signal }),
+      h.client.testHooks.gestures().requestDoubleTapCoordinates(1, 2, undefined, { signal }),
   },
   {
     name: "swipe",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestSwipe({
+      h.client.testHooks.gestures().requestSwipe({
         x1: 1,
         y1: 2,
         x2: 3,
@@ -157,7 +170,7 @@ const methods: Method[] = [
     name: "drag",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestDrag({
+      h.client.testHooks.gestures().requestDrag({
         x1: 1,
         y1: 2,
         x2: 3,
@@ -172,37 +185,68 @@ const methods: Method[] = [
   {
     name: "pinch",
     signal: true,
-    invoke: (h, signal) => h.client["gestures"].requestPinch(1, 2, 3, 4, 0, 20, 50, perf, signal),
+    invoke: (h, signal) =>
+      h.client.testHooks.gestures().requestPinch({
+        centerX: 1,
+        centerY: 2,
+        distanceStart: 3,
+        distanceEnd: 4,
+        rotationDegrees: 0,
+        duration: 20,
+        timeoutMs: 50,
+        perf,
+        signal,
+      }),
   },
   {
     name: "two finger swipe",
-    invoke: (h) => h.client["gestures"].requestTwoFingerSwipe(1, 2, 3, 4, 20, 10, 50),
+    invoke: (h) =>
+      h.client.testHooks.gestures().requestTwoFingerSwipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        duration: 20,
+        offset: 10,
+        timeoutMs: 50,
+      }),
   },
-  { name: "gesture start", invoke: (h) => h.client["gestures"].requestGestureStart("g", 1, 2, 50) },
-  { name: "gesture move", invoke: (h) => h.client["gestures"].requestGestureMove("g", 1, 2, 50) },
+  {
+    name: "gesture start",
+    invoke: (h) =>
+      h.client.testHooks
+        .gestures()
+        .requestGestureStart({ gestureId: "g", x: 1, y: 2, timeoutMs: 50 }),
+  },
+  {
+    name: "gesture move",
+    invoke: (h) => h.client.testHooks.gestures().requestGestureMove("g", 1, 2, 50),
+  },
   {
     name: "gesture end",
-    invoke: (h) => h.client["gestures"].requestGestureEnd("g", 1, 2, false, 50),
+    invoke: (h) => h.client.testHooks.gestures().requestGestureEnd("g", 1, 2, false, 50),
   },
   {
     name: "set text",
     signal: true,
     invoke: (h, signal) =>
-      h.client["text"].requestSetText("text", { timeoutMs: 50, abortSignal: signal }),
+      h.client.testHooks.text().requestSetText("text", { timeoutMs: 50, abortSignal: signal }),
   },
-  { name: "clear text", invoke: (h) => h.client["text"].requestClearText("id", 50) },
+  { name: "clear text", invoke: (h) => h.client.testHooks.text().requestClearText("id", 50) },
   {
     name: "ime action",
     signal: true,
-    invoke: (h, signal) => h.client["text"].requestImeAction("done", 50, perf, signal),
+    invoke: (h, signal) => h.client.testHooks.text().requestImeAction("done", 50, perf, signal),
   },
-  { name: "select all", invoke: (h) => h.client["text"].requestSelectAll(50) },
-  { name: "insert text state", invoke: (h) => h.client["text"].requestInsertTextState() },
+  { name: "select all", invoke: (h) => h.client.testHooks.text().requestSelectAll(50) },
+  { name: "insert text state", invoke: (h) => h.client.testHooks.text().requestInsertTextState() },
   {
     name: "insert text",
     signal: true,
     invoke: (h, signal) =>
-      h.client["text"].requestInsertText("text", 50, perf, undefined, { abortSignal: signal }),
+      h.client.testHooks
+        .text()
+        .requestInsertText("text", 50, perf, undefined, { abortSignal: signal }),
   },
   {
     name: "commit via ime",
@@ -217,65 +261,75 @@ const methods: Method[] = [
           });
         }
       };
-      return h.client["text"].commitViaIme("text", undefined, 50, perf, signal);
+      return h.client.testHooks.text().commitViaIme("text", undefined, 50, perf, signal);
     },
   },
-  { name: "set keyboard profile", invoke: (h) => h.client["text"].setKeyboardProfile("p", 50) },
-  { name: "list keyboard profiles", invoke: (h) => h.client["text"].listKeyboardProfiles(50) },
+  {
+    name: "set keyboard profile",
+    invoke: (h) => h.client.testHooks.text().setKeyboardProfile("p", 50),
+  },
+  {
+    name: "list keyboard profiles",
+    invoke: (h) => h.client.testHooks.text().listKeyboardProfiles(50),
+  },
   {
     name: "list preference files",
-    invoke: (h) => h.client["storage"].listPreferenceFiles("pkg", 50),
+    invoke: (h) => h.client.testHooks.storage().listPreferenceFiles("pkg", 50),
   },
   {
     name: "get preference entries",
-    invoke: (h) => h.client["storage"].getPreferenceEntries("pkg", "prefs", 50),
+    invoke: (h) => h.client.testHooks.storage().getPreferenceEntries("pkg", "prefs", 50),
   },
   {
     name: "get preference",
-    invoke: (h) => h.client["storage"].getPreference("pkg", "prefs", "key", 50),
+    invoke: (h) => h.client.testHooks.storage().getPreference("pkg", "prefs", "key", 50),
   },
-  { name: "discover keystore", invoke: (h) => h.client["storage"].discoverKeystore("pkg", 50) },
+  {
+    name: "discover keystore",
+    invoke: (h) => h.client.testHooks.storage().discoverKeystore("pkg", 50),
+  },
   {
     name: "get sdk capabilities",
-    invoke: (h) => h.client["storage"].getSdkCapabilities("pkg", 0, 50),
+    invoke: (h) => h.client.testHooks.storage().getSdkCapabilities("pkg", 0, 50),
   },
   {
     name: "list data stores",
-    invoke: (h) => h.client["storage"].listDataStores("pkg", "adapter", 50),
+    invoke: (h) => h.client.testHooks.storage().listDataStores("pkg", "adapter", 50),
   },
   {
     name: "get data store",
-    invoke: (h) => h.client["storage"].getDataStore("pkg", "adapter", "store", 50),
+    invoke: (h) => h.client.testHooks.storage().getDataStore("pkg", "adapter", "store", 50),
   },
   {
     name: "subscribe storage",
-    invoke: (h) => h.client["storage"].subscribeStorage("pkg", "prefs", 50),
+    invoke: (h) => h.client.testHooks.storage().subscribeStorage("pkg", "prefs", 50),
   },
   {
     name: "unsubscribe storage",
-    invoke: (h) => h.client["storage"].unsubscribeStorage("pkg:prefs", 50),
+    invoke: (h) => h.client.testHooks.storage().unsubscribeStorage("pkg:prefs", 50),
   },
   {
     name: "set preference",
-    invoke: (h) => h.client["storage"].setPreference("pkg", "prefs", "key", null, "STRING", 50),
+    invoke: (h) =>
+      h.client.testHooks.storage().setPreference("pkg", "prefs", "key", null, "STRING", 50),
   },
   {
     name: "remove preference",
-    invoke: (h) => h.client["storage"].removePreference("pkg", "prefs", "key", 50),
+    invoke: (h) => h.client.testHooks.storage().removePreference("pkg", "prefs", "key", 50),
   },
   {
     name: "clear preferences",
-    invoke: (h) => h.client["storage"].clearPreferenceStore("pkg", "prefs", 50),
+    invoke: (h) => h.client.testHooks.storage().clearPreferenceStore("pkg", "prefs", 50),
   },
   {
     name: "install certificate",
-    invoke: (h) => h.client["certificates"].requestInstallCaCertificate("PEM", 50),
+    invoke: (h) => h.client.testHooks.certificates().requestInstallCaCertificate("PEM", 50),
   },
   {
     name: "install certificate from file",
     invoke: (h) => {
       const certificates = new CtrlProxyCertificates(
-        h.client["createCertificatesDelegateContext"](),
+        h.client.testHooks.createCertificatesDelegateContext(),
         { stat: async () => ({ size: 1, isFile: () => true }) },
       );
       certificates["pushCertificateToDevice"] = async () => "/sdcard/ca.pem";
@@ -284,31 +338,45 @@ const methods: Method[] = [
   },
   {
     name: "remove certificate",
-    invoke: (h) => h.client["certificates"].requestRemoveCaCertificate("alias", 50),
+    invoke: (h) => h.client.testHooks.certificates().requestRemoveCaCertificate("alias", 50),
   },
-  { name: "device owner", invoke: (h) => h.client["certificates"].requestDeviceOwnerStatus(50) },
+  {
+    name: "device owner",
+    invoke: (h) => h.client.testHooks.certificates().requestDeviceOwnerStatus(50),
+  },
   {
     name: "permission",
-    invoke: (h) => h.client["certificates"].requestPermission("perm", false, 50),
+    invoke: (h) => h.client.testHooks.certificates().requestPermission("perm", false, 50),
   },
-  { name: "set focus", invoke: (h) => h.client["focus"].setAccessibilityFocus("id", 50) },
-  { name: "clear focus", invoke: (h) => h.client["focus"].clearAccessibilityFocus("id", 50) },
-  { name: "current focus", invoke: (h) => h.client["focus"].requestCurrentFocus(50) },
-  { name: "traversal order", invoke: (h) => h.client["focus"].requestTraversalOrder(50) },
+  { name: "set focus", invoke: (h) => h.client.testHooks.focus().setAccessibilityFocus("id", 50) },
+  {
+    name: "clear focus",
+    invoke: (h) => h.client.testHooks.focus().clearAccessibilityFocus("id", 50),
+  },
+  { name: "current focus", invoke: (h) => h.client.testHooks.focus().requestCurrentFocus(50) },
+  { name: "traversal order", invoke: (h) => h.client.testHooks.focus().requestTraversalOrder(50) },
   {
     name: "installed packages",
-    invoke: (h) => h.client["packages"].requestInstalledPackages(false, 0, 50),
+    invoke: (h) => h.client.testHooks.packages().requestInstalledPackages(false, 0, 50),
   },
-  { name: "package info", invoke: (h) => h.client["packages"].requestPackageInfo("pkg", {}, 50) },
-  { name: "launch intent", invoke: (h) => h.client["packages"].requestLaunchIntent("pkg", 50) },
+  {
+    name: "package info",
+    invoke: (h) => h.client.testHooks.packages().requestPackageInfo("pkg", {}, 50),
+  },
+  {
+    name: "launch intent",
+    invoke: (h) => h.client.testHooks.packages().requestLaunchIntent("pkg", 50),
+  },
   {
     name: "add highlight",
     invoke: (h) =>
-      h.client["highlights"].requestAddHighlight(
-        "h",
-        { type: "box", bounds: { x: 1, y: 2, width: 3, height: 4 } },
-        50,
-      ),
+      h.client.testHooks
+        .highlights()
+        .requestAddHighlight(
+          "h",
+          { type: "circle", bounds: { x: 1, y: 2, width: 3, height: 4 } },
+          50,
+        ),
   },
 ];
 

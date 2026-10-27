@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   parseSessionBrokerHostConfig,
+  iosReusePolicy,
   type SessionBrokerHostConfig,
 } from "../../src/daemon/sessionBroker/hostConfig";
 import { parseSessionConfig, type SessionConfig } from "../../src/devices/sessionConfig";
@@ -17,28 +18,23 @@ const clientSchema = z
     preparationTimeoutMs: z.number().optional(),
   })
   .strict();
-const cap = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
-const batchSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    limits: z.object({ totalDeviceCap: cap, sessionCap: cap, idlePoolCap: cap }).strict(),
-    reuseCleanDevices: z.boolean(),
-    defaults: z.object({ ios: z.unknown().optional(), android: z.unknown().optional() }).strict(),
-    // Product host-config parser owns both shapes; the Android/iOS resolvers require them.
-    androidProfileArchetypes: z.unknown().optional(),
-    iosClassifications: z.unknown().optional(),
-    clients: z.array(clientSchema),
-  })
-  .strict();
+/**
+ * The batch envelope is only `schemaVersion` + `clients`; every other key is a host-config key
+ * and is validated by the product parser, so a host-config key can never be accepted by the broker
+ * and rejected here.
+ */
+const envelopeSchema = z
+  .object({ schemaVersion: z.literal(1), clients: z.array(clientSchema) })
+  .passthrough();
 
+type HostConfig = SessionBrokerHostConfig;
+type HostLimits = HostConfig["limits"];
+type RequiredCaps = { totalDeviceCap: number; sessionCap: number; idlePoolCap: number };
 export type BrokerBatchClient = z.infer<typeof clientSchema>;
-export type BrokerBatch = Omit<
-  z.infer<typeof batchSchema>,
-  "defaults" | "androidProfileArchetypes" | "iosClassifications"
-> & {
-  defaults: SessionBrokerHostConfig["defaults"];
-  androidProfileArchetypes: SessionBrokerHostConfig["androidProfileArchetypes"];
-  iosClassifications: SessionBrokerHostConfig["iosClassifications"];
+export type BrokerBatch = Omit<HostConfig, "contractVersion" | "limits"> & {
+  schemaVersion: 1;
+  limits: HostLimits & RequiredCaps;
+  clients: BrokerBatchClient[];
 };
 export interface BrokerBatchOptions {
   maxDevices?: number;
@@ -68,23 +64,38 @@ export function renderClientRequest(client: BrokerBatchClient, requestId: string
   });
 }
 
-export function renderHostConfig(
-  batch: Pick<z.infer<typeof batchSchema>, "limits" | "defaults" | "reuseCleanDevices"> &
-    Partial<Pick<z.infer<typeof batchSchema>, "androidProfileArchetypes" | "iosClassifications">>,
-): SessionBrokerHostConfig {
-  return parseSessionBrokerHostConfig({
-    contractVersion: 1,
-    limits: batch.limits,
-    defaults: batch.defaults,
-    // Undefined keys fall back to the product defaults ({} and []).
-    androidProfileArchetypes: batch.androidProfileArchetypes,
-    iosClassifications: batch.iosClassifications,
-    reuseCleanDevices: batch.reuseCleanDevices,
-  });
+function parseHostKeys(raw: Record<string, unknown>): SessionBrokerHostConfig {
+  // Drop the batch envelope; everything else is the host config, whatever keys the product adds.
+  const hostKeys = Object.fromEntries(
+    Object.entries(raw).filter(([key]) => key !== "schemaVersion" && key !== "clients"),
+  );
+  return parseSessionBrokerHostConfig({ ...hostKeys, contractVersion: 1 });
+}
+
+export function renderHostConfig(batch: Omit<BrokerBatch, "clients">): SessionBrokerHostConfig {
+  return parseHostKeys(batch);
 }
 
 export function parseBrokerBatch(input: unknown, options: BrokerBatchOptions = {}): BrokerBatch {
-  const batch = batchSchema.parse(input);
+  const envelope = envelopeSchema.parse(input);
+  const { clients } = envelope;
+  const host = parseHostKeys(envelope);
+  const { totalDeviceCap, sessionCap, idlePoolCap } = host.limits;
+  if (totalDeviceCap === undefined || sessionCap === undefined || idlePoolCap === undefined) {
+    throw new Error(
+      "limits.totalDeviceCap, limits.sessionCap and limits.idlePoolCap are required.",
+    );
+  }
+  const hostRest: Omit<SessionBrokerHostConfig, "contractVersion"> & { contractVersion?: 1 } = {
+    ...host,
+  };
+  delete hostRest.contractVersion;
+  const batch: BrokerBatch = {
+    ...hostRest,
+    schemaVersion: 1,
+    limits: { ...host.limits, totalDeviceCap, sessionCap, idlePoolCap },
+    clients,
+  };
   const maxDevices = options.maxDevices ?? 2;
   if (!Number.isSafeInteger(maxDevices) || maxDevices < 1 || maxDevices > 4) {
     throw new Error("--max-devices must be an integer from 1 to the hard ceiling of 4.");
@@ -92,25 +103,27 @@ export function parseBrokerBatch(input: unknown, options: BrokerBatchOptions = {
   if (batch.limits.totalDeviceCap > maxDevices) {
     throw new Error(`totalDeviceCap exceeds --max-devices ${maxDevices} (hard ceiling 4).`);
   }
-  if (!options.allowReuse && (batch.limits.idlePoolCap !== 0 || batch.reuseCleanDevices)) {
-    throw new Error("idlePoolCap must be 0 and reuseCleanDevices false without --allow-reuse.");
+  if (
+    !options.allowReuse &&
+    (batch.limits.idlePoolCap !== 0 ||
+      batch.reuseCleanDevices ||
+      iosReusePolicy(host).mode !== "off" ||
+      batch.reuseAndroidCleanDevices === true)
+  ) {
+    throw new Error(
+      "idlePoolCap must be 0, reuseCleanDevices false and reuseAndroidCleanDevices false without --allow-reuse.",
+    );
   }
   if (new Set(batch.clients.map((client) => client.name)).size !== batch.clients.length) {
     throw new Error("Broker batch client names must be unique.");
   }
-  const host = renderHostConfig(batch);
   for (const client of batch.clients) {
     renderClientRequest(client, `validate-${client.name}`);
     if (!host.defaults[client.platform]) {
       throw new Error(`Client ${client.name} requires explicit ${client.platform} defaults.`);
     }
   }
-  return {
-    ...batch,
-    defaults: host.defaults,
-    androidProfileArchetypes: host.androidProfileArchetypes,
-    iosClassifications: host.iosClassifications,
-  };
+  return batch;
 }
 
 /** One injected batch identity, with explicit per-client attempt numbers. Persist before reuse. */

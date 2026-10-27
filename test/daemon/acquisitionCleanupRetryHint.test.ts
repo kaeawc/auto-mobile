@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { afterEach, describe, expect, spyOn, test, mock } from "bun:test";
+import { DeviceCleanupInProgressError } from "../../src/models/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
@@ -8,9 +8,9 @@ import {
   defaultRecordingSessionCleanupDeps,
   type RecordingAcquisitionDeps,
   type RecordingSessionCleanupDeps,
-} from "../../src/server/recordingSessionCleanup";
-import { NetworkState } from "../../src/server/NetworkState";
-import { createOwnerlessNetworkStateAcquisitionCleanup } from "../../src/server/networkStateSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
+import { NetworkState } from "../../src/utils/NetworkState";
+import { createOwnerlessNetworkStateAcquisitionCleanup } from "../../src/daemon/networkStateSessionCleanup";
 import { createDeviceSettingDefaultsAcquisitionReset } from "../../src/features/utility/DeviceSettingDefaults";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { logger } from "../../src/utils/logger";
@@ -19,6 +19,8 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+
+afterEach(() => mock.restore());
 
 // The hint contract of `device_cleanup_in_progress`.
 //
@@ -111,7 +113,7 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
   let recordings: WedgedRecordings;
   let warn: ReturnType<typeof spyOn>;
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
     timer.setCurrentTime(1_000_000);
     manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
@@ -124,8 +126,7 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
     );
     await pool.initializeWithDevices([DEVICE]);
     recordings = new WedgedRecordings(timer);
-    warn = spyOn(logger, "warn").mockImplementation(() => {});
-  });
+  }
 
   afterEach(() => {
     warn.mockRestore();
@@ -156,6 +157,8 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
   }
 
   test("control: the release-time finalize advertises its remaining cap (#11360)", async () => {
+    await arrangeHarness();
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
     registerRecordingSessionCleanup(manager, recordings);
     await pool.bindOrReuseDeviceSession({
       sessionId: "holder",
@@ -172,6 +175,8 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
   });
 
   test("an adopted owner-less recording advertises the full finalize cap at release", async () => {
+    await arrangeHarness();
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
     registerRecordingSessionCleanup(manager, recordings);
     const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
       manager,
@@ -201,6 +206,8 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
   });
 
   test("the adopted recording's hint subtracts only time spent finalizing after release", async () => {
+    await arrangeHarness();
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
     registerRecordingSessionCleanup(manager, recordings);
     const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
       manager,
@@ -223,6 +230,8 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
   });
 
   test("an acquisition cleanup with no cap of its own keeps the default polling hint", async () => {
+    await arrangeHarness();
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
     await pool.bindOrReuseDeviceSession({
       sessionId: "holder",
       deviceId: DEVICE.deviceId,
@@ -235,6 +244,8 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
   });
 
   test("an acquisition hook for a session other than the holder adopts nothing", async () => {
+    await arrangeHarness();
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
     const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
       manager,
       recordings,
@@ -260,6 +271,8 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
   });
 
   test("wedged adoption persistence advertises its remaining cap and releases quarantine", async () => {
+    await arrangeHarness();
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
     registerRecordingSessionCleanup(manager, recordings);
     const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
       manager,
@@ -306,6 +319,8 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
   });
 
   test("wedged acquisition network push advertises its cap and releases quarantine", async () => {
+    await arrangeHarness();
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
     const state = new NetworkState({ timer, notifier: { notifyResourceUpdated: () => {} } });
     state.startSimulation(DEVICE.deviceId, "timeout", 30, null);
     const cleanup = createOwnerlessNetworkStateAcquisitionCleanup(manager, {
@@ -334,8 +349,9 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
       description: "acquisition quarantine cleared",
     });
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toContain("push cleared network state");
+    // The push's own deadline race and the bounded acquisition cleanup both report the cap.
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("exceeded 10000ms"));
     await pool.bindOrReuseDeviceSession({
       sessionId: "next-owner",
       deviceId: DEVICE.deviceId,
@@ -344,6 +360,8 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
   });
 
   test("wedged acquisition settings reset advertises its cap and releases quarantine", async () => {
+    await arrangeHarness();
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
     const cleanup = createDeviceSettingDefaultsAcquisitionReset(
       manager,
       { resetOnAcquisition: () => new Promise<void>(() => {}) },

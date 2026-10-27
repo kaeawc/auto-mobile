@@ -1,3 +1,7 @@
+import {
+  deliverDaemonHeartbeat,
+  deliverDaemonHeartbeatIfKnown,
+} from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   handleDaemonRequest,
@@ -11,8 +15,9 @@ import {
   type SessionReleaseSnapshot,
 } from "../../src/daemon/sessionManager";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
-import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
+import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/wire/constants";
 import { DAEMON_SESSION_NOT_FOUND_CODE, type DaemonRequest } from "../../src/daemon/types";
+import type { SessionReleaseReason } from "../../src/models/releaseReasons";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -24,7 +29,7 @@ const notFound = {
   success: false,
   error: `Session not found: ${sessionId}`,
   code: DAEMON_SESSION_NOT_FOUND_CODE,
-};
+} as const;
 const released = {
   success: true,
   result: { message: `Session ${sessionId} released`, device: deviceId, alreadyReleased: false },
@@ -32,7 +37,8 @@ const released = {
 const alreadyReleased = {
   success: true,
   result: {
-    message: `Session ${sessionId} already released or never existed`,
+    message: `Session ${sessionId} already released`,
+    known: true,
     alreadyReleased: true,
   },
 };
@@ -89,12 +95,12 @@ class DeferredPersistence extends FakeDeviceSessionPersistence {
 
   override async upsertActiveSession(
     ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
-  ): Promise<void> {
+  ): Promise<number> {
     if (this.deferUpsert) {
       this.upsertStarted.resolve();
       await this.finishUpsert.promise;
     }
-    await super.upsertActiveSession(...args);
+    return super.upsertActiveSession(...args);
   }
 }
 
@@ -178,10 +184,10 @@ describe("requests during device session release", () => {
     manager.stopCleanupTimer();
   });
 
-  async function beginPhaseA(reason: string, cli = false) {
+  async function beginPhaseA(reason: SessionReleaseReason, cli = false) {
     const session = await manager.createSession(sessionId, deviceId, "android");
     if (reason === "heartbeat-timeout") {
-      manager.recordHeartbeat(sessionId);
+      await deliverDaemonHeartbeat(manager, sessionId);
     }
     if (cli) {
       manager.adoptCliLivenessPolicy(sessionId, 60000);
@@ -199,7 +205,7 @@ describe("requests during device session release", () => {
     await handleDaemonRequest(request("daemon/heartbeat", { sessionId: "unrelated" }), state);
   }
 
-  for (const reason of ["explicit-release", "heartbeat-timeout", "daemon-shutdown"]) {
+  for (const reason of ["explicit-release", "heartbeat-timeout", "daemon-shutdown"] as const) {
     for (const mode of ["plain", "cli-idle", "literal-cli-idle", "claim", "restore"] as const) {
       test(`Phase A ${reason}: ${mode} heartbeat rejects without liveness mutation`, async () => {
         const { session, release } = await beginPhaseA(reason, mode === "restore");
@@ -328,14 +334,14 @@ describe("requests during device session release", () => {
     }
   });
 
-  test("direct recordHeartbeat during Phase A does not mutate or persist activity", async () => {
+  test("a heartbeat delivered during Phase A does not mutate or persist activity", async () => {
     const { session, release } = await beginPhaseA("explicit-release");
     session.ownership = "awaiting-owner";
     session.awaitingOwnerSince = 0;
     const before = liveness(session);
     const writes = persistence.activityWrites;
     timer.advanceTime(1);
-    manager.recordHeartbeat(sessionId);
+    await deliverDaemonHeartbeatIfKnown(manager, sessionId);
     const after = liveness(session);
     finishRestore.resolve();
     await release;
@@ -406,7 +412,7 @@ describe("requests during device session release", () => {
     });
   }
 
-  for (const reason of ["explicit-release", "heartbeat-timeout"]) {
+  for (const reason of ["explicit-release", "heartbeat-timeout"] as const) {
     test(`${reason}: tool admission waits for teardown then rejects without assigning`, async () => {
       const { release } = await beginPhaseA(reason);
       // This persistence seam retains no recoverable row for tool admission.

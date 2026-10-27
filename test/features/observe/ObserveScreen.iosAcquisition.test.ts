@@ -39,6 +39,15 @@ const device = {
   deviceId: "provenance-ios-9821",
   platform: "ios",
 } as const;
+class TestTapOnElement extends TapOnElement {
+  override async captureTerminalObservationScreenshot(): Promise<void> {}
+  override async recordDeferredPredictionOutcome(): Promise<void> {}
+}
+class TestTapAnyElement extends TapAnyElement {
+  override async captureTerminalObservationScreenshot(): Promise<void> {}
+  override async recordDeferredPredictionOutcome(): Promise<void> {}
+}
+
 const raw: XCTestHierarchy = {
   updatedAt: 1000,
   packageName: "com.example.app",
@@ -103,7 +112,7 @@ function harness(
   );
   const instance = spyOnIosClientInstance(client);
   const adb = new FakeAdbClientFactory(new FakeAdbExecutor());
-  const hierarchy = new ViewHierarchy(device, adb, timer);
+  const hierarchy = new ViewHierarchy(device, adb, undefined, timer);
   const screen = createObserveScreenForTest(
     device,
     adb,
@@ -274,21 +283,19 @@ for (const tool of ["tapOn", "tapAny"] as const) {
         const adb = new FakeAdbExecutor();
         const tap =
           tool === "tapOn"
-            ? new TapOnElement(device, adb, {
+            ? new TestTapOnElement(device, adb, {
                 timer: h.timer,
-                tapStrategy: new FakeTapStrategy(),
+                tapStrategy: FakeTapStrategy.ios(),
                 visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
                 selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
               })
-            : new TapAnyElement(device, adb, {
+            : new TestTapAnyElement(device, adb, {
                 timer: h.timer,
                 iosVoiceOverDetector: new FakeIosVoiceOverDetector(),
               });
         tap.observeScreen = h.screen;
         tap.window = new FakeWindow();
         tap.awaitIdle = new FakeAwaitIdle();
-        tap.captureTerminalObservationScreenshot = async () => {};
-        tap.recordDeferredPredictionOutcome = async () => {};
         if (tap instanceof TapOnElement) {
           tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
             observation: current,
@@ -298,13 +305,15 @@ for (const tool of ["tapOn", "tapAny"] as const) {
         const execute = h.screen.execute.bind(h.screen);
         h.screen.execute = (options) =>
           execute({ ...options, skipScreenshot: true, skipBackStack: true });
-        const run = () =>
-          tap.execute({
+        const run = () => {
+          const options = {
             text: "Target",
-            action: "tap",
+            action: "tap" as const,
             retryIfNoChange: false,
-            selectionStrategy: "first",
-          });
+            selectionStrategy: "first" as const,
+          };
+          return tap instanceof TestTapOnElement ? tap.execute(options) : tap.execute(options);
+        };
         if (scenario === "observe->tap" || scenario === "aged-observe->tap") {
           await h.screen.execute();
           if (scenario === "aged-observe->tap") {
@@ -326,7 +335,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
         const resolutionReads: string[][] = [];
         const dispatch = spyOn(h.client, "requestTapCoordinates").mockImplementation(async () => {
           resolutionReads.push(h.commands.map((command) => command.type));
-          return { success: true };
+          return { success: true, totalTimeMs: 0 };
         });
         try {
           expect((await run()).success).toBe(true);

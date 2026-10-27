@@ -6,8 +6,8 @@ import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { defaultTimer } from "../../../utils/SystemTimer";
 import { carryToolFailureMark } from "../../../utils/toolFailureSignal";
 import { stringifyToolResponse } from "../../../utils/toolUtils";
-import { unregisterDirectSession } from "../../directSessionDeviceRegistry";
-import { isDeviceSessionAcquisitionTool } from "../../deviceSessionResult";
+import { unregisterDirectSession } from "../../../utils/directSessionDeviceRegistry";
+import { isDeviceSessionAcquisitionTool } from "../../../daemon/deviceSessionResult";
 import type { McpServerOptions } from "../../index";
 import { ToolRegistry } from "../../toolRegistry";
 import {
@@ -101,7 +101,7 @@ export async function applyAcquisitionToolSelection(
   try {
     const selection = await applyToolSelection(service, sessionUuid, enableTools, true);
     if (selection.requested.length > 0) {
-      ToolRegistry.notifyToolListChanged();
+      ToolRegistry.notifyToolSelectionChanged();
     }
     return selection.skipped.length > 0 ? { skipped: selection.skipped } : {};
   } catch (error) {

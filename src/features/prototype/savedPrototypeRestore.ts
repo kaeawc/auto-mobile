@@ -16,6 +16,9 @@ import {
   type SavedPrototypeMirror,
 } from "./savedPrototypeMirror";
 
+import type { SavedPrototypeRestoreReport } from "../../models/SavedPrototypeRestoreReport";
+export type { SavedPrototypeRestoreReport };
+
 // Restore polling uses a fixed half-second interval.
 const SAVED_PROTOTYPE_POLL_INTERVAL_MS = 500;
 
@@ -31,11 +34,6 @@ export interface SavedPrototypeRestoreDevice {
 export type SavedPrototypeRestoreResult = Omit<PrototypeResult, "errorCode"> & {
   errorCode?: string;
 };
-export interface SavedPrototypeRestoreReport {
-  restored: string[];
-  skipped: string[];
-  failed: { id: string; code: string; reason: string }[];
-}
 function failedReply(
   reply: SavedPrototypeRestoreResult,
 ): { code: string; reason: string } | undefined {

@@ -8,6 +8,8 @@ import android.view.ViewGroup
 import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -18,23 +20,30 @@ import dev.jasonpearson.automobile.protocol.PrototypeDismissAction
 import dev.jasonpearson.automobile.protocol.PrototypeEmitAction
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeEventKind
+import dev.jasonpearson.automobile.protocol.PrototypePushAction
 import dev.jasonpearson.automobile.protocol.PrototypeRequestAction
 import dev.jasonpearson.automobile.protocol.PrototypeRequestError
 import dev.jasonpearson.automobile.protocol.PrototypeRequestErrorCode
 import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
+import dev.jasonpearson.automobile.protocol.PrototypeRequests
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
+import dev.jasonpearson.automobile.protocol.PrototypeStackNode
 import dev.jasonpearson.automobile.protocol.PrototypeStorageBlock
 import dev.jasonpearson.automobile.protocol.PrototypeStoredValues
+import dev.jasonpearson.automobile.protocol.PrototypeSwitchNode
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -43,6 +52,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -124,6 +134,51 @@ class SavedPrototypeActivityTest {
   fun `back finishes and buffers exactly one user dismissal`() {
     val activity = launch()
     activity.onBackPressedDispatcher.onBackPressed()
+    activity.onBackPressedDispatcher.onBackPressed()
+    compose.waitForIdle()
+    assertUserDismissed(activity)
+  }
+
+  @Test
+  fun `activity back pops the saved stack before dismissing at root`() = runBlocking {
+    val original = savedPrototypeFixture()
+    val spec =
+      original.spec.copy(
+        motion = "none",
+        root =
+          PrototypeStackNode(
+            id = "nav",
+            start = "home",
+            screens =
+              mapOf(
+                "home" to original.spec.root,
+                "detail" to PrototypeButtonNode(label = "Detail", testTag = "detail"),
+              ),
+          ),
+      )
+    store.stored["panel"] =
+      SavedPrototypeLoadResult.Loaded(
+        original.id,
+        original.label,
+        original.slug,
+        original.savedAt,
+        spec,
+        "",
+        emptyMap(),
+      )
+    val activity = launch()
+    activity.interact(PrototypeInteraction.Tap(listOf(PrototypePushAction("nav", "detail"))))
+    compose.waitForIdle()
+    assertNotNull(root(activity).find("detail"))
+    SavedPrototypeEvents.buffer.drain()
+    activity.onBackPressedDispatcher.onBackPressed()
+    compose.waitForIdle()
+    assertFalse(activity.isFinishing)
+    assertNotNull(root(activity).find("saved-node"))
+    assertEquals(
+      listOf(PrototypeEventKind.SCREEN_CHANGED),
+      SavedPrototypeEvents.buffer.drain().map { it.kind },
+    )
     activity.onBackPressedDispatcher.onBackPressed()
     compose.waitForIdle()
     assertUserDismissed(activity)
@@ -220,6 +275,60 @@ class SavedPrototypeActivityTest {
   }
 
   @Test
+  fun `document relaunch of identical spec still replaces runtime and continues sequence`() {
+    val fixture = savedPrototypeFixture(actions = listOf(PrototypeToggleAction("dark")))
+    store.stored["panel"] =
+      SavedPrototypeLoadResult.Loaded(
+        fixture.id,
+        fixture.label,
+        fixture.slug,
+        fixture.savedAt,
+        fixture.spec.copy(state = mapOf("dark" to PrototypeScalar.BooleanValue(false))),
+        fixture.specJson,
+        emptyMap(),
+      )
+    val activity = launch()
+    click(activity, "saved-node")
+    controllers.single().newIntent(SavedPrototypeLaunch.intent(context, "panel"))
+    compose.waitForIdle()
+    assertEquals(1, SavedPrototypeEvents.buffer.size)
+    click(activity, "saved-node")
+
+    val events = SavedPrototypeEvents.buffer.drain()
+    assertEquals(listOf(1L, 2L), events.map { it.sequence })
+    assertEquals(listOf(PrototypeEventKind.EMIT, PrototypeEventKind.EMIT), events.map { it.kind })
+    assertEquals(listOf("change", "change"), events.map { it.name })
+    // Both toggles start from the saved false value, rather than retaining the old runtime's true.
+    assertEquals(events.first().payload, events.last().payload)
+    assertFalse(activity.isFinishing)
+  }
+
+  @Test
+  fun `suspending injected sink is awaited between events without default delivery`() =
+    runBlocking {
+      val gate = CompletableDeferred<Unit>()
+      val events = mutableListOf<PrototypeEvent>()
+      SavedPrototypeActivityDependencies.eventSink = PrototypeEventSink {
+        events += it
+        if (events.size == 1) gate.await()
+      }
+      val activity = launch()
+      val button = store.stored.getValue("panel").spec.root as PrototypeButtonNode
+      val interaction =
+        launch(start = CoroutineStart.UNDISPATCHED) {
+          activity.interact(PrototypeInteraction.Tap(checkNotNull(button.onTap)))
+        }
+      assertEquals(listOf("first"), events.map { it.name })
+      assertFalse(interaction.isCompleted)
+      gate.complete(Unit)
+      interaction.join()
+      assertTrue(interaction.isCompleted)
+      assertEquals(listOf("first", "second"), events.map { it.name })
+      assertEquals(listOf(1L, 2L), events.map { it.sequence })
+      assertEquals(0, SavedPrototypeEvents.buffer.size)
+    }
+
+  @Test
   fun `document relaunch of a deleted entry shows not saved and closes without an event`() {
     val activity = launch()
     assertTrue(store.delete("panel"))
@@ -297,6 +406,97 @@ class SavedPrototypeActivityTest {
     assertEquals(PrototypeRequestErrorCode.INVALID_REQUEST, error.code)
     assertEquals(PrototypeHttpClients.SAVED_HOST_UNAVAILABLE_MESSAGE, error.message)
     assertTrue(error.message.contains("saved prototypes"))
+  }
+
+  @Test
+  fun `public embedding wiring preserves the saved host refusal outcome`() {
+    SavedPrototypeActivityDependencies.httpClients = {
+      PrototypeHttpClients.forSavedPrototype { error("Host requests must never use the device") }
+    }
+    savedRequestPrototype("host")
+    val activity = launch()
+    click(activity, "saved-node")
+
+    val payload =
+      SavedPrototypeEvents.buffer
+        .drain()
+        .single { it.name == PrototypeRequests.EVENT_NAME }
+        .payload!!
+        .jsonObject
+    assertEquals(JsonPrimitive("host"), payload["via"])
+    assertEquals(JsonPrimitive("error"), payload["outcome"])
+    val failure = payload.getValue("error").jsonObject
+    assertEquals(
+      JsonPrimitive(PrototypeRequestErrorCode.INVALID_REQUEST.wireValue),
+      failure["code"],
+    )
+    assertEquals(
+      JsonPrimitive(PrototypeHttpClients.SAVED_HOST_UNAVAILABLE_MESSAGE),
+      failure["message"],
+    )
+  }
+
+  @Test
+  fun `corrupt stored values are deleted when opening through public storage adapter`() {
+    val storage = FakePrototypeStorageStore()
+    storage.documents["panel"] = PrototypeStorageLoad.Corrupt("unreadable")
+    SavedPrototypeActivityDependencies.storageStore = { storage }
+    val activity = launch()
+    assertNotNull(root(activity).find("saved-node"))
+    assertEquals(listOf("panel"), storage.deletes)
+    assertEquals(0, SavedPrototypeEvents.buffer.size)
+  }
+
+  @Test
+  fun `storage restores before drawing and reload flushes before the replacement restores`() {
+    val storage = FakePrototypeStorageStore()
+    storage.seed("panel", PrototypeStoredValues(1, mapOf("state:dark" to JsonPrimitive(true))))
+    SavedPrototypeActivityDependencies.storageStore = { storage }
+    savedStoragePrototype()
+    val activity = launch()
+    compose.onNodeWithTag("saved-node").assertIsOn()
+    assertEquals(0, SavedPrototypeEvents.buffer.size)
+    click(activity, "saved-node")
+    compose.onNodeWithTag("saved-node").assertIsOff()
+
+    controllers.single().newIntent(SavedPrototypeLaunch.intent(context, "panel"))
+    compose.waitForIdle()
+    compose.onNodeWithTag("saved-node").assertIsOff()
+    assertEquals(JsonPrimitive(false), storage.stored("panel")?.values?.get("state:dark"))
+    assertEquals(1, SavedPrototypeEvents.buffer.size)
+  }
+
+  @Test
+  fun `shared registry invalidation prevents the embedded saved session from recreating storage`() =
+    runBlocking {
+      val storage = FakePrototypeStorageStore()
+      SavedPrototypeActivityDependencies.storageStore = { storage }
+      SavedPrototypeActivityDependencies.flushScope = this
+      savedStoragePrototype()
+      val activity = launch()
+      assertTrue(PrototypeStorageSessionRegistry.Shared.invalidate("panel") > 0)
+      click(activity, "saved-node")
+      controllers.removeAt(0).pause().stop().destroy()
+      yield()
+      assertTrue(storage.saves.isEmpty())
+    }
+
+  private fun savedStoragePrototype() {
+    val fixture = savedPrototypeFixture()
+    store.stored["panel"] =
+      SavedPrototypeLoadResult.Loaded(
+        fixture.id,
+        fixture.label,
+        fixture.slug,
+        fixture.savedAt,
+        fixture.spec.copy(
+          state = mapOf("dark" to PrototypeScalar.BooleanValue(false)),
+          storage = PrototypeStorageBlock(1, listOf("state:dark")),
+          root = PrototypeSwitchNode(testTag = "saved-node", label = "Dark", stateKey = "dark"),
+        ),
+        fixture.specJson,
+        emptyMap(),
+      )
   }
 
   @Test
@@ -399,6 +599,36 @@ class SavedPrototypeActivityTest {
     override fun dispatch(context: CoroutineContext, block: Runnable) {
       if (hold) queue.addLast(block) else block.run()
     }
+  }
+
+  @Test
+  fun `loading stays visible until stored state is ready for its first draw`() {
+    val gate = GatedDispatcher()
+    val storage = FakePrototypeStorageStore()
+    storage.seed("panel", PrototypeStoredValues(1, mapOf("state:dark" to JsonPrimitive(true))))
+    savedStoragePrototype()
+    SavedPrototypeActivityDependencies.ioDispatcher = gate
+    SavedPrototypeActivityDependencies.storageStore = { storage }
+    SavedPrototypeActivityDependencies.store = {
+      object : SavedPrototypeStore by store {
+        override fun load(id: String): SavedPrototypeLoadResult =
+          store.load(id).also { gate.hold = true }
+      }
+    }
+    val activity = launch()
+    try {
+      assertNotNull(root(activity).find("saved-prototype-state-loading"))
+      assertNull(root(activity).find("saved-prototype-state-ready"))
+      assertNull(root(activity).find("saved-node"))
+    } finally {
+      gate.hold = false
+      while (gate.queue.isNotEmpty()) gate.queue.removeFirst().run()
+    }
+    compose.waitForIdle()
+    compose.onNodeWithTag("saved-node").assertIsOn()
+    assertNotNull(root(activity).find("saved-prototype-state-ready"))
+    assertNull(root(activity).find("saved-prototype-state-loading"))
+    assertEquals(0, SavedPrototypeEvents.buffer.size)
   }
 
   @Test

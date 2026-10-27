@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { DaemonClient } from "../../../src/daemon/client";
 import { DaemonMcpProxy } from "../../../src/daemon/daemonMcpProxy";
 import type { DaemonManagerLike, DaemonRestartResult } from "../../../src/daemon/manager";
+import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
 import { UnixSocketServer } from "../../../src/daemon/socketServer";
 import type { DaemonOptions, DaemonStatus } from "../../../src/daemon/types";
 import { FakeDaemonClient } from "../../fakes/FakeDaemonClient";
@@ -17,6 +18,8 @@ function createFakeDaemonState() {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
+      getDeviceLabels: () => undefined,
       getSession: () => null,
       getAllSessions: () => [],
       releaseSession: async () => null,
@@ -26,6 +29,7 @@ function createFakeDaemonState() {
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       releaseDevice: async () => {},
     }),
+    getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
   };
 }
 
@@ -86,6 +90,12 @@ describe("sequential startup-option reconciliation", () => {
             options,
           };
           return "restarted";
+        },
+        recoverControlState: async () => {
+          throw new Error("this scenario never recovers control state");
+        },
+        restartAdmitted: async () => {
+          throw new Error("this scenario never admits a restart");
         },
         waitForReady: async () => true,
         isStartupLockHeldByLiveProcess: () => false,

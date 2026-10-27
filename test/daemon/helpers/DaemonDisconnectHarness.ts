@@ -1,4 +1,5 @@
 import { Daemon } from "../../../src/daemon/daemon";
+import { DeviceLossState } from "../../../src/daemon/deviceLossState";
 import type { PooledDevice } from "../../../src/daemon/devicePool";
 import type { SingleFlightInterval } from "../../../src/daemon/SingleFlightInterval";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
@@ -107,7 +108,7 @@ export class DaemonDisconnectHarness extends Daemon {
   }
 
   stopMissingDeviceListener(): void {
-    this.unsubscribeAdbMissingDevice?.();
+    this.runtime.unsubscribeAdbMissingDevice?.();
   }
 
   shouldSkipStaleCleanup(
@@ -123,38 +124,40 @@ export class DaemonDisconnectHarness extends Daemon {
   }
 
   get disconnectMonitor(): SingleFlightInterval | null {
-    return this.deviceDisconnectMonitor;
+    return this.runtime.deviceDisconnectMonitor;
   }
 
   get disconnectMisses(): Map<string, number> {
-    return this.deviceDisconnectMisses;
+    return this.deviceLoss.misses;
   }
 
-  get missIncarnations(): Daemon["deviceDisconnectMissIncarnations"] {
-    return this.deviceDisconnectMissIncarnations;
+  get missIncarnations(): DeviceLossState["missIncarnations"] {
+    return this.deviceLoss.missIncarnations;
   }
 
   get confirmedDisconnected(): Set<string> {
-    return this.confirmedDisconnectedDeviceIds;
+    return this.deviceLoss.confirmedDisconnectedIds;
   }
 
   get forcedDisconnected(): Set<string> {
-    return this.forceDisconnectedDeviceIds;
+    return this.deviceLoss.forceDisconnectedIds;
   }
 
   set forcedDisconnected(ids: Set<string>) {
-    this.forceDisconnectedDeviceIds = ids;
+    Object.assign(this, {
+      deviceLoss: new DeviceLossState({ ...this.deviceLoss, forceDisconnectedIds: ids }),
+    });
   }
 
   get forceGenerations(): Map<string, number> {
-    return this.forceDisconnectedDeviceGenerations;
+    return this.deviceLoss.forceDisconnectedGenerations;
   }
 
   get offlineRecoveryAttempted(): Set<string> {
-    return this.offlineRecoveryAttemptedDeviceIds;
+    return this.deviceLoss.offlineRecoveryAttemptedIds;
   }
 
   get offlineRecoveryIncarnations(): Map<string, number | string> {
-    return this.offlineRecoveryAttemptedIncarnations;
+    return this.deviceLoss.offlineRecoveryAttemptedIncarnations;
   }
 }

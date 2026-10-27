@@ -1,5 +1,7 @@
-import { expect, mock, test } from "bun:test";
+import { afterEach, expect, mock, test } from "bun:test";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { Daemon } from "../../src/daemon/daemon";
+import type { DaemonDisconnect } from "../../src/daemon/daemonCore/DaemonDisconnect";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -37,15 +39,17 @@ test.each(["waiting", "in-flight", "absent", "prepared"])(
       () => {},
     );
     pool.finishSessionPreservingRecoveryPreparation = finishPreparation;
-    const daemon: Daemon = Object.create(Daemon.prototype);
-    Object.assign(daemon, { devicePool: pool, forceDisconnectedDeviceIds: new Set<string>() });
-    daemon["shouldSkipStaleDisconnectCleanup"] = async () => false;
-    daemon["isCapturedDisconnectTargetCurrent"] = () => true;
-    const retire = mock<Daemon["retireAdbServerResetDisconnectState"]>(() => {});
-    daemon["retireAdbServerResetDisconnectState"] = retire;
+    const hooks = new Daemon({}, { timer }).testHooks;
+    hooks.replaceDevicePool(pool);
+    const retire = mock<DaemonDisconnect["retireAdbServerResetDisconnectState"]>(() => {});
+    hooks.overrideCapturedDisconnectChecks({
+      shouldSkipStaleDisconnectCleanup: async () => false,
+      isCapturedDisconnectTargetCurrent: () => true,
+      retireAdbServerResetDisconnectState: retire,
+    });
     try {
       expect(
-        await daemon["recordAndTryRecoverCapturedDisconnect"](
+        await hooks.recordAndTryRecoverCapturedDisconnect(
           "device",
           null,
           0,
@@ -137,17 +141,19 @@ test.each([
     pool.recoverSessionBoundDeviceAfterLoss = recover;
     const finish = mock<DevicePool["finishSessionPreservingRecoveryPreparation"]>(() => {});
     pool.finishSessionPreservingRecoveryPreparation = finish;
-    const daemon: Daemon = Object.create(Daemon.prototype);
-    Object.assign(daemon, { devicePool: pool, forceDisconnectedDeviceIds: new Set<string>() });
-    const skip = mock<Daemon["shouldSkipStaleDisconnectCleanup"]>(async () => false);
-    daemon["shouldSkipStaleDisconnectCleanup"] = skip;
-    const current = mock<Daemon["isCapturedDisconnectTargetCurrent"]>(() => true);
-    daemon["isCapturedDisconnectTargetCurrent"] = current;
-    const retire = mock<Daemon["retireAdbServerResetDisconnectState"]>(() => {});
-    daemon["retireAdbServerResetDisconnectState"] = retire;
+    const hooks = new Daemon({}, { timer }).testHooks;
+    hooks.replaceDevicePool(pool);
+    const skip = mock<DaemonDisconnect["shouldSkipStaleDisconnectCleanup"]>(async () => false);
+    const current = mock<DaemonDisconnect["isCapturedDisconnectTargetCurrent"]>(() => true);
+    const retire = mock<DaemonDisconnect["retireAdbServerResetDisconnectState"]>(() => {});
+    hooks.overrideCapturedDisconnectChecks({
+      shouldSkipStaleDisconnectCleanup: skip,
+      isCapturedDisconnectTargetCurrent: current,
+      retireAdbServerResetDisconnectState: retire,
+    });
     try {
       expect(
-        await daemon["recordAndTryRecoverCapturedDisconnect"](
+        await hooks.recordAndTryRecoverCapturedDisconnect(
           deviceId,
           pooledDevice,
           assignmentCount,
@@ -178,3 +184,7 @@ test.each([
     }
   },
 );
+
+afterEach(() => {
+  DaemonState.getInstance().reset();
+});

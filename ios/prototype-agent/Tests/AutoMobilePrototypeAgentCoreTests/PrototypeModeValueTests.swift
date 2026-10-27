@@ -221,6 +221,6 @@ final class PrototypeModeValueTests: XCTestCase {
         XCTAssertEqual(withIcon.visual(dark: false, available: ["a"]), .image("a"))
         XCTAssertEqual(withIcon.visual(dark: true, available: ["a"]), .icon("home"))
         let plain = try JSONDecoder().decode(NavItem.self, from: Data(#"{"label":"Home"}"#.utf8))
-        XCTAssertEqual(plain.visual(dark: false, available: all), PrototypeNavVisual.none)
+        XCTAssertEqual(plain.visual(dark: false, available: all), PrototypeNavVisual.absent)
     }
 }

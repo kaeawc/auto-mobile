@@ -2,22 +2,35 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.accessibilityservice.AccessibilityService.GestureResultCallback
 import android.accessibilityservice.GestureDescription
-import android.annotation.TargetApi
 import android.graphics.Path
 import android.os.Build
 import android.os.Handler
 import android.util.Log
+import androidx.annotation.RequiresApi
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import dev.jasonpearson.automobile.protocol.RequestDrag
+import dev.jasonpearson.automobile.protocol.RequestGestureEnd
+import dev.jasonpearson.automobile.protocol.RequestGestureStart
+import dev.jasonpearson.automobile.protocol.RequestPinch
+import dev.jasonpearson.automobile.protocol.RequestSwipe
+import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
+import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.android.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.json.JsonElement
+
+/** Timing, performance tracking and delivery for gesture result frames. */
+internal data class GestureReportingDependencies(
+  val perfProvider: PerfProvider,
+  val timeProvider: TimeProvider,
+  val resultSender: ResultSender,
+)
 
 /**
  * Accessibility gesture injection: tap, double tap, long press, swipe, multi-finger swipe, pinch,
@@ -27,17 +40,18 @@ import kotlinx.serialization.json.JsonElement
  * Timing is device-measured behaviour and must not drift in a move: accessibility strokes complete
  * at their last emitted event, and the pointer stays down between continued strokes (drag phases
  * and streamed segments). Everything that needs the live accessibility service or the late-bound
- * WebSocket server comes through [Host] and [ResponseSender].
+ * WebSocket server comes through [Host] and [ResultSender].
  */
 internal class GestureController(
   private val host: Host,
   private val scope: () -> CoroutineScope,
-  private val perfProvider: PerfProvider,
-  private val timeProvider: TimeProvider,
-  private val resultBroadcaster: ResultBroadcaster,
-  private val responseSender: ResponseSender,
+  reporting: GestureReportingDependencies,
   private val gestureThreadFactory: () -> GestureThread,
 ) {
+  private val perfProvider = reporting.perfProvider
+  private val timeProvider = reporting.timeProvider
+  private val resultSender = reporting.resultSender
+
   /** Service-side operations the controller cannot perform without the accessibility service. */
   interface Host {
     /** `AccessibilityService.dispatchGesture`; may throw or return false when refused. */
@@ -60,16 +74,6 @@ internal class GestureController(
 
     /** Broadcasts [hierarchy] synchronously, ahead of the tap result that follows it. */
     suspend fun publishHierarchy(hierarchy: ViewHierarchy)
-  }
-
-  /** Keeps the late-bound WebSocket server behind one seam. */
-  interface ResponseSender {
-    /** False until the server is constructed and while it is stopped. */
-    fun isRunning(): Boolean
-
-    suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String)
-
-    fun connectionCount(): Int
   }
 
   companion object {
@@ -95,20 +99,14 @@ internal class GestureController(
     gestureStreamRouter.cancelOwnedBy(client)
   }
 
-  fun startStream(
-    requestId: String?,
-    gestureId: String,
-    x: Double,
-    y: Double,
-    displayId: Int?,
-    requester: WebSocketServer.ConnectedClient?,
-  ) {
+  fun startStream(request: RequestGestureStart, requester: WebSocketServer.ConnectedClient?) {
+    val requestId = request.requestId
     host.forgetRememberedInsert()
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
       broadcastGestureResult(requestId, false, "Streaming gestures require Android 8.0 (API 26)")
       return
     }
-    gestureStreamRouter.start(requestId, gestureId, x.toFloat(), y.toFloat(), displayId, requester)
+    gestureStreamRouter.start(request, requester)
   }
 
   fun moveStream(requestId: String?, gestureId: String, x: Double, y: Double) {
@@ -116,23 +114,9 @@ internal class GestureController(
     gestureStreamRouter.move(requestId, gestureId, x.toFloat(), y.toFloat())
   }
 
-  fun endStream(
-    requestId: String?,
-    gestureId: String,
-    x: Double,
-    y: Double,
-    cancel: Boolean,
-    requester: WebSocketServer.ConnectedClient?,
-  ) {
+  fun endStream(request: RequestGestureEnd, requester: WebSocketServer.ConnectedClient?) {
     host.forgetRememberedInsert()
-    gestureStreamRouter.end(
-      requestId,
-      gestureId,
-      x.toFloat(),
-      y.toFloat(),
-      cancel,
-      requester = requester,
-    )
+    gestureStreamRouter.end(request, requester)
   }
 
   /**
@@ -188,7 +172,10 @@ internal class GestureController(
       newSession = { onFinished ->
         GestureStreamSession(
           coordinator = GestureStreamCoordinator(),
-          dispatcher = AccessibilityStrokeDispatcher(),
+          // startStream rejects API < 26 before this factory can run on the gesture thread.
+          dispatcher =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) AccessibilityStrokeDispatcher()
+            else error("Streaming gestures require Android 8.0 (API 26)"),
           runOnGestureThread = { gestureThread.post(it) },
           onFinished = onFinished,
         )
@@ -203,7 +190,7 @@ internal class GestureController(
    * seam so the continuation loop ([GestureStreamSession]) stays framework-free and unit-tested.
    * Requires API 26+ (the `willContinue` constructor and `continueStroke`); the caller guards.
    */
-  @TargetApi(Build.VERSION_CODES.O)
+  @RequiresApi(Build.VERSION_CODES.O)
   private inner class AccessibilityStrokeDispatcher :
     StrokeDispatcher<GestureDescription.StrokeDescription> {
     override fun initialStroke(segment: GestureSegment): GestureDescription.StrokeDescription =
@@ -241,7 +228,13 @@ internal class GestureController(
     ) {
       val gesture = gestureBuilder(displayId).addStroke(stroke).build()
       val dispatched =
-        try {
+        withGestureFailures(
+          onFailure = { e ->
+            Log.e(TAG, "Error dispatching streamed gesture stroke", e)
+            onRejected(e.message ?: "Failed to dispatch streamed gesture stroke")
+            return
+          },
+        ) {
           host.dispatchGesture(
             gesture,
             object : GestureResultCallback() {
@@ -252,10 +245,6 @@ internal class GestureController(
             },
             gestureHandler,
           )
-        } catch (e: Exception) {
-          Log.e(TAG, "Error dispatching streamed gesture stroke", e)
-          onRejected(e.message ?: "Failed to dispatch streamed gesture stroke")
-          return
         }
       if (!dispatched) onRejected("Failed to dispatch streamed gesture stroke")
     }
@@ -278,15 +267,17 @@ internal class GestureController(
    * `dispatchGesture` perf operation, callback result conversion, and guaranteed outer perf close.
    */
   private fun dispatchGestureWithResult(
-    perfLabel: String,
-    gesture: GestureDescription,
-    requestId: String?,
-    startTimeMs: Long,
-    gestureBuiltTimeMs: Long,
-    frameContext: String? = null,
+    request: GestureDispatchRequest,
     beforeCompletedResult: suspend () -> Unit = {},
     onResult: (GestureDispatchOutcome) -> Unit,
   ) {
+    val perfLabel = request.perfLabel
+    val gesture = request.gesture
+    val requestId = request.requestId
+    val startTimeMs = request.startTimeMs
+    val gestureBuiltTimeMs = request.gestureBuiltTimeMs
+    val frameContext = request.frameContext
+
     host.forgetRememberedInsert()
     val lifecycle =
       GestureDispatchLifecycle(
@@ -307,7 +298,13 @@ internal class GestureController(
       return
     }
     val dispatched =
-      try {
+      withGestureFailures(
+        onFailure = { e ->
+          Log.e(TAG, "Error dispatching $perfLabel gesture (requestId=$requestId)", e)
+          lifecycle.failed(e, onResult)
+          return
+        },
+      ) {
         host.dispatchGesture(
           gesture,
           object : GestureResultCallback() {
@@ -337,10 +334,6 @@ internal class GestureController(
           },
           gestureHandler,
         )
-      } catch (e: Exception) {
-        Log.e(TAG, "Error dispatching $perfLabel gesture (requestId=$requestId)", e)
-        lifecycle.failed(e, onResult)
-        return
       }
 
     if (!dispatched) {
@@ -361,33 +354,37 @@ internal class GestureController(
    * Perform a swipe gesture using AccessibilityService's dispatchGesture API. This is significantly
    * faster than ADB's input swipe command.
    */
-  fun performSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    frameContext: String? = null,
-    displayId: Int? = null,
-  ) {
+  fun performSwipe(request: RequestSwipe) {
+    val requestId = request.requestId
     val startTime = timeProvider.currentTimeMillis()
-    Log.d(TAG, "performSwipe: ($x1, $y1) -> ($x2, $y2) duration=${duration}ms")
+    Log.d(
+      TAG,
+      "performSwipe: (${request.x1}, ${request.y1}) -> (${request.x2}, ${request.y2}) duration=${request.duration}ms",
+    )
     perfProvider.serial("performSwipe")
 
-    try {
+    withGestureFailures(
+      onFailure = { e ->
+        perfProvider.end() // end performSwipe block
+        val errorTime = timeProvider.currentTimeMillis()
+        Log.e(TAG, "Error performing swipe", e)
+        host.launchRequestScope(requestId) {
+          broadcastSwipeResult(requestId, false, e.message, errorTime - startTime, null)
+        }
+      },
+    ) {
       // Create the swipe path
       perfProvider.startOperation("buildPath")
       val path =
         Path().apply {
-          moveTo(x1.toFloat(), y1.toFloat())
-          lineTo(x2.toFloat(), y2.toFloat())
+          moveTo(request.x1.toFloat(), request.y1.toFloat())
+          lineTo(request.x2.toFloat(), request.y2.toFloat())
         }
 
       // Build the gesture description
       val gesture =
-        gestureBuilder(displayId)
-          .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
+        gestureBuilder(request.displayId)
+          .addStroke(GestureDescription.StrokeDescription(path, 0, request.duration))
           .build()
       perfProvider.endOperation("buildPath")
 
@@ -395,12 +392,14 @@ internal class GestureController(
       Log.d(TAG, "Gesture built in ${gestureBuiltTime - startTime}ms")
 
       dispatchGestureWithResult(
-        "performSwipe",
-        gesture,
-        requestId,
-        startTime,
-        gestureBuiltTime,
-        frameContext,
+        GestureDispatchRequest(
+          perfLabel = "performSwipe",
+          gesture = gesture,
+          requestId = requestId,
+          startTimeMs = startTime,
+          gestureBuiltTimeMs = gestureBuiltTime,
+          frameContext = request.frameContext,
+        ),
       ) { outcome ->
         if (outcome.completed) {
           Log.d(
@@ -408,13 +407,7 @@ internal class GestureController(
             "Swipe completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
           )
           host.launchRequestScope(requestId) {
-            broadcastSwipeResult(
-              requestId,
-              true,
-              null,
-              outcome.totalTimeMs,
-              outcome.gestureTimeMs,
-            )
+            broadcastSwipeResult(requestId, true, null, outcome.totalTimeMs, outcome.gestureTimeMs)
           }
         } else {
           Log.w(TAG, "Swipe failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
@@ -423,142 +416,84 @@ internal class GestureController(
           }
         }
       }
-    } catch (e: Exception) {
-      perfProvider.end() // end performSwipe block
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing swipe", e)
-      host.launchRequestScope(requestId) {
-        broadcastSwipeResult(requestId, false, e.message, errorTime - startTime, null)
-      }
     }
   }
 
   /**
    * Perform a drag gesture using AccessibilityService's dispatchGesture API.
    *
-   * @param requestId Optional request ID for response correlation
-   * @param x1 Starting X coordinate
-   * @param y1 Starting Y coordinate
-   * @param x2 Ending X coordinate
-   * @param y2 Ending Y coordinate
-   * @param pressDurationMs Press duration before dragging in milliseconds
-   * @param dragDurationMs Drag duration in milliseconds
-   * @param holdDurationMs Hold duration after dragging in milliseconds
+   * @param request Resolved drag endpoints, phase durations, and frame/display context.
    */
-  fun performDrag(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    pressDurationMs: Long,
-    dragDurationMs: Long,
-    holdDurationMs: Long,
-    frameContext: String? = null,
-    displayId: Int? = null,
-  ) {
-    val startTime = timeProvider.currentTimeMillis()
-    Log.d(
-      TAG,
-      "performDrag: ($x1, $y1) -> ($x2, $y2) press=${pressDurationMs}ms drag=${dragDurationMs}ms hold=${holdDurationMs}ms",
-    )
-    // Chained callbacks cross threads. Own these entries by request rather than leaving an IO
-    // thread's perf stack open and trying to close it from the gesture thread.
-    val dragPerf =
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        MutablePerfEntry("performDrag", startTime, requestId).apply {
-          children.add(MutablePerfEntry("buildPath", timeProvider.currentTimeMillis(), requestId))
-        }
-      } else null
-    if (dragPerf == null) perfProvider.serial("performDrag")
+  fun performDrag(request: RequestDrag) {
+    DragOperation(request).run()
+  }
 
-    try {
-      if (dragPerf == null) perfProvider.startOperation("buildPath")
-      val gestureBuilder = gestureBuilder(displayId)
-      val startX = x1.toFloat()
-      val startY = y1.toFloat()
-      val endX = x2.toFloat()
-      val endY = y2.toFloat()
+  private inner class DragOperation(private val request: RequestDrag) {
+    private val requestId = request.requestId
+    private val x1 = request.x1
+    private val y1 = request.y1
+    private val x2 = request.x2
+    private val y2 = request.y2
+    private val pressDurationMs = request.resolvedPressDurationMs
+    private val dragDurationMs = request.resolvedDragDurationMs
+    private val holdDurationMs = request.holdDurationMs
+    private val frameContext = request.frameContext
+    private val displayId = request.displayId
 
-      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-        // Pre-API-26 GestureDescription has no stroke continuation (the willContinue
-        // StrokeDescription constructor is API 26+), so press/drag/hold cannot be
-        // chained as one continuous touch. Approximate with a single stroke covering
-        // the combined duration. Previously this path threw NoSuchMethodError.
-        val totalDurationMs = maxOf(1L, pressDurationMs + dragDurationMs + holdDurationMs)
-        val dragPath =
-          Path().apply {
-            moveTo(startX, startY)
-            lineTo(endX, endY)
+    private val startTime = timeProvider.currentTimeMillis()
+
+    fun run() {
+      Log.d(
+        TAG,
+        "performDrag: ($x1, $y1) -> ($x2, $y2) press=${pressDurationMs}ms drag=${dragDurationMs}ms hold=${holdDurationMs}ms",
+      )
+      // Chained callbacks cross threads. Own these entries by request rather than leaving an IO
+      // thread's perf stack open and trying to close it from the gesture thread.
+      val dragPerf =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          MutablePerfEntry("performDrag", startTime, requestId).apply {
+            children.add(MutablePerfEntry("buildPath", timeProvider.currentTimeMillis(), requestId))
           }
-        gestureBuilder.addStroke(GestureDescription.StrokeDescription(dragPath, 0, totalDurationMs))
-        Log.d(
-          TAG,
-          "Legacy (<API 26) single-stroke drag: ($startX, $startY) -> ($endX, $endY), duration=${totalDurationMs}ms",
-        )
-      } else {
-        val plan =
-          dragStrokePlan(
+        } else null
+      if (dragPerf == null) perfProvider.serial("performDrag")
+
+      withGestureFailures(
+        onFailure = { e ->
+          reportFailure(e, dragPerf)
+        },
+      ) {
+        if (dragPerf == null) perfProvider.startOperation("buildPath")
+        val gestureBuilder = gestureBuilder(displayId)
+        val startX = x1.toFloat()
+        val startY = y1.toFloat()
+        val endX = x2.toFloat()
+        val endY = y2.toFloat()
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+          addLegacyDragStroke(
+            gestureBuilder,
             GesturePoint(startX, startY),
             GesturePoint(endX, endY),
-            pressDurationMs,
-            dragDurationMs,
-            holdDurationMs,
+            pressDurationMs + dragDurationMs + holdDurationMs,
           )
-        val ownedPerf = requireNotNull(dragPerf)
-        val gestureBuiltTime = timeProvider.currentTimeMillis()
-        ownedPerf.children.single().endTime = gestureBuiltTime
-        val dispatchPerf = MutablePerfEntry("dispatchGesture", gestureBuiltTime, requestId)
-        val lifecycle =
-          GestureDispatchLifecycle(
-            startTimeMs = startTime,
-            gestureBuiltTimeMs = gestureBuiltTime,
-            nowMs = { timeProvider.currentTimeMillis() },
-            startOperation = { ownedPerf.children.add(dispatchPerf) },
-            endOperation = { dispatchPerf.endTime = timeProvider.currentTimeMillis() },
-            endPerfBlock = {
-              ownedPerf.endTime = timeProvider.currentTimeMillis()
-              perfProvider.complete(ownedPerf)
-            },
-          )
-        host.forgetRememberedInsert()
-        lifecycle.startDispatch()
-        val onResult: (GestureDispatchOutcome) -> Unit = { dragResultReporter(requestId, it) }
-        val posted = gestureThread.post {
-          // Check once immediately before DOWN; this gesture's own events may advance the token.
-          if (frameContext != null && frameContext != host.currentFrameContext()) {
-            lifecycle.failed(
-              IllegalStateException("Stale frame context; observe a fresh frame before retrying"),
-              onResult,
+        } else {
+          val plan =
+            dragStrokePlan(
+              GesturePoint(startX, startY),
+              GesturePoint(endX, endY),
+              pressDurationMs,
+              dragDurationMs,
+              holdDurationMs,
             )
-          } else {
-            DragStrokeSession(
-                plan = plan,
-                dispatcher = AccessibilityStrokeDispatcher(),
-                deadline = dragDeadline,
-                displayId = displayId,
-                logError = { Log.e(TAG, "Error dispatching drag stroke", it) },
-                onFinished = { success, error ->
-                  if (success) {
-                    serviceScope.launch(
-                      gestureHandler.asCoroutineDispatcher().immediate +
-                        RequestIdContext(requestId) +
-                        PerfRequestContext(requestId),
-                    ) {
-                      gestureCompletionMutex.withLock { lifecycle.completed(onResult = onResult) }
-                    }
-                  } else {
-                    lifecycle.failed(IllegalStateException(error ?: "Drag failed"), onResult)
-                  }
-                },
-                nowMs = android.os.SystemClock::elapsedRealtime,
-              )
-              .start()
-          }
+          ContinuedDrag(requestId, startTime, frameContext, displayId, requireNotNull(dragPerf))
+            .dispatch(plan)
+          return
         }
-        if (!posted) lifecycle.notDispatched(onResult)
-        return
+        dispatchLegacy(gestureBuilder)
       }
+    }
+
+    private fun dispatchLegacy(gestureBuilder: GestureDescription.Builder) {
       val gesture = gestureBuilder.build()
       perfProvider.endOperation("buildPath")
 
@@ -566,16 +501,20 @@ internal class GestureController(
       Log.d(TAG, "Drag gesture built in ${gestureBuiltTime - startTime}ms")
 
       dispatchGestureWithResult(
-        "performDrag",
-        gesture,
-        requestId,
-        startTime,
-        gestureBuiltTime,
-        frameContext,
+        GestureDispatchRequest(
+          perfLabel = "performDrag",
+          gesture = gesture,
+          requestId = requestId,
+          startTimeMs = startTime,
+          gestureBuiltTimeMs = gestureBuiltTime,
+          frameContext = frameContext,
+        ),
       ) { outcome ->
         dragResultReporter(requestId, outcome)
       }
-    } catch (e: Exception) {
+    }
+
+    private fun reportFailure(e: Exception, dragPerf: MutablePerfEntry?) {
       val errorTime = timeProvider.currentTimeMillis()
       if (dragPerf == null) perfProvider.end()
       else {
@@ -596,37 +535,104 @@ internal class GestureController(
     }
   }
 
+  private inner class ContinuedDrag(
+    private val requestId: String?,
+    private val startTime: Long,
+    private val frameContext: String?,
+    private val displayId: Int?,
+    private val ownedPerf: MutablePerfEntry,
+  ) {
+    fun dispatch(plan: List<GestureSegment>) {
+      val gestureBuiltTime = timeProvider.currentTimeMillis()
+      ownedPerf.children.single().endTime = gestureBuiltTime
+      val dispatchPerf = MutablePerfEntry("dispatchGesture", gestureBuiltTime, requestId)
+      val lifecycle =
+        GestureDispatchLifecycle(
+          startTimeMs = startTime,
+          gestureBuiltTimeMs = gestureBuiltTime,
+          nowMs = { timeProvider.currentTimeMillis() },
+          startOperation = { ownedPerf.children.add(dispatchPerf) },
+          endOperation = { dispatchPerf.endTime = timeProvider.currentTimeMillis() },
+          endPerfBlock = {
+            ownedPerf.endTime = timeProvider.currentTimeMillis()
+            perfProvider.complete(ownedPerf)
+          },
+        )
+      host.forgetRememberedInsert()
+      lifecycle.startDispatch()
+      val onResult: (GestureDispatchOutcome) -> Unit = { dragResultReporter(requestId, it) }
+      val posted = gestureThread.post {
+        // Check once immediately before DOWN; this gesture's own events may advance the token.
+        if (frameContext != null && frameContext != host.currentFrameContext()) {
+          lifecycle.failed(
+            IllegalStateException("Stale frame context; observe a fresh frame before retrying"),
+            onResult,
+          )
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          DragStrokeSession(
+              plan = plan,
+              dispatcher = AccessibilityStrokeDispatcher(),
+              timing =
+                DragStrokeDependencies(
+                  deadline = dragDeadline,
+                  nowMs = android.os.SystemClock::elapsedRealtime,
+                ),
+              displayId = displayId,
+              logError = { Log.e(TAG, "Error dispatching drag stroke", it) },
+              onFinished = { success, error ->
+                if (success) {
+                  serviceScope.launch(
+                    gestureHandler.asCoroutineDispatcher().immediate +
+                      RequestIdContext(requestId) +
+                      PerfRequestContext(requestId),
+                  ) {
+                    gestureCompletionMutex.withLock { lifecycle.completed(onResult = onResult) }
+                  }
+                } else {
+                  lifecycle.failed(IllegalStateException(error ?: "Drag failed"), onResult)
+                }
+              },
+            )
+            .start()
+        }
+      }
+      if (!posted) lifecycle.notDispatched(onResult)
+    }
+  }
+
   /**
    * Perform a tap at specific coordinates using AccessibilityService's dispatchGesture API. This is
    * significantly faster than ADB input tap and more precise than resource-id lookup.
    *
-   * @param requestId Optional request ID for response correlation
-   * @param x X coordinate to tap
-   * @param y Y coordinate to tap
-   * @param duration Duration of the tap in milliseconds (default 10ms for a quick tap)
+   * @param request Tap coordinates, duration, frame/display context, and double-tap mode.
    */
-  fun performTapCoordinates(
-    requestId: String?,
-    x: Double,
-    y: Double,
-    duration: Long = 10,
-    frameContext: String? = null,
-    displayId: Int? = null,
-    doubleTap: Boolean = false,
-  ) {
+  fun performTapCoordinates(request: RequestTapCoordinates) {
+    val requestId = request.requestId
+    val duration = request.duration
+    val displayId = request.displayId
+
     val startTime = timeProvider.currentTimeMillis()
-    Log.d(TAG, "performTapCoordinates: ($x, $y) duration=${duration}ms")
+    Log.d(TAG, "performTapCoordinates: (${request.x}, ${request.y}) duration=${duration}ms")
     perfProvider.serial("performTapCoordinates")
 
-    try {
+    withGestureFailures(
+      onFailure = { e ->
+        perfProvider.end() // end performTapCoordinates block
+        val errorTime = timeProvider.currentTimeMillis()
+        Log.e(TAG, "Error performing tap", e)
+        host.launchRequestScope(requestId) {
+          broadcastTapCoordinatesResult(requestId, false, e.message, errorTime - startTime)
+        }
+      },
+    ) {
       // Create a tap path (single point, no movement)
       perfProvider.startOperation("buildPath")
-      val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+      val path = Path().apply { moveTo(request.x.toFloat(), request.y.toFloat()) }
 
       // Build the gesture description
-      val builder =
-        gestureBuilder(displayId).addStroke(GestureDescription.StrokeDescription(path, 0, duration))
-      if (doubleTap) {
+      val builder = gestureBuilder(displayId)
+      builder.addStroke(GestureDescription.StrokeDescription(path, 0, duration))
+      if (request.doubleTap) {
         // Fixed 100ms release-to-press gap, independent of host reply latency.
         builder.addStroke(GestureDescription.StrokeDescription(path, duration + 100L, duration))
       }
@@ -638,12 +644,14 @@ internal class GestureController(
 
       var freshHierarchy: ViewHierarchy? = null
       dispatchGestureWithResult(
-        "performTapCoordinates",
-        gesture,
-        requestId,
-        startTime,
-        gestureBuiltTime,
-        frameContext,
+        GestureDispatchRequest(
+          perfLabel = "performTapCoordinates",
+          gesture = gesture,
+          requestId = requestId,
+          startTimeMs = startTime,
+          gestureBuiltTimeMs = gestureBuiltTime,
+          frameContext = request.frameContext,
+        ),
         beforeCompletedResult = {
           // Wait for UI to settle after tap, then extract fresh hierarchy.
           freshHierarchy = host.settledHierarchy(displayId)
@@ -665,13 +673,6 @@ internal class GestureController(
           }
         }
       }
-    } catch (e: Exception) {
-      perfProvider.end() // end performTapCoordinates block
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing tap", e)
-      host.launchRequestScope(requestId) {
-        broadcastTapCoordinatesResult(requestId, false, e.message, errorTime - startTime)
-      }
     }
   }
 
@@ -679,25 +680,19 @@ internal class GestureController(
    * Perform a two-finger swipe gesture for TalkBack mode scrolling. This allows scrolling content
    * without moving the TalkBack focus cursor.
    *
-   * @param requestId Optional request ID for response correlation
-   * @param x1 Starting X coordinate
-   * @param y1 Starting Y coordinate
-   * @param x2 Ending X coordinate
-   * @param y2 Ending Y coordinate
-   * @param duration Duration of the swipe in milliseconds
-   * @param offset Horizontal offset between the two fingers (default 100px)
+   * @param request Parallel finger strokes, duration, spacing, and display context.
    */
-  fun performTwoFingerSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    offset: Int = 100,
-    displayId: Int? = null,
-    fingerCount: Int = 2,
-  ) {
+  fun performTwoFingerSwipe(request: RequestTwoFingerSwipe) {
+    val requestId = request.requestId
+    val x1 = request.x1
+    val y1 = request.y1
+    val x2 = request.x2
+    val y2 = request.y2
+    val duration = request.duration
+    val offset = request.offset
+    val displayId = request.displayId
+    val fingerCount = request.fingerCount
+
     val startTime = timeProvider.currentTimeMillis()
     Log.d(
       TAG,
@@ -705,76 +700,49 @@ internal class GestureController(
     )
     perfProvider.serial("performTwoFingerSwipe")
 
-    try {
+    withGestureFailures(
+      onFailure = { e ->
+        perfProvider.end() // end performTwoFingerSwipe block
+        val errorTime = timeProvider.currentTimeMillis()
+        Log.e(TAG, "Error performing two-finger swipe", e)
+        host.launchRequestScope(requestId) {
+          broadcastSwipeResult(requestId, false, e.message, errorTime - startTime, null)
+        }
+      },
+    ) {
       // One parallel stroke per finger (geometry shared with iOS via computeMultiFingerStrokes).
       perfProvider.startOperation("buildPaths")
-      val builder = gestureBuilder(displayId)
-      for (stroke in computeMultiFingerStrokes(x1, y1, x2, y2, offset, fingerCount)) {
-        val path =
-          Path().apply {
-            moveTo(stroke.startX, stroke.startY)
-            // A stationary stroke (multi-finger tap / long press) is a bare moveTo, like a tap.
-            if (stroke.startX != stroke.endX || stroke.startY != stroke.endY) {
-              lineTo(stroke.endX, stroke.endY)
-            }
-          }
-        builder.addStroke(GestureDescription.StrokeDescription(path, 0, duration))
-      }
-      val gesture = builder.build()
+      val gesture = buildMultiFingerGesture(gestureBuilder(displayId), request)
       perfProvider.endOperation("buildPaths")
 
       val gestureBuiltTime = timeProvider.currentTimeMillis()
       Log.d(TAG, "Two-finger gesture built in ${gestureBuiltTime - startTime}ms")
 
       dispatchGestureWithResult(
-        "performTwoFingerSwipe",
-        gesture,
-        requestId,
-        startTime,
-        gestureBuiltTime,
+        GestureDispatchRequest(
+          perfLabel = "performTwoFingerSwipe",
+          gesture = gesture,
+          requestId = requestId,
+          startTimeMs = startTime,
+          gestureBuiltTimeMs = gestureBuiltTime,
+        ),
       ) { outcome ->
-        if (outcome.completed) {
-          Log.d(
-            TAG,
-            "Two-finger swipe completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
-          )
-          host.launchRequestScope(requestId) {
-            broadcastSwipeResult(
-              requestId,
-              true,
-              null,
-              outcome.totalTimeMs,
-              outcome.gestureTimeMs,
-            )
-          }
-        } else {
-          Log.w(TAG, "Two-finger swipe failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
-          host.launchRequestScope(requestId) {
-            broadcastSwipeResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
-          }
-        }
-      }
-    } catch (e: Exception) {
-      perfProvider.end() // end performTwoFingerSwipe block
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing two-finger swipe", e)
-      host.launchRequestScope(requestId) {
-        broadcastSwipeResult(requestId, false, e.message, errorTime - startTime, null)
+        GestureReporter(requestId).twoFingerSwipe(outcome)
       }
     }
   }
 
   /** Perform a pinch gesture using AccessibilityService's dispatchGesture API. */
-  fun performPinch(
-    requestId: String?,
-    centerX: Double,
-    centerY: Double,
-    distanceStart: Double,
-    distanceEnd: Double,
-    rotationDegrees: Float,
-    duration: Long,
-    displayId: Int? = null,
-  ) {
+  fun performPinch(request: RequestPinch) {
+    val requestId = request.requestId
+    val centerX = request.centerX
+    val centerY = request.centerY
+    val distanceStart = request.distanceStart
+    val distanceEnd = request.distanceEnd
+    val rotationDegrees = request.rotationDegrees
+    val duration = request.duration
+    val displayId = request.displayId
+
     val startTime = timeProvider.currentTimeMillis()
     Log.d(
       TAG,
@@ -782,69 +750,83 @@ internal class GestureController(
     )
     perfProvider.serial("performPinch")
 
-    try {
+    withGestureFailures(
+      onFailure = { e ->
+        perfProvider.end()
+        val errorTime = timeProvider.currentTimeMillis()
+        Log.e(TAG, "Error performing pinch", e)
+        host.launchRequestScope(requestId) {
+          broadcastPinchResult(requestId, false, e.message, errorTime - startTime, null)
+        }
+      },
+    ) {
       perfProvider.startOperation("buildPath")
-      // Geometry is extracted into computePinchPoints so it stays unit testable (see
-      // PinchGeometryTest) and stays in sync with the iOS runner. rotationDegrees rotates the
-      // finger axis *during* the pinch (start horizontal, end rotated); see issue #2911.
-      val points = computePinchPoints(centerX, centerY, distanceStart, distanceEnd, rotationDegrees)
-
-      // A rotating pinch follows an arc (angle and radius interpolated) instead of the straight
-      // chord, which would shrink the radius mid-gesture and zoom a pure rotation (issue #12996).
-      val interior =
-        computePinchPathInterior(centerX, centerY, distanceStart, distanceEnd, rotationDegrees)
-      val path1 =
-        Path().apply {
-          moveTo(points.startX1, points.startY1)
-          interior.forEach { lineTo(it.x1, it.y1) }
-          lineTo(points.endX1, points.endY1)
-        }
-      val path2 =
-        Path().apply {
-          moveTo(points.startX2, points.startY2)
-          interior.forEach { lineTo(it.x2, it.y2) }
-          lineTo(points.endX2, points.endY2)
-        }
-
-      val gesture =
-        gestureBuilder(displayId)
-          .addStroke(GestureDescription.StrokeDescription(path1, 0, duration))
-          .addStroke(GestureDescription.StrokeDescription(path2, 0, duration))
-          .build()
+      val gesture = buildPinchGesture(request) { gestureBuilder(displayId) }
       perfProvider.endOperation("buildPath")
 
       val gestureBuiltTime = timeProvider.currentTimeMillis()
       Log.d(TAG, "Pinch gesture built in ${gestureBuiltTime - startTime}ms")
 
-      dispatchGestureWithResult("performPinch", gesture, requestId, startTime, gestureBuiltTime) {
-        outcome ->
-        if (outcome.completed) {
-          Log.d(
-            TAG,
-            "Pinch completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
+      dispatchGestureWithResult(
+        GestureDispatchRequest(
+          perfLabel = "performPinch",
+          gesture = gesture,
+          requestId = requestId,
+          startTimeMs = startTime,
+          gestureBuiltTimeMs = gestureBuiltTime,
+        ),
+      ) { outcome ->
+        GestureReporter(requestId).pinch(outcome)
+      }
+    }
+  }
+
+  private inner class GestureReporter(private val requestId: String?) {
+    fun twoFingerSwipe(outcome: GestureDispatchOutcome) {
+
+      if (outcome.completed) {
+        Log.d(
+          TAG,
+          "Two-finger swipe completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
+        )
+        host.launchRequestScope(requestId) {
+          broadcastSwipeResult(
+            requestId,
+            true,
+            null,
+            outcome.totalTimeMs,
+            outcome.gestureTimeMs,
           )
-          host.launchRequestScope(requestId) {
-            broadcastPinchResult(
-              requestId,
-              true,
-              null,
-              outcome.totalTimeMs,
-              outcome.gestureTimeMs,
-            )
-          }
-        } else {
-          Log.w(TAG, "Pinch failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
-          host.launchRequestScope(requestId) {
-            broadcastPinchResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
-          }
+        }
+      } else {
+        Log.w(TAG, "Two-finger swipe failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
+        host.launchRequestScope(requestId) {
+          broadcastSwipeResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
         }
       }
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing pinch", e)
-      host.launchRequestScope(requestId) {
-        broadcastPinchResult(requestId, false, e.message, errorTime - startTime, null)
+    }
+
+    fun pinch(outcome: GestureDispatchOutcome) {
+
+      if (outcome.completed) {
+        Log.d(
+          TAG,
+          "Pinch completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
+        )
+        host.launchRequestScope(requestId) {
+          broadcastPinchResult(
+            requestId,
+            true,
+            null,
+            outcome.totalTimeMs,
+            outcome.gestureTimeMs,
+          )
+        }
+      } else {
+        Log.w(TAG, "Pinch failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
+        host.launchRequestScope(requestId) {
+          broadcastPinchResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
+        }
       }
     }
   }
@@ -857,16 +839,17 @@ internal class GestureController(
     totalTimeMs: Long,
     gestureTimeMs: Long?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping swipe result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "swipe_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        swipeResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
-      }
-      Log.d(TAG, "Broadcasted swipe result to ${responseSender.connectionCount()} clients")
+    resultSender.sendFrame(requestId, "swipe_result") { perfTiming ->
+      swipeResultFrame(
+        GestureFrameResult(
+          requestId = requestId,
+          success = success,
+          error = error,
+          totalTimeMs = totalTimeMs,
+          gestureTimeMs = gestureTimeMs,
+        ),
+        perfTiming,
+      )
     }
   }
 
@@ -878,16 +861,17 @@ internal class GestureController(
     totalTimeMs: Long,
     gestureTimeMs: Long?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping drag result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "drag_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        dragResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
-      }
-      Log.d(TAG, "Broadcasted drag result to ${responseSender.connectionCount()} clients")
+    resultSender.sendFrame(requestId, "drag_result") { perfTiming ->
+      dragResultFrame(
+        GestureFrameResult(
+          requestId = requestId,
+          success = success,
+          error = error,
+          totalTimeMs = totalTimeMs,
+          gestureTimeMs = gestureTimeMs,
+        ),
+        perfTiming,
+      )
     }
   }
 
@@ -898,19 +882,8 @@ internal class GestureController(
     error: String?,
     totalTimeMs: Long,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping tap coordinates result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "tap_coordinates_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        tapCoordinatesResultFrame(requestId, success, error, totalTimeMs, perfTiming)
-      }
-      Log.d(
-        TAG,
-        "Broadcasted tap coordinates result to ${responseSender.connectionCount()} clients",
-      )
+    resultSender.sendFrame(requestId, "tap_coordinates_result") { perfTiming ->
+      tapCoordinatesResultFrame(requestId, success, error, totalTimeMs, perfTiming)
     }
   }
 
@@ -922,16 +895,131 @@ internal class GestureController(
     totalTimeMs: Long,
     gestureTimeMs: Long?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping pinch result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "pinch_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        pinchResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
-      }
-      Log.d(TAG, "Broadcasted pinch result to ${responseSender.connectionCount()} clients")
+    resultSender.sendFrame(requestId, "pinch_result") { perfTiming ->
+      pinchResultFrame(
+        GestureFrameResult(
+          requestId = requestId,
+          success = success,
+          error = error,
+          totalTimeMs = totalTimeMs,
+          gestureTimeMs = gestureTimeMs,
+        ),
+        perfTiming,
+      )
     }
   }
+}
+
+/**
+ * Handles the platform failure set shared by these operations. Failure handlers run outside the
+ * try.
+ */
+private inline fun <T> withGestureFailures(onFailure: (Exception) -> T, block: () -> T): T =
+  try {
+    block()
+  } catch (e: kotlinx.coroutines.CancellationException) {
+    throw e
+  } catch (e: IllegalArgumentException) {
+    onFailure(e)
+  } catch (e: IllegalStateException) {
+    onFailure(e)
+  } catch (e: SecurityException) {
+    onFailure(e)
+  }
+
+private fun buildMultiFingerGesture(
+  builder: GestureDescription.Builder,
+  request: RequestTwoFingerSwipe,
+): GestureDescription {
+
+  for (stroke in
+    computeMultiFingerStrokes(
+      MultiFingerStrokeGeometry(
+        x1 = request.x1,
+        y1 = request.y1,
+        x2 = request.x2,
+        y2 = request.y2,
+        offset = request.offset,
+        fingerCount = request.fingerCount,
+      ),
+    )) {
+    val path =
+      Path().apply {
+        moveTo(stroke.startX, stroke.startY)
+        // A stationary stroke (multi-finger tap / long press) is a bare moveTo, like a tap.
+        if (stroke.startX != stroke.endX || stroke.startY != stroke.endY) {
+          lineTo(stroke.endX, stroke.endY)
+        }
+      }
+    builder.addStroke(GestureDescription.StrokeDescription(path, 0, request.duration))
+  }
+  return builder.build()
+}
+
+private fun buildPinchGesture(
+  request: RequestPinch,
+  builder: () -> GestureDescription.Builder,
+): GestureDescription {
+  // Geometry is extracted into computePinchPoints so it stays unit testable (see
+  // PinchGeometryTest) and stays in sync with the iOS runner. rotationDegrees rotates the
+  // finger axis *during* the pinch (start horizontal, end rotated); see issue #2911.
+  val points =
+    computePinchPoints(
+      request.centerX,
+      request.centerY,
+      request.distanceStart,
+      request.distanceEnd,
+      request.rotationDegrees,
+    )
+
+  // A rotating pinch follows an arc (angle and radius interpolated) instead of the straight
+  // chord, which would shrink the radius mid-gesture and zoom a pure rotation (issue #12996).
+  val interior =
+    computePinchPathInterior(
+      request.centerX,
+      request.centerY,
+      request.distanceStart,
+      request.distanceEnd,
+      request.rotationDegrees,
+    )
+  val path1 =
+    Path().apply {
+      moveTo(points.startX1, points.startY1)
+      interior.forEach { lineTo(it.x1, it.y1) }
+      lineTo(points.endX1, points.endY1)
+    }
+  val path2 =
+    Path().apply {
+      moveTo(points.startX2, points.startY2)
+      interior.forEach { lineTo(it.x2, it.y2) }
+      lineTo(points.endX2, points.endY2)
+    }
+
+  return builder()
+    .addStroke(GestureDescription.StrokeDescription(path1, 0, request.duration))
+    .addStroke(GestureDescription.StrokeDescription(path2, 0, request.duration))
+    .build()
+}
+
+private fun addLegacyDragStroke(
+  gestureBuilder: GestureDescription.Builder,
+  start: GesturePoint,
+  end: GesturePoint,
+  durationMs: Long,
+) {
+  // Pre-API-26 GestureDescription has no stroke continuation (the willContinue
+  // StrokeDescription constructor is API 26+), so press/drag/hold cannot be
+  // chained as one continuous touch. Approximate with a single stroke covering
+  // the combined duration. Previously this path threw NoSuchMethodError.
+  val totalDurationMs = maxOf(1L, durationMs)
+  val dragPath =
+    Path().apply {
+      moveTo(start.x, start.y)
+      lineTo(end.x, end.y)
+    }
+  gestureBuilder.addStroke(GestureDescription.StrokeDescription(dragPath, 0, totalDurationMs))
+  Log.d(
+    "CtrlProxy",
+    "Legacy (<API 26) single-stroke drag: (${start.x}, ${start.y}) -> (${end.x}, ${end.y}), duration=${totalDurationMs}ms",
+  )
 }

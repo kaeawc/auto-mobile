@@ -41,7 +41,7 @@ export class FakePrototypeAgentClient implements PrototypeAgentClient {
     readonly handshake: PrototypeAgentHandshake = {
       agentVersion: "0.1.0",
       protocolVersion: 1,
-      capabilities: FAKE_PROTOTYPE_AGENT_CAPABILITIES,
+      capabilities: [...FAKE_PROTOTYPE_AGENT_CAPABILITIES],
     },
   ) {}
 

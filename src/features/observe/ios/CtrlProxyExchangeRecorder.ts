@@ -24,8 +24,9 @@ import { logger } from "../../../utils/logger";
 import type { WebSocketFactory } from "../DeviceServiceClient";
 import { DirectoryExchangeSink } from "./DirectoryExchangeSink";
 import type { CtrlSocket } from "../shared/types";
+import { ENV } from "../../../config/env";
 
-export const IOS_CTRL_PROXY_RECORD_DIR_ENV = "AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR";
+export const IOS_CTRL_PROXY_RECORD_DIR_ENV = ENV.IOS_CTRLPROXY_RECORD_DIR.name;
 
 /** Replacement written in place of text typed into a password (or unresolved) field. */
 export const REDACTED_PASSWORD_TEXT = "<redacted:password-field>";

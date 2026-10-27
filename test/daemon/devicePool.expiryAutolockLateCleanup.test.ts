@@ -41,7 +41,7 @@ import type {
   RotationRestoreState,
 } from "../../src/features/action/Rotate";
 import type { RotateResult } from "../../src/models/RotateResult";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { type InteractionToolDependencies, rotateHandler } from "../../src/server/interactionTools";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";

@@ -1,20 +1,18 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { BootedDevice } from "../../../../src/models";
-import { NetworkState } from "../../../../src/server/NetworkState";
+import { NetworkState } from "../../../../src/utils/NetworkState";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const DEVICE_A: BootedDevice = {
   deviceId: "emulator-5554",
   platform: "android",
-  isEmulator: true,
   name: "Pixel A",
 };
 const DEVICE_B: BootedDevice = {
   deviceId: "emulator-5556",
   platform: "android",
-  isEmulator: true,
   name: "Pixel B",
 };
 

@@ -43,19 +43,26 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
  * @param dividerWidth Width of the visible divider line.
  * @param dragHandleWidth Width of the invisible drag target area (centered on the divider).
  */
+data class HorizontalSplitOptions(
+  val firstPaneFraction: Float = 0.25f,
+  val minFirstDp: Dp = 100.dp,
+  val minSecondDp: Dp = 100.dp,
+  val onFractionChanged: ((Float) -> Unit)? = null,
+  val dividerWidth: Dp = 1.dp,
+  val dragHandleWidth: Dp = 8.dp,
+)
+
 @Composable
 fun HorizontalSplitPane(
+  options: HorizontalSplitOptions = HorizontalSplitOptions(),
   first: @Composable () -> Unit,
   second: @Composable () -> Unit,
   modifier: Modifier = Modifier,
-  firstPaneFraction: Float = 0.25f,
-  minFirstDp: Dp = 100.dp,
-  minSecondDp: Dp = 100.dp,
-  onFractionChanged: ((Float) -> Unit)? = null,
-  dividerWidth: Dp = 1.dp,
-  dragHandleWidth: Dp = 8.dp,
 ) {
-  val currentDensity by rememberUpdatedState(LocalDensity.current)
+  val firstPaneFraction = options.firstPaneFraction
+
+  val onFractionChanged = options.onFractionChanged
+
   val currentOnFractionChanged by rememberUpdatedState(onFractionChanged)
   var fraction by remember { mutableStateOf(firstPaneFraction) }
   var totalWidthPx by remember { mutableStateOf(0) }
@@ -80,41 +87,21 @@ fun HorizontalSplitPane(
       first()
     }
 
-    Box(
-      modifier =
-        Modifier.width(dragHandleWidth)
-          .fillMaxHeight()
-          .hoverable(interactionSource)
-          .pointerHoverIcon(PointerIcon.Hand)
-          .pointerInput(minFirstDp, minSecondDp, dragHandleWidth) {
-            detectDragGestures(
-              onDragStart = { isDragging = true },
-              onDragEnd = { isDragging = false },
-              onDragCancel = { isDragging = false },
-              onDrag = { change, dragAmount ->
-                change.consume()
-                if (totalWidthPx > 0) {
-                  val minFirstPx = with(currentDensity) { minFirstDp.toPx() }
-                  val minSecondPx = with(currentDensity) { minSecondDp.toPx() }
-                  val handlePx = with(currentDensity) { dragHandleWidth.toPx() }
-                  val usable = (totalWidthPx - handlePx).coerceAtLeast(minFirstPx + minSecondPx)
-                  if (usable <= 0f) return@detectDragGestures
-                  val newFirstPx =
-                    (fraction * usable + dragAmount.x).coerceIn(
-                      minFirstPx,
-                      (usable - minSecondPx).coerceAtLeast(minFirstPx),
-                    )
-                  val newFraction = (newFirstPx / usable).coerceIn(0.01f, 0.99f)
-                  fraction = newFraction
-                  currentOnFractionChanged?.invoke(newFraction)
-                }
-              },
-            )
-          },
-      contentAlignment = Alignment.Center,
-    ) {
-      Box(modifier = Modifier.width(dividerWidth).fillMaxHeight().background(dividerColor))
-    }
+    HorizontalSplitDivider(
+      options,
+      SplitDividerState(
+        totalWidthPx,
+        fraction,
+        isDragging,
+        { isDragging = it },
+        {
+          fraction = it
+          currentOnFractionChanged?.invoke(it)
+        },
+        interactionSource,
+        dividerColor,
+      ),
+    )
 
     Box(modifier = Modifier.weight((1f - fraction).coerceIn(0.01f, 0.99f)).fillMaxHeight()) {
       second()
@@ -136,20 +123,28 @@ fun HorizontalSplitPane(
  * @param dividerWidth Height of the visible divider line.
  * @param dragHandleWidth Height of the invisible drag target area (centered on the divider).
  */
+data class VerticalSplitOptions(
+  val showSecond: Boolean = true,
+  val firstPaneFraction: Float = 0.25f,
+  val minFirstDp: Dp = 100.dp,
+  val minSecondDp: Dp = 100.dp,
+  val onFractionChanged: ((Float) -> Unit)? = null,
+  val dividerWidth: Dp = 1.dp,
+  val dragHandleWidth: Dp = 8.dp,
+)
+
 @Composable
 fun VerticalSplitPane(
+  options: VerticalSplitOptions = VerticalSplitOptions(),
   first: @Composable () -> Unit,
   second: @Composable () -> Unit,
-  showSecond: Boolean = true,
   modifier: Modifier = Modifier,
-  firstPaneFraction: Float = 0.25f,
-  minFirstDp: Dp = 100.dp,
-  minSecondDp: Dp = 100.dp,
-  onFractionChanged: ((Float) -> Unit)? = null,
-  dividerWidth: Dp = 1.dp,
-  dragHandleWidth: Dp = 8.dp,
 ) {
-  val currentDensity by rememberUpdatedState(LocalDensity.current)
+  val showSecond = options.showSecond
+  val firstPaneFraction = options.firstPaneFraction
+
+  val onFractionChanged = options.onFractionChanged
+
   val currentOnFractionChanged by rememberUpdatedState(onFractionChanged)
   var fraction by remember { mutableStateOf(firstPaneFraction) }
   var totalHeightPx by remember { mutableStateOf(0) }
@@ -178,45 +173,123 @@ fun VerticalSplitPane(
     }
 
     if (showSecond) {
-      Box(
-        modifier =
-          Modifier.height(dragHandleWidth)
-            .fillMaxWidth()
-            .hoverable(interactionSource)
-            .pointerHoverIcon(PointerIcon.Hand)
-            .pointerInput(minFirstDp, minSecondDp, dragHandleWidth) {
-              detectDragGestures(
-                onDragStart = { isDragging = true },
-                onDragEnd = { isDragging = false },
-                onDragCancel = { isDragging = false },
-                onDrag = { change, dragAmount ->
-                  change.consume()
-                  if (totalHeightPx > 0) {
-                    val minFirstPx = with(currentDensity) { minFirstDp.toPx() }
-                    val minSecondPx = with(currentDensity) { minSecondDp.toPx() }
-                    val handlePx = with(currentDensity) { dragHandleWidth.toPx() }
-                    val usable = (totalHeightPx - handlePx).coerceAtLeast(minFirstPx + minSecondPx)
-                    if (usable <= 0f) return@detectDragGestures
-                    val newFirstPx =
-                      (fraction * usable + dragAmount.y).coerceIn(
-                        minFirstPx,
-                        (usable - minSecondPx).coerceAtLeast(minFirstPx),
-                      )
-                    val newFraction = (newFirstPx / usable).coerceIn(0.01f, 0.99f)
-                    fraction = newFraction
-                    currentOnFractionChanged?.invoke(newFraction)
-                  }
-                },
-              )
-            },
-        contentAlignment = Alignment.Center,
-      ) {
-        Box(modifier = Modifier.height(dividerWidth).fillMaxWidth().background(dividerColor))
-      }
+      VerticalSplitDivider(
+        options,
+        SplitDividerState(
+          totalHeightPx,
+          fraction,
+          isDragging,
+          { isDragging = it },
+          {
+            fraction = it
+            currentOnFractionChanged?.invoke(it)
+          },
+          interactionSource,
+          dividerColor,
+        ),
+      )
 
       Box(modifier = Modifier.weight((1f - fraction).coerceIn(0.01f, 0.99f)).fillMaxWidth()) {
         second()
       }
     }
+  }
+}
+
+private data class SplitDividerState(
+  val totalPx: Int,
+  val fraction: Float,
+  val isDragging: Boolean,
+  val onDragging: (Boolean) -> Unit,
+  val onFractionChanged: (Float) -> Unit,
+  val interactionSource: MutableInteractionSource,
+  val dividerColor: androidx.compose.ui.graphics.Color,
+)
+
+@Composable
+private fun HorizontalSplitDivider(options: HorizontalSplitOptions, state: SplitDividerState) {
+  val currentDensity by rememberUpdatedState(LocalDensity.current)
+  val currentOnFractionChanged by rememberUpdatedState(state.onFractionChanged)
+  val minFirstDp = options.minFirstDp
+  val minSecondDp = options.minSecondDp
+  val dragHandleWidth = options.dragHandleWidth
+  val dividerWidth = options.dividerWidth
+  Box(
+    modifier =
+      Modifier.width(dragHandleWidth)
+        .fillMaxHeight()
+        .hoverable(state.interactionSource)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .pointerInput(minFirstDp, minSecondDp, dragHandleWidth) {
+          detectDragGestures(
+            onDragStart = { state.onDragging(true) },
+            onDragEnd = { state.onDragging(false) },
+            onDragCancel = { state.onDragging(false) },
+            onDrag = { change, dragAmount ->
+              change.consume()
+              if (state.totalPx > 0) {
+                val minFirstPx = with(currentDensity) { minFirstDp.toPx() }
+                val minSecondPx = with(currentDensity) { minSecondDp.toPx() }
+                val handlePx = with(currentDensity) { dragHandleWidth.toPx() }
+                val usable = (state.totalPx - handlePx).coerceAtLeast(minFirstPx + minSecondPx)
+                if (usable <= 0f) return@detectDragGestures
+                val newFirstPx =
+                  (state.fraction * usable + dragAmount.x).coerceIn(
+                    minFirstPx,
+                    (usable - minSecondPx).coerceAtLeast(minFirstPx),
+                  )
+                val newFraction = (newFirstPx / usable).coerceIn(0.01f, 0.99f)
+                currentOnFractionChanged(newFraction)
+              }
+            },
+          )
+        },
+    contentAlignment = Alignment.Center,
+  ) {
+    Box(modifier = Modifier.width(dividerWidth).fillMaxHeight().background(state.dividerColor))
+  }
+}
+
+@Composable
+private fun VerticalSplitDivider(options: VerticalSplitOptions, state: SplitDividerState) {
+  val currentDensity by rememberUpdatedState(LocalDensity.current)
+  val currentOnFractionChanged by rememberUpdatedState(state.onFractionChanged)
+  val minFirstDp = options.minFirstDp
+  val minSecondDp = options.minSecondDp
+  val dragHandleWidth = options.dragHandleWidth
+  val dividerWidth = options.dividerWidth
+  Box(
+    modifier =
+      Modifier.height(dragHandleWidth)
+        .fillMaxWidth()
+        .hoverable(state.interactionSource)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .pointerInput(minFirstDp, minSecondDp, dragHandleWidth) {
+          detectDragGestures(
+            onDragStart = { state.onDragging(true) },
+            onDragEnd = { state.onDragging(false) },
+            onDragCancel = { state.onDragging(false) },
+            onDrag = { change, dragAmount ->
+              change.consume()
+              if (state.totalPx > 0) {
+                val minFirstPx = with(currentDensity) { minFirstDp.toPx() }
+                val minSecondPx = with(currentDensity) { minSecondDp.toPx() }
+                val handlePx = with(currentDensity) { dragHandleWidth.toPx() }
+                val usable = (state.totalPx - handlePx).coerceAtLeast(minFirstPx + minSecondPx)
+                if (usable <= 0f) return@detectDragGestures
+                val newFirstPx =
+                  (state.fraction * usable + dragAmount.y).coerceIn(
+                    minFirstPx,
+                    (usable - minSecondPx).coerceAtLeast(minFirstPx),
+                  )
+                val newFraction = (newFirstPx / usable).coerceIn(0.01f, 0.99f)
+                currentOnFractionChanged(newFraction)
+              }
+            },
+          )
+        },
+    contentAlignment = Alignment.Center,
+  ) {
+    Box(modifier = Modifier.height(dividerWidth).fillMaxWidth().background(state.dividerColor))
   }
 }

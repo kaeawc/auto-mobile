@@ -1,4 +1,5 @@
 import { LONG_PRESS_HARD_MAX_MS } from "../../src/features/action/tapAtGesture";
+import { toolIsError } from "../helpers/toolResponse";
 import {
   SEND_KEYS_MAX_COMMANDS,
   SEND_KEYS_MAX_MODIFIERS,
@@ -223,8 +224,10 @@ test("implementation-supported drag duration reaches the fake action unchanged",
     },
   });
   expect(
-    (await dragAndDropHandler(device, parsedDrag, undefined, undefined, interactionDeps)).isError,
-  ).toBeUndefined();
+    toolIsError(
+      await dragAndDropHandler(device, parsedDrag, undefined, undefined, interactionDeps),
+    ),
+  ).toBe(false);
 });
 
 test.each([{ apexPause: 3000 }, { returnSpeed: 0.1 }, { returnSpeed: 4 }])(
@@ -235,12 +238,12 @@ test.each([{ apexPause: 3000 }, { returnSpeed: 0.1 }, { returnSpeed: 4 }])(
       execute: async (options) => {
         expect(options.apexPause).toBe(timing.apexPause);
         expect(options.returnSpeed).toBe(timing.returnSpeed);
-        return { success: true };
+        return { success: true, targetType: "screen", x1: 0, y1: 0, x2: 0, y2: 0, duration: 0 };
       },
     });
     expect(
-      (await swipeOnHandler(device, parsedSwipe, undefined, undefined, interactionDeps)).isError,
-    ).toBeUndefined();
+      toolIsError(await swipeOnHandler(device, parsedSwipe, undefined, undefined, interactionDeps)),
+    ).toBe(false);
   },
 );
 

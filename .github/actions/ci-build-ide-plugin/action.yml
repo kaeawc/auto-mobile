@@ -1,0 +1,38 @@
+name: "ci-build-ide-plugin"
+description: >-
+  Shared body of the "Build IDE Plugin" job. Call after checkout from both
+  pull_request.yml and merge.yml; the job name, runs-on and gating stay on the
+  caller job so the required status check context is unchanged (#11872).
+inputs:
+  gradle-encryption-key:
+    description: "Gradle encryption key; composite actions cannot read secrets directly."
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/gradle-task-run
+      with:
+        gradle-tasks: "build -x test"
+        gradle-project-directory: "android/ide-plugin"
+        gradle-home-directory: "~/.gradle/${{ github.job }}"
+        reuse-configuration-cache: true
+        gradle-encryption-key: ${{ inputs.gradle-encryption-key }}
+
+    - name: "Build Plugin ZIP"
+      shell: bash
+      working-directory: android/ide-plugin
+      run: |
+        ./gradlew buildPlugin --stacktrace --continue
+
+    - name: "Verify Plugin"
+      shell: bash
+      working-directory: android/ide-plugin
+      run: |
+        ./gradlew verifyPlugin --stacktrace --continue
+
+    - name: "Upload IDE Plugin ZIP"
+      uses: actions/upload-artifact@v6
+      if: success()
+      with:
+        name: ide-plugin-zip
+        path: android/ide-plugin/build/distributions/*.zip

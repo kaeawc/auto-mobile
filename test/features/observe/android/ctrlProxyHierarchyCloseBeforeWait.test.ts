@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/android/CtrlProxyHierarchy";
 import type { HierarchyDelegateContext } from "../../../../src/features/observe/android/types";
@@ -24,7 +25,7 @@ test.each([false, true])(
     adb.executeCommand = async () => {
       started = true;
       await broadcast;
-      return { stdout: "", stderr: "" };
+      return createExecResult("", "");
     };
     const context: HierarchyDelegateContext = {
       getWebSocket: () => socket,

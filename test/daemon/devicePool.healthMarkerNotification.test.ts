@@ -11,7 +11,7 @@ import {
 import {
   createDeviceStateChangeNotifier,
   DEVICE_STATE_NOTIFY_DEBOUNCE_MS,
-} from "../../src/server/deviceStateChangeNotifier";
+} from "../../src/daemon/deviceStateChangeNotifier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";

@@ -1,4 +1,4 @@
-import { expect, test, spyOn } from "bun:test";
+import { mock, afterEach, expect, test, spyOn } from "bun:test";
 import {
   ProcessTableEmulatorProcessStopper,
   type EmulatorProcessSignaler,
@@ -11,6 +11,10 @@ import {
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
 import { FakeLockOwnerGenerationProbe } from "../../fakes/FakeLockOwnerGenerationProbe";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const command = "qemu-system-aarch64 -avd Pixel -port 5554";
 const target = { serial: "emulator-5554", avdName: "Pixel" };
@@ -58,6 +62,9 @@ function fixture(processGeneration?: FakeLockOwnerGenerationProbe) {
 }
 test("own group generation change during escalation read withholds every KILL", async () => {
   const generation = new FakeLockOwnerGenerationProbe();
+  if (generation.token === undefined) {
+    throw new Error("Expected generation token");
+  }
   const f = fixture(generation);
   f.signaler.exitOn = "SIGKILL";
   generation.onCompare = () => (f.table.calls.length === 2 ? "different" : "same");
@@ -73,6 +80,9 @@ test("own group generation change during escalation read withholds every KILL", 
 });
 test("own group generation change after TERM stops waiting without escalation", async () => {
   const generation = new FakeLockOwnerGenerationProbe();
+  if (generation.token === undefined) {
+    throw new Error("Expected generation token");
+  }
   generation.verdict = "same";
   const f = fixture(generation);
   f.signaler.exitOn = "SIGKILL";
@@ -94,6 +104,9 @@ test("own group generation change after TERM stops waiting without escalation", 
 });
 test("generation capture follows group proof and sends TERM before yielding", async () => {
   const generation = new FakeLockOwnerGenerationProbe();
+  if (generation.token === undefined) {
+    throw new Error("Expected generation token");
+  }
   const f = fixture(generation);
   const order: string[] = [];
   f.signaler.resolveOwnGroup = async () => {
@@ -129,6 +142,9 @@ test("generation capture follows group proof and sends TERM before yielding", as
 });
 test("absent group proof skips generation capture and every signal", async () => {
   const generation = new FakeLockOwnerGenerationProbe();
+  if (generation.token === undefined) {
+    throw new Error("Expected generation token");
+  }
   const f = fixture(generation);
   f.signaler.probe = { kind: "absent" };
   expect(await f.stopper.stop(target, { deadlineMs: 30_000 })).toEqual({

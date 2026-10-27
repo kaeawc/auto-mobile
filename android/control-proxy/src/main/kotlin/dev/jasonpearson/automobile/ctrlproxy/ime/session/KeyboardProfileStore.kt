@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.ime.session
 
 import android.content.Context
+import androidx.core.content.edit
 import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile.KeyboardProfiles
 
 interface KeyboardProfileStore {
@@ -18,6 +19,6 @@ class SharedPreferencesKeyboardProfileStore(context: Context) : KeyboardProfileS
   }
 
   override fun setActiveProfileId(id: String) {
-    preferences.edit().putString("profile_id", id).apply()
+    preferences.edit { putString("profile_id", id) }
   }
 }

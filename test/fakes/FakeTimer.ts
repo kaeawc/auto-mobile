@@ -58,7 +58,9 @@ interface PendingInterval {
  * For tests that don't need time control, call enableAutoAdvance() to make
  * sleeps resolve asynchronously while preserving timer deadline order.
  */
-export class FakeTimer implements Timer {
+type FakeTimerContract = Pick<Timer, keyof Timer>;
+
+export class FakeTimer implements FakeTimerContract {
   private pendingSleeps: PendingSleep[] = [];
   private sleepHistory: number[] = [];
   private currentTime: number = 0;
@@ -256,7 +258,7 @@ export class FakeTimer implements Timer {
   /**
    * The monotonic clock: it moves with every advance and `setCurrentTime`, but not across
    * {@link simulateHostSleep}, like `performance.now()` across a macOS suspend. With
-   * {@link simulateSleepCountingMonotonicClock} it runs through sleep too, as on Windows and Linux.
+   * {@link simulateSleepCountingMonotonicClock} it runs through sleep too, as on Windows.
    */
   monotonicNow(): number {
     return this.monotonicIncludesHostSleep ? this.currentTime : this.currentTime - this.hostSleptMs;
@@ -269,7 +271,7 @@ export class FakeTimer implements Timer {
 
   /**
    * Make the monotonic clock run through {@link simulateHostSleep}, like `QueryPerformanceCounter`
-   * on Windows or `CLOCK_BOOTTIME` on Linux, so sleep is indistinguishable from a stall.
+   * on Windows (or `CLOCK_BOOTTIME` on Linux under Bun 1.3), so sleep is indistinguishable from a stall.
    */
   simulateSleepCountingMonotonicClock(): void {
     this.sleepCountingMonotonic = true;
@@ -411,7 +413,7 @@ export class FakeTimer implements Timer {
    * In auto-advance mode: fires asynchronously at its scheduled fake time (but can be cancelled).
    */
   setTimeout(callback: () => void, ms: number): NodeJS.Timeout {
-    const id = this.nextTimeoutId as unknown as NodeJS.Timeout;
+    const id = new FakeTimerHandle(this.nextTimeoutId, callback, () => this.clearTimeout(id));
     this.nextTimeoutId++;
     this.pendingTimeouts.push({
       id,
@@ -437,7 +439,7 @@ export class FakeTimer implements Timer {
    * In auto-advance mode: reschedules itself at each fake interval until cancelled.
    */
   setInterval(callback: () => void, ms: number): NodeJS.Timeout {
-    const id = this.nextIntervalId as unknown as NodeJS.Timeout;
+    const id = new FakeTimerHandle(this.nextIntervalId, callback, () => this.clearInterval(id));
     this.nextIntervalId++;
     this.pendingIntervals.push({
       id,
@@ -691,4 +693,40 @@ export class FakeTimer implements Timer {
 
 function flushNextTicks(): Promise<void> {
   return new Promise<void>((resolve) => process.nextTick(resolve));
+}
+
+type FakeTimerHandleContract = Pick<NodeJS.Timeout, keyof NodeJS.Timeout>;
+
+/** A structural Node handle; all scheduling remains on FakeTimer's clock. */
+class FakeTimerHandle implements FakeTimerHandleContract {
+  private referenced = true;
+  constructor(
+    private readonly id: number,
+    readonly _onTimeout: () => void,
+    private readonly cancel: () => void,
+  ) {}
+  close(): this {
+    this.cancel();
+    return this;
+  }
+  hasRef(): boolean {
+    return this.referenced;
+  }
+  ref(): this {
+    this.referenced = true;
+    return this;
+  }
+  unref(): this {
+    this.referenced = false;
+    return this;
+  }
+  refresh(): this {
+    return this;
+  }
+  [Symbol.toPrimitive](): number {
+    return this.id;
+  }
+  [Symbol.dispose](): void {
+    this.cancel();
+  }
 }

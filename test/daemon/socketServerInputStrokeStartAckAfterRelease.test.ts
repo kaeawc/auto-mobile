@@ -1,3 +1,4 @@
+import type { GestureTimingResult } from "../../src/features/observe/shared/types";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -9,7 +10,7 @@ import {
 } from "../../src/daemon/toolCallActivity";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import {
   createHarnessServer,
   type UnixSocketServerHarness,
@@ -52,7 +53,7 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
   /** Device-side gesture frames, in the order the fake device received them. */
   let strokes: string[];
   let startOnDevice: PromiseWithResolvers<void>;
-  let startAck: PromiseWithResolvers<{ success: boolean }>;
+  let startAck: PromiseWithResolvers<GestureTimingResult>;
   let unsubscribeActivity: () => void;
   const pool = { isSessionRecoveryInFlight: () => false, sessionExecutionsEnded: () => {} };
 
@@ -84,7 +85,7 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
 
   /** The runner acks the start; the frame's handler finishes. */
   async function ackStart(): Promise<DaemonResponse | undefined> {
-    startAck.resolve({ success: true });
+    startAck.resolve({ success: true, totalTimeMs: 0 });
     await settle();
     await Promise.all([...server.state.activeRequestHandlers]);
     await settle();
@@ -94,7 +95,7 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
   beforeEach(async () => {
     strokes = [];
     startOnDevice = Promise.withResolvers<void>();
-    startAck = Promise.withResolvers<{ success: boolean }>();
+    startAck = Promise.withResolvers<GestureTimingResult>();
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
@@ -113,11 +114,11 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
       },
       requestGestureMove: async () => {
         strokes.push("move");
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
       requestGestureEnd: async (_id, _x, _y, cancel) => {
         strokes.push(cancel === true ? "cancel" : "end");
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     });
     const fakePool = createFakeDaemonState().getDevicePool();
@@ -126,6 +127,7 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
       {
         isInitialized: () => true,
         getSessionManager: () => sessionManager,
+        getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
         getDevicePool: () => fakePool,
       },
       new FakeTimer(),
@@ -138,7 +140,7 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
   });
 
   afterEach(async () => {
-    startAck.resolve({ success: true });
+    startAck.resolve({ success: true, totalTimeMs: 0 });
     socket.destroy();
     await settle();
     await Promise.all([...server.state.activeRequestHandlers]);
@@ -164,6 +166,7 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
         getSessionManager: () => sessionManager,
         getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
         getDevicePool: () => ({
+          ...createFakeDaemonState().getDevicePool(),
           releaseDevice: async (deviceId: string) => {
             freed.push(deviceId);
           },
@@ -252,7 +255,7 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
     );
     await settle();
 
-    startAck.resolve({ success: false });
+    startAck.resolve({ success: false, totalTimeMs: 0 });
     await settle();
     await Promise.all([...server.state.activeRequestHandlers]);
 

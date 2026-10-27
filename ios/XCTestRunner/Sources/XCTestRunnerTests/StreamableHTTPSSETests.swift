@@ -1,4 +1,3 @@
-// swiftlint:disable force_unwrapping - fail-fast on bad fixtures is idiomatic in tests.
 import Foundation
 import XCTest
 @testable import XCTestRunner
@@ -25,8 +24,8 @@ private struct HTTPResponseFixture: Sendable {
 final class StreamableHTTPSSETests: XCTestCase {
     private func makeClient(_ performer: AsyncFakeHTTPPerformer) throws -> StreamableHTTPMCPClient {
         try StreamableHTTPMCPClient(
-            endpoint: URL(string: "http://unused/auto-mobile/streamable")!, performer: performer,
-            options: .init(scheduler: VirtualDeadlineScheduler())
+            endpoint: XCTUnwrap(URL(string: "http://unused/auto-mobile/streamable")), performer: performer,
+            options: .init(scheduler: VirtualDeadlineScheduler(), tokenProvider: FakeDaemonHTTPTokenProvider())
         )
     }
 
@@ -303,5 +302,3 @@ final class SSEEventParserTests: XCTestCase {
         XCTAssertEqual(events.map(\.data), ["real"])
     }
 }
-
-// swiftlint:enable force_unwrapping

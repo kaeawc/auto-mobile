@@ -1,8 +1,8 @@
 import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { DaemonMcpProxy, DaemonToolOutcomeUnknownError } from "../../src/daemon/daemonMcpProxy";
-import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/LineFramer";
+import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/DaemonFrameTooLargeError";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -36,9 +36,7 @@ function makeWire(): Wire {
     timer,
     ISOLATED_DAEMON_RECOVERY,
     null,
-    new FakeIdGenerator(),
-    "darwin",
-    LIMIT,
+    { idGenerator: new FakeIdGenerator(), platformOverride: "darwin", maxInboundFrameBytes: LIMIT },
   );
   client.testHooks.attachSocket(socket);
   const requests: DaemonRequest[] = [];

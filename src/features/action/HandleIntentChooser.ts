@@ -24,17 +24,7 @@ export class HandleIntentChooser extends BaseVisualChange {
     deepLinkManagerFactory: (
       signal?: AbortSignal,
     ) => Pick<DeepLinkManager, "handleIntentChooser"> = (signal) =>
-      new DeepLinkManager(
-        device,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        timer,
-        signal,
-      ),
+      new DeepLinkManager(device, undefined, { timer, chooserSignal: signal }),
     timer: Timer = defaultTimer,
     collaborators: DisplayFenceDependencies = {},
   ) {

@@ -1,7 +1,8 @@
+import { readGuardFile, guardDirectoryEntries } from "./astGuard";
 import ts from "typescript";
-import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   PROXY_ACTIVITY_CLOCKS,
   SESSION_ACTIVITY_CLOCKS,
@@ -76,7 +77,7 @@ const LIVENESS_READS: ReadonlySet<string> = new Set([
 
 /** Liveness-only entry points, per file. Keys are `Class.method` or a module function name. */
 const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
-  "src/daemon/sessionManager.ts": ["SessionManager.forgiveDaemonStall"],
+  "src/daemon/sessionManager/activityClocks.ts": ["SessionActivityClocks.forgiveDaemonStall"],
   // The lease and policy moved out of SessionManager (#11797); it reaches SessionManager's own
   // helpers (`getSession`, `recordSessionActivity`, ...) through its `port`.
   "src/daemon/sessionLivenessLease.ts": [
@@ -89,15 +90,21 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
     "SessionLivenessController.adoptCliLivenessPolicy",
     "SessionLivenessController.restoreHeartbeatLivenessPolicy",
   ],
-  "src/daemon/daemonRequestHandlers.ts": ["handleHeartbeat"],
+  "src/daemon/daemonRequestHandlersParts/heartbeat.ts": ["handleHeartbeat"],
   "src/daemon/daemonHttpIngress.ts": ["DaemonHttpIngress.handleHeartbeatHttpRequest"],
   "src/daemon/cli/runDaemonCommand.ts": ["recordLocalDaemonHeartbeat"],
-  "src/daemon/daemonMcpProxy.ts": [
-    "DaemonMcpProxy.sendFirstBoundSessionHeartbeat",
-    "DaemonMcpProxy.recordBoundSessionHeartbeatSuccess",
-    "DaemonMcpProxy.heartbeatHeldSession",
+  "src/daemon/mcpProxy/ProxySessionOwnership.ts": [
+    "ProxySessionOwnership.sendFirstBoundSessionHeartbeat",
+    "ProxySessionOwnership.recordBoundSessionHeartbeatSuccess",
+    "ProxySessionOwnership.heartbeatHeldSession",
+  ],
+  // Terminal fencing moved behind the proxy port; the walker cannot follow the collaborator.
+  "src/daemon/proxy/BoundSessionFenceGate.ts": [
+    "BoundSessionFenceGate.fenceBoundSessionUuid",
+    "BoundSessionFenceGate.idleSessionReleaseReason",
   ],
   "src/daemon/proxy/HeartbeatKeeper.ts": ["HeartbeatKeeper.heartbeatHeldSession"],
+  "src/daemon/proxy/ConnectionRecovery.ts": ["ConnectionRecovery.withRecoverableReconnect"],
   // The proxy's forwarders hand held-session heartbeat answers to this object, which the walker
   // cannot follow through `this.heartbeatOutcomes`, so its entry points are roots themselves.
   "src/daemon/proxy/HeldSessionHeartbeatOutcomes.ts": [
@@ -146,9 +153,9 @@ const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
   "src/daemon/sessionHoldDiagnostics.ts": ["idleReleaseAt", "vetoedIdleReleaseAt"],
   // #11558: the one idle deadline the scan, a late call's admission and `idleReleaseAt` share.
   "src/daemon/sessionClocks.ts": ["sessionIdleDeadline", "effectiveLastToolActivity"],
-  "src/daemon/daemonMcpProxy.ts": [
+  "src/daemon/proxy/BoundSessionFenceGate.ts": [
     // The replay-lease TTL (#10656): a heartbeat ack must not keep a dead binding replayable.
-    "DaemonMcpProxy.isBoundSessionReplayExpired",
+    "BoundSessionFenceGate.isBoundSessionReplayExpired",
   ],
   "src/daemon/proxy/HeartbeatKeeper.ts": ["HeartbeatKeeper.evictAbandonedHeldSessions"],
 };
@@ -167,8 +174,10 @@ const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
     "SessionManager.isLateExecutionWhileEarlierWorkIsActive",
     // #11359: the wall-clock request deadline is converted onto the session clock before it is
     // compared with the session-clock restart deadline.
-    "SessionManager.waitForAbortedAssignment",
-    "SessionManager.waitForSharedAssignment",
+  ],
+  "src/daemon/sessionManager/acquisition.ts": [
+    "SessionAcquisition.waitForAbortedAssignment",
+    "SessionAcquisition.waitForSharedAssignment",
   ],
   // #11162: the release's deferral is a session-clock instant from the execution veto.
   "src/daemon/ownerDisconnectRelease.ts": [
@@ -177,7 +186,10 @@ const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
   ],
   // #11162: the veto's start and bound are judged against session-clock request deadlines.
   "src/daemon/unsettledExecutionVeto.ts": ["UnsettledExecutionVeto.judge"],
-  "src/daemon/devicePool.ts": ["DevicePool.recoveryAssignmentError", "DevicePool.recoveryNow"],
+  "src/daemon/devicePoolParts/assignment.ts": [
+    "DevicePoolAssignment.recoveryAssignmentError",
+    "DevicePoolAssignment.recoveryNow",
+  ],
   "src/daemon/deviceAllocation.ts": [
     // #11162: the restart-recovery wait and retry gate compare with the recovery deadline.
     "DeviceAllocation.assignmentRetryPolicy",
@@ -225,7 +237,7 @@ interface Classified {
  * removing or adding a write forces this list to be updated.
  */
 const KNOWN_LIVENESS_WRITES: Readonly<Record<string, Classified>> = {
-  "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
+  "src/daemon/sessionManager/activityClocks.ts SessionActivityClocks.forgiveDaemonStall": {
     writes: 2,
     reason:
       "#10662: stall forgiveness compensates for time the daemon itself lost. It shifts " +
@@ -233,7 +245,7 @@ const KNOWN_LIVENESS_WRITES: Readonly<Record<string, Classified>> = {
       "no hold time a non-stalled session would not have had. #10835: a cli-idle session's " +
       "idleStallForgivenAt moves by the same bounded lost interval.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdTokenOwnedSession": {
+  "src/daemon/mcpProxy/ProxySessionOwnership.ts ProxySessionOwnership.holdTokenOwnedSession": {
     writes: 1,
     reason:
       "#10990: any connection, including one a keeper heartbeat re-establishes, resumes the " +
@@ -249,19 +261,19 @@ const KNOWN_LIVENESS_WRITES: Readonly<Record<string, Classified>> = {
  */
 const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   // --- Session idle clocks (SessionManager) --------------------------------
-  "src/daemon/sessionManager.ts SessionManager.reclaimAndRefreshExistingSession": {
+  "src/daemon/sessionManager/admission.ts SessionAdmission.reclaimAndRefreshExistingSession": {
     writes: 4,
     reason:
       "Tool usage: getOrCreateSession resolving a session for a tool call refreshes " +
       "lastUsedAt/expiresAt, and restores both if the durable write fails.",
   },
-  "src/daemon/sessionManager.ts SessionManager.createSession": {
+  "src/daemon/sessionManager/creationGuard.ts SessionCreationGuard.createSession": {
     writes: 2,
     reason:
       "Tool usage: a session is created for a device acquisition (a tool call), and its " +
       "lastUsedAt/expiresAt start the idle window from that moment.",
   },
-  "src/daemon/sessionManager.ts SessionManager.recordToolCallEnded": {
+  "src/daemon/sessionManager/activityClocks.ts SessionActivityClocks.recordToolCallEnded": {
     writes: 2,
     reason:
       "Tool usage: the end of a tool call restarts the idle window (owner decision 2026-10-08), " +
@@ -285,13 +297,13 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
         "Policy (#11176): a failed durable write of the managed-execution adoption restores the " +
         "previous expiresAt; the new deadline itself comes from rebaseIdleDeadlineOnLastActivity.",
     },
-  "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
+  "src/daemon/sessionManager/activityClocks.ts SessionActivityClocks.forgiveDaemonStall": {
     writes: 2,
     reason:
       "Stall compensation (shift by the lost interval), listed in KNOWN_LIVENESS_WRITES " +
       "(#10662, #10835).",
   },
-  "src/daemon/sessionManager.ts SessionManager.startRehydratedOwnerWindows": {
+  "src/daemon/sessionManager/activityClocks.ts SessionActivityClocks.startRehydratedOwnerWindows": {
     writes: 2,
     reason:
       "Startup (#11388): a rehydrated session's idle window starts when the daemon can hear " +
@@ -299,13 +311,13 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   },
 
   // --- Proxy replay lease (DaemonMcpProxy) ---------------------------------
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.boundSessionUuidAt": {
+  "src/daemon/mcpProxy/ProxyRuntime.ts ProxyRuntime.boundSessionUuidAt": {
     writes: 1,
     reason:
       "Delegation: the setter forwards the caller's existing activity-clock value to " +
       "ProxySessionState without reading the clock or changing when callers write it.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.bindStartupSession": {
+  "src/daemon/mcpProxy/ProxySessionOwnership.ts ProxySessionOwnership.bindStartupSession": {
     writes: 1,
     reason:
       "Binding: a configured --initial-session-uuid, or a managed execution's held session " +
@@ -315,7 +327,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "Tool usage: a device-acquisition result (getAndroid/getApple/startDevice) binds.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.creditSessionUse": {
+  "src/daemon/mcpProxy/ProxyToolRouting.ts ProxyToolRouting.creditSessionUse": {
     writes: 2,
     reason:
       "Tool usage: the end of a forwarded call that reached the session restarts the latest " +
@@ -324,14 +336,14 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "(endOneSessionCall) and for the session the daemon echoed as the one it routed an " +
       "admitted control call to (#10692, #10974); a read or refused call carries no echo.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdPreviousBinding": {
+  "src/daemon/mcpProxy/ProxySessionOwnership.ts ProxySessionOwnership.holdPreviousBinding": {
     writes: 1,
     reason:
       "Tool usage: a newer binding demotes the previous one to a held session whose lastUsedAt " +
       "carries that binding's replay lease (boundSessionUuidAt, itself only stamped by tool " +
       "calls), so held-session idle eviction keys off tool use, never heartbeat acks (#10677).",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdTokenOwnedSession": {
+  "src/daemon/mcpProxy/ProxySessionOwnership.ts ProxySessionOwnership.holdTokenOwnedSession": {
     writes: 1,
     reason:
       "Resume (#10990): a session the stable owner token holds is held with the daemon's own " +
@@ -343,17 +355,17 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "A read projection (#11243): the sessionInfo answer reports the session's lastUsedAt and " +
       "expiresAt converted to wall-clock ms for the CLI; it stamps nothing.",
   },
-  "src/daemon/daemonRequestHandlers.ts handleTokenOwnedSessions": {
+  "src/daemon/daemonRequestHandlersParts/heartbeat.ts handleTokenOwnedSessions": {
     writes: 1,
     reason:
       "A read projection (#11117): the tokenOwnedSessions answer reports the session's lastUsedAt " +
       "converted to wall-clock ms for the resuming proxy; it stamps nothing.",
   },
-  "src/daemon/daemonMcpProxy.ts <module>": {
+  "src/daemon/mcpProxy/ProxyContracts.ts <module>": {
     writes: 1,
     reason: "The tokenOwnedSessions answer schema (zod) declares lastUsedAt, not a clock value.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.stallRestoreSnapshot": {
+  "src/daemon/mcpProxy/ProxyLiveness.ts ProxyLiveness.stallRestoreSnapshot": {
     writes: 1,
     reason:
       "Rollback record: a daemon_stalled handover copies the session's tool-use clock " +
@@ -365,7 +377,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "Rollback: a session resumed after a daemon_stalled handover is held again with the " +
       "lastUsedAt it had before the handover; the heartbeat ack that resumed it renews nothing (#10989).",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.noteSessionRestoredByCall": {
+  "src/daemon/mcpProxy/ProxySessionOwnership.ts ProxySessionOwnership.noteSessionRestoredByCall": {
     writes: 1,
     reason:
       "Tool usage: the daemon echoed a held session as the one it admitted a control call under " +
@@ -384,19 +396,19 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   },
 
   // --- Same names, different clocks -----------------------------------------
-  "src/daemon/devicePool.ts DevicePool.addDevice": {
+  "src/daemon/devicePoolParts/membership.ts DevicePoolMembership.addDevice": {
     writes: 2,
     reason:
       "PooledDevice.lastUsedAt is the pool's LRU order (assigned, or stored with a new pool " +
       "entry), not a session idle clock.",
   },
-  "src/daemon/devicePool.ts DevicePool.restoreSessionAssignment": {
+  "src/daemon/devicePoolParts/release.ts DevicePoolRelease.restoreSessionAssignment": {
     writes: 1,
     reason:
       "Allocation rollback restores the captured lastUsedAt without reading the clock; " +
       "explicit bookkeeping projection keeps binding and health writes in their owner (#11802).",
   },
-  "src/daemon/devicePool.ts DevicePool.initializeWithDevices": {
+  "src/daemon/devicePoolParts/membership.ts DevicePoolMembership.initializeWithDevices": {
     writes: 1,
     reason: "PooledDevice LRU order seeded for each discovered device, not a session idle clock.",
   },
@@ -429,13 +441,13 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "PooledDevice LRU order on autolock assignment, not a session idle clock.",
   },
-  "src/server/webrtcStreamManager.ts acquireLease": {
+  "src/daemon/webrtcStreamManager.ts acquireLease": {
     writes: 2,
     reason:
       "WebRTC stream subscription lease expiry (renewed, or stored with a new lease), unrelated " +
       "to device sessions.",
   },
-  "src/server/webrtcStreamManager.ts endLease": {
+  "src/daemon/webrtcStreamManager.ts endLease": {
     writes: 1,
     reason: "WebRTC stream end-of-lease record expiry, unrelated to device sessions.",
   },
@@ -447,14 +459,10 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 2,
     reason: "Installed-apps resource cache TTL, unrelated to device sessions.",
   },
-  "src/server/webrtcStreamManager.ts describeRecord": {
+  "src/daemon/webrtcStreamQueries.ts WebRtcStreamQueries.describeRecord": {
     writes: 1,
     reason:
       "WebRTC stream descriptor reporting its subscription lease expiry, not a session clock.",
-  },
-  "src/server/NetworkState.ts NetworkState.startSimulationUntil": {
-    writes: 1,
-    reason: "Network-error simulation expiry, unrelated to device sessions.",
   },
   "src/server/retainedScreenshot.ts readRetainedScreenshot": {
     writes: 1,
@@ -469,11 +477,11 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     reason:
       "Output-schema field declaration (zod) for the retained-screenshot expiry, not a clock value.",
   },
-  "src/server/toolOutputSchemas.ts <module>": {
+  "src/server/toolOutputSchemas/observationContract.ts <module>": {
     writes: 2,
     reason: "Output-schema field declarations (zod), not clock values.",
   },
-  "src/daemon/cli/runDaemonCommand.ts parseAcceptanceSessionRestartScope": {
+  "src/daemon/cli/daemonCommandArguments.ts parseAcceptanceSessionRestartScope": {
     writes: 1,
     reason: "Acceptance-harness restart scope expiry parsed from CLI flags, not a session clock.",
   },
@@ -524,7 +532,7 @@ function isFunctionInitializer(initializer: ts.Expression | undefined): boolean 
 
 function classMemberUnits(node: ts.ClassLikeDeclaration): FunctionUnit[] {
   const className = node.name?.text ?? "<anonymous class>";
-  return node.members.flatMap((member) => {
+  return node.members.flatMap<FunctionUnit>((member) => {
     if (ts.isConstructorDeclaration(member)) {
       return [{ key: `${className}.constructor`, className, node: member }];
     }
@@ -835,7 +843,7 @@ interface FunctionRef {
 type PortIndex = ReadonlyMap<string, readonly FunctionRef[]>;
 
 /** Property names a collaborator stores its port under (`this.port`, `this.deps.port`, `this.pool`). */
-const PORT_FIELDS: ReadonlySet<string> = new Set(["port", "pool"]);
+const PORT_FIELDS: ReadonlySet<string> = new Set(["port", "pool", "host", "forwardersHost"]);
 
 /** Unwrap only forwarder results: `void` elsewhere still means retiring a clock. */
 function unwrapForwarder(expression: ts.Expression): ts.Expression {
@@ -883,25 +891,119 @@ function forwardedOwnerMethod(initializer: ts.Expression): ts.PropertyAccessExpr
   return callee;
 }
 
-/** Resolve delegate types only from scanned ASTs, without filesystem reads or libraries. */
-function portTypeChecker(models: ReadonlyMap<string, FileModel>): ts.TypeChecker {
-  const options: ts.CompilerOptions = { noLib: true, types: [], target: ts.ScriptTarget.Latest };
+function normalizeTsPath(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+function portCompilerHost(
+  models: ReadonlyMap<string, FileModel>,
+  options: ts.CompilerOptions,
+  libraryPath: string,
+  library: ts.SourceFile,
+): ts.CompilerHost {
   const host = ts.createCompilerHost(options);
-  const modelAt = (path: string): FileModel | undefined =>
-    models.get(isAbsolute(path) ? relative(ROOT, path).split(sep).join("/") : path);
-  host.getCurrentDirectory = () => ROOT;
-  host.fileExists = (path) => modelAt(path) !== undefined;
-  host.readFile = (path) => modelAt(path)?.source.text;
-  host.getSourceFile = (path) => modelAt(path)?.source;
+  const modelAt = (path: string): FileModel | undefined => {
+    const normalized = normalizeTsPath(path);
+    // node:path.win32 accepts both separators, including TypeScript's absolute paths.
+    return models.get(isAbsolute(normalized) ? repoPath(normalized) : normalized);
+  };
+  const isLibrary = (path: string): boolean =>
+    normalizeTsPath(path) === normalizeTsPath(libraryPath);
+  host.getCurrentDirectory = () => normalizeTsPath(ROOT);
+  host.fileExists = (path) => isLibrary(path) || modelAt(path) !== undefined;
+  host.readFile = (path) => (isLibrary(path) ? library.text : modelAt(path)?.source.text);
+  host.getSourceFile = (path) => (isLibrary(path) ? library : modelAt(path)?.source);
   host.directoryExists = () => true;
   host.getDirectories = () => [];
-  host.realpath = (path) => path;
-  return ts.createProgram([...models.keys()], options, host).getTypeChecker();
+  host.realpath = normalizeTsPath;
+  return host;
+}
+
+/** Resolve application delegates from scanned ASTs, with standard Pick/Readonly utility types. */
+function portTypeChecker(models: ReadonlyMap<string, FileModel>): ts.TypeChecker {
+  const options: ts.CompilerOptions = { noLib: true, types: [], target: ts.ScriptTarget.Latest };
+  // Shared runtime views use Pick. Supply TypeScript's own utility types instead of treating
+  // those receivers as any under noLib, which would hide their collaborator targets.
+  const libraryPath = normalizeTsPath(
+    join(dirname(ts.getDefaultLibFilePath(options)), "lib.es5.d.ts"),
+  );
+  const library = ts.createSourceFile(
+    libraryPath,
+    readGuardFile(libraryPath),
+    options.target!,
+    true,
+  );
+  const host = portCompilerHost(models, options, libraryPath, library);
+  return ts.createProgram([...models.keys(), libraryPath], options, host).getTypeChecker();
 }
 
 function buildPortIndex(models: ReadonlyMap<string, FileModel>): PortIndex {
   const index = new Map<string, FunctionRef[]>();
   const checker = portTypeChecker(models);
+  const resolveTarget = (
+    model: FileModel,
+    unit: FunctionUnit,
+    owner: ts.PropertyAccessExpression,
+  ): FunctionRef | undefined => {
+    const receiver = unwrap(owner.expression);
+    // Shared runtime collaborators can sit deeper than one field on this.
+    let root = receiver;
+    while (ts.isPropertyAccessExpression(root)) {
+      root = unwrap(root.expression);
+    }
+    if (root.kind !== ts.SyntaxKind.ThisKeyword) {
+      return undefined;
+    }
+    if (receiver.kind === ts.SyntaxKind.ThisKeyword) {
+      // An inherited facade method belongs to its declaring base class and source file.
+      const method = checker.getSymbolAtLocation(owner.name)?.valueDeclaration;
+      const parent = method?.parent;
+      const targetModel =
+        parent &&
+        [...models.values()].find((candidate) => candidate.source === parent.getSourceFile());
+      if (parent && ts.isClassDeclaration(parent) && parent.name && targetModel) {
+        return { path: targetModel.path, key: `${parent.name.text}.${owner.name.text}` };
+      }
+      return { path: model.path, key: `${unit.className}.${owner.name.text}` };
+    }
+    const declaration = checker
+      .getTypeAtLocation(receiver)
+      .getSymbol()
+      ?.declarations?.find((node): node is ts.ClassDeclaration => ts.isClassDeclaration(node));
+    const targetModel =
+      declaration &&
+      [...models.values()].find((candidate) => candidate.source === declaration.getSourceFile());
+    return declaration?.name && targetModel
+      ? { path: targetModel.path, key: `${declaration.name.text}.${owner.name.text}` }
+      : undefined;
+  };
+  const addForwarder = (member: string, first: FunctionRef | undefined): void => {
+    let target = first;
+    while (target) {
+      const model = models.get(target.path);
+      const unit = model?.functions.get(target.key);
+      if (!model || !unit) {
+        return;
+      }
+      const list = index.get(member) ?? [];
+      if (list.some((ref) => ref.path === target!.path && ref.key === target!.key)) {
+        return;
+      }
+      index.set(member, [...list, target]);
+      // A public facade or a private named delegate adds another typed forwarding hop.
+      const statement =
+        ts.isMethodDeclaration(unit.node) && unit.node.body?.statements.length === 1
+          ? unit.node.body.statements[0]
+          : undefined;
+      const next =
+        statement &&
+        (ts.isReturnStatement(statement) || ts.isExpressionStatement(statement)) &&
+        statement.expression
+          ? forwardedOwnerMethod(statement.expression)
+          : undefined;
+      target = next ? resolveTarget(model, unit, next) : undefined;
+    }
+  };
   for (const model of models.values()) {
     for (const unit of model.functions.values()) {
       if (unit.className === undefined) {
@@ -910,56 +1012,32 @@ function buildPortIndex(models: ReadonlyMap<string, FileModel>): PortIndex {
       const visit = (node: ts.Node): void => {
         if (ts.isObjectLiteralExpression(node)) {
           for (const property of node.properties) {
-            const member =
-              ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)
-                ? property.name.text
-                : undefined;
-            const owner =
-              member !== undefined && ts.isPropertyAssignment(property)
-                ? forwardedOwnerMethod(property.initializer)
-                : undefined;
-            if (member === undefined || owner === undefined) {
+            if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name)) {
               continue;
             }
-            const receiver = unwrap(owner.expression);
-            // Only a direct `this` or one delegate field on `this` is a port forwarder.
-            if (
-              receiver.kind !== ts.SyntaxKind.ThisKeyword &&
-              !(
-                ts.isPropertyAccessExpression(receiver) &&
-                unwrap(receiver.expression).kind === ts.SyntaxKind.ThisKeyword
-              )
-            ) {
-              continue;
-            }
-            const declaration = checker
-              .getTypeAtLocation(receiver)
-              .getSymbol()
-              ?.declarations?.find((node): node is ts.ClassDeclaration =>
-                ts.isClassDeclaration(node),
-              );
-            const target =
-              receiver.kind === ts.SyntaxKind.ThisKeyword
-                ? { path: model.path, key: `${unit.className}.${owner.name.text}` }
-                : declaration?.name
-                  ? {
-                      path: [...models.values()].find(
-                        (candidate) => candidate.source === declaration.getSourceFile(),
-                      )!.path,
-                      key: `${declaration.name.text}.${owner.name.text}`,
-                    }
-                  : undefined;
-            if (target && models.get(target.path)?.functions.has(target.key)) {
-              const list = index.get(member) ?? [];
-              if (!list.some((ref) => ref.path === target.path && ref.key === target.key)) {
-                index.set(member, [...list, target]);
-              }
+            const owner = forwardedOwnerMethod(property.initializer);
+            if (owner) {
+              addForwarder(property.name.text, resolveTarget(model, unit, owner));
             }
           }
         }
         ts.forEachChild(node, visit);
       };
       visit(unit.node);
+      // Facade methods also forward through typed collaborator fields, including a base class.
+      const statement =
+        ts.isMethodDeclaration(unit.node) && unit.node.body?.statements.length === 1
+          ? unit.node.body.statements[0]
+          : undefined;
+      const owner =
+        statement &&
+        (ts.isReturnStatement(statement) || ts.isExpressionStatement(statement)) &&
+        statement.expression
+          ? forwardedOwnerMethod(statement.expression)
+          : undefined;
+      if (owner) {
+        addForwarder(unit.key.slice(unit.className.length + 1), resolveTarget(model, unit, owner));
+      }
     }
   }
   return index;
@@ -1287,7 +1365,7 @@ function inventoryOf(model: FileModel): Map<string, number[]> {
 }
 
 function walk(dir: string, files: string[] = []): string[] {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+  for (const entry of guardDirectoryEntries(dir)) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       walk(full, files);
@@ -1303,9 +1381,47 @@ function repoPath(full: string): string {
 }
 
 describe("liveness paths never write activity clocks (#10656, #10668)", () => {
+  test("port compiler host resolves both Windows library spellings and absolute model paths", () => {
+    const libraryPath = String.raw`C:\typescript\lib\lib.es5.d.ts`;
+    const options: ts.CompilerOptions = { noLib: true, types: [], target: ts.ScriptTarget.Latest };
+    const library = ts.createSourceFile(
+      libraryPath,
+      "type Pick<T, K extends keyof T> = { [P in K]: T[P] };",
+      options.target!,
+      true,
+    );
+    const owner = parse(
+      "owner.ts",
+      'class Target {} class Owner { target: Pick<{ target: Target }, "target">; }',
+    );
+    const host = portCompilerHost(new Map([[owner.path, owner]]), options, libraryPath, library);
+    const program = ts.createProgram([owner.path, libraryPath], options, host);
+    const checker = program.getTypeChecker();
+    // Pick's mapped property must resolve rather than disappearing into any.
+    const ownerDeclaration = owner.source.statements.filter(ts.isClassDeclaration)[1]!;
+    const member = ownerDeclaration.members[0]!;
+    expect(checker.getTypeAtLocation(member).getProperty("target")).toBeDefined();
+    for (const path of [libraryPath, libraryPath.replaceAll("\\", "/")]) {
+      expect(host.fileExists(path)).toBe(true);
+      expect(host.getSourceFile(path, options.target!)).toBe(library);
+      expect(host.readFile(path)).toBe(library.text);
+      expect(host.realpath?.(path)).toBe("C:/typescript/lib/lib.es5.d.ts");
+    }
+    for (const path of [join(ROOT, owner.path), join(ROOT, owner.path).replaceAll("\\", "/")]) {
+      expect(host.fileExists(path)).toBe(true);
+      expect(host.getSourceFile(path, options.target!)).toBe(owner.source);
+      expect(host.readFile(path)).toBe(owner.source.text);
+    }
+  });
+
   const models = new Map<string, FileModel>();
   const inventory = new Map<string, number[]>();
   let ports: PortIndex = new Map();
+  afterAll(() => {
+    // These models contain SourceFiles and type-checker references needed only by this suite.
+    models.clear();
+    ports = new Map();
+  });
   // Parsing the scanned daemon/server/db files can take seconds on a loaded runner.
   const TREE_SCAN_HOOK_TIMEOUT_MS = 20_000;
 
@@ -1314,7 +1430,10 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     const clockBytes = [...ACTIVITY_CLOCKS].map((clock) => Buffer.from(clock));
     for (const full of INVENTORY_DIRS.flatMap((dir) => walk(join(ROOT, dir)))) {
       const bytes = readFileSync(full);
-      if (!clockBytes.some((clock) => bytes.includes(clock))) {
+      if (
+        !repoPath(full).startsWith("src/daemon/mcpProxy/") &&
+        !clockBytes.some((clock) => bytes.includes(clock))
+      ) {
         continue;
       }
       const model = parse(repoPath(full), bytes.toString("utf8"));
@@ -1324,6 +1443,12 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       }
     }
     for (const path of [
+      // Facade wiring must be modeled even when it names no activity-clock field itself.
+      "src/daemon/sessionManager/forwarders.ts",
+      "src/daemon/sessionManager/wiring.ts",
+      "src/daemon/sessionManager/construction.ts",
+      "src/daemon/sessionManager/queries.ts",
+      "src/daemon/sessionManager/configuration.ts",
       ...Object.keys(NON_ACTIVITY_PATHS),
       ...Object.keys(DEADLINE_REDERIVATION_HELPERS),
       ...Object.keys(EXPIRY_JUDGEMENTS),
@@ -1331,7 +1456,7 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       ...Object.keys(SESSION_CLOCK_JUDGEMENTS),
     ]) {
       if (!models.has(path)) {
-        models.set(path, parse(path, readFileSync(join(ROOT, path), "utf8")));
+        models.set(path, parse(path, readGuardFile(join(ROOT, path))));
       }
     }
     ports = buildPortIndex(models);
@@ -1385,13 +1510,14 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     const roots = LIVENESS_ONLY[keeperPath]!;
     expect(roots).toEqual(["HeartbeatKeeper.heartbeatHeldSession"]);
     const reached = reachableFrom(models.get(keeperPath)!, roots, new Set(), { models, ports });
-    const proxy = "src/daemon/daemonMcpProxy.ts";
+    const routing = "src/daemon/mcpProxy/ProxyToolRouting.ts";
+    const ownership = "src/daemon/mcpProxy/ProxySessionOwnership.ts";
     expect(reached.map((ref) => `${ref.path} ${ref.key}`)).toEqual(
       expect.arrayContaining([
-        `${proxy} DaemonMcpProxy.recordHeldSessionTerminalLoss`,
-        `${proxy} DaemonMcpProxy.dropHeldSession`,
-        `${proxy} DaemonMcpProxy.recordHeldSessionHeartbeatSuccess`,
-        `${proxy} DaemonMcpProxy.handleHeldSessionHeartbeatError`,
+        `${routing} ProxyToolRouting.recordHeldSessionTerminalLoss`,
+        `${ownership} ProxySessionOwnership.dropHeldSession`,
+        `${ownership} ProxySessionOwnership.recordHeldSessionHeartbeatSuccess`,
+        `${ownership} ProxySessionOwnership.handleHeldSessionHeartbeatError`,
       ]),
     );
   });
@@ -1440,11 +1566,36 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
         models.get(sessionManagerPath)!,
         "SessionManager",
         new Set(DEADLINE_REDERIVATION_HELPERS[sessionManagerPath] ?? []),
+        { models, ports },
+      ),
+      ...activityWritingMethods(
+        models.get("src/daemon/sessionManager/forwarders.ts")!,
+        "SessionManagerForwarders",
+        new Set(),
+        { models, ports },
       ),
       ...activityWritingMethods(
         models.get(controllerPath)!,
         "SessionLivenessController",
         new Set(DEADLINE_REDERIVATION_HELPERS[controllerPath] ?? []),
+        { models, ports },
+      ),
+      ...activityWritingMethods(
+        models.get("src/daemon/sessionManager/admission.ts")!,
+        "SessionAdmission",
+        new Set(),
+        { models, ports },
+      ),
+      ...activityWritingMethods(
+        models.get("src/daemon/sessionManager/creationGuard.ts")!,
+        "SessionCreationGuard",
+        new Set(),
+        { models, ports },
+      ),
+      ...activityWritingMethods(
+        models.get("src/daemon/sessionManager/activityClocks.ts")!,
+        "SessionActivityClocks",
+        new Set(),
         { models, ports },
       ),
     ]);
@@ -1531,7 +1682,7 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     // A `--daemon heartbeat` loop proves the CLI owner is alive, not that it uses the device, so
     // it must never hold a CLI session past the idle window (owner decision 2026-10-08).
     const path = "src/daemon/SessionHeartbeatMonitor.ts";
-    const model = parse(path, readFileSync(join(ROOT, path), "utf8"));
+    const model = parse(path, readGuardFile(join(ROOT, path)));
     const heartbeatClocks = LIVENESS_READS;
     const judgements: { line: number; readsActivity: boolean; heartbeatReads: string[] }[] = [];
     const visit = (node: ts.Node): void => {
@@ -1598,7 +1749,7 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
 
   test("a device-tool admission is credited only for a control call, never a read (#10964)", () => {
     for (const [path, readNames] of Object.entries(ADMISSION_SITES)) {
-      const model = parse(path, readFileSync(join(ROOT, path), "utf8"));
+      const model = parse(path, readGuardFile(join(ROOT, path)));
       expect(model.source.text).toContain("markSessionAdmitted");
       expect(unguardedAdmissions(model, readNames)).toEqual([]);
     }
@@ -1660,7 +1811,10 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
         [owner.path, owner],
       ]);
       const ports = buildPortIndex(models);
-      expect(ports.get("drop")).toEqual([{ path: "owner.ts", key: "Owner.drop" }]);
+      expect(ports.get("drop")).toEqual([
+        { path: "owner.ts", key: "Owner.drop" },
+        { path: "owner.ts", key: "Owner.stamp" },
+      ]);
       // Without the port edge the walk ends at the keeper and sees nothing (the old blind spot).
       expect(livenessViolations(keeper, ["Keeper.beat"], new Set())).toEqual([]);
       const found = livenessViolations(keeper, ["Keeper.beat"], new Set(), { models, ports });
@@ -1668,6 +1822,45 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
         ["owner.ts", "Owner.stamp", "lastUsedAt"],
       ]);
     });
+
+    test.each(["return ", ""])(
+      "follows an inherited facade delegate (%s) through its typed collaborator",
+      (result) => {
+        const activity = parse(
+          "activity.ts",
+          "export class Activity { touch(session) { session.lastUsedAt = 5; } }",
+        );
+        const base = parse(
+          "base.ts",
+          `import { Activity } from "./activity";
+        export abstract class Base {
+          protected abstract readonly forwardersHost: { activity: Activity };
+          touch(session) { ${result}this.forwardersHost.activity.touch(session); }
+        }`,
+        );
+        const manager = parse(
+          "manager.ts",
+          `import { Base } from "./base";
+        export class Manager extends Base {
+          make() { return { touch: (session) => this.touch(session) }; }
+        }`,
+        );
+        const keeper = parse(
+          "keeper.ts",
+          "class Keeper { beat(session) { this.port.touch(session); } }",
+        );
+        const models = new Map(
+          [activity, base, manager, keeper].map((model) => [model.path, model]),
+        );
+        const ports = buildPortIndex(models);
+        expect(ports.get("touch")).toContainEqual({ path: "base.ts", key: "Base.touch" });
+        expect(
+          livenessViolations(keeper, ["Keeper.beat"], new Set(), { models, ports }).map(
+            (violation) => `${violation.path} ${violation.via}:${violation.clock}`,
+          ),
+        ).toEqual(["activity.ts Activity.touch:lastUsedAt"]);
+      },
+    );
 
     test.each([
       ["pool receiver", "this.pool.drop(id)", "(id) => this.drop(id)"],
@@ -1696,6 +1889,33 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       });
       expect(found.map((v) => [v.path, v.via, v.clock])).toEqual([
         ["owner.ts", "Owner.drop", "lastUsedAt"],
+      ]);
+    });
+
+    test("follows a collaborator on a narrowed shared runtime", () => {
+      const keeper = parse("keeper.ts", "class Keeper { beat(id) { this.port.drop(id); } }");
+      const owner = parse(
+        "owner.ts",
+        `
+        class Target { drop(session) { session.lastUsedAt = 5; } }
+        class Runtime { target: Target; }
+        class Owner {
+          constructor(private runtime: Pick<Runtime, "target">) {}
+          make() { return { drop: (id) => this.drop(id) }; }
+          drop(id) { return this.runtime.target.drop(id); }
+        }
+      `,
+      );
+      const models = new Map([
+        [keeper.path, keeper],
+        [owner.path, owner],
+      ]);
+      const found = livenessViolations(keeper, ["Keeper.beat"], new Set(), {
+        models,
+        ports: buildPortIndex(models),
+      });
+      expect(found.map((v) => [v.path, v.via, v.clock])).toEqual([
+        ["owner.ts", "Target.drop", "lastUsedAt"],
       ]);
     });
 

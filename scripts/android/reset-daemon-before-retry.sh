@@ -8,7 +8,7 @@ repo_root="${GITHUB_WORKSPACE:-$(cd -- "${script_dir}/../.." && pwd)}"
 bun_bin_dir="${HOME}/.bun/bin"
 dist_entry="${repo_root}/dist/src/index.js"
 
-# shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+# shellcheck source=scripts/ios/run_with_timeout.sh
 source "${script_dir}/../ios/run_with_timeout.sh"
 
 export PATH="${bun_bin_dir}:${PATH}"

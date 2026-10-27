@@ -1,7 +1,9 @@
 import { FakeSocket } from "../fakes/FakeNetServer";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
 import * as net from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { connectionListenerOf } from "../helpers/netConnectionListener";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 let createdSocket: FakeSocket | undefined;
@@ -11,16 +13,16 @@ let createConnectionSpy: ReturnType<typeof spyOn<typeof net, "createConnection">
 beforeEach(() => {
   createdSocket = undefined;
   failNextConnect = false;
-  createConnectionSpy = spyOn(net, "createConnection").mockImplementation((_path, onConnect) => {
+  createConnectionSpy = spyOn(net, "createConnection").mockImplementation((...args: unknown[]) => {
     const socket = new FakeSocket();
     createdSocket = socket;
     if (failNextConnect) {
       failNextConnect = false;
       queueMicrotask(() => socket.emit("error", new Error("connect ECONNREFUSED")));
     } else {
-      queueMicrotask(onConnect!);
+      queueMicrotask(connectionListenerOf(args)!);
     }
-    return socket as unknown as net.Socket;
+    return socket;
   });
 });
 
@@ -29,22 +31,12 @@ afterEach(() => {
   createConnectionSpy.mockRestore();
 });
 
-import {
-  DaemonClient,
-  DaemonRequestNotDeliveredError,
-  DaemonUnavailableError,
-} from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 
 function createClient() {
-  return new DaemonClient(
-    "/fake/socket",
-    1_000,
-    new FakeTimer(),
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-    undefined,
-    "win32",
-  );
+  return new DaemonClient("/fake/socket", 1_000, new FakeTimer(), ISOLATED_DAEMON_RECOVERY, null, {
+    platformOverride: "win32",
+  });
 }
 
 // Issue #6382: the proxy may replay a mutating tools/call only when the client
@@ -83,15 +75,9 @@ describe("DaemonClient request delivery phase", () => {
 describe("DaemonClient request that fails before the frame is written", () => {
   function createTimedClient() {
     const timer = new FakeTimer();
-    const client = new DaemonClient(
-      "/fake/socket",
-      1_000,
-      timer,
-      ISOLATED_DAEMON_RECOVERY,
-      null,
-      undefined,
-      "win32",
-    );
+    const client = new DaemonClient("/fake/socket", 1_000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+      platformOverride: "win32",
+    });
     return { client, timer };
   }
 

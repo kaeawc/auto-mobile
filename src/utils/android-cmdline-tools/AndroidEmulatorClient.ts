@@ -1,3 +1,4 @@
+import { AdbCommandTimeoutError } from "./AdbCommandTimeoutError";
 import { errorMessage } from "../describeUnknownError";
 import type { FileSystem } from "../filesystem/DefaultFileSystem";
 import { ENV, readEnvRaw } from "../../config/env";
@@ -109,8 +110,6 @@ export {
   resetAndroidInventoryEnrichmentCache,
 } from "./AndroidDeviceInventoryScanner";
 
-export { EMULATOR_CONSOLE_KILL_BOUND_MS } from "./EmulatorKiller";
-
 function resolveReadinessPoller(
   poller: EmulatorReadinessPoller | undefined,
   createHost: () => EmulatorReadinessHost,
@@ -198,7 +197,12 @@ export interface AndroidEmulator {
   /** Resolve the AVD name from one runtime serial without scanning all devices. */
   resolveAvdNameForSerial(
     serial: string,
-    options: { signal?: AbortSignal; timeoutMs: number },
+    options: {
+      signal?: AbortSignal;
+      timeoutMs: number;
+      consoleExclusiveOwner?: boolean;
+      throwOnTimeout?: boolean;
+    },
   ): Promise<string | undefined>;
 
   /**
@@ -252,7 +256,9 @@ export interface AndroidEmulatorForDeviceManager extends Pick<
   | "launchEmulator"
   | "killDevice"
   | "waitForEmulatorReady"
-> {}
+> {
+  withForeignInventoryResolver?(resolver: BootedDeviceScanOptions["resolveForeignSerials"]): void;
+}
 
 // Route the default long-lived spawn through the shared host-process seam so the
 // client no longer reaches for `child_process.spawn` directly (issue #5459). The
@@ -285,6 +291,7 @@ const execAsync = async (
 
 import { getFallbackEmulatorPath, locateEmulatorPath } from "./emulatorBinaryLocator";
 import { resolveRunningAvdNameOnce, type RunningAvdNameResult } from "./runningAvdName";
+import { createForeignAndroidSerialResolver } from "../../devices/foreignAndroidSerialResolver";
 export { AndroidEmulatorUnavailableError } from "./AndroidEmulatorUnavailableError";
 export { AndroidOfflineProbeError } from "./AndroidOfflineProbeError";
 import {
@@ -332,6 +339,8 @@ export interface AndroidEmulatorClientOptions {
   inventory?: AndroidDeviceInventoryScanner;
   launcher?: EmulatorLauncher;
   readinessPoller?: EmulatorReadinessPoller;
+  /** Resolves the `emulator` binary path (for testing; defaults to filesystem/shell detection) */
+  emulatorPathLocator?: () => Promise<string>;
 }
 
 type ResolvedClientOptions = AndroidEmulatorClientOptions &
@@ -368,6 +377,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>;
   private spawnFn: SpawnFn;
   private emulatorPath: string;
+  private readonly emulatorPathLocator: () => Promise<string>;
   private timer: Timer;
   private adbFactory: AdbClientFactory;
   private avdConfigReader: AvdConfigReader;
@@ -377,6 +387,15 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private readonly runningAvdAdvertisementReader: RunningAvdAdvertisementReader;
   private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
   private readonly reservations: EmulatorPortReservations;
+  // Discovery respects daemon claims even for clients outside the pool's own manager.
+  // Explicit single-serial lifecycle identity reads intentionally bypass this scan resolver.
+  private foreignInventoryResolver: BootedDeviceScanOptions["resolveForeignSerials"] =
+    createForeignAndroidSerialResolver(() => undefined);
+
+  withForeignInventoryResolver(resolver: BootedDeviceScanOptions["resolveForeignSerials"]): void {
+    this.foreignInventoryResolver = resolver ?? createForeignAndroidSerialResolver(() => undefined);
+  }
+
   private readonly inventory: AndroidDeviceInventoryScanner;
   private readonly launcher: EmulatorLauncher;
   private readonly readinessPoller: EmulatorReadinessPoller;
@@ -413,7 +432,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       inventory,
       launcher,
       readinessPoller,
+      emulatorPathLocator = locateEmulatorPath,
     } = withClientOptionDefaults(options);
+    this.emulatorPathLocator = emulatorPathLocator;
     this.observationSequence = observationSequence;
     this.posterFileSystem = posterFileSystem;
     this.execAsync = resolveEmulatorExecAsync(execAsyncFn);
@@ -474,14 +495,18 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       targets: () => this.targets,
       posterFileSystem: () => this.posterFileSystem,
       getBootedDevicesChecked: (onlyEmulators, scanOptions, signal) =>
-        this.getBootedDevicesChecked(onlyEmulators, scanOptions, signal),
+        this.getBootedDevicesChecked(
+          onlyEmulators,
+          { ...scanOptions, resolveForeignSerials: this.foreignInventoryResolver },
+          signal,
+        ),
       isAvdStarting: (avdName) => this.isAvdStarting(avdName),
     });
     // Only set a fallback emulator path here; proper detection happens lazily
     this.emulatorPath = getFallbackEmulatorPath();
   }
 
-  private wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void> {
+  wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void> {
     return this.readinessPoller.wakeAndUnlock(device, signal);
   }
 
@@ -538,6 +563,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       launchErrors: () => this.targets.launchErrors,
       launchErrorFinalizations: () => this.targets.launchErrorFinalizations,
       launchTargetDeviceIds: () => this.targets.launchTargetDeviceIds,
+      isEmulatorSerialListed: (serial, signal) => this.isEmulatorSerialListed(serial, signal),
       accelerationCheckCategory,
       adoptsExistingAvdLaunch: (avdName, perf, signal) =>
         this.coordinator.adoptsExistingAvdLaunch(avdName, perf, signal),
@@ -566,6 +592,25 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         this.coordinator.throwIfLaunchCancelled(avdName, isCancelled),
       validateAvdMemory,
     };
+  }
+
+  private async isEmulatorSerialListed(serial: string, signal?: AbortSignal): Promise<boolean> {
+    try {
+      const devices = await this.getBootedDevicesChecked(
+        true,
+        { bypassDeviceListCache: true, skipNameEnrichment: true, skipProfileEnrichment: true },
+        signal,
+      );
+      if (devices.some((device) => device.deviceId === serial)) {
+        return true;
+      }
+      // Any listed transport confirms startup, even before adb reports it as online.
+      return (await this.getListedNonDeviceStatesAmong([serial], { signal })).has(serial);
+    } catch (error) {
+      // adb may be unavailable during startup; the stdout grace and fallback still validate it.
+      logger.debug(`Could not probe emulator startup serial '${serial}': ${errorMessage(error)}`);
+      return false;
+    }
   }
 
   private createInventoryDeps(): AndroidDeviceInventoryDeps {
@@ -600,7 +645,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    * Ensure emulator path is properly detected and cached
    */
   private async ensureEmulatorPath(): Promise<string> {
-    this.emulatorPath = await locateEmulatorPath();
+    this.emulatorPath = await this.emulatorPathLocator();
     return this.emulatorPath;
   }
 
@@ -757,13 +802,31 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
   async resolveAvdNameForSerial(
     serial: string,
-    options: { signal?: AbortSignal; timeoutMs: number },
+    options: {
+      signal?: AbortSignal;
+      timeoutMs: number;
+      consoleExclusiveOwner?: boolean;
+      throwOnTimeout?: boolean;
+    },
   ): Promise<string | undefined> {
-    return await this.resolveRunningAvdName(
+    const result = await resolveRunningAvdNameOnce(
+      {
+        consoleBusyRegistry: this.consoleBusyRegistry,
+        adbFactory: this.adbFactory,
+        timer: this.timer,
+      },
       { deviceId: serial, name: serial, platform: "android" },
       options.timeoutMs,
       options.signal,
+      options.consoleExclusiveOwner,
     );
+    // Reset retries need timeout evidence; inventory callers retain the unresolved-name result.
+    if (options.throwOnTimeout && result.nameProbeTimedOut) {
+      throw new AdbCommandTimeoutError(
+        `AVD name resolution timed out after ${options.timeoutMs}ms`,
+      );
+    }
+    return result.name || undefined;
   }
 
   private getRunningAVDName(
@@ -806,7 +869,14 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     options: BootedDeviceScanOptions = {},
     signal?: AbortSignal,
   ): Promise<BootedDeviceScan> {
-    return this.inventory.getBootedDevicesWithDiagnostics(onlyEmulators, options, signal);
+    return this.inventory.getBootedDevicesWithDiagnostics(
+      onlyEmulators,
+      {
+        ...options,
+        resolveForeignSerials: options.resolveForeignSerials ?? this.foreignInventoryResolver,
+      },
+      signal,
+    );
   }
 
   /**

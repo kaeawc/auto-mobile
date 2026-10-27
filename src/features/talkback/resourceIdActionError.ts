@@ -5,7 +5,11 @@ import type { ViewHierarchyResult } from "../../models";
 import { StaleDisplayError } from "../observe/StaleDisplayError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
+import {
+  SearchableHierarchy,
+  matchesCtrlProxyResourceId,
+  type SearchableEntry,
+} from "../utility/SearchableNode";
 
 /**
  * CtrlProxy replies `Element not found with <target>` when its node lookup misses. The selector was
@@ -79,7 +83,7 @@ export async function resourceIdActionError(
   // Match SetAccessibilityFocus and CtrlProxy's full-ID / short-ID normalization.
   const candidates = new SearchableHierarchy()
     .project(hierarchy)
-    .filter((node) => node.nativeId === resourceId || node.nativeId?.endsWith(`:id/${resourceId}`));
+    .filter((node) => matchesCtrlProxyResourceId(node.nativeId, resourceId));
   // The full tree may be newer than selector resolution. Duplicate-ID fallback
   // is safe only while the selected row still exists at the selected bounds.
   assertSelectedElementPresent(candidates, selectedElement);

@@ -20,7 +20,7 @@ class StorageChangeWireEncoderTest {
   private val json = Json { prettyPrint = false }
 
   private fun encodeAndParse(event: PreferenceChangeEvent): JsonObject {
-    val wire = buildStorageChangedMessage(event, messageTimestampMs = 111L, json = json)
+    val wire = buildStorageChangedMessage(event, messageTimestampMs = 111L)
     // Must be valid JSON — parse or throw.
     return json.parseToJsonElement(wire) as JsonObject
   }
@@ -166,7 +166,7 @@ class StorageChangeWireEncoderTest {
     val event = baseEvent("dark", "STRING", "light", "STRING")
     assertEquals(
       """{"type":"storage_changed","timestamp":111,"packageName":"com.example","fileName":"prefs.xml","key":"theme","value":"dark","valueType":"STRING","changeType":"modify","previousValue":"light","eventTimestamp":222,"sequenceNumber":3}""",
-      buildStorageChangedMessage(event, 111L, json),
+      buildStorageChangedMessage(event, 111L),
     )
   }
 }

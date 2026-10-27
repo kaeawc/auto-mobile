@@ -6,7 +6,7 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { DAEMON_RELEASE_SESSION_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_RELEASE_SESSION_METHOD, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE } from "../../src/daemon/types";
 import { BROKER_EXECUTION_RELEASE_TIMEOUT_MS } from "../../src/daemon/sessionBroker/provisioning/executionLiveness";
 import { PROCESS_SHUTDOWN_TIMEOUT_MS } from "../../src/processLifecycle";
@@ -16,10 +16,21 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 
-const rigs: ReturnType<typeof setup>[] = [];
+interface Rig {
+  proxy: DaemonMcpProxy;
+  client: FakeDaemonClient;
+  sessions: SessionManager;
+  timer: FakeTimer;
+  wire: Array<{ method: string; params?: Record<string, unknown> }>;
+  releasedDevices: string[];
+  state: DaemonStateAccess;
+  wedge: () => void;
+}
+
+const rigs: Rig[] = [];
 afterEach(async () => {
   for (const rig of rigs.splice(0)) {
     await rig.proxy.close();
@@ -27,7 +38,7 @@ afterEach(async () => {
   }
 });
 
-function setup(config: Partial<DaemonMcpProxyConfig> = {}) {
+function setup(config: Partial<DaemonMcpProxyConfig> = {}): Rig {
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const wire: Array<{ method: string; params?: Record<string, unknown> }> = [];
@@ -127,7 +138,7 @@ beforeAll(async () => {
   }
 });
 
-const releases = (rig: ReturnType<typeof setup>) =>
+const releases = (rig: Rig) =>
   rig.wire.filter(({ method }) => method === DAEMON_RELEASE_SESSION_METHOD);
 
 for (const count of [1, 2]) {
@@ -301,7 +312,10 @@ test("token-bearing unknown and already released sessions remain idempotent", as
       },
       rig.state,
     );
-    expect(response).toMatchObject({ success: true, result: { alreadyReleased: true } });
+    expect(response).toMatchObject({
+      success: true,
+      result: { alreadyReleased: sessionId === "gone", known: sessionId === "gone" },
+    });
   }
 });
 

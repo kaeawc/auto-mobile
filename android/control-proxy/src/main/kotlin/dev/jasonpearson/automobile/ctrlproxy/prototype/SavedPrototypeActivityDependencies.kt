@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.UserManager
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
+import dev.jasonpearson.automobile.prototype.PrototypeHttpClient as EmbeddedHttpClient
+import dev.jasonpearson.automobile.prototype.PrototypeNetwork
 import java.io.File
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -74,13 +76,33 @@ internal object SavedPrototypeActivityDependencies {
   /** Outlives any one activity: the last storage flush of a stopped activity runs here. */
   @Volatile var flushScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
   @Volatile var clock: () -> Long = System::currentTimeMillis
-  @Volatile var eventSink: PrototypeEventSink = PrototypeEventSink { SavedPrototypeEvents.send(it) }
+  val defaultEventSink = PrototypeEventSink { SavedPrototypeEvents.send(it) }
+  @Volatile var eventSink: PrototypeEventSink = defaultEventSink
 
   /** The transports behind a saved prototype's `request` actions (#12970). */
   @Volatile var httpClients: () -> PrototypeHttpClients = ::defaultHttpClients
 
   private fun defaultHttpClients(): PrototypeHttpClients =
     PrototypeHttpClients.forSavedPrototype(RetrofitPrototypeHttpClient(OkHttpClient()))
+
+  /** Both public routes adapt the saved transports, including the typed host refusal. */
+  fun network(): PrototypeNetwork {
+    val clients = httpClients()
+    fun adapt(client: PrototypeHttpClient) = EmbeddedHttpClient { request ->
+      client.execute(
+        PrototypeHttpRequest(
+          request.requestId,
+          request.prototypeId,
+          request.method,
+          request.url,
+          request.headers,
+          request.body,
+          request.timeoutMs,
+        ),
+      )
+    }
+    return PrototypeNetwork(device = adapt(clients.device), hostHandler = adapt(clients.host))
+  }
 
   fun reset() {
     storageStore = { PrototypeStorageStores.inDirectory(prototypeStorageRoot(it.filesDir)) }
@@ -89,7 +111,7 @@ internal object SavedPrototypeActivityDependencies {
     ioDispatcher = Dispatchers.IO
     flushScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     clock = System::currentTimeMillis
-    eventSink = PrototypeEventSink { SavedPrototypeEvents.send(it) }
+    eventSink = defaultEventSink
     httpClients = ::defaultHttpClients
   }
 }

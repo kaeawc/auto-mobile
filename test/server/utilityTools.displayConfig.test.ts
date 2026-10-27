@@ -6,11 +6,8 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { installFakeDeviceToolProviders } from "../helpers/hermeticDeviceTools";
 import Ajv2020 from "ajv/dist/2020";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import {
-  changeLocalizationSchema,
-  displayConfigSchema,
-  registerUtilityTools,
-} from "../../src/server/utilityTools";
+import { changeLocalizationSchema, registerUtilityTools } from "../../src/server/utilityTools";
+import { displayConfigSchema } from "../../src/server/displayConfigTool";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -42,6 +39,25 @@ describe("displayConfigSchema", () => {
     const parsed = displayConfigSchema.safeParse({ reset: true, theme: "dark" });
 
     expect(parsed.success).toBe(false);
+  });
+
+  test("rejects contentSize combined with fontScale or reset, and unknown categories", () => {
+    expect(displayConfigSchema.safeParse({ contentSize: "accessibility-large" }).success).toBe(
+      true,
+    );
+    expect(displayConfigSchema.safeParse({ contentSize: "huge" }).success).toBe(false);
+    expect(displayConfigSchema.safeParse({ contentSize: "large", fontScale: 1.2 }).success).toBe(
+      false,
+    );
+    expect(displayConfigSchema.safeParse({ contentSize: "large", reset: true }).success).toBe(
+      false,
+    );
+  });
+
+  test("rejects reset combined with an accessibility display preference", () => {
+    expect(displayConfigSchema.safeParse({ reset: true, boldText: true }).success).toBe(false);
+    expect(displayConfigSchema.safeParse({ reset: true, reduceMotion: false }).success).toBe(false);
+    expect(displayConfigSchema.safeParse({ increaseContrast: true }).success).toBe(true);
   });
 
   test("allows reset:false with an explicit field", () => {
@@ -280,11 +296,14 @@ describe("device setting defaults are recorded before a change (#11145)", () => 
       const handler = ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!;
       await handler(device, { fontScale: 1.3, theme: "dark" });
       await handler(device, { reset: true });
+      await handler(device, { boldText: true });
       await handler(device, {});
       expect(events).toEqual([
-        "record:fontScale,nightMode",
+        "record:fontScale,contentSize,nightMode",
         "set",
-        "record:fontScale,density,nightMode",
+        "record:fontScale,contentSize,density,nightMode,increaseContrast,reduceMotion,boldText,colorInversion,colorCorrection,magnification,magnificationScale,extraDim",
+        "set",
+        "record:boldText",
         "set",
       ]);
     } finally {

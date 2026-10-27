@@ -89,7 +89,7 @@ describe("TopLevelUnionFlattener module", () => {
       });
 
       const properties = result.properties as Record<string, unknown>;
-      expect(properties.constructor).toEqual({ enum: ["a", "b"] });
+      expect(new Map(Object.entries(properties)).get("constructor")).toEqual({ enum: ["a", "b"] });
     });
   });
 });

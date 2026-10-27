@@ -10,12 +10,14 @@ export const nestedClickableHierarchy: ViewHierarchyResult = {
       "resource-id": "app:id/outer",
       clickable: true,
       bounds: outerBounds,
-      node: {
-        "resource-id": "app:id/inner",
-        clickable: true,
-        bounds: innerBounds,
-        node: { text: "Wi-Fi", bounds: labelBounds },
-      },
+      node: [
+        {
+          "resource-id": "app:id/inner",
+          clickable: true,
+          bounds: innerBounds,
+          node: [{ text: "Wi-Fi", bounds: labelBounds }],
+        },
+      ],
     },
   },
 };

@@ -15,11 +15,13 @@ class FailuresCollapsedContentUiTest {
     setContent {
       MaterialTheme {
         FailuresCollapsedContent(
-          dateRangeLabel = "24h",
-          crashCount = 0,
-          anrCount = 0,
-          toolFailureCount = 0,
-          nonFatalCount = 0,
+          dev.jasonpearson.automobile.desktop.core.failures.FailuresCollapsedState(
+            dateRangeLabel = "24h",
+            crashCount = 0,
+            anrCount = 0,
+            toolFailureCount = 0,
+            nonFatalCount = 0,
+          ),
         )
       }
     }
@@ -31,11 +33,13 @@ class FailuresCollapsedContentUiTest {
     setContent {
       MaterialTheme {
         FailuresCollapsedContent(
-          dateRangeLabel = "7d",
-          crashCount = 0,
-          anrCount = 0,
-          toolFailureCount = 0,
-          nonFatalCount = 0,
+          dev.jasonpearson.automobile.desktop.core.failures.FailuresCollapsedState(
+            dateRangeLabel = "7d",
+            crashCount = 0,
+            anrCount = 0,
+            toolFailureCount = 0,
+            nonFatalCount = 0,
+          ),
         )
       }
     }
@@ -51,11 +55,13 @@ class FailuresCollapsedContentUiTest {
     setContent {
       MaterialTheme {
         FailuresCollapsedContent(
-          dateRangeLabel = "30d",
-          crashCount = 12,
-          anrCount = 3,
-          toolFailureCount = 7,
-          nonFatalCount = 25,
+          dev.jasonpearson.automobile.desktop.core.failures.FailuresCollapsedState(
+            dateRangeLabel = "30d",
+            crashCount = 12,
+            anrCount = 3,
+            toolFailureCount = 7,
+            nonFatalCount = 25,
+          ),
         )
       }
     }
@@ -70,11 +76,13 @@ class FailuresCollapsedContentUiTest {
     setContent {
       MaterialTheme {
         FailuresCollapsedContent(
-          dateRangeLabel = "30d",
-          crashCount = 1500,
-          anrCount = 200,
-          toolFailureCount = 0,
-          nonFatalCount = 10000,
+          dev.jasonpearson.automobile.desktop.core.failures.FailuresCollapsedState(
+            dateRangeLabel = "30d",
+            crashCount = 1500,
+            anrCount = 200,
+            toolFailureCount = 0,
+            nonFatalCount = 10000,
+          ),
         )
       }
     }
@@ -88,11 +96,13 @@ class FailuresCollapsedContentUiTest {
     setContent {
       MaterialTheme {
         FailuresCollapsedContent(
-          dateRangeLabel = "30d",
-          crashCount = 2500000,
-          anrCount = 0,
-          toolFailureCount = 0,
-          nonFatalCount = 0,
+          dev.jasonpearson.automobile.desktop.core.failures.FailuresCollapsedState(
+            dateRangeLabel = "30d",
+            crashCount = 2500000,
+            anrCount = 0,
+            toolFailureCount = 0,
+            nonFatalCount = 0,
+          ),
         )
       }
     }

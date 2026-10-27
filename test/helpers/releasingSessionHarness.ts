@@ -37,12 +37,12 @@ class DeferredPersistence extends FakeDeviceSessionPersistence {
 
   override async upsertActiveSession(
     ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
-  ) {
+  ): Promise<number> {
     if (this.deferUpsert) {
       this.upsertStarted.resolve();
       await this.finishUpsert.promise;
     }
-    await super.upsertActiveSession(...args);
+    return super.upsertActiveSession(...args);
   }
 }
 
@@ -116,7 +116,7 @@ export function releasingSessionHarness() {
     },
     holdTerminalFence(session: Session) {
       // Model a failed terminal persistence attempt awaiting retry, with no release in flight.
-      manager["sessionSlots"].setTerminalSnapshot(session.sessionId, {
+      manager.testHooks.wiring.host.sessionSlots.setTerminalSnapshot(session.sessionId, {
         sessionId: session.sessionId,
         deviceId: session.assignedDevice!,
         releaseReason: "heartbeat-timeout",

@@ -8,44 +8,245 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Pure, fast tests for the structural hierarchy diff. No Compose, no I/O. */
-class HierarchyDiffTest {
+internal abstract class HierarchyDiffFixture {
+  protected data class NodeSpec(
+    val className: String,
+    val resourceId: String? = null,
+    val text: String? = null,
+    val contentDescription: String? = null,
+    val bounds: ElementBounds = ElementBounds(0, 0, 10, 10),
+    val isClickable: Boolean = false,
+    val isScrollable: Boolean = false,
+    val isCheckable: Boolean = false,
+    val isChecked: Boolean = false,
+    val children: List<UIElementInfo> = emptyList(),
+  )
 
-  private fun node(
-    className: String,
-    resourceId: String? = null,
-    text: String? = null,
-    contentDescription: String? = null,
-    bounds: ElementBounds = ElementBounds(0, 0, 10, 10),
-    isClickable: Boolean = false,
-    isScrollable: Boolean = false,
-    isCheckable: Boolean = false,
-    isChecked: Boolean = false,
-    children: List<UIElementInfo> = emptyList(),
-  ): UIElementInfo =
-    UIElementInfo(
-      id = "$className:${resourceId ?: ""}:${text ?: ""}:${contentDescription ?: ""}",
-      className = className,
-      resourceId = resourceId,
-      text = text,
-      contentDescription = contentDescription,
-      bounds = bounds,
-      isClickable = isClickable,
-      isEnabled = true,
-      isFocused = false,
-      isSelected = false,
-      isScrollable = isScrollable,
-      isCheckable = isCheckable,
-      isChecked = isChecked,
-      children = children,
-      depth = 0,
-    )
+  protected fun node(spec: NodeSpec): UIElementInfo =
+    with(spec) {
+      UIElementInfo(
+        id = "$className:${resourceId ?: ""}:${text ?: ""}:${contentDescription ?: ""}",
+        className = className,
+        resourceId = resourceId,
+        text = text,
+        contentDescription = contentDescription,
+        bounds = bounds,
+        isClickable = isClickable,
+        isEnabled = true,
+        isFocused = false,
+        isSelected = false,
+        isScrollable = isScrollable,
+        isCheckable = isCheckable,
+        isChecked = isChecked,
+        children = children,
+        depth = 0,
+      )
+    }
 
-  private fun statusOf(diff: HierarchyDiff, keySubstring: String): NodeDiffStatus? =
+  protected fun statusOf(diff: HierarchyDiff, keySubstring: String): NodeDiffStatus? =
     diff.entries.firstOrNull { it.key.contains(keySubstring) }?.status
 
+  /** A synthetic multi-window root as [parseHierarchyFromJson] emits for a 2+ window frame. */
+  protected fun multiWindowRoot(vararg windows: UIElementInfo): UIElementInfo =
+    node(NodeSpec(MULTI_WINDOW_ROOT_CLASS_NAME, "multiwindow", children = windows.toList()))
+
+  // --- Multi-window pairing by subtree similarity (issue #5533) ----------------------------------
+  //
+  // The `text-input-empty.json` / `scroll-before.json` fixtures are a 3-window frame and the same
+  // frame with the *middle* window removed. Positional (by-index) pairing shifts the surviving
+  // third window into the second slot, so both survivors surface as removed+added. Order-preserving
+  // similarity matching must instead pair the two survivors and report only the removed window.
+
+  protected fun windowA() =
+    node(
+      NodeSpec(
+        "app.Window",
+        "app",
+        children = listOf(node(NodeSpec("android.widget.TextView", "title", text = "Home"))),
+      ),
+    )
+
+  protected fun windowB() =
+    node(
+      NodeSpec(
+        "dialog.Window",
+        "dialog",
+        children = listOf(node(NodeSpec("android.widget.Button", "ok", text = "OK"))),
+      ),
+    )
+
+  protected fun windowC() =
+    node(
+      NodeSpec(
+        "ime.Window",
+        "ime",
+        children = listOf(node(NodeSpec("android.widget.EditText", "field", text = "abc"))),
+      ),
+    )
+
+  // --- Cross-platform structural-role keying (issue #4872) ---
+
+  /** An Android screen: content frame → list → [title label, action button]. */
+  protected fun androidScreen(title: String, action: String): UIElementInfo =
+    node(
+      NodeSpec(
+        "android.widget.FrameLayout",
+        "android:id/content",
+        children =
+          listOf(
+            node(
+              NodeSpec(
+                "androidx.recyclerview.widget.RecyclerView",
+                "com.app:id/list",
+                children =
+                  listOf(
+                    node(NodeSpec("android.widget.TextView", "com.app:id/title", text = title)),
+                    node(
+                      NodeSpec(
+                        "androidx.appcompat.widget.AppCompatButton",
+                        "com.app:id/cta",
+                        text = action,
+                      ),
+                    ),
+                  ),
+              ),
+            ),
+          ),
+      ),
+    )
+
+  /**
+   * The iOS rendering of the same screen: application → table → [static text, button]. Uses the
+   * UIKit class names the runner actually reports (`ElementLocator.mapElementType`), not the
+   * fabricated `XCUIElementType*` forms, so the cross-platform role diff is exercised on the live
+   * vocabulary.
+   */
+  protected fun iosScreen(title: String, action: String): UIElementInfo =
+    node(
+      NodeSpec(
+        "XCUIApplication",
+        children =
+          listOf(
+            node(
+              NodeSpec(
+                "UITableView",
+                children =
+                  listOf(
+                    node(NodeSpec("UILabel", text = title)),
+                    node(NodeSpec("UIButton", text = action)),
+                  ),
+              ),
+            ),
+          ),
+      ),
+    )
+
+  // --- Production-shaped cross-platform pairing (issue #4872 review) ---
+
+  /**
+   * The Android compare root as `HierarchyParser` actually produces it: a class-less synthetic
+   * wrapper defaulting to `android.view.View`, not the idealized `FrameLayout`. It must pair with
+   * the iOS `XCUIApplication` root, or the shared root segment diverges and every descendant key is
+   * disjoint — the two live trees would read as wholly OnlyIn.
+   */
+
+  /**
+   * An icon button carries its label in Android's `content-desc` but in iOS's `text`. Role mode
+   * normalizes to a single accessible name, so the equivalent controls read Equal instead of being
+   * flagged Changed by a field-by-field text/content-desc comparison.
+   */
+
+  /** A genuinely different accessible name is still Changed under the normalized comparison. */
+
+  /**
+   * The live iOS runner reports a checkbox as the bare `UIView` class (its `mapElementType` has no
+   * `.checkBox` case) while still setting `isCheckable`. Role mode promotes that checkable generic
+   * node to Checkbox so it pairs with Android's `CheckBox` instead of surfacing as OnlyIn on each
+   * side.
+   */
+
+  /**
+   * The checkable promotion is gated on generic roles: a `UISwitch` is checkable too but already
+   * keys as Switch by class, so it must not be pulled into Checkbox and mis-pair with a checkbox.
+   */
+
+  /**
+   * Production Android blanks `android.widget.TextView` (it is in the extractor's
+   * `GENERIC_CLASS_NAMES`) to a class-less node that `HierarchyParser` defaults to
+   * `android.view.View`, so an ordinary label arrives as a generic node — not the idealized
+   * `TextView` the earlier tests use. Role mode must still promote a non-interactive text-bearing
+   * generic node to Text so it pairs with the iOS `UILabel`; otherwise ubiquitous labels and their
+   * subtrees read as OnlyIn (issue #4872 review).
+   */
+
+  /**
+   * The text promotion is gated on the node being non-interactive: a clickable generic node that
+   * carries text is left in its structural Container role on both sides rather than mis-promoted to
+   * Text, so an interactive control is never keyed as a static label (issue #4872 review).
+   */
+
+  /**
+   * Production Android also blanks `android.widget.ScrollView` to `android.view.View`, while
+   * retaining its scrollable state. Role mode must recover ScrollView from that state so its
+   * subtree aligns with the iOS runner's `UIScrollView` instead of becoming OnlyIn entries.
+   */
+
+  /**
+   * Android keeps `android.widget.RadioButton` (it is not erased), which contains the `Button`
+   * substring, while the iOS runner reports a radio as a checkable generic `UIView`. Role mode
+   * folds the Android radio into Checkbox so it pairs with iOS's promoted checkable node instead of
+   * surfacing as two OnlyIn entries (issue #4872 review).
+   */
+
+  /**
+   * A custom Android View subclass (`com.example.ProfileView`) and its whole subtree must pair with
+   * the iOS runner's custom `.other -> UIView` container. Without the `*View` container catch-all
+   * the Android node keys as Other and the iOS node as Container, making the entire custom subtree
+   * disjoint (issue #4872 review).
+   */
+
+  /**
+   * `android.widget.CheckedTextView` is a standard checkable control, but its class name contains
+   * the `TextView` substring so the class mapping keys it as [StructuralRole.Text] — before any
+   * generic-role checkable promotion could fire. The iOS runner reports the equivalent checkbox as
+   * a checkable bare `UIView -> Container`. Promoting on `isCheckable` regardless of the
+   * class-derived role folds the CheckedTextView into Checkbox too, so the two pair instead of
+   * surfacing as OnlyIn on each side (issue #4872 review).
+   */
+
+  /**
+   * A production Android list row is an ordinary `LinearLayout`/`ViewGroup -> Container` whose
+   * collection-item metadata `HierarchyParser` drops, while the iOS runner emits the matching row
+   * as a `UITableViewCell -> ListItem` by class. Keying the Android row by its class alone would
+   * make every row (and its whole subtree) OnlyIn against the iOS cells. Inferring [ListItem] for a
+   * generic direct child of a [List] parent pairs the rows so their contents diff (issue #4872
+   * review).
+   */
+
+  /**
+   * The ListItem inference is scoped to a [List] parent: a generic container that is *not* a list
+   * row keeps its Container role, so an ordinary nested wrapper is never mis-keyed as a list item.
+   */
+
+  /**
+   * An Android icon control can carry an empty `text` alongside a real `content-desc`. The
+   * normalized accessible name treats empty text as absent and falls back to `content-desc`, so it
+   * reads the same as the iOS `text` label instead of comparing `""` against the label and
+   * reporting Changed (issue #4872 review).
+   */
+}
+
+internal class HierarchyDiffTest : HierarchyDiffFixture() {
   @Test
   fun `identical trees are all equal`() {
-    val tree = node("Root", "root", children = listOf(node("Text", "title", text = "Hello")))
+    val tree =
+      node(
+        NodeSpec(
+          "Root",
+          "root",
+          children = listOf(node(NodeSpec("Text", "title", text = "Hello"))),
+        ),
+      )
     val diff = diffHierarchies(tree, tree)
 
     assertEquals(0, diff.onlyInA)
@@ -59,11 +260,17 @@ class HierarchyDiffTest {
   fun `node present only in A is classified OnlyInA`() {
     val a =
       node(
-        "Root",
-        "root",
-        children = listOf(node("Text", "title", text = "Hi"), node("Button", "extra")),
+        NodeSpec(
+          "Root",
+          "root",
+          children =
+            listOf(node(NodeSpec("Text", "title", text = "Hi")), node(NodeSpec("Button", "extra"))),
+        ),
       )
-    val b = node("Root", "root", children = listOf(node("Text", "title", text = "Hi")))
+    val b =
+      node(
+        NodeSpec("Root", "root", children = listOf(node(NodeSpec("Text", "title", text = "Hi")))),
+      )
     val diff = diffHierarchies(a, b)
 
     assertEquals(1, diff.onlyInA)
@@ -74,12 +281,18 @@ class HierarchyDiffTest {
 
   @Test
   fun `node present only in B is classified OnlyInB`() {
-    val a = node("Root", "root", children = listOf(node("Text", "title", text = "Hi")))
+    val a =
+      node(
+        NodeSpec("Root", "root", children = listOf(node(NodeSpec("Text", "title", text = "Hi")))),
+      )
     val b =
       node(
-        "Root",
-        "root",
-        children = listOf(node("Text", "title", text = "Hi"), node("Button", "extra")),
+        NodeSpec(
+          "Root",
+          "root",
+          children =
+            listOf(node(NodeSpec("Text", "title", text = "Hi")), node(NodeSpec("Button", "extra"))),
+        ),
       )
     val diff = diffHierarchies(a, b)
 
@@ -90,8 +303,14 @@ class HierarchyDiffTest {
 
   @Test
   fun `same-position node with changed text is Changed`() {
-    val a = node("Root", "root", children = listOf(node("Text", "title", text = "Hi")))
-    val b = node("Root", "root", children = listOf(node("Text", "title", text = "Bye")))
+    val a =
+      node(
+        NodeSpec("Root", "root", children = listOf(node(NodeSpec("Text", "title", text = "Hi")))),
+      )
+    val b =
+      node(
+        NodeSpec("Root", "root", children = listOf(node(NodeSpec("Text", "title", text = "Bye")))),
+      )
     val diff = diffHierarchies(a, b)
 
     assertEquals(NodeDiffStatus.Changed, statusOf(diff, "Text:title"))
@@ -102,8 +321,22 @@ class HierarchyDiffTest {
 
   @Test
   fun `changed boolean state flag is Changed`() {
-    val a = node("Root", "root", children = listOf(node("Box", "toggle", isChecked = false)))
-    val b = node("Root", "root", children = listOf(node("Box", "toggle", isChecked = true)))
+    val a =
+      node(
+        NodeSpec(
+          "Root",
+          "root",
+          children = listOf(node(NodeSpec("Box", "toggle", isChecked = false))),
+        ),
+      )
+    val b =
+      node(
+        NodeSpec(
+          "Root",
+          "root",
+          children = listOf(node(NodeSpec("Box", "toggle", isChecked = true))),
+        ),
+      )
     val diff = diffHierarchies(a, b)
 
     assertEquals(NodeDiffStatus.Changed, statusOf(diff, "Box:toggle"))
@@ -112,8 +345,8 @@ class HierarchyDiffTest {
   @Test
   fun `differing bounds alone do not mark a node Changed`() {
     // Two devices with different resolutions: geometry differs but structure and semantics match.
-    val a = node("Root", "root", bounds = ElementBounds(0, 0, 1080, 1920))
-    val b = node("Root", "root", bounds = ElementBounds(0, 0, 1440, 3120))
+    val a = node(NodeSpec("Root", "root", bounds = ElementBounds(0, 0, 1080, 1920)))
+    val b = node(NodeSpec("Root", "root", bounds = ElementBounds(0, 0, 1440, 3120)))
     val diff = diffHierarchies(a, b)
 
     assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Root:root"))
@@ -122,8 +355,22 @@ class HierarchyDiffTest {
 
   @Test
   fun `reordered siblings surface positionally as OnlyInA and OnlyInB`() {
-    val a = node("Root", "root", children = listOf(node("A", "a"), node("B", "b")))
-    val b = node("Root", "root", children = listOf(node("B", "b"), node("A", "a")))
+    val a =
+      node(
+        NodeSpec(
+          "Root",
+          "root",
+          children = listOf(node(NodeSpec("A", "a")), node(NodeSpec("B", "b"))),
+        ),
+      )
+    val b =
+      node(
+        NodeSpec(
+          "Root",
+          "root",
+          children = listOf(node(NodeSpec("B", "b")), node(NodeSpec("A", "a"))),
+        ),
+      )
     val diff = diffHierarchies(a, b)
 
     // Positional identity: A#0 vs B#0 and A#1 vs B#1 differ by className (part of key),
@@ -136,9 +383,9 @@ class HierarchyDiffTest {
   @Test
   fun `siblings sharing a resource-id are disambiguated by index`() {
     // RecyclerView-style rows commonly share a resource-id; the index keeps keys unique.
-    val row = { t: String -> node("Row", "item", text = t) }
-    val a = node("List", "list", children = listOf(row("one"), row("two")))
-    val b = node("List", "list", children = listOf(row("one"), row("two")))
+    val row = { t: String -> node(NodeSpec("Row", "item", text = t)) }
+    val a = node(NodeSpec("List", "list", children = listOf(row("one"), row("two"))))
+    val b = node(NodeSpec("List", "list", children = listOf(row("one"), row("two"))))
     val diff = diffHierarchies(a, b)
 
     assertEquals(3, diff.equal) // list + 2 rows
@@ -151,15 +398,21 @@ class HierarchyDiffTest {
   fun `classification is symmetric when A and B are swapped`() {
     val a =
       node(
-        "Root",
-        "root",
-        children = listOf(node("Text", "title", text = "Hi"), node("OnlyA", "oa")),
+        NodeSpec(
+          "Root",
+          "root",
+          children =
+            listOf(node(NodeSpec("Text", "title", text = "Hi")), node(NodeSpec("OnlyA", "oa"))),
+        ),
       )
     val b =
       node(
-        "Root",
-        "root",
-        children = listOf(node("Text", "title", text = "Bye"), node("OnlyB", "ob")),
+        NodeSpec(
+          "Root",
+          "root",
+          children =
+            listOf(node(NodeSpec("Text", "title", text = "Bye")), node(NodeSpec("OnlyB", "ob"))),
+        ),
       )
     val ab = diffHierarchies(a, b)
     val ba = diffHierarchies(b, a)
@@ -175,8 +428,23 @@ class HierarchyDiffTest {
 
   @Test
   fun `diff is deterministic across repeated runs`() {
-    val a = node("Root", "root", children = listOf(node("A", "a"), node("B", "b"), node("C", "c")))
-    val b = node("Root", "root", children = listOf(node("A", "a"), node("C", "c")))
+    val a =
+      node(
+        NodeSpec(
+          "Root",
+          "root",
+          children =
+            listOf(node(NodeSpec("A", "a")), node(NodeSpec("B", "b")), node(NodeSpec("C", "c"))),
+        ),
+      )
+    val b =
+      node(
+        NodeSpec(
+          "Root",
+          "root",
+          children = listOf(node(NodeSpec("A", "a")), node(NodeSpec("C", "c"))),
+        ),
+      )
 
     val first = diffHierarchies(a, b).entries.map { it.key to it.status }
     val second = diffHierarchies(a, b).entries.map { it.key to it.status }
@@ -190,24 +458,30 @@ class HierarchyDiffTest {
     // pair (android.widget.* vs the iOS runner's UIKit names) would produce.
     val a =
       node(
-        "android.widget.FrameLayout",
-        "content",
-        children =
-          listOf(
-            node("android.widget.TextView", "title", text = "Home"),
-            node("android.widget.Button", "submit", isClickable = true),
-          ),
+        NodeSpec(
+          "android.widget.FrameLayout",
+          "content",
+          children =
+            listOf(
+              node(NodeSpec("android.widget.TextView", "title", text = "Home")),
+              node(NodeSpec("android.widget.Button", "submit", isClickable = true)),
+            ),
+        ),
       )
     val b =
       node(
-        "android.widget.FrameLayout",
-        "content",
-        children =
-          listOf(
-            node("android.widget.TextView", "title", text = "Home"), // equal
-            node("android.widget.Button", "submit", isClickable = false), // changed flag
-            node("android.widget.ProgressBar", "loading"), // only in B
-          ),
+        NodeSpec(
+          "android.widget.FrameLayout",
+          "content",
+          children =
+            listOf(
+              node(NodeSpec("android.widget.TextView", "title", text = "Home")), // equal
+              node(
+                NodeSpec("android.widget.Button", "submit", isClickable = false),
+              ), // changed flag
+              node(NodeSpec("android.widget.ProgressBar", "loading")), // only in B
+            ),
+        ),
       )
     val diff = diffHierarchies(a, b)
 
@@ -221,18 +495,21 @@ class HierarchyDiffTest {
 
   @Test
   fun `entries preorder lists A nodes before B-only nodes`() {
-    val a = node("Root", "root", children = listOf(node("A", "a")))
-    val b = node("Root", "root", children = listOf(node("A", "a"), node("Bonly", "bo")))
+    val a = node(NodeSpec("Root", "root", children = listOf(node(NodeSpec("A", "a")))))
+    val b =
+      node(
+        NodeSpec(
+          "Root",
+          "root",
+          children = listOf(node(NodeSpec("A", "a")), node(NodeSpec("Bonly", "bo"))),
+        ),
+      )
     val entries = diffHierarchies(a, b).entries
 
     // Root, then A (both from A's pre-order), then the B-only node appended last.
     assertEquals(NodeDiffStatus.OnlyInB, entries.last().status)
     assertTrue(entries.last().key.contains("Bonly:bo"))
   }
-
-  /** A synthetic multi-window root as [parseHierarchyFromJson] emits for a 2+ window frame. */
-  private fun multiWindowRoot(vararg windows: UIElementInfo): UIElementInfo =
-    node(MULTI_WINDOW_ROOT_CLASS_NAME, "multiwindow", children = windows.toList())
 
   @Test
   fun `wrapped multi-window frame diffed against a single-window frame isolates the extra window`() {
@@ -241,16 +518,20 @@ class HierarchyDiffTest {
     // and only the extra IME window surfaces as OnlyInA — not the whole app as OnlyInA/OnlyInB.
     val appSubtree =
       node(
-        "app.Window",
-        "app",
-        children = listOf(node("android.widget.TextView", "title", text = "Hi")),
+        NodeSpec(
+          "app.Window",
+          "app",
+          children = listOf(node(NodeSpec("android.widget.TextView", "title", text = "Hi"))),
+        ),
       )
-    val a = multiWindowRoot(appSubtree, node("ime.Window", "ime"))
+    val a = multiWindowRoot(appSubtree, node(NodeSpec("ime.Window", "ime")))
     val b =
       node(
-        "app.Window",
-        "app",
-        children = listOf(node("android.widget.TextView", "title", text = "Hi")),
+        NodeSpec(
+          "app.Window",
+          "app",
+          children = listOf(node(NodeSpec("android.widget.TextView", "title", text = "Hi"))),
+        ),
       )
 
     val diff = diffHierarchies(a, b)
@@ -266,8 +547,10 @@ class HierarchyDiffTest {
 
   @Test
   fun `two identical wrapped multi-window frames report no differences`() {
-    val a = multiWindowRoot(node("app.Window", "app"), node("ime.Window", "ime"))
-    val b = multiWindowRoot(node("app.Window", "app"), node("ime.Window", "ime"))
+    val a =
+      multiWindowRoot(node(NodeSpec("app.Window", "app")), node(NodeSpec("ime.Window", "ime")))
+    val b =
+      multiWindowRoot(node(NodeSpec("app.Window", "app")), node(NodeSpec("ime.Window", "ime")))
 
     val diff = diffHierarchies(a, b)
 
@@ -276,34 +559,6 @@ class HierarchyDiffTest {
     assertEquals(2, diff.equal)
     assertNull(statusOf(diff, MULTI_WINDOW_ROOT_CLASS_NAME))
   }
-
-  // --- Multi-window pairing by subtree similarity (issue #5533) ----------------------------------
-  //
-  // The `text-input-empty.json` / `scroll-before.json` fixtures are a 3-window frame and the same
-  // frame with the *middle* window removed. Positional (by-index) pairing shifts the surviving
-  // third window into the second slot, so both survivors surface as removed+added. Order-preserving
-  // similarity matching must instead pair the two survivors and report only the removed window.
-
-  private fun windowA() =
-    node(
-      "app.Window",
-      "app",
-      children = listOf(node("android.widget.TextView", "title", text = "Home")),
-    )
-
-  private fun windowB() =
-    node(
-      "dialog.Window",
-      "dialog",
-      children = listOf(node("android.widget.Button", "ok", text = "OK")),
-    )
-
-  private fun windowC() =
-    node(
-      "ime.Window",
-      "ime",
-      children = listOf(node("android.widget.EditText", "field", text = "abc")),
-    )
 
   @Test
   fun `middle window removed pairs the surviving windows and surfaces only the removed one`() {
@@ -384,7 +639,13 @@ class HierarchyDiffTest {
     // A's *second* dialog and report Changed. Semantic-aware similarity must pair the true survivor
     // (Equal) and surface the removed dialog (OnlyInA).
     val dialog = { t: String ->
-      node("dialog.Window", "dialog", children = listOf(node("TextView", "msg", text = t)))
+      node(
+        NodeSpec(
+          "dialog.Window",
+          "dialog",
+          children = listOf(node(NodeSpec("TextView", "msg", text = t))),
+        ),
+      )
     }
     val a = multiWindowRoot(dialog("kept"), dialog("removed"))
     val b = multiWindowRoot(dialog("kept"))
@@ -406,20 +667,24 @@ class HierarchyDiffTest {
     val a =
       multiWindowRoot(
         node(
-          "app.Window",
-          "app",
-          children = listOf(node("android.widget.TextView", "title", text = "Home")),
+          NodeSpec(
+            "app.Window",
+            "app",
+            children = listOf(node(NodeSpec("android.widget.TextView", "title", text = "Home"))),
+          ),
         ),
-        node("ime.Window", "ime"),
+        node(NodeSpec("ime.Window", "ime")),
       )
     val b =
       multiWindowRoot(
         node(
-          "app.Window",
-          "app",
-          children = listOf(node("android.widget.TextView", "title", text = "Away")),
+          NodeSpec(
+            "app.Window",
+            "app",
+            children = listOf(node(NodeSpec("android.widget.TextView", "title", text = "Away"))),
+          ),
         ),
-        node("ime.Window", "ime"),
+        node(NodeSpec("ime.Window", "ime")),
       )
 
     val diff = diffHierarchies(a, b)
@@ -428,45 +693,6 @@ class HierarchyDiffTest {
     assertEquals(0, diff.onlyInA)
     assertEquals(0, diff.onlyInB)
   }
-
-  // --- Cross-platform structural-role keying (issue #4872) ---
-
-  /** An Android screen: content frame → list → [title label, action button]. */
-  private fun androidScreen(title: String, action: String): UIElementInfo =
-    node(
-      "android.widget.FrameLayout",
-      "android:id/content",
-      children =
-        listOf(
-          node(
-            "androidx.recyclerview.widget.RecyclerView",
-            "com.app:id/list",
-            children =
-              listOf(
-                node("android.widget.TextView", "com.app:id/title", text = title),
-                node("androidx.appcompat.widget.AppCompatButton", "com.app:id/cta", text = action),
-              ),
-          ),
-        ),
-    )
-
-  /**
-   * The iOS rendering of the same screen: application → table → [static text, button]. Uses the
-   * UIKit class names the runner actually reports (`ElementLocator.mapElementType`), not the
-   * fabricated `XCUIElementType*` forms, so the cross-platform role diff is exercised on the live
-   * vocabulary.
-   */
-  private fun iosScreen(title: String, action: String): UIElementInfo =
-    node(
-      "XCUIApplication",
-      children =
-        listOf(
-          node(
-            "UITableView",
-            children = listOf(node("UILabel", text = title), node("UIButton", text = action)),
-          ),
-        ),
-    )
 
   @Test
   fun `class-name mode makes a cross-platform pair a meaningless all-OnlyIn diff`() {
@@ -520,15 +746,20 @@ class HierarchyDiffTest {
     // The Android side has an extra image trailing the button; the rest still pairs by role.
     val android =
       node(
-        "android.widget.FrameLayout",
-        "android:id/content",
-        children =
-          listOf(
-            node("android.widget.TextView", "com.app:id/title", text = "Inbox"),
-            node("android.widget.ImageView", "com.app:id/avatar"),
-          ),
+        NodeSpec(
+          "android.widget.FrameLayout",
+          "android:id/content",
+          children =
+            listOf(
+              node(NodeSpec("android.widget.TextView", "com.app:id/title", text = "Inbox")),
+              node(NodeSpec("android.widget.ImageView", "com.app:id/avatar")),
+            ),
+        ),
       )
-    val ios = node("XCUIApplication", children = listOf(node("UILabel", text = "Inbox")))
+    val ios =
+      node(
+        NodeSpec("XCUIApplication", children = listOf(node(NodeSpec("UILabel", text = "Inbox")))),
+      )
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
 
@@ -537,7 +768,9 @@ class HierarchyDiffTest {
     assertEquals(0, diff.onlyInB)
     assertEquals(2, diff.equal)
   }
+}
 
+internal class HierarchyDiffStructuralRoleTest : HierarchyDiffFixture() {
   @Test
   fun `role mode is symmetric under A-B swap`() {
     val android = androidScreen("Inbox", "Compose")
@@ -552,22 +785,20 @@ class HierarchyDiffTest {
     assertEquals(forward.equal, backward.equal)
   }
 
-  // --- Production-shaped cross-platform pairing (issue #4872 review) ---
-
-  /**
-   * The Android compare root as `HierarchyParser` actually produces it: a class-less synthetic
-   * wrapper defaulting to `android.view.View`, not the idealized `FrameLayout`. It must pair with
-   * the iOS `XCUIApplication` root, or the shared root segment diverges and every descendant key is
-   * disjoint — the two live trees would read as wholly OnlyIn.
-   */
   @Test
   fun `role mode pairs the production class-less android root with the ios root`() {
     val android =
       node(
-        "android.view.View",
-        children = listOf(node("android.widget.TextView", "com.app:id/title", text = "Inbox")),
+        NodeSpec(
+          "android.view.View",
+          children =
+            listOf(node(NodeSpec("android.widget.TextView", "com.app:id/title", text = "Inbox"))),
+        ),
       )
-    val ios = node("XCUIApplication", children = listOf(node("UILabel", text = "Inbox")))
+    val ios =
+      node(
+        NodeSpec("XCUIApplication", children = listOf(node(NodeSpec("UILabel", text = "Inbox")))),
+      )
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
 
@@ -579,19 +810,18 @@ class HierarchyDiffTest {
     assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Text#"))
   }
 
-  /**
-   * An icon button carries its label in Android's `content-desc` but in iOS's `text`. Role mode
-   * normalizes to a single accessible name, so the equivalent controls read Equal instead of being
-   * flagged Changed by a field-by-field text/content-desc comparison.
-   */
   @Test
   fun `role mode treats an android content-desc and an ios text label as the same accessible name`() {
     val android =
       node(
-        "android.view.View",
-        children = listOf(node("android.widget.ImageButton", contentDescription = "Add")),
+        NodeSpec(
+          "android.view.View",
+          children =
+            listOf(node(NodeSpec("android.widget.ImageButton", contentDescription = "Add"))),
+        ),
       )
-    val ios = node("XCUIApplication", children = listOf(node("UIButton", text = "Add")))
+    val ios =
+      node(NodeSpec("XCUIApplication", children = listOf(node(NodeSpec("UIButton", text = "Add")))))
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
 
@@ -602,15 +832,20 @@ class HierarchyDiffTest {
     assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Button#"))
   }
 
-  /** A genuinely different accessible name is still Changed under the normalized comparison. */
   @Test
   fun `role mode still reports a differing accessible name as Changed`() {
     val android =
       node(
-        "android.view.View",
-        children = listOf(node("android.widget.ImageButton", contentDescription = "Add")),
+        NodeSpec(
+          "android.view.View",
+          children =
+            listOf(node(NodeSpec("android.widget.ImageButton", contentDescription = "Add"))),
+        ),
       )
-    val ios = node("XCUIApplication", children = listOf(node("UIButton", text = "Remove")))
+    val ios =
+      node(
+        NodeSpec("XCUIApplication", children = listOf(node(NodeSpec("UIButton", text = "Remove")))),
+      )
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
 
@@ -618,20 +853,22 @@ class HierarchyDiffTest {
     assertEquals(NodeDiffStatus.Changed, statusOf(diff, "Button#"))
   }
 
-  /**
-   * The live iOS runner reports a checkbox as the bare `UIView` class (its `mapElementType` has no
-   * `.checkBox` case) while still setting `isCheckable`. Role mode promotes that checkable generic
-   * node to Checkbox so it pairs with Android's `CheckBox` instead of surfacing as OnlyIn on each
-   * side.
-   */
   @Test
   fun `role mode pairs an ios checkbox reported as a checkable UIView with an android CheckBox`() {
     val android =
       node(
-        "android.view.View",
-        children = listOf(node("android.widget.CheckBox", isCheckable = true)),
+        NodeSpec(
+          "android.view.View",
+          children = listOf(node(NodeSpec("android.widget.CheckBox", isCheckable = true))),
+        ),
       )
-    val ios = node("XCUIApplication", children = listOf(node("UIView", isCheckable = true)))
+    val ios =
+      node(
+        NodeSpec(
+          "XCUIApplication",
+          children = listOf(node(NodeSpec("UIView", isCheckable = true))),
+        ),
+      )
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
 
@@ -641,18 +878,23 @@ class HierarchyDiffTest {
     assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Checkbox#"))
   }
 
-  /**
-   * The checkable promotion is gated on generic roles: a `UISwitch` is checkable too but already
-   * keys as Switch by class, so it must not be pulled into Checkbox and mis-pair with a checkbox.
-   */
   @Test
   fun `role mode leaves a checkable switch keyed as Switch`() {
     val androidSwitch =
       node(
-        "android.view.View",
-        children = listOf(node("androidx.appcompat.widget.SwitchCompat", isCheckable = true)),
+        NodeSpec(
+          "android.view.View",
+          children =
+            listOf(node(NodeSpec("androidx.appcompat.widget.SwitchCompat", isCheckable = true))),
+        ),
       )
-    val iosSwitch = node("XCUIApplication", children = listOf(node("UISwitch", isCheckable = true)))
+    val iosSwitch =
+      node(
+        NodeSpec(
+          "XCUIApplication",
+          children = listOf(node(NodeSpec("UISwitch", isCheckable = true))),
+        ),
+      )
 
     val diff = diffHierarchies(androidSwitch, iosSwitch, DiffKeyMode.StructuralRole)
 
@@ -661,22 +903,20 @@ class HierarchyDiffTest {
     assertNull(statusOf(diff, "Checkbox#"))
   }
 
-  /**
-   * Production Android blanks `android.widget.TextView` (it is in the extractor's
-   * `GENERIC_CLASS_NAMES`) to a class-less node that `HierarchyParser` defaults to
-   * `android.view.View`, so an ordinary label arrives as a generic node — not the idealized
-   * `TextView` the earlier tests use. Role mode must still promote a non-interactive text-bearing
-   * generic node to Text so it pairs with the iOS `UILabel`; otherwise ubiquitous labels and their
-   * subtrees read as OnlyIn (issue #4872 review).
-   */
   @Test
   fun `role mode promotes a class-erased android label to Text so it pairs with an ios UILabel`() {
     val android =
       node(
-        "android.view.View",
-        children = listOf(node("android.view.View", "com.app:id/title", text = "Inbox")),
+        NodeSpec(
+          "android.view.View",
+          children =
+            listOf(node(NodeSpec("android.view.View", "com.app:id/title", text = "Inbox"))),
+        ),
       )
-    val ios = node("XCUIApplication", children = listOf(node("UILabel", text = "Inbox")))
+    val ios =
+      node(
+        NodeSpec("XCUIApplication", children = listOf(node(NodeSpec("UILabel", text = "Inbox")))),
+      )
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
 
@@ -687,20 +927,22 @@ class HierarchyDiffTest {
     assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Text#"))
   }
 
-  /**
-   * The text promotion is gated on the node being non-interactive: a clickable generic node that
-   * carries text is left in its structural Container role on both sides rather than mis-promoted to
-   * Text, so an interactive control is never keyed as a static label (issue #4872 review).
-   */
   @Test
   fun `role mode leaves a clickable text-bearing generic node keyed as Container`() {
     val android =
       node(
-        "android.view.View",
-        children = listOf(node("android.view.View", text = "Go", isClickable = true)),
+        NodeSpec(
+          "android.view.View",
+          children = listOf(node(NodeSpec("android.view.View", text = "Go", isClickable = true))),
+        ),
       )
     val ios =
-      node("XCUIApplication", children = listOf(node("UIView", text = "Go", isClickable = true)))
+      node(
+        NodeSpec(
+          "XCUIApplication",
+          children = listOf(node(NodeSpec("UIView", text = "Go", isClickable = true))),
+        ),
+      )
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
 
@@ -709,19 +951,22 @@ class HierarchyDiffTest {
     assertNull(statusOf(diff, "Text#"))
   }
 
-  /**
-   * Production Android also blanks `android.widget.ScrollView` to `android.view.View`, while
-   * retaining its scrollable state. Role mode must recover ScrollView from that state so its
-   * subtree aligns with the iOS runner's `UIScrollView` instead of becoming OnlyIn entries.
-   */
   @Test
   fun `role mode promotes a class-erased android scroll container to ScrollView`() {
     val android =
       node(
-        "android.view.View",
-        children = listOf(node("android.view.View", isScrollable = true)),
+        NodeSpec(
+          "android.view.View",
+          children = listOf(node(NodeSpec("android.view.View", isScrollable = true))),
+        ),
       )
-    val ios = node("XCUIApplication", children = listOf(node("UIScrollView", isScrollable = true)))
+    val ios =
+      node(
+        NodeSpec(
+          "XCUIApplication",
+          children = listOf(node(NodeSpec("UIScrollView", isScrollable = true))),
+        ),
+      )
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
 
@@ -732,20 +977,22 @@ class HierarchyDiffTest {
     assertEquals(NodeDiffStatus.Equal, statusOf(diff, "ScrollView#"))
   }
 
-  /**
-   * Android keeps `android.widget.RadioButton` (it is not erased), which contains the `Button`
-   * substring, while the iOS runner reports a radio as a checkable generic `UIView`. Role mode
-   * folds the Android radio into Checkbox so it pairs with iOS's promoted checkable node instead of
-   * surfacing as two OnlyIn entries (issue #4872 review).
-   */
   @Test
   fun `role mode pairs an android RadioButton with an ios checkable radio view`() {
     val android =
       node(
-        "android.view.View",
-        children = listOf(node("android.widget.RadioButton", isCheckable = true)),
+        NodeSpec(
+          "android.view.View",
+          children = listOf(node(NodeSpec("android.widget.RadioButton", isCheckable = true))),
+        ),
       )
-    val ios = node("XCUIApplication", children = listOf(node("UIView", isCheckable = true)))
+    val ios =
+      node(
+        NodeSpec(
+          "XCUIApplication",
+          children = listOf(node(NodeSpec("UIView", isCheckable = true))),
+        ),
+      )
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
 
@@ -755,29 +1002,32 @@ class HierarchyDiffTest {
     assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Checkbox#"))
   }
 
-  /**
-   * A custom Android View subclass (`com.example.ProfileView`) and its whole subtree must pair with
-   * the iOS runner's custom `.other -> UIView` container. Without the `*View` container catch-all
-   * the Android node keys as Other and the iOS node as Container, making the entire custom subtree
-   * disjoint (issue #4872 review).
-   */
   @Test
   fun `role mode pairs a custom android View container with an ios UIView container`() {
     val android =
       node(
-        "android.view.View",
-        children =
-          listOf(
-            node(
-              "com.example.ProfileView",
-              children = listOf(node("android.widget.TextView", text = "Name")),
+        NodeSpec(
+          "android.view.View",
+          children =
+            listOf(
+              node(
+                NodeSpec(
+                  "com.example.ProfileView",
+                  children = listOf(node(NodeSpec("android.widget.TextView", text = "Name"))),
+                ),
+              ),
             ),
-          ),
+        ),
       )
     val ios =
       node(
-        "XCUIApplication",
-        children = listOf(node("UIView", children = listOf(node("UILabel", text = "Name")))),
+        NodeSpec(
+          "XCUIApplication",
+          children =
+            listOf(
+              node(NodeSpec("UIView", children = listOf(node(NodeSpec("UILabel", text = "Name"))))),
+            ),
+        ),
       )
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
@@ -789,24 +1039,25 @@ class HierarchyDiffTest {
     assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Text#"))
   }
 
-  /**
-   * `android.widget.CheckedTextView` is a standard checkable control, but its class name contains
-   * the `TextView` substring so the class mapping keys it as [StructuralRole.Text] — before any
-   * generic-role checkable promotion could fire. The iOS runner reports the equivalent checkbox as
-   * a checkable bare `UIView -> Container`. Promoting on `isCheckable` regardless of the
-   * class-derived role folds the CheckedTextView into Checkbox too, so the two pair instead of
-   * surfacing as OnlyIn on each side (issue #4872 review).
-   */
   @Test
   fun `role mode pairs a checkable android CheckedTextView with an ios checkable view`() {
     val android =
       node(
-        "android.view.View",
-        children =
-          listOf(node("android.widget.CheckedTextView", text = "Wifi", isCheckable = true)),
+        NodeSpec(
+          "android.view.View",
+          children =
+            listOf(
+              node(NodeSpec("android.widget.CheckedTextView", text = "Wifi", isCheckable = true)),
+            ),
+        ),
       )
     val ios =
-      node("XCUIApplication", children = listOf(node("UIView", text = "Wifi", isCheckable = true)))
+      node(
+        NodeSpec(
+          "XCUIApplication",
+          children = listOf(node(NodeSpec("UIView", text = "Wifi", isCheckable = true))),
+        ),
+      )
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
 
@@ -816,47 +1067,57 @@ class HierarchyDiffTest {
     assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Checkbox#"))
   }
 
-  /**
-   * A production Android list row is an ordinary `LinearLayout`/`ViewGroup -> Container` whose
-   * collection-item metadata `HierarchyParser` drops, while the iOS runner emits the matching row
-   * as a `UITableViewCell -> ListItem` by class. Keying the Android row by its class alone would
-   * make every row (and its whole subtree) OnlyIn against the iOS cells. Inferring [ListItem] for a
-   * generic direct child of a [List] parent pairs the rows so their contents diff (issue #4872
-   * review).
-   */
   @Test
   fun `role mode infers ListItem for an android list-row wrapper so it pairs with an ios cell`() {
     val android =
       node(
-        "android.widget.FrameLayout",
-        "android:id/content",
-        children =
-          listOf(
-            node(
-              "androidx.recyclerview.widget.RecyclerView",
-              "com.app:id/list",
-              children =
-                listOf(
-                  node(
-                    "android.widget.LinearLayout",
-                    "com.app:id/row",
-                    children = listOf(node("android.widget.TextView", text = "Inbox")),
-                  ),
+        NodeSpec(
+          "android.widget.FrameLayout",
+          "android:id/content",
+          children =
+            listOf(
+              node(
+                NodeSpec(
+                  "androidx.recyclerview.widget.RecyclerView",
+                  "com.app:id/list",
+                  children =
+                    listOf(
+                      node(
+                        NodeSpec(
+                          "android.widget.LinearLayout",
+                          "com.app:id/row",
+                          children =
+                            listOf(node(NodeSpec("android.widget.TextView", text = "Inbox"))),
+                        ),
+                      ),
+                    ),
                 ),
+              ),
             ),
-          ),
+        ),
       )
     val ios =
       node(
-        "XCUIApplication",
-        children =
-          listOf(
-            node(
-              "UITableView",
-              children =
-                listOf(node("UITableViewCell", children = listOf(node("UILabel", text = "Inbox")))),
+        NodeSpec(
+          "XCUIApplication",
+          children =
+            listOf(
+              node(
+                NodeSpec(
+                  "UITableView",
+                  children =
+                    listOf(
+                      node(
+                        NodeSpec(
+                          "UITableViewCell",
+                          children = listOf(node(NodeSpec("UILabel", text = "Inbox"))),
+                        ),
+                      ),
+                    ),
+                ),
+              ),
             ),
-          ),
+        ),
       )
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
@@ -870,18 +1131,16 @@ class HierarchyDiffTest {
     assertEquals(NodeDiffStatus.Equal, statusOf(diff, "ListItem#"))
   }
 
-  /**
-   * The ListItem inference is scoped to a [List] parent: a generic container that is *not* a list
-   * row keeps its Container role, so an ordinary nested wrapper is never mis-keyed as a list item.
-   */
   @Test
   fun `role mode does not infer ListItem for a generic container outside a list`() {
     val android =
       node(
-        "android.view.View",
-        children = listOf(node("android.widget.LinearLayout", "com.app:id/panel")),
+        NodeSpec(
+          "android.view.View",
+          children = listOf(node(NodeSpec("android.widget.LinearLayout", "com.app:id/panel"))),
+        ),
       )
-    val ios = node("XCUIApplication", children = listOf(node("UIView")))
+    val ios = node(NodeSpec("XCUIApplication", children = listOf(node(NodeSpec("UIView")))))
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
 
@@ -890,21 +1149,20 @@ class HierarchyDiffTest {
     assertNull(statusOf(diff, "ListItem#"))
   }
 
-  /**
-   * An Android icon control can carry an empty `text` alongside a real `content-desc`. The
-   * normalized accessible name treats empty text as absent and falls back to `content-desc`, so it
-   * reads the same as the iOS `text` label instead of comparing `""` against the label and
-   * reporting Changed (issue #4872 review).
-   */
   @Test
   fun `role mode treats empty android text as absent and falls back to content-desc`() {
     val android =
       node(
-        "android.view.View",
-        children =
-          listOf(node("android.widget.ImageButton", text = "", contentDescription = "Add")),
+        NodeSpec(
+          "android.view.View",
+          children =
+            listOf(
+              node(NodeSpec("android.widget.ImageButton", text = "", contentDescription = "Add")),
+            ),
+        ),
       )
-    val ios = node("XCUIApplication", children = listOf(node("UIButton", text = "Add")))
+    val ios =
+      node(NodeSpec("XCUIApplication", children = listOf(node(NodeSpec("UIButton", text = "Add")))))
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
 
@@ -919,18 +1177,26 @@ class HierarchyDiffTest {
   fun `role mode aligns later siblings after a platform-specific node`() {
     val android =
       node(
-        "android.view.View",
-        children =
-          listOf(
-            node("android.widget.TextView", text = "First"),
-            node("android.widget.ImageView"),
-            node("android.widget.TextView", text = "Second"),
-          ),
+        NodeSpec(
+          "android.view.View",
+          children =
+            listOf(
+              node(NodeSpec("android.widget.TextView", text = "First")),
+              node(NodeSpec("android.widget.ImageView")),
+              node(NodeSpec("android.widget.TextView", text = "Second")),
+            ),
+        ),
       )
     val ios =
       node(
-        "XCUIApplication",
-        children = listOf(node("UILabel", text = "First"), node("UILabel", text = "Second")),
+        NodeSpec(
+          "XCUIApplication",
+          children =
+            listOf(
+              node(NodeSpec("UILabel", text = "First")),
+              node(NodeSpec("UILabel", text = "Second")),
+            ),
+        ),
       )
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
@@ -945,10 +1211,13 @@ class HierarchyDiffTest {
   fun `role mode promotes a content-description-only generic node to Text`() {
     val android =
       node(
-        "android.view.View",
-        children = listOf(node("android.view.View", contentDescription = "Home")),
+        NodeSpec(
+          "android.view.View",
+          children = listOf(node(NodeSpec("android.view.View", contentDescription = "Home"))),
+        ),
       )
-    val ios = node("XCUIApplication", children = listOf(node("UIView", text = "Home")))
+    val ios =
+      node(NodeSpec("XCUIApplication", children = listOf(node(NodeSpec("UIView", text = "Home")))))
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
 
@@ -963,20 +1232,27 @@ class HierarchyDiffTest {
   fun `role mode prefers an Android content description over visible text`() {
     val android =
       node(
-        "android.view.View",
-        children =
-          listOf(
-            node(
-              "android.widget.Button",
-              text = "AutoMobile Playground",
-              contentDescription = "Predicted app: AutoMobile Playground",
+        NodeSpec(
+          "android.view.View",
+          children =
+            listOf(
+              node(
+                NodeSpec(
+                  "android.widget.Button",
+                  text = "AutoMobile Playground",
+                  contentDescription = "Predicted app: AutoMobile Playground",
+                ),
+              ),
             ),
-          ),
+        ),
       )
     val ios =
       node(
-        "XCUIApplication",
-        children = listOf(node("UIButton", text = "Predicted app: AutoMobile Playground")),
+        NodeSpec(
+          "XCUIApplication",
+          children =
+            listOf(node(NodeSpec("UIButton", text = "Predicted app: AutoMobile Playground"))),
+        ),
       )
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)

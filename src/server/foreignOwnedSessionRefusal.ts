@@ -2,7 +2,7 @@ import { defaultDaemonContext } from "../daemon/daemonContext";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import type { SessionAccess } from "../daemon/sessionManager";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
-import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
+import { isDeviceSessionAcquisitionTool } from "../daemon/deviceSessionResult";
 
 const FOREIGN_SESSION_REMEDY =
   "Acquire a device on this connection (getAndroid, getApple or startDevice), or wait for the owner to release the session.";

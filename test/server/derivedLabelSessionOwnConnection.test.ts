@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -7,8 +7,8 @@ import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDevice
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
-import { executionTracker } from "../../src/server/executionTracker";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";

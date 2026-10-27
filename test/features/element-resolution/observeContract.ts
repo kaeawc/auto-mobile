@@ -1,3 +1,4 @@
+import { wireCapture } from "../../helpers/wireCapture";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Element } from "../../../src/models/Element";
@@ -43,7 +44,7 @@ export interface ContractCase {
 export function loadContractCaptures(directory: string): ContractCapture[] {
   return readdirSync(directory, { withFileTypes: true })
     .sort((a, b) => a.name.localeCompare(b.name))
-    .flatMap((entry) => {
+    .flatMap<ContractCapture>((entry) => {
       if (entry.isDirectory()) {
         return loadContractCaptures(join(directory, entry.name)).map((capture) => ({
           ...capture,
@@ -71,7 +72,7 @@ export function loadContractCaptures(directory: string): ContractCapture[] {
       if (entry.name === "ctrlproxy-notification-group-compact-bounds.json") {
         return Object.entries(value).map(([name, node]) => ({
           name: `${entry.name}/${name}`,
-          hierarchy: { hierarchy: { node } },
+          hierarchy: wireCapture({ hierarchy: { node } }),
           platform: "android" as const,
         }));
       }

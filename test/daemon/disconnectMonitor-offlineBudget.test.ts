@@ -1,18 +1,19 @@
-import { describe, expect, test } from "bun:test";
-import { Daemon } from "../../src/daemon/daemon";
+import { afterEach, describe, expect, test } from "bun:test";
+import { DaemonState } from "../../src/daemon/daemonState";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import {
   evaluateDeviceDisconnects,
   OFFLINE_DEVICE_DISCONNECT_BUDGET_MS,
   type OfflineEpisode,
 } from "../../src/daemon/disconnectMonitor";
-import type { BootedDevice, ExecResult, Platform } from "../../src/models";
+import type { ExecResult, Platform } from "../../src/models";
 import { AdbClient, resetAdbClientCaches } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { createMonitorDaemon, heldAndroidDevice } from "../helpers/disconnectMonitorDaemon";
 
 const EMULATOR = "emulator-5554";
 const PHONE = "57281FDCH00462";
@@ -78,43 +79,27 @@ function offlineMonitorHarness(deviceId = EMULATOR, initialRow = ROWS.device) {
     override async getAndroidListedDeviceStates(ids: Iterable<string>) {
       return emulator.getListedNonDeviceStatesAmong(ids);
     }
+    // Offline rows reach the monitor through the listed-state probe above, not this one.
+    async getAndroidOfflineDeviceIds() {
+      return new Set<string>();
+    }
     async recoverAndroidOfflineDevices() {
       reconnects++;
     }
   }
-  const device = { id: deviceId, platform: "android", incarnation: 1 };
+  const device = heldAndroidDevice(deviceId);
   const cleanedUp: string[] = [];
-  const daemon = Object.assign(Object.create(Daemon.prototype), {
+  const { daemon } = createMonitorDaemon({
     timer,
-    deviceDisconnectMonitor: null,
-    deviceDisconnectMisses: new Map<string, number>(),
-    deviceDisconnectMissIncarnations: new Map([[device.id, 1]]),
-    confirmedDisconnectedDeviceIds: new Set(),
-    forceDisconnectedDeviceIds: new Set(),
-    offlineRecoveryAttemptedDeviceIds: new Set(),
-    offlineRecoveryAttemptedIncarnations: new Map(),
-    offlineEpisodes: new Map<string, OfflineEpisode>(),
-    deferredSessionRecoverySweeps: new Set(),
-    devicePool: {
-      retryDueDeferredSessionRecoveries: async () => {},
-      reconcileDiscoveryObservation: async () => {},
-      mapAndroidDiscovery: (devices: BootedDevice[]) => devices,
-      getAndroidTransportAliases: (): string[] => [],
-      getAllDevices: () => [device],
-      isDeviceLeasedForAndroidStartup: () => false,
-      releaseAdbServerResetCohortReservations: async () => {},
-    },
-    sessionManager: {
-      getAssignedDevices: () => [device.id],
-      getAllSessions: () => [{ assignedDevice: device.id, platform: "android" }],
-    },
-    // The release path (session release, pool removal, in-flight cancel) starts here.
-    cleanupDisconnectedDevice: async (deviceId: string) => {
-      cleanedUp.push(deviceId);
-    },
+    device,
+    missIncarnations: new Map([[device.id, 1]]),
   });
-  daemon.startDeviceDisconnectMonitor(new ListingManager(), async () => []);
-  const monitor = daemon.deviceDisconnectMonitor as SingleFlightInterval;
+  // The release path (session release, pool removal, in-flight cancel) starts here.
+  daemon.testHooks.overrideCleanupDisconnectedDevice(async (id) => {
+    cleanedUp.push(id);
+  });
+  daemon.testHooks.startDeviceDisconnectMonitor(new ListingManager(), async () => []);
+  const monitor = daemon.testHooks.runtime.deviceDisconnectMonitor as SingleFlightInterval;
   const sweepFor = async (ms: number) => {
     for (let elapsed = 0; elapsed < ms; elapsed += POLL_MS) {
       await monitor.run();
@@ -141,14 +126,14 @@ describe("disconnect monitor offline budget (#11090)", () => {
       h.list(ROWS.offline);
       await h.sweepFor(30_000);
       expect(h.cleanedUp).toEqual([]);
-      expect(h.daemon.deviceDisconnectMisses.has(EMULATOR)).toBe(false);
+      expect(h.daemon.testHooks.deviceLoss.misses.has(EMULATOR)).toBe(false);
       expect(h.reconnects()).toBe(1);
 
       h.list(ROWS.device);
       await h.sweepFor(POLL_MS);
       expect(h.cleanedUp).toEqual([]);
-      expect(h.daemon.offlineEpisodes.size).toBe(0);
-      expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+      expect(h.daemon.testHooks.deviceLoss.offlineEpisodes.size).toBe(0);
+      expect(h.daemon.testHooks.deviceLoss.confirmedDisconnectedIds.size).toBe(0);
     } finally {
       await h.monitor.stop();
     }
@@ -194,7 +179,7 @@ describe("physical device in a transitional adb state (#11090)", () => {
         h.list(PHONE_DEVICE_ROW);
         await h.sweepFor(POLL_MS);
         expect(h.cleanedUp).toEqual([]);
-        expect(h.daemon.deviceDisconnectMisses.has(PHONE)).toBe(false);
+        expect(h.daemon.testHooks.deviceLoss.misses.has(PHONE)).toBe(false);
       } finally {
         await h.monitor.stop();
       }
@@ -225,13 +210,13 @@ describe("adb transitional states share the offline budget (#11592)", () => {
       h.list(unauthorizedRow);
       await h.sweepFor(30_000);
       expect(h.cleanedUp).toEqual([]);
-      expect(h.daemon.deviceDisconnectMisses.has(PHONE)).toBe(false);
+      expect(h.daemon.testHooks.deviceLoss.misses.has(PHONE)).toBe(false);
       expect(h.reconnects()).toBe(0);
 
       h.list(PHONE_DEVICE_ROW);
       await h.sweepFor(POLL_MS);
       expect(h.cleanedUp).toEqual([]);
-      expect(h.daemon.offlineEpisodes.size).toBe(0);
+      expect(h.daemon.testHooks.deviceLoss.offlineEpisodes.size).toBe(0);
     } finally {
       await h.monitor.stop();
     }
@@ -303,4 +288,8 @@ describe("evaluateDeviceDisconnects offline episodes", () => {
     const result = evaluate(misses, episodes, OFFLINE_DEVICE_DISCONNECT_BUDGET_MS, true);
     expect(result.disconnected).toEqual([EMULATOR]);
   });
+});
+
+afterEach(() => {
+  DaemonState.getInstance().reset();
 });

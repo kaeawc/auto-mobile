@@ -9,8 +9,8 @@ import {
   resetRecordingTeardownRecoveryNeeded,
   takeRecordingIdsFinalizedByRelease,
   type RecordingSessionCleanupDeps,
-} from "../../src/server/recordingSessionCleanup";
-import { redriveUnconfirmedCaptureTeardowns } from "../../src/server/recordingTeardownRedrive";
+} from "../../src/daemon/recordingSessionCleanup";
+import { redriveUnconfirmedCaptureTeardowns } from "../../src/daemon/recordingTeardownRedrive";
 import { exponentialBackoff } from "../../src/utils/Backoff";
 import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";

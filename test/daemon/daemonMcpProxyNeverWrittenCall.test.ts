@@ -1,12 +1,9 @@
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
-import { describe, expect, test, spyOn } from "bun:test";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
+import { describe, expect, test, spyOn, afterEach, mock, beforeEach } from "bun:test";
 import { DaemonMcpProxy, DaemonToolOutcomeUnknownError } from "../../src/daemon/daemonMcpProxy";
-import {
-  DaemonClient,
-  DaemonRequestNotDeliveredError,
-  DaemonUnavailableError,
-} from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -43,7 +40,6 @@ describe("DaemonMcpProxy tool call that was never written (#9996)", () => {
     const result = { content: [{ type: "text", text: "tapped" }] };
     const freshClient = new FakeDaemonClient({ toolResult: result });
     const clients = [lostClient, freshClient];
-    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const proxy = new DaemonMcpProxy({
       clientFactory: () => clients.shift()!,
       daemonManager: matchingDaemonManager(),
@@ -66,7 +62,6 @@ describe("DaemonMcpProxy tool call that was never written (#9996)", () => {
         { toolName: "tapOn", params: withProxyOwnerToken({ text: "Submit" }) },
       ]);
     } finally {
-      isAvailableSpy.mockRestore();
       await proxy.close();
     }
   });
@@ -86,7 +81,6 @@ describe("DaemonMcpProxy retry of a never-written call (#9996 follow-up)", () =>
       },
     });
     const clients = [lostClient, retryClient];
-    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const proxy = new DaemonMcpProxy({
       clientFactory: () => clients.shift()!,
       daemonManager: matchingDaemonManager(),
@@ -105,7 +99,6 @@ describe("DaemonMcpProxy retry of a never-written call (#9996 follow-up)", () =>
       lostClient.closeSocketThenReleaseSubscribe();
       return { error: await settled, retryClient };
     } finally {
-      isAvailableSpy.mockRestore();
       await proxy.close();
     }
   }
@@ -143,4 +136,12 @@ describe("DaemonMcpProxy retry of a never-written call (#9996 follow-up)", () =>
 
     expect(error).toBe(toolFailure);
   });
+});
+
+afterEach(() => {
+  mock.restore();
+});
+
+beforeEach(() => {
+  spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
 });

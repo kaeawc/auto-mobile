@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
-import { DAEMON_REGISTER_SESSION_METHOD } from "../../src/daemon/constants";
+import { DAEMON_REGISTER_SESSION_METHOD } from "../../src/daemon/wire/constants";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -12,6 +12,7 @@ import { SESSION_OWNERSHIP_LOST_CODE } from "../../src/daemon/sessionReleasedDur
 import { DAEMON_SESSION_NOT_FOUND_CODE, type DaemonRequest } from "../../src/daemon/types";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
+import type { SessionReleaseReason } from "../../src/models/releaseReasons";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../../src/models/deviceSessionRecovery";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -79,7 +80,7 @@ describe("registerSession after a daemon restart (#11367)", () => {
   }
 
   /** The first daemon issues the session and releases it; the returned daemon is its successor. */
-  async function restartedAfterRelease(releaseReason: string): Promise<TestDaemon> {
+  async function restartedAfterRelease(releaseReason: SessionReleaseReason): Promise<TestDaemon> {
     const first = daemon("daemon-a");
     await first.manager.createSession(SESSION, DEVICE, "android");
     timer.advanceTime(5);
@@ -120,8 +121,8 @@ describe("registerSession after a daemon restart (#11367)", () => {
         error: `Session not found: ${SESSION}`,
         code: DAEMON_SESSION_NOT_FOUND_CODE,
         releaseReason,
-        ...(idle ? { idle: true } : {}),
-      };
+        ...(idle ? ({ idle: true } as const) : {}),
+      } as const;
       expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
       expect(await heartbeat(state)).toEqual(released);
 
@@ -131,9 +132,13 @@ describe("registerSession after a daemon restart (#11367)", () => {
         retryable: false,
         nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
         error: expect.stringContaining(`Session ${SESSION} is terminal after ${releaseReason}`),
-        details: { sessionUuid: SESSION, reason: releaseReason, ...(idle ? { idle: true } : {}) },
+        details: {
+          sessionUuid: SESSION,
+          reason: releaseReason,
+          ...(idle ? ({ idle: true } as const) : {}),
+        },
         releaseReason,
-        ...(idle ? { idle: true } : {}),
+        ...(idle ? ({ idle: true } as const) : {}),
       });
 
       expect(registry.list()).toEqual([]);
@@ -150,7 +155,7 @@ describe("registerSession after a daemon restart (#11367)", () => {
     `device-disconnected:${DEVICE}`,
     "identity-recovery-device-missing",
     "plan-auto-release",
-  ]) {
+  ] as const) {
     test(`the restarted daemon still registers a UUID released by ${releaseReason}`, async () => {
       const { registry, state } = await restartedAfterRelease(releaseReason);
 
@@ -262,7 +267,7 @@ describe("registerSession after a daemon restart (#11367)", () => {
       error: `Session not found: ${SESSION}`,
       releaseReason: "expired",
       idle: true,
-    };
+    } as const;
     expect(await heartbeat(state)).toEqual(missing);
     expect(
       await handleDaemonRequest(request("daemon/sessionInfo", { sessionId: SESSION }), state),

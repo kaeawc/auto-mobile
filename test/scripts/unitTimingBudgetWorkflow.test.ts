@@ -23,7 +23,7 @@ describe("unit timing validator workflow budgets", () => {
     expect(callers.map(({ file, id }) => `${file}:${id}`)).toContain(
       "pull_request.yml:ts-build-and-test",
     );
-    expect(callers.map(({ file, id }) => `${file}:${id}`)).toContain("merge.yml:node-unit-tests");
+    expect(callers.map(({ file, id }) => `${file}:${id}`)).toContain("merge.yml:ts-code-coverage");
   });
 
   for (const { file, id, job, step, index } of callers) {
@@ -32,7 +32,9 @@ describe("unit timing validator workflow budgets", () => {
       const budget = Number(env.BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS ?? 600);
       const priorLanes = (job.steps ?? [])
         .slice(0, index)
-        .filter((prior) => prior.run?.includes("scripts/test-ts.sh unit"));
+        .filter((prior) =>
+          /scripts\/(?:test-ts.sh unit|ci\/run-ts-coverage.sh)/.test(prior.run ?? ""),
+        );
       let priorSeconds = 0;
       for (const lane of priorLanes) {
         const wall = Number(lane.env?.AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS);
@@ -45,10 +47,11 @@ describe("unit timing validator workflow budgets", () => {
         expect(Number.isInteger(laneCap) && laneCap >= wall).toBe(true);
         priorSeconds += laneCap;
       }
-      // The combined main job has no artifact download; reserve two minutes.
-      // Standalone/prepush jobs reserve three. Include the unit lane's full
-      // configured allowance, rather than assuming it finishes quickly.
-      const margin = priorLanes.length > 0 ? 120 : 180;
+      // Coverage setup builds and globally installs the package; also reserve
+      // post-lane probes, merging and badge work. Other combined jobs reserve
+      // two minutes, standalone/prepush jobs three.
+      const margin =
+        file === "merge.yml" && id === "ts-code-coverage" ? 480 : priorLanes.length > 0 ? 120 : 180;
       expect(Number.isInteger(budget) && budget > 0).toBe(true);
       expect(budget + priorSeconds + margin).toBeLessThan(Number(job["timeout-minutes"]) * 60);
       // Direct CI gates must reuse the completed lane, avoiding an unaccounted
@@ -112,5 +115,62 @@ test("timing budget uploads its summary after enforcement even on failure", () =
     path: "scratch/timing-unit-reports/unit-timing-budget-summary.md",
     "if-no-files-found": "ignore",
     "retention-days": 7,
+  });
+});
+
+const mergeJobs = loadJobs(".github/workflows/merge.yml");
+const coverage = mergeJobs["ts-code-coverage"];
+const coverageSteps = coverage.steps ?? [];
+
+test("merge coverage owns the Ubuntu unit gate and plain isolated timing verdict", () => {
+  expect(mergeJobs["node-unit-tests"].strategy?.matrix?.os).toEqual(["windows-latest"]);
+  expect(
+    mergeJobs["node-unit-tests"].steps?.some((s) => s.run?.includes("validate-bun-test-timings")),
+  ).toBe(false);
+  const windows = mergeJobs["node-unit-tests"];
+  expect(
+    windows.steps?.find((s) => s.uses === "actions/checkout@v6")?.with?.["fetch-depth"],
+  ).toBeUndefined();
+  expect(windows.steps?.some((s) => s.env?.AUTOMOBILE_UNIT_JUNIT_DIR)).toBe(false);
+  expect(coverage["timeout-minutes"]).toBe(45);
+  expect(coverage["runs-on"]).toBe("ubuntu-latest");
+  expect(coverage.permissions).toEqual({ actions: "write", contents: "read" });
+  expect(coverageSteps.find((s) => s.uses === "actions/checkout@v6")?.with?.["fetch-depth"]).toBe(
+    2,
+  );
+  const lane = coverageSteps.findIndex((s) => s.run?.includes("ci/run-ts-coverage.sh"));
+  const timing = coverageSteps.findIndex((s) => s.run?.includes("validate-bun-test-timings.sh"));
+  expect(lane).toBeGreaterThanOrEqual(0);
+  expect(coverageSteps[lane].env).toEqual({
+    AUTOMOBILE_TEST_MODE: "true",
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720",
+    AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560",
+  });
+  const badge = coverageSteps.findIndex((s) => s.name === "Upload Coverage Badge");
+  expect(badge).toBeGreaterThan(lane);
+  expect(timing).toBeGreaterThan(badge);
+  expect(coverageSteps[timing].if).toBeUndefined();
+  expect(coverageSteps[timing].env).toEqual({
+    AUTOMOBILE_TEST_MODE: "true",
+    BUN_TEST_TIMING_BASE_REF: "HEAD^",
+    BUN_TEST_TIMING_REPORT_DIR: "coverage/shards",
+    BUN_TEST_TIMING_REPORTS_INSTRUMENTED: "true",
+    BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "600",
+  });
+  const diagnostics = coverageSteps.findIndex((s) => s.with?.name === "ts-coverage-diagnostics");
+  expect(diagnostics).toBeGreaterThan(timing);
+  expect(coverageSteps[diagnostics].if).toBe("always()");
+  expect(coverageSteps[diagnostics].with?.path).toContain("coverage/shards/**");
+  expect(coverageSteps[diagnostics].with?.path).toContain("scratch/bun-test-report.recheck.d/**");
+  const dispatch = coverageSteps.at(-1);
+  expect(dispatch?.run).toBe(
+    'bash scripts/ci/rerun-contended-runner.sh dispatch "$GITHUB_STEP_SUMMARY" "$RUN_ID" "$RUN_ATTEMPT"',
+  );
+  expect(dispatch?.if).toContain("failure()");
+  expect(dispatch?.env).toEqual({
+    GH_TOKEN: "${{ github.token }}",
+    REPO: "${{ github.repository }}",
+    RUN_ID: "${{ github.run_id }}",
+    RUN_ATTEMPT: "${{ github.run_attempt }}",
   });
 });

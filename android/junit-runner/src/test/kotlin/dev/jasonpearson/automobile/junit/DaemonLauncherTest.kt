@@ -105,11 +105,11 @@ class DaemonLauncherTest {
     // at 2_000 (forkEvery / second module), after that restart. Keyed on its own JVM start it would
     // restart again; keyed on the run start it reuses the daemon (#10170).
     val daemon = FakeDaemon(record = DaemonPidRecord(version = "1.0.0", startedAtMs = 100))
-    val runStart = DaemonSocketPaths.resolveRunnerStartedAtMs("400") { 500 }
+    val runStart = DaemonRestartPolicy.resolveRunnerStartedAtMs("400") { 500 }
     DaemonLauncher.ensureRunning(FakeEnvironment(daemon, runnerStartedAtMs = runStart))
     daemon.nowMs = 3_000
 
-    val laterForkStart = DaemonSocketPaths.resolveRunnerStartedAtMs("400") { 2_000 }
+    val laterForkStart = DaemonRestartPolicy.resolveRunnerStartedAtMs("400") { 2_000 }
     DaemonLauncher.ensureRunning(FakeEnvironment(daemon, runnerStartedAtMs = laterForkStart))
 
     assertEquals(listOf(true), daemon.launches)
@@ -117,13 +117,13 @@ class DaemonLauncherTest {
 
   @Test
   fun `runner start resolution prefers the build-wide run start`() {
-    assertEquals(400L, DaemonSocketPaths.resolveRunnerStartedAtMs("400") { 500 })
-    assertEquals(400L, DaemonSocketPaths.resolveRunnerStartedAtMs(" 400 ") { 500 })
-    assertEquals(500L, DaemonSocketPaths.resolveRunnerStartedAtMs(null) { 500 })
-    assertEquals(500L, DaemonSocketPaths.resolveRunnerStartedAtMs("") { 500 })
-    assertEquals(500L, DaemonSocketPaths.resolveRunnerStartedAtMs("abc") { 500 })
-    assertEquals(500L, DaemonSocketPaths.resolveRunnerStartedAtMs("0") { 500 })
-    assertNull(DaemonSocketPaths.resolveRunnerStartedAtMs(null) { null })
+    assertEquals(400L, DaemonRestartPolicy.resolveRunnerStartedAtMs("400") { 500 })
+    assertEquals(400L, DaemonRestartPolicy.resolveRunnerStartedAtMs(" 400 ") { 500 })
+    assertEquals(500L, DaemonRestartPolicy.resolveRunnerStartedAtMs(null) { 500 })
+    assertEquals(500L, DaemonRestartPolicy.resolveRunnerStartedAtMs("") { 500 })
+    assertEquals(500L, DaemonRestartPolicy.resolveRunnerStartedAtMs("abc") { 500 })
+    assertEquals(500L, DaemonRestartPolicy.resolveRunnerStartedAtMs("0") { 500 })
+    assertNull(DaemonRestartPolicy.resolveRunnerStartedAtMs(null) { null })
   }
 
   @Test
@@ -241,15 +241,17 @@ class DaemonLauncherTest {
   @Test
   fun `requiresForcedRestart decision table`() {
     // The case that fails today: a fresh daemon from another fork of this run.
-    assertFalse(DaemonSocketPaths.requiresForcedRestart(true, true, 2_000, 1_000))
-    assertTrue(DaemonSocketPaths.requiresForcedRestart(true, true, 500, 1_000))
-    assertTrue(DaemonSocketPaths.requiresForcedRestart(true, true, 1_000, 1_000))
-    assertTrue(DaemonSocketPaths.requiresForcedRestart(true, true, null, 1_000))
-    assertTrue(DaemonSocketPaths.requiresForcedRestart(true, true, 2_000, null))
-    assertTrue(DaemonSocketPaths.requiresForcedRestart(true, false, 2_000, 1_000))
+    assertFalse(DaemonRestartPolicy.requiresForcedRestart(true, true, 2_000, 1_000))
+    assertTrue(DaemonRestartPolicy.requiresForcedRestart(true, true, 500, 1_000))
+    assertTrue(DaemonRestartPolicy.requiresForcedRestart(true, true, 1_000, 1_000))
+    assertTrue(DaemonRestartPolicy.requiresForcedRestart(true, true, null, 1_000))
+    assertTrue(DaemonRestartPolicy.requiresForcedRestart(true, true, 2_000, null))
+    assertTrue(DaemonRestartPolicy.requiresForcedRestart(true, false, 2_000, 1_000))
     listOf(true, false).forEach { available ->
       listOf<Long?>(null, 500, 2_000).forEach { daemonStarted ->
-        assertFalse(DaemonSocketPaths.requiresForcedRestart(false, available, daemonStarted, 1_000))
+        assertFalse(
+          DaemonRestartPolicy.requiresForcedRestart(false, available, daemonStarted, 1_000),
+        )
       }
     }
   }
@@ -261,15 +263,15 @@ class DaemonLauncherTest {
       pidFile.writeText("""{"pid":42,"startedAt":1759750000123,"version":"1.0.0"}""")
       assertEquals(
         1_759_750_000_123L,
-        DaemonSocketPaths.readDaemonStartedAtMsFromPidFile(pidFile.path),
+        DaemonPidFiles.readDaemonStartedAtMsFromPidFile(pidFile.path),
       )
 
       pidFile.writeText("""{"pid":42}""")
-      assertNull(DaemonSocketPaths.readDaemonStartedAtMsFromPidFile(pidFile.path))
+      assertNull(DaemonPidFiles.readDaemonStartedAtMsFromPidFile(pidFile.path))
     } finally {
       pidFile.delete()
     }
-    assertNull(DaemonSocketPaths.readDaemonStartedAtMsFromPidFile(pidFile.path))
+    assertNull(DaemonPidFiles.readDaemonStartedAtMsFromPidFile(pidFile.path))
   }
 
   @Test

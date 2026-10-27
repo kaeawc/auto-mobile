@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../../src/daemon/SessionHeartbeatMonitor";
-import { SUSPECT_GRACE_MS } from "../../../src/daemon/sessionLivenessWindows";
+import { SUSPECT_GRACE_MS } from "../../../src/daemon/wire/sessionLivenessWindows";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import {
   HeartbeatTaskLeaseKeepalive,
   type TaskLeaseSessions,
-} from "../../../src/server/tasks/taskLeaseKeepalive";
+} from "../../../src/daemon/tasks/taskLeaseKeepalive";
 import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../../fakes/FakeTimer";

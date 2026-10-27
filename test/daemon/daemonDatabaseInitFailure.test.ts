@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import * as videoRecordingManager from "../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -48,10 +48,6 @@ class SpyDeviceSessionRepository extends DeviceSessionRepository {
       throw this.failure;
     }
   }
-}
-
-interface DaemonInternals {
-  initializeDatabase(): Promise<void>;
 }
 
 function buildDaemon(overrides: {
@@ -121,9 +117,7 @@ describe("Daemon.initializeDatabase fatality", () => {
     tracker.setCounts([1]);
     const { daemon } = buildDaemon({ initializer, tracker, timer });
 
-    await expect(
-      (daemon as unknown as DaemonInternals).initializeDatabase(),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(daemon.initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
     expect(initializer.initializeCalls).toBe(1);
     expect(tracker.recorded).toHaveLength(1);
     expect(tracker.recorded[0]!.kind).toBe("permanent");
@@ -137,7 +131,7 @@ describe("Daemon.initializeDatabase fatality", () => {
     const tracker = new FakeStartupFailureTracker();
     const { daemon, deviceSessionRepository } = buildDaemon({ initializer, tracker, timer });
 
-    await (daemon as unknown as DaemonInternals).initializeDatabase();
+    await daemon.initializeDatabase();
 
     expect(initializer.initializeCalls).toBe(1);
     expect(deviceSessionRepository.markStaleCalls).toBe(1);
@@ -168,7 +162,7 @@ describe("Daemon.initializeDatabase fatality", () => {
       installedAppsRepository,
     });
 
-    await (daemon as unknown as DaemonInternals).initializeDatabase();
+    await daemon.initializeDatabase();
 
     expect(await installedAppsRepository.listInstalledApps("peer-device")).toHaveLength(1);
     expect(await installedAppsRepository.listInstalledApps("dead-device")).toHaveLength(0);
@@ -189,6 +183,7 @@ describe("Daemon.initializeDatabase fatality", () => {
       readPidFile: () => incumbentRecord,
       persistPidFile: () => {},
       isProcessRunning: (pid) => pid === incumbentRecord.pid,
+      readProcessGenerationToken: () => undefined,
       selfPid: 4242,
     };
     const incumbentOwnerGuard = new IncumbentOwnerGuard(guardDependencies);
@@ -205,7 +200,7 @@ describe("Daemon.initializeDatabase fatality", () => {
       incumbentOwnerGuard,
     });
 
-    await (daemon as unknown as DaemonInternals).initializeDatabase();
+    await daemon.initializeDatabase();
 
     expect(deviceSessionRepository.liveDaemonSessionIds).toEqual(
       new Set(["sibling-worktree-daemon", "same-namespace-incumbent"]),
@@ -227,19 +222,13 @@ describe("Daemon.initializeDatabase fatality", () => {
     tracker.setCounts([1, 2, 3]);
     const { daemon } = buildDaemon({ initializer, tracker, timer });
 
-    await expect(
-      (daemon as unknown as DaemonInternals).initializeDatabase(),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(daemon.initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
     const afterFirst = [...timer.getSleepHistory()];
 
-    await expect(
-      (daemon as unknown as DaemonInternals).initializeDatabase(),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(daemon.initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
     const afterSecond = [...timer.getSleepHistory()];
 
-    await expect(
-      (daemon as unknown as DaemonInternals).initializeDatabase(),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(daemon.initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
     const afterThird = [...timer.getSleepHistory()];
 
     // First failure did not park; subsequent failures park with the concrete
@@ -257,9 +246,7 @@ describe("Daemon.initializeDatabase fatality", () => {
     tracker.setCounts([5]); // even at a high count, transient does not back off
     const { daemon } = buildDaemon({ initializer, tracker, timer });
 
-    await expect(
-      (daemon as unknown as DaemonInternals).initializeDatabase(),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(daemon.initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
 
     expect(timer.getSleepHistory()).toEqual([]);
     expect(tracker.recorded[0]!.kind).toBe("transient");
@@ -274,9 +261,7 @@ describe("Daemon.initializeDatabase fatality", () => {
     const tracker = new FakeStartupFailureTracker();
     const { daemon } = buildDaemon({ initializer, tracker, timer, deviceSessionRepository });
 
-    await expect(
-      (daemon as unknown as DaemonInternals).initializeDatabase(),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(daemon.initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
     expect(tracker.recorded).toHaveLength(1);
     expect(tracker.resetCalls).toBe(0);
   });
@@ -297,9 +282,7 @@ describe("Daemon.initializeDatabase fatality", () => {
       },
     });
 
-    await expect(
-      (daemon as unknown as DaemonInternals).initializeDatabase(),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(daemon.initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
     expect(deviceSessionRepository.markStaleCalls).toBe(0);
     expect(tracker.recorded).toHaveLength(1);
   });

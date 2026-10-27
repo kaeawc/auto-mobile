@@ -251,6 +251,20 @@ final class GesturePhaseDiagnostics: Sendable {
     static let slowGestureThresholdMs: Int64 = 2000
     @TaskLocal static var current: GesturePhaseDiagnostics?
 
+    private struct BoundLogSnapshot {
+        let phase: String
+        let elapsedMs: Int64
+        let shouldLog: Bool
+        let annotations: String
+    }
+
+    private struct FinishLogSnapshot {
+        let timing: PerfTiming
+        let shouldLog: Bool
+        let phaseAtBound: String?
+        let annotations: String
+    }
+
     private struct State {
         var phase = "queueWait"
         var phaseStarted: Int64
@@ -316,22 +330,32 @@ final class GesturePhaseDiagnostics: Sendable {
     @discardableResult
     func markBoundExceeded(boundMs: Int64) -> (phase: String, elapsedMs: Int64) {
         let time = now()
-        let (phase, elapsed, shouldLog, annotations) = state.withLock { value -> (String, Int64, Bool, String) in
+        let snapshot = state.withLock { value -> BoundLogSnapshot in
             if let phase = value.phaseAtBound, let elapsed = value.elapsedAtBoundMs {
-                return (phase, elapsed, false, value.annotations)
+                return BoundLogSnapshot(
+                    phase: phase,
+                    elapsedMs: elapsed,
+                    shouldLog: false,
+                    annotations: value.annotations
+                )
             }
             let elapsed = time - receivedAtMs
             value.phaseAtBound = value.phase
             value.elapsedAtBoundMs = elapsed
-            return (value.phase, elapsed, true, value.annotations)
-        }
-        if shouldLog {
-            let remaining = deadlineMs.map { String($0 - time) } ?? "none"
-            sink.warning(
-                "gesture_phases command=\(command) boundHit=true phaseAtBound=\(phase) boundMs=\(boundMs) elapsedMs=\(elapsed) deadlineRemainingMs=\(remaining)\(annotations) (still running)"
+            return BoundLogSnapshot(
+                phase: value.phase,
+                elapsedMs: elapsed,
+                shouldLog: true,
+                annotations: value.annotations
             )
         }
-        return (phase, elapsed)
+        if snapshot.shouldLog {
+            let remaining = deadlineMs.map { String($0 - time) } ?? "none"
+            sink.warning(
+                "gesture_phases command=\(command) boundHit=true phaseAtBound=\(snapshot.phase) boundMs=\(boundMs) elapsedMs=\(snapshot.elapsedMs) deadlineRemainingMs=\(remaining)\(snapshot.annotations) (still running)"
+            )
+        }
+        return (snapshot.phase, snapshot.elapsedMs)
     }
 
     func markDeadlineExceeded() { state.withLock { $0.deadlineExceeded = true } }
@@ -339,30 +363,31 @@ final class GesturePhaseDiagnostics: Sendable {
     @discardableResult
     func finish() -> PerfTiming {
         let time = now()
-        let (timing, shouldLog, phaseAtBound, annotations) = state.withLock { value -> (
-            PerfTiming,
-            Bool,
-            String?,
-            String
-        ) in
-            if let finished = value.finished { return (finished, false, value.phaseAtBound, value.annotations) }
+        let snapshot = state.withLock { value -> FinishLogSnapshot in
+            if let finished = value.finished {
+                return FinishLogSnapshot(
+                    timing: finished, shouldLog: false, phaseAtBound: value.phaseAtBound, annotations: value.annotations
+                )
+            }
             value.phases.append(.timing(value.phase, durationMs: time - value.phaseStarted))
             let timing = PerfTiming(name: "gesturePhases", durationMs: time - receivedAtMs, children: value.phases)
             value.finished = timing
-            return (
-                timing,
-                value.deadlineExceeded || timing.durationMs > Self.slowGestureThresholdMs || value.phaseAtBound != nil,
-                value.phaseAtBound,
-                value.annotations
+            return FinishLogSnapshot(
+                timing: timing,
+                shouldLog: value.deadlineExceeded || timing.durationMs > Self.slowGestureThresholdMs || value
+                    .phaseAtBound != nil,
+                phaseAtBound: value.phaseAtBound,
+                annotations: value.annotations
             )
         }
-        if shouldLog {
-            let bound = phaseAtBound.map { " phaseAtBound=\($0)" } ?? ""
+        let timing = snapshot.timing
+        if snapshot.shouldLog {
+            let bound = snapshot.phaseAtBound.map { " phaseAtBound=\($0)" } ?? ""
             let phases = (timing.children ?? []).map { "\($0.name)Ms=\($0.durationMs)" }.joined(separator: " ")
             let remaining = deadlineMs.map { String($0 - time) } ?? "none"
             sink
                 .warning(
-                    "gesture_phases command=\(command) \(phases) totalMs=\(timing.durationMs) deadlineRemainingMs=\(remaining)\(bound)\(annotations)"
+                    "gesture_phases command=\(command) \(phases) totalMs=\(timing.durationMs) deadlineRemainingMs=\(remaining)\(bound)\(snapshot.annotations)"
                 )
         }
         return timing

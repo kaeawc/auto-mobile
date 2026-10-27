@@ -92,6 +92,10 @@ tasks.withType<Test> {
   // JUnit 4 suites (e.g. RecoveryLoopTest) running on the same platform.
   useJUnitPlatform()
 
+  inputs
+    .file(layout.projectDirectory.file("../../test/fixtures/daemon-http-endpoints.json"))
+    .withPropertyName("daemonHttpEndpointVectors")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
   // DaemonStatePathsTest reads the daemon state-path vectors shared with the TypeScript daemon,
   // the desktop app and XCTestRunner (#10906).
   inputs

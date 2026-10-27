@@ -8,13 +8,13 @@ import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_ONE_SHOT_CLI_PARAM,
-} from "../../../daemon/constants";
+} from "../../../daemon/wire/constants";
 import { getSessionToolSelectionService } from "../../../features/toolSelection/SessionToolSelectionService";
 import { runWithToolSelectionContext } from "../../../features/toolSelection/toolSelectionContext";
 import { runWithTextRequestContext } from "../../../features/action/textTransportTimeout";
 import type { TextRequestState } from "../../../features/action/textTransportTimeout";
 import { runWithAbortSignal } from "../../../utils/AbortContext";
-import { executionTracker, sessionExecutionMetadataOf } from "../../executionTracker";
+import { executionTracker, sessionExecutionMetadataOf } from "../../../daemon/executionTracker";
 import type { McpServerOptions } from "../../index";
 import type { SessionToolBinding } from "../../SessionToolBinding";
 import type { ToolCallProgress } from "../../toolCallDispatch";
@@ -30,6 +30,7 @@ export interface InvocationPlan {
   readonly toolParams: Record<string, unknown>;
   readonly parsedParams: Record<string, unknown>;
   readonly sessionId: string | undefined;
+  readonly bindingKey: string | undefined;
   readonly context: CallContext;
   readonly options: McpServerOptions;
   readonly sessionToolBinding: SessionToolBinding;
@@ -73,8 +74,8 @@ export function buildHandlerParams(plan: InvocationPlan): Record<string, unknown
     // internal budget, can recover it: this value plus `execution.startTime` is
     // the absolute wall-clock deadline of the current request. Only present on
     // a daemon-forwarded call; absent on a direct call, which a handler must
-    // treat as "no transport deadline known" (issue #6222 P1,
-    // `setUIStateHandler` is the first consumer).
+    // treat as "no transport deadline known" (issue #6222 P1; the handler
+    // built by `createSetUIStateHandler` is the first consumer).
     ...(context.requestTimeoutMs !== undefined
       ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: context.requestTimeoutMs }
       : {}),
@@ -85,8 +86,8 @@ export function buildHandlerParams(plan: InvocationPlan): Record<string, unknown
     ...(context.requestDeadlineMs !== undefined
       ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: context.requestDeadlineMs }
       : {}),
-    // Same daemon-only provenance as `requestTimeoutMs`: lets `setUIStateHandler`
-    // resolve the LIVE (possibly progress-extended) deadline via
+    // Same daemon-only provenance as `requestTimeoutMs`: lets the
+    // `createSetUIStateHandler` handler resolve the LIVE (possibly progress-extended) deadline via
     // `liveDeadlineRegistry` instead of only this frozen snapshot (issue #6222).
     ...(context.requestLiveDeadlineKey !== undefined
       ? { [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: context.requestLiveDeadlineKey }
@@ -119,6 +120,7 @@ export async function invokeHandler(plan: InvocationPlan): Promise<ToolHandlerRe
         routingSessionUuid: plan.handlerRoutingSessionUuid,
         // #11469: nested internal calls and plan steps run for this daemon connection.
         callerMcpSessionId: plan.context.requestMcpSessionId,
+        deviceConnectionKey: plan.bindingKey,
         ownsDeviceSession: (sessionUuid) => sessionToolBinding.ownsSession(sessionId, sessionUuid),
         execution: {
           deviceBinding: {

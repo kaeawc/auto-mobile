@@ -8,7 +8,7 @@ import {
   ViewerReadOnlyError,
   type StreamSubscriptionKind,
   type StreamSubscriptionEndReason,
-} from "../../src/daemon/streamSubscriptionPolicy";
+} from "../../src/daemon/wire/streamSubscriptionPolicy";
 import { ActionableError } from "../../src/models/ActionableError";
 
 describe("transport-independent subscription policy", () => {

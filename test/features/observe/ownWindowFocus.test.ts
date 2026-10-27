@@ -1,3 +1,5 @@
+import { wireCapture } from "../../helpers/wireCapture";
+import { createAndroidHierarchyConverter } from "../../helpers/androidHierarchyConverter";
 import { describe, expect, test } from "bun:test";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import {
@@ -13,12 +15,7 @@ import {
   capturedTwoWindowHierarchy,
 } from "../../helpers/prototypeWindowCapture";
 import launcherCapture from "../../fixtures/android-launcher/launcher-recents-emulator-5602.json";
-import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
-import type {
-  AccessibilityHierarchy,
-  HierarchyDelegateContext,
-} from "../../../src/features/observe/android/types";
-import { FakeTimer } from "../../fakes/FakeTimer";
+import type { AccessibilityHierarchy } from "../../../src/features/observe/android/types";
 
 const bounds = { left: 0, top: 0, right: 1080, bottom: 2400 };
 const HOSTS_NODES = { node: [{}] };
@@ -29,9 +26,7 @@ describe("prototype_window_metadata_v1 window fields", () => {
     wire.windows = wire.windows!.map((entry) =>
       entry.id === 252 ? { ...entry, prototypePlacement: "sheet", prototypeOpaque: false } : entry,
     );
-    const converted = new CtrlProxyHierarchy({
-      timer: new FakeTimer(),
-    } as HierarchyDelegateContext).convertToViewHierarchyResult(wire);
+    const converted = createAndroidHierarchyConverter().convertToViewHierarchyResult(wire);
     const entry = converted.windows!.find((candidate) => candidate.id === 252)!;
     expect(entry.prototypePlacement).toBe("sheet");
     expect(entry.prototypeOpaque).toBe(false);
@@ -211,7 +206,11 @@ describe("ownWindows: app-layer prototype windows (aovl D4)", () => {
       bounds,
       hierarchy: { node: { text: "Bump" } },
     };
-    expect(isOwnPrototypeFocused({ packageName: "com.example.app", windows: [own] })).toBe(true);
+    expect(
+      isOwnPrototypeFocused(
+        wireCapture({ hierarchy: {}, packageName: "com.example.app", windows: [own] }),
+      ),
+    ).toBe(true);
   });
 
   test("CtrlProxy's highlight window (TYPE_SYSTEM once SYSTEM_ALERT_WINDOW is granted, no nodes) is not a prototype", () => {

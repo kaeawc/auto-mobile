@@ -2,16 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ImplicitDefaultLocale:AudioPlayerComponent.kt:"%02d:%02d".format(minutes, remainingSeconds)</ID>
-    <ID>ImplicitDefaultLocale:MediaPlayerScreen.kt:"%02d:%02d".format(minutes, remainingSeconds)</ID>
-    <ID>ImplicitDefaultLocale:VideoPlayerScreen.kt:"%02d:%02d".format(minutes, remainingSeconds)</ID>
-    <ID>LongMethod:AudioPlayerComponent.kt:@Composable fun AudioPlayerComponent</ID>
-    <ID>LongMethod:MediaPlayerScreen.kt:@Composable fun FullscreenMediaPlayer</ID>
-    <ID>LongMethod:MediaPlayerScreen.kt:@Composable fun MediaControlsOverlay</ID>
-    <ID>LongMethod:VideoPlayerScreen.kt:@Composable private fun VideoPlayerContent</ID>
-    <ID>LongParameterList:AudioPlayerComponent.kt:@Composable fun AudioPlayerInterface</ID>
-    <ID>LongParameterList:MediaPlayerScreen.kt:@Composable fun MediaControlsOverlay</ID>
     <ID>TooGenericExceptionCaught:MediaPlayerViewModel.kt:MediaPlayerViewModel$e: Exception</ID>
-    <ID>TooManyFunctions:MediaPlayerViewModel.kt:MediaPlayerViewModel : ViewModel</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -1,4 +1,5 @@
-import type { SystemImageFilter } from "../../../src/utils/android-cmdline-tools/interfaces/AvdManager";
+import type { BootedDevice } from "../../../src/models";
+import type { SystemImageFilter } from "../../../src/utils/android-cmdline-tools/avdmanager";
 import { getAbortSignal } from "../../../src/utils/AbortContext";
 import { createListingHandlers } from "../../../src/server/deviceToolsListing";
 import {
@@ -64,7 +65,7 @@ describe("Android inventory read budgets", () => {
       return lateLock.promise;
     });
     const orientationReaderFactory = () => ({
-      readOrientation: async (_device, signal) => {
+      readOrientation: async (_device: BootedDevice, signal?: AbortSignal) => {
         orientationSignal = signal;
         return lateOrientation.promise;
       },
@@ -122,7 +123,9 @@ describe("Android inventory read budgets", () => {
   test("9s images response is retryable and a late catalog completes the next read without new children", async () => {
     const timer = new FakeTimer();
     const manager = new FakeDeviceUtils();
-    manager.setDeviceImages("android", [{ name: "Pixel_9", platform: "android" }]);
+    manager.setDeviceImages("android", [
+      { name: "Pixel_9", platform: "android", isRunning: false },
+    ]);
     const avds = new SlowCatalog(timer);
     const handler = createDeviceImageResourcesHandler({
       deviceManager: manager,

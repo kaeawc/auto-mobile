@@ -1,15 +1,40 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { join, posix } from "node:path";
-import { Visitor } from "oxc-parser";
-import { parseGuardSource } from "./astGuard";
+import { parseSync } from "oxc-parser";
+import { readGuardFile, guardTextMayMatch, GuardVisitor as Visitor } from "./astGuard";
+import { workingTreeFiles } from "../helpers/workingTreeFiles";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const EXTENSIONS = [".ts", ".tsx", ".js", ".json"];
 const SCAN_TIMEOUT_MS = 60_000;
 
 function relativeSpecifiers(file: string, source: string): string[] {
+  const parsed = parseSync(file, source);
+  if (parsed.errors.length > 0) {
+    throw new Error(`${file}: ${parsed.errors[0].message}`);
+  }
+  const module = parsed.module;
+  // The module table owns static import/export requests. Extra tokens may be type/dynamic
+  // imports or empty re-exports (which Oxc omits from this table). Those keep the AST path.
+  // Comments/strings can only cause a conservative fallback. Escaped names fall back too.
+  if (
+    !guardTextMayMatch(source, /\brequire\b/) &&
+    (source.match(/\bimport\b/g)?.length ?? 0) === module.staticImports.length &&
+    (source.match(/\bexport\b/g)?.length ?? 0) ===
+      new Set(module.staticExports.map((entry) => entry.start)).size
+  ) {
+    const requests = [
+      ...module.staticImports.map((entry) => entry.moduleRequest),
+      ...module.staticExports.flatMap((entry) =>
+        entry.entries.flatMap((binding) => (binding.moduleRequest ? [binding.moduleRequest] : [])),
+      ),
+    ];
+    // Each exported binding repeats the request; keep one per declaration in source order.
+    return [...new Map(requests.map((request) => [request.start, request])).values()]
+      .sort((a, b) => a.start - b.start)
+      .map((request) => request.value)
+      .filter((value) => value.startsWith("./") || value.startsWith("../"));
+  }
   const specifiers: string[] = [];
   const collect = (value: string): void => {
     if (value.startsWith("./") || value.startsWith("../")) {
@@ -39,7 +64,7 @@ function relativeSpecifiers(file: string, source: string): string[] {
         }
       }
     },
-  }).visit(parseGuardSource(file, source));
+  }).visit(parsed.program);
   return specifiers;
 }
 
@@ -61,22 +86,15 @@ let failures: string[];
 // Like the other tree-wide guards, reading/parsing belongs in setup, outside the per-test budget.
 // Full-tree parsing can be slow under CI contention; hook time is excluded from the 100ms per-test budget.
 beforeAll(() => {
-  const tracked = new Set(
-    execFileSync("git", ["ls-files", "-z"], {
-      cwd: ROOT,
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-    })
-      .split("\0")
-      .filter(Boolean),
-  );
+  // Untracked new files count, so a lane need not `git add` (or jj stage) before this runs.
+  const tracked = new Set(workingTreeFiles(ROOT));
   failures = [];
   const normalizedTracked = new Set([...tracked].map((file) => file.replaceAll("\\", "/")));
   for (const file of normalizedTracked) {
     if (!(file.startsWith("src/") || file.startsWith("test/")) || !file.endsWith(".ts")) {
       continue;
     }
-    const source = readFileSync(join(ROOT, file), "utf8");
+    const source = readGuardFile(join(ROOT, file));
     if (!['"./', "'./", '"../', "'../", "`./", "`../"].some((prefix) => source.includes(prefix))) {
       continue;
     }
@@ -94,6 +112,19 @@ describe("relative import casing", () => {
   });
 
   test("collects static, type, export, require and nested dynamic imports using the AST", () => {
+    expect(
+      relativeSpecifiers("fixture.ts", 'import a from "./a"; import type { B } from "../b";'),
+    ).toEqual(["./a", "../b"]);
+    expect(relativeSpecifiers("fixture.ts", 'type A = import /* ; */ ("./type").A;')).toEqual([
+      "./type",
+    ]);
+    expect(relativeSpecifiers("fixture.ts", 'export {} from "./empty";')).toEqual(["./empty"]);
+    expect(
+      relativeSpecifiers(
+        "fixture.ts",
+        'export {a, b} from "./x"; import c from "../c"; export * as d from "./x"; export type {T} from "./t";',
+      ),
+    ).toEqual(["./x", "../c", "./x", "./t"]);
     expect(
       relativeSpecifiers(
         "fixture.ts",

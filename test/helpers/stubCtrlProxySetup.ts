@@ -1,6 +1,17 @@
-import { setDeviceReadinessProxyDriverProviderForTesting } from "../../src/server/deviceReadinessProxyProvider";
+import {
+  testOverrides,
+  type DeviceReadinessProxyDriverProvider,
+} from "../../src/utils/testOverrides";
 
-export { setDeviceReadinessProxyDriverProviderForTesting };
+/**
+ * Override the readiness driver provider process-wide through `testOverrides`, the seam
+ * `getDeviceReadinessProxyDriver` reads. Pass `null` to restore the real provider.
+ */
+export function setDeviceReadinessProxyDriverProviderForTesting(
+  next: DeviceReadinessProxyDriverProvider | null,
+): void {
+  testOverrides.deviceReadinessProxyDriverProvider = next;
+}
 
 /**
  * #6227: `createToolExecutionContext`'s device-readiness upgrade

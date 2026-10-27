@@ -11,6 +11,13 @@ import type {
   SessionDeviceRequirement,
 } from "./types";
 import { normalizeOsSelector } from "./version";
+import {
+  MANUFACTURER_PROFILE_IDS,
+  NON_EMULATABLE_CAPABILITY_IDS,
+  type DeviceProfileSelector,
+  type ManufacturerProfileId,
+  type NonEmulatableCapability,
+} from "../../models/ManufacturerProfileIds";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -201,9 +208,11 @@ function parseAndroidHardware(value: unknown): RequirementResult<AndroidHardware
     if (!keys.ok) {
       return keys;
     }
-    return value.archetype === "phone" || value.archetype === "tablet"
+    return value.archetype === "phone" ||
+      value.archetype === "tablet" ||
+      value.archetype === "foldable"
       ? success({ kind: "archetype", archetype: value.archetype })
-      : failure("invalid_request", "Android hardware supports only phone or tablet.", {
+      : failure("invalid_request", "Android hardware supports only phone, tablet or foldable.", {
           field: "hardware.archetype",
         });
   }
@@ -273,6 +282,59 @@ function parseIosRequest(
     : os;
 }
 
+export function isManufacturerProfileId(value: unknown): value is ManufacturerProfileId {
+  return (MANUFACTURER_PROFILE_IDS as readonly unknown[]).includes(value);
+}
+
+function isNonEmulatableCapability(value: unknown): value is NonEmulatableCapability {
+  return (NON_EMULATABLE_CAPABILITY_IDS as readonly unknown[]).includes(value);
+}
+
+function parseRequires(value: unknown): RequirementResult<NonEmulatableCapability[] | undefined> {
+  if (value === undefined) {
+    return success(undefined);
+  }
+  if (!Array.isArray(value) || !value.every(isNonEmulatableCapability)) {
+    return failure(
+      "invalid_request",
+      `deviceProfile.requires must list capabilities from: ${NON_EMULATABLE_CAPABILITY_IDS.join(", ")}.`,
+      { field: "deviceProfile.requires" },
+    );
+  }
+  return success([...value]);
+}
+
+/** An Android-only OEM manufacturer-profile selector (#14058). */
+function parseDeviceProfile(value: unknown): RequirementResult<DeviceProfileSelector | undefined> {
+  if (value === undefined) {
+    return success(undefined);
+  }
+  if (!isRecord(value)) {
+    return failure("invalid_request", "deviceProfile must be an object.", {
+      field: "deviceProfile",
+    });
+  }
+  const keys = hasOnlyKeys(value, ["manufacturerProfile", "requires"]);
+  if (!keys.ok) {
+    return keys;
+  }
+  if (!isManufacturerProfileId(value.manufacturerProfile)) {
+    return failure(
+      "invalid_request",
+      `deviceProfile.manufacturerProfile must be one of: ${MANUFACTURER_PROFILE_IDS.join(", ")}.`,
+      { field: "deviceProfile.manufacturerProfile" },
+    );
+  }
+  const requires = parseRequires(value.requires);
+  if (!requires.ok) {
+    return requires;
+  }
+  return success({
+    manufacturerProfile: value.manufacturerProfile,
+    ...(requires.value ? { requires: requires.value } : {}),
+  });
+}
+
 function parseAndroidRequest(
   value: Record<string, unknown>,
 ): RequirementResult<AndroidSessionDeviceRequirement> {
@@ -281,9 +343,20 @@ function parseAndroidRequest(
     return hardware;
   }
   const os = parseOs(value.os);
-  return os.ok
-    ? success({ schemaVersion: 1, platform: "android", hardware: hardware.value, os: os.value })
-    : os;
+  if (!os.ok) {
+    return os;
+  }
+  const deviceProfile = parseDeviceProfile(value.deviceProfile);
+  if (!deviceProfile.ok) {
+    return deviceProfile;
+  }
+  return success({
+    schemaVersion: 1,
+    platform: "android",
+    hardware: hardware.value,
+    os: os.value,
+    ...(deviceProfile.value ? { deviceProfile: deviceProfile.value } : {}),
+  });
 }
 
 export function parseSessionDeviceRequirement(
@@ -292,7 +365,13 @@ export function parseSessionDeviceRequirement(
   if (!isRecord(value)) {
     return failure("invalid_request", "Session device requirement must be an object.");
   }
-  const keys = hasOnlyKeys(value, ["schemaVersion", "platform", "hardware", "os"]);
+  // `deviceProfile` is Android-only; an iOS request naming it is an unexpected field.
+  const keys = hasOnlyKeys(
+    value,
+    value.platform === "android"
+      ? ["schemaVersion", "platform", "hardware", "os", "deviceProfile"]
+      : ["schemaVersion", "platform", "hardware", "os"],
+  );
   if (!keys.ok) {
     return keys;
   }

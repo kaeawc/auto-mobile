@@ -7,7 +7,7 @@ import {
   INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   parseProvisionDeviceArgs,
   resetDeviceToolsDependencies,
@@ -16,6 +16,7 @@ import {
 import { createAcquisitionHandlers } from "../../src/server/deviceToolsAcquisition";
 import { createStartDeviceHandlers } from "../../src/server/deviceToolsStartDevice";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { ActionableError } from "../../src/models/ActionableError";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
@@ -99,7 +100,7 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       // Device-reported prototype entries parsed from an inspect reply are not tool
       // arguments, so there is no transport metadata to strip.
       if (
-        file === "prototypeTools.ts" &&
+        file === "prototypeTools/inspection.ts" &&
         receiver.type === "Identifier" &&
         receiver.name === "devicePrototypeEntrySchema" &&
         first?.type === "Identifier" &&
@@ -109,7 +110,7 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       }
       // The injected iOS agent's status reply, likewise not a tool argument.
       if (
-        file === "prototypeTools.ts" &&
+        file === "prototypeTools/inspection.ts" &&
         receiver.type === "Identifier" &&
         receiver.name === "iosAgentStatusSchema" &&
         first?.type === "MemberExpression"
@@ -128,7 +129,9 @@ describe("handler internal metadata regression guard", () => {
   let offenders: string[];
   beforeAll(() => {
     const server = join(import.meta.dir, "../../src/server");
-    const files = Array.from(new Bun.Glob("**/*.ts").scanSync({ cwd: server }));
+    const files = Array.from(new Bun.Glob("**/*.ts").scanSync({ cwd: server }), (file) =>
+      file.replaceAll("\\", "/"),
+    );
     expect(files.length).toBeGreaterThan(0);
     offenders = files.flatMap((file) =>
       unsafeSchemaParses(file, readFileSync(join(server, file), "utf8")),
@@ -170,18 +173,15 @@ describe("handler internal metadata regression guard", () => {
       const handlers = createAcquisitionHandlers({
         bootAndPrepareDevice: async (args) => {
           calls.push(args);
-          return createStructuredToolResponse({ message: "fake device boundary" });
+          throw new ActionableError("fake device boundary");
         },
       });
       const args = Object.freeze({
         ...(name === "getAndroid" ? { avdName: "Fold" } : { udid: "fake-udid" }),
         ...metadata,
       });
-      if (name === "getAndroid") {
-        await handlers.getAndroidHandler(args);
-      } else {
-        await handlers.getAppleHandler(args);
-      }
+      const acquire = name === "getAndroid" ? handlers.getAndroidHandler : handlers.getAppleHandler;
+      await expect(acquire(args)).rejects.toThrow("fake device boundary");
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({
         platform: name === "getAndroid" ? "android" : "ios",

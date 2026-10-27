@@ -1,17 +1,33 @@
-import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
-import type { DeviceResourceDrift } from "../models/DeviceResourceReconciliation";
-import { promises as fs } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import type { SimulatorCreator } from "./SimulatorCreator";
+import type {
+  ConfigurableDeviceResource,
+  DeviceResourceConfiguration,
+} from "../models/DeviceResourceConfiguration";
+import { SimulatorPrebootProfile } from "../utils/ios-cmdline-tools/SimulatorPrebootProfile";
+export {
+  DEFAULT_PROVISION_DEVICE_RETRYABILITY,
+  ProvisionDeviceError,
+  type IosRuntimeIncompatibility,
+  type ProvisionDeviceFailureCode,
+} from "./ProvisionDeviceError";
+export { ProvisionDeviceCreateRejectedError } from "./ProvisionDeviceCreateRejectedError";
+export {
+  FileAndroidAvdConfigWriter,
+  type AndroidAvdConfigWriter,
+} from "./FileAndroidAvdConfigWriter";
+import { ProvisionDeviceError, type IosRuntimeIncompatibility } from "./ProvisionDeviceError";
+import { ProvisionDeviceCreateRejectedError } from "./ProvisionDeviceCreateRejectedError";
+import {
+  FileAndroidAvdConfigWriter,
+  type AndroidAvdConfigWriter,
+} from "./FileAndroidAvdConfigWriter";
+import { DeviceAssignedToBindingError } from "../models/DeviceAssignedToBindingError";
 import type { DeviceInfo } from "../models";
 import { ActionableError } from "../models";
 import type { DeviceCreationGate } from "./deviceCreationGate";
 import type { PlatformDeviceManager } from "./deviceUtils";
 import type { AvdConfigReader } from "../utils/android-cmdline-tools/AvdConfigReader";
-import {
-  FileAvdConfigReader,
-  resolveAndroidAvdHome,
-} from "../utils/android-cmdline-tools/AvdConfigReader";
+import { FileAvdConfigReader } from "../utils/android-cmdline-tools/AvdConfigReader";
 import {
   evaluateIosPairCompatibility,
   iosDeviceSpecificationMismatch,
@@ -23,21 +39,17 @@ import { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/Android
 import type { CreateAvdParams } from "../utils/android-cmdline-tools/avdmanager";
 import {
   SimCtlClient,
+  type SimCtlCatalog,
   type AppleDeviceRuntime,
   type AppleDeviceType,
 } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { type DeviceTypeRuntimeBounds } from "../utils/ios-cmdline-tools/runtimeCompatibility";
-import type { ProvisionDeviceRecoveryEvidence } from "../server/provisionDeviceRecoveryEvidence";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { awaitWhileRequestIsLive, throwIfAborted } from "../utils/toolUtils";
+import { throwIfAborted } from "../utils/toolUtils";
 import { trackAmbient } from "../utils/PerfContext";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import {
-  androidAvdConfigurationSchema,
-  androidAvdConfigurationKeys,
-  type AndroidAvdConfiguration,
-} from "../models/AndroidAvdConfiguration";
+import type { AndroidAvdConfiguration } from "../models/AndroidAvdConfiguration";
 import {
   type DisplayCutoutClassification,
   type DisplayCutoutPreference,
@@ -72,6 +84,7 @@ export type ResolvedExactDeviceSpecification =
     });
 
 export interface ExactDeviceProvisionRequest {
+  resources?: DeviceResourceConfiguration;
   platform: "android" | "ios";
   name: string;
   deviceId?: string;
@@ -91,124 +104,10 @@ export interface ExactDeviceProvisionRequest {
 }
 
 export interface ExactProvisionedDevice {
+  prebootDisabledResources?: readonly ConfigurableDeviceResource[];
   device: DeviceInfo;
   created: boolean;
   resolvedSpec: ResolvedExactDeviceSpecification;
-}
-
-export type ProvisionDeviceFailureCode =
-  | "cleanup_failed"
-  | "creation_not_allowed"
-  | "device_lost"
-  | "device_owned_by_other_session"
-  | "device_owned_by_other_daemon"
-  | "device_cleanup_in_progress"
-  | "session_creation_timeout"
-  | "device_shutting_down"
-  | "device_assigned_to_binding"
-  | "device_offline"
-  | "discovery_incomplete"
-  | "capacity_exhausted"
-  | "identity_conflict"
-  | "timeout"
-  | "unsupported"
-  | "platform_command_failed"
-  | "resource_profile_unproven"
-  | "runtime_incompatible";
-
-export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
-  Record<ProvisionDeviceFailureCode, boolean>
-> = {
-  cleanup_failed: false,
-  creation_not_allowed: false,
-  device_lost: true,
-  // Transient: the holder can release the device, after which the same operation can succeed.
-  device_owned_by_other_session: true,
-  // Transient: the other daemon's claim lapses once its session ends.
-  device_owned_by_other_daemon: true,
-  // Transient: the previous session's release cleanup finishes by itself.
-  device_cleanup_in_progress: true,
-  // The bind was rolled back; retrying is safe.
-  session_creation_timeout: true,
-  // Transient: the kill reservation clears once the shutdown finishes.
-  device_shutting_down: true,
-  // An idle assigned device stays assigned; only a scope reset frees it (#11174).
-  device_assigned_to_binding: false,
-  device_offline: true,
-  discovery_incomplete: true,
-  // Transient: capacity frees when another device shuts down (#11236).
-  capacity_exhausted: true,
-  identity_conflict: false,
-  timeout: true,
-  unsupported: false,
-  platform_command_failed: false,
-  resource_profile_unproven: false,
-  // A proven model/runtime mismatch is a property of the request; only a different pair can succeed.
-  runtime_incompatible: false,
-};
-
-interface ProvisionDeviceErrorDiagnostics {
-  providerCode?: string;
-  readinessPhase?: string;
-  attempt?: number;
-  incidentId?: string;
-  deviceId?: string;
-  /** PID of the other daemon holding the device (`device_owned_by_other_daemon`). */
-  ownerPid?: number;
-  /** Wait hint carried by a typed retryable acquisition refusal. */
-  retryAfterMs?: number;
-  /** Requested resources that could not be proven applied (iOS Simulator profiles). */
-  resourceDrift?: DeviceResourceDrift[];
-  /** Proven iOS model/runtime mismatch: requested pair, known bounds, installed alternatives. */
-  runtimeCompatibility?: IosRuntimeIncompatibility;
-  /** Structured recovery evidence delivered with the error (a snapshot, not live state). */
-  recovery?: ProvisionDeviceRecoveryEvidence;
-  /** The broker binding holding the device (`device_assigned_to_binding`); no credentials. */
-  binding?: { scopeKey: string; declaredBinding: number | null; stableId: string };
-  /** Boot-capacity refusal details (`capacity_exhausted`, #11236). */
-  capacity?: ProvisionDeviceCapacityDetails;
-}
-
-/** The booted-device limit a `capacity_exhausted` refusal hit (#11236). */
-export interface ProvisionDeviceCapacityDetails {
-  limit: number;
-  booted: number;
-  /** Counted devices AutoMobile did not start; present only when there are any. */
-  externalDevices?: string[];
-}
-
-export interface IosRuntimeIncompatibility {
-  requestedRuntime: string;
-  requestedDeviceType: string;
-  /** Normalized inclusive bounds of the model; `maxVersion: null` is unbounded. */
-  bounds?: DeviceTypeRuntimeBounds;
-  /** Installed, available runtimes that do support the requested model. */
-  compatibleRuntimes: Array<{ id: string; version: string }>;
-}
-
-export class ProvisionDeviceError extends ActionableError {
-  constructor(
-    public readonly code: ProvisionDeviceFailureCode,
-    message: string,
-    public readonly retryable = DEFAULT_PROVISION_DEVICE_RETRYABILITY[code],
-    public readonly diagnostics: ProvisionDeviceErrorDiagnostics = {},
-  ) {
-    super(message);
-    this.name = "ProvisionDeviceError";
-  }
-}
-
-/**
- * The platform tool reported that it did not create the device (e.g. avdmanager
- * exited non-zero because the name already exists). Nothing this request owns
- * exists, so rollback must not target the requested name: it may belong to a
- * racing external create or a device a stale listing missed (#11100).
- */
-export class ProvisionDeviceCreateRejectedError extends ProvisionDeviceError {
-  constructor(message: string) {
-    super("platform_command_failed", message);
-    this.name = "ProvisionDeviceCreateRejectedError";
-  }
 }
 
 export interface ExactAndroidAvdClient {
@@ -229,128 +128,10 @@ export interface ExactIosSimulatorClient {
 
 /** Read-only simctl catalog used to validate an exact pair before creation. */
 export interface ExactIosRuntimeCatalog {
+  /** Atomic cached snapshot when the transport supports it; legacy catalogs remain compatible. */
+  getCatalogChecked?(signal?: AbortSignal): Promise<SimCtlCatalog>;
   getRuntimesChecked(timeoutMs?: number, signal?: AbortSignal): Promise<AppleDeviceRuntime[]>;
   getDeviceTypesChecked(signal?: AbortSignal): Promise<AppleDeviceType[]>;
-}
-
-export interface AndroidAvdConfigWriteOptions {
-  signal?: AbortSignal;
-}
-
-export interface AndroidAvdConfigWriter {
-  setMemoryMb(
-    avdName: string,
-    memoryMb: number,
-    options?: AndroidAvdConfigWriteOptions,
-  ): Promise<void>;
-  setConfiguration?(
-    avdName: string,
-    configuration: AndroidAvdConfiguration,
-    options?: AndroidAvdConfigWriteOptions,
-  ): Promise<void>;
-}
-
-interface FileAndroidAvdConfigWriterDependencies {
-  readFile(path: string, encoding: "utf8"): Promise<string>;
-  writeFile(path: string, content: string, encoding: "utf8"): Promise<void>;
-  environment: NodeJS.ProcessEnv;
-  homeDirectory: () => string;
-}
-
-function defaultAndroidAvdConfigWriterDependencies(): FileAndroidAvdConfigWriterDependencies {
-  return {
-    readFile: (path, encoding) => fs.readFile(path, encoding),
-    writeFile: (path, content, encoding) => fs.writeFile(path, content, encoding),
-    environment: process.env,
-    homeDirectory: homedir,
-  };
-}
-
-function configWriteSignal(
-  options: AndroidAvdConfigWriteOptions | undefined,
-): AbortSignal | undefined {
-  return options?.signal;
-}
-
-/**
- * Applies a small, typed subset of AVD hardware configuration after
- * `avdmanager create avd`. The caller creates only default-path AVDs, so the
- * standard AVD-home location is authoritative here.
- */
-export class FileAndroidAvdConfigWriter implements AndroidAvdConfigWriter {
-  constructor(
-    private readonly dependencies: FileAndroidAvdConfigWriterDependencies = defaultAndroidAvdConfigWriterDependencies(),
-  ) {}
-
-  async setMemoryMb(
-    avdName: string,
-    memoryMb: number,
-    options?: AndroidAvdConfigWriteOptions,
-  ): Promise<void> {
-    if (!Number.isInteger(memoryMb) || memoryMb <= 0) {
-      throw new ProvisionDeviceError(
-        "platform_command_failed",
-        `Android AVD memoryMb must be a positive integer; got ${memoryMb}.`,
-      );
-    }
-    return this.setConfiguration(avdName, { memoryMb }, options);
-  }
-
-  async setConfiguration(
-    avdName: string,
-    configuration: AndroidAvdConfiguration,
-    options?: AndroidAvdConfigWriteOptions,
-  ): Promise<void> {
-    const signal = configWriteSignal(options);
-    throwIfAborted(signal);
-    const validated = androidAvdConfigurationSchema.parse(configuration);
-    const replacements = new Map<string, string>();
-    for (const key of Object.keys(validated) as (keyof AndroidAvdConfiguration)[]) {
-      const value = validated[key];
-      if (value !== undefined) {
-        replacements.set(
-          androidAvdConfigurationKeys[key],
-          typeof value === "boolean" ? (value ? "yes" : "no") : String(value),
-        );
-      }
-    }
-    if (validated.gpuMode !== undefined) {
-      replacements.set("hw.gpu.enabled", "yes");
-    }
-    const avdHome = resolveAndroidAvdHome(
-      this.dependencies.environment,
-      this.dependencies.homeDirectory(),
-    );
-    const configPath = join(avdHome, `${avdName}.avd`, "config.ini");
-    const content = await awaitWhileRequestIsLive(
-      this.dependencies.readFile(configPath, "utf8"),
-      signal,
-    );
-    // A timed-out provision may have rolled this AVD back while the read was
-    // pending. Never apply its captured content to a same-name replacement.
-    throwIfAborted(signal);
-    const lines = content.split(/\r?\n/);
-    const replaced = new Set<string>();
-    const updated = lines.map((line) => {
-      const key = line.slice(0, line.indexOf("=")).trim();
-      if (replacements.has(key)) {
-        replaced.add(key);
-        return `${key}=${replacements.get(key)}`;
-      }
-      return line;
-    });
-    for (const [key, value] of replacements) {
-      if (replaced.has(key)) {
-        continue;
-      }
-      if (updated.at(-1) !== "") {
-        updated.push("");
-      }
-      updated.push(`${key}=${value}`, "");
-    }
-    throwIfAborted(signal);
-    await this.dependencies.writeFile(configPath, updated.join("\n"), "utf8");
-  }
 }
 
 export interface ExactDeviceProvisioner {
@@ -358,6 +139,8 @@ export interface ExactDeviceProvisioner {
 }
 
 export interface DefaultExactDeviceProvisionerDependencies {
+  simulatorCreation?: SimulatorCreator;
+  prebootProfile?: Pick<SimulatorPrebootProfile, "apply">;
   listDeviceImages: PlatformDeviceManager["listDeviceImages"];
   isCreationAllowed: DeviceCreationGate["isCreationAllowed"];
   avdManager: ExactAndroidAvdClient;
@@ -782,13 +565,31 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     spec: IosDeviceSpecification,
     displayCutout: DisplayCutoutClassification,
   ): Promise<ExactProvisionedDevice> {
-    const deviceId = await this.dependencies.iosSimulator.createSimulator(
-      request.name,
-      spec.deviceType,
-      spec.runtime,
+    const deviceId = this.dependencies.simulatorCreation
+      ? (
+          await this.dependencies.simulatorCreation.create({
+            name: request.name,
+            deviceType: spec.deviceType,
+            runtime: spec.runtime,
+            resources: request.resources,
+            signal: request.signal,
+          })
+        ).udid
+      : await this.dependencies.iosSimulator.createSimulator(
+          request.name,
+          spec.deviceType,
+          spec.runtime,
+          request.signal,
+        );
+    const preboot = await this.dependencies.prebootProfile?.apply(
+      deviceId,
+      { resources: request.resources },
       request.signal,
     );
     return {
+      ...(preboot?.applied && preboot.resources.length
+        ? { prebootDisabledResources: preboot.resources }
+        : {}),
       created: true,
       device: {
         name: request.name,
@@ -839,6 +640,11 @@ export function createDefaultExactDeviceProvisioner(
   deviceCreationGate: DeviceCreationGate,
   androidConfigWriter: AndroidAvdConfigWriter = new FileAndroidAvdConfigWriter(),
   assertAdoptable?: ExactDeviceAdoptionGuard,
+  simulatorCreation?: SimulatorCreator,
+  ios?: Pick<
+    DefaultExactDeviceProvisionerDependencies,
+    "iosSimulator" | "iosRuntimeCatalog" | "prebootProfile" | "timer" | "lifecycleCoordinator"
+  >,
 ): ExactDeviceProvisioner {
   return new DefaultExactDeviceProvisioner({
     assertAdoptable,
@@ -847,7 +653,10 @@ export function createDefaultExactDeviceProvisioner(
     avdManager: new AvdManagerClient(),
     androidConfigReader: new FileAvdConfigReader(),
     androidConfigWriter,
+    simulatorCreation,
+    prebootProfile: new SimulatorPrebootProfile(),
     iosSimulator: new SimCtlClient(null),
     iosRuntimeCatalog: new SimCtlClient(null),
+    ...ios,
   });
 }

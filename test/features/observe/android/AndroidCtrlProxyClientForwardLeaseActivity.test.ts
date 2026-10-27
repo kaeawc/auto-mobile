@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { BootedDevice } from "../../../../src/models";
-import { installFakeCtrlProxyManagers } from "../../../helpers/hermeticDeviceTools";
 import type { CtrlProxyForwardLease } from "../../../../src/features/observe/android/CtrlProxyForwardLease";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { PortManager } from "../../../../src/utils/PortManager";
@@ -31,18 +30,15 @@ class HeldLease implements CtrlProxyForwardLease {
 
 describe("AndroidCtrlProxyClient forwarding-lease activity (#10497 review)", () => {
   let timer: FakeTimer;
-  let restoreManagers: () => void;
 
   beforeEach(() => {
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
-    restoreManagers = installFakeCtrlProxyManagers();
   });
 
   afterEach(async () => {
     await AndroidCtrlProxyClient.getExistingInstance(DEVICE.deviceId)?.close();
-    restoreManagers();
     AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
     expect(AndroidCtrlProxyClient.getExistingInstance(DEVICE.deviceId)).toBeNull();
     PortManager.reset();
@@ -66,7 +62,7 @@ describe("AndroidCtrlProxyClient forwarding-lease activity (#10497 review)", () 
     });
 
     // e.g. an MCP resource read or initial observation frame: no tool call is bound.
-    const requests = client["requestManager"];
+    const requests = client.connectionTestHooks.requestManager;
     const pending = requests.register("read-1", "storage_read", 30_000, () => null);
     timer.setCurrentTime(7_000);
     expect(AndroidCtrlProxyClient.getForwardLeaseActivity(DEVICE.deviceId, timer)).toEqual({

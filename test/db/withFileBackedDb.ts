@@ -46,19 +46,6 @@ import { WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./fileBackedDbTestTimeout";
  */
 
 /**
- * The narrow slice of `database.ts` the harness drives. Kept minimal (YAGNI):
- * suites that need the wider module surface (`getMigrationsError`,
- * `getMigrationsPromiseForTest`, ...) use the fuller type returned by
- * {@link importFreshDatabaseModule} directly.
- */
-export interface LifecycleDatabaseModule {
-  getDatabase(): unknown;
-  ensureMigrations(): Promise<void>;
-  closeDatabase(): Promise<void>;
-  getDatabasePath(): string;
-}
-
-/**
  * The full fresh `database.ts` module type (the default the harness hands back),
  * so suites can reach beyond the narrow lifecycle slice — `getMigrationsError`,
  * `getMigrationsPromiseForTest`, ... — without a cast.

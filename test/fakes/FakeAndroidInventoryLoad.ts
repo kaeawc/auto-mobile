@@ -29,6 +29,7 @@ export class FakeAndroidInventoryLoad implements HostProcessExecutor {
     name: device.name,
     platform: "android",
     source: "local",
+    isRunning: true,
   }));
   readonly calls = new Map<string, number>();
   private readonly nextAvailable = new Map<string, number>();
@@ -51,24 +52,13 @@ export class FakeAndroidInventoryLoad implements HostProcessExecutor {
   }
 
   adb(device: BootedDevice | null): AdbClient {
-    const client = new AdbClient(
-      device,
-      null,
-      null,
-      undefined,
-      this.timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      this,
-    );
+    const client = new AdbClient(device, null, { timer: this.timer, hostProcessExecutor: this });
     // Typed device-list seam: do not invent parser input for the five-device fixture.
     Object.defineProperty(client, "getBaseCommandParts", {
       value: async () => ({ adbPath: "fake-adb", baseArgs: device ? ["-s", device.deviceId] : [] }),
     });
     Object.defineProperty(client, "isTestMode", { value: false });
-    Object.defineProperty(client, "readDeviceListFromAdb", {
+    Object.defineProperty(client.adbDeviceDiscovery, "readDeviceListFromAdb", {
       value: async () => {
         this.record("host", "devices -l");
         await this.timer.sleep(1);
@@ -80,12 +70,12 @@ export class FakeAndroidInventoryLoad implements HostProcessExecutor {
 
   emulator(): AndroidEmulatorClient {
     const client = new AndroidEmulatorClient({
+      emulatorPathLocator: async () => "fake-emulator",
       execAsync: async () => createExecResult("", ""),
       timer: this.timer,
       adbFactory: this.adbFactory,
       avdConfigReader: new FakeAvdConfigReader(),
     });
-    Object.defineProperty(client, "ensureEmulatorPath", { value: async () => "fake-emulator" });
     // Typed identity/enumeration seams isolate workload behavior from console/AVD text parsing.
     const enumerate = async () => {
       this.record("host", "emulator -list-avds");
@@ -150,7 +140,7 @@ export class FakeAndroidInventoryLoad implements HostProcessExecutor {
         pending.reject(new Error("fake child cancelled"));
       }
     });
-    return { child: child as unknown as ChildProcess, result: pending.promise };
+    return { child, result: pending.promise };
   }
   async executeCommand(
     file: string,

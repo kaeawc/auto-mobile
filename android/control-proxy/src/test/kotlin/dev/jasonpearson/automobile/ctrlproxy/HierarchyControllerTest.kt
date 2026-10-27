@@ -114,9 +114,12 @@ class HierarchyControllerTest {
         serviceScope = backgroundScope,
         viewHierarchyExtractor = mockk(relaxed = true),
         displayController = DisplayController(mockk(relaxed = true)),
-        perfProvider = PerfProvider.instance,
-        timeProvider = FakeTimer(),
-        workStats = CtrlProxyWorkStats(),
+        diagnostics =
+          HierarchyDiagnosticsDependencies(
+            perfProvider = PerfProvider.instance,
+            timeProvider = FakeTimer(),
+            workStats = CtrlProxyWorkStats(),
+          ),
         jsonCompact = Json { encodeDefaults = true },
       )
       .also {
@@ -124,12 +127,15 @@ class HierarchyControllerTest {
           HierarchyDebouncer(
             scope = backgroundScope,
             timeProvider = FakeTimer(),
-            extractHierarchy = { _, options -> extract(options) },
+            dependencies =
+              HierarchyDebouncerDependencies(
+                extractHierarchy = { _, options -> extract(options) },
+              ),
           )
       }
 
   @Test
-  fun `request hierarchy forwards limits and delivers a correlated sync update and file`() =
+  fun `request hierarchy forwards limits and delivers a correlated sync update without a dump`() =
     runTest {
       val host = FakeHost(tmp.newFolder())
       val seen = mutableListOf<HierarchySnapshotOptions>()
@@ -149,10 +155,43 @@ class HierarchyControllerTest {
       val frame = Json.parseToJsonElement(host.syncFrames.single()).jsonObject
       assertEquals("hierarchy_update", frame["type"]?.jsonPrimitive?.content)
       assertEquals("req_1", frame["requestId"]?.jsonPrimitive?.content)
-      assertTrue(File(host.dir, "latest_hierarchy.json").readText().contains("com.example"))
+      assertFalse(File(host.dir, "latest_hierarchy.json").exists())
       assertEquals(listOf<String?>("req_1"), host.released)
       assertTrue(controller.extractedHierarchyFrameContexts.isEmpty())
     }
+
+  @Test
+  fun `push and request dump only while the marker exists and always broadcast`() = runTest {
+    for (requested in listOf(false, true)) {
+      val host = FakeHost(tmp.newFolder())
+      var hierarchy = ViewHierarchy(packageName = "com.example.initial")
+      val controller = controller(host) { hierarchy }
+      val marker = File(host.dir, "dump_hierarchy")
+      val dump = File(host.dir, "latest_hierarchy.json")
+      val frames = if (requested) host.syncFrames else host.asyncFrames
+
+      for (enabled in listOf(false, true, false)) {
+        if (enabled) assertTrue(marker.createNewFile()) else marker.delete()
+        val previousDump = dump.takeIf { it.exists() }?.readText()
+        val packageName = "com.example.frame${frames.size}"
+        hierarchy = ViewHierarchy(packageName = packageName)
+        if (requested) {
+          controller.requestHierarchy(RequestHierarchy(requestId = "req_${frames.size}"))
+        } else {
+          controller.deliverResult(HierarchyResult.Changed(hierarchy, 1, 0L))
+        }
+        val frame = Json.parseToJsonElement(frames.last()).jsonObject
+        assertEquals("hierarchy_update", frame["type"]?.jsonPrimitive?.content)
+        assertTrue(frames.last().contains(packageName))
+        if (enabled) {
+          assertTrue(dump.readText().contains(packageName))
+        } else {
+          assertEquals(previousDump, dump.takeIf { it.exists() }?.readText())
+        }
+      }
+      assertEquals(3, frames.size)
+    }
+  }
 
   @Test
   fun `request hierarchy defaults the snapshot limits`() = runTest {
@@ -197,19 +236,22 @@ class HierarchyControllerTest {
     }
 
   @Test
-  fun `cleanup deletes uuid hierarchy files but keeps the latest hierarchy file`() = runTest {
-    val host = FakeHost(tmp.newFolder())
-    File(host.dir, "hierarchy_abc.json").writeText("{}")
-    File(host.dir, "latest_hierarchy.json").writeText("{}")
-    File(host.dir, "other.json").writeText("{}")
-    val controller = controller(host) { null }
+  fun `cleanup deletes uuid hierarchy files but keeps the latest hierarchy file and dump marker`() =
+    runTest {
+      val host = FakeHost(tmp.newFolder())
+      File(host.dir, "hierarchy_abc.json").writeText("{}")
+      File(host.dir, "latest_hierarchy.json").writeText("{}")
+      File(host.dir, "other.json").writeText("{}")
+      File(host.dir, "dump_hierarchy").createNewFile()
+      val controller = controller(host) { null }
 
-    controller.cleanupUuidHierarchyFiles()
+      controller.cleanupUuidHierarchyFiles()
 
-    assertFalse(File(host.dir, "hierarchy_abc.json").exists())
-    assertTrue(File(host.dir, "latest_hierarchy.json").exists())
-    assertTrue(File(host.dir, "other.json").exists())
-  }
+      assertFalse(File(host.dir, "hierarchy_abc.json").exists())
+      assertTrue(File(host.dir, "latest_hierarchy.json").exists())
+      assertTrue(File(host.dir, "other.json").exists())
+      assertTrue(File(host.dir, "dump_hierarchy").exists())
+    }
 
   @Test
   fun `interval and event hooks are safe before the debouncer exists`() = runTest {
@@ -219,9 +261,12 @@ class HierarchyControllerTest {
         serviceScope = backgroundScope,
         viewHierarchyExtractor = mockk(relaxed = true),
         displayController = DisplayController(mockk(relaxed = true)),
-        perfProvider = PerfProvider.instance,
-        timeProvider = FakeTimer(),
-        workStats = CtrlProxyWorkStats(),
+        diagnostics =
+          HierarchyDiagnosticsDependencies(
+            perfProvider = PerfProvider.instance,
+            timeProvider = FakeTimer(),
+            workStats = CtrlProxyWorkStats(),
+          ),
         jsonCompact = Json { encodeDefaults = true },
       )
 

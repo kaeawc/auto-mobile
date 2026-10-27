@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../../src/models/ViewHierarchyResult";
@@ -171,7 +172,7 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("preserves an SDK-backed screen identity while compacting observation output", () => {
-      const observe: ObserveResult = {
+      const observe: ObserveResult = buildObserveResult({
         updatedAt: 1,
         screenSize: { width: 100, height: 200 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -185,7 +186,7 @@ describe("sanitizeObserveResult", () => {
             navigationRoute: "SettingsTab",
           },
         },
-      };
+      });
 
       expect(sanitizeObserveResult(observe, COMPACT).screenIdentity).toEqual(
         observe.screenIdentity,
@@ -239,7 +240,9 @@ describe("sanitizeObserveResult", () => {
 
     test("perf-audit strip truncates diagnostics to the summary above the GFXINFO DUMP marker", () => {
       const { observe } = loadAndroidHomeObserve();
-      delete observe.performanceAudit!.violations;
+      const partialAudit: Partial<NonNullable<ObserveResult["performanceAudit"]>> =
+        observe.performanceAudit!;
+      delete partialAudit.violations;
       const original = observe.performanceAudit!.diagnostics!;
       expect(original).toContain(GFXINFO_DUMP_MARKER);
       const expectedSummary = original.slice(0, original.indexOf(GFXINFO_DUMP_MARKER)).trimEnd();
@@ -364,7 +367,7 @@ describe("sanitizeObserveResult", () => {
 
       const out = sanitizeObserveResult(observe, DROP_NONE);
 
-      expect(out.gfxMetrics).toEqual({
+      expect<unknown>(out.gfxMetrics).toEqual({
         packageName: "com.example.app",
         pollCount: 7,
         stabilityWaitMs: 350,
@@ -471,7 +474,7 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("keeps view-id when it differs from resource-id", () => {
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -485,7 +488,7 @@ describe("sanitizeObserveResult", () => {
             }),
           },
         },
-      };
+      });
 
       const out = sanitizeObserveResult(obs, DROP_NONE);
       expect(out.viewHierarchy!.hierarchy!.node!["view-id"]).toBe("distinct-uuid");
@@ -536,7 +539,7 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("omits default-false booleans and empty-string fields (synthetic)", () => {
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -554,7 +557,7 @@ describe("sanitizeObserveResult", () => {
             }),
           },
         },
-      };
+      });
 
       const out = sanitizeObserveResult(obs, DROP_NONE);
       const node = flatNodeAttributes(out.viewHierarchy!.hierarchy!.node);
@@ -571,21 +574,22 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("drops enabled when true but preserves enabled=false (default-true convention)", () => {
-      const makeObs = (enabled: string): ObserveResult => ({
-        updatedAt: 0,
-        screenSize: { width: 1, height: 1 },
-        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-        viewHierarchy: {
-          hierarchy: {
-            node: createFlatNodeForTest({
-              enabled: enabled,
-              "resource-id": "id/keep",
-              node: [],
-              $: {},
-            }),
+      const makeObs = (enabled: string): ObserveResult =>
+        buildObserveResult({
+          updatedAt: 0,
+          screenSize: { width: 1, height: 1 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+          viewHierarchy: {
+            hierarchy: {
+              node: createFlatNodeForTest({
+                enabled: enabled,
+                "resource-id": "id/keep",
+                node: [],
+                $: {},
+              }),
+            },
           },
-        },
-      });
+        });
 
       const enabledTrue = sanitizeObserveResult(makeObs("true"), DROP_NONE);
       const enabledFalse = sanitizeObserveResult(makeObs("false"), DROP_NONE);
@@ -795,7 +799,7 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("bounds compaction is a no-op for nodes that carry no bounds", () => {
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -804,7 +808,7 @@ describe("sanitizeObserveResult", () => {
             node: createFlatNodeForTest({ "resource-id": "id/no-bounds", node: [], $: {} }),
           },
         },
-      };
+      });
       const out = sanitizeObserveResult(obs, COMPACT);
       const node = flatNodeAttributes(out.viewHierarchy!.hierarchy!.node);
       expect(node.bounds).toBeUndefined();
@@ -840,7 +844,7 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("composes with trimNodes and dropElements (tuple bounds + trimmed attrs + no elements)", () => {
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -858,7 +862,7 @@ describe("sanitizeObserveResult", () => {
           },
         },
         elements: { clickable: [], scrollable: [], text: [], media: [] },
-      };
+      });
       const out = sanitizeObserveResult(obs, {
         dropElements: true,
         trimNodes: true,
@@ -935,25 +939,25 @@ describe("sanitizeObserveResult", () => {
     test("flattens elements[].bounds across all four element buckets", () => {
       const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
       const e = out.elements!;
-      expect(Reflect.get(e.clickable[0], "bounds")).toEqual([20, 21, 22, 23]);
-      expect(Reflect.get(e.scrollable[0], "bounds")).toEqual([30, 31, 32, 33]);
-      expect(Reflect.get(e.text[0], "bounds")).toEqual([40, 41, 42, 43]);
-      expect(Reflect.get(e.media[0], "bounds")).toEqual([50, 51, 52, 53]);
+      expect<unknown>(e.clickable[0]?.bounds).toEqual([20, 21, 22, 23]);
+      expect<unknown>(e.scrollable[0]?.bounds).toEqual([30, 31, 32, 33]);
+      expect<unknown>(e.text[0]?.bounds).toEqual([40, 41, 42, 43]);
+      expect<unknown>(e.media[0]?.bounds).toEqual([50, 51, 52, 53]);
     });
 
     test("flattens the Hierarchy root, window, and content-hidden-region bounds", () => {
       const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
       const vh = out.viewHierarchy!;
-      expect(Reflect.get(vh.hierarchy, "bounds")).toEqual([0, 0, 1080, 2400]);
-      expect(Reflect.get(vh.windows![0], "bounds")).toEqual([70, 71, 72, 73]);
-      expect(Reflect.get(vh.contentHiddenRegions![0], "bounds")).toEqual([80, 81, 82, 83]);
+      expect<unknown>(vh.hierarchy?.bounds).toEqual([0, 0, 1080, 2400]);
+      expect<unknown>(vh.windows![0]?.bounds).toEqual([70, 71, 72, 73]);
+      expect<unknown>(vh.contentHiddenRegions![0]?.bounds).toEqual([80, 81, 82, 83]);
     });
 
     test("flattens focused / accessibility-focused / awaited element bounds", () => {
       const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
-      expect(Reflect.get(out.focusedElement, "bounds")).toEqual([1, 2, 3, 4]);
-      expect(Reflect.get(out.accessibilityFocusedElement, "bounds")).toEqual([9, 10, 11, 12]);
-      expect(Reflect.get(out.awaitedElement, "bounds")).toEqual([13, 14, 15, 16]);
+      expect<unknown>(out.focusedElement?.bounds).toEqual([1, 2, 3, 4]);
+      expect<unknown>(out.accessibilityFocusedElement?.bounds).toEqual([9, 10, 11, 12]);
+      expect<unknown>(out.awaitedElement?.bounds).toEqual([13, 14, 15, 16]);
     });
 
     test("NEVER compacts systemInsets (a {top,bottom,left,right} object, not bounds)", () => {
@@ -981,7 +985,7 @@ describe("sanitizeObserveResult", () => {
 
       expect(JSON.stringify(out.rawViewHierarchy)).toBe(rawBefore);
       // ...while the processed hierarchy WAS compacted (proves the skip is targeted).
-      expect(Reflect.get(out.viewHierarchy!.hierarchy.node, "bounds")).toEqual([60, 61, 62, 63]);
+      expect<unknown>(out.viewHierarchy!.hierarchy.node?.bounds).toEqual([60, 61, 62, 63]);
     });
 
     test("is output-only across every site (input object never mutated)", () => {
@@ -1098,7 +1102,9 @@ describe("sanitizeObserveResult", () => {
         windows[0].truncationReasons = [reason];
         observe.viewHierarchy!.truncationReasons = [reason, "cancelled"];
         const out = sanitizeObserveResult(observe, { ...COMPACT, project: "skeleton" });
-        expect(out.windowTruncations).toEqual([{ windowId: windows[0].id, reasons: [reason] }]);
+        expect<unknown>(out.windowTruncations).toEqual([
+          { windowId: windows[0].id, reasons: [reason] },
+        ]);
         expect(out.truncationReasons).toEqual([reason, "cancelled"]);
         expect(windows[1].truncationReasons).toBeUndefined();
       },
@@ -1116,7 +1122,7 @@ describe("sanitizeObserveResult", () => {
         "",
       ];
       const out = sanitizeObserveResult(observe, { ...COMPACT, project: "skeleton" });
-      expect(out.windowTruncations).toEqual([
+      expect<unknown>(out.windowTruncations).toEqual([
         {
           windowId: observe.viewHierarchy!.windows![1].id,
           reasons: ["future_code", "max_depth", "cancelled", "max_nodes"],
@@ -1284,7 +1290,7 @@ describe("sanitizeObserveResult", () => {
   describe("default-false boolean drop table (P3)", () => {
     /** Trim one synthetic node carrying `attrs` and return the surviving attrs. */
     function trimmedNode(attrs: Record<string, unknown>): Record<string, unknown> {
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -1293,25 +1299,25 @@ describe("sanitizeObserveResult", () => {
             node: createFlatNodeForTest({ class: "android.view.View", ...attrs, node: [], $: {} }),
           },
         },
-      };
+      });
       return flatNodeAttributes(
         sanitizeObserveResult(obs, DROP_NONE).viewHierarchy!.hierarchy!.node,
       );
     }
 
-    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s='false' (string default) is dropped", (key) => {
+    test.each([...DEFAULT_FALSE_BOOLEAN_KEYS])("%s='false' (string default) is dropped", (key) => {
       expect(trimmedNode({ [key]: "false" })).not.toHaveProperty(key);
     });
 
-    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s=false (boolean default) is dropped", (key) => {
+    test.each([...DEFAULT_FALSE_BOOLEAN_KEYS])("%s=false (boolean default) is dropped", (key) => {
       expect(trimmedNode({ [key]: false })).not.toHaveProperty(key);
     });
 
-    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s='true' (non-default) is kept", (key) => {
+    test.each([...DEFAULT_FALSE_BOOLEAN_KEYS])("%s='true' (non-default) is kept", (key) => {
       expect(trimmedNode({ [key]: "true" })[key]).toBe("true");
     });
 
-    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s=true (boolean non-default) is kept", (key) => {
+    test.each([...DEFAULT_FALSE_BOOLEAN_KEYS])("%s=true (boolean non-default) is kept", (key) => {
       expect(trimmedNode({ [key]: true })[key]).toBe(true);
     });
 
@@ -1350,7 +1356,7 @@ describe("sanitizeObserveResult", () => {
     function compactNodeBounds(input: unknown): unknown {
       // `bounds` is deliberately off-model (malformed shapes), so it enters through an open record.
       const malformed: Record<string, unknown> = { bounds: input };
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -1359,7 +1365,7 @@ describe("sanitizeObserveResult", () => {
             node: createFlatNodeForTest({ "resource-id": "r", ...malformed, node: [], $: {} }),
           },
         },
-      };
+      });
       return Reflect.get(
         sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!.node!,
         "bounds",
@@ -1414,12 +1420,12 @@ describe("sanitizeObserveResult", () => {
     // D6: the old diff "tuple-vs-tuple" characterization is folded here — the
     // shape contract lives with the compactor, not the diff.
     test("systemInsets (a {top,bottom,left,right} object) is never compacted", () => {
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 5, bottom: 6, left: 7, right: 8 },
         viewHierarchy: { hierarchy: { node: createFlatNodeForTest({ "resource-id": "r" }) } },
-      };
+      });
       expect(sanitizeObserveResult(obs, COMPACT).systemInsets).toEqual({
         top: 5,
         bottom: 6,
@@ -1509,7 +1515,9 @@ describe("sanitizeObserveResult", () => {
   describe("GFXINFO diagnostics-marker boundaries (A6)", () => {
     function strippedDiagnostics(diagnostics: string): string {
       const { observe } = loadAndroidHomeObserve();
-      delete observe.performanceAudit!.violations;
+      const partialAudit: Partial<NonNullable<ObserveResult["performanceAudit"]>> =
+        observe.performanceAudit!;
+      delete partialAudit.violations;
       observe.performanceAudit!.diagnostics = diagnostics;
       return sanitizeObserveResult(observe, DROP_NONE).performanceAudit!.diagnostics!;
     }
@@ -1540,7 +1548,7 @@ describe("sanitizeObserveResult", () => {
   // drop multi-byte, astral (surrogate-pair), or zero-width text.
   describe("unicode text preservation (A10)", () => {
     function trimmedCompactNode(attrs: Record<string, unknown>): Record<string, unknown> {
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -1549,7 +1557,7 @@ describe("sanitizeObserveResult", () => {
             node: createFlatNodeForTest({ "resource-id": "r", ...attrs, node: [], $: {} }),
           },
         },
-      };
+      });
       return flatNodeAttributes(sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!.node);
     }
 
@@ -1674,14 +1682,14 @@ describe("sanitizeObserveResult", () => {
 
     // Boundary: a reduction applied to an observation LACKING its target field
     // must be a no-op — never grow the payload.
-    const BARE: ObserveResult = {
+    const BARE: ObserveResult = buildObserveResult({
       updatedAt: 0,
       screenSize: { width: 1, height: 1 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: {
         hierarchy: { node: createFlatNodeForTest({ "resource-id": "r", node: [], $: {} }) },
       },
-    };
+    });
 
     test("compact on a bounds-free observation does not grow it", () => {
       const compacted = sanitizeObserveResult(BARE, COMPACT);
@@ -1712,9 +1720,9 @@ test("panel fingerprints stay internal in every output projection while unique i
     device: { deviceId: "fingerprint", platform: "android" },
   };
   for (const cfg of [
-    { project: "full" },
-    { project: "full", trimNodes: false, compact: false },
-    { project: "skeleton" },
+    { dropElements: false, project: "full" },
+    { dropElements: false, project: "full", trimNodes: false, compact: false },
+    { dropElements: false, project: "skeleton" },
   ] satisfies SanitizeObserveConfig[]) {
     const out = sanitizeObserveResult(obs, cfg);
     expect(JSON.stringify(out)).not.toContain("panelFingerprint");

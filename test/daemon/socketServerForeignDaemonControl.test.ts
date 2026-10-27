@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   DeviceOwnedByOtherDaemonError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
@@ -117,7 +117,7 @@ beforeEach(() => {
   spyOnAndroidClientInstance(androidDevice, {
     getScreenScaleMetadata: () => null,
     requestTapCoordinates: async (...args) => {
-      args[6]?.();
+      args[0].onDispatch?.();
       deviceCalls.push("tap");
       return { success: true, totalTimeMs: 0 };
     },

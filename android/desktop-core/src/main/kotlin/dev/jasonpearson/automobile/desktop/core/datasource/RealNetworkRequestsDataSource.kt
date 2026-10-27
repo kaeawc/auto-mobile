@@ -4,7 +4,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.encodeResourceUriComponent
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
-import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -29,6 +29,7 @@ class RealNetworkRequestsDataSource(
   private val clientProvider: (() -> AutoMobileClient)? = null,
   private val deviceId: String? = null,
   private val limit: Int = DEFAULT_LIMIT,
+  private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : NetworkRequestsDataSource {
   private val json = Json { ignoreUnknownKeys = true }
 
@@ -41,7 +42,7 @@ class RealNetworkRequestsDataSource(
     val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
 
     return try {
-      withContext(Dispatchers.IO) {
+      withContext(ioDispatcher) {
         val client = provider()
         val uri = buildTrafficUri(device, limit)
         val text =
@@ -56,9 +57,7 @@ class RealNetworkRequestsDataSource(
     } catch (e: McpConnectionException) {
       LOG.warn("getRequests: MCP connection error: ${e.message}", e)
       Result.Error(e, "MCP server not available: ${e.message}")
-    } catch (e: Exception) {
-      // Let coroutine cancellation propagate so this suspend call stays cancellable.
-      if (e is CancellationException) throw e
+    } catch (e: IllegalArgumentException) {
       LOG.warn("getRequests: Exception: ${e.message}", e)
       Result.Error(e, "Failed to load network requests: ${e.message}")
     }
@@ -69,7 +68,7 @@ class RealNetworkRequestsDataSource(
       clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
 
     return try {
-      withContext(Dispatchers.IO) {
+      withContext(ioDispatcher) {
         val client = provider()
         val uri = "automobile:network/request/$id"
         val text =
@@ -92,8 +91,7 @@ class RealNetworkRequestsDataSource(
     } catch (e: McpConnectionException) {
       LOG.warn("getRequestDetail: MCP connection error: ${e.message}", e)
       Result.Error(e, "MCP server not available: ${e.message}")
-    } catch (e: Exception) {
-      if (e is CancellationException) throw e
+    } catch (e: IllegalArgumentException) {
       LOG.warn("getRequestDetail: Exception: ${e.message}", e)
       Result.Error(e, "Failed to load request detail: ${e.message}")
     }

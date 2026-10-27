@@ -1,14 +1,12 @@
-import type { AndroidTransportRouting } from "../androidSerial";
 import {
   ambientDeviceExecutionBinding,
   type DeviceExecutionBinding,
 } from "../deviceExecutionBinding";
 import type { BootedDevice } from "../../models";
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
-import { AdbClient } from "./AdbClient";
 import type { RetryExecutor } from "../retry/RetryExecutor";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../deviceAdmissionGate";
-import { defaultEmulatorConsoleBusyRegistry } from "./EmulatorConsoleBusyRegistry";
+import { DefaultAdbClientFactory } from "./DefaultAdbClientFactory";
 
 /**
  * Factory interface for creating AdbClient instances.
@@ -22,29 +20,6 @@ export interface AdbClientFactory {
    * @returns An AdbExecutor instance
    */
   create(device?: BootedDevice | null, retryExecutor?: RetryExecutor): AdbExecutor;
-}
-
-/**
- * Default factory that creates real AdbClient instances.
- */
-class DefaultAdbClientFactory implements AdbClientFactory {
-  constructor(private readonly transportRouting?: AndroidTransportRouting) {}
-
-  create(device?: BootedDevice | null, retryExecutor?: RetryExecutor): AdbExecutor {
-    return new AdbClient(
-      device ?? null,
-      null,
-      null,
-      retryExecutor,
-      undefined,
-      undefined,
-      undefined,
-      defaultEmulatorConsoleBusyRegistry,
-      undefined,
-      undefined,
-      this.transportRouting ?? daemonDeviceAdmissionGate.getAndroidTransportRouting?.(),
-    );
-  }
 }
 
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */

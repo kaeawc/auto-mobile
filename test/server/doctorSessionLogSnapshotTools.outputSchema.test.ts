@@ -10,7 +10,7 @@ import { registerSnapshotTools } from "../../src/server/snapshotTools";
 import {
   resetDeviceSnapshotManagerDependencies,
   setDeviceSnapshotManagerDependencies,
-} from "../../src/server/deviceSnapshotManager";
+} from "../../src/daemon/deviceSnapshotManager";
 import type { SessionLogService } from "../../src/server/sessionLogService";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";

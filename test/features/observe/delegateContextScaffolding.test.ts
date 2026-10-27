@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 /**
  * Pinning test for the delegate-context scaffolding shared by the Android and iOS
  * CtrlProxy clients (issue #5458).
@@ -14,9 +15,8 @@
  *   - the exact field set of each client's `HierarchyDelegateContext`,
  *   - the singleton-caching semantics of the delegate getters.
  *
- * Private members are reached with bracket access (`client["name"]`) — the established pattern in the
- * sibling client suites — because the getters and context-builders are intentionally
- * private.
+ * The getters and context-builders are private, so they are reached through each client's typed
+ * `testHooks`.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -31,7 +31,6 @@ import type { WebSocketFactory } from "../../../src/features/observe/DeviceServi
 const androidDevice: BootedDevice = {
   deviceId: "delegate-context-android",
   platform: "android",
-  isEmulator: true,
   name: "Test Device",
 };
 
@@ -43,7 +42,7 @@ const iosDevice: BootedDevice = {
 
 function createAndroidClient(): AndroidCtrlProxyClient {
   const fakeAdb = new FakeAdbExecutor();
-  fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+  fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
   fakeAdb.setScreenState(true);
   const fakeTimer = new FakeTimer();
   AndroidCtrlProxyClient.resetInstances();
@@ -64,7 +63,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
   describe("Android base DelegateContext", () => {
     test("exposes exactly the shared field set", () => {
       const client = createAndroidClient();
-      const ctx = client["createDelegateContext"]();
+      const ctx = client.testHooks.createDelegateContext();
       expect(Object.keys(ctx).sort()).toEqual([
         "cancelScreenshotBackoff",
         "ensureConnected",
@@ -81,9 +80,9 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
 
     test("wires the shared fields to live client state", () => {
       const client = createAndroidClient();
-      const ctx = client["createDelegateContext"]();
-      expect(ctx.requestManager).toBe(client["requestManager"]);
-      expect(ctx.timer).toBe(client["timer"]);
+      const ctx = client.testHooks.createDelegateContext();
+      expect(ctx.requestManager).toBe(client.connectionTestHooks.requestManager);
+      expect(client.testHooks.injected().timer).toBe(ctx.timer);
       // Not connected yet: the WebSocket accessor mirrors the client's null socket.
       expect(ctx.getWebSocket()).toBe(client.connectionTestHooks.socket);
       expect(typeof ctx.ensureConnected).toBe("function");
@@ -96,7 +95,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
   describe("Android HierarchyDelegateContext", () => {
     test("extends the base with the Android-specific fields", () => {
       const client = createAndroidClient();
-      const ctx = client["createHierarchyDelegateContext"]();
+      const ctx = client.testHooks.createHierarchyDelegateContext();
       expect(Object.keys(ctx).sort()).toEqual([
         "adb",
         "cancelScreenshotBackoff",
@@ -117,15 +116,15 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
         "timer",
         "unmarkObserverHierarchyRequest",
       ]);
-      expect(ctx.device).toBe(client["device"]);
-      expect(ctx.adb).toBe(client["adb"]);
+      expect(client.testHooks.injected().device).toBe(ctx.device);
+      expect(client.testHooks.injected().adb).toBe(ctx.adb);
     });
   });
 
   describe("iOS base DelegateContext", () => {
     test("exposes the shared fields plus the iOS command-capability fields", () => {
       const client = createIosClient();
-      const ctx = client["createDelegateContext"]();
+      const ctx = client.testHooks.createDelegateContext();
       expect(Object.keys(ctx).sort()).toEqual([
         "cancelScreenshotBackoff",
         "ensureConnected",
@@ -143,9 +142,9 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
 
     test("wires the shared fields to live client state", () => {
       const client = createIosClient();
-      const ctx = client["createDelegateContext"]();
-      expect(ctx.requestManager).toBe(client["requestManager"]);
-      expect(ctx.timer).toBe(client["timer"]);
+      const ctx = client.testHooks.createDelegateContext();
+      expect(ctx.requestManager).toBe(client.connectionTestHooks.requestManager);
+      expect(client.testHooks.timer).toBe(ctx.timer);
       expect(ctx.getWebSocket()).toBe(client.connectionTestHooks.socket);
       expect(typeof ctx.ensureConnected).toBe("function");
       expect(typeof ctx.cancelScreenshotBackoff).toBe("function");
@@ -159,7 +158,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
   describe("iOS HierarchyDelegateContext", () => {
     test("extends the base with the iOS-specific fields", () => {
       const client = createIosClient();
-      const ctx = client["createHierarchyDelegateContext"]();
+      const ctx = client.testHooks.createHierarchyDelegateContext();
       expect(Object.keys(ctx).sort()).toEqual([
         "cacheFreshTtlMs",
         "cancelScreenshotBackoff",
@@ -187,30 +186,32 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
   describe("delegate getters are cached singletons", () => {
     test("Android getters return a stable instance", () => {
       const client = createAndroidClient();
-      expect(client["gestures"]).toBe(client["gestures"]);
-      expect(client["text"]).toBe(client["text"]);
-      expect(client["hierarchy"]).toBe(client["hierarchy"]);
-      expect(client["storage"]).toBe(client["storage"]);
-      expect(client["certificates"]).toBe(client["certificates"]);
-      expect(client["focus"]).toBe(client["focus"]);
-      expect(client["highlights"]).toBe(client["highlights"]);
-      expect(client["packages"]).toBe(client["packages"]);
+      expect(client.testHooks.gestures()).toBe(client.testHooks.gestures());
+      expect(client.testHooks.text()).toBe(client.testHooks.text());
+      expect(client.testHooks.hierarchy()).toBe(client.testHooks.hierarchy());
+      expect(client.testHooks.storage()).toBe(client.testHooks.storage());
+      expect(client.testHooks.certificates()).toBe(client.testHooks.certificates());
+      expect(client.testHooks.focus()).toBe(client.testHooks.focus());
+      expect(client.testHooks.highlights()).toBe(client.testHooks.highlights());
+      expect(client.testHooks.packages()).toBe(client.testHooks.packages());
     });
 
     test("iOS getters return a stable instance", () => {
       const client = createIosClient();
-      expect(client["gestures"]).toBe(client["gestures"]);
-      expect(client["text"]).toBe(client["text"]);
-      expect(client["hierarchy"]).toBe(client["hierarchy"]);
-      expect(client["screenshot"]).toBe(client["screenshot"]);
-      expect(client["navigation"]).toBe(client["navigation"]);
-      expect(client["clipboard"]).toBe(client["clipboard"]);
-      expect(client["voiceOver"]).toBe(client["voiceOver"]);
-      expect(client["storage"]).toBe(client["storage"]);
-      expect(client["keyboard"]).toBe(client["keyboard"]);
-      expect(client["highlights"]).toBe(client["highlights"]);
-      expect(client["database"]).toBe(client["database"]);
-      expect(client["permissions"]).toBe(client["permissions"]);
+      expect(client.testHooks.delegates().gestures).toBe(client.testHooks.delegates().gestures);
+      expect(client.testHooks.delegates().text).toBe(client.testHooks.delegates().text);
+      expect(client.testHooks.delegates().hierarchy).toBe(client.testHooks.delegates().hierarchy);
+      expect(client.testHooks.delegates().screenshot).toBe(client.testHooks.delegates().screenshot);
+      expect(client.testHooks.delegates().navigation).toBe(client.testHooks.delegates().navigation);
+      expect(client.testHooks.delegates().clipboard).toBe(client.testHooks.delegates().clipboard);
+      expect(client.testHooks.delegates().voiceOver).toBe(client.testHooks.delegates().voiceOver);
+      expect(client.testHooks.delegates().storage).toBe(client.testHooks.delegates().storage);
+      expect(client.testHooks.delegates().keyboard).toBe(client.testHooks.delegates().keyboard);
+      expect(client.testHooks.delegates().highlights).toBe(client.testHooks.delegates().highlights);
+      expect(client.testHooks.delegates().database).toBe(client.testHooks.delegates().database);
+      expect(client.testHooks.delegates().permissions).toBe(
+        client.testHooks.delegates().permissions,
+      );
     });
   });
 });

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, spyOn, test } from "bun:test";
 import { validGfxinfoOutput, noFrameGfxinfoOutput } from "./gfxinfoFixtures";
 import {
@@ -5,7 +6,12 @@ import {
   NO_FRAME_STATS_GRACE_MS,
   NO_FRAME_STATS_GRACE_POLLS,
 } from "../../../src/features/observe/AwaitIdle";
-import { Idle, ROTATION_READ_FLOOR_MS } from "../../../src/features/observe/Idle";
+import {
+  Idle,
+  ROTATION_READ_FLOOR_MS,
+  ROTATION_WAIT_TIMEOUT_MS,
+} from "../../../src/features/observe/Idle";
+import { fixedBackoff } from "../../../src/utils/Backoff";
 import {
   WINDOW_MANAGER_ROTATION_COMMAND,
   WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND,
@@ -71,6 +77,29 @@ function createAwaitIdle(adb: AdbExecutor, timer: FakeTimer): AwaitIdle {
   return new AwaitIdle(device, { create: () => adb }, timer);
 }
 
+/** Fixed 17 ms rotation polling, so deadline mechanics tests can assert exact sleeps. */
+function createFixedPollAwaitIdle(adb: AdbExecutor, timer: FakeTimer): AwaitIdle {
+  return new AwaitIdle(device, { create: () => adb }, timer, undefined, fixedBackoff(17));
+}
+
+/** Reports window-manager rotation 1 only once the fake clock has reached `rotatesAtMs`. */
+class SlowRotationAdbExecutor extends FakeAdbExecutor {
+  constructor(
+    private readonly timer: FakeTimer,
+    private readonly rotatesAtMs: number,
+  ) {
+    super();
+  }
+
+  override async executeCommand(command: string, options?: AdbExecuteOptions) {
+    const result = await super.executeCommand(command, options);
+    if (command === WINDOW_MANAGER_ROTATION_COMMAND) {
+      return createExecResult(`mRotation=${this.timer.now() >= this.rotatesAtMs ? 1 : 0}`, "");
+    }
+    return result;
+  }
+}
+
 describe("AwaitIdle missing frame stats", () => {
   test("unavailable reads are neutral between no-frame polls", async () => {
     const timer = new FakeTimer();
@@ -83,7 +112,7 @@ describe("AwaitIdle missing frame stats", () => {
       if (++reads % 2 === 0) {
         throw new Error("gfxinfo unavailable");
       }
-      return { stdout: noFrameGfxinfoOutput, stderr: "" };
+      return createExecResult(noFrameGfxinfoOutput, "");
     });
     try {
       const metrics = await awaitIdle.waitForUiStabilityWithState("com.example.app", 8000, state);
@@ -107,7 +136,7 @@ describe("AwaitIdle missing frame stats", () => {
       if (timer.now() >= NO_FRAME_STATS_GRACE_MS) {
         graceRead = true;
       }
-      return { stdout: final ? validGfxinfoOutput : noFrameGfxinfoOutput, stderr: "" };
+      return createExecResult(final ? validGfxinfoOutput : noFrameGfxinfoOutput, "");
     });
     try {
       const metrics = await awaitIdle.waitForUiStabilityWithState("com.example.app", 8000, state);
@@ -124,11 +153,11 @@ describe("AwaitIdle missing frame stats", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("dumpsys gfxinfo 'com.example.app' reset", { stdout: "", stderr: "" });
-    adb.setCommandResponse("dumpsys gfxinfo 'com.example.app'", {
-      stdout: noFrameGfxinfoOutput,
-      stderr: "",
-    });
+    adb.setCommandResponse("dumpsys gfxinfo 'com.example.app' reset", createExecResult("", ""));
+    adb.setCommandResponse(
+      "dumpsys gfxinfo 'com.example.app'",
+      createExecResult(noFrameGfxinfoOutput, ""),
+    );
     const awaitIdle = createAwaitIdle(adb, timer);
     const state = await awaitIdle.initializeUiStabilityTracking("com.example.app", 8000);
     const metrics = await awaitIdle.waitForUiStabilityWithState("com.example.app", 8000, state);
@@ -145,10 +174,10 @@ describe("AwaitIdle missing frame stats", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("dumpsys gfxinfo 'com.example.app' reset", { stdout: "", stderr: "" });
+    adb.setCommandResponse("dumpsys gfxinfo 'com.example.app' reset", createExecResult("", ""));
     adb.setCommandResponseSequence("dumpsys gfxinfo 'com.example.app'", [
-      ...Array.from({ length: 30 }, () => ({ stdout: noFrameGfxinfoOutput, stderr: "" })),
-      { stdout: validGfxinfoOutput, stderr: "" },
+      ...Array.from({ length: 30 }, () => createExecResult(noFrameGfxinfoOutput, "")),
+      createExecResult(validGfxinfoOutput, ""),
     ]);
     const awaitIdle = createAwaitIdle(adb, timer);
     const state = await awaitIdle.initializeUiStabilityTracking("com.example.app", 8000);
@@ -166,14 +195,14 @@ describe("AwaitIdle missing frame stats", () => {
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
     const awaitIdle = createAwaitIdle(adb, timer);
-    adb.setCommandResponse("dumpsys gfxinfo 'com.example.app' reset", { stdout: "", stderr: "" });
+    adb.setCommandResponse("dumpsys gfxinfo 'com.example.app' reset", createExecResult("", ""));
     const state = await awaitIdle.initializeUiStabilityTracking("com.example.app", 8000);
     // Neither run reaches ten polls; their combined length would trip an unreset counter.
     adb.setCommandResponseSequence("dumpsys gfxinfo 'com.example.app'", [
-      ...Array.from({ length: 6 }, () => ({ stdout: noFrameGfxinfoOutput, stderr: "" })),
-      { stdout: validGfxinfoOutput, stderr: "" },
-      ...Array.from({ length: 6 }, () => ({ stdout: noFrameGfxinfoOutput, stderr: "" })),
-      { stdout: validGfxinfoOutput, stderr: "" },
+      ...Array.from({ length: 6 }, () => createExecResult(noFrameGfxinfoOutput, "")),
+      createExecResult(validGfxinfoOutput, ""),
+      ...Array.from({ length: 6 }, () => createExecResult(noFrameGfxinfoOutput, "")),
+      createExecResult(validGfxinfoOutput, ""),
     ]);
     const metrics = await awaitIdle.waitForUiStabilityWithState("com.example.app", 8000, state);
 
@@ -186,13 +215,13 @@ describe("AwaitIdle missing frame stats", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("dumpsys gfxinfo 'com.example.app' reset", { stdout: "", stderr: "" });
+    adb.setCommandResponse("dumpsys gfxinfo 'com.example.app' reset", createExecResult("", ""));
     // Each streak lasts about 660ms; only their combined duration exceeds the grace.
     adb.setCommandResponseSequence("dumpsys gfxinfo 'com.example.app'", [
-      ...Array.from({ length: 40 }, () => ({ stdout: noFrameGfxinfoOutput, stderr: "" })),
-      { stdout: validGfxinfoOutput, stderr: "" },
-      ...Array.from({ length: 40 }, () => ({ stdout: noFrameGfxinfoOutput, stderr: "" })),
-      { stdout: validGfxinfoOutput, stderr: "" },
+      ...Array.from({ length: 40 }, () => createExecResult(noFrameGfxinfoOutput, "")),
+      createExecResult(validGfxinfoOutput, ""),
+      ...Array.from({ length: 40 }, () => createExecResult(noFrameGfxinfoOutput, "")),
+      createExecResult(validGfxinfoOutput, ""),
     ]);
     const awaitIdle = createAwaitIdle(adb, timer);
     const state = await awaitIdle.initializeUiStabilityTracking("com.example.app", 8000);
@@ -288,11 +317,11 @@ describe("AwaitIdle rotation polling", () => {
     const adb = new FakeAdbExecutor();
     const controller = new AbortController();
     adb.setCommandResponseSequence(WINDOW_MANAGER_ROTATION_COMMAND, [
-      { stdout: "mRotation=0", stderr: "" },
-      { stdout: "mRotation=1", stderr: "" },
+      createExecResult("mRotation=0", ""),
+      createExecResult("mRotation=1", ""),
     ]);
 
-    await createAwaitIdle(adb, timer).waitForRotation(
+    await createFixedPollAwaitIdle(adb, timer).waitForRotation(
       1,
       ROTATION_READ_FLOOR_MS / 10,
       controller.signal,
@@ -310,51 +339,73 @@ describe("AwaitIdle rotation polling", () => {
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence(WINDOW_MANAGER_ROTATION_COMMAND, [
-      { stdout: "mRotation=0", stderr: "" },
-      { stdout: "mRotation=1", stderr: "" },
+      createExecResult("mRotation=0", ""),
+      createExecResult("mRotation=1", ""),
     ]);
 
-    await createAwaitIdle(adb, timer).waitForRotation(1, 5000);
+    await createFixedPollAwaitIdle(adb, timer).waitForRotation(1, 5000);
 
     expect(timer.now()).toBe(17);
     expect(adb.getCommandCalls().map(({ timeoutMs }) => timeoutMs)).toEqual([5000, 4983]);
   });
 
-  test("detects rotation appearing only in the final slot of the default budget", async () => {
+  test("the default budget is long enough for an emulator under load", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const adb = new FakeAdbExecutor();
-    adb.setCommandResponseSequence(WINDOW_MANAGER_ROTATION_COMMAND, [
-      ...Array.from({ length: 30 }, () => ({ stdout: "mRotation=0", stderr: "" })),
-      { stdout: "mRotation=1", stderr: "" },
-    ]);
+    const adb = new SlowRotationAdbExecutor(timer, 3_000);
 
     await createAwaitIdle(adb, timer).waitForRotation(1);
 
-    expect(adb.getCommandCalls()).toHaveLength(31);
-    expect(adb.getCommandCalls().map(({ timeoutMs }) => timeoutMs)).toEqual(
-      Array.from({ length: 31 }, () => 1000),
+    expect(ROTATION_WAIT_TIMEOUT_MS).toBeGreaterThanOrEqual(5_000);
+    expect(timer.now()).toBeGreaterThanOrEqual(3_000);
+    expect(timer.now()).toBeLessThan(3_000 + 500);
+  });
+
+  test("polls with a growing delay instead of hammering dumpsys every 17 ms", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new SlowRotationAdbExecutor(timer, 1_000);
+
+    await createAwaitIdle(adb, timer).waitForRotation(1);
+
+    const sleeps = timer.getSleepHistory();
+    expect(sleeps.slice(0, 4)).toEqual([50, 100, 200, 400]);
+    expect(Math.max(...sleeps)).toBeLessThanOrEqual(400);
+    expect(sleeps.length).toBeLessThan(10);
+  });
+
+  test("times out after the default budget with the budget in the message", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new SlowRotationAdbExecutor(timer, Number.POSITIVE_INFINITY);
+
+    await expect(createAwaitIdle(adb, timer).waitForRotation(1)).rejects.toThrow(
+      `Timeout waiting for rotation to 1 after ${ROTATION_WAIT_TIMEOUT_MS}ms`,
     );
-    expect(timer.getSleepHistory()).toEqual([...Array.from({ length: 29 }, () => 17), 7]);
-    expect(timer.now()).toBe(500);
+    expect(timer.now()).toBe(ROTATION_WAIT_TIMEOUT_MS);
   });
 
   test("caps sleeps at the deadline and stops after exactly one final unsuccessful read", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
-      stdout: "mRotation=0",
-      stderr: "",
+    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, createExecResult("mRotation=0", ""));
+    const awaitIdle = createFixedPollAwaitIdle(adb, timer);
+    const statuses: Awaited<ReturnType<Idle["getRotationStatus"]>>[] = [];
+    const getRotationStatus = Idle.prototype.getRotationStatus;
+    const statusSpy = spyOn(Idle.prototype, "getRotationStatus").mockImplementation(async function (
+      this: Idle,
+      ...args: Parameters<Idle["getRotationStatus"]>
+    ) {
+      const status = await getRotationStatus.apply(this, args);
+      statuses.push(status);
+      return status;
     });
-    const awaitIdle = createAwaitIdle(adb, timer);
-    const statusSpy = spyOn(Idle.prototype, "getRotationStatus");
 
     try {
       await expect(awaitIdle.waitForRotation(1, 40)).rejects.toThrow(
         "Timeout waiting for rotation to 1 after 40ms",
       );
-      const statuses = await Promise.all(statusSpy.mock.results.map(({ value }) => value));
       expect(statuses.map(({ shouldContinue }) => shouldContinue)).toEqual([
         true,
         true,
@@ -378,7 +429,7 @@ describe("AwaitIdle rotation polling", () => {
     timer.enableAutoAdvance();
     const adb = new DeadlineAdbExecutor(timer, () => true);
 
-    await expect(createAwaitIdle(adb, timer).waitForRotation(1, 5000)).rejects.toThrow(
+    await expect(createFixedPollAwaitIdle(adb, timer).waitForRotation(1, 5000)).rejects.toThrow(
       "Timeout waiting for rotation to 1 after 5000ms",
     );
 
@@ -390,12 +441,9 @@ describe("AwaitIdle rotation polling", () => {
   test("rejects an abort without resolving the pending poll sleep", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
-      stdout: "mRotation=0",
-      stderr: "",
-    });
+    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, createExecResult("mRotation=0", ""));
     const controller = new AbortController();
-    const pending = createAwaitIdle(adb, timer).waitForRotation(1, 100, controller.signal);
+    const pending = createFixedPollAwaitIdle(adb, timer).waitForRotation(1, 100, controller.signal);
     for (let i = 0; i < 20; i++) {
       await Promise.resolve();
     }
@@ -426,7 +474,7 @@ describe("AwaitIdle rotation polling", () => {
     const timer = new FakeTimer();
     const adb = new DeadlineAdbExecutor(timer, () => true, true);
     const controller = new AbortController();
-    const pending = createAwaitIdle(adb, timer).waitForRotation(1, 100, controller.signal);
+    const pending = createFixedPollAwaitIdle(adb, timer).waitForRotation(1, 100, controller.signal);
     for (let i = 0; i < 20; i++) {
       await Promise.resolve();
     }
@@ -459,7 +507,7 @@ describe("AwaitIdle rotation polling", () => {
     timer.enableAutoAdvance();
     const adb = new DeadlineAdbExecutor(timer, () => true, true);
 
-    await expect(createAwaitIdle(adb, timer).waitForRotation(1, 5000)).rejects.toThrow(
+    await expect(createFixedPollAwaitIdle(adb, timer).waitForRotation(1, 5000)).rejects.toThrow(
       "Timeout waiting for rotation to 1 after 5000ms",
     );
 
@@ -473,12 +521,9 @@ describe("AwaitIdle rotation polling", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new DeadlineAdbExecutor(timer, () => timer.now() >= 100, true);
-    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
-      stdout: "mRotation=0",
-      stderr: "",
-    });
+    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, createExecResult("mRotation=0", ""));
 
-    await expect(createAwaitIdle(adb, timer).waitForRotation(1, 100)).rejects.toThrow(
+    await expect(createFixedPollAwaitIdle(adb, timer).waitForRotation(1, 100)).rejects.toThrow(
       "Timeout waiting for rotation to 1 after 100ms",
     );
 
@@ -507,12 +552,9 @@ describe("AwaitIdle rotation polling", () => {
       },
       true,
     );
-    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
-      stdout: "mRotation=0",
-      stderr: "",
-    });
+    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, createExecResult("mRotation=0", ""));
 
-    await expect(createAwaitIdle(adb, timer).waitForRotation(1, 500)).rejects.toThrow(
+    await expect(createFixedPollAwaitIdle(adb, timer).waitForRotation(1, 500)).rejects.toThrow(
       "Timeout waiting for rotation to 1 after 500ms",
     );
 
@@ -537,7 +579,7 @@ describe("AwaitIdle rotation polling", () => {
     const adb = new CancellingAdbExecutor(controller, reason);
 
     await expect(
-      createAwaitIdle(adb, timer).waitForRotation(1, 100, controller.signal),
+      createFixedPollAwaitIdle(adb, timer).waitForRotation(1, 100, controller.signal),
     ).rejects.toThrow("Operation cancelled");
     expect(adb.getCommandCalls()[0]?.signal).toBe(controller.signal);
     expect(timer.getSleepHistory()).toEqual([]);
@@ -550,7 +592,7 @@ describe("AwaitIdle rotation polling", () => {
     controller.abort(new Error("rotation cancelled"));
 
     await expect(
-      createAwaitIdle(adb, timer).waitForRotation(1, 100, controller.signal),
+      createFixedPollAwaitIdle(adb, timer).waitForRotation(1, 100, controller.signal),
     ).rejects.toThrow("Operation cancelled");
     expect(adb.getCommandCalls()).toEqual([]);
   });
@@ -560,11 +602,11 @@ describe("AwaitIdle rotation polling", () => {
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence(WINDOW_MANAGER_ROTATION_COMMAND, [
-      { stdout: "mRotation=0", stderr: "" },
-      { stdout: "mRotation=0", stderr: "" },
-      { stdout: "mRotation=1", stderr: "" },
+      createExecResult("mRotation=0", ""),
+      createExecResult("mRotation=0", ""),
+      createExecResult("mRotation=1", ""),
     ]);
-    const awaitIdle = createAwaitIdle(adb, timer);
+    const awaitIdle = createFixedPollAwaitIdle(adb, timer);
 
     await awaitIdle.waitForRotation(1, 100);
 
@@ -576,11 +618,8 @@ describe("AwaitIdle rotation polling", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
-      stdout: "mRotation=0",
-      stderr: "",
-    });
-    const awaitIdle = createAwaitIdle(adb, timer);
+    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, createExecResult("mRotation=0", ""));
+    const awaitIdle = createFixedPollAwaitIdle(adb, timer);
 
     await expect(awaitIdle.waitForRotation(1, 34)).rejects.toThrow(
       "Timeout waiting for rotation to 1 after 34ms",

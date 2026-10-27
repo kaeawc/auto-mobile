@@ -98,6 +98,15 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
   return { requestId, result: message };
 }
 
+function decodeKeychainDeleteResult(message: WebSocketMessage) {
+  return {
+    success: message.success === true,
+    totalTimeMs: message.totalTimeMs ?? 0,
+    outcome: typeof message.outcome === "string" ? message.outcome : "sdk_unavailable",
+    deletedScope: message.deletedScope ?? null,
+  };
+}
+
 function decodeRunnerBusy(message: WebSocketMessage, requestId: string): DecodedCtrlProxyMessage {
   const blockingType =
     typeof message.blockingCommandType === "string" && message.blockingCommandType.length > 0
@@ -258,6 +267,24 @@ function decodeHingeAngleResult(message: WebSocketMessage): unknown {
   return {
     success: message.success ?? false,
     angle: message.angle,
+    error: message.error,
+    totalTimeMs: message.totalTimeMs ?? 0,
+  };
+}
+
+function decodeLocationResult(message: WebSocketMessage): unknown {
+  return {
+    success: message.success ?? false,
+    error: message.error,
+    totalTimeMs: message.totalTimeMs ?? 0,
+  };
+}
+
+function decodeAppearanceResult(message: WebSocketMessage): unknown {
+  const text = (message as { text?: string }).text;
+  return {
+    success: message.success ?? false,
+    appearance: text === "light" || text === "dark" || text === "unspecified" ? text : undefined,
     error: message.error,
     totalTimeMs: message.totalTimeMs ?? 0,
   };
@@ -521,8 +548,20 @@ const messageDecoders = new Map<
   ["keyboard_result", decodeKeyboardResult],
   ["rotate_result", decodeRotateResult],
   ["hinge_angle_result", decodeHingeAngleResult],
+  ["location_result", decodeLocationResult],
+  ["appearance_result", decodeAppearanceResult],
   ["ime_action_result", decodeImeActionResult],
   ["action_result", decodeImeActionResult],
+  [
+    "accessibility_audit_result",
+    (message) => ({
+      success: message.success ?? false,
+      issues: message.issues ?? [],
+      unsupportedChecks: message.unsupportedChecks ?? [],
+      error: message.error,
+      totalTimeMs: message.totalTimeMs ?? 0,
+    }),
+  ],
   [
     "magic_tap_result",
     (message) => ({
@@ -561,6 +600,7 @@ const messageDecoders = new Map<
   ["set_preference_result", decodeSetPreferenceResult],
   ["remove_preference_result", decodeSetPreferenceResult],
   ["clear_preferences_result", decodeSetPreferenceResult],
+  ["delete_keychain_item_result", decodeKeychainDeleteResult],
   ["set_network_mock_rules_result", decodeSetNetworkMockRulesResult],
   ["set_network_fault_rules_result", decodeSetNetworkFaultRulesResult],
   ["set_network_error_simulation_result", decodeSetNetworkFaultRulesResult],

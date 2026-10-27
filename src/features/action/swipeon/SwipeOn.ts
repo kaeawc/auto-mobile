@@ -1,3 +1,4 @@
+import { androidCtrlProxyClientForPlatform } from "../../observe/android/androidCtrlProxyClientFor";
 import { SwipeOnAutoTargeting } from "./SwipeOnAutoTargeting";
 import { SwipeOnAndroidDisplay, containerFailureOf } from "./SwipeOnAndroidDisplay";
 import { freshSwipeHierarchy, withSwipeObservationReadScope } from "./freshSwipeHierarchy";
@@ -46,11 +47,10 @@ import {
   PerformanceTracker,
   NoOpPerformanceTracker,
 } from "../../../utils/PerformanceTracker";
-import { AndroidCtrlProxyClient } from "../../observe/android";
 import { buildElementSearchDebugContext } from "../../utility/ElementSearchDebugContext";
 import { resolveSwipeDirection } from "./swipeOnUtils";
-import { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../../accessibility/AccessibilityDetector";
+import { AccessibilityDetector } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../../ctrlProxy/accessibility/AccessibilityDetector";
 import {
   DEFAULT_VISION_CONFIG,
   getVisionEnrichedError,
@@ -83,7 +83,12 @@ import { ScrollUntilVisible } from "./ScrollUntilVisible";
 import { isTruthyFlag } from "../../utility/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import { edgeSwipeCoordinates, validateResolvedEdgeSwipe } from "./edgeSwipe";
-import { effectiveSwipeInsets, iosSwipeStartWarning, swipeScreenSize } from "./iosChromeInsets";
+import {
+  effectiveSwipeInsets,
+  iosSwipeStartWarning,
+  swipeScreenSize,
+  screenSwipeBounds,
+} from "./iosChromeInsets";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
 import { explicitDuration, withSwipeOnVelocity } from "./swipeDurationReport";
 import { type RenderedObservationReader } from "../TargetDisplayAction";
@@ -227,15 +232,15 @@ export class SwipeOn extends BaseVisualChange {
           observeResult,
         ),
     }));
-    this.talkBackExecutor = new TalkBackSwipeExecutor(
+    this.talkBackExecutor = new TalkBackSwipeExecutor({
       device,
-      this.executeGesture,
-      this.accessibilityService,
-      this.accessibilityDetector,
-      this.adb,
-      this.timer,
+      executeGesture: this.executeGesture,
+      accessibilityService: this.accessibilityService,
+      accessibilityDetector: this.accessibilityDetector,
+      adb: this.adb,
+      timer: this.timer,
       featureFlags,
-    );
+    });
     const iosVoiceOverDetector = dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
     this.voiceOverExecutor =
       dependencies.voiceOverExecutor ??
@@ -278,7 +283,9 @@ export class SwipeOn extends BaseVisualChange {
     const parser = dependencies.parser ?? new DefaultElementParser();
     this.scrollables = dependencies.scrollables ?? new DefaultScrollableElementsQuery();
     this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
-    this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
+    this.accessibilityService =
+      dependencies.accessibilityService ??
+      androidCtrlProxyClientForPlatform(device, this.adbFactory);
     this.accessibilityDetector = dependencies.accessibilityDetector || defaultAccessibilityDetector;
     return parser;
   }
@@ -436,11 +443,12 @@ export class SwipeOn extends BaseVisualChange {
               signal,
               context.observeResult ? { observation: context.observeResult } : undefined,
             )
-          : await this.executeScreenSwipe(options, progress, perf, signal);
+          : await this.executeScreenSwipe(options, progress, perf, signal, {
+              within: decision.scrollFrame,
+            });
     return this.autoTargeting.withAutoTargetDecision({ result, decision });
   }
 
-  // oxlint-disable-next-line max-lines-per-function -- Keep the existing dispatch branches together while threading cancellation.
   private async executeLegacy(
     options: SwipeOnOptions,
     progress?: ProgressCallback,
@@ -504,8 +512,7 @@ export class SwipeOn extends BaseVisualChange {
           searchCriteria,
           this.visionConfig,
           errorMsg,
-          undefined,
-          this.visionAnalyzer,
+          { visionAnalyzer: this.visionAnalyzer },
         );
       }
 
@@ -776,6 +783,7 @@ export class SwipeOn extends BaseVisualChange {
     progress?: ProgressCallback,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
+    { within }: { within?: Element["bounds"] } = {},
   ): Promise<SwipeOnResult> {
     logger.info(`[SwipeOn] Starting screen swipe: direction=${options.direction}`);
     let iosDispatchTimestamp: number | undefined;
@@ -788,12 +796,14 @@ export class SwipeOn extends BaseVisualChange {
           observation: observeResult,
           platform: this.device.platform,
           includeSystemInsets: options.includeSystemInsets,
+          includeFloatingBars: !options.fromEdge,
         };
         const screenSize = swipeScreenSize(insetOptions);
         if (!screenSize) {
           throw new ActionableError("Could not determine screen size");
         }
-        const bounds = getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions));
+        const screenBounds = getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions));
+        const bounds = screenSwipeBounds(screenBounds, within, options.fromEdge);
 
         const { startX, startY, endX, endY } = options.fromEdge
           ? screenEdgeSwipe(options, options.fromEdge, bounds)
@@ -816,30 +826,30 @@ export class SwipeOn extends BaseVisualChange {
         throwIfAborted(signal);
         const swipeResult = await perf.track("executeScreenSwipe", () =>
           this.device.platform === "ios"
-            ? this.voiceOverExecutor.executeSwipeGesture(
-                Math.floor(startX),
-                Math.floor(startY),
-                Math.floor(endX),
-                Math.floor(endY),
-                options.direction,
-                null, // No container for screen swipe
+            ? this.voiceOverExecutor.executeSwipeGesture({
+                x1: Math.floor(startX),
+                y1: Math.floor(startY),
+                x2: Math.floor(endX),
+                y2: Math.floor(endY),
+                direction: options.direction,
+                containerElement: null,
                 gestureOptions,
                 perf,
                 boomerang,
                 signal,
-              )
-            : this.talkBackExecutor.executeSwipeGesture(
-                Math.floor(startX),
-                Math.floor(startY),
-                Math.floor(endX),
-                Math.floor(endY),
-                options.direction,
-                null, // No container for screen swipe
+              })
+            : this.talkBackExecutor.executeSwipeGesture({
+                x1: Math.floor(startX),
+                y1: Math.floor(startY),
+                x2: Math.floor(endX),
+                y2: Math.floor(endY),
+                direction: options.direction,
+                containerElement: null,
                 gestureOptions,
                 perf,
                 boomerang,
                 signal,
-              ),
+              }),
         );
         if (
           this.stopAfterIosGestureFailure &&
@@ -949,30 +959,30 @@ export class SwipeOn extends BaseVisualChange {
         throwIfAborted(signal);
         const swipeResult = await perf.track("executeElementSwipe", () =>
           this.device.platform === "ios"
-            ? this.voiceOverExecutor.executeSwipeGesture(
-                Math.floor(startX),
-                Math.floor(startY),
-                Math.floor(endX),
-                Math.floor(endY),
-                options.direction,
-                element ?? null, // Use the container element
+            ? this.voiceOverExecutor.executeSwipeGesture({
+                x1: Math.floor(startX),
+                y1: Math.floor(startY),
+                x2: Math.floor(endX),
+                y2: Math.floor(endY),
+                direction: options.direction,
+                containerElement: element ?? null,
                 gestureOptions,
                 perf,
                 boomerang,
                 signal,
-              )
-            : this.talkBackExecutor.executeSwipeGesture(
-                Math.floor(startX),
-                Math.floor(startY),
-                Math.floor(endX),
-                Math.floor(endY),
-                options.direction,
-                element, // Use the container element
+              })
+            : this.talkBackExecutor.executeSwipeGesture({
+                x1: Math.floor(startX),
+                y1: Math.floor(startY),
+                x2: Math.floor(endX),
+                y2: Math.floor(endY),
+                direction: options.direction,
+                containerElement: element,
                 gestureOptions,
                 perf,
                 boomerang,
                 signal,
-              ),
+              }),
         );
         throwIfAborted(signal);
         // An unconfirmed swipe may still have scrolled, so the next read must not be pre-swipe.

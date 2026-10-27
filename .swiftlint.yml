@@ -179,6 +179,11 @@ reporter: "xcode"
 # urlQueryAllowed character set permits query delimiters such as `&` and `=`,
 # allowing manual encoding to split one value into multiple fields.
 custom_rules:
+  protoviewer_string_catalog:
+    included: 'ios/prototype-agent/ProtoViewer/.*\.swift$'
+    regex: '(Text\s*\(\s*verbatim\s*:|NSLocalizedString\s*\()'
+    message: "Use the ProtoViewer String Catalog with translator comments."
+    severity: error
   no_manual_url_query_value_encoding:
     regex: 'addingPercentEncoding\s*\(\s*withAllowedCharacters\s*:\s*(?:\.|CharacterSet\s*\.)urlQueryAllowed\s*\)'
     message: "Use URLComponents and URLQueryItem for query values instead of .urlQueryAllowed."

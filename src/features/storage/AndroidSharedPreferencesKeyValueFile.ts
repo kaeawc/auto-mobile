@@ -87,13 +87,11 @@ function serializeDirectMutationPerFile<T>(
 export async function setAndroidKeyValueDirect(
   adb: AdbExecutor,
   deviceId: string,
-  appId: string,
-  fileName: string,
-  key: string,
-  value: string,
-  type: KeyValueType,
-  userId?: number,
+  target: { appId: string; fileName: string; userId?: number },
+  entry: { key: string; value: string; type: KeyValueType },
 ): Promise<void> {
+  const { appId, fileName, userId } = target;
+  const { key, value, type } = entry;
   const safeFileName = androidKeyValueFileName(fileName);
   const targetUser = userId ?? (await resolveDefaultAndroidPreferencesUser(adb, appId));
   return serializeDirectMutationPerFile(deviceId, appId, safeFileName, targetUser, async () => {

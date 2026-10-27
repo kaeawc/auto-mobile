@@ -10,10 +10,6 @@ import {
   swipeOnSchema,
   tapAtHandler,
   tapAtSchema,
-  type PinchOnLike,
-  type SelectAllTextLike,
-  type SwipeOnLike,
-  type TapAtElementLike,
 } from "../../src/server/interactionTools";
 
 const interactionDeps: InteractionToolDependencies = {};
@@ -40,34 +36,39 @@ describe("coordinate and focus tool layer argument (#9305)", () => {
 
   test("handlers pass layer through to the action", async () => {
     const seen: unknown[] = [];
-    interactionDeps.tapAtElementFactory = () =>
-      ({
-        execute: async (options: { layer?: string }) => {
-          seen.push(["tapAt", options.layer]);
-          return { success: true, x: 1, y: 2, action: "tap" };
-        },
-      }) as unknown as TapAtElementLike;
-    interactionDeps.swipeOnFactory = () =>
-      ({
-        execute: async (options: { layer?: string }) => {
-          seen.push(["swipeOn", options.layer]);
-          return { success: true, targetType: "screen", x1: 0, y1: 0, x2: 0, y2: 0, duration: 0 };
-        },
-      }) as unknown as SwipeOnLike;
-    interactionDeps.pinchOnFactory = () =>
-      ({
-        execute: async (options: { layer?: string }) => {
-          seen.push(["pinchOn", options.layer]);
-          return { success: true };
-        },
-      }) as unknown as PinchOnLike;
-    interactionDeps.selectAllTextFactory = () =>
-      ({
-        execute: async (_progress: unknown, _signal: unknown, options: { layer?: string }) => {
-          seen.push(["selectAllText", options.layer]);
-          return { success: true };
-        },
-      }) as unknown as SelectAllTextLike;
+    interactionDeps.tapAtElementFactory = () => ({
+      execute: async (options: { layer?: string }) => {
+        seen.push(["tapAt", options.layer]);
+        return { success: true, x: 1, y: 2, action: "tap" };
+      },
+    });
+    interactionDeps.swipeOnFactory = () => ({
+      execute: async (options: { layer?: string }) => {
+        seen.push(["swipeOn", options.layer]);
+        return { success: true, targetType: "screen", x1: 0, y1: 0, x2: 0, y2: 0, duration: 0 };
+      },
+    });
+    interactionDeps.pinchOnFactory = () => ({
+      execute: async (options: { layer?: string }) => {
+        seen.push(["pinchOn", options.layer]);
+        return {
+          success: true,
+          direction: "in" as const,
+          distanceStart: 100,
+          distanceEnd: 50,
+          duration: 0,
+          centerX: 0,
+          centerY: 0,
+          targetType: "screen" as const,
+        };
+      },
+    });
+    interactionDeps.selectAllTextFactory = () => ({
+      execute: async (_progress: unknown, _signal: unknown, options: { layer?: string } = {}) => {
+        seen.push(["selectAllText", options.layer]);
+        return { success: true };
+      },
+    });
 
     await tapAtHandler(device, { x: 1, y: 2, layer: "app" }, undefined, undefined, interactionDeps);
     await swipeOnHandler(

@@ -74,37 +74,7 @@ fun ContrastDemoScreen(onNavigateBack: () -> Unit) {
           text = "Intentional contrast failures for auditing.",
           style = MaterialTheme.typography.bodyLarge,
         )
-        // Raw Material card: crayon overlays would change what a contrast audit measures.
-        Card(
-          modifier = Modifier.fillMaxWidth().semantics { testTag = "contrast_low_card" },
-          colors = CardDefaults.cardColors(containerColor = LowContrastSurface),
-        ) {
-          Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Text(
-              text = "Low contrast body text",
-              color = LowContrastText,
-              modifier = Modifier.semantics { testTag = "contrast_low_text" },
-            )
-            Text(
-              text = "Secondary text with insufficient contrast",
-              color = LowContrastText,
-              style = MaterialTheme.typography.bodySmall,
-              modifier = Modifier.semantics { testTag = "contrast_low_text_secondary" },
-            )
-          }
-        }
-        // Raw Material button: crayon overlays would change what a contrast audit measures.
-        Button(
-          onClick = {},
-          modifier = Modifier.semantics { testTag = "contrast_low_button" },
-          colors =
-            ButtonDefaults.buttonColors(
-              containerColor = LowContrastSurface,
-              contentColor = LowContrastText,
-            ),
-        ) {
-          Text("Low Contrast Action")
-        }
+        LowContrastExamples()
       }
     }
   }
@@ -143,46 +113,7 @@ fun TapTargetsDemoScreen(onNavigateBack: () -> Unit) {
           text = "These targets are intentionally small or tightly spaced.",
           style = MaterialTheme.typography.bodyLarge,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-          SmallTapTarget(
-            icon = Icons.Filled.Edit,
-            label = "Edit",
-            tag = "tap_target_small_edit",
-          )
-          SmallTapTarget(
-            icon = Icons.Filled.Close,
-            label = "Close",
-            tag = "tap_target_small_close",
-          )
-          SmallTapTarget(
-            icon = Icons.Filled.Favorite,
-            label = "Favorite",
-            tag = "tap_target_small_favorite",
-          )
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Text(
-            text = "Tiny Link",
-            color = MaterialTheme.colorScheme.primary,
-            modifier =
-              Modifier.padding(2.dp).clickable {}.semantics { testTag = "tap_target_tiny_link" },
-          )
-          Spacer(modifier = Modifier.width(6.dp))
-          Text(
-            text = "Another Link",
-            color = MaterialTheme.colorScheme.primary,
-            modifier =
-              Modifier.padding(2.dp).clickable {}.semantics { testTag = "tap_target_tiny_link_2" },
-          )
-        }
-        AutoMobileContentCard(
-          modifier = Modifier.fillMaxWidth().semantics { testTag = "tap_targets_note" },
-          elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        ) {
-          Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Text(text = "Spacing below 8dp and sizes under 44dp.")
-          }
-        }
+        SmallTapTargetExamples()
       }
     }
   }
@@ -210,5 +141,83 @@ private fun SmallTapTarget(
       )
     }
     Text(text = label, style = MaterialTheme.typography.bodySmall)
+  }
+}
+
+@Composable
+private fun LowContrastExamples() {
+  // Raw Material card: crayon overlays would change what a contrast audit measures.
+  Card(
+    modifier = Modifier.fillMaxWidth().semantics { testTag = "contrast_low_card" },
+    colors = CardDefaults.cardColors(containerColor = LowContrastSurface),
+  ) {
+    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+      Text(
+        text = "Low contrast body text",
+        color = LowContrastText,
+        modifier = Modifier.semantics { testTag = "contrast_low_text" },
+      )
+      Text(
+        text = "Secondary text with insufficient contrast",
+        color = LowContrastText,
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.semantics { testTag = "contrast_low_text_secondary" },
+      )
+    }
+  }
+  // Raw Material button: crayon overlays would change what a contrast audit measures.
+  Button(
+    onClick = {},
+    modifier = Modifier.semantics { testTag = "contrast_low_button" },
+    colors =
+      ButtonDefaults.buttonColors(
+        containerColor = LowContrastSurface,
+        contentColor = LowContrastText,
+      ),
+  ) {
+    Text("Low Contrast Action")
+  }
+}
+
+@Composable
+private fun SmallTapTargetExamples() {
+  Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    SmallTapTarget(
+      icon = Icons.Filled.Edit,
+      label = "Edit",
+      tag = "tap_target_small_edit",
+    )
+    SmallTapTarget(
+      icon = Icons.Filled.Close,
+      label = "Close",
+      tag = "tap_target_small_close",
+    )
+    SmallTapTarget(
+      icon = Icons.Filled.Favorite,
+      label = "Favorite",
+      tag = "tap_target_small_favorite",
+    )
+  }
+  Row(verticalAlignment = Alignment.CenterVertically) {
+    Text(
+      text = "Tiny Link",
+      color = MaterialTheme.colorScheme.primary,
+      modifier = Modifier.padding(2.dp).clickable {}.semantics { testTag = "tap_target_tiny_link" },
+    )
+    Spacer(modifier = Modifier.width(6.dp))
+    Text(
+      text = "Another Link",
+      color = MaterialTheme.colorScheme.primary,
+      modifier =
+        Modifier.padding(2.dp).clickable {}.semantics { testTag = "tap_target_tiny_link_2" },
+    )
+  }
+  AutoMobileContentCard(
+    modifier = Modifier.fillMaxWidth().semantics { testTag = "tap_targets_note" },
+    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+  ) {
+    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+      Text(text = "Spacing below 8dp and sizes under 44dp.")
+    }
   }
 }

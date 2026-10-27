@@ -1,8 +1,20 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+
+let logSpy: ReturnType<typeof spyOn<typeof console, "log">>;
+let errorSpy: ReturnType<typeof spyOn<typeof console, "error">>;
+let exitSpy: ReturnType<typeof spyOn<typeof process, "exit">>;
+beforeEach(() => {
+  logSpy = spyOn(console, "log");
+  errorSpy = spyOn(console, "error");
+  exitSpy = spyOn(process, "exit");
+});
+afterEach(() => {
+  mock.restore();
+});
 
 const unexpected = (): never => {
   throw new Error("Unexpected daemon operation");
@@ -47,13 +59,13 @@ async function runAgainstRefusingDaemon(command: string, args: string[]) {
       return new Client();
     }
   }
-  const log = spyOn(console, "log").mockImplementation((text) => {
+  const log = logSpy.mockImplementation((text) => {
     stdout.push(String(text));
   });
-  const error = spyOn(console, "error").mockImplementation((text) => {
+  const error = errorSpy.mockImplementation((text) => {
     stderr.push(String(text));
   });
-  const exit = spyOn(process, "exit").mockImplementation((code) => {
+  const exit = exitSpy.mockImplementation((code) => {
     exits.push(code);
     throw exited;
   });

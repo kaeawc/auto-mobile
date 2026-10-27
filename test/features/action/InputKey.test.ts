@@ -50,7 +50,7 @@ describe("InputKey", () => {
         },
       };
       const key = new InputKey(androidDevice, createAdbFactory(adb), validator, timer);
-      const pending = key.press("a", 500, "frame", ["ctrl"], {
+      const pending = key.press("enter", 500, "frame", ["ctrl"], {
         signal: controller.signal,
         onDispatch: () => {
           expect(adb.getExecutedArgv()).toEqual([]);
@@ -213,7 +213,11 @@ describe("InputKey", () => {
   });
 
   test("preserves an iOS arrow failure and an unverified result from the runner", async () => {
-    let response = {
+    let response: Awaited<
+      ReturnType<
+        import("../../../src/features/action/InputKey").InputKeyIosClient["requestPressKey"]
+      >
+    > = {
       success: false,
       error:
         "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead",
@@ -277,11 +281,15 @@ describe("InputKey", () => {
   });
 
   test("carries an iOS delete warning and preserves a reliable-field failure", async () => {
-    const requestPressKey = mock(async () => ({
-      success: true,
-      warning: "Key 'backspace' value did not change; delivery could not be confirmed",
-      error: undefined as string | undefined,
-    }));
+    const requestPressKey = mock(
+      async (): ReturnType<
+        import("../../../src/features/action/InputKey").InputKeyIosClient["requestPressKey"]
+      > => ({
+        success: true,
+        warning: "Key 'backspace' value did not change; delivery could not be confirmed",
+        error: undefined as string | undefined,
+      }),
+    );
     const inputKey = new InputKey(
       iosDevice,
       createAdbFactory(new FakeAdbExecutor()),

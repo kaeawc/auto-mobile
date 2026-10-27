@@ -2,7 +2,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import type { SessionReleaseSnapshot } from "../sessionManager";
+import type { SessionReleaseSnapshot } from "../sessionManager/releaseTypes";
 import {
   DAEMON_STALLED_CODE,
   PROXY_STALLED_CODE,
@@ -10,7 +10,7 @@ import {
   type LivenessRecovery,
   type TickLatenessClock,
 } from "../proxyLivenessRecovery";
-import { LifecycleConnectionInFlightError } from "./daemonErrors";
+import { LifecycleConnectionInFlightError } from "./LifecycleConnectionInFlightError";
 import { heartbeatRequestTimeoutMs } from "./heartbeatCadence";
 import type { LatestHeartbeatAsk, ProxySessionState } from "./ProxySessionState";
 

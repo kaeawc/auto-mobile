@@ -158,7 +158,7 @@ public final class NetworkCaptureRecorder: Sendable {
             if let responseBodySize {
                 request.responseBodySize = responseBodySize
             }
-        }) { request in
+        }, { request in
             NetworkRequestRecord(
                 url: request.url,
                 method: request.method,
@@ -175,7 +175,7 @@ public final class NetworkCaptureRecorder: Sendable {
                 requestBody: request.requestBody,
                 responseBody: request.responseBody
             )
-        }
+        })
     }
 
     public func recordFailure(requestId: String, error: Error) {
@@ -294,7 +294,8 @@ public final class NetworkCaptureRecorder: Sendable {
 
     private func truncate(_ value: String?) -> String? {
         guard isBodyCaptureEnabled(), let value, maxBodyBytes > 0 else { return nil }
-        return String(decoding: value.utf8.prefix(maxBodyBytes), as: UTF8.self)
+        // A byte limit can split a scalar; preserve replacement decoding for that suffix.
+        return String(decoding: value.utf8.prefix(maxBodyBytes), as: Unicode.UTF8.self)
     }
 
     private func append(_ current: String?, _ next: String?) -> String? {

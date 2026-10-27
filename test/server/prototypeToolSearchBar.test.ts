@@ -1,6 +1,7 @@
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { PROTOTYPE_SEARCH_BAR_CAPABILITY } from "../../src/features/observe/android/ctrlProxyProtocol";
-import type { PrototypeSpec } from "../../src/features/prototype/prototypeSpec";
+import { prototypeSpecSchema } from "../../src/features/prototype/prototypeSpec";
 import type { BootedDevice } from "../../src/models";
 import {
   prototypeOutputSchema,
@@ -120,10 +121,10 @@ describe("prototype search bar host", () => {
   async function call(device: BootedDevice, spec: unknown) {
     return callWith(device, { action: "show", spec });
   }
-  async function callWith(device: BootedDevice, input: unknown) {
+  async function callWith(device: BootedDevice, input: Record<string, unknown>) {
     const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
     const response = await handler(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
   const agentShows = () => agent.requests.filter((request) => request.type === "show_prototype");
 
@@ -151,7 +152,7 @@ describe("prototype search bar host", () => {
           success: false,
           error: new ActionableError(
             prototypeSearchBarUnsupportedMessage(
-              prototypeSearchBarFields(spec as PrototypeSpec),
+              prototypeSearchBarFields(prototypeSpecSchema.parse(spec)),
               platform,
             ),
           ).message,

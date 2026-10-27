@@ -19,6 +19,9 @@ test("batch renders product-validated host and Android/iOS request contracts", (
   for (const client of batch.clients) {
     const request = renderClientRequest(client, `batch-${client.name}-1`);
     expect(parseSessionConfig(JSON.parse(JSON.stringify(request)))).toEqual(request);
+    if (client.hardware !== "phone" && client.hardware !== "tablet" && client.hardware !== "duo") {
+      throw new Error("fixture must use a hardware archetype");
+    }
     expect(request.device.hardware).toEqual({ kind: "archetype", archetype: client.hardware });
     expect(request.device.os).toEqual({ kind: "omitted" });
   }
@@ -134,6 +137,45 @@ test("pooling requires explicit reuse permission", () => {
   }
 });
 
+test("Android reuse flag requires explicit reuse permission and renders to host config", () => {
+  const input = { ...brokerBatchInput(), reuseAndroidCleanDevices: true };
+  expect(() => parseBrokerBatch(input)).toThrow("reuseAndroidCleanDevices false");
+  const host = renderHostConfig(parseBrokerBatch(input, { allowReuse: true }));
+  expect(host.reuseAndroidCleanDevices).toBe(true);
+});
+
+test.each(["erase", "keep-booted"])("explicit iOS %s cannot bypass no-reuse guards", (mode) => {
+  const input = { ...brokerBatchInput(), reuseCleanDevices: false, reuse: { ios: { mode } } };
+  expect(() => parseBrokerBatch(input)).toThrow("--allow-reuse");
+  const parsed = parseBrokerBatch(input, { allowReuse: true });
+  expect(renderHostConfig(parsed).reuse?.ios.mode).toBe(mode);
+});
+
+test("the iOS keep-booted reuse cap is accepted by the harness and defaults to 10 (#15017)", () => {
+  const withCap = {
+    ...brokerBatchInput(),
+    reuseCleanDevices: false,
+    reuse: { ios: { mode: "keep-booted", maxUses: 4 } },
+  };
+  expect(renderHostConfig(parseBrokerBatch(withCap, { allowReuse: true })).reuse?.ios).toEqual({
+    mode: "keep-booted",
+    maxUses: 4,
+    fallback: "erase",
+  });
+  const defaulted = { ...withCap, reuse: { ios: { mode: "keep-booted" } } };
+  expect(renderHostConfig(parseBrokerBatch(defaulted, { allowReuse: true })).reuse?.ios).toEqual({
+    mode: "keep-booted",
+    maxUses: 10,
+    fallback: "erase",
+  });
+  expect(() =>
+    parseBrokerBatch(
+      { ...withCap, reuse: { ios: { mode: "keep-booted", maxUses: 0 } } },
+      { allowReuse: true },
+    ),
+  ).toThrow("Invalid session broker host configuration");
+});
+
 test("planning retains excess clients and marks capacity refusals by order", () => {
   const input = brokerBatchInput();
   expect(planExpectations(parseBrokerBatch(input))).toEqual([
@@ -167,8 +209,8 @@ test("injected identities number attempts independently per client", () => {
 test("catalog classification passes through to the rendered host config", () => {
   const input = brokerBatchInput();
   const host = renderHostConfig(parseBrokerBatch(input));
-  expect(host.androidProfileArchetypes).toEqual(input.androidProfileArchetypes);
-  expect(host.iosClassifications).toEqual(input.iosClassifications);
+  expect(host.androidProfileArchetypes).toEqual({ medium_phone: "phone", medium_tablet: "tablet" });
+  expect(input.iosClassifications).toEqual(host.iosClassifications!);
 });
 
 test("omitted classification keys fall back to product defaults", () => {
@@ -188,5 +230,44 @@ test.each([
 ])("invalid classification input is refused by the product parser: %j", (fields) => {
   expect(() => parseBrokerBatch({ ...brokerBatchInput(), ...fields })).toThrow(
     "Invalid session broker host configuration",
+  );
+});
+
+test("every host-config key the product accepts survives the batch round trip (#14789)", () => {
+  const input = {
+    ...brokerBatchInput(),
+    limits: { totalDeviceCap: 2, sessionCap: 2, idlePoolCap: 0, maxConcurrentResetBoots: 1 },
+    androidResetMode: "keep-booted",
+    reuseAndroidCleanDevices: true,
+    androidKeepBootedMaxUses: 5,
+    androidKeepBootedFallback: "snapshot",
+    androidResetTimeoutMs: 60_000,
+    reuse: { ios: { mode: "off" } },
+  };
+  const batch = parseBrokerBatch(input, { allowReuse: true });
+  expect(batch.limits.maxConcurrentResetBoots).toBe(1);
+  const host = renderHostConfig(batch);
+  expect(host).toMatchObject({
+    limits: { maxConcurrentResetBoots: 1 },
+    androidResetMode: "keep-booted",
+    androidKeepBootedMaxUses: 5,
+    androidKeepBootedFallback: "snapshot",
+    androidResetTimeoutMs: 60_000,
+  });
+  // The product parser accepts the rendered host config, and re-wrapping it as a batch is lossless.
+  expect(
+    renderHostConfig(
+      parseBrokerBatch({ ...host, schemaVersion: 1, clients: [] }, { allowReuse: true }),
+    ),
+  ).toEqual(host);
+});
+
+test("the product parser still owns invalid host-config values and required caps", () => {
+  const input = brokerBatchInput();
+  expect(() =>
+    parseBrokerBatch({ ...input, limits: { ...input.limits, maxConcurrentResetBoots: 0 } }),
+  ).toThrow("Invalid session broker host configuration");
+  expect(() => parseBrokerBatch({ ...input, limits: { totalDeviceCap: 2 } })).toThrow(
+    "are required",
   );
 });

@@ -1,0 +1,56 @@
+{
+  "id": "platform-reads",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["test"]
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "text",
+        "text": "Count {platform:/test/count}"
+      },
+      {
+        "type": "text",
+        "text": "Ready",
+        "visibleWhen": {
+          "platform": "/test/ready",
+          "equals": true
+        },
+        "styleWhen": [
+          {
+            "when": {
+              "not": {
+                "platform": "/test/count",
+                "gt": 2
+              }
+            },
+            "style": {
+              "alpha": 0.5
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "Go",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "test.echo",
+            "args": {
+              "message": {
+                "platform": "/test/count"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

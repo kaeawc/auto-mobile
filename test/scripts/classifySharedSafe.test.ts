@@ -27,7 +27,9 @@ const TIER_B: Record<string, string> = {
   envWrite: `process.env.AUTOMOBILE_DATA_DIR = dir;`,
   envBracketWrite: `process.env["HOME"] = dir;`,
   envDelete: `delete process.env.HOME;`,
-  singleton: `const manager = DeviceSessionManager.getInstance();`,
+  singleton: `const manager = DeviceReadiness.getInstance();`,
+  getInstanceAssignment: `IOSCtrlProxyClient.getInstance = () => client;`,
+  installForTesting: `installDeviceDataStreamSocketServerForTesting(streamServer);`,
   resetInstance: `afterEach(() => NavigationGraphManager.resetInstance());`,
   db: `const db = await createTestDatabase();`,
   dbHarness: `import { useNavigationTestHarness } from "../helpers/navigationTestHarness";`,
@@ -206,5 +208,131 @@ describe("runCli", () => {
   test("--check fails when the list is missing and rejects unknown arguments", () => {
     expect(runCli(["--check"], new FakeIo(unitFiles, undefined))).toBe(1);
     expect(runCli(["--fix"], new FakeIo(unitFiles, undefined))).toBe(2);
+  });
+});
+
+const PROVEN_SPIES: Record<string, string> = {
+  parenthesized: `test("x", () => { (spyOn)(o, "f").mockRestore(); });`,
+  bracketCall: `test("x", () => { mock["spyOn"](o, "f").mockRestore(); });`,
+  immediate: `test("x", () => { spyOn(o, "f").mockRestore(); });`,
+  stored: `let spy; beforeEach(() => { spy = spyOn(o, "f"); }); afterEach(() => { spy.mockRestore(); });`,
+  afterAll: `let spy; beforeEach(() => { spy = spyOn(o, "f"); }); afterAll(() => spy.mockRestore());`,
+  // A beforeEach spy restored only in afterAll needs an invariant target (#14515):
+  // Bun reuses the spy on an already-spied method, so one restore suffices.
+  afterAllImported: `import { logger } from "../src/logger"; let spy; beforeEach(() => { spy = spyOn(logger, "warn"); }); afterAll(() => spy.mockRestore());`,
+  afterAllTopLevelConst: `const fake = new Fake(); let spy; beforeEach(() => { spy = spyOn(fake.inner, "f"); }); afterAll(() => spy.mockRestore());`,
+  afterEachPerTestTarget: `const targets = [a, b]; let i = 0; let spy; beforeEach(() => { spy = spyOn(targets[i++], "f"); }); afterEach(() => spy.mockRestore());`,
+  testAfterAllImported: `import { logger } from "../src/logger"; let spy; test("x", () => { spy = spyOn(logger, "warn"); }); afterAll(() => spy.mockRestore());`,
+  afterAllRestoreAllPerTestTarget: `import { mock } from "bun:test"; const targets = [a, b]; let i = 0; beforeEach(() => { spyOn(targets[i++], "f"); }); afterAll(() => mock.restore());`,
+  chained: `let spy; beforeEach(() => { spy = spyOn(o, "f").mockImplementation(() => {}); }); afterEach(() => spy.mockRestore());`,
+  restoreAll: `import { mock } from "bun:test"; beforeEach(() => { spyOn(o, "f"); }); afterEach(() => { mock.restore(); });`,
+  globalAfterAll: `test("x", () => { spyOn(o, "f"); }); afterAll(() => restoreAllMocks());`,
+  jestAfterEach: `test("x", () => { spyOn(o, "f"); }); afterEach(() => jest.restoreAllMocks());`,
+  finally: `test("x", () => { const spy = spyOn(o, "f"); try { work(); } finally { spy.mockRestore(); } });`,
+  using: `test("x", () => { using spy = spyOn(o, "f").mockImplementation(() => {}); work(); });`,
+  usingBeforeEach: `beforeEach(() => { using spy = spyOn(o, "f"); });`,
+  sameTest: `test("x", () => { const spy = spyOn(o, "f"); work(); spy.mockRestore(); });`,
+  aliased: `import { spyOn as watch, test as spec, afterEach as clean, mock as mocks } from "bun:test"; spec.each([1])("x", () => { watch(o, "f"); }); clean(() => mocks.restore());`,
+  mockSpy: `test("x", () => { mock.spyOn(o, "f").mockRestore(); });`,
+  namespace: `import * as bt from "bun:test"; bt.test("x", () => { bt.spyOn(o, "f"); }); bt.afterEach(() => bt.mock.restore());`,
+  nestedScope: `describe("outer", () => { afterEach(() => mock.restore()); describe("inner", () => { test.only("x", () => { spyOn(o, "f"); }); }); });`,
+  field: `const handles = {}; beforeEach(() => { handles.spy = spyOn(o, "f"); }); afterEach(() => handles.spy.mockRestore());`,
+  index: `const spies = []; beforeEach(() => { spies[0] = spyOn(o, "f"); }); afterEach(() => spies[0].mockRestore());`,
+  array: `test("x", () => { const spies = [spyOn(o, "f"), spyOn(o, "g")]; for (const spy of spies) { spy.mockRestore(); } });`,
+  push: `const spies = []; beforeEach(() => { spies.push(spyOn(o, "f")); }); afterEach(() => { spies.forEach(spy => spy.mockRestore()); });`,
+};
+
+const UNPROVEN_SPIES: Record<string, string> = {
+  beforeAll: `beforeAll(() => { spyOn(o, "f"); }); afterEach(() => mock.restore());`,
+  before: `before(() => { spyOn(o, "f").mockRestore(); });`,
+  parenthesizedMissing: `test("x", () => { (spyOn)(o, "f"); });`,
+  aliasParenthesizedMissing: `import { spyOn as watch } from "bun:test"; test("x", () => { (watch)(o, "f"); });`,
+  bracketMissing: `test("x", () => { mock["spyOn"](o, "f"); });`,
+  missing: `test("x", () => { spyOn(o, "f"); });`,
+  sibling: `describe("a", () => { test("x", () => { spyOn(o, "f"); }); }); describe("b", () => { afterEach(() => mock.restore()); });`,
+  child: `describe("a", () => { test("x", () => { spyOn(o, "f"); }); describe("b", () => { afterEach(() => mock.restore()); }); });`,
+  conditional: `test("x", () => { const spy = spyOn(o, "f"); if (ok) spy.mockRestore(); });`,
+  conditionalGlobal: `test("x", () => { spyOn(o, "f"); }); afterEach(() => { if (ok) mock.restore(); });`,
+  conditionalRegistration: `test("x", () => { spyOn(o, "f"); }); if (ok) afterEach(() => mock.restore());`,
+  catchRegistration: `test("x", () => { spyOn(o, "f"); }); try {} catch { afterEach(() => mock.restore()); }`,
+  optionalRegistration: `test("x", () => { spyOn(o, "f"); }); afterEach?.(() => mock.restore());`,
+  shortCircuit: `test("x", () => { const spy = spyOn(o, "f"); ok && spy.mockRestore(); });`,
+  optional: `test("x", () => { const spy = spyOn(o, "f"); spy?.mockRestore(); });`,
+  earlyReturn: `test("x", () => { const spy = spyOn(o, "f"); if (ok) return; spy.mockRestore(); });`,
+  topLevel: `const spy = spyOn(o, "f"); afterAll(() => spy.mockRestore());`,
+  describeBody: `describe("x", () => { const spy = spyOn(o, "f"); afterAll(() => spy.mockRestore()); });`,
+  helper: `function install() { return spyOn(o, "f"); } test("x", () => { const spy = install(); spy.mockRestore(); });`,
+  nestedHelper: `test("x", () => { const helper = () => spyOn(o, "f"); helper().mockRestore(); });`,
+  wrongHandle: `test("x", () => { const spy = spyOn(o, "f"); other.mockRestore(); });`,
+  shadowedHandle: `let spy; beforeEach(() => { spy = spyOn(o, "f"); }); afterEach(() => { const spy = other; spy.mockRestore(); });`,
+  shadowedMock: `test("x", () => { spyOn(o, "f"); }); afterEach(() => { const mock = fake; mock.restore(); });`,
+  namedShadowedMock: `test("x", () => { spyOn(o, "f"); }); afterEach(function mock() { mock.restore(); });`,
+  namedCleanup: `test("x", () => { spyOn(o, "f"); }); const clean = () => mock.restore(); afterEach(clean);`,
+  overwritten: `test("x", () => { let spy = spyOn(o, "f"); spy = other; spy.mockRestore(); });`,
+  overwrittenField: `test("x", () => { let h = {}; h.spy = spyOn(o, "f"); h = {}; h.spy.mockRestore(); });`,
+  hookReassignedBeforeRestore: `let spy; afterEach(() => { spy = other; spy.mockRestore(); }); beforeEach(() => { spy = spyOn(o, "f"); });`,
+  hookReassignedByTest: `let spy; test("x", () => { spy = other; }); beforeEach(() => { spy = spyOn(o, "f"); }); afterEach(() => spy.mockRestore());`,
+  distinctFields: `test("x", () => { const h = {}; h["a.b"] = spyOn(o, "f"); h.a.b.mockRestore(); });`,
+  earlyRestore: `test("x", () => { let spy; spy.mockRestore(); spy = spyOn(o, "f"); });`,
+  oneLeaks: `test("x", () => { spyOn(o, "f").mockRestore(); spyOn(o, "g"); });`,
+  concurrent: `test.concurrent("x", () => { spyOn(o, "f").mockRestore(); });`,
+  filteredArray: `test("x", () => { const spies = [spyOn(o, "f")]; for (const spy of spies) { if (ok) spy.mockRestore(); } });`,
+  aliasedBeforeAll: `import { spyOn as watch } from "bun:test"; beforeAll(() => watch(o, "f")); afterAll(() => mock.restore());`,
+  // afterAll restores only the last spy a repeated beforeEach, test.each row or
+  // test left in the handle (#14515).
+  afterAllPerTestTarget: `const targets = [a, b]; let i = 0; let spy; beforeEach(() => { spy = spyOn(targets[i++], "f"); }); afterAll(() => spy.mockRestore());`,
+  afterAllLetTarget: `let target; let spy; beforeEach(() => { target = pick(); spy = spyOn(target, "f"); }); afterAll(() => spy.mockRestore());`,
+  afterAllLocalTarget: `let spy; beforeEach(() => { const fake = new Fake(); spy = spyOn(fake, "f"); }); afterAll(() => spy.mockRestore());`,
+  afterAllCallTarget: `let spy; beforeEach(() => { spy = spyOn(make(), "f"); }); afterAll(() => spy.mockRestore());`,
+  afterAllReassignedPath: `const deps = { client }; let spy; beforeEach(() => { deps.client = new Fake(); spy = spyOn(deps.client, "f"); }); afterAll(() => spy.mockRestore());`,
+  afterAllComputedMethod: `let spy; beforeEach(() => { spy = spyOn(o, pickMethod()); }); afterAll(() => spy.mockRestore());`,
+  testsReassignAfterAll: `let spy; test("a", () => { spy = spyOn(a, "f"); }); test("b", () => { spy = spyOn(b, "f"); }); afterAll(() => spy.mockRestore());`,
+  testEachReassignAfterAll: `let spy; test.each([a, b])("x", (t) => { spy = spyOn(t, "f"); }); afterAll(() => spy.mockRestore());`,
+  afterAllResetCollection: `let spies = []; beforeEach(() => { spies = []; spies.push(spyOn(make(), "f")); }); afterAll(() => { spies.forEach(spy => spy.mockRestore()); });`,
+};
+
+describe("spy restore proof", () => {
+  test.each(Object.entries(PROVEN_SPIES))("proven: %s", (_name, source) => {
+    expect(classifySource(source)).toEqual({ tier: "C", signals: [] });
+  });
+  test.each(Object.entries(UNPROVEN_SPIES))("unproven: %s", (_name, source) => {
+    expect(classifySource(source).tier).toBe("B");
+  });
+  test.each(Object.entries(TIER_B).filter(([name]) => !["spyOn", "spyOnAlias"].includes(name)))(
+    "proven spies preserve other signal: %s",
+    (_name, source) => {
+      expect(classifySource(`${PROVEN_SPIES.finally}\n${source}`).tier).toBe("B");
+    },
+  );
+  test("reports leaking lines when an allow-listed file loses proof", () => {
+    const io = new FakeIo(
+      [
+        {
+          path: "test/a.test.ts",
+          source: `test("x", () => {\n spyOn(o, "f");\n spyOn(o, "g");\n});`,
+        },
+      ],
+      renderAllowlist(["test/a.test.ts"]),
+    );
+    expect(runCli(["--check"], io)).toBe(1);
+    expect(io.errors.join("\n")).toContain("test/a.test.ts:2:");
+    expect(io.errors.join("\n")).toContain("test/a.test.ts:3:");
+  });
+  test("--explain lists only spy-only blockers, or all sites for a requested file", () => {
+    const io = new FakeIo(
+      [
+        { path: "test/a.test.ts", source: UNPROVEN_SPIES.beforeAll },
+        { path: "test/b.test.ts", source: PROVEN_SPIES.finally },
+        { path: "test/c.test.ts", source: `${UNPROVEN_SPIES.missing}\n${TIER_B.envWrite}` },
+      ],
+      undefined,
+    );
+    expect(runCli(["--explain"], io)).toBe(0);
+    expect(io.logs).toHaveLength(1);
+    expect(io.logs[0]).toContain("test/a.test.ts:1: spy installed in beforeAll");
+    expect(runCli(["--explain", "test/c.test.ts"], io)).toBe(0);
+    expect(io.logs.at(-1)).toContain("test/c.test.ts:1:");
+    expect(runCli(["--explain", "missing"], io)).toBe(2);
+    expect(io.written).toBeUndefined();
   });
 });

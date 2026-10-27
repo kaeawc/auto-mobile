@@ -720,7 +720,7 @@ describe("runDoctor", () => {
         runSystemChecks: () => [],
         runAndroidChecks: async (options) => {
           await new Promise<void>((resolve) => {
-            options.signal?.addEventListener("abort", resolve, { once: true });
+            options.signal?.addEventListener("abort", () => resolve(), { once: true });
           });
           try {
             options.signal?.throwIfAborted();

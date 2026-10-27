@@ -4,6 +4,7 @@ import { createStructuredToolResponse } from "../utils/toolUtils";
 import { defineDeviceTool } from "./defineTool";
 import { SetAccessibilityFocus } from "../features/accessibility/SetAccessibilityFocus";
 import { accessibilityFocusResultSchema } from "./toolOutputSchemas";
+import { accessibilityActionTool } from "./accessibilityActionTool";
 
 // `defineDeviceTool` applies `.strict()` (#6712) and device targeting, and infers the
 // handler's args from this schema.
@@ -64,4 +65,6 @@ export const accessibilityFocusSchema = accessibilityFocusTool.schema;
 
 export function registerAccessibilityFocusTools() {
   accessibilityFocusTool.register();
+  // Semantic and custom accessibility actions (#14077) share the focus tool's target resolution.
+  accessibilityActionTool.register();
 }

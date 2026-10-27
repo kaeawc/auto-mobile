@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Kysely } from "kysely";
 import { McpTaskRepository } from "../../src/db/mcpTaskRepository";
-import { DefaultTaskManager, TASK_INTERRUPTED_MESSAGE } from "../../src/server/tasks/TaskManager";
+import { DefaultTaskManager, TASK_INTERRUPTED_MESSAGE } from "../../src/daemon/tasks/TaskManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import type { Database } from "../../src/db/types";
 import { logger } from "../../src/utils/logger";

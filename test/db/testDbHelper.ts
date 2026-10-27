@@ -108,7 +108,7 @@ export async function createTestBunDatabase(
   const templateBytes = await getMigratedTemplateBytes(options.throughMigration);
   // Give bun:sqlite a fresh copy in case its constructor takes ownership of the
   // supplied bytes. Every caller must get an independent in-memory database.
-  const bunDb = new BunDatabase(new Uint8Array(templateBytes));
+  const bunDb = BunDatabase.deserialize(new Uint8Array(templateBytes));
   if (options.foreignKeys) {
     bunDb.exec("PRAGMA foreign_keys = ON;");
   }

@@ -1,4 +1,16 @@
-import { SimctlIosFilesFixtureContainer, nodeAppFileFileSystem } from "./appFileService";
+import {
+  describeDefaultSharedStorageReadCoverage,
+  IOS_MEDIA_READ_UNSUPPORTED_REASON,
+  type SharedStorageReadCoverage,
+} from "../features/storage/sharedStorageReadCoverage";
+import { BoundedSharedStorageHashCache } from "./BoundedSharedStorageHashCache";
+export {
+  describeDefaultSharedStorageReadCoverage,
+  IOS_MEDIA_READ_UNSUPPORTED_REASON,
+  type SharedStorageReadCoverage,
+};
+import { SimctlIosFilesFixtureContainer } from "./SimctlIosFilesFixtureContainer";
+import { nodeAppFileFileSystem } from "./appFileSupport";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { createHash } from "node:crypto";
@@ -50,23 +62,6 @@ export interface ReadSharedStorageRequest extends ListSharedStorageRequest {
   path: string;
 }
 
-export interface SharedStorageReadCoverage {
-  readonly list: boolean;
-  readonly read: boolean;
-}
-
-export const IOS_MEDIA_READ_UNSUPPORTED_REASON =
-  "simctl addmedia imports fixtures but exposes no supported bounded enumeration or read API for imported media.";
-
-/** Coverage of registered bounded namespace readers. */
-export function describeDefaultSharedStorageReadCoverage(
-  platform: Platform,
-  domain: "user_files" | "media_library" = "user_files",
-): SharedStorageReadCoverage {
-  const available = domain === "user_files" || platform === "android";
-  return { list: available, read: available };
-}
-
 export interface SharedStorageReadService {
   describeReadCoverage?(
     platform: Platform,
@@ -108,7 +103,6 @@ export interface SharedStorageHashCache {
   retainNamespacePaths(deviceId: string, namespace: string, paths: ReadonlySet<string>): void;
 }
 
-const SHARED_STORAGE_HASH_CACHE_MAX_ENTRIES = 2_048;
 const SHARED_STORAGE_HASH_COMMAND_MAX_LENGTH = 24 * 1024;
 const SHA256_UNAVAILABLE_REASON = "Hash unavailable: file changed or disappeared during listing";
 
@@ -588,91 +582,6 @@ async function listHashes(
     // Hash lines for paths absent from stat output are ignored because only requested paths are read.
   }
   return hashes;
-}
-
-class BoundedSharedStorageHashCache implements SharedStorageHashCache {
-  private readonly entries = new Map<
-    string,
-    {
-      deviceId: string;
-      namespace: string;
-      path: string;
-      sha256: string;
-      lastUsed: number;
-    }
-  >();
-  private accessCounter = 0;
-
-  get(
-    deviceId: string,
-    namespace: string,
-    path: string,
-    byteCount: number,
-    modifiedSeconds: number,
-  ): string | undefined {
-    const entry = this.entries.get(
-      hashCacheKey(deviceId, namespace, path, byteCount, modifiedSeconds),
-    );
-    if (!entry) {
-      return undefined;
-    }
-    entry.lastUsed = ++this.accessCounter;
-    return entry.sha256;
-  }
-
-  set(
-    deviceId: string,
-    namespace: string,
-    path: string,
-    byteCount: number,
-    modifiedSeconds: number,
-    sha256: string,
-  ): void {
-    for (const [key, entry] of this.entries) {
-      if (entry.deviceId === deviceId && entry.namespace === namespace && entry.path === path) {
-        this.entries.delete(key);
-      }
-    }
-    this.entries.set(hashCacheKey(deviceId, namespace, path, byteCount, modifiedSeconds), {
-      deviceId,
-      namespace,
-      path,
-      sha256,
-      lastUsed: ++this.accessCounter,
-    });
-    while (this.entries.size > SHARED_STORAGE_HASH_CACHE_MAX_ENTRIES) {
-      let oldestKey: string | undefined;
-      let oldestUsed = Number.POSITIVE_INFINITY;
-      for (const [key, entry] of this.entries) {
-        if (entry.lastUsed < oldestUsed) {
-          oldestKey = key;
-          oldestUsed = entry.lastUsed;
-        }
-      }
-      if (oldestKey === undefined) {
-        break;
-      }
-      this.entries.delete(oldestKey);
-    }
-  }
-
-  retainNamespacePaths(deviceId: string, namespace: string, paths: ReadonlySet<string>): void {
-    for (const [key, entry] of this.entries) {
-      if (entry.deviceId === deviceId && entry.namespace === namespace && !paths.has(entry.path)) {
-        this.entries.delete(key);
-      }
-    }
-  }
-}
-
-function hashCacheKey(
-  deviceId: string,
-  namespace: string,
-  path: string,
-  byteCount: number,
-  modifiedSeconds: number,
-): string {
-  return JSON.stringify([deviceId, namespace, path, byteCount, modifiedSeconds]);
 }
 
 function chunkHashPaths(entries: readonly ParsedStatEntry[]): ParsedStatEntry[][] {

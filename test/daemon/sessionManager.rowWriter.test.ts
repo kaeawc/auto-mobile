@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, spyOn, test, afterEach, mock } from "bun:test";
 import { SessionManager, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 import { SerializedSessionRowWriter } from "../../src/daemon/sessionRowWriter";
 import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
@@ -6,6 +6,10 @@ import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalRelea
 import { FakeSessionRowWriter } from "../fakes/FakeSessionRowWriter";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { installSessionManagerCleanup, makeSessionManager } from "../helpers/sessionManagerSuite";
+
+afterEach(() => {
+  mock.restore();
+});
 
 installSessionManagerCleanup();
 
@@ -199,7 +203,7 @@ test("startup replay retains its fence without lifting a successor writer desire
     releasedAtMs: 0,
     heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 1000, ageMs: 0 },
   };
-  manager["sessionSlots"].setTerminalSnapshot(snapshot.sessionId, snapshot);
+  manager.testHooks.wiring.host.sessionSlots.setTerminalSnapshot(snapshot.sessionId, snapshot);
   writer.noteRelease(snapshot);
   writer.desire(snapshot.sessionId, {
     snapshot,
@@ -216,7 +220,9 @@ test("startup replay retains its fence without lifting a successor writer desire
   manager.attachTerminalReleaseJournal(journal);
   await manager.applyRecoveredTerminalReleaseIntents();
   expect(journal.loadUnconfirmed()).toEqual([]);
-  expect(manager["sessionSlots"].getTerminalSnapshot(snapshot.sessionId)).toBe(snapshot);
+  expect(manager.testHooks.wiring.host.sessionSlots.getTerminalSnapshot(snapshot.sessionId)).toBe(
+    snapshot,
+  );
   expect(writer.pendingSnapshot(snapshot.sessionId)).toBe(snapshot);
   expect(writer.canIssueRelease(snapshot)).toBe(true);
   expect(lift).not.toHaveBeenCalled();

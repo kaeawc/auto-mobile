@@ -1,3 +1,5 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { scopedSelectionMatrix } from "../../helpers/scopedSelectionMatrix";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
@@ -10,7 +12,6 @@ import type {
   ObserveResult,
   ViewHierarchyResult,
 } from "../../../src/models";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { encodeAndroidFlat, type LogicalNode } from "../../fixtures/hierarchyArbitraries";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
@@ -86,14 +87,15 @@ function harness(route: Route, kind: Kind = "success", vision = false) {
   };
   displayTransitions.reset(device.deviceId);
   const capture = hierarchy(kind);
-  const observation: ObserveResult = {
+  const observation: ObserveResult = buildObserveResult({
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     observationId: "nested-drag",
-    timestamp: 1,
+    updatedAt: 1,
     displayRevision: 0,
     display: { key: "external", role: "external", posture: "unknown", generation: 1 },
     screenSize: { width: 500, height: 500 },
     viewHierarchy: capture,
-  };
+  });
   const adb = new FakeAdbClient();
   adb.setCommandResult(
     "shell cmd display get-displays",
@@ -104,7 +106,7 @@ function harness(route: Route, kind: Kind = "success", vision = false) {
   const capturer = new FakeScreenshotCapturer();
   capturer.setPaths(["/fake/drag.png"]);
   const analyzer = new FakeVisionAnalyzer();
-  const action = new DragAndDrop(device, adb as AdbClient, timer, {
+  const action = new DragAndDrop(device, adb, timer, {
     hierarchyCapture: new FakeHierarchyCapture(() => capture),
     lastRenderedObservation: () => observation,
     visionConfig: {
@@ -124,7 +126,7 @@ function harness(route: Route, kind: Kind = "success", vision = false) {
   const predictions: unknown[] = [];
   action.observedInteraction = (callback, options) => {
     predictions.push(options?.predictionContext?.toolArgs);
-    return callback(observation);
+    return runBlockWith(observation)(callback, options);
   };
   const client = AndroidCtrlProxyClient.getExistingInstance(device.deviceId)!;
   const drag = spyOn(client, "requestDrag").mockResolvedValue({ success: true, totalTimeMs: 0 });

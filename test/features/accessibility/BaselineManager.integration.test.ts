@@ -61,7 +61,7 @@ describe("BaselineManager", function () {
           bounds: { left: 0, top: 50, right: 100, bottom: 100 },
           text: "Low contrast text",
         },
-        details: { ratio: 2.5, required: 4.5 },
+        details: { contrastRatio: 2.5, requiredRatio: 4.5 },
         fingerprint: "def456",
       },
     ];
@@ -274,10 +274,9 @@ describe("BaselineManager", function () {
             text: "Sample",
           },
           details: {
-            ratio: 3.2,
-            required: 4.5,
-            textColor: { r: 128, g: 128, b: 128 },
-            backgroundColor: { r: 255, g: 255, b: 255 },
+            contrastRatio: 3.2,
+            requiredRatio: 4.5,
+            explanation: "Gray text on a white background",
           },
           fingerprint: "test123",
         },

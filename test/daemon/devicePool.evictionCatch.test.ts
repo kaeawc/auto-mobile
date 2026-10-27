@@ -1,8 +1,7 @@
 import { makePool } from "../helpers/makePool";
-import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
-import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
-import { EventEmitter } from "node:events";
-import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { describe, it, expect, afterEach, spyOn, mock } from "bun:test";
+import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -31,7 +30,7 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     deviceId: "emulator-5554",
   };
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     fakeDeviceUtils = new FakeDeviceUtils();
@@ -41,26 +40,38 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     });
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     await pool.initializeWithDevices([androidDevice]);
-  });
+  }
 
-  afterEach(() => {
-    timer.clearAllTimers?.();
-  });
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    it(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   it("logs a warning and does not throw when eviction rejects on process exit", async () => {
+    await arrangeHarness();
     const warnSpy = spyOn(logger, "warn");
     const evictError = new Error("removeDevice failed");
     // Force the eviction chain to reject.
-    const evictSpy = spyOn(poolInternals(pool), "evictMissingPooledDevice").mockRejectedValue(
-      evictError,
-    );
+    let evictCalls = 0;
+    const restoreEvict = pool.testHooks.evictMissingPooledDevice.intercept(() => async () => {
+      evictCalls++;
+      throw evictError;
+    });
 
-    const child = new EventEmitter();
+    const child = new FakeChildProcess();
     // Register the exit listener under test.
-    poolInternals(pool).trackStartedDeviceProcess(androidDevice, child);
+    await pool.testHooks.trackStartedDeviceProcess.call(androidDevice, child);
 
     // Fire the process-exit event; the rejection must be caught, not unhandled.
     child.emit("exit", 1, null);
+    child.emit("close", 1, null);
 
     const hasLoggedEviction = (): boolean =>
       warnSpy.mock.calls.some(
@@ -72,14 +83,14 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
       await Promise.resolve();
     }
 
-    expect(evictSpy).toHaveBeenCalledTimes(1);
+    expect(evictCalls).toBe(1);
     expect(hasLoggedEviction()).toBe(true);
 
     warnSpy.mockRestore();
-    evictSpy.mockRestore();
+    restoreEvict();
   });
 
-  it("persists redacted post-ready process diagnostics and recovery outcome", async () => {
+  arranged("persists redacted post-ready process diagnostics and recovery outcome", async () => {
     const incidentStore = new InMemoryEmulatorLossIncidentStore(
       timer,
       new CountingIdGenerator("test"),
@@ -100,22 +111,13 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
       source: "local",
     };
 
-    const child = new EventEmitter() as unknown as {
-      once(
-        event: "exit",
-        listener: (code: number | null, signal: NodeJS.Signals | null) => void,
-      ): void;
-      stdout: EventEmitter;
-      stderr: EventEmitter;
-    };
-    child.stdout = new EventEmitter();
-    child.stderr = new EventEmitter();
-    await poolInternals(diagnosticPool).trackStartedDeviceProcess(androidDevice, child);
+    const child = new FakeChildProcess();
+    await diagnosticPool.testHooks.trackStartedDeviceProcess.call(androidDevice, child);
     child.stdout.emit("data", Buffer.from("token="));
-    (child as unknown as EventEmitter).emit("exit", 1, null);
+    child.emit("exit", 1, null);
     child.stderr.emit("data", Buffer.from("emulator died\n"));
     child.stdout.emit("data", Buffer.from("should-not-leak\n"));
-    (child as unknown as EventEmitter).emit("close", 1, null);
+    child.emit("close", 1, null);
 
     let [incident] = await incidentStore.list();
     for (let turn = 0; turn < 30 && incident?.recovery.outcome === undefined; turn++) {
@@ -145,7 +147,7 @@ describe("device identity replacement IME quarantine", () => {
   let pool: DevicePool;
   let devices: FakeDeviceUtils;
 
-  beforeEach(async () => {
+  async function arrangeHarness2(): Promise<void> {
     const timer = new FakeTimer();
     manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     devices = new FakeDeviceUtils();
@@ -158,7 +160,27 @@ describe("device identity replacement IME quarantine", () => {
     await pool.initializeWithDevices([device]);
     quarantineAndroidIme(device.deviceId);
     quarantineAndroidIme(otherId);
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged2(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    it(
+      name,
+      async () => {
+        await arrangeHarness2();
+        await fn();
+      },
+      timeout,
+    );
+  }
+
+  function arrangedEach2<T>(table: readonly T[]) {
+    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+      for (const row of table) {
+        arranged2(name.replace("%s", String(row)), () => fn(row), timeout);
+      }
+    };
+  }
 
   afterEach(() => {
     manager.stopCleanupTimer();
@@ -166,7 +188,7 @@ describe("device identity replacement IME quarantine", () => {
     clearAndroidImeQuarantine(otherId);
   });
 
-  it("different runtime identity clears only the replaced serial's quarantine", async () => {
+  arranged2("different runtime identity clears only the replaced serial's quarantine", async () => {
     const captured = pool.getDevice(device.deviceId)!;
     devices.setBootedDevices("android", [{ ...device, name: "Different_AVD" }]);
     await pool.refreshDevices();
@@ -178,36 +200,40 @@ describe("device identity replacement IME quarantine", () => {
     );
   });
 
-  it("a concurrently removed identity entry still pools the replacement without clearing quarantine", async () => {
-    const captured = pool.getDevice(device.deviceId)!;
-    const internals = poolInternals(pool);
-    const replace = internals.replacePooledDeviceForRuntimeIdentity.bind(pool);
-    let replaced: boolean | undefined;
-    const replaceSpy = spyOn(internals, "replacePooledDeviceForRuntimeIdentity").mockImplementation(
-      async (pooled, booted) => {
-        expect(pooled).toBe(captured);
-        await pool.removeDevice(pooled.id);
-        expect(pool.getDevice(pooled.id)).toBeNull();
-        replaced = await replace(pooled, booted);
-        return replaced;
-      },
-    );
-    try {
-      devices.setBootedDevices("android", [{ ...device, name: "Different_AVD" }]);
-      await pool.refreshDevices();
-      expect(replaceSpy).toHaveBeenCalledTimes(1);
-      expect(replaced).toBe(true);
-      expect(pool.getDevice(device.deviceId)?.name).toBe("Different_AVD");
-      expect(pool.getDevice(device.deviceId)?.incarnation).not.toBe(captured.incarnation);
-      await expect(withAndroidImeLock(device.deviceId, async () => true)).rejects.toThrow(
-        "IME state is unknown",
+  arranged2(
+    "a concurrently removed identity entry still pools the replacement without clearing quarantine",
+    async () => {
+      const captured = pool.getDevice(device.deviceId)!;
+      const internals = pool.testHooks;
+      let replaced: boolean | undefined;
+      let replaceCalls = 0;
+      const restoreReplace = internals.replacePooledDeviceForRuntimeIdentity.intercept(
+        (replace) => async (pooled, booted) => {
+          replaceCalls++;
+          expect(pooled).toBe(captured);
+          await pool.removeDevice(pooled.id);
+          expect(pool.getDevice(pooled.id)).toBeNull();
+          replaced = await replace(pooled, booted);
+          return replaced;
+        },
       );
-    } finally {
-      replaceSpy.mockRestore();
-    }
-  });
+      try {
+        devices.setBootedDevices("android", [{ ...device, name: "Different_AVD" }]);
+        await pool.refreshDevices();
+        expect(replaceCalls).toBe(1);
+        expect(replaced).toBe(true);
+        expect(pool.getDevice(device.deviceId)?.name).toBe("Different_AVD");
+        expect(pool.getDevice(device.deviceId)?.incarnation).not.toBe(captured.incarnation);
+        await expect(withAndroidImeLock(device.deviceId, async () => true)).rejects.toThrow(
+          "IME state is unknown",
+        );
+      } finally {
+        restoreReplace();
+      }
+    },
+  );
 
-  it.each([
+  arrangedEach2([
     "remove",
     "disconnect",
     "three-miss refresh",
@@ -231,11 +257,10 @@ describe("device identity replacement IME quarantine", () => {
         }
       }
     } else if (route === "liveness eviction") {
-      await (
-        pool as unknown as {
-          evictMissingPooledDevice(device: PooledDevice, reason: string): Promise<void>;
-        }
-      ).evictMissingPooledDevice(captured, "missing device during liveness check");
+      await pool.testHooks.evictMissingPooledDevice.call(
+        captured,
+        "missing device during liveness check",
+      );
     } else if (route === "shutdown") {
       expect(await pool.retireDeviceForShutdown(captured)).toBe(true);
     } else if (route === "same-AVD replacement") {
@@ -258,16 +283,19 @@ describe("device identity replacement IME quarantine", () => {
     );
   });
 
-  it("shutdown replacement without an identity decision keeps quarantine even for a new name", async () => {
-    const captured = pool.getDevice(device.deviceId)!;
-    await pool.replaceDeviceForShutdown(captured, { ...device, name: "Different_AVD" });
-    expect(pool.getDevice(device.deviceId)?.name).toBe("Different_AVD");
-    await expect(withAndroidImeLock(device.deviceId, async () => true)).rejects.toThrow(
-      "IME state is unknown",
-    );
-  });
+  arranged2(
+    "shutdown replacement without an identity decision keeps quarantine even for a new name",
+    async () => {
+      const captured = pool.getDevice(device.deviceId)!;
+      await pool.replaceDeviceForShutdown(captured, { ...device, name: "Different_AVD" });
+      expect(pool.getDevice(device.deviceId)?.name).toBe("Different_AVD");
+      await expect(withAndroidImeLock(device.deviceId, async () => true)).rejects.toThrow(
+        "IME state is unknown",
+      );
+    },
+  );
 
-  it.each(["old", "new"] as const)(
+  arrangedEach2(["old", "new"] as const)(
     "an unverified %s placeholder keeps quarantine",
     async (side) => {
       if (side === "old") {
@@ -291,29 +319,32 @@ describe("device identity replacement IME quarantine", () => {
     },
   );
 
-  it("a deferred identity eviction keeps quarantine while the old entry is pooled", async () => {
-    const captured = pool.getDevice(device.deviceId)!;
-    const reservation = await pool.reserveDeviceForShutdown(captured.id);
-    if (!reservation) {
-      throw new Error("Expected shutdown reservation");
-    }
-    try {
-      devices.setBootedDevices("android", [{ ...device, name: "Different_AVD" }]);
-      await pool.refreshDevices();
-      expect(pool.getDevice(device.deviceId)).toBe(captured);
-      await expect(withAndroidImeLock(device.deviceId, async () => true)).rejects.toThrow(
-        "IME state is unknown",
-      );
-    } finally {
-      reservation.release();
-    }
-  });
+  arranged2(
+    "a deferred identity eviction keeps quarantine while the old entry is pooled",
+    async () => {
+      const captured = pool.getDevice(device.deviceId)!;
+      const reservation = await pool.reserveDeviceForShutdown(captured.id);
+      if (!reservation) {
+        throw new Error("Expected shutdown reservation");
+      }
+      try {
+        devices.setBootedDevices("android", [{ ...device, name: "Different_AVD" }]);
+        await pool.refreshDevices();
+        expect(pool.getDevice(device.deviceId)).toBe(captured);
+        await expect(withAndroidImeLock(device.deviceId, async () => true)).rejects.toThrow(
+          "IME state is unknown",
+        );
+      } finally {
+        void reservation.release();
+      }
+    },
+  );
 
-  it("a superseded identity decision cannot clear the successor's quarantine", async () => {
+  arranged2("a superseded identity decision cannot clear the successor's quarantine", async () => {
     const captured = pool.getDevice(device.deviceId)!;
     await pool.replaceDeviceForShutdown(captured, { ...device, name: "Replacement_AVD" });
     quarantineAndroidIme(device.deviceId);
-    const replaced = await poolInternals(pool).replacePooledDeviceForRuntimeIdentity(captured, {
+    const replaced = await pool.testHooks.replacePooledDeviceForRuntimeIdentity.call(captured, {
       ...device,
       name: "Different_AVD",
     });
@@ -324,54 +355,59 @@ describe("device identity replacement IME quarantine", () => {
     );
   });
 
-  it("identity cleanup cannot clear a successor quarantined while cache cleanup is pending", async () => {
-    const captured = pool.getDevice(device.deviceId)!;
-    const internals = poolInternals(pool);
-    const started = Promise.withResolvers<void>();
-    const finish = Promise.withResolvers<void>();
-    const cleanup = internals.clearDeviceSessionCache.bind(pool);
-    internals.clearDeviceSessionCache = async (deviceId) => {
-      started.resolve();
-      await finish.promise;
-      await cleanup(deviceId);
-    };
-    let replacement: Promise<boolean> | undefined;
-    try {
-      replacement = internals.replacePooledDeviceForRuntimeIdentity(captured, {
-        ...device,
-        name: "Different_AVD",
-      });
-      await started.promise;
-      expect(pool.getDevice(device.deviceId)).toBeNull();
-      await pool.addDevice({ ...device, name: "Successor_AVD" });
-      quarantineAndroidIme(device.deviceId);
-      finish.resolve();
-      expect(await replacement).toBe(false);
-      expect(pool.getDevice(device.deviceId)?.name).toBe("Successor_AVD");
-      await expect(withAndroidImeLock(device.deviceId, async () => true)).rejects.toThrow(
-        "IME state is unknown",
+  arranged2(
+    "identity cleanup cannot clear a successor quarantined while cache cleanup is pending",
+    async () => {
+      const captured = pool.getDevice(device.deviceId)!;
+      const internals = pool.testHooks;
+      const started = Promise.withResolvers<void>();
+      const finish = Promise.withResolvers<void>();
+      const restoreCleanup = internals.clearDeviceSessionCache.intercept(
+        (cleanup) => async (deviceId) => {
+          started.resolve();
+          await finish.promise;
+          await cleanup(deviceId);
+        },
       );
-    } finally {
-      finish.resolve();
-      await replacement;
-      internals.clearDeviceSessionCache = cleanup;
-    }
-  });
+      let replacement: Promise<boolean> | undefined;
+      try {
+        replacement = internals.replacePooledDeviceForRuntimeIdentity.call(captured, {
+          ...device,
+          name: "Different_AVD",
+        });
+        await started.promise;
+        expect(pool.getDevice(device.deviceId)).toBeNull();
+        await pool.addDevice({ ...device, name: "Successor_AVD" });
+        quarantineAndroidIme(device.deviceId);
+        finish.resolve();
+        expect(await replacement).toBe(false);
+        expect(pool.getDevice(device.deviceId)?.name).toBe("Successor_AVD");
+        await expect(withAndroidImeLock(device.deviceId, async () => true)).rejects.toThrow(
+          "IME state is unknown",
+        );
+      } finally {
+        finish.resolve();
+        await replacement;
+        restoreCleanup();
+      }
+    },
+  );
 
-  it("newer unresolved evidence during identity cleanup keeps quarantine", async () => {
+  arranged2("newer unresolved evidence during identity cleanup keeps quarantine", async () => {
     const captured = pool.getDevice(device.deviceId)!;
-    const internals = poolInternals(pool);
+    const internals = pool.testHooks;
     const started = Promise.withResolvers<void>();
     const finish = Promise.withResolvers<void>();
-    const cleanup = internals.clearDeviceSessionCache.bind(pool);
-    internals.clearDeviceSessionCache = async (deviceId) => {
-      started.resolve();
-      await finish.promise;
-      await cleanup(deviceId);
-    };
+    const restoreCleanup = internals.clearDeviceSessionCache.intercept(
+      (cleanup) => async (deviceId) => {
+        started.resolve();
+        await finish.promise;
+        await cleanup(deviceId);
+      },
+    );
     let replacement: Promise<boolean> | undefined;
     try {
-      replacement = internals.replacePooledDeviceForRuntimeIdentity(captured, {
+      replacement = internals.replacePooledDeviceForRuntimeIdentity.call(captured, {
         ...device,
         name: "Different_AVD",
         observedAt: 2,
@@ -390,11 +426,11 @@ describe("device identity replacement IME quarantine", () => {
     } finally {
       finish.resolve();
       await replacement;
-      internals.clearDeviceSessionCache = cleanup;
+      restoreCleanup();
     }
   });
 
-  it("session release keeps quarantine on the same pooled incarnation", async () => {
+  arranged2("session release keeps quarantine on the same pooled incarnation", async () => {
     await pool.bindOrReuseDeviceSession({
       sessionId: "ime-owner",
       deviceId: device.deviceId,
@@ -410,7 +446,7 @@ describe("device identity replacement IME quarantine", () => {
     );
   });
 
-  it("stale removal cannot clear a replacement's new quarantine", async () => {
+  arranged2("stale removal cannot clear a replacement's new quarantine", async () => {
     const captured = pool.getDevice(device.deviceId)!;
     await pool.replaceDeviceForShutdown(captured, device);
     quarantineAndroidIme(device.deviceId);
@@ -419,4 +455,8 @@ describe("device identity replacement IME quarantine", () => {
       "IME state is unknown",
     );
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

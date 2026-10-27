@@ -10,6 +10,10 @@ import {
   FileAvdConfigReader,
   type AvdDirectoryResolver,
 } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
+import {
+  AndroidEmulatorClient,
+  type AndroidEmulator,
+} from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { AvdSnapshotService } from "../../../src/utils/android-cmdline-tools/AvdSnapshotService";
 import { InMemoryEmulatorConsoleBusyRegistry } from "../../../src/utils/android-cmdline-tools/EmulatorConsoleBusyRegistry";
 import {
@@ -18,6 +22,8 @@ import {
   isMissingVmSnapshotError,
 } from "../../../src/utils/android-cmdline-tools/vmSnapshot";
 import type { BootedDevice, ExecResult } from "../../../src/models";
+import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
 // Every path here is built with `path.join`, exactly as the production code
 // does. Hard-coding POSIX separators made this suite a false negative on the
@@ -134,6 +140,34 @@ describe("vmSnapshot delete command (#6490)", () => {
 });
 
 describe("AvdSnapshotService (#6490)", () => {
+  test("expected-AVD deletion probes the real resolver while sharing its busy registry", async () => {
+    const timer = new FakeTimer();
+    const registry = new InMemoryEmulatorConsoleBusyRegistry();
+    const adb = new FakeAdbClient();
+    adb.setCommandResult("emu avd name", "am-api36");
+    adb.setCommandResult("emu avd snapshot del snap", "OK");
+    const factory = new FakeAdbClientFactory(adb);
+    const emulator = new AndroidEmulatorClient({
+      timer,
+      adbFactory: factory,
+      consoleBusyRegistry: registry,
+    });
+    const sut = new AvdSnapshotService(
+      new FakeDirectories({}, {}),
+      new FakeAvdDirectories(new Set()),
+      emulator,
+      factory,
+      registry,
+    );
+    expect(await sut.deleteVmSnapshot("emulator-5556", "snap", 30_000, "am-api36")).toEqual({
+      reclaimed: true,
+    });
+    expect(adb.getCommandCalls().map((call) => call.command)).toEqual([
+      "emu avd name",
+      "emu avd snapshot del snap",
+    ]);
+    expect(registry.isBusy("emulator-5556")).toBe(false);
+  });
   const service = (
     sizes: Record<string, number>,
     children: Record<string, string[]>,
@@ -148,6 +182,26 @@ describe("AvdSnapshotService (#6490)", () => {
       stubEmulator(devices),
       adb.factory,
     );
+
+  test("broker baseline snapshots are excluded from listings and cannot be reclaimed", async () => {
+    const adb = recordingAdbFactory(execResult("OK"));
+    const baseline = "automobile-broker-baseline-v1";
+    const sut = service(
+      {},
+      { [avdSnapshotsRoot("broker-avd")]: [baseline, "user-snapshot"] },
+      ["broker-avd"],
+      [],
+      adb,
+    );
+    expect(
+      (await sut.listAvdSnapshotDirectories("broker-avd")).map((entry) => entry.snapshotName),
+    ).toEqual(["user-snapshot"]);
+    expect(await sut.deleteVmSnapshot("emulator-5554", baseline, 1000)).toEqual({
+      reclaimed: false,
+      reason: "Broker baseline snapshot is reserved",
+    });
+    expect(adb.commands).toEqual([]);
+  });
 
   test("measures <avd>.avd/snapshots/<name>, and reports null for an unknown AVD", async () => {
     const sut = service({ [avdSnapshotPath("am-api36", "snap")]: 2_100_829_021 }, {}, ["am-api36"]);
@@ -326,15 +380,18 @@ describe("AvdSnapshotService (#6490)", () => {
     const sut = new AvdSnapshotService(
       new FakeDirectories({}, {}),
       new FakeAvdDirectories(new Set()),
-      {
-        getBootedDevices: async () => {
+      new (class extends AndroidEmulatorClient implements AndroidEmulator {
+        override async getBootedDevices(): Promise<BootedDevice[]> {
           throw new Error("pre-delete identity confirmation must not discover every emulator");
-        },
-        resolveAvdNameForSerial: async (serial, options) => {
+        }
+        override async resolveAvdNameForSerial(
+          serial: string,
+          options: { signal?: AbortSignal; timeoutMs: number },
+        ) {
           probes.push({ serial, timeoutMs: options.timeoutMs, signal: options.signal });
           return "am-api36";
-        },
-      } as never,
+        }
+      })(),
       adb.factory,
     );
 
@@ -372,9 +429,7 @@ describe("AvdSnapshotService (#6490)", () => {
         }
         return execResult("OK");
       },
-      null,
-      new DefaultRetryExecutor(timer),
-      timer,
+      { retryExecutor: new DefaultRetryExecutor(timer), timer },
     );
     const adbFactory: AdbClientFactory = { create: () => client };
     const sut = new AvdSnapshotService(

@@ -23,7 +23,7 @@ import { drainUntil, drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/
 import { InputKey } from "../../src/features/action/InputKey";
 import { PressButton } from "../../src/features/action/PressButton";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -73,7 +73,7 @@ const IDLE_MS = 120_000;
 
 /** Every `input/*` and device-mutating `ide/*` control frame, with params that run. */
 const KEY_VALUE = { appId: "com.example", fileName: "prefs" };
-const FRAMES: ReadonlyArray<{
+const FRAMES: Array<{
   method: string;
   params: Record<string, unknown>;
   /** The device call a frame that runs makes. */
@@ -268,7 +268,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
       beforeDeviceWork?.();
       return createAndroidTestClient(androidDevice, {
         getScreenScaleMetadata: () => screenGeometry,
-        requestTapCoordinates: record("tap", 6),
+        requestTapCoordinates: record("tap", 0),
         requestSwipe: record("swipe", 0),
         requestGestureStart: record("gestureStart"),
         requestGestureMove: record("gestureMove"),
@@ -283,7 +283,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
     spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation((device) =>
       createIosTestClient(device, {
         getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
-        requestTapCoordinates: record("tap", 7),
+        requestTapCoordinates: record("tap", 0),
         requestDrag: record("swipe", 0),
         requestSetText: record("setText", 1),
         requestAppendText: record("appendText", 4),

@@ -14,7 +14,12 @@ import { toActionableError } from "../models/ActionableError";
 import { type IdGenerator, defaultIdGenerator } from "./IdGenerator";
 
 type DownloadExec = (file: string, args: string[], options: ExecSeamOptions) => Promise<void>;
-type DownloadFileSystem = Pick<typeof fs, "mkdir" | "rename" | "rm">;
+/** Exactly the filesystem calls a download makes; `fs/promises` and fakes both satisfy it. */
+interface DownloadFileSystem {
+  mkdir(path: string, options: { recursive: true }): Promise<unknown>;
+  rename(from: string, to: string): Promise<void>;
+  rm(path: string, options: { force: true }): Promise<void>;
+}
 
 const defaultDownloadExec: DownloadExec = async (file, args, options) => {
   await runExecSeam(
@@ -37,6 +42,17 @@ export class DefaultFileDownloader implements FileDownloader {
     private readonly execute: DownloadExec = defaultDownloadExec,
     private readonly fileSystem: DownloadFileSystem = fs,
   ) {}
+
+  /** @internal Typed access to deterministic stream regression seams. */
+  get testHooks() {
+    return {
+      pipeResponseToFile: (response: Readable, destination: string) =>
+        this.pipeResponseToFile(response, destination),
+      onFirstResponseByte: (observer: () => void): void => {
+        this.onFirstResponseByte = observer;
+      },
+    };
+  }
 
   public async download(url: string, destination: string, signal?: AbortSignal): Promise<void> {
     signal ??= getAbortSignal();

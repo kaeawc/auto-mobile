@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MCP_SESSION_KEY_HEADER, readMcpSessionKey } from "../../src/server/mcpSessionKey";
+import { MCP_SESSION_KEY_HEADER, readMcpSessionKey } from "../../src/daemon/mcpSessionKey";
 
 describe("readMcpSessionKey", () => {
   test("reads the header value", () => {

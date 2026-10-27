@@ -45,7 +45,7 @@ class StaleFrameContextRejectionWiringTest {
         Regex("""broadcastSetTextResult\(\s*requestId\s*,\s*false\s*,\s*error\s*,\s*0\s*\)"""),
       "IME_ACTION" to
         Regex(
-          """broadcastImeActionResult\(\s*requestId\s*,\s*action\.wireName\s*,\s*false\s*,\s*error\s*,\s*0\s*\)""",
+          """broadcastImeActionResult\(\s*ImeActionFrameResult\(\s*requestId\s*=\s*requestId\s*,\s*action\s*=\s*action\.wireName\s*,\s*success\s*=\s*false\s*,\s*error\s*=\s*error\s*,\s*totalTimeMs\s*=\s*0\s*,?\s*\),?\s*\)""",
         ),
       "GLOBAL_ACTION" to
         Regex(

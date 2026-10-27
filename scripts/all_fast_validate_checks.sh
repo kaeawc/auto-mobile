@@ -18,8 +18,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${PROJECT_ROOT}/scripts/lib/spotlight-exclude.sh"
 
-# shellcheck source=scripts/lib/shell-core.sh disable=SC1091
+# shellcheck source=scripts/lib/shell-core.sh
 source "$SCRIPT_DIR/lib/shell-core.sh"
 
 CHECK_NAMES=()
@@ -37,13 +39,16 @@ add_check() {
 add_check "ktfmt" "ONLY_TOUCHED_FILES=${KTFMT_ONLY_TOUCHED_FILES:-true} \"$PROJECT_ROOT/scripts/ktfmt/validate_ktfmt.sh\"" "format,kotlin" "Validate Kotlin formatting"
 add_check "element-resolution-ratchet" "bash \"$PROJECT_ROOT/scripts/check-element-resolution-ratchet.sh\"" "lint,typescript" "Forbid growth of finding-keyed element-resolution exceptions"
 add_check "shared-process-allowlist" "bun \"$PROJECT_ROOT/scripts/test/classify-shared-safe.ts\" --check" "lint,conventions,typescript" "Keep unit files that share Bun processes free of shared-state signals (#10583)"
-add_check "test-as-any-ratchet" "bash \"$PROJECT_ROOT/scripts/test-as-any-baseline.sh\"" "lint,conventions,typescript" "Forbid growth of test as-any assertions"
 add_check "node-format" "bun --cwd \"$PROJECT_ROOT\" run format:check" "format,typescript" "Check Node TypeScript formatting"
 add_check "yaml" "bun \"$PROJECT_ROOT/scripts/validate-yaml.ts\"" "config,yaml" "Validate test plan YAML files"
 add_check "ctrl-proxy-project-sources" "\"$PROJECT_ROOT/scripts/check-ctrl-proxy-project-sources.sh\"" "config,ios" "Check CtrlProxy Swift sources are in its Xcode project"
 add_check "ctrl-proxy-xcodegen-drift" "\"$PROJECT_ROOT/scripts/ios/check-ctrl-proxy-xcodegen-drift.sh\"" "config,ios" "Check CtrlProxy.xcodeproj matches XcodeGen output when ios/control-proxy changes (skips without pinned XcodeGen)"
 add_check "schema-copy-drift" "bun \"$PROJECT_ROOT/scripts/check-schema-copy-drift.ts\"" "config,schema" "Detect drift between the canonical and Android copies of test-plan.schema.json"
 add_check "tool-definitions" "bun \"$PROJECT_ROOT/scripts/generate-tool-definitions.ts\" --check" "config,typescript" "Keep schemas/tool-definitions.json in sync with the live tool registry"
+add_check "prototype-spec-models" "bun \"$PROJECT_ROOT/scripts/prototype/generate-prototype-spec-models.ts\" --check" "config,typescript,kotlin,ios" "Keep selected prototype spec models in sync with the contract"
+add_check "protoviewer-notices" "bun \"$PROJECT_ROOT/scripts/ios/protoviewer-notices.ts\" --check" "config,typescript,ios" "Keep the ProtoViewer iOS third-party notices in sync with SwiftPM dependencies (skips without swift)"
+add_check "privacy-manifests" "bun \"$PROJECT_ROOT/scripts/ios/check-privacy-manifests.ts\"" "config,typescript,ios" "Keep the prototype library and ProtoViewer PrivacyInfo.xcprivacy in step with the required-reason APIs their Swift sources use"
+add_check "store-listing" "bun \"$PROJECT_ROOT/scripts/store-listing/validate-store-listing.ts\"" "config,typescript" "Keep the ProtoViewer fastlane store listing within Play and App Store limits and its icon sources well-formed (#14152)"
 add_check "bun-version-coherence" "bun \"$PROJECT_ROOT/scripts/check-bun-version-coherence.ts\"" "config,dependencies" "Keep Bun versions aligned across package, workflows, Docker, and local development"
 add_check "xml" "\"$PROJECT_ROOT/scripts/xml/validate_xml.sh\"" "config,xml" "Validate XML files"
 add_check "shellcheck" "\"$PROJECT_ROOT/scripts/shellcheck/validate_shell_scripts.sh\"" "lint,shell" "Validate shell scripts with shellcheck"
@@ -352,7 +357,7 @@ fi
 # deps are present, so CI is unaffected.
 ensure_node_modules "$PROJECT_ROOT"
 
-mkdir -p "$PROJECT_ROOT/scratch"
+mkdir_spotlight_excluded "$PROJECT_ROOT/scratch"
 run_id="$(date +%Y%m%dT%H%M%S)"
 run_dir="$PROJECT_ROOT/scratch/fast-validate-$run_id"
 mkdir -p "$run_dir"

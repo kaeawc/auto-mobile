@@ -50,10 +50,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
-class NavigationFacetTest {
+internal abstract class NavigationFacetFixture {
 
   /** In-memory graph so nothing the facet touches reaches a real socket. */
-  private fun testGraph(): AutoMobileGraphProvider {
+  protected fun testGraph(): AutoMobileGraphProvider {
     val client = FakeAutoMobileClient()
     return object : AutoMobileGraphProvider {
       override val autoMobileClient = client
@@ -65,10 +65,10 @@ class NavigationFacetTest {
     }
   }
 
-  private fun column(deviceId: String = "dev-1") =
+  protected fun column(deviceId: String = "dev-1") =
     DeviceColumn(deviceId = deviceId, name = "Pixel", platform = Platform.Android)
 
-  private fun screen(name: String) =
+  protected fun screen(name: String) =
     ScreenNode(
       id = name.lowercase(),
       name = name,
@@ -79,7 +79,7 @@ class NavigationFacetTest {
     )
 
   /** A [NavigationDataSource] that returns a fixed result and counts invocations. */
-  private class StubNavigationDataSource(private val result: Result<NavigationGraph>) :
+  protected class StubNavigationDataSource(private val result: Result<NavigationGraph>) :
     NavigationDataSource {
     val callCount = AtomicInteger(0)
 
@@ -89,7 +89,7 @@ class NavigationFacetTest {
     }
   }
 
-  private fun navUpdate(appId: String?, currentScreen: String? = null) =
+  protected fun navUpdate(appId: String?, currentScreen: String? = null) =
     NavigationGraphStreamUpdate(
       timestamp = 1L,
       appId = appId,
@@ -98,6 +98,41 @@ class NavigationFacetTest {
       currentScreen = currentScreen,
     )
 
+  /** A [SharedFlow] that throws on collection, to simulate a stream read/parse failure. */
+  protected fun throwingNavFlow(error: Throwable): SharedFlow<NavigationGraphStreamUpdate> =
+    object : SharedFlow<NavigationGraphStreamUpdate> {
+      override val replayCache: List<NavigationGraphStreamUpdate> = emptyList()
+
+      override suspend fun collect(collector: FlowCollector<NavigationGraphStreamUpdate>): Nothing =
+        throw error
+    }
+
+  protected fun screenWithShot(name: String, screenshotUri: String) =
+    screen(name).copy(screenshotUri = screenshotUri)
+
+  /** A [ScreenshotLoader] that records load/invalidate calls; returns no bitmap (unused here). */
+  protected class RecordingScreenshotLoader : ScreenshotLoader {
+    // Cross-thread: load() runs on Dispatchers.IO, invalidate() on the composition thread.
+    val loaded = CopyOnWriteArrayList<String>()
+    val invalidated = CopyOnWriteArrayList<String>()
+
+    override suspend fun load(uri: String): ImageBitmap? {
+      loaded += uri
+      return null
+    }
+
+    override fun invalidate(uri: String) {
+      invalidated += uri
+    }
+
+    override fun clearCache() = Unit
+
+    override fun cacheSize(): Int = 0
+  }
+}
+
+@OptIn(ExperimentalTestApi::class)
+internal class NavigationFacetTest : NavigationFacetFixture() {
   @Test
   fun `stream build context reaches dashboard provenance and null restores fallback`() =
     runComposeUiTest {
@@ -118,8 +153,11 @@ class NavigationFacetTest {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = { source },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = { source },
+                ),
             )
           }
         }
@@ -169,12 +207,15 @@ class NavigationFacetTest {
             if (visible.value) {
               NavigationFacet(
                 column = column(),
-                observationStreamFactory = { fake },
-                navigationDataSourceProvider = {
-                  StubNavigationDataSource(
-                    Result.Success(NavigationGraph(emptyList(), emptyList())),
-                  )
-                },
+                options =
+                  NavigationFacetOptions(
+                    observationStreamFactory = { fake },
+                    navigationDataSourceProvider = {
+                      StubNavigationDataSource(
+                        Result.Success(NavigationGraph(emptyList(), emptyList())),
+                      )
+                    },
+                  ),
               )
             }
           }
@@ -207,8 +248,11 @@ class NavigationFacetTest {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = { source },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = { source },
+              ),
           )
         }
       }
@@ -233,12 +277,15 @@ class NavigationFacetTest {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = {
-                StubNavigationDataSource(
-                  Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
-                )
-              },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = {
+                    StubNavigationDataSource(
+                      Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
+                    )
+                  },
+                ),
             )
           }
         }
@@ -274,8 +321,11 @@ class NavigationFacetTest {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = { growingSource },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = { growingSource },
+                ),
             )
           }
         }
@@ -319,10 +369,13 @@ class NavigationFacetTest {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = { appId ->
-                if (appId == "com.example.b") bSource else aSource
-              },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = { appId ->
+                    if (appId == "com.example.b") bSource else aSource
+                  },
+                ),
             )
           }
         }
@@ -379,8 +432,11 @@ class NavigationFacetTest {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = { refreshingSource },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = { refreshingSource },
+              ),
           )
         }
       }
@@ -419,10 +475,15 @@ class NavigationFacetTest {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = {
-                StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
-              },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = {
+                    StubNavigationDataSource(
+                      Result.Success(NavigationGraph(emptyList(), emptyList())),
+                    )
+                  },
+                ),
             )
           }
         }
@@ -455,12 +516,15 @@ class NavigationFacetTest {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = {
-                StubNavigationDataSource(
-                  Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
-                )
-              },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = {
+                    StubNavigationDataSource(
+                      Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
+                    )
+                  },
+                ),
             )
           }
         }
@@ -476,7 +540,10 @@ class NavigationFacetTest {
       }
       onNodeWithContentDescription("Fog focus available").assertExists()
     }
+}
 
+@OptIn(ExperimentalTestApi::class)
+internal class NavigationFacetAppGraphTest : NavigationFacetFixture() {
   @Test
   fun `two same-app panes render the same shared app graph`() = runComposeUiTest {
     val shared = NavigationGraph(listOf(screen("Home")), emptyList())
@@ -487,13 +554,19 @@ class NavigationFacetTest {
         MaterialTheme {
           NavigationFacet(
             column = column("dev-1"),
-            observationStreamFactory = { streamA },
-            navigationDataSourceProvider = { StubNavigationDataSource(Result.Success(shared)) },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { streamA },
+                navigationDataSourceProvider = { StubNavigationDataSource(Result.Success(shared)) },
+              ),
           )
           NavigationFacet(
             column = column("dev-2"),
-            observationStreamFactory = { streamB },
-            navigationDataSourceProvider = { StubNavigationDataSource(Result.Success(shared)) },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { streamB },
+                navigationDataSourceProvider = { StubNavigationDataSource(Result.Success(shared)) },
+              ),
           )
         }
       }
@@ -521,10 +594,15 @@ class NavigationFacetTest {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = {
-              StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
-            },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = {
+                  StubNavigationDataSource(
+                    Result.Success(NavigationGraph(emptyList(), emptyList())),
+                  )
+                },
+              ),
           )
         }
       }
@@ -549,10 +627,15 @@ class NavigationFacetTest {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = {
-              StubNavigationDataSource(Result.Error(RuntimeException("daemon down"), "daemon down"))
-            },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = {
+                  StubNavigationDataSource(
+                    Result.Error(RuntimeException("daemon down"), "daemon down"),
+                  )
+                },
+              ),
           )
         }
       }
@@ -583,8 +666,11 @@ class NavigationFacetTest {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = { recovering },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = { recovering },
+              ),
           )
         }
       }
@@ -619,14 +705,17 @@ class NavigationFacetTest {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { controlled },
-            navigationDataSourceProvider = {
-              StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
-              )
-            },
-            backoffDelay = { backoff.await() },
-            socketAvailable = { socketUp.value },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { controlled },
+                navigationDataSourceProvider = {
+                  StubNavigationDataSource(
+                    Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
+                  )
+                },
+                backoffDelay = { backoff.await() },
+                socketAvailable = { socketUp.value },
+              ),
           )
         }
       }
@@ -669,20 +758,23 @@ class NavigationFacetTest {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = {
-              StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
-              )
-            },
-            backoffDelay = { reconnectMayStart.await() },
-            socketAvailable = { true },
-            connectionStateCollectorGate = { next ->
-              if (next is ConnectionState.Disconnected && next.reason == "Stream ended") {
-                collectorBlocked.complete(Unit)
-                collectorMayResume.await()
-              }
-            },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = {
+                  StubNavigationDataSource(
+                    Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
+                  )
+                },
+                backoffDelay = { reconnectMayStart.await() },
+                socketAvailable = { true },
+                connectionStateCollectorGate = { next ->
+                  if (next is ConnectionState.Disconnected && next.reason == "Stream ended") {
+                    collectorBlocked.complete(Unit)
+                    collectorMayResume.await()
+                  }
+                },
+              ),
           )
         }
       }
@@ -721,14 +813,17 @@ class NavigationFacetTest {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = {
-              StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
-              )
-            },
-            backoffDelay = { backoff.await() },
-            socketAvailable = { true },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = {
+                  StubNavigationDataSource(
+                    Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
+                  )
+                },
+                backoffDelay = { backoff.await() },
+                socketAvailable = { true },
+              ),
           )
         }
       }
@@ -767,16 +862,19 @@ class NavigationFacetTest {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = { appId ->
-                // Distinct graph per app so a stale render is detectable by screen name.
-                val label = if (appId == "com.example.b") "Beta" else "Alpha"
-                StubNavigationDataSource(
-                  Result.Success(NavigationGraph(listOf(screen(label)), emptyList())),
-                )
-              },
-              backoffDelay = { backoff.await() },
-              socketAvailable = { true },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = { appId ->
+                    // Distinct graph per app so a stale render is detectable by screen name.
+                    val label = if (appId == "com.example.b") "Beta" else "Alpha"
+                    StubNavigationDataSource(
+                      Result.Success(NavigationGraph(listOf(screen(label)), emptyList())),
+                    )
+                  },
+                  backoffDelay = { backoff.await() },
+                  socketAvailable = { true },
+                ),
             )
           }
         }
@@ -829,14 +927,17 @@ class NavigationFacetTest {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = {
-                StubNavigationDataSource(
-                  Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
-                )
-              },
-              backoffDelay = { backoff.await() },
-              socketAvailable = { true },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = {
+                    StubNavigationDataSource(
+                      Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
+                    )
+                  },
+                  backoffDelay = { backoff.await() },
+                  socketAvailable = { true },
+                ),
             )
           }
         }
@@ -868,16 +969,10 @@ class NavigationFacetTest {
         onAllNodesWithText("Alpha").fetchSemanticsNodes().isEmpty(),
       )
     }
+}
 
-  /** A [SharedFlow] that throws on collection, to simulate a stream read/parse failure. */
-  private fun throwingNavFlow(error: Throwable): SharedFlow<NavigationGraphStreamUpdate> =
-    object : SharedFlow<NavigationGraphStreamUpdate> {
-      override val replayCache: List<NavigationGraphStreamUpdate> = emptyList()
-
-      override suspend fun collect(collector: FlowCollector<NavigationGraphStreamUpdate>): Nothing =
-        throw error
-    }
-
+@OptIn(ExperimentalTestApi::class)
+internal class NavigationFacetRecoveryTest : NavigationFacetFixture() {
   @Test
   fun `routes a throwing stream collection to the retryable error state instead of crashing`() =
     runComposeUiTest {
@@ -893,10 +988,15 @@ class NavigationFacetTest {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { throwing },
-              navigationDataSourceProvider = {
-                StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
-              },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { throwing },
+                  navigationDataSourceProvider = {
+                    StubNavigationDataSource(
+                      Result.Success(NavigationGraph(emptyList(), emptyList())),
+                    )
+                  },
+                ),
             )
           }
         }
@@ -930,15 +1030,20 @@ class NavigationFacetTest {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = {
-                StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
-              },
-              resolveTimeout = {
-                // Mount can relaunch the effect before Retry; all such launches share the first
-                // gate. The user action, not the number of launches, selects the retry gate.
-                if (!retryStarted.get()) fireTimeout.await() else retryTimeout.await()
-              },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = {
+                    StubNavigationDataSource(
+                      Result.Success(NavigationGraph(emptyList(), emptyList())),
+                    )
+                  },
+                  resolveTimeout = {
+                    // Mount can relaunch the effect before Retry; all such launches share the first
+                    // gate. The user action, not the number of launches, selects the retry gate.
+                    if (!retryStarted.get()) fireTimeout.await() else retryTimeout.await()
+                  },
+                ),
             )
           }
         }
@@ -982,17 +1087,20 @@ class NavigationFacetTest {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = {
-              StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
-              )
-            },
-            backoffDelay = {},
-            socketAvailable = { true },
-            resolveTimeout = {
-              if (retryStarted.get()) retryTimeout.await() else reconnectTimeout.await()
-            },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = {
+                  StubNavigationDataSource(
+                    Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
+                  )
+                },
+                backoffDelay = {},
+                socketAvailable = { true },
+                resolveTimeout = {
+                  if (retryStarted.get()) retryTimeout.await() else reconnectTimeout.await()
+                },
+              ),
           )
         }
       }
@@ -1028,7 +1136,7 @@ class NavigationFacetTest {
   @Test
   fun `switching apps resets fog so the new app starts with the full graph`() = runComposeUiTest {
     // App A starts with fog enabled (persisted). Switching to B must not carry A's fog into B.
-    val settings = FakeSettingsProvider(fogModeEnabled = true)
+    val settings = FakeSettingsProvider(FakeSettingsProvider.Values(fogModeEnabled = true))
     val client = FakeAutoMobileClient()
     val graphProvider =
       object : AutoMobileGraphProvider {
@@ -1045,13 +1153,16 @@ class NavigationFacetTest {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = { appId ->
-              val label = if (appId == "com.example.b") "Beta" else "Alpha"
-              StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen(label)), emptyList())),
-              )
-            },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = { appId ->
+                  val label = if (appId == "com.example.b") "Beta" else "Alpha"
+                  StubNavigationDataSource(
+                    Result.Success(NavigationGraph(listOf(screen(label)), emptyList())),
+                  )
+                },
+              ),
           )
         }
       }
@@ -1081,10 +1192,17 @@ class NavigationFacetTest {
         MaterialTheme {
           NavigationFacet(
             column = column(deviceId.value),
-            observationStreamFactory = { id -> streams.getOrPut(id) { FakeObservationStream() } },
-            navigationDataSourceProvider = {
-              StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
-            },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { id ->
+                  streams.getOrPut(id) { FakeObservationStream() }
+                },
+                navigationDataSourceProvider = {
+                  StubNavigationDataSource(
+                    Result.Success(NavigationGraph(emptyList(), emptyList())),
+                  )
+                },
+              ),
           )
         }
       }
@@ -1113,10 +1231,13 @@ class NavigationFacetTest {
           if (visible.value) {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { FakeObservationStream() },
-              screenshotLoaderProvider = { deviceId ->
-                registry.forDevice(deviceId) { FakeAutoMobileClient() }.also { used += it }
-              },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { FakeObservationStream() },
+                  screenshotLoaderProvider = { deviceId ->
+                    registry.forDevice(deviceId) { FakeAutoMobileClient() }.also { used += it }
+                  },
+                ),
             )
           }
         }
@@ -1150,7 +1271,10 @@ class NavigationFacetTest {
           MaterialTheme {
             NavigationFacet(
               column = column(deviceId),
-              observationStreamFactory = { FakeObservationStream() },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { FakeObservationStream() },
+                ),
             )
           }
         }
@@ -1180,8 +1304,11 @@ class NavigationFacetTest {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { FakeObservationStream() },
-            screenshotLoaderProvider = provider.value,
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { FakeObservationStream() },
+                screenshotLoaderProvider = provider.value,
+              ),
           )
         }
       }
@@ -1196,29 +1323,6 @@ class NavigationFacetTest {
 
     assertEquals("a provider swap must re-resolve the loader", 2, used.size)
     assertNotSame("the loader must come from the new provider after a swap", used[0], used[1])
-  }
-
-  private fun screenWithShot(name: String, screenshotUri: String) =
-    screen(name).copy(screenshotUri = screenshotUri)
-
-  /** A [ScreenshotLoader] that records load/invalidate calls; returns no bitmap (unused here). */
-  private class RecordingScreenshotLoader : ScreenshotLoader {
-    // Cross-thread: load() runs on Dispatchers.IO, invalidate() on the composition thread.
-    val loaded = CopyOnWriteArrayList<String>()
-    val invalidated = CopyOnWriteArrayList<String>()
-
-    override suspend fun load(uri: String): ImageBitmap? {
-      loaded += uri
-      return null
-    }
-
-    override fun invalidate(uri: String) {
-      invalidated += uri
-    }
-
-    override fun clearCache() = Unit
-
-    override fun cacheSize(): Int = 0
   }
 
   @Test
@@ -1261,9 +1365,12 @@ class NavigationFacetTest {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = { source },
-              screenshotLoaderProvider = { loader },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = { source },
+                  screenshotLoaderProvider = { loader },
+                ),
             )
           }
         }

@@ -4,17 +4,17 @@ import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import {
   DAEMON_VERSION,
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResult";
 import {
   DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS,
   type Session,
 } from "../../src/daemon/sessionManager";
-import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
+import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -23,7 +23,7 @@ import { LivenessScenario } from "../helpers/livenessScenarioHarness";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { warmedTests } from "../helpers/warmedTests";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
-import { freshStartAlreadyBoundError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { freshStartAlreadyBoundError } from "../../src/models/deviceAcquisitionRefusals";
 
 let scenario: LivenessScenario | undefined;
 isolateEmptyToolRegistry();
@@ -294,7 +294,7 @@ for (const phase of ["suspect", "awaiting-reap", "disconnect"] as const) {
     const hint = s.daemon.pool.holderReleaseRemainingMs(id);
     expect(hint).toBeGreaterThan(0);
     const before = holderClocks(session);
-    const deadline = s.daemon.pool["ownerDisconnectRelease"].remainingMs(id);
+    const deadline = s.daemon.pool.testHooks.ownerDisconnectRelease.remainingMs(id);
     const error = await explicitImageRefusal(s);
     expect(error.toPayload()).toEqual({
       code: "device_owned_by_other_session",
@@ -306,7 +306,7 @@ for (const phase of ["suspect", "awaiting-reap", "disconnect"] as const) {
       freshStartAlreadyBoundError("emulator-5554", id, false, hint).message,
     );
     expect(holderClocks(session)).toEqual(before);
-    expect(s.daemon.pool["ownerDisconnectRelease"].remainingMs(id)).toBe(deadline);
+    expect(s.daemon.pool.testHooks.ownerDisconnectRelease.remainingMs(id)).toBe(deadline);
     expect(s.daemon.pool.holderReleaseRemainingMs(id)).toBe(hint);
   });
 }

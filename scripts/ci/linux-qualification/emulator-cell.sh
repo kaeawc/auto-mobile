@@ -2,7 +2,7 @@
 # Linux-only manual research harness. Wrapper mode is also used by AutoMobile's SDK.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=scripts/ci/linux-qualification/lib.sh disable=SC1091
+# shellcheck source=scripts/ci/linux-qualification/lib.sh
 source "$here/lib.sh"
 if [[ "${1:-}" == --emulator-wrapper ]]; then
   shift
@@ -68,8 +68,7 @@ jq -n --arg cell "$GPU-$WORKLOAD" --arg gpu "$GPU" --arg workload "$WORKLOAD" \
 cell_error() {
   trap - ERR TERM INT
   local evidence_dir=${CYCLE_DIR:-$CELL_DIR}
-  # shellcheck disable=SC2310 # Best-effort wait for exit evidence before classifying the error.
-  if [[ ${1:-} == ERR && -n ${CYCLE_DIR:-} && ! -f "$CYCLE_DIR/exit-time" ]]; then await_exit || true; fi
+  if [[ ${1:-} == ERR && -n ${CYCLE_DIR:-} && ! -f "$CYCLE_DIR/exit-time" ]]; then run_capture_status await_exit; fi
   touch "$evidence_dir/harness-error"
   bash "$here/classify-exit.sh" "$evidence_dir"
   if [[ "$evidence_dir" != "$CELL_DIR" ]]; then cp "$evidence_dir/result.json" "$CELL_DIR/result.json"; fi
@@ -102,8 +101,7 @@ if [[ "$GPU" == host && ! -d /dev/dri ]]; then
 fi
 # License acceptance can give yes SIGPIPE; sdkmanager's status is authoritative.
 # Keep the required wait at top level so a failure still runs the cell's ERR trap.
-# shellcheck disable=SC2016 # PIPESTATUS belongs to the child shell.
-timeout -k 5 180 bash -c 'yes | sdkmanager --licenses; exit ${PIPESTATUS[1]}' > "$CELL_DIR/licenses.log" 2>&1 <&0 &
+timeout -k 5 180 bash -c "yes | sdkmanager --licenses; exit \${PIPESTATUS[1]}" > "$CELL_DIR/licenses.log" 2>&1 <&0 &
 wait "$!"
 run_wait timeout -k 5 600 sdkmanager 'system-images;android-35;google_apis;x86_64' > "$CELL_DIR/sdk.log" 2>&1
 profile=medium_phone
@@ -127,8 +125,7 @@ export ANDROID_HOME="$private/sdk" ANDROID_SDK_ROOT="$private/sdk"
 export AUTOMOBILE_EMULATOR_ARGS
 AUTOMOBILE_EMULATOR_ARGS=$(jq -c '.+["-no-snapshot-load","-no-snapshot-save","-no-boot-anim","-camera-back","none","-verbose"]' <<< "$GPU_ARGS")
 export AUTOMOBILE_EMULATOR_HEADLESS=true AUTOMOBILE_EMULATOR_AUDIO=false AUTOMOBILE_APPEARANCE_SYNC=0
-# shellcheck disable=SC2024,SC2310 # User-owned evidence; debugger installation is best effort.
-run_wait timeout -k 5 60 sudo -n apt-get install -y gdb > "$CELL_DIR/gdb-install.log" 2>&1 || true
+run_capture_status --output "$CELL_DIR/gdb-install.log" run_wait timeout -k 5 60 sudo -n apt-get install -y gdb
 completed=0
 for ((cycle=1; cycle<=CYCLES; cycle++)); do
   # Reserve boot, load, bounded operations, shutdown and evidence collection.
@@ -146,8 +143,7 @@ for ((cycle=1; cycle<=CYCLES; cycle++)); do
   export AUTOMOBILE_DAEMON_LOCK_FILE_PATH="$private/c$cycle/d.lock" AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH="$private/c$cycle/w.sock"
   mkdir -p "$AUTOMOBILE_AUX_SOCKET_DIR"
   ulimit -c unlimited || true
-  # shellcheck disable=SC2024 # Destination is deliberately user-owned evidence.
-  sudo -n sysctl -w "kernel.core_pattern=$CYCLE_DIR/cores/core.%e.%p" > "$CYCLE_DIR/core-pattern.log" 2>&1 || true
+  { sudo -n sysctl -w "kernel.core_pattern=$CYCLE_DIR/cores/core.%e.%p"; } > "$CYCLE_DIR/core-pattern.log" 2>&1 || true
   export SERIAL=emulator-5554
   now > "$CYCLE_DIR/start-time"
   launcher=''
@@ -171,17 +167,15 @@ for ((cycle=1; cycle<=CYCLES; cycle++)); do
   ready=false
   timestamp=$(now)
   while (( timestamp < boot_deadline && acquisition_rc == 0 )) && [[ ! -f "$CYCLE_DIR/exit-time" ]]; do
-    # shellcheck disable=SC2310 # Boot probe failure is data; keep polling until the deadline.
-    run_wait timeout 5 adb -s "$SERIAL" shell getprop sys.boot_completed > "$CYCLE_DIR/boot-property.txt" 2>/dev/null || true
+    run_capture_status --quiet-stderr-output "$CYCLE_DIR/boot-property.txt" run_wait timeout 5 adb -s "$SERIAL" shell getprop sys.boot_completed
     if [[ "$(tr -d '\r' < "$CYCLE_DIR/boot-property.txt")" == 1 ]]; then ready=true; break; fi
     pause 5
     timestamp=$(now)
   done
-  # shellcheck disable=SC2310 # Best-effort wait for exit evidence after unsuccessful boot.
-  if [[ "$ready" == false && ! -f "$CYCLE_DIR/exit-time" ]]; then await_exit || true; fi
+  if [[ "$ready" == false && ! -f "$CYCLE_DIR/exit-time" ]]; then run_capture_status await_exit; fi
   if [[ "$GPU" == host && "$ready" == false ]]; then
-    # shellcheck disable=SC2310 # Missing crash evidence is data for host availability classification.
-    if [[ -z $(crash_evidence "$CYCLE_DIR") ]]; then touch "$CYCLE_DIR/host-unavailable"; fi
+    crash=$(crash_evidence "$CYCLE_DIR")
+    if [[ -z "$crash" ]]; then touch "$CYCLE_DIR/host-unavailable"; fi
   fi
   if [[ "$ready" == false && "$GPU" != host && ! -f "$CYCLE_DIR/exit-time" ]]; then touch "$CYCLE_DIR/harness-error"; fi
   load_rc=0
@@ -195,28 +189,25 @@ for ((cycle=1; cycle<=CYCLES; cycle++)); do
       run_wait timeout -k 2 15 adb -s "$SERIAL" shell am start -a android.settings.SETTINGS > "$CYCLE_DIR/target.log" 2>&1
       heartbeat & heartbeat_pid=$!
       if [[ "$WORKLOAD" == automobile ]]; then script=workload-automobile.sh; else script=workload-raw-adb.sh; fi
-      # shellcheck disable=SC2310 # Load failure is classified by finish_load after collecting exit evidence.
-      run_wait bash "$here/$script" || load_rc=$?
+      run_capture_status run_wait bash "$here/$script"
+      load_rc=$RUN_STATUS
       wait "$heartbeat_pid" || true
     else
-      # shellcheck disable=SC2310 # Load failure is classified by finish_load after collecting exit evidence.
-      run_wait bash "$here/workload-heartbeat.sh" || load_rc=$?
+      run_capture_status run_wait bash "$here/workload-heartbeat.sh"
+      load_rc=$RUN_STATUS
     fi
     finish_load "$load_rc"
     if [[ -f "$CYCLE_DIR/load-survived" ]]; then completed=$((completed+1)); fi
-    # shellcheck disable=SC2310 # Best-effort evidence collection must not abort the cell.
-    run_wait timeout -k 2 10 adb -s "$SERIAL" logcat -b crash,main -d > "$CYCLE_DIR/logcat-crash-main.log" 2>&1 || true
+    run_capture_status --output "$CYCLE_DIR/logcat-crash-main.log" run_wait timeout -k 2 10 adb -s "$SERIAL" logcat -b crash,main -d
   fi
   # Do not overwrite a spontaneous exit with a later cleanup marker.
   if [[ ! -f "$CYCLE_DIR/exit-time" ]]; then
     now > "$CYCLE_DIR/shutdown-intent"
     if [[ "$WORKLOAD" == automobile && -n "${SESSION_UUID:-}" ]]; then
       device=$(jq -nc --arg id "$SERIAL" '{name:"medium_phone",deviceId:$id,platform:"android"}')
-      # shellcheck disable=SC2310 # Best-effort shutdown; bounded signal fallback follows.
-      run_wait timeout -k 5 30 auto-mobile --cli --session-uuid "$SESSION_UUID" killDevice --device "$device" > "$CYCLE_DIR/shutdown.log" 2>&1 || true
+      run_capture_status --output "$CYCLE_DIR/shutdown.log" run_wait timeout -k 5 30 auto-mobile --cli --session-uuid "$SESSION_UUID" killDevice --device "$device"
     else
-      # shellcheck disable=SC2310 # Best-effort shutdown; bounded signal fallback follows.
-      run_wait timeout -k 5 15 adb -s "$SERIAL" emu kill > "$CYCLE_DIR/shutdown.log" 2>&1 || true
+      run_capture_status --output "$CYCLE_DIR/shutdown.log" run_wait timeout -k 5 15 adb -s "$SERIAL" emu kill
     fi
     for ((n=0;n<10;n++)); do [[ -f "$CYCLE_DIR/exit-time" ]] && break; pause 1; done
     if [[ ! -f "$CYCLE_DIR/exit-time" && -f "$CYCLE_DIR/emulator.pid" ]]; then
@@ -233,19 +224,15 @@ for ((cycle=1; cycle<=CYCLES; cycle++)); do
   # Best-effort evidence collection cannot fail the cell.
   printf '%s TERM logcat\n' "$(now)" > "$CYCLE_DIR/logcat-kill-sent"
   if [[ -n "$logcat_pid" ]]; then kill "$logcat_pid" 2>/dev/null || true; fi
-  # shellcheck disable=SC2310 # Best-effort evidence collection must not abort the cell.
-  run_wait timeout -k 2 15 sudo -n dmesg --since "$(date -d "@$(cat "$CYCLE_DIR/start-time")" +'%F %T')" > "$CYCLE_DIR/dmesg-all.log" 2>&1 || true
+  run_capture_status --output "$CYCLE_DIR/dmesg-all.log" run_wait timeout -k 2 15 sudo -n dmesg --since "$(date -d "@$(cat "$CYCLE_DIR/start-time")" +'%F %T')"
   grep -iE 'segfault|emulator|oom' "$CYCLE_DIR/dmesg-all.log" > "$CYCLE_DIR/dmesg.log" || true
-  # shellcheck disable=SC2310 # Best-effort evidence collection must not abort the cell.
-  collect_crash_files '*.dmp' dumps /tmp "$ANDROID_USER_HOME" "$HOME/.android" 2> "$CYCLE_DIR/find.log" || true
-  # shellcheck disable=SC2310 # Best-effort evidence collection must not abort the cell.
-  collect_crash_files 'core.*' cores /tmp "$ANDROID_USER_HOME" "$HOME/.android" 2>> "$CYCLE_DIR/find.log" || true
+  run_capture_status --stderr "$CYCLE_DIR/find.log" collect_crash_files '*.dmp' dumps /tmp "$ANDROID_USER_HOME" "$HOME/.android"
+  run_capture_status --append-stderr "$CYCLE_DIR/find.log" collect_crash_files 'core.*' cores /tmp "$ANDROID_USER_HOME" "$HOME/.android"
   for core in "$CYCLE_DIR"/cores/*; do
     [[ -f "$core" && -s "$core" ]] || continue
     debug_binary="$REAL_EMULATOR"
     if [[ ${core##*/} == *qemu* ]]; then debug_binary="${REAL_EMULATOR%/*}/qemu/linux-x86_64/qemu-system-x86_64"; fi
-    # shellcheck disable=SC2310 # Best-effort evidence collection must not abort the cell.
-    run_wait timeout -k 2 30 gdb -batch -ex 'thread apply all bt' "$debug_binary" "$core" >> "$CYCLE_DIR/backtrace.log" 2>&1 || true
+    run_capture_status --append-output "$CYCLE_DIR/backtrace.log" run_wait timeout -k 2 30 gdb -batch -ex 'thread apply all bt' "$debug_binary" "$core"
   done
   if [[ ! -f "$CYCLE_DIR/backtrace.log" ]]; then printf 'Backtrace skipped: no ELF core; minidumps retained if found\n' > "$CYCLE_DIR/backtrace.log"; fi
   grep '^#' "$CYCLE_DIR/backtrace.log" 2>/dev/null | head -5 > "$CYCLE_DIR/top-frames.txt" || true
@@ -262,8 +249,8 @@ for ((cycle=1; cycle<=CYCLES; cycle++)); do
   mv "$CYCLE_DIR/env.tmp" "$CYCLE_DIR/environment.json"
   bash "$here/classify-exit.sh" "$CYCLE_DIR"
   stop_private_daemon
-  # shellcheck disable=SC2310 # Cleanup probe failure is classified as a harness error below.
-  if ! await_device_gone; then
+  run_capture_status await_device_gone
+  if (( RUN_STATUS != 0 )); then
     touch "$CYCLE_DIR/harness-error"
     bash "$here/classify-exit.sh" "$CYCLE_DIR"
     break

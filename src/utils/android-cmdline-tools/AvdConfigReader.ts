@@ -22,6 +22,7 @@ export interface AvdConfig {
   osVersion?: string;
   /** Exact Android SDK package identity derived from image.sysdir.1. */
   systemImagePackage?: string;
+  systemImagePath?: string;
   /** Normalized emulator CPU architecture used by the AVD. */
   architecture?: string;
   screenWidth?: number;
@@ -29,10 +30,19 @@ export interface AvdConfig {
   screenDensity?: number;
   /** Configured guest memory in megabytes. */
   ramSizeMb?: number;
+  /**
+   * Guest memory the emulator actually gave the last launch, from `hardware-qemu.ini` (#15475).
+   * It can exceed `ramSizeMb`: the system image sets a floor. Absent until the AVD has launched.
+   */
+  effectiveRamMb?: number;
+  /** CPU cores of the last launch, from `hardware-qemu.ini`; absent until the AVD has launched. */
+  effectiveCpuCores?: number;
   /** Whether config.ini contains an unrecognized guest-memory value. */
   ramSizeInvalid?: boolean;
   /** Whether the AVD's GPU is explicitly enabled in config.ini. */
   gpuEnabled?: boolean;
+  /** Raw `hw.gpu.mode` from config.ini; unset means the emulator picks (`auto`). */
+  gpuMode?: string;
   deviceName?: string;
   tag?: string;
   /** Stable hardware features derived from the AVD's local profile settings. */
@@ -177,11 +187,13 @@ export function resolveAndroidAvdHome(
   environment: NodeJS.ProcessEnv,
   homeDirectory?: string,
 ): string {
-  const androidUserHome = nonEmptyEnvironmentValue(environment.ANDROID_USER_HOME);
-  const avdHome = nonEmptyEnvironmentValue(environment.ANDROID_AVD_HOME);
+  const androidUserHome = nonEmptyEnvironmentValue(
+    readEnvRaw(AMBIENT_ENV.ANDROID_USER_HOME, environment),
+  );
+  const avdHome = nonEmptyEnvironmentValue(readEnvRaw(AMBIENT_ENV.ANDROID_AVD_HOME, environment));
   const androidSdkHome = nonEmptyEnvironmentValue(environment.ANDROID_SDK_HOME);
   const configHome =
-    nonEmptyEnvironmentValue(environment.ANDROID_EMULATOR_HOME) ??
+    nonEmptyEnvironmentValue(readEnvRaw(AMBIENT_ENV.ANDROID_EMULATOR_HOME, environment)) ??
     androidUserHome ??
     (androidSdkHome ? join(androidSdkHome, ".android") : undefined) ??
     (homeDirectory ? join(homeDirectory, ".android") : "");
@@ -207,8 +219,8 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
     this.existsFn = existsFn ?? ((p: string) => fs.existsSync(p));
 
     const homeDir = readEnvRaw(AMBIENT_ENV.HOME) || readEnvRaw(AMBIENT_ENV.USERPROFILE);
-    const androidUserHome = nonEmptyEnvironmentValue(process.env.ANDROID_USER_HOME);
-    const avdHomeEnv = nonEmptyEnvironmentValue(process.env.ANDROID_AVD_HOME);
+    const androidUserHome = nonEmptyEnvironmentValue(readEnvRaw(AMBIENT_ENV.ANDROID_USER_HOME));
+    const avdHomeEnv = nonEmptyEnvironmentValue(readEnvRaw(AMBIENT_ENV.ANDROID_AVD_HOME));
     const androidSdkHome = nonEmptyEnvironmentValue(readEnvRaw(AMBIENT_ENV.ANDROID_SDK_HOME));
     const configHome = this.resolveConfigHome(
       androidUserHome,
@@ -231,7 +243,7 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
     fallback: string,
   ): string {
     return (
-      nonEmptyEnvironmentValue(process.env.ANDROID_EMULATOR_HOME) ||
+      nonEmptyEnvironmentValue(readEnvRaw(AMBIENT_ENV.ANDROID_EMULATOR_HOME)) ||
       androidUserHome ||
       (androidSdkHome ? join(androidSdkHome, ".android") : undefined) ||
       fallback
@@ -272,10 +284,31 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
 
     try {
       const content = await this.readFileFn(configPath, "utf-8");
-      return parseAvdConfig(content);
+      return {
+        ...parseAvdConfig(content),
+        ...(await this.readEffectiveHardware(avdName, dirname(configPath))),
+      };
     } catch (error) {
       logger.warn(`Failed to read AVD config for ${avdName}: ${error}`);
       return null;
+    }
+  }
+
+  /** The emulator's launch-time view of RAM and cores; best effort, absent before a first launch. */
+  private async readEffectiveHardware(
+    avdName: string,
+    avdDirectory: string,
+  ): Promise<Pick<AvdConfig, "effectiveRamMb" | "effectiveCpuCores">> {
+    const qemuPath = join(avdDirectory, "hardware-qemu.ini");
+    if (!this.existsFn(qemuPath)) {
+      return {};
+    }
+    try {
+      return parseEffectiveHardware(await this.readFileFn(qemuPath, "utf-8"));
+    } catch (error) {
+      // The configured values still describe the AVD; the effective ones are an optional extra.
+      logger.warn(`Failed to read hardware-qemu.ini for ${avdName}: ${error}`);
+      return {};
     }
   }
 
@@ -310,6 +343,23 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
   }
 }
 
+/** Parse the effective `hw.ramSize` (MiB, no unit suffix) and `hw.cpu.ncore` from hardware-qemu.ini. */
+export function parseEffectiveHardware(
+  content: string,
+): Pick<AvdConfig, "effectiveRamMb" | "effectiveCpuCores"> {
+  const props = parseKeyValueProperties(content);
+  const positiveInt = (value: string | undefined): number | undefined => {
+    const parsed = value !== undefined && /^\d+$/.test(value) ? Number(value) : undefined;
+    return parsed !== undefined && parsed > 0 ? parsed : undefined;
+  };
+  const effectiveRamMb = positiveInt(props.get("hw.ramSize"));
+  const effectiveCpuCores = positiveInt(props.get("hw.cpu.ncore"));
+  return {
+    ...(effectiveRamMb === undefined ? {} : { effectiveRamMb }),
+    ...(effectiveCpuCores === undefined ? {} : { effectiveCpuCores }),
+  };
+}
+
 /**
  * Parse AVD config.ini content into structured data.
  */
@@ -340,7 +390,9 @@ export function parseAvdConfig(content: string): AvdConfig {
   }
   return {
     hardware: hardware as AndroidAvdConfiguration,
+    systemImagePath: props.get("image.sysdir.1"),
     gpuEnabled: parseYesNo(props.get("hw.gpu.enabled")),
+    gpuMode: props.get("hw.gpu.mode"),
     ...parseScreenDimensions(props),
     ...parseRamSize(props),
     ...parseDeviceMetadata(props),

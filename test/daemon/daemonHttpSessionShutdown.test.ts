@@ -1,40 +1,22 @@
 import { EventEmitter } from "node:events";
-import type { IncomingMessage } from "node:http";
 import { afterEach, describe, expect, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { Daemon } from "../../src/daemon/daemon";
+import { interruptProvisioningForShutdown } from "../../src/daemon/shutdownSteps";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { type ActiveExecution, executionTracker } from "../../src/server/executionTracker";
+import { type ActiveExecution, executionTracker } from "../../src/daemon/executionTracker";
 import type {
-  StatelessMcpHttpEndpoint,
-  StatelessMcpRequestScope,
+  HttpBodyRequest,
+  McpIngressRequest,
+  McpIngressTransport,
+} from "../../src/daemon/daemonHttpIngress";
+import type {
+  McpHttpResponseLike,
+  StatelessMcpServer,
 } from "../../src/daemon/statelessMcpHttpEndpoint";
 
-interface ClosableTransport {
-  close(): Promise<void>;
-}
-
-interface DaemonHttpIngressInternals {
-  acceptingHttpSessions: boolean;
-  startupCompleted: boolean;
-  mcpHttpEndpoint: StatelessMcpHttpEndpoint<FakeMcpRequest, FakeResponse, BlockingTransport>;
-  mcpHttpTransportFactory: () => BlockingTransport;
-  mcpRequestServerFactory: (req: FakeMcpRequest, scope: StatelessMcpRequestScope) => FakeMcpServer;
-  handleMcpHttpRequest(req: FakeMcpRequest, res: FakeResponse): Promise<void>;
-  readHttpBody(
-    req: IncomingMessage,
-  ): Promise<{ ok: true; body: string } | { ok: false; status: number; error: string }>;
-}
-
-interface DaemonHttpSessionInternals {
-  httpIngress: DaemonHttpIngressInternals;
-  socketServer: { quiesce(): Promise<void> } | null;
-  quiesceProvisioningIngress(): Promise<void>;
-  interruptProvisioningForShutdown(): Promise<void>;
-}
-
-class FakeRequest extends EventEmitter {
+class FakeRequest extends EventEmitter implements HttpBodyRequest {
   destroyed = false;
 
   destroy(): this {
@@ -44,12 +26,16 @@ class FakeRequest extends EventEmitter {
   }
 }
 
-class FakeMcpRequest extends EventEmitter {
+class FakeMcpRequest extends EventEmitter implements McpIngressRequest {
   readonly method = "POST";
   readonly headers = {};
+
+  destroy(): this {
+    return this;
+  }
 }
 
-class FakeResponse extends EventEmitter {
+class FakeResponse extends EventEmitter implements McpHttpResponseLike {
   statusCode = 0;
   body = "";
   headersSent = false;
@@ -74,7 +60,7 @@ class FakeResponse extends EventEmitter {
 }
 
 /** One request's transport: its response stays open until the transport closes. */
-class BlockingTransport implements ClosableTransport {
+class BlockingTransport implements McpIngressTransport {
   closeCalls = 0;
   private markStarted!: () => void;
   private markClosed!: () => void;
@@ -84,6 +70,10 @@ class BlockingTransport implements ClosableTransport {
   private readonly closed = new Promise<void>((resolve) => {
     this.markClosed = resolve;
   });
+
+  async start(): Promise<void> {}
+
+  async send(): Promise<void> {}
 
   async handleRequest(): Promise<void> {
     this.markStarted();
@@ -96,7 +86,7 @@ class BlockingTransport implements ClosableTransport {
   }
 }
 
-class FakeMcpServer {
+class FakeMcpServer implements StatelessMcpServer<McpIngressTransport> {
   async connect(): Promise<void> {}
   async close(): Promise<void> {}
 }
@@ -104,16 +94,16 @@ class FakeMcpServer {
 /** A daemon whose MCP requests each start one tracked execution keyed on their request scope. */
 function statelessDaemon(): {
   daemon: Daemon;
-  internals: DaemonHttpSessionInternals;
+  ingress: Daemon["testHooks"]["httpIngress"];
   transport: BlockingTransport;
   executions: ActiveExecution[];
 } {
   const daemon = new Daemon({}, { timer: new FakeTimer() });
-  const internals = daemon as unknown as DaemonHttpSessionInternals;
+  const ingress = daemon.testHooks.httpIngress;
   const transport = new BlockingTransport();
   const executions: ActiveExecution[] = [];
-  internals.httpIngress.mcpHttpTransportFactory = () => transport;
-  internals.httpIngress.mcpRequestServerFactory = (_req, scope) => {
+  ingress.setMcpTransportFactory(() => transport);
+  ingress.setMcpRequestServerFactory((_req, scope) => {
     const execution = executionTracker.startExecution("observe", scope.requestScopeId);
     execution.abortController.signal.addEventListener(
       "abort",
@@ -122,8 +112,8 @@ function statelessDaemon(): {
     );
     executions.push(execution);
     return new FakeMcpServer();
-  };
-  return { daemon, internals, transport, executions };
+  });
+  return { daemon, ingress, transport, executions };
 }
 
 const TOOLS_CALL = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "observe" } };
@@ -136,17 +126,17 @@ describe("Daemon HTTP session shutdown", () => {
   });
 
   test("a request whose body arrives after HTTP admission is quiesced answers 503 without a server", async () => {
-    const { internals, executions } = statelessDaemon();
-    internals.httpIngress.acceptingHttpSessions = true;
-    internals.httpIngress.startupCompleted = true;
+    const { ingress, executions } = statelessDaemon();
+    ingress.setAcceptingHttpSessions(true);
+    ingress.markStartupCompleted();
     const req = new FakeMcpRequest();
     const res = new FakeResponse();
-    const handled = internals.httpIngress.handleMcpHttpRequest(req, res);
+    const handled = ingress.handleMcpHttpRequest(req, res);
     // Startup admission is awaited first; the body is read on a later turn.
     for (let turn = 0; turn < 20 && req.listenerCount("end") === 0; turn++) {
       await Promise.resolve();
     }
-    internals.httpIngress.acceptingHttpSessions = false;
+    ingress.setAcceptingHttpSessions(false);
     req.emit("data", Buffer.from(JSON.stringify(TOOLS_CALL)));
     req.emit("end");
     await handled;
@@ -154,21 +144,21 @@ describe("Daemon HTTP session shutdown", () => {
     expect(res.statusCode).toBe(503);
     expect(JSON.parse(res.body)).toEqual({ error: "Daemon is shutting down" });
     expect(executions).toEqual([]);
-    expect(internals.httpIngress.mcpHttpEndpoint.inFlightCount).toBe(0);
+    expect(ingress.mcpHttpEndpoint.inFlightCount).toBe(0);
   });
 
   test("shutdown closes an in-flight request and cancels its work with the handoff reason", async () => {
-    const { daemon, internals, transport, executions } = statelessDaemon();
-    const handled = internals.httpIngress.mcpHttpEndpoint.handle(
+    const { daemon, ingress, transport, executions } = statelessDaemon();
+    const handled = ingress.mcpHttpEndpoint.handle(
       new FakeMcpRequest(),
       new FakeResponse(),
       TOOLS_CALL,
       () => {},
     );
     await transport.started;
-    daemon.markShutdownInProgressForTesting();
+    daemon.testHooks.markShutdownInProgress();
 
-    const inFlight = internals.httpIngress.mcpHttpEndpoint.inFlightRequests();
+    const inFlight = ingress.mcpHttpEndpoint.inFlightRequests();
     expect(inFlight).toHaveLength(1);
     await Promise.all(inFlight.map((request) => request.close()));
     await handled;
@@ -177,18 +167,13 @@ describe("Daemon HTTP session shutdown", () => {
       DaemonHandoffInterruptionError,
     );
     expect(transport.closeCalls).toBe(1);
-    expect(internals.httpIngress.mcpHttpEndpoint.inFlightCount).toBe(0);
+    expect(ingress.mcpHttpEndpoint.inFlightCount).toBe(0);
   });
 
   test("a response that closes early cancels only that request's work", async () => {
-    const { internals, transport, executions } = statelessDaemon();
+    const { ingress, transport, executions } = statelessDaemon();
     const res = new FakeResponse();
-    const handled = internals.httpIngress.mcpHttpEndpoint.handle(
-      new FakeMcpRequest(),
-      res,
-      TOOLS_CALL,
-      () => {},
-    );
+    const handled = ingress.mcpHttpEndpoint.handle(new FakeMcpRequest(), res, TOOLS_CALL, () => {});
     await transport.started;
     const sibling = executionTracker.startExecution("observe", "another-request-scope");
     try {
@@ -201,7 +186,7 @@ describe("Daemon HTTP session shutdown", () => {
         DaemonHandoffInterruptionError,
       );
       expect(sibling.abortController.signal.aborted).toBeFalse();
-      expect(internals.httpIngress.mcpHttpEndpoint.inFlightCount).toBe(0);
+      expect(ingress.mcpHttpEndpoint.inFlightCount).toBe(0);
     } finally {
       executionTracker.endExecution(sibling.id);
     }
@@ -209,9 +194,8 @@ describe("Daemon HTTP session shutdown", () => {
 
   test("HTTP body read preserves UTF-8 split across data events", async () => {
     const daemon = new Daemon({}, { timer: new FakeTimer() });
-    const internals = daemon as unknown as DaemonHttpSessionInternals;
     const req = new FakeRequest();
-    const read = internals.httpIngress.readHttpBody(req as unknown as IncomingMessage);
+    const read = daemon.testHooks.httpIngress.readHttpBody(req);
     const body = Buffer.from('{"text":"日"}');
     const split = body.indexOf(Buffer.from("日")) + 1;
     req.emit("data", body.subarray(0, split));
@@ -222,9 +206,8 @@ describe("Daemon HTTP session shutdown", () => {
 
   test("HTTP body read settles when upload closes without end", async () => {
     const daemon = new Daemon({}, { timer: new FakeTimer() });
-    const internals = daemon as unknown as DaemonHttpSessionInternals;
     const req = new FakeRequest();
-    const read = internals.httpIngress.readHttpBody(req as unknown as IncomingMessage);
+    const read = daemon.testHooks.httpIngress.readHttpBody(req);
     req.emit("data", Buffer.from("partial"));
     req.emit("close");
     expect(await read).toEqual({ ok: false, status: 400, error: "Request closed" });
@@ -232,9 +215,8 @@ describe("Daemon HTTP session shutdown", () => {
 
   test.each(["aborted", "error"])("HTTP body read settles on %s", async (event) => {
     const daemon = new Daemon({}, { timer: new FakeTimer() });
-    const internals = daemon as unknown as DaemonHttpSessionInternals;
     const req = new FakeRequest();
-    const read = internals.httpIngress.readHttpBody(req as unknown as IncomingMessage);
+    const read = daemon.testHooks.httpIngress.readHttpBody(req);
     req.emit(event, event === "error" ? new Error("connection reset") : undefined);
     const result = await read;
     expect(result.ok).toBeFalse();
@@ -244,17 +226,14 @@ describe("Daemon HTTP session shutdown", () => {
   test("HTTP body read times out a stalled upload", async () => {
     const timer = new FakeTimer();
     const daemon = new Daemon({}, { timer });
-    const internals = daemon as unknown as DaemonHttpSessionInternals;
     const req = new FakeRequest();
-    const read = internals.httpIngress.readHttpBody(req as unknown as IncomingMessage);
+    const read = daemon.testHooks.httpIngress.readHttpBody(req);
     timer.advanceTime(60_000);
     expect(await read).toEqual({ ok: false, status: 408, error: "Request body timed out" });
     expect(req.destroyed).toBeTrue();
   });
 
   test("interrupts and drains provisioning before the sequential shutdown stages", async () => {
-    const daemon = new Daemon({});
-    const internals = daemon as unknown as DaemonHttpSessionInternals;
     const execution = executionTracker.startExecution("provisionDevice", "provision-session");
     execution.abortController.signal.addEventListener(
       "abort",
@@ -262,7 +241,7 @@ describe("Daemon HTTP session shutdown", () => {
       { once: true },
     );
 
-    await internals.interruptProvisioningForShutdown();
+    await interruptProvisioningForShutdown(1_000);
 
     expect(execution.abortController.signal.reason).toBeInstanceOf(DaemonHandoffInterruptionError);
     expect(
@@ -272,18 +251,17 @@ describe("Daemon HTTP session shutdown", () => {
 
   test("closes HTTP and control-socket provisioning ingress before cancellation", async () => {
     const daemon = new Daemon({});
-    const internals = daemon as unknown as DaemonHttpSessionInternals;
     let quiesced = false;
-    internals.httpIngress.acceptingHttpSessions = true;
-    internals.socketServer = {
+    daemon.testHooks.httpIngress.setAcceptingHttpSessions(true);
+    daemon.testHooks.setSocketServer({
       async quiesce() {
         quiesced = true;
       },
-    };
+    });
 
-    await internals.quiesceProvisioningIngress();
+    await daemon.testHooks.quiesceProvisioningIngress();
 
-    expect(internals.httpIngress.acceptingHttpSessions).toBeFalse();
+    expect(daemon.testHooks.httpIngress.isAcceptingHttpSessions()).toBeFalse();
     expect(quiesced).toBeTrue();
   });
 });

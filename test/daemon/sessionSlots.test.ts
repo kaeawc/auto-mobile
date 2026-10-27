@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   LEGAL_SLOT_TRANSITIONS,
   SLOT_TAGS,
-  SlotTransitionError,
   assertSlotTransition,
   checkSlotTransition,
   deriveAllSlots,
@@ -19,6 +18,7 @@ import {
   type SlotPhase,
   type SlotPosition,
 } from "../../src/daemon/sessionSlots";
+import { SlotTransitionError } from "../../src/daemon/SlotTransitionError";
 import { FakeLegacyLifecycleView, deadIdentity } from "../fakes/FakeLegacyLifecycleView";
 
 // Independent oracle from design sections 3.1 and 4, including every absent edge.
@@ -425,7 +425,7 @@ test("generic slot payloads represent every designed state without manager depen
     retiring: new Set([op]),
     settled: Promise.resolve(),
   };
-  expect(states.map(({ tag }) => tag)).toEqual(SLOT_TAGS);
+  expect(states.map(({ tag }) => tag)).toEqual([...SLOT_TAGS]);
   expect(slot.uuid).toBe(uuid);
   expect(slot.state).toBe(states[0]);
   expect(slot.retiring.has(op)).toBe(true);

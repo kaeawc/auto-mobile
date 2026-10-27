@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import java.io.BufferedReader
+import java.io.IOException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.json.Json
@@ -61,7 +62,7 @@ internal class StdioResponsePump(
       try {
         readUntilClosed()
         StdioClosedException("MCP stdio closed")
-      } catch (e: Exception) {
+      } catch (e: IOException) {
         // A closed or broken pipe (child exit, client destroy) or an unexpected reader fault ends
         // the pump; every waiter receives it as a typed failure instead of hanging.
         StdioClosedException("MCP stdio closed: ${e.message}", e)

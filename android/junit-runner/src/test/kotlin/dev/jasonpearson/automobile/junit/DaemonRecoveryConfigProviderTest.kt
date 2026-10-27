@@ -132,6 +132,16 @@ class DaemonRecoveryConfigProviderTest {
   }
 
   @Test
+  fun `structured max calls uses default while preserving disabled flag`() {
+    for (value in listOf("{}", "[]", "null")) {
+      val provider =
+        providerFor(textResponse("""{"enabled":false,"config":{"maxToolCalls":$value}}"""))
+      assertFalse(provider.isRecoveryEnabled())
+      assertEquals(5, provider.getMaxRecoveryToolCalls())
+    }
+  }
+
+  @Test
   fun `malformed JSON prints warning and caches defaults`() {
     val reader = FakeRecoveryConfigResourceReader({ textResponse("{") })
     assertWarningAndCachedDefaults(reader)

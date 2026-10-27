@@ -317,6 +317,10 @@ data class RequestAction(
   val boundsTop: Int? = null,
   val boundsRight: Int? = null,
   val boundsBottom: Int? = null,
+  /** For action `custom`: the label of the app-defined accessibility action to perform. */
+  val customAction: String? = null,
+  /** For action `set_progress`: the value passed as ACTION_ARGUMENT_PROGRESS_VALUE. */
+  val progress: Float? = null,
 ) : WebSocketRequest()
 
 /**
@@ -702,7 +706,10 @@ data class ClearPreferences(
 @SerialName("request_global_action")
 data class RequestGlobalAction(
   override val requestId: String? = null,
-  val action: String, // back, home, recent, notifications, power_dialog, lock_screen
+  // back, home, recent, notifications, power_dialog, quick_settings, split_screen, lock_screen,
+  // screenshot, dismiss_notification_shade. Hosts send the latter six only to a service advertising
+  // `global_action_<action>_v1`.
+  val action: String,
   val frameContext: String? = null,
 ) : WebSocketRequest()
 
@@ -814,3 +821,11 @@ data class StartRecording(override val requestId: String? = null) : WebSocketReq
 @Serializable
 @SerialName("stop_recording")
 data class StopRecording(override val requestId: String? = null) : WebSocketRequest()
+
+@Serializable
+@SerialName("advance_prototype_clock")
+data class AdvancePrototypeClock(
+  override val requestId: String? = null,
+  val id: String,
+  val advanceTimeMs: Int,
+) : WebSocketRequest()

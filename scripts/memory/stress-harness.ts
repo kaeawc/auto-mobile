@@ -5,7 +5,9 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import type { ObserveScreen } from "../../src/features/observe/interfaces/ObserveScreen";
 import { TapOnElement } from "../../src/features/action/TapOnElement";
-import { SwipeOn } from "../../src/features/action/swipeon";
+import { TalkBackSwipeExecutor } from "../../src/features/action/swipeon/TalkBackSwipeExecutor";
+import { createExecResult } from "../../src/utils/execResult";
+import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 import { InputText } from "../../src/features/action/InputText";
 import { ViewHierarchy } from "../../src/features/observe/ViewHierarchy";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
@@ -186,7 +188,7 @@ export function resolveStressConfig(options: StressCliOptions = {}): ResolvedStr
   };
 }
 
-function createFakeAccessibilityClient() {
+function createFakeAccessibilityClient(device: BootedDevice, adb: FakeAdbExecutor) {
   const staticHierarchy = {
     hierarchy: {
       node: {
@@ -202,59 +204,35 @@ function createFakeAccessibilityClient() {
     updatedAt: Date.now(),
   };
 
-  return {
-    async getAccessibilityHierarchy() {
-      return staticHierarchy;
-    },
-    async requestAction() {
-      return { success: true, totalTimeMs: 1 };
-    },
-    async requestSwipe() {
-      return { success: true, totalTimeMs: 1 };
-    },
-    async requestSetText() {
-      return { success: true, totalTimeMs: 1 };
-    },
-    async requestImeAction(action: string) {
-      return { success: true, action, totalTimeMs: 1 };
-    },
-    async requestTapCoordinates() {
-      return { success: true, totalTimeMs: 1 };
-    },
-    async requestClearText() {
-      return { success: true, totalTimeMs: 1 };
-    },
-    async requestSelectAll() {
-      return { success: true, totalTimeMs: 1 };
-    },
-    async setRecompositionTrackingEnabled() {
-      return;
-    },
-    invalidateCache() {
-      return;
-    },
-    hasCachedHierarchy() {
-      return true;
-    },
-    isConnected() {
-      return true;
-    },
-  };
+  const client = AndroidCtrlProxyClient.createForTesting(device, adb);
+  client.getAccessibilityHierarchy = async () => staticHierarchy;
+  client.requestAction = async () => ({ success: true, totalTimeMs: 1 });
+  client.requestSwipe = async () => ({ success: true, totalTimeMs: 1 });
+  client.requestSetText = async () => ({ success: true, totalTimeMs: 1 });
+  client.requestImeAction = async (action) => ({ success: true, action, totalTimeMs: 1 });
+  client.requestTapCoordinates = async () => ({ success: true, totalTimeMs: 1 });
+  client.requestClearText = async () => ({ success: true, totalTimeMs: 1 });
+  client.requestSelectAll = async () => ({ success: true, totalTimeMs: 1 });
+  client.setRecompositionTrackingEnabled = async () => {};
+  client.invalidateCache = () => {};
+  client.hasCachedHierarchy = () => true;
+  client.isConnected = () => true;
+  return client;
 }
 
 function createFakeAdb(screenshotBase64: string): FakeAdbExecutor {
   const fakeAdb = new FakeAdbExecutor();
-  fakeAdb.setCommandResponse("wm size", { stdout: "Physical size: 1080x2400", stderr: "" });
-  fakeAdb.setCommandResponse("dumpsys window windows", {
-    stdout: DUMPSYS_WINDOW_WINDOWS_OUTPUT,
-    stderr: "",
-  });
-  fakeAdb.setCommandResponse("dumpsys window", { stdout: DUMPSYS_WINDOW_OUTPUT, stderr: "" });
-  fakeAdb.setCommandResponse("dumpsys activity activities", {
-    stdout: DUMPSYS_ACTIVITY_OUTPUT,
-    stderr: "",
-  });
-  fakeAdb.setCommandResponse("screencap -p", { stdout: screenshotBase64, stderr: "" });
+  fakeAdb.setCommandResponse("wm size", createExecResult("Physical size: 1080x2400", ""));
+  fakeAdb.setCommandResponse(
+    "dumpsys window windows",
+    createExecResult(DUMPSYS_WINDOW_WINDOWS_OUTPUT, ""),
+  );
+  fakeAdb.setCommandResponse("dumpsys window", createExecResult(DUMPSYS_WINDOW_OUTPUT, ""));
+  fakeAdb.setCommandResponse(
+    "dumpsys activity activities",
+    createExecResult(DUMPSYS_ACTIVITY_OUTPUT, ""),
+  );
+  fakeAdb.setCommandResponse("screencap -p", createExecResult(screenshotBase64, ""));
   return fakeAdb;
 }
 
@@ -279,30 +257,41 @@ export async function createStressHarness(): Promise<StressHarness> {
     create: () => fakeAdb,
   };
 
-  const fakeA11yClient = createFakeAccessibilityClient();
+  const fakeA11yClient = createFakeAccessibilityClient(device, fakeAdb);
   const originalGetInstance = AndroidCtrlProxyClient.getInstance;
-  (AndroidCtrlProxyClient as unknown as { getInstance: () => unknown }).getInstance = () =>
-    fakeA11yClient;
+  AndroidCtrlProxyClient.getInstance = () => fakeA11yClient;
 
-  const viewHierarchy = new ViewHierarchy(device, fakeAdbFactory, fakeA11yClient as unknown as any);
+  const viewHierarchy = new ViewHierarchy(device, fakeAdbFactory, fakeA11yClient);
 
-  const observeScreen = new RealObserveScreen(device, fakeAdbFactory);
-  (observeScreen as unknown as { viewHierarchy: ViewHierarchy }).viewHierarchy = viewHierarchy;
+  const observeScreen = new RealObserveScreen(device, fakeAdbFactory, { viewHierarchy });
 
-  const tapOnElement = new TapOnElement(device, fakeAdb as unknown as any, {
+  const tapOnElement = new TapOnElement(device, fakeAdb, {
     accessibilityDetector: fakeAccessibilityDetector,
   });
 
-  const swipeOn = new SwipeOn(device, fakeAdb as unknown as any, {
+  const swipeExecutor = new TalkBackSwipeExecutor({
+    device,
+    adb: fakeAdb,
+    timer: defaultTimer,
+    accessibilityService: fakeA11yClient,
+    featureFlags: FeatureFlagService.getInstance(),
     executeGesture: {
-      async swipe() {
-        return { success: true, totalTimeMs: 1 };
+      async swipe(x1, y1, x2, y2, options) {
+        return {
+          success: true,
+          totalTimeMs: 1,
+          x1,
+          y1,
+          x2,
+          y2,
+          duration: options?.duration ?? 300,
+        };
       },
     },
     accessibilityDetector: fakeAccessibilityDetector,
   });
 
-  const inputText = new InputText(device, fakeAdb as unknown as any);
+  const inputText = new InputText(device, fakeAdb);
   const imageUtils = new JimpImageUtils();
 
   let imageIndex = 0;
@@ -321,16 +310,22 @@ export async function createStressHarness(): Promise<StressHarness> {
       await tapOnElement.executeAndroidTap("tap", 10, 10, 50, element);
     },
     swipeOn: async () => {
-      await swipeOn["talkBackExecutor"].executeSwipeGesture(10, 10, 200, 10, "right", null);
+      await swipeExecutor.executeSwipeGesture({
+        x1: 10,
+        y1: 10,
+        x2: 200,
+        y2: 10,
+        direction: "right",
+        containerElement: null,
+      });
     },
     inputText: async () => {
-      await inputText["executeAndroidTextInput"]("memory-test");
+      await inputText.testHooks.executeAndroidTextInput("memory-test");
     },
   };
 
   const cleanup = async () => {
-    (AndroidCtrlProxyClient as unknown as { getInstance: unknown }).getInstance =
-      originalGetInstance;
+    AndroidCtrlProxyClient.getInstance = originalGetInstance;
     AndroidCtrlProxyClient.resetInstances();
     RealObserveScreen.clearCache();
   };

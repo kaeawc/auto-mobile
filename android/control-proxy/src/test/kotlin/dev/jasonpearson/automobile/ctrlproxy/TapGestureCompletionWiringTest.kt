@@ -35,6 +35,11 @@ class TapGestureCompletionWiringTest {
 
   @Test
   fun `tap settles off main and queues hierarchy before tap result`() {
+    assertCompletionDispatch()
+    assertTapHierarchyOrder()
+  }
+
+  private fun assertCompletionDispatch() {
     val dispatchBody = functionBody("private fun dispatchGestureWithResult(")
     val compactBody = dispatchBody.filterNot { it.isWhitespace() }
     val correlatedLaunch =
@@ -63,7 +68,9 @@ class TapGestureCompletionWiringTest {
       "lifecycle.completed(beforeResult = beforeCompletedResult, onResult = onResult)" in
         dispatchBody,
     )
+  }
 
+  private fun assertTapHierarchyOrder() {
     val tapBody = functionBody("fun performTapCoordinates(")
     val beforeStart = tapBody.indexOf("beforeCompletedResult = {")
     assertTrue("tap must provide completion work", beforeStart >= 0)

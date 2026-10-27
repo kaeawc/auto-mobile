@@ -12,24 +12,15 @@ import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
-import java.security.MessageDigest
 import java.util.UUID
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlin.concurrent.thread
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.serializer
 
 internal object DaemonSocketClientManager : DaemonToolClient {
   override fun isAlive(): Boolean = DaemonSocketClient.isAvailable(DaemonSocketPaths.socketPath())
@@ -71,7 +62,7 @@ internal object DaemonSocketClientManager : DaemonToolClient {
       connect = { DaemonSocketClient(DaemonSocketPaths.socketPath()) },
       daemonProcessAlive = {
         DaemonSocketPaths.isProcessAlive(
-          DaemonSocketPaths.readDaemonPidFromPidFile(DaemonSocketPaths.pidFilePath()),
+          DaemonPidFiles.readDaemonPidFromPidFile(DaemonSocketPaths.pidFilePath()),
         )
       },
       nowMs = System::currentTimeMillis,
@@ -195,243 +186,9 @@ internal fun forwardedDaemonFlags(environment: DaemonFlagEnvironment): List<Stri
 }
 
 internal object DaemonSocketPaths {
-  private const val DEFAULT_DAEMON_STARTUP_TIMEOUT_MS = 30000L
-  private const val DAEMON_STARTUP_LIFECYCLE_BUDGETS = 3L
-  private const val DAEMON_LAUNCHER_FINAL_READINESS_CHECK_TIMEOUT_MS = 10000L
-  private const val DAEMON_LAUNCHER_TIMED_OUT_PROCESS_STOP_TIMEOUT_MS = 10000L
-  private const val DAEMON_LAUNCHER_POST_TIMEOUT_OVERHEAD_MS =
-    DAEMON_LAUNCHER_FINAL_READINESS_CHECK_TIMEOUT_MS +
-      DAEMON_LAUNCHER_TIMED_OUT_PROCESS_STOP_TIMEOUT_MS
-  private const val DAEMON_INCOMPLETE_EXTRACTION_CLEANUP_ALLOWANCE_MS =
-    DEFAULT_DAEMON_STARTUP_TIMEOUT_MS
-  private const val DAEMON_RESTART_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 10000L
-  private const val DAEMON_RESTART_FORCE_STOP_TIMEOUT_MS = 1000L
-  private const val DAEMON_RESTART_DELAY_MS = 1000L
-  private const val DAEMON_RESTART_OVERHEAD_MS =
-    DAEMON_RESTART_GRACEFUL_SHUTDOWN_TIMEOUT_MS +
-      DAEMON_RESTART_FORCE_STOP_TIMEOUT_MS +
-      DAEMON_RESTART_DELAY_MS
-  private const val DAEMON_PACKAGE_NAME = "@kaeawc/auto-mobile"
-  private const val DAEMON_PACKAGE_VERSION_PROPERTY = "automobile.daemon.package.version"
-  private val ignoredPackageVersions = setOf("latest", "unknown")
 
   /** Control socket, honouring overrides and `AUTOMOBILE_AUX_SOCKET_DIR` like the daemon. */
   fun socketPath(): String = DaemonStatePaths.resolve(DaemonStateFile.SOCKET, ::getUserId)
-
-  fun daemonStartTimeoutMs(): Long {
-    // Check system property first, then environment variable
-    val sysProp = SystemPropertyCache.get("automobile.daemon.startup.timeout.ms", "")
-    val envVar = System.getenv("AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS")?.trim().orEmpty()
-    val configured =
-      sysProp.ifEmpty { envVar }.ifEmpty { DEFAULT_DAEMON_STARTUP_TIMEOUT_MS.toString() }
-    return configured.toLongOrNull() ?: DEFAULT_DAEMON_STARTUP_TIMEOUT_MS
-  }
-
-  /**
-   * Bound the launcher process for the daemon's full startup lifecycle: one lock-holder wait plus
-   * up to two startup attempts. A timed-out attempt may then perform a bounded final readiness
-   * check and process teardown. A retryable incomplete extraction needs one cleanup allowance
-   * before the fallback launch; restarts also budget their bounded shutdown and delay phases.
-   */
-  fun daemonLauncherTimeoutMs(isRestart: Boolean): Long {
-    val lifecycleOverheadMs =
-      DAEMON_LAUNCHER_POST_TIMEOUT_OVERHEAD_MS +
-        DAEMON_INCOMPLETE_EXTRACTION_CLEANUP_ALLOWANCE_MS +
-        if (isRestart) DAEMON_RESTART_OVERHEAD_MS else 0L
-    val startupTimeoutMs = daemonStartTimeoutMs()
-    val maximumStartupTimeoutMs =
-      (Long.MAX_VALUE - lifecycleOverheadMs) / DAEMON_STARTUP_LIFECYCLE_BUDGETS
-
-    return if (startupTimeoutMs > maximumStartupTimeoutMs) {
-      Long.MAX_VALUE
-    } else {
-      startupTimeoutMs * DAEMON_STARTUP_LIFECYCLE_BUDGETS + lifecycleOverheadMs
-    }
-  }
-
-  fun buildDaemonStartCommand(
-    flagEnvironment: DaemonFlagEnvironment = SystemDaemonFlagEnvironment,
-  ): List<String> {
-    return buildDaemonCommand("start", flagEnvironment)
-  }
-
-  fun buildDaemonRestartCommand(
-    flagEnvironment: DaemonFlagEnvironment = SystemDaemonFlagEnvironment,
-  ): List<String> {
-    return buildDaemonCommand("restart", flagEnvironment)
-  }
-
-  private fun buildDaemonCommand(
-    subCommand: String,
-    flagEnvironment: DaemonFlagEnvironment = SystemDaemonFlagEnvironment,
-  ): List<String> {
-    val command =
-      resolveLocalCommand(subCommand)
-        ?: resolvePackageCommand(subCommand)
-        ?: listOf("auto-mobile", "--daemon", subCommand)
-
-    return command + forwardedDaemonFlags(flagEnvironment)
-  }
-
-  private fun resolveLocalCommand(subCommand: String): List<String>? {
-    val projectRoot = resolveLocalDaemonProjectRoot() ?: return null
-    val runtime = resolveRuntimePath()
-    return listOf(
-      runtime,
-      File(projectRoot, "dist/src/index.js").absolutePath,
-      "--daemon",
-      subCommand,
-    )
-  }
-
-  /**
-   * The local checkout root when `automobile.daemon.local.project.path` (or its env) points at a
-   * directory whose built daemon entrypoint exists — i.e. when [buildDaemonCommand] will actually
-   * start the *local* daemon instead of the published package. Null otherwise.
-   */
-  private fun resolveLocalDaemonProjectRoot(): File? {
-    val localPath = resolveLocalProjectPath() ?: return null
-    val projectRoot = File(localPath)
-    if (!File(projectRoot, "dist/src/index.js").exists()) return null
-    return projectRoot
-  }
-
-  /** Read the `version` field from a checkout's `package.json`, or null if absent/unreadable. */
-  private fun resolveLocalPackageVersion(projectRoot: File): String? {
-    return try {
-      val packageJson = File(projectRoot, "package.json")
-      if (!packageJson.exists()) return null
-      Json { ignoreUnknownKeys = true }
-        .parseToJsonElement(packageJson.readText())
-        .jsonObject["version"]
-        ?.jsonPrimitive
-        ?.contentOrNull
-        ?.trim()
-        ?.takeIf { it.isNotEmpty() }
-    } catch (e: Exception) {
-      null
-    }
-  }
-
-  private fun resolvePackageCommand(subCommand: String): List<String>? {
-    val runner = resolvePackageRunner() ?: return null
-    return buildPackageDaemonCommand(runner, subCommand)
-  }
-
-  internal fun buildPackageDaemonCommand(
-    runner: String,
-    subCommand: String,
-    packageVersion: String? = resolveDaemonPackageVersion(),
-  ): List<String>? {
-    val packageSpecifier = resolveDaemonPackageSpecifier(packageVersion) ?: return null
-    return if (File(runner).nameWithoutExtension == "npx") {
-      listOf(runner, "-y", packageSpecifier, "--daemon", subCommand)
-    } else {
-      listOf(runner, packageSpecifier, "--daemon", subCommand)
-    }
-  }
-
-  private fun resolveDaemonPackageSpecifier(packageVersion: String?): String? {
-    val trimmedVersion = packageVersion?.trim().orEmpty()
-    if (trimmedVersion.isEmpty() || ignoredPackageVersions.contains(trimmedVersion.lowercase())) {
-      return null
-    }
-    return "$DAEMON_PACKAGE_NAME@$trimmedVersion"
-  }
-
-  internal fun resolveDaemonPackageVersion(): String? {
-    val sysProp = SystemPropertyCache.get(DAEMON_PACKAGE_VERSION_PROPERTY, "").trim()
-    if (sysProp.isNotEmpty()) return sysProp
-
-    val daemonPackageEnv = System.getenv("AUTOMOBILE_DAEMON_PACKAGE_VERSION")?.trim().orEmpty()
-    if (daemonPackageEnv.isNotEmpty()) return daemonPackageEnv
-
-    val automobileVersionEnv = System.getenv("AUTOMOBILE_VERSION")?.trim().orEmpty()
-    if (automobileVersionEnv.isNotEmpty()) return automobileVersionEnv
-
-    return DaemonSocketPaths::class.java.`package`?.implementationVersion?.trim()
-  }
-
-  /**
-   * Version this runner declares to the daemon for the server-side handshake gate (#2744).
-   *
-   * Must describe the daemon this runner will actually *start*, else the daemon rejects every
-   * request. When a local project override is active, [buildDaemonCommand] starts
-   * `<local>/dist/src/index.js` — whose version is the local checkout's, not this runner jar's — so
-   * declare the local `package.json` version (falling back to omitting, i.e. a legacy ungated
-   * client, when it can't be read) rather than the jar `Implementation-Version` the published
-   * package path would use. This was the #2749 review's local-override rejection.
-   */
-  internal fun resolveClientVersion(): String? {
-    val localProjectRoot = resolveLocalDaemonProjectRoot()
-    val resolved =
-      if (localProjectRoot != null) {
-        resolveLocalPackageVersion(localProjectRoot)
-      } else {
-        resolveDaemonPackageVersion()
-      }
-    val trimmed = resolved?.trim().orEmpty()
-    // Aliases like `latest`/`unknown` are not real versions — resolveDaemonPackageSpecifier()
-    // already treats them as unpinnable and starts bare `auto-mobile`. Declaring one as
-    // clientVersion would make the gate (and the post-start skew check) compare e.g. `latest`
-    // against `0.0.40` and reject, so behave as an unversioned (legacy, ungated) client instead.
-    if (trimmed.isEmpty() || ignoredPackageVersions.contains(trimmed.lowercase())) {
-      return null
-    }
-    return trimmed
-  }
-
-  /**
-   * Resolve whether to force a daemon restart before reuse. Explicit configuration wins (JVM
-   * property `automobile.daemon.force.restart` or env `AUTOMOBILE_DAEMON_FORCE_RESTART`); otherwise
-   * CI runs default to true so a stale daemon left by a previous job is replaced rather than
-   * silently reused (#2744 interim). See [shouldForceRestart] for the decision.
-   */
-  fun resolveForceRestart(): Boolean {
-    val property = SystemPropertyCache.get("automobile.daemon.force.restart", "").ifBlank { null }
-    val env = System.getenv("AUTOMOBILE_DAEMON_FORCE_RESTART")
-    val ci = System.getenv("CI")
-    return shouldForceRestart(property, env, ci)
-  }
-
-  /**
-   * Pure force-restart decision. Explicit property/env values (parsed as booleans) win in order;
-   * when neither is set, a truthy `CI` marker defaults to true. Unset/blank/unparseable values fall
-   * through, defaulting to false outside CI.
-   */
-  internal fun shouldForceRestart(
-    propertyValue: String?,
-    envValue: String?,
-    ciValue: String?,
-  ): Boolean {
-    parseBooleanFlag(propertyValue)?.let {
-      return it
-    }
-    parseBooleanFlag(envValue)?.let {
-      return it
-    }
-    return parseBooleanFlag(ciValue) ?: false
-  }
-
-  /**
-   * Whether a requested forced restart must actually stop the running daemon (#10170).
-   *
-   * The forced restart exists to replace a stale daemon left by an earlier job. A daemon that
-   * started after this run began ([resolveRunnerStartedAtMs]) was started by another runner of the
-   * same run (a parallel Gradle fork), so restarting it again would stop that runner's in-flight
-   * plans. When either start time is unknown the restart is kept, as before. An unavailable daemon
-   * is always (re)started.
-   */
-  internal fun requiresForcedRestart(
-    forceRestart: Boolean,
-    daemonAvailable: Boolean,
-    daemonStartedAtMs: Long?,
-    runnerStartedAtMs: Long?,
-  ): Boolean {
-    if (!forceRestart) return false
-    if (!daemonAvailable || daemonStartedAtMs == null || runnerStartedAtMs == null) return true
-    return daemonStartedAtMs <= runnerStartedAtMs
-  }
 
   /**
    * Lock file every runner JVM of this user takes around its daemon check-and-restart, so parallel
@@ -439,57 +196,8 @@ internal object DaemonSocketPaths {
    */
   fun runnerRestartLockPath(): String = socketPath().removeSuffix(".sock") + ".runner-restart.lock"
 
-  private fun parseBooleanFlag(value: String?): Boolean? {
-    val normalized = value?.trim()?.lowercase() ?: return null
-    return when (normalized) {
-      "1",
-      "true",
-      "yes",
-      "y" -> true
-      "0",
-      "false",
-      "no",
-      "n" -> false
-      else -> null
-    }
-  }
-
   /** PID file the daemon writes its identity to. Resolved like [socketPath]. */
   fun pidFilePath(): String = DaemonStatePaths.resolve(DaemonStateFile.PID, ::getUserId)
-
-  /**
-   * The release portion of a version string — everything before the semver `+g<sha>` dev stamp.
-   * Mirrors the daemon's `releaseVersion`, so a git-stamped source-checkout daemon and a
-   * plain-versioned runner compare equal at the same release.
-   */
-  internal fun releaseVersion(version: String): String = version.substringBefore('+')
-
-  /** Read the daemon's recorded version from its PID file, or null if absent/unreadable. */
-  internal fun readDaemonVersionFromPidFile(path: String): String? =
-    readPidFileString(path, "version")
-
-  /** Read the daemon's recorded CtrlProxy asset version from its PID file, or null. */
-  internal fun readDaemonAssetVersionFromPidFile(path: String): String? =
-    readPidFileString(path, "assetVersion")
-
-  /** Read the daemon's recorded build-identity hash from its PID file, or null. */
-  internal fun readDaemonBuildIdFromPidFile(path: String): String? =
-    readPidFileString(path, "buildId")
-
-  /** Read the daemon's recorded entry-script path from its PID file, or null. */
-  internal fun readDaemonEntryScriptFromPidFile(path: String): String? =
-    readPidFileString(path, "entryScript")
-
-  /**
-   * Read when the daemon generation started (epoch ms, the PID file's `startedAt`), or null if
-   * absent/unreadable.
-   */
-  internal fun readDaemonStartedAtMsFromPidFile(path: String): Long? =
-    readPidFileString(path, "startedAt")?.let { it.toLongOrNull() ?: it.toDoubleOrNull()?.toLong() }
-
-  /** Read the daemon's process id from its PID file, or null if absent/unreadable. */
-  internal fun readDaemonPidFromPidFile(path: String): Long? =
-    readPidFileString(path, "pid")?.toLongOrNull()?.takeIf { it > 0 }
 
   /**
    * Whether [pid] names a live process. An unknown pid is reported as not alive, so a daemon that
@@ -501,187 +209,6 @@ internal object DaemonSocketPaths {
       ProcessHandle.of(candidate).map { it.isAlive }.orElse(false)
     },
   ): Boolean = pid != null && lookup(pid)
-
-  /** System property carrying one start timestamp (epoch ms) shared by every fork of a build. */
-  const val RUN_STARTED_AT_PROPERTY = "automobile.junit.runStartedAtMs"
-
-  /**
-   * When this test run started (epoch ms), compared with the daemon's `startedAt` to decide whether
-   * a forced restart is still needed (#10170). A build-wide [RUN_STARTED_AT_PROPERTY] wins, so a
-   * fork started after a sibling restarted the daemon does not restart it again; without it this
-   * JVM's start time ([jvmStartedAtMs]) is used.
-   */
-  internal fun resolveRunnerStartedAtMs(
-    runStartedAtProperty: String?,
-    jvmStartedAtMs: () -> Long?,
-  ): Long? = runStartedAtProperty?.trim()?.toLongOrNull()?.takeIf { it > 0 } ?: jvmStartedAtMs()
-
-  private fun readPidFileString(path: String, field: String): String? {
-    return try {
-      val file = File(path)
-      if (!file.exists()) return null
-      Json { ignoreUnknownKeys = true }
-        .parseToJsonElement(file.readText())
-        .jsonObject[field]
-        ?.jsonPrimitive
-        ?.contentOrNull
-        ?.trim()
-        ?.takeIf { it.isNotEmpty() }
-    } catch (e: Exception) {
-      null
-    }
-  }
-
-  /**
-   * Entry script the local-override daemon runs (`<local>/dist/src/index.js`), or null when no
-   * local override is active. This is the file whose content hash forms the build identity.
-   */
-  internal fun resolveLocalDaemonEntryScript(): String? =
-    resolveLocalDaemonProjectRoot()?.let { File(it, "dist/src/index.js").absolutePath }
-
-  /**
-   * Build identity (short content hash of the started daemon's entry script) this runner declares
-   * for the handshake gate. Only resolvable for a local override — the published-package daemon's
-   * entry script lives in an npm cache this runner cannot hash — so a package-path runner stays a
-   * version-only client. Mirrors the TS `computeBuildIdentity` (sha256, first 16 hex chars) so the
-   * daemon's own build id compares equal.
-   */
-  internal fun resolveClientBuildId(): String? =
-    resolveLocalDaemonEntryScript()?.let { computeBuildId(File(it)) }
-
-  private fun computeBuildId(entryScript: File): String? {
-    return try {
-      if (!entryScript.exists()) return null
-      val digest = MessageDigest.getInstance("SHA-256").digest(entryScript.readBytes())
-      digest.joinToString("") { formatHexByte(it) }.substring(0, 16)
-    } catch (e: Exception) {
-      null
-    }
-  }
-
-  /**
-   * Whether an already-running daemon must be restarted because its recorded build identity differs
-   * from this runner's — two checkouts at the *same* release version (e.g. `0.0.40+gold` vs a local
-   * `0.0.40`) that the release-only version check cannot tell apart (#2744). Mirrors the daemon's
-   * `buildIdentitiesMatch`: compare content hashes when both are known, else fall back to comparing
-   * entry-script paths (so a daemon whose hash is `unknown` but whose recorded entry script differs
-   * still triggers a restart), else treat as a match to avoid thrashing an unidentifiable daemon.
-   */
-  internal fun requiresBuildSkewRestart(
-    daemonBuildId: String?,
-    daemonEntryScript: String?,
-    clientBuildId: String?,
-    clientEntryScript: String?,
-  ): Boolean {
-    val daemonHash = daemonBuildId?.trim().orEmpty()
-    val clientHash = clientBuildId?.trim().orEmpty()
-    val daemonHashKnown = daemonHash.isNotEmpty() && daemonHash != "unknown"
-    val clientHashKnown = clientHash.isNotEmpty() && clientHash != "unknown"
-    if (daemonHashKnown && clientHashKnown) {
-      return daemonHash != clientHash
-    }
-    val daemonEntry = daemonEntryScript?.trim().orEmpty()
-    val clientEntry = clientEntryScript?.trim().orEmpty()
-    if (daemonEntry.isNotEmpty() && clientEntry.isNotEmpty()) {
-      return daemonEntry != clientEntry
-    }
-    return false
-  }
-
-  /**
-   * Whether an already-running daemon must be restarted before reuse because its recorded version
-   * does not match this runner's (#2744). Compares release portions (stripping the dev stamp),
-   * mirroring the MCP proxy's `ensureVersionMatches`. A blank/unknown version on either side yields
-   * false: without both versions the skew cannot be proven, and forcing a restart would thrash a
-   * daemon we cannot identify (matches the daemon gate's lenient "unknown => allow" stance).
-   */
-  internal fun requiresVersionSkewRestart(daemonVersion: String?, clientVersion: String?): Boolean {
-    val daemonBase = releaseVersion(daemonVersion?.trim().orEmpty())
-    val clientBase = releaseVersion(clientVersion?.trim().orEmpty())
-    if (daemonBase.isEmpty() || clientBase.isEmpty()) return false
-    return daemonBase != clientBase
-  }
-
-  internal fun resolveCallerAssetVersionPin(): String? {
-    val pinned = System.getenv("AUTOMOBILE_VERSION")?.trim().orEmpty()
-    if (pinned.isEmpty() || ignoredPackageVersions.contains(pinned.lowercase())) {
-      return null
-    }
-    return pinned
-  }
-
-  internal fun requiresAssetVersionPinFailure(
-    daemonAssetVersion: String?,
-    callerPinnedVersion: String?,
-  ): Boolean {
-    val daemon = daemonAssetVersion?.trim().orEmpty()
-    val caller = callerPinnedVersion?.trim().orEmpty()
-    if (caller.isEmpty() || ignoredPackageVersions.contains(caller.lowercase())) {
-      return false
-    }
-    return daemon != caller
-  }
-
-  internal fun requiresImmediateAssetVersionPinFailure(
-    assetVersionSkew: Boolean,
-    versionSkew: Boolean,
-    buildSkew: Boolean,
-    forceRestart: Boolean,
-  ): Boolean {
-    return assetVersionSkew && !versionSkew && !buildSkew && !forceRestart
-  }
-
-  private fun resolveLocalProjectPath(): String? {
-    val sysProp = SystemPropertyCache.get("automobile.daemon.local.project.path", "")
-    val envVar = System.getenv("AUTOMOBILE_DAEMON_LOCAL_PROJECT_PATH")?.trim().orEmpty()
-    val path = sysProp.ifEmpty { envVar }
-    if (path.isEmpty()) return null
-    val dir = File(path)
-    return if (dir.isDirectory) dir.absolutePath else null
-  }
-
-  private fun resolveRuntimePath(): String {
-    // Gradle test workers often have a stripped PATH, so resolve full paths.
-    // Prefer bun since the project runs on bun.
-    val home = System.getProperty("user.home") ?: System.getenv("HOME") ?: ""
-    val candidates =
-      listOfNotNull(
-        if (home.isNotEmpty()) "$home/.bun/bin/bun" else null,
-        "/usr/local/bin/bun",
-        "/opt/homebrew/bin/bun",
-        "/usr/local/bin/node",
-        "/opt/homebrew/bin/node",
-        if (home.isNotEmpty()) "$home/.nvm/current/bin/node" else null,
-      )
-
-    for (path in candidates) {
-      if (File(path).exists()) return path
-    }
-
-    return resolveCommandPath("bun") ?: resolveCommandPath("node") ?: "node"
-  }
-
-  private fun resolvePackageRunner(): String? {
-    for (cmd in listOf("bunx", "npx")) {
-      val resolved = resolveCommandPath(cmd)
-      if (resolved != null) return resolved
-    }
-    return null
-  }
-
-  private fun resolveCommandPath(cmd: String): String? {
-    try {
-      val process = ProcessBuilder("which", cmd).redirectErrorStream(true).start()
-      val exited = process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
-      if (exited && process.exitValue() == 0) {
-        val path = process.inputStream.bufferedReader().readText().trim()
-        if (path.isNotEmpty()) return path
-      }
-    } catch (_: Exception) {
-      // ignore
-    }
-    return null
-  }
 
   private fun getUserId(): String {
     val userName = System.getProperty("user.name", "default").ifBlank { "default" }
@@ -699,7 +226,14 @@ internal object DaemonSocketPaths {
       }
       val uid = process.inputStream.bufferedReader().readText().trim()
       if (uid.isNotEmpty()) uid else userName
-    } catch (e: Exception) {
+    } catch (e: IOException) {
+      println("User id lookup failed: $e")
+      userName
+    } catch (e: SecurityException) {
+      println("User id lookup inaccessible: $e")
+      userName
+    } catch (e: InterruptedException) {
+      println("User id lookup interrupted: $e")
       userName
     }
   }
@@ -707,14 +241,13 @@ internal object DaemonSocketPaths {
 
 internal class DaemonSocketClient(
   private val socketPath: String,
-  private val clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
-  private val clientBuildId: String? = DaemonSocketPaths.resolveClientBuildId(),
-  private val clientEntryScript: String? = DaemonSocketPaths.resolveLocalDaemonEntryScript(),
+  private val clientVersion: String? = DaemonLaunchCommands.resolveClientVersion(),
+  private val clientBuildId: String? = DaemonLocalBuild.resolveClientBuildId(),
+  private val clientEntryScript: String? = DaemonLocalBuild.resolveLocalDaemonEntryScript(),
   private val livenessOwnerToken: String = DaemonLivenessOwner.token,
+  private val responseObserver: ((DaemonResponse) -> Unit)? = null,
 ) : Closeable, DaemonToolClient {
-  private val json = Json { ignoreUnknownKeys = true }
-  private val pending = ConcurrentHashMap<String, CompletableFuture<DaemonResponse>>()
-  private val writeLock = Any()
+  private val requests: DaemonPendingRequests
   @Volatile private var closed = false
 
   // Session UUID for per-thread plan execution locking.
@@ -731,6 +264,7 @@ internal class DaemonSocketClient(
     val outputStream = Channels.newOutputStream(channel)
     reader = BufferedReader(InputStreamReader(inputStream, StandardCharsets.UTF_8))
     writer = BufferedWriter(OutputStreamWriter(outputStream, StandardCharsets.UTF_8))
+    requests = DaemonPendingRequests(writer)
 
     readThread =
       thread(start = true, isDaemon = true, name = "auto-mobile-daemon-reader") { readLoop() }
@@ -744,7 +278,7 @@ internal class DaemonSocketClient(
     channel.shutdownOutput()
   }
 
-  internal fun pendingRequestCount(): Int = pending.size
+  internal fun pendingRequestCount(): Int = requests.size
 
   override fun callTool(toolName: String, arguments: JsonObject, timeoutMs: Long): DaemonResponse {
     if (!isConnected()) {
@@ -759,15 +293,13 @@ internal class DaemonSocketClient(
         method = "tools/call",
         params = buildJsonParams(toolName, arguments),
         timeoutMs = timeoutMs,
+        acceptsRequestBudget = true,
         clientVersion = clientVersion,
         clientBuildId = clientBuildId,
         clientEntryScript = clientEntryScript,
       )
 
-    val responseFuture = CompletableFuture<DaemonResponse>()
-    registerAndSend(requestId, responseFuture, request, timeoutMs)
-
-    return awaitResponse(requestId, responseFuture, timeoutMs)
+    return requests.execute(request, timeoutMs)
   }
 
   override fun readResource(uri: String, timeoutMs: Long): DaemonResponse {
@@ -783,15 +315,13 @@ internal class DaemonSocketClient(
         method = "resources/read",
         params = JsonObject(mapOf("uri" to JsonPrimitive(uri))),
         timeoutMs = timeoutMs,
+        acceptsRequestBudget = true,
         clientVersion = clientVersion,
         clientBuildId = clientBuildId,
         clientEntryScript = clientEntryScript,
       )
 
-    val responseFuture = CompletableFuture<DaemonResponse>()
-    registerAndSend(requestId, responseFuture, request, timeoutMs)
-
-    return awaitResponse(requestId, responseFuture, timeoutMs)
+    return requests.execute(request, timeoutMs)
   }
 
   override fun callDaemonMethod(
@@ -821,10 +351,7 @@ internal class DaemonSocketClient(
         clientEntryScript = clientEntryScript,
       )
 
-    val responseFuture = CompletableFuture<DaemonResponse>()
-    registerAndSend(requestId, responseFuture, request, timeoutMs)
-
-    return awaitResponse(requestId, responseFuture, timeoutMs)
+    return requests.execute(request, timeoutMs)
   }
 
   /**
@@ -835,25 +362,6 @@ internal class DaemonSocketClient(
    * loop dies; `future.get` then rethrows it wrapped in an [ExecutionException], so we unwrap it
    * here.
    */
-  private fun awaitResponse(
-    requestId: String,
-    responseFuture: CompletableFuture<DaemonResponse>,
-    timeoutMs: Long,
-  ): DaemonResponse {
-    return try {
-      responseFuture.get(timeoutMs, TimeUnit.MILLISECONDS)
-    } catch (e: TimeoutException) {
-      throw mapAwaitFailure(e, timeoutMs)
-    } catch (e: ExecutionException) {
-      throw mapAwaitFailure(e, timeoutMs)
-    } catch (e: InterruptedException) {
-      Thread.currentThread().interrupt()
-      throw mapAwaitFailure(e, timeoutMs)
-    } finally {
-      pending.remove(requestId)
-    }
-  }
-
   override fun close() {
     if (closed) {
       return
@@ -861,10 +369,10 @@ internal class DaemonSocketClient(
     closed = true
     try {
       channel.close()
-    } catch (e: Exception) {
-      // Ignore close errors
+    } catch (e: IOException) {
+      println("Daemon socket close failed: $e")
     }
-    failPendingRequests("Daemon socket closed")
+    requests.failPendingRequests("Daemon socket closed")
   }
 
   private fun connect(): SocketChannel {
@@ -884,31 +392,15 @@ internal class DaemonSocketClient(
     }
   }
 
-  private fun registerAndSend(
-    requestId: String,
-    responseFuture: CompletableFuture<DaemonResponse>,
-    request: DaemonRequest,
-    timeoutMs: Long,
-  ) {
-    pending[requestId] = responseFuture
-    try {
-      sendRequest(request)
-    } catch (e: IOException) {
-      pending.remove(requestId)
-      throw mapAwaitFailure(e, timeoutMs)
-    }
-  }
-
-  private fun sendRequest(request: DaemonRequest) {
-    val payload = json.encodeToString(request)
-    synchronized(writeLock) {
-      writer.write(payload)
-      writer.newLine()
-      writer.flush()
-    }
-  }
-
   private fun readLoop() {
+    val frames =
+      DaemonInboundFrames(
+        onResponse = { response ->
+          responseObserver?.invoke(response)
+          requests.handleResponse(response)
+        },
+        onBudget = requests::adoptBudget,
+      )
     try {
       while (!closed) {
         val line = reader.readLine() ?: break
@@ -916,25 +408,19 @@ internal class DaemonSocketClient(
           continue
         }
         try {
-          val response = json.decodeFromString(serializer<DaemonResponse>(), line)
-          handleResponse(response)
+          frames.handle(line)
         } catch (e: Exception) {
-          println("Failed to parse daemon response: ${e.message}")
+          // One bad frame must not end the reader and fail every pending request in the user's
+          // test.
+          println("Failed to handle daemon response: ${e.message}")
         }
       }
-    } catch (e: Exception) {
+    } catch (e: IOException) {
       if (!closed) {
         println("Daemon socket read error: ${e.message}")
       }
     } finally {
       close()
-    }
-  }
-
-  private fun handleResponse(response: DaemonResponse) {
-    val future = pending.remove(response.id)
-    if (future != null) {
-      future.complete(response)
     }
   }
 
@@ -950,12 +436,6 @@ internal class DaemonSocketClient(
         },
       )
     return JsonObject(mapOf("name" to JsonPrimitive(toolName), "arguments" to argumentsWithSession))
-  }
-
-  private fun failPendingRequests(message: String) {
-    val exception = DaemonUnavailableException(message)
-    pending.values.forEach { future -> future.completeExceptionally(exception) }
-    pending.clear()
   }
 
   companion object {
@@ -1001,7 +481,20 @@ internal class DaemonSocketClient(
         val client = DaemonSocketClient(socketPath)
         client.close()
         true
-      } catch (e: Exception) {
+      } catch (e: DaemonUnavailableException) {
+        println("Daemon socket unavailable: $e")
+        false
+      } catch (e: IOException) {
+        println("Daemon socket unavailable: $e")
+        false
+      } catch (e: UnsupportedOperationException) {
+        println("Daemon socket unsupported: $e")
+        false
+      } catch (e: SecurityException) {
+        println("Daemon socket inaccessible: $e")
+        false
+      } catch (e: IllegalArgumentException) {
+        println("Invalid daemon socket path: $e")
         false
       }
     }
@@ -1026,6 +519,7 @@ internal data class DaemonRequest(
   val method: String,
   val params: JsonObject,
   val timeoutMs: Long? = null,
+  val acceptsRequestBudget: Boolean? = null,
   // Declared for the daemon's server-side version handshake gate (#2744). Null on
   // legacy runners; the daemon allows those through.
   val clientVersion: String? = null,

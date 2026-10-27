@@ -232,7 +232,7 @@ describe("IosCtrlProxyProcessClient", () => {
     let rootAlive = true;
     let childAlive = true;
     const host: HostCommandExecutor = {
-      async executeCommand(file, args) {
+      async executeCommand(file, args = []) {
         if (file === "ps") {
           return result(rootAlive ? "42 1\n43 42\n" : "43 1\n");
         }
@@ -266,7 +266,7 @@ describe("IosCtrlProxyProcessClient", () => {
     timer.enableAutoAdvance();
     const commands: string[] = [];
     const host: HostCommandExecutor = {
-      async executeCommand(file, args, options) {
+      async executeCommand(file, args = [], options) {
         commands.push([file, ...args].join(" "));
         if (file === "ps") {
           await timer.sleep(options!.timeoutMs!);
@@ -294,7 +294,7 @@ describe("IosCtrlProxyProcessClient", () => {
     const commands: string[] = [];
     const timeouts: Array<number | undefined> = [];
     const host: HostCommandExecutor = {
-      async executeCommand(file, args, options) {
+      async executeCommand(file, args = [], options) {
         commands.push([file, ...args].join(" "));
         timeouts.push(options?.timeoutMs);
         return result(file === "ps" ? "42 1\n43 42\n" : "");
@@ -396,7 +396,7 @@ describe("IosCtrlProxyProcessClient", () => {
     async (parentPid) => {
       const command = `${parentPid} xcodebuild test-without-building -xctestrun /tmp/${"long-path/".repeat(40)}CtrlProxy.xctestrun -destination id=DEVICE-1`;
       const host: HostCommandExecutor = {
-        async executeCommand(file, args) {
+        async executeCommand(file, args = []) {
           expect(file).toBe("ps");
           return result(args.includes("-ww") ? command : command.slice(0, 256));
         },
@@ -441,7 +441,7 @@ describe("IosCtrlProxyProcessClient", () => {
   test("force termination signals the tracked process group when its root is absent", async () => {
     const commands: string[] = [];
     const host: HostCommandExecutor = {
-      async executeCommand(file, args) {
+      async executeCommand(file, args = []) {
         commands.push(`${file} ${args.join(" ")}`);
         if (file === "ps") {
           return result();
@@ -465,7 +465,7 @@ describe("IosCtrlProxyProcessClient", () => {
   test("does not signal a PID recycled while descendants are enumerated", async () => {
     const commands: string[] = [];
     const host: HostCommandExecutor = {
-      async executeCommand(file, args) {
+      async executeCommand(file, args = []) {
         commands.push(`${file} ${args.join(" ")}`);
         if (args.includes("-axo")) {
           return result("42 100\n43 42");
@@ -482,7 +482,7 @@ describe("IosCtrlProxyProcessClient", () => {
     const timer = new FakeTimer();
     const commands: string[] = [];
     const host: HostCommandExecutor = {
-      async executeCommand(file, args) {
+      async executeCommand(file, args = []) {
         commands.push(`${file} ${args.join(" ")}`);
         if (file === "kill" && args[0] === "-0") {
           throw new Error("No such process");
@@ -545,7 +545,7 @@ describe("IosCtrlProxyProcessClient", () => {
     timer.enableAutoAdvance();
     let killed = false;
     const host: HostCommandExecutor = {
-      async executeCommand(file, args) {
+      async executeCommand(file, args = []) {
         if (file === "ps") {
           return result("42 1\n43 42\n");
         }
@@ -570,7 +570,7 @@ describe("IosCtrlProxyProcessClient", () => {
   test("propagates deadline expiry while waiting for a process tree to exit", async () => {
     const timer = new FakeTimer();
     const host: HostCommandExecutor = {
-      async executeCommand(file, args) {
+      async executeCommand(file, args = []) {
         if (file === "ps") {
           return result("42 1\n");
         }

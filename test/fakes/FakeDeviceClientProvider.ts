@@ -1,14 +1,14 @@
 import type {
   DeviceClientProvider,
   DeviceClientSimctl,
-} from "../../src/devices/DeviceSessionManager";
+} from "../../src/daemon/readiness/DeviceReadiness";
 import { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { PlatformDeviceManager } from "../../src/utils/interfaces/DeviceUtils";
 import { CtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { CtrlProxyIosManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
-import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import type { IosCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import type { Window } from "../../src/features/observe/interfaces/Window";
 import type { ObserveScreenCache } from "../../src/features/observe/interfaces/ObserveScreenCache";
 import { FakeObserveScreenCache } from "./FakeObserveScreenCache";
@@ -19,7 +19,7 @@ export interface FakeDeviceClientProviderOptions {
   ctrlProxyManager?: CtrlProxyManager;
   ctrlProxyClient?: AndroidCtrlProxy;
   iosCtrlProxyManager?: CtrlProxyIosManager;
-  iosCtrlProxyClient?: IOSCtrlProxy;
+  iosCtrlProxyClient?: IosCtrlProxy;
   window?: Window;
   observeScreenCache?: ObserveScreenCache;
   iosPhysicalDeviceLister?: IosPhysicalDeviceLister;
@@ -82,7 +82,7 @@ export class FakeDeviceClientProvider implements DeviceClientProvider {
     return this.require(this.options.iosCtrlProxyManager, "iosCtrlProxyManager");
   }
 
-  getIOSCtrlProxyClient(_device: BootedDevice, _port: number): IOSCtrlProxy {
+  getIOSCtrlProxyClient(_device: BootedDevice, _port: number): IosCtrlProxy {
     return this.require(this.options.iosCtrlProxyClient, "iosCtrlProxyClient");
   }
 

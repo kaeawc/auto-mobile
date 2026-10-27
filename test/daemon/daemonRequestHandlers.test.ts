@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { idleReleaseAt } from "../../src/daemon/sessionHoldDiagnostics";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { logger } from "../../src/utils/logger";
 import {
   DevicePoolStats,
   handleDaemonRequest,
+  type DaemonMethodResult,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import {
@@ -26,9 +27,13 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { createRegistryDeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import type { DeviceLeaseActivitySources } from "../../src/daemon/deviceLeaseActivity";
 import type { DeviceLeaseRelinquishPort } from "../../src/daemon/deviceLeaseActivitySources";
+
+afterEach(() => {
+  mock.restore();
+});
 
 class FakeDevicePool {
   stats: DevicePoolStats;
@@ -217,9 +222,10 @@ describe("handleDaemonRequest", () => {
             claimLivenessOwnership: true,
           }),
           {
-            ...state,
             isInitialized: () => true,
             getSessionManager: () => sessionManager,
+            getDevicePool: () => state.getDevicePool(),
+            getDeviceSessionRegistry: () => state.getDeviceSessionRegistry(),
             getDaemonInstance: () => "daemon-race",
           },
         );
@@ -282,7 +288,9 @@ describe("handleDaemonRequest", () => {
     );
     const capabilities = await handleDaemonRequest(buildRequest("daemon/capabilities"), state);
     expect(capabilities?.result?.capabilities).toContain("session-broker/v1");
+    expect(capabilities?.result?.capabilities).toContain("session-broker-export/v1");
     expect(capabilities?.result?.capabilities).not.toContain("managed-slots/v1"); // Legacy capability is absent after upgrade.
+    expect(capabilities?.result?.capabilities).not.toContain("session-broker/ios-duo/v1");
     // A provider that has not completed broker startup cannot grant a session.
     expect(await handleDaemonRequest(buildRequest("daemon/prepareSession"), state)).toMatchObject({
       success: false,
@@ -949,12 +957,21 @@ describe("handleDaemonRequest", () => {
       daemon_session_id: "old-daemon",
       created_at_ms: 1,
       last_used_at_ms: 20,
+      activity_seq: 0,
       expires_at_ms: 30,
       released_at_ms: 25,
       release_reason: "daemon-restart",
       session_timeout_ms: 10_000,
       heartbeat_timeout_ms: 5_000,
       has_received_heartbeat: 1,
+      stable_identity_generation: 0,
+      liveness_contract_generation: 0,
+      heartbeat_timeout_source: null,
+      liveness_policy: null,
+      pre_cli_heartbeat_timeout_ms: null,
+      pre_cli_heartbeat_timeout_source: null,
+      pre_cli_session_timeout_ms: null,
+      liveness_owner_token: null,
       created_at: "2026-09-14T00:00:00.000Z",
       updated_at: "2026-09-14T00:00:00.000Z",
     };
@@ -1076,7 +1093,7 @@ describe("handleDaemonRequest", () => {
         getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
         getDaemonInstance: () => "daemon-not-found",
       };
-      const legacy = {
+      const legacy: DaemonMethodResult = {
         success: false,
         error: `Session not found: ${sessionId}`,
         code: DAEMON_SESSION_NOT_FOUND_CODE,
@@ -1212,7 +1229,14 @@ describe("handleDaemonRequest", () => {
         new FakeDaemonState(sessionManager, pool),
         tracker,
       ),
-    ).toMatchObject({ success: true, result: { alreadyReleased: true } });
+    ).toMatchObject({
+      success: true,
+      result: {
+        alreadyReleased: false,
+        known: false,
+        message: expect.stringContaining("not known"),
+      },
+    });
   });
 
   test("releasing an already released session stays idempotent (#11148)", async () => {
@@ -1227,7 +1251,10 @@ describe("handleDaemonRequest", () => {
       );
     await release();
 
-    expect(await release()).toMatchObject({ success: true, result: { alreadyReleased: true } });
+    expect(await release()).toMatchObject({
+      success: true,
+      result: { alreadyReleased: true, known: true },
+    });
   });
 
   test("releases session and device without a cancellation await when idle", async () => {
@@ -1468,7 +1495,7 @@ describe("handleDaemonRequest", () => {
       name: "emulator-5600",
       platform: "android",
       sessionId: "session-unpublished",
-      status: "assigned",
+      status: "busy",
       lastUsedAt: 0,
       assignmentCount: 1,
       errorCount: 0,

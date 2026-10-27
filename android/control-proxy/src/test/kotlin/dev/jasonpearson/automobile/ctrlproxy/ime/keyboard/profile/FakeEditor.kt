@@ -41,21 +41,7 @@ internal class FakeEditor(initialText: String = "") {
           replace(start, end, op.text)
           clearComposing()
         }
-        is ImeOp.SetComposingText -> {
-          val start = if (composingStart >= 0) composingStart else selectionStart
-          val end = if (composingStart >= 0) composingEnd else selectionEnd
-          replace(start, end, op.text)
-          composingStart = start
-          composingEnd = start + op.text.length
-          val cursor =
-            if (op.newCursorPosition > 0) {
-              start + op.text.length + op.newCursorPosition - 1
-            } else {
-              start + op.newCursorPosition
-            }
-          selectionStart = cursor.coerceIn(composingStart, composingEnd)
-          selectionEnd = selectionStart
-        }
+        is ImeOp.SetComposingText -> setComposingText(op)
         ImeOp.FinishComposingText -> clearComposing()
         is ImeOp.SetComposingRegion -> {
           require(op.start in 0..text.length && op.end in op.start..text.length)
@@ -69,25 +55,44 @@ internal class FakeEditor(initialText: String = "") {
           replace(start, end, "")
           clearComposing()
         }
-        is ImeOp.SendKey ->
-          when (op.keyCode) {
-            67 -> {
-              val start =
-                if (selectionStart != selectionEnd) selectionStart
-                else (selectionStart - 1).coerceAtLeast(0)
-              replace(start, selectionEnd, "")
-              clearComposing()
-            }
-            66 -> {
-              replace(selectionStart, selectionEnd, "\n")
-              clearComposing()
-            }
-            else -> error("Unsupported key code ${op.keyCode}")
-          }
+        is ImeOp.SendKey -> sendKey(op)
         is ImeOp.PerformEditorAction,
         ImeOp.BeginBatchEdit,
         ImeOp.EndBatchEdit -> Unit
       }
+    }
+  }
+
+  private fun setComposingText(op: ImeOp.SetComposingText) {
+    val start = if (composingStart >= 0) composingStart else selectionStart
+    val end = if (composingStart >= 0) composingEnd else selectionEnd
+    replace(start, end, op.text)
+    composingStart = start
+    composingEnd = start + op.text.length
+    val cursor =
+      if (op.newCursorPosition > 0) {
+        start + op.text.length + op.newCursorPosition - 1
+      } else {
+        start + op.newCursorPosition
+      }
+    selectionStart = cursor.coerceIn(composingStart, composingEnd)
+    selectionEnd = selectionStart
+  }
+
+  private fun sendKey(op: ImeOp.SendKey) {
+    when (op.keyCode) {
+      67 -> {
+        val start =
+          if (selectionStart != selectionEnd) selectionStart
+          else (selectionStart - 1).coerceAtLeast(0)
+        replace(start, selectionEnd, "")
+        clearComposing()
+      }
+      66 -> {
+        replace(selectionStart, selectionEnd, "\n")
+        clearComposing()
+      }
+      else -> error("Unsupported key code ${op.keyCode}")
     }
   }
 

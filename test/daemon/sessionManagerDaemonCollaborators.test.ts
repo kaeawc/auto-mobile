@@ -4,14 +4,14 @@ import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-function createManager(): SessionManager {
+async function createManager(): Promise<SessionManager> {
   const timer = new FakeTimer();
-  return new SessionManager(timer, new DeviceSessionRepository(createTestDatabase(), timer));
+  return new SessionManager(timer, new DeviceSessionRepository(await createTestDatabase(), timer));
 }
 
 describe("SessionManager daemon collaborator assertion", () => {
-  test("fails loudly naming every unattached collaborator", () => {
-    const manager = createManager();
+  test("fails loudly naming every unattached collaborator", async () => {
+    const manager = await createManager();
     expect(() => manager.assertDaemonCollaboratorsAttached()).toThrow(
       /daemonSessionId.*activeSessionExecutionChecker/,
     );
@@ -21,8 +21,8 @@ describe("SessionManager daemon collaborator assertion", () => {
     );
   });
 
-  test("passes once every collaborator is attached", () => {
-    const manager = createManager();
+  test("passes once every collaborator is attached", async () => {
+    const manager = await createManager();
     manager.attachDaemonSessionId("daemon-1");
     manager.setActiveSessionExecutionChecker(() => true);
     manager.setSessionExecutionDeadlineLookup(() => undefined);

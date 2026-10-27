@@ -63,6 +63,13 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
     return { socket, subscriptionId };
   }
 
+  setBackfilling(subscriptionId: string, backfilling: boolean): void {
+    const subscriber = this.subscribers.get(subscriptionId);
+    if (subscriber) {
+      subscriber.backfilling = backfilling;
+    }
+  }
+
   /**
    * Simulate a pong response from a subscriber
    */
@@ -145,6 +152,42 @@ describe("PerformancePushSocketServer", () => {
 
     server.simulateSubscription({ deviceSessionUuid: "uuid-1" });
     expect(server.getSubscriberCount()).toBe(2);
+  });
+
+  it("reports demand using live UUID and package filters", () => {
+    expect(server.hasSubscriberForDevice("device-1", "com.example.app")).toBe(false);
+    server.simulateSubscription({ deviceSessionUuid: "uuid-1", packageName: "com.example.app" });
+    expect(server.hasSubscriberForDevice("device-1", "com.example.app")).toBe(true);
+    expect(server.hasSubscriberForDevice("device-2", "com.example.app")).toBe(false);
+    expect(server.hasSubscriberForDevice("device-1", "other.app")).toBe(false);
+    resolver.bind("device-1", "new-uuid");
+    expect(server.hasSubscriberForDevice("device-1", "com.example.app")).toBe(false);
+  });
+
+  it("supports null filters and ignores destroyed and backfilling subscribers", () => {
+    const { socket, subscriptionId } = server.simulateSubscription({ packageName: "app" });
+    expect(server.hasSubscriberForDevice("unresolved-device", "app")).toBe(true);
+    expect(server.hasSubscriberForDevice("device-1", "other")).toBe(false);
+    server.setBackfilling(subscriptionId, true);
+    expect(server.hasSubscriberForDevice("device-1", "app")).toBe(false);
+    server.setBackfilling(subscriptionId, false);
+    socket.destroy();
+    expect(server.hasSubscriberForDevice("device-1", "app")).toBe(false);
+    server.simulateSubscription({ deviceSessionUuid: "uuid-1" });
+    expect(server.hasSubscriberForDevice("device-1", "other")).toBe(true);
+    server.simulateSubscription({});
+    expect(server.hasSubscriberForDevice("unresolved-device", "other")).toBe(true);
+  });
+
+  it("does not demand samples for quarantined identities and resumes after resolution", () => {
+    server.simulateSubscription({});
+    expect(server.hasSubscriberForDevice("device-1", "app")).toBe(true);
+    resolver.quarantine("device-1");
+    expect(server.hasSubscriberForDevice("device-1", "app")).toBe(false);
+    expect(server.hasSubscriberForDevice("device-1", "app")).toBe(false);
+    expect(server.hasSubscriberForDevice("device-2", "app")).toBe(true);
+    resolver.resolveIdentity("device-1");
+    expect(server.hasSubscriberForDevice("device-1", "app")).toBe(true);
   });
 
   it("stores subscription filters correctly", () => {

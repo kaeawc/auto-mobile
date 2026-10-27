@@ -5,7 +5,7 @@ import {
   DAEMON_FORCED_STOP_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
-} from "./constants";
+} from "./wire/constants";
 import type { DaemonClientFactoryOptions, DaemonClientLike } from "./client";
 import { daemonProcessOptions } from "./daemonOptionScopes";
 import {
@@ -29,6 +29,10 @@ import {
 } from "./liveAcceptanceCapability";
 import { recordedProcessGenerationToken } from "./processGenerationFields";
 import type { DaemonStartResult } from "./manager";
+import {
+  deferredRestartError,
+  type TakeoverDeferralLedger,
+} from "./manager/TakeoverDeferralLedger";
 import type { DaemonOptions, DaemonStatus } from "./types";
 
 /**
@@ -51,6 +55,8 @@ export interface DaemonStopWaitResult {
  * stay in one place and the restart sequencing can be tested with a fake.
  */
 export interface DaemonRestartHost {
+  readonly takeoverDeferrals: TakeoverDeferralLedger;
+  now(): number;
   log(message: string): void;
   sleep(ms: number): Promise<void>;
   acquireLock(): boolean;
@@ -215,6 +221,52 @@ export async function restartNamespace(
   return restartResultFromStart(startResult);
 }
 
+async function prepareExpectedGenerationRestart(
+  host: DaemonRestartHost,
+  expected: DaemonStatus,
+  recovering: boolean,
+): Promise<boolean> {
+  let preparation: DaemonRestartPreparation;
+  try {
+    preparation = recovering
+      ? await host.prepareIdentityRecoveryRestart(expected)
+      : await host.prepareDaemonForConditionalRestart(expected);
+  } catch (error) {
+    if (error instanceof DaemonRestartDeferredError) {
+      throw deferredRestartError({
+        ledger: host.takeoverDeferrals,
+        incumbent: expected,
+        kind: error.refusalReason === "active_operations" ? "active_operations" : "unavailable",
+        original: error,
+        nowMs: host.now(),
+        subject: "daemon",
+      });
+    }
+    throw error;
+  }
+  if (preparation.accepted) {
+    return true;
+  }
+  if (preparation.reason === "generation_changed" || preparation.reason === "restart_pending") {
+    return false;
+  }
+  const kind = preparation.reason === "active_operations" ? "active_operations" : "unavailable";
+  const reason =
+    preparation.reason === "active_operations"
+      ? "a device operation is active"
+      : preparation.reason === "shutdown_unavailable"
+        ? "the daemon could not initiate its own shutdown"
+        : "the daemon returned an unrecognized safe-restart admission result";
+  throw deferredRestartError({
+    ledger: host.takeoverDeferrals,
+    incumbent: expected,
+    kind,
+    original: new DaemonRestartDeferredError(reason),
+    nowMs: host.now(),
+    subject: "daemon",
+  });
+}
+
 export async function restartExpectedGeneration(
   host: DaemonRestartHost,
   status: DaemonStatus,
@@ -222,24 +274,11 @@ export async function restartExpectedGeneration(
   options: DaemonOptions,
   recovering: boolean,
 ): Promise<DaemonRestartResult> {
-  const preparation = recovering
-    ? await host.prepareIdentityRecoveryRestart(expected)
-    : await host.prepareDaemonForConditionalRestart(expected);
-  if (!preparation.accepted) {
-    if (preparation.reason === "generation_changed" || preparation.reason === "restart_pending") {
-      host.log("Daemon restart is already in progress; joining its successor");
-      return "joined";
-    }
-    if (preparation.reason === "active_operations") {
-      throw new DaemonRestartDeferredError("a device operation is active");
-    }
-    if (preparation.reason === "shutdown_unavailable") {
-      throw new DaemonRestartDeferredError("the daemon could not initiate its own shutdown");
-    }
-    throw new DaemonRestartDeferredError(
-      "the daemon returned an unrecognized safe-restart admission result",
-    );
+  if (!(await prepareExpectedGenerationRestart(host, expected, recovering))) {
+    host.log("Daemon restart is already in progress; joining its successor");
+    return "joined";
   }
+  host.takeoverDeferrals.clear();
   if (status.running) {
     // Atomic admission asks the daemon to initiate its own shutdown before
     // acknowledging. Waiting without a second SIGTERM prevents a delayed

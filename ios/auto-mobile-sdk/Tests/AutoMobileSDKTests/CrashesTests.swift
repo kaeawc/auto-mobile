@@ -1,6 +1,3 @@
-// swiftlint:disable force_unwrapping
-// Force-unwrap is idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
-
 @testable import AutoMobileSDK
 import os
 import XCTest
@@ -99,7 +96,7 @@ final class CrashesTests: XCTestCase {
 
     /// initialize must capture the previous handler and reset must restore it —
     /// exercising the captured predecessor through the fake process accessors.
-    func testInitializeCapturesPreviousHandlerAndResetRestoresIt() {
+    func testInitializeCapturesPreviousHandlerAndResetRestoresIt() throws {
         let crashes = AutoMobileCrashes.makeTestInstance()
         var installed: [(@convention(c) (NSException) -> Void)?] = []
         var current: (@convention(c) (NSException) -> Void)? = knownPreviousHandler
@@ -117,7 +114,7 @@ final class CrashesTests: XCTestCase {
         XCTAssertFalse(crashes.isInitialized)
         XCTAssertEqual(installed.count, 2)
         // reset restored exactly the handler initialize captured.
-        XCTAssertEqual(rawPointer(installed.last!), rawPointer(knownPreviousHandler))
+        XCTAssertEqual(try rawPointer(XCTUnwrap(installed.last)), rawPointer(knownPreviousHandler))
     }
 
     func testResetPreservesLaterReporter() {

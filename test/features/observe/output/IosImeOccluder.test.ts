@@ -19,7 +19,7 @@ const measured: ImeOccluder = {
   spanEnter: 3,
   spanExit: 4,
 };
-const screen = iosKeyboardCapture.screenSize;
+const screen = { ...iosKeyboardCapture.screenSize, units: "points" as const };
 
 describe("iOS action keyboard geometry", () => {
   test("docked key union extends to both screen edges and screen bottom without mutation", () => {
@@ -84,8 +84,8 @@ describe("real raw iOS keyboard captures", () => {
       const ime = getImeOccluder(elements!);
       expect(ime).toBeDefined();
       // Visible key bounds omit the container margins and bottom emoji/dictation strip.
-      expect(ime!.bounds).toEqual(bounds);
-      expect(getVisibleIosImeBounds(ime!, { width: 402, height: 874 })).toEqual(visible);
+      expect<unknown>(ime!.bounds).toEqual(bounds);
+      expect<unknown>(getVisibleIosImeBounds(ime!, { width: 402, height: 874 })).toEqual(visible);
     },
   );
 });
@@ -109,7 +109,7 @@ describe("synthetic visible iOS keyboard intersection", () => {
   ] as const)("clips synthetic %s without fabricating height", (_name, bounds, expected) => {
     const ime: ImeOccluder = { ...measured, bounds: [...bounds] };
     const original = structuredClone(ime);
-    expect(getVisibleIosImeBounds(ime, { width: 402, height: 874 })).toEqual(expected);
+    expect<unknown>(getVisibleIosImeBounds(ime, { width: 402, height: 874 })).toEqual(expected);
     expect(ime).toEqual(original);
     if (
       expected === undefined &&
@@ -130,6 +130,6 @@ describe("synthetic visible iOS keyboard intersection", () => {
     { width: Infinity, height: 874 },
     { width: 402, height: -1 },
   ])("synthetic unknown or invalid screen has no visible rectangle: %j", (size) => {
-    expect(getVisibleIosImeBounds(measured, size)).toBeUndefined();
+    expect(getVisibleIosImeBounds(measured, size ?? { width: 0, height: 0 })).toBeUndefined();
   });
 });

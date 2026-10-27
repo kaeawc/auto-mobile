@@ -31,19 +31,31 @@ import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** Section showing MCP server connection state with process detection and a data-source toggle. */
+data class McpConnectionOptions(
+  val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+  val dataSourceMode: DataSourceMode,
+  val onDataSourceModeChanged: (DataSourceMode) -> Unit,
+  val onProcessConnected: (McpProcess?) -> Unit,
+  val connectedProcess: McpProcess? = null,
+  val onRetryDetection: (() -> Unit)? = null,
+)
+
 @Composable
 fun McpConnectionSection(
-  dataSourceMode: DataSourceMode,
-  onDataSourceModeChanged: (DataSourceMode) -> Unit,
-  onProcessConnected: (McpProcess?) -> Unit,
+  options: McpConnectionOptions,
   modifier: Modifier = Modifier,
-  connectedProcess: McpProcess? = null,
-  onRetryDetection: (() -> Unit)? = null,
 ) {
+  val dataSourceMode = options.dataSourceMode
+  val onDataSourceModeChanged = options.onDataSourceModeChanged
+  val onProcessConnected = options.onProcessConnected
+  val connectedProcess = options.connectedProcess
+  val onRetryDetection = options.onRetryDetection
+
   if (onRetryDetection != null) {
     McpConnectionStatus(
       dataSourceMode,
@@ -58,6 +70,7 @@ fun McpConnectionSection(
       onDataSourceModeChanged,
       onProcessConnected,
       modifier,
+      options.ioDispatcher,
     )
   }
 }
@@ -109,6 +122,7 @@ private fun DetectedMcpConnectionSection(
   onDataSourceModeChanged: (DataSourceMode) -> Unit,
   onProcessConnected: (McpProcess?) -> Unit,
   modifier: Modifier,
+  ioDispatcher: CoroutineDispatcher,
 ) {
   val colors = SharedTheme.globalColors
   val useRealData = dataSourceMode == DataSourceMode.Real
@@ -118,180 +132,237 @@ private fun DetectedMcpConnectionSection(
       if (useRealData) RealMcpProcessDetector() else FakeMcpProcessDetector()
     }
 
-  var refreshCounter by remember { mutableIntStateOf(0) }
-  var processes by remember { mutableStateOf<List<McpProcess>>(emptyList()) }
-  var isLoading by remember { mutableStateOf(true) }
-  var connectedProcess by remember { mutableStateOf<McpProcess?>(null) }
-  var expanded by remember { mutableStateOf(true) }
+  val state = remember { DetectedMcpState() }
+  LoadDetectedMcpProcesses(detector, useRealData, ioDispatcher, state)
+  NotifyDetectedMcpConnection(state, onProcessConnected)
+  AutoConnectDetectedMcpProcess(state, onProcessConnected)
+  with(state) {
 
-  LaunchedEffect(useRealData, refreshCounter) {
-    isLoading = true
-    processes = withContext(Dispatchers.IO) { detector.detectProcesses() }
-    isLoading = false
-  }
+    // Clear stale connection when process list refreshes, or auto-connect
 
-  LaunchedEffect(connectedProcess) {
-    onProcessConnected(connectedProcess)
-  }
+    Column(
+      modifier =
+        modifier
+          .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+          .padding(12.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      CollapsibleSectionHeader(
+        title = "MCP Servers",
+        expanded = expanded,
+        onToggle = { expanded = !expanded },
+        trailing = { StatusDot(connected = connectedProcess != null) },
+      )
 
-  // Clear stale connection when process list refreshes, or auto-connect
-  LaunchedEffect(processes) {
-    // If the previously connected process is no longer detected, clear it
-    val current = connectedProcess
-    if (current != null && processes.none { it.pid == current.pid }) {
-      connectedProcess = null
-      onProcessConnected(null)
-    }
+      if (expanded) {
+        DataSourceToggle(useRealData, onDataSourceModeChanged)
 
-    // Auto-connect when there is exactly one Unix Socket process
-    val socketProcesses = processes.filter { it.connectionType == McpConnectionType.UnixSocket }
-    if (socketProcesses.size == 1 && connectedProcess == null) {
-      val autoConnect = socketProcesses.first()
-      connectedProcess = autoConnect
-      onProcessConnected(autoConnect)
-    }
-  }
-
-  Column(
-    modifier =
-      modifier
-        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-        .padding(12.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
-  ) {
-    CollapsibleSectionHeader(
-      title = "MCP Servers",
-      expanded = expanded,
-      onToggle = { expanded = !expanded },
-      trailing = { StatusDot(connected = connectedProcess != null) },
-    )
-
-    if (expanded) {
-      // Data source toggle
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Text(
-          "Real Data",
-          fontSize = 11.sp,
-          color = colors.text.normal.copy(alpha = 0.7f),
-          maxLines = 1,
-          softWrap = false,
-        )
-        Box(
-          modifier =
-            Modifier.background(
-                if (useRealData) Color(0xFF4CAF50).copy(alpha = 0.2f)
-                else colors.text.normal.copy(alpha = 0.1f),
-                RoundedCornerShape(4.dp),
-              )
-              .clickable {
-                onDataSourceModeChanged(
-                  if (useRealData) DataSourceMode.Fake else DataSourceMode.Real,
-                )
-              }
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 8.dp, vertical = 2.dp),
-        ) {
-          Text(
-            if (useRealData) "ON" else "OFF",
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Medium,
-            color = if (useRealData) Color(0xFF4CAF50) else colors.text.normal.copy(alpha = 0.5f),
-          )
+        if (connectedProcess != null) {
+          ConnectedProcessCard(requireNotNull(connectedProcess) { "Connected process is required" })
         }
-      }
 
-      if (connectedProcess != null) {
-        val proc = connectedProcess!!
-        Column(
-          modifier =
-            Modifier.fillMaxWidth()
-              .background(Color(0xFF4CAF50).copy(alpha = 0.08f), RoundedCornerShape(4.dp))
-              .padding(8.dp),
-          verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
+        if (isLoading && processes.isEmpty()) {
           Text(
-            proc.name,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            color = colors.text.normal,
-            maxLines = 1,
-            softWrap = false,
-          )
-          Text(
-            "PID ${proc.pid} \u00B7 ${proc.connectionType.label}",
+            "Detecting servers...",
             fontSize = 11.sp,
-            color = colors.text.normal.copy(alpha = 0.6f),
-            maxLines = 1,
-            softWrap = false,
+            color = colors.text.normal.copy(alpha = 0.5f),
           )
         }
-      }
 
-      if (isLoading && processes.isEmpty()) {
-        Text(
-          "Detecting servers...",
-          fontSize = 11.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
-        )
-      }
-
-      if (!isLoading || processes.isNotEmpty()) {
-        processes.forEach { process ->
-          val isConnected = connectedProcess?.pid == process.pid
-          Row(
-            modifier =
-              Modifier.fillMaxWidth()
-                .background(
-                  if (isConnected) colors.outlines.focused.copy(alpha = 0.1f)
-                  else Color.Transparent,
-                  RoundedCornerShape(4.dp),
-                )
-                .clickable {
-                  connectedProcess = if (isConnected) null else process
-                }
-                .pointerHoverIcon(PointerIcon.Hand)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            Column(modifier = Modifier.weight(1f)) {
-              Text(
-                process.name,
-                fontSize = 12.sp,
-                color = colors.text.normal,
-                maxLines = 1,
-                softWrap = false,
-              )
-              Text(
-                "${process.connectionType.icon} ${process.connectionType.label}" +
-                  (process.socketPath?.let { " \u00B7 $it" } ?: "") +
-                  (process.port?.let { " :$it" } ?: ""),
-                fontSize = 10.sp,
-                color = colors.text.normal.copy(alpha = 0.5f),
-                maxLines = 1,
-                softWrap = false,
-              )
+        if (!isLoading || processes.isNotEmpty()) {
+          processes.forEach { process ->
+            val isConnected = connectedProcess?.pid == process.pid
+            DetectedProcessRow(process, isConnected) {
+              connectedProcess = if (isConnected) null else process
             }
-            Text(
-              if (isConnected) "Disconnect" else "Connect",
-              fontSize = 10.sp,
-              color = if (isConnected) Color(0xFFE53935) else Color(0xFF4CAF50),
-            )
           }
         }
+
+        if (!isLoading) {
+          Text(
+            "\u21BB Refresh",
+            fontSize = 10.sp,
+            color = Color(0xFF2196F3),
+            modifier = Modifier.clickable { refreshCounter++ }.pointerHoverIcon(PointerIcon.Hand),
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun DataSourceToggle(
+  useRealData: Boolean,
+  onDataSourceModeChanged: (DataSourceMode) -> Unit,
+) {
+  val colors = SharedTheme.globalColors
+  // Data source toggle
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text(
+      "Real Data",
+      fontSize = 11.sp,
+      color = colors.text.normal.copy(alpha = 0.7f),
+      maxLines = 1,
+      softWrap = false,
+    )
+    Box(
+      modifier =
+        Modifier.background(
+            if (useRealData) Color(0xFF4CAF50).copy(alpha = 0.2f)
+            else colors.text.normal.copy(alpha = 0.1f),
+            RoundedCornerShape(4.dp),
+          )
+          .clickable {
+            onDataSourceModeChanged(
+              if (useRealData) DataSourceMode.Fake else DataSourceMode.Real,
+            )
+          }
+          .pointerHoverIcon(PointerIcon.Hand)
+          .padding(horizontal = 8.dp, vertical = 2.dp),
+    ) {
+      Text(
+        if (useRealData) "ON" else "OFF",
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Medium,
+        color = if (useRealData) Color(0xFF4CAF50) else colors.text.normal.copy(alpha = 0.5f),
+      )
+    }
+  }
+}
+
+@Composable
+private fun ConnectedProcessCard(proc: McpProcess) {
+  val colors = SharedTheme.globalColors
+  Column(
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(Color(0xFF4CAF50).copy(alpha = 0.08f), RoundedCornerShape(4.dp))
+        .padding(8.dp),
+    verticalArrangement = Arrangement.spacedBy(2.dp),
+  ) {
+    Text(
+      proc.name,
+      fontSize = 12.sp,
+      fontWeight = FontWeight.Medium,
+      color = colors.text.normal,
+      maxLines = 1,
+      softWrap = false,
+    )
+    Text(
+      "PID ${proc.pid} \u00B7 ${proc.connectionType.label}",
+      fontSize = 11.sp,
+      color = colors.text.normal.copy(alpha = 0.6f),
+      maxLines = 1,
+      softWrap = false,
+    )
+  }
+}
+
+@Composable
+private fun DetectedProcessRow(process: McpProcess, isConnected: Boolean, onClick: () -> Unit) {
+  val colors = SharedTheme.globalColors
+  Row(
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(
+          if (isConnected) colors.outlines.focused.copy(alpha = 0.1f) else Color.Transparent,
+          RoundedCornerShape(4.dp),
+        )
+        .clickable {
+          onClick()
+        }
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 8.dp, vertical = 4.dp),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Column(modifier = Modifier.weight(1f)) {
+      Text(
+        process.name,
+        fontSize = 12.sp,
+        color = colors.text.normal,
+        maxLines = 1,
+        softWrap = false,
+      )
+      Text(
+        "${process.connectionType.icon} ${process.connectionType.label}" +
+          (process.socketPath?.let { " \u00B7 $it" } ?: "") +
+          (process.port?.let { " :$it" } ?: ""),
+        fontSize = 10.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
+        maxLines = 1,
+        softWrap = false,
+      )
+    }
+    Text(
+      if (isConnected) "Disconnect" else "Connect",
+      fontSize = 10.sp,
+      color = if (isConnected) Color(0xFFE53935) else Color(0xFF4CAF50),
+    )
+  }
+}
+
+private class DetectedMcpState {
+  var refreshCounter by mutableIntStateOf(0)
+  var processes by mutableStateOf<List<McpProcess>>(emptyList())
+  var isLoading by mutableStateOf(true)
+  var connectedProcess by mutableStateOf<McpProcess?>(null)
+  var expanded by mutableStateOf(true)
+}
+
+@Composable
+private fun LoadDetectedMcpProcesses(
+  detector: dev.jasonpearson.automobile.desktop.core.mcp.McpProcessDetector,
+  useRealData: Boolean,
+  ioDispatcher: CoroutineDispatcher,
+  state: DetectedMcpState,
+) {
+  with(state) {
+    LaunchedEffect(useRealData, refreshCounter) {
+      isLoading = true
+      processes = withContext(ioDispatcher) { detector.detectProcesses() }
+      isLoading = false
+    }
+  }
+}
+
+@Composable
+private fun NotifyDetectedMcpConnection(
+  state: DetectedMcpState,
+  onProcessConnected: (McpProcess?) -> Unit,
+) {
+  with(state) {
+    LaunchedEffect(connectedProcess) {
+      onProcessConnected(connectedProcess)
+    }
+  }
+}
+
+@Composable
+private fun AutoConnectDetectedMcpProcess(
+  state: DetectedMcpState,
+  onProcessConnected: (McpProcess?) -> Unit,
+) {
+  with(state) {
+    LaunchedEffect(processes) {
+      // If the previously connected process is no longer detected, clear it
+      val current = connectedProcess
+      if (current != null && processes.none { it.pid == current.pid }) {
+        connectedProcess = null
+        onProcessConnected(null)
       }
 
-      if (!isLoading) {
-        Text(
-          "\u21BB Refresh",
-          fontSize = 10.sp,
-          color = Color(0xFF2196F3),
-          modifier = Modifier.clickable { refreshCounter++ }.pointerHoverIcon(PointerIcon.Hand),
-        )
+      // Auto-connect when there is exactly one Unix Socket process
+      val socketProcesses = processes.filter { it.connectionType == McpConnectionType.UnixSocket }
+      if (socketProcesses.size == 1 && connectedProcess == null) {
+        val autoConnect = socketProcesses.first()
+        connectedProcess = autoConnect
+        onProcessConnected(autoConnect)
       }
     }
   }

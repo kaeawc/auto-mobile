@@ -5,6 +5,7 @@ import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { z } from "zod/v4";
 import { compileJsonSchema } from "../../helpers/jsonSchemaCompile";
 import { isAlwaysOnTool } from "../../../src/features/toolSelection/toolSelectionControl";
+import { schemaProperty } from "../../helpers/toolResponse";
 
 const listToolsResponseSchema = z.object({
   tools: z.array(
@@ -90,7 +91,9 @@ describe("MCP Tools List", () => {
         listToolsResponseSchema,
       );
       const selection = result.tools.find((tool) => tool.name === "setToolEnabled");
-      const toolNameSchema = selection?.inputSchema.properties?.toolName as { enum: string[] };
+      const toolNameSchema = z
+        .object({ enum: z.array(z.string()) })
+        .parse(schemaProperty(selection?.inputSchema.properties, "toolName"));
 
       expect(result.tools.map((tool) => tool.name)).not.toContain("systemTray");
       expect(result.tools.map((tool) => tool.name)).not.toContain("setNotificationPolicy");
@@ -184,7 +187,7 @@ describe("MCP Tools List", () => {
       const observe = result.tools.find((tool) => tool.name === "observe");
 
       expect(observe?.outputSchema).toBeDefined();
-      expect(observe!.outputSchema).toEqual(compiledObserveOutputSchema);
+      expect<unknown>(observe!.outputSchema).toEqual(compiledObserveOutputSchema);
     });
   });
 });

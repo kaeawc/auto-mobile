@@ -3,7 +3,6 @@ import {
   DEVICE_CREATE_ENV_VAR,
   EnvDeviceCreationGate,
   getDeviceCreationGate,
-  isTruthyCreationEnvValue,
   resetDeviceCreationGate,
   setDeviceCreationGate,
 } from "../../src/devices/deviceCreationGate";
@@ -45,14 +44,13 @@ describe("device creation gate", () => {
     }
   });
 
-  it("accepts 1/true case-insensitively and tolerates whitespace", () => {
-    expect(isTruthyCreationEnvValue("TRUE")).toBe(true);
-    expect(isTruthyCreationEnvValue("  1 ")).toBe(true);
-    expect(isTruthyCreationEnvValue("True")).toBe(true);
-    expect(isTruthyCreationEnvValue("yes")).toBe(false);
-    expect(isTruthyCreationEnvValue("on")).toBe(false);
-    expect(isTruthyCreationEnvValue("")).toBe(false);
-    expect(isTruthyCreationEnvValue(undefined)).toBe(false);
+  it("reads the env var with the shared flag rule (1/true/yes/on, case-insensitive, trimmed)", () => {
+    for (const value of ["TRUE", "  1 ", "True", "yes", "on"]) {
+      expect(gateWithEnv(value).isCreationAllowed()).toBe(true);
+    }
+    for (const value of ["0", "false", "", undefined]) {
+      expect(gateWithEnv(value).isCreationAllowed()).toBe(false);
+    }
   });
 
   it("describes which source decided", () => {

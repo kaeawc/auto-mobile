@@ -50,9 +50,24 @@ export interface DeviceInfo {
   architecture?: string;
   /** Pre-session virtual hardware inventory when the platform can inspect it. */
   capabilityInventory?: VirtualDeviceCapabilityInventory;
+  /**
+   * Android: guest RAM and cores the emulator actually used on its last launch (hardware-qemu.ini).
+   * `config.ini`'s hw.ramSize is only what was asked for; the system image can raise it (#15475).
+   */
+  effectiveRamMb?: number;
+  effectiveCpuCores?: number;
 }
 
+export type AvdNameProbeObservation = Pick<
+  BootedDevice,
+  "deviceId" | "name" | "platform" | "consoleBusyDuringProbe" | "nameProbeTimedOut"
+>;
+export type StampedAvdNameProbeObservation = AvdNameProbeObservation &
+  Pick<BootedDevice, "observedAt">;
+
 export interface BootedDevice {
+  /** Enrichment deliberately skipped because another live daemon owns this serial. */
+  foreignOwned?: true;
   name: string;
   platform: Platform;
   deviceId: string;
@@ -64,6 +79,12 @@ export interface BootedDevice {
   observedAt?: number;
   /** Point-in-time console state captured when the AVD-name probe failed, not live status. */
   consoleBusyDuringProbe?: boolean;
+  /**
+   * Point-in-time: the AVD-name probe exhausted its budget without an answer.
+   * Under host load or a stalled daemon event loop, this says nothing about which
+   * AVD owns the serial and supplies no identity evidence (#14333).
+   */
+  nameProbeTimedOut?: boolean;
   source?: "local";
   iosVersion?: string;
   apiLevel?: number;

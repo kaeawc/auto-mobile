@@ -1,3 +1,4 @@
+import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { IdentifyInteractions } from "../../src/features/observe/IdentifyInteractions";
@@ -27,7 +28,9 @@ describe("identifyInteractions cached freshness", () => {
 
   function observation(text: string, freshness?: ObserveResult["freshness"]): ObserveResult {
     return {
-      timestamp: timer.now(),
+      updatedAt: timer.now(),
+      observationId: "freshness",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: {
@@ -54,7 +57,7 @@ describe("identifyInteractions cached freshness", () => {
   }
 
   async function parsedResult() {
-    const response = await call();
+    const response = readToolResponse(await call());
     const content = response.content[0];
     if (content.type !== "text") {
       throw new Error("Expected JSON text response");
@@ -67,7 +70,7 @@ describe("identifyInteractions cached freshness", () => {
     setDebugModeEnabled(true);
     // Freshness only reads the current screen; avoid unrelated database migrations.
     navigation = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
+      new FakeNavigationGraphManager(),
     );
     timer = new FakeTimer();
     screen = new FakeObserveScreen();
@@ -128,7 +131,7 @@ describe("identifyInteractions cached freshness", () => {
 
   test("preserves the cache-only no-observation response", async () => {
     const cached = observation("Unavailable", { isFresh: false });
-    cached.viewHierarchy = null;
+    cached.viewHierarchy = undefined;
     screen.setObserveResult(cached);
 
     const result = await parsedResult();
@@ -158,7 +161,7 @@ describe("identifyInteractions cached freshness", () => {
       const cached = observation("StaleOnly", { isFresh: false });
       const unavailable = observation("FreshOnly", { isFresh: true });
       unavailable.viewHierarchy =
-        failure === "errored hierarchy" ? { hierarchy: { error: "capture failed" } } : null;
+        failure === "errored hierarchy" ? { hierarchy: { error: "capture failed" } } : undefined;
       screen.setObserveSequence([cached, unavailable]);
       const cause = new Error("capture failed");
       if (failure === "throws") {

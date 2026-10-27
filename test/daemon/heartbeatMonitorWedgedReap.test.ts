@@ -1,5 +1,5 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import {
   STUCK_REAP_WARN_MS,
   SessionHeartbeatMonitor,
@@ -7,7 +7,7 @@ import {
 } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
-import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
+import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -27,6 +27,10 @@ describe("terminal source releases", () => {
     for (const cleanup of cleanups.splice(0).reverse()) {
       cleanup();
     }
+  });
+
+  beforeEach(() => {
+    spyOn(logger, "warn").mockImplementation(() => {});
   });
 
   function harness() {
@@ -86,12 +90,10 @@ describe("terminal source releases", () => {
         },
       },
     );
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
     cleanups.push(() => {
       gate.resolve();
       void monitor.stop();
       timer.reset();
-      warn.mockRestore();
     });
     monitor.start();
     return { timer, session, state, forcedAt, reapedAt };
@@ -390,4 +392,8 @@ describe("monitor reap timestamps", () => {
       expect(forcedAt).toEqual([secondStartedAt + STUCK_REAP_WARN_MS]);
     });
   }
+});
+
+afterEach(() => {
+  mock.restore();
 });

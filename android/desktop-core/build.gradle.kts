@@ -150,6 +150,10 @@ tasks.withType<Test>().configureEach {
     .dir(rootDir.resolve("../test/fixtures/desktop-wire"))
     .withPropertyName("desktopWireFixtures")
     .withPathSensitivity(PathSensitivity.RELATIVE)
+  inputs
+    .file(layout.projectDirectory.file("../../test/fixtures/daemon-http-endpoints.json"))
+    .withPropertyName("daemonHttpEndpointVectors")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
   // DaemonIsolationPathVectorsTest reads the daemon state-path vectors shared with the TypeScript
   // daemon, the JUnit runner and XCTestRunner (#10906).
   inputs

@@ -9,7 +9,7 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
-import { runWithAbortSignal } from "../../src/utils/AbortContext";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 
 function harness(env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" }) {
   const timer = new FakeTimer();
@@ -133,7 +133,7 @@ describe("DeviceAutolockManager", () => {
       const h = harness();
       try {
         await h.sessions.createSession("holder", h.device.id, "android");
-        h.device.sessionId = "holder";
+        patchDeviceBinding(h.device, { sessionId: "holder" });
         h.port.holderReleaseRemainingMs = (holder) => {
           expect(holder).toBe("holder");
           return retryAfterMs;
@@ -143,6 +143,7 @@ describe("DeviceAutolockManager", () => {
             deviceId: h.device.id,
             name: h.device.name,
             platform: "android",
+            isRunning: true,
           })
           .catch((error: unknown) => error);
         expect(refusal).toMatchObject({
@@ -173,8 +174,7 @@ describe("DeviceAutolockManager", () => {
       const h = harness();
       try {
         const session = await h.sessions.createSession("resumed-R", h.device.id, "android");
-        h.device.sessionId = session.sessionId;
-        h.device.status = "busy";
+        patchDeviceBinding(h.device, { sessionId: session.sessionId, status: "busy" });
         const recordReadiness = h.sessions.setDeviceReadiness.bind(h.sessions);
         h.sessions.setDeviceReadiness = (id, level) => {
           expect(h.manager.captureAutolockSessionForMcpSession("owner")).toBeUndefined();
@@ -229,7 +229,7 @@ describe("DeviceAutolockManager", () => {
     const h = harness();
     try {
       await h.sessions.createSession("resumed-R", h.device.id, "android");
-      h.device.sessionId = "resumed-R";
+      patchDeviceBinding(h.device, { sessionId: "resumed-R" });
       h.port.recordBindOwnership = () => false;
       await h.manager.adoptResumedAutolockSession(
         "resumed-R",
@@ -255,9 +255,9 @@ describe("DeviceAutolockManager", () => {
     const h = harness();
     try {
       await h.sessions.createSession("resumed-R", h.device.id, "android");
-      h.device.sessionId = "resumed-R";
+      patchDeviceBinding(h.device, { sessionId: "resumed-R" });
       h.port.withAssignmentLock = async (operation) => {
-        h.device.sessionId = "rival";
+        patchDeviceBinding(h.device, { sessionId: "rival" });
         h.device.autolockSessionId = "rival";
         return await operation();
       };
@@ -303,7 +303,7 @@ describe("DeviceAutolockManager", () => {
     const { manager, sessions, device, events } = harness();
     const id = await manager.autolockDevice(device.id, "android", "mcp-1");
 
-    expect(device.sessionId).toBe(id);
+    expect<string | null | undefined>(device.sessionId).toBe(id);
     expect(device.autolockSessionId).toBe(id);
     expect(sessions.getDeviceReadiness(id!)).toBe("automationReady");
     expect(manager.resolveAutolockSessionForMcpSession("mcp-1")).toBe(id);
@@ -336,7 +336,7 @@ describe("DeviceAutolockManager", () => {
     const id = await manager.autolockDevice(device.id, "android", "mcp-1");
     expect(events.filter((event) => event === "retry")).toHaveLength(1);
     expect(device.sessionId).toBeNull();
-    expect(replacement.sessionId).toBe(id);
+    expect<string | null | undefined>(replacement.sessionId).toBe(id);
     expect(replacement.assignmentCount).toBe(1);
     expect(events.filter((event) => event === "persist")).toHaveLength(1);
     sessions.stopCleanupTimer();
@@ -356,7 +356,7 @@ describe("DeviceAutolockManager", () => {
     const id = await manager.autolockDevice(device.id, "android", "mcp-1");
     expect(events.filter((event) => event === "retry")).toHaveLength(1);
     expect(device.sessionId).toBeNull();
-    expect(replacement.sessionId).toBe(id);
+    expect<string | null | undefined>(replacement.sessionId).toBe(id);
     expect(replacement.assignmentCount).toBe(1);
     expect(events.filter((event) => event === "persist")).toHaveLength(1);
     sessions.stopCleanupTimer();
@@ -366,7 +366,7 @@ describe("DeviceAutolockManager", () => {
     const { manager, sessions, device, timer } = harness();
     const first = await manager.autolockDevice(device.id, "android", "mcp-1");
     device.autolockSessionId = "replacement";
-    device.sessionId = "replacement";
+    patchDeviceBinding(device, { sessionId: "replacement" });
     timer.advanceTime(1);
     manager.clearReleasedAutolockState(first!, device.id);
     expect(device.autolockSessionId).toBe("replacement");
@@ -382,7 +382,7 @@ describe("DeviceAutolockManager", () => {
     manager.clearRebindAutolockLock(id!, device.id, device);
 
     expect(device.autolockSessionId).toBeUndefined();
-    expect(device.sessionId).toBe(id);
+    expect<string | null | undefined>(device.sessionId).toBe(id);
     expect(device.status).toBe("busy");
     expect(manager.captureAutolockSessionForMcpSession("mcp-1")).toBe(id);
     expect(manager.captureAutolockSessionForMcpSession("mcp-2")).toBe(id);
@@ -527,7 +527,7 @@ describe("DeviceAutolockManager", () => {
     const other: PooledDevice = { ...device, id: "emulator-5556", name: "Other", sessionId: null };
     devices.set(other.id, other);
     const own = await manager.autolockDevice(other.id, "android", "mcp-B");
-    const persistedOwners: (string | null)[] = [];
+    const persistedOwners: (string | null | undefined)[] = [];
     setPersistence(async (_id, input) => {
       persistedOwners.push(input.mcpSessionId);
     });
@@ -624,9 +624,20 @@ describe("DeviceAutolockManager", () => {
     setPersistence(async () => {
       controller.abort(new Error("cancelled"));
     });
+    // The caller's signal is forwarded explicitly (#11817); no ambient request scope is entered.
     await expect(
-      runWithAbortSignal(controller.signal, () =>
-        manager.autolockDevice(device.id, "android", "mcp-1"),
+      manager.autolockDevice(
+        device.id,
+        "android",
+        "mcp-1",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { signal: controller.signal },
       ),
     ).rejects.toThrow("cancelled");
     expect(events).toContain("restore");

@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../../observe/flatHierarchyBuilders";
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { ExecuteGesture } from "../../../../src/features/action/ExecuteGesture";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
@@ -31,11 +32,14 @@ function searchHarness(foundAfter = 1, residualMomentum = false) {
   const client = AndroidCtrlProxyClient.getInstance(device);
   let scrolls = 0;
   const observe = (): ObserveResult => ({
-    timestamp: timer.now(),
+    updatedAt: timer.now(),
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     screenSize: { width: 1080, height: 2400 },
     viewHierarchy: {
       hierarchy: {
-        node: {
+        node: createFlatNodeForTest({
           "resource-id": "list",
           scrollable: true,
           bounds: { left: 0, top: 300, right: 1080, bottom: 2100 },
@@ -53,7 +57,7 @@ function searchHarness(foundAfter = 1, residualMomentum = false) {
               bounds: { left: 0, top: 600, right: 1080, bottom: 900 },
             },
           ],
-        },
+        }),
       },
     },
   });
@@ -68,7 +72,14 @@ function searchHarness(foundAfter = 1, residualMomentum = false) {
     accessibilityDetector: detector,
     accessibilityService: new FakeScrollAccessibilityService(),
     overlayDetector: new FakeOverlayDetector(),
-    talkBackExecutor: new TalkBackSwipeExecutor(device, gesture, client, detector, adb, timer),
+    talkBackExecutor: new TalkBackSwipeExecutor({
+      device,
+      executeGesture: gesture,
+      accessibilityService: client,
+      accessibilityDetector: detector,
+      adb,
+      timer,
+    }),
     getDuration: (options) => options.duration ?? geometry.getSwipeDurationFromSpeed(options.speed),
     resolveBoomerangConfig: () => undefined,
     buildPredictionArgs: () => ({}),

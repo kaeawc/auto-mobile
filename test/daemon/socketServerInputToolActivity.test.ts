@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
+import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/wire/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
@@ -70,7 +70,7 @@ beforeEach(() => {
   spyOnAndroidClientInstance(androidDevice, {
     getScreenScaleMetadata: () => null,
     requestTapCoordinates: (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) =>
-      ack(args[6]),
+      ack(args[0].onDispatch),
     requestSwipe: (request: Parameters<AndroidCtrlProxyClient["requestSwipe"]>[0]) =>
       ack(request.onDispatch),
   });

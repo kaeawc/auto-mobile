@@ -1,13 +1,34 @@
+import {
+  createPidFileTemporaryPath,
+  defaultAtomicPidFileWriteSyncDependencies,
+  writeJsonFileAtomicSync,
+  type AtomicPidFileWriteSyncDependencies,
+} from "./atomicJsonFile";
+export { writeJsonFileAtomicSync, type AtomicPidFileWriteSyncDependencies } from "./atomicJsonFile";
 import path from "node:path";
-import { existsSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  constants as fsConstants,
+  copyFileSync,
+  existsSync,
+  linkSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { rename, unlink, writeFile } from "node:fs/promises";
-import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./constants";
+import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./wire/constants";
+import { sameFileIdentity, statFileIdentity, type SocketFileIdentity } from "./socketFileIdentity";
 import {
   compareProcessGenerationTokens,
   readProcessGenerationTokenForPid,
 } from "./processGeneration";
 import { recordedProcessGenerationToken } from "./processGenerationFields";
-import { getSocketPath, resolveAuxSocketDir, type SocketServerConfig } from "./socketServer/index";
+import {
+  getSocketPath,
+  resolveAuxSocketDir,
+  type SocketServerConfig,
+} from "./socketServer/SocketServerTypes";
 import type { AuxiliaryDaemonSocketName, PidFileData } from "./types";
 import { compareStrictNumericVersions } from "../utils/deviceMatcher";
 import { logger, registerLogRetentionNamespaceSource } from "../utils/logger";
@@ -16,6 +37,9 @@ import { releaseVersion } from "../utils/mcpVersion";
 import { isProcessRunning } from "../utils/processLiveness";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { sortedReaddirSync } from "../utils/io";
+import { ENV, readEnvRaw } from "../config/env";
+import type { IdGenerator } from "../utils/IdGenerator";
+import { OwnedRecordRestoreError, removeOwnedFileSync } from "./ownedFileRemoval";
 
 export {
   compareProcessGenerationTokens,
@@ -106,8 +130,7 @@ export const WEBRTC_STREAM_SOCKET_CONFIG: SocketServerConfig = {
 };
 
 export function resolveWebRtcStreamSocketPath(env: NodeJS.ProcessEnv = process.env): string {
-  const override =
-    env.AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH ?? env.AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH;
+  const override = readEnvRaw(ENV.WEBRTC_STREAM_SOCKET_PATH, env);
   return override
     ? resolvePathFromDaemonLaunchWorkingDirectory(override)
     : path.join(resolveAuxSocketDir(env), "webrtc-stream.sock");
@@ -139,10 +162,12 @@ export const AUXILIARY_SOCKET_CONFIGS_BY_NAME: Record<
 };
 
 export interface DaemonFileCleanupOptions {
+  idGenerator?: IdGenerator;
   pidFilePath?: string;
   socketPaths?: string[];
-  /** Bound aux socket identities, used to avoid unlinking a successor's replacement path. */
-  socketFileIdentities?: ReadonlyMap<string, { dev: number; ino: number }>;
+  /** Bound socket identities, used to avoid unlinking a successor's replacement path. */
+  socketFileIdentities?: ReadonlyMap<string, SocketFileIdentity>;
+  controlSocketPath?: string;
   expectedPid?: number;
   /**
    * Whether this process actually acquired the daemon socket bind. When
@@ -168,20 +193,6 @@ export interface AtomicPidFileWriteDependencies {
   removeTemporaryFile: (temporaryPath: string) => Promise<void>;
 }
 
-export interface AtomicPidFileWriteSyncDependencies {
-  createTemporaryPath: (pidFilePath: string) => string;
-  writeTemporaryFile: (temporaryPath: string, contents: string) => void;
-  replaceFile: (temporaryPath: string, pidFilePath: string) => void;
-  removeTemporaryFile: (temporaryPath: string) => void;
-}
-
-let pidFileTemporaryPathSequence = 0;
-
-function createPidFileTemporaryPath(pidFilePath: string): string {
-  pidFileTemporaryPathSequence += 1;
-  return `${pidFilePath}.${process.pid}.${pidFileTemporaryPathSequence}.tmp`;
-}
-
 const defaultAtomicPidFileWriteDependencies: AtomicPidFileWriteDependencies = {
   createTemporaryPath: createPidFileTemporaryPath,
   writeTemporaryFile: async (temporaryPath, contents, signal) => {
@@ -193,15 +204,6 @@ const defaultAtomicPidFileWriteDependencies: AtomicPidFileWriteDependencies = {
   },
   replaceFile: rename,
   removeTemporaryFile: unlink,
-};
-
-const defaultAtomicPidFileWriteSyncDependencies: AtomicPidFileWriteSyncDependencies = {
-  createTemporaryPath: createPidFileTemporaryPath,
-  writeTemporaryFile: (temporaryPath, contents) => {
-    writeFileSync(temporaryPath, contents, { encoding: "utf-8", mode: 0o600 });
-  },
-  replaceFile: renameSync,
-  removeTemporaryFile: unlinkSync,
 };
 
 /**
@@ -240,23 +242,7 @@ export function writePidFileDataAtomicSync(
   data: PidFileData,
   dependencies: AtomicPidFileWriteSyncDependencies = defaultAtomicPidFileWriteSyncDependencies,
 ): void {
-  const temporaryPath = dependencies.createTemporaryPath(pidFilePath);
-  try {
-    dependencies.writeTemporaryFile(temporaryPath, JSON.stringify(data, null, 2));
-    dependencies.replaceFile(temporaryPath, pidFilePath);
-  } catch (writeError) {
-    try {
-      dependencies.removeTemporaryFile(temporaryPath);
-    } catch (cleanupError) {
-      if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw new AggregateError(
-          [writeError, cleanupError],
-          `Failed to publish PID file ${pidFilePath} and remove its temporary file`,
-        );
-      }
-    }
-    throw writeError;
-  }
+  writeJsonFileAtomicSync(pidFilePath, data, dependencies);
 }
 
 /** Durable companion to a manager's launch-capture log. */
@@ -287,11 +273,13 @@ export function clearDaemonLaunchLogOwnerTombstoneSync(launchLogPath: string): v
  * completed. The write is replace-atomic so a concurrent sweep sees either the
  * old complete tombstone or the new complete tombstone, never partial JSON.
  */
-function persistDaemonLaunchLogOwnerTombstoneSync(pidFilePath: string): void {
+function persistDaemonLaunchLogOwnerTombstoneSync(record: PidFileData | null): void {
   try {
-    const owner = readDaemonOwnerForRetentionSync(pidFilePath);
+    const owner = record && { pid: record.pid, launchLogPath: record.launchLogPath };
     if (
       !owner ||
+      !Number.isInteger(owner.pid) ||
+      owner.pid <= 0 ||
       typeof owner.launchLogPath !== "string" ||
       !path.isAbsolute(owner.launchLogPath)
     ) {
@@ -349,17 +337,41 @@ export function getDaemonSocketPathList(): string[] {
   ];
 }
 
+export interface DaemonCleanupFileSystem {
+  exists: (path: string) => boolean;
+  stat: (path: string) => SocketFileIdentity;
+  unlink: (path: string) => Promise<void>;
+  unlinkSync: (path: string) => void;
+  renameSync: (from: string, to: string) => void;
+  linkSync: (from: string, to: string) => void;
+  copyFileExclusiveSync: (from: string, to: string) => void;
+  readPid: typeof readPidFileDataSync;
+  persistOwner: typeof persistDaemonLaunchLogOwnerTombstoneSync;
+}
+
+const cleanupFileSystem: DaemonCleanupFileSystem = {
+  exists: existsSync,
+  stat: statFileIdentity,
+  unlink: (path) => unlink(path),
+  unlinkSync: (path) => unlinkSync(path),
+  renameSync,
+  linkSync,
+  copyFileExclusiveSync: (from, to) => copyFileSync(from, to, fsConstants.COPYFILE_EXCL),
+  readPid: readPidFileDataSync,
+  persistOwner: persistDaemonLaunchLogOwnerTombstoneSync,
+};
+
 function stillOwnsSocketFile(
   socketPath: string,
   identities: DaemonFileCleanupOptions["socketFileIdentities"],
+  files: DaemonCleanupFileSystem,
 ): boolean {
   const identity = identities?.get(socketPath);
   if (!identity) {
     return true;
   }
   try {
-    const current = statSync(socketPath);
-    return current.dev === identity.dev && current.ino === identity.ino;
+    return sameFileIdentity(files.stat(socketPath), identity);
   } catch (error) {
     // A vanished or unreadable path is not safe to unlink during shutdown.
     logger.warn(`daemon socket ownership check failed for ${socketPath}: ${error}`, error);
@@ -367,43 +379,130 @@ function stillOwnsSocketFile(
   }
 }
 
-export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {}): Promise<boolean> {
-  const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
-  const socketPaths = options.socketPaths ?? getDaemonSocketPathList();
-
-  if (options.socketBindCommitted === false) {
-    return false;
-  }
-
-  if (!shouldCleanupForExpectedPid(pidFilePath, options.expectedPid)) {
-    return false;
-  }
-
-  for (const socketPath of socketPaths) {
-    if (!existsSync(socketPath) || !stillOwnsSocketFile(socketPath, options.socketFileIdentities)) {
-      continue;
-    }
-    try {
-      await unlink(socketPath);
-    } catch (error) {
-      // Cleanup is best effort so a stale path cannot abort shutdown/startup.
-      logger.warn(`Could not remove daemon socket ${socketPath}: ${error}`, error);
-    }
-  }
-
-  if (existsSync(pidFilePath)) {
-    try {
-      persistDaemonLaunchLogOwnerTombstoneSync(pidFilePath);
-      await unlink(pidFilePath);
-    } catch (error) {
-      // Cleanup is best effort so an unreadable PID path cannot abort shutdown/startup.
-      logger.warn(`Could not remove daemon PID file ${pidFilePath}: ${error}`, error);
-    }
-  }
-  return true;
+function ownedSocketExists(
+  socketPath: string,
+  options: DaemonFileCleanupOptions,
+  files: DaemonCleanupFileSystem,
+): boolean {
+  return (
+    files.exists(socketPath) && stillOwnsSocketFile(socketPath, options.socketFileIdentities, files)
+  );
 }
 
-export function cleanupDaemonFilesSync(options: DaemonFileCleanupOptions = {}): boolean {
+function retainedControlSocket(
+  socketPath: string,
+  options: DaemonFileCleanupOptions,
+  files: DaemonCleanupFileSystem,
+): boolean {
+  const retained =
+    socketPath === (options.controlSocketPath ?? SOCKET_PATH) &&
+    ownedSocketExists(socketPath, options, files);
+  if (retained) {
+    logger.warn(`Keeping daemon PID file because control socket remains at ${socketPath}`);
+  }
+  return retained;
+}
+
+async function cleanupSocketFiles(
+  socketPaths: string[],
+  options: DaemonFileCleanupOptions,
+  files: DaemonCleanupFileSystem,
+): Promise<boolean> {
+  let controlUnlinkFailed = false;
+  for (const socketPath of socketPaths) {
+    if (!ownedSocketExists(socketPath, options, files)) {
+      continue;
+    }
+    try {
+      await files.unlink(socketPath);
+    } catch (error) {
+      controlUnlinkFailed =
+        retainedControlSocket(socketPath, options, files) || controlUnlinkFailed;
+      // Cleanup is best effort so a stale path cannot abort shutdown/startup.
+      logger.warn(`Could not remove daemon socket ${socketPath}: ${error}`, error);
+    }
+  }
+
+  return !controlUnlinkFailed;
+}
+
+function cleanupSocketFilesSync(
+  socketPaths: string[],
+  options: DaemonFileCleanupOptions,
+  files: DaemonCleanupFileSystem,
+): boolean {
+  let controlUnlinkFailed = false;
+  for (const socketPath of socketPaths) {
+    if (!ownedSocketExists(socketPath, options, files)) {
+      continue;
+    }
+    try {
+      files.unlinkSync(socketPath);
+    } catch (error) {
+      controlUnlinkFailed =
+        retainedControlSocket(socketPath, options, files) || controlUnlinkFailed;
+      // Cleanup is best effort so a stale path cannot abort shutdown/startup.
+      logger.warn(`Could not remove daemon socket ${socketPath}: ${error}`, error);
+    }
+  }
+
+  return !controlUnlinkFailed;
+}
+
+function prepareOwnedPidUnlink(
+  pidFilePath: string,
+  expectedPid: number | undefined,
+  files: DaemonCleanupFileSystem,
+): PidFileData | null | false {
+  const owner = files.readPid(pidFilePath);
+  if (expectedPid !== undefined && owner?.pid !== expectedPid) {
+    return false;
+  }
+  files.persistOwner(owner);
+  return shouldCleanupForExpectedPid(pidFilePath, expectedPid, files.readPid) ? owner : false;
+}
+
+function cleanupPidFile(
+  pidFilePath: string,
+  options: DaemonFileCleanupOptions,
+  files: DaemonCleanupFileSystem,
+): boolean {
+  if (!files.exists(pidFilePath)) {
+    return true;
+  }
+  try {
+    const owner = prepareOwnedPidUnlink(pidFilePath, options.expectedPid, files);
+    if (owner === false) {
+      return false;
+    }
+    // PID metadata is small and already read synchronously. Share the complete
+    // claim/verify/restore sequence between async shutdown and synchronous exit.
+    return removeOwnedFileSync(
+      pidFilePath,
+      (claimedPath) => JSON.stringify(files.readPid(claimedPath)) === JSON.stringify(owner),
+      {
+        rename: (from, to) => files.renameSync(from, to),
+        link: (from, to) => files.linkSync(from, to),
+        copyExclusive: (from, to) => files.copyFileExclusiveSync(from, to),
+        remove: (path) => files.unlinkSync(path),
+      },
+      options.idGenerator,
+    );
+  } catch (error) {
+    if (error instanceof OwnedRecordRestoreError) {
+      logger.warn(`Could not restore successor daemon PID file ${pidFilePath}`, error);
+      return false;
+    }
+    // Preserve the existing best-effort cleanup return contract on I/O failure.
+    logger.warn(`Could not remove daemon PID file ${pidFilePath}`, error);
+    return true;
+  }
+}
+
+export async function cleanupDaemonFiles(
+  options: DaemonFileCleanupOptions = {},
+  files: DaemonCleanupFileSystem = cleanupFileSystem,
+): Promise<boolean> {
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
   const socketPaths = options.socketPaths ?? getDaemonSocketPathList();
 
@@ -411,32 +510,39 @@ export function cleanupDaemonFilesSync(options: DaemonFileCleanupOptions = {}): 
     return false;
   }
 
-  if (!shouldCleanupForExpectedPid(pidFilePath, options.expectedPid)) {
+  if (!shouldCleanupForExpectedPid(pidFilePath, options.expectedPid, files.readPid)) {
     return false;
   }
 
-  for (const socketPath of socketPaths) {
-    if (!existsSync(socketPath) || !stillOwnsSocketFile(socketPath, options.socketFileIdentities)) {
-      continue;
-    }
-    try {
-      unlinkSync(socketPath);
-    } catch (error) {
-      // Cleanup is best effort so a stale path cannot abort shutdown/startup.
-      logger.warn(`Could not remove daemon socket ${socketPath}: ${error}`, error);
-    }
+  const controlRemoved = await cleanupSocketFiles(socketPaths, options, files);
+
+  if (!controlRemoved) {
+    return false;
+  }
+  return cleanupPidFile(pidFilePath, options, files);
+}
+
+export function cleanupDaemonFilesSync(
+  options: DaemonFileCleanupOptions = {},
+  files: DaemonCleanupFileSystem = cleanupFileSystem,
+): boolean {
+  const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
+  const socketPaths = options.socketPaths ?? getDaemonSocketPathList();
+
+  if (options.socketBindCommitted === false) {
+    return false;
   }
 
-  if (existsSync(pidFilePath)) {
-    try {
-      persistDaemonLaunchLogOwnerTombstoneSync(pidFilePath);
-      unlinkSync(pidFilePath);
-    } catch (error) {
-      // Cleanup is best effort so an unreadable PID path cannot abort shutdown/startup.
-      logger.warn(`Could not remove daemon PID file ${pidFilePath}: ${error}`, error);
-    }
+  if (!shouldCleanupForExpectedPid(pidFilePath, options.expectedPid, files.readPid)) {
+    return false;
   }
-  return true;
+
+  const controlRemoved = cleanupSocketFilesSync(socketPaths, options, files);
+
+  if (!controlRemoved) {
+    return false;
+  }
+  return cleanupPidFile(pidFilePath, options, files);
 }
 
 /**
@@ -485,7 +591,7 @@ function logSafeDebug(message: string, error: unknown): void {
  * A single-directory scan can NEVER prove it discovered every namespace that
  * could share this log directory — `AUTOMOBILE_LOG_DIR` and
  * `AUTOMOBILE_DAEMON_PID_FILE_PATH` are independent overrides
- * (`src/daemon/constants.ts:119-123`), so a peer can leave the log directory at
+ * (`src/daemon/wire/constants.ts:119-123`), so a peer can leave the log directory at
  * its default (making it discoverable-looking) while relocating ONLY its pid
  * file to an arbitrary directory this scan never visits (e.g. `/state/a/daemon.pid`).
  * That combination is invisible to a directory listing regardless of whether
@@ -849,10 +955,11 @@ export { isProcessRunning } from "../utils/processLiveness";
 function shouldCleanupForExpectedPid(
   pidFilePath: string,
   expectedPid: number | undefined,
+  readPid: typeof readPidFileDataSync,
 ): boolean {
   if (expectedPid === undefined) {
     return true;
   }
-  const pidData = readPidFileDataSync(pidFilePath);
+  const pidData = readPid(pidFilePath);
   return pidData?.pid === expectedPid;
 }

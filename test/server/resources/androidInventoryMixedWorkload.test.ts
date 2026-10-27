@@ -1,4 +1,4 @@
-import type { SystemImageFilter } from "../../../src/utils/android-cmdline-tools/interfaces/AvdManager";
+import type { SystemImageFilter } from "../../../src/utils/android-cmdline-tools/avdmanager";
 import { afterEach, beforeAll, expect, test } from "bun:test";
 import { MultiPlatformDeviceManager } from "../../../src/devices/deviceUtils";
 import { createListingHandlers } from "../../../src/server/deviceToolsListing";

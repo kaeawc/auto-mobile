@@ -32,7 +32,7 @@ private final class StandaloneHarness {
     var outbox: PrototypeEventOutbox<PrototypeEvent>
     var delivered: [PrototypeEvent] = []
     let clock = StandaloneClock()
-    lazy var timer = PrototypeIdleTimer(clock: clock) { [unowned self] in dismiss(.ttl) }
+    lazy var timer = PrototypeIdleTimer(clock: clock) { [weak self] in self?.dismiss(.ttl) }
 
     init(mode: PrototypeLifecycleMode) {
         self.mode = mode
@@ -57,7 +57,7 @@ private final class StandaloneHarness {
         }
     }
 
-    func dismiss(_ reason: PrototypeDismissReason) {
+    func dismiss(_ reason: PrototypeSessionDismissReason) {
         apply(activity: false) { $0.dismiss(reason: reason) }
     }
 
@@ -185,7 +185,7 @@ final class PrototypeStandaloneTests: XCTestCase {
         XCTAssertEqual(harness.outbox.bufferedCount, 1)
         harness.connect(2)
         XCTAssertEqual(harness.delivered.map(\.sequence), [1, 2, 3])
-        XCTAssertFalse(harness.delivered.contains { $0.kind == "dismissed" })
+        XCTAssertFalse(harness.delivered.contains { $0.wireKind == "dismissed" })
         XCTAssertTrue(harness.clock.timers.isEmpty)
     }
 
@@ -195,7 +195,7 @@ final class PrototypeStandaloneTests: XCTestCase {
         try ttl.show(textSpec())
         ttl.clock.elapse()
         XCTAssertFalse(ttl.session.isShown)
-        XCTAssertEqual(ttl.delivered.map(\.kind), ["dismissed"])
+        XCTAssertEqual(ttl.delivered.map(\.wireKind), ["dismissed"])
         XCTAssertEqual(ttl.delivered.map(reason), ["ttl"])
         let disconnect = StandaloneHarness(mode: .session)
         disconnect.connect(1)

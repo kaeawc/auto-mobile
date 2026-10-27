@@ -21,6 +21,28 @@ import type { RequestManager } from "../../../utils/RequestManager";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { DelegateContext } from "../shared/types";
 
+export interface AndroidActivateAccessibilityLinkRequest {
+  text: string;
+  occurrence: number;
+  selector?: AccessibilityNodeSelector;
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+}
+
+/** A semantic or custom accessibility action on the node with `resourceId` (#14077). */
+export interface AndroidAccessibilityActionRequest {
+  action: string;
+  resourceId: string;
+  /** For `custom`: the app-defined action's label. */
+  customAction?: string;
+  /** For `set_progress`: the progress value. */
+  progress?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
 /** Client-backed accessors resolve live state on every use, including after awaits. */
 export interface AndroidActionDispatcherContext {
   readonly timer: Timer;
@@ -61,6 +83,28 @@ export class AndroidActionDispatcher {
       timeoutMs,
       perf,
       signal,
+    );
+  }
+
+  async requestAccessibilityAction(
+    request: AndroidAccessibilityActionRequest,
+  ): Promise<A11yActionResult> {
+    const { action, resourceId, customAction, progress } = request;
+    return this.dispatchActionRequest(
+      action,
+      (requestId) =>
+        serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestAction({
+            requestId,
+            action,
+            resourceId,
+            customAction,
+            progress,
+          }),
+        ),
+      request.timeoutMs ?? 5000,
+      new NoOpPerformanceTracker(),
+      request.signal,
     );
   }
 
@@ -305,17 +349,19 @@ export class AndroidActionDispatcher {
     return connected && this.context.isCommandSupported("request_activate_accessibility_link");
   }
 
-  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
-  // oxlint-disable-next-line max-params
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    selector?: AccessibilityNodeSelector,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: AndroidActivateAccessibilityLinkRequest,
   ): Promise<A11yActionResult> {
+    const {
+      text,
+      occurrence,
+      selector,
+      timeoutMs = 5000,
+      perf = new NoOpPerformanceTracker(),
+      signal,
+      onDispatch,
+    } = request;
+
     const startTime = this.context.timer.now();
     const action = "activate_accessibility_link";
     const combinedSignal = combineWithAmbientAbort(signal);

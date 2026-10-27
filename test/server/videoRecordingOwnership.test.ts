@@ -15,7 +15,7 @@ import {
   setVideoRecordingManagerDependencies,
   startVideoRecording,
   stopVideoRecording,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -23,6 +23,7 @@ import { FakeSecurePermissions } from "../fakes/FakeSecurePermissions";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
+import type { BootedDevice } from "../../src/models";
 
 describe("video recording daemon ownership", () => {
   let db: Awaited<ReturnType<typeof createTestDatabase>>;
@@ -112,7 +113,7 @@ describe("video recording daemon ownership", () => {
 
   test("adoption updates the real persisted owner and the release ids without stopping capture", async () => {
     await configure(new Set());
-    const device = { deviceId: "adopt-device", platform: "ios" as const };
+    const device: BootedDevice = { deviceId: "adopt-device", platform: "ios", name: "iPhone" };
     const active = await startVideoRecording({ device });
     await adoptOwnerlessActiveVideoRecordings(device.deviceId, "holder");
     expect((await recordings.getRecording(active.recordingId))?.ownerSessionUuid).toBe("holder");
@@ -189,7 +190,9 @@ describe("video recording daemon ownership", () => {
 
   test("implicit stop selects the local capture and leaves a peer recording untouched", async () => {
     await configure(new Set(["peer"]));
-    const local = await startVideoRecording({ device: { deviceId: "local", platform: "ios" } });
+    const local = await startVideoRecording({
+      device: { deviceId: "local", platform: "ios", name: "iPhone" },
+    });
     // A peer can start after this manager's one-time restart sweep.
     await insertSession("peer-session", "peer");
     await insertRecording("peer-recording", "peer-session");

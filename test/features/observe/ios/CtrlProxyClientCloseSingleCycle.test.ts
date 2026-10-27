@@ -1,3 +1,4 @@
+import { createFetchMock } from "../../../helpers/createFetchMock";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { BootedDevice } from "../../../../src/models";
@@ -50,10 +51,10 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
     // onConnectionEstablished(). Stub fetch so the unit test makes no real
     // network call and leaks no polling handles into sibling suites.
     originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () => ({
+    globalThis.fetch = createFetchMock(async () => ({
       ok: true,
       json: async () => [],
-    })) as unknown as typeof fetch;
+    }));
   });
 
   afterEach(async () => {
@@ -75,9 +76,11 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
       8765,
       (url) => new FakeWebSocket(url, "none", 0, fakeTimer),
       fakeTimer,
-      undefined,
-      undefined,
-      notifier,
+      {
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: notifier,
+      },
     );
 
     // Establish a real (fake) socket so close() has a live socket to tear down.
@@ -109,9 +112,11 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
         return socket;
       },
       fakeTimer,
-      undefined,
-      undefined,
-      notifier,
+      {
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: notifier,
+      },
     );
 
     const connected = await client.ensureConnected();
@@ -179,13 +184,11 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
 
     const replacementConnection = client.ensureConnected();
     await flushSetImmediate();
-    const lifecycle = client as unknown as {
-      pendingConnectAbort: { socket: FakeWebSocket } | null;
-    };
-    expect(lifecycle.pendingConnectAbort?.socket).toBe(sockets[1]);
+    const lifecycle = client.testHooks;
+    expect(lifecycle.pendingConnectSocket).toBe(sockets[1]);
 
     sockets[0].emit("close");
-    expect(lifecycle.pendingConnectAbort?.socket).toBe(sockets[1]);
+    expect(lifecycle.pendingConnectSocket).toBe(sockets[1]);
 
     await client.close();
     expect(await replacementConnection).toBe(false);
@@ -220,11 +223,7 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
       holdDurationMs: 0,
       timeoutMs: 60_000,
     });
-    const requestManager = (
-      client as unknown as {
-        requestManager: { getPendingCount(): number };
-      }
-    ).requestManager;
+    const requestManager = client.testHooks.requestManager;
     // Microtasks only: a real turn would let auto-advance expire the request first.
     await drainUntil(() => requestManager.getPendingCount() === 1, {
       description: "the drag request to register",

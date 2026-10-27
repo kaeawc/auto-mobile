@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { logger } from "../../../utils/logger";
 import { readEnvPositiveInteger } from "../../../utils/envNumbers";
+import { ENV } from "../../../config/env";
 
 /**
  * Ownership metadata and stale-owner policy for the cross-process CtrlProxy
@@ -62,7 +63,7 @@ export function getCtrlProxyForwardLeaseOwnerSocketPath(): string | undefined {
 
 /** Idle period after which a daemon gives up a device's forwarding lease. */
 export const DEFAULT_CTRL_PROXY_FORWARD_LEASE_IDLE_MS = 60_000;
-export const CTRL_PROXY_FORWARD_LEASE_IDLE_MS_ENV = "AUTOMOBILE_CTRL_PROXY_LEASE_IDLE_MS";
+export const CTRL_PROXY_FORWARD_LEASE_IDLE_MS_ENV = ENV.CTRL_PROXY_LEASE_IDLE_MS.name;
 
 export function resolveCtrlProxyForwardLeaseIdleMs(env: NodeJS.ProcessEnv = process.env): number {
   return readEnvPositiveInteger(

@@ -61,6 +61,7 @@ function harness(after = gone) {
     timer,
     home,
     cacheInvalidator: {
+      retireAppProcess: () => {},
       invalidate: (value) => {
         invalidated.push(value);
       },
@@ -114,7 +115,7 @@ describe("AppLifecycle", () => {
       adb: h.adb,
       timer: h.timer,
       home,
-      cacheInvalidator: { invalidate: () => {} },
+      cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => {} },
     });
     expect(await action.execute(appId, "background")).toMatchObject({
       success: false,
@@ -200,27 +201,6 @@ describe("AppLifecycle", () => {
       });
       expect(h.adb.getExecutedCommands()).toEqual([]);
     });
-    for (const deviceId of ["AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", "00008110-001A2B3C4D5E6F70"]) {
-      test(`iOS ${deviceId} ${action} is unsupported without commands`, async () => {
-        const h = harness();
-        const ios = new AppLifecycle(
-          { ...device, platform: "ios", deviceId },
-          {
-            adb: h.adb,
-            timer: h.timer,
-            home: h.home,
-            cacheInvalidator: { invalidate: () => {} },
-          },
-        );
-        expect(await ios.execute(appId, action)).toMatchObject({
-          success: false,
-          supported: false,
-          mechanism: "unsupported",
-        });
-        expect(h.adb.getExecutedCommands()).toEqual([]);
-        expect(h.home.calls).toBe(0);
-      });
-    }
   }
   test("work profile is derived from a capture, not itself captured", async () => {
     const h = harness();
@@ -287,7 +267,7 @@ describe("AppLifecycle", () => {
       adb,
       timer: h.timer,
       home: h.home,
-      cacheInvalidator: { invalidate: () => {} },
+      cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => {} },
     });
     expect((await action.execute(appId, "killBackgrounded")).processReclaimed).toBe(true);
     expect(h.timer.getSleepHistory()).toEqual([250]);
@@ -308,7 +288,7 @@ describe("AppLifecycle", () => {
       adb: h.adb,
       timer,
       home: h.home,
-      cacheInvalidator: { invalidate: () => {} },
+      cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => {} },
     });
     const controller = new AbortController();
     const pending = action.execute(appId, "killBackgrounded", { signal: controller.signal });

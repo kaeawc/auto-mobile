@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, it } from "bun:test";
 import { PredictionAnalyzer } from "../../../src/features/observe/PredictionAnalyzer";
 import type { PredictionOutcomeRecord } from "../../../src/db/predictionHistoryRepository";
@@ -19,7 +20,7 @@ class FakeNavigationGraph {
   }
 }
 
-const baseObservation: ObserveResult = {
+const baseObservation: ObserveResult = buildObserveResult({
   updatedAt: Date.now(),
   screenSize: { width: 1, height: 1 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -34,7 +35,7 @@ const baseObservation: ObserveResult = {
       },
     },
   },
-};
+});
 
 const buildObservation = (overrides: Partial<ObserveResult>): ObserveResult => ({
   ...baseObservation,

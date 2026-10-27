@@ -24,6 +24,29 @@
       ]
     },
     {
+      "serialName": "advance_prototype_clock",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "advanceTimeMs",
+          "type": "int",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
       "serialName": "clear_preferences",
       "fields": [
         {
@@ -574,6 +597,18 @@
         {
           "name": "boundsBottom",
           "type": "int",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "customAction",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "progress",
+          "type": "double",
           "nullable": true,
           "hasDefault": true
         }
@@ -1947,14 +1982,20 @@
           "hasDefault": true
         },
         {
+          "name": "action",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
           "name": "success",
           "type": "boolean",
           "nullable": false,
           "hasDefault": false
         },
         {
-          "name": "action",
-          "type": "string",
+          "name": "totalTimeMs",
+          "type": "long",
           "nullable": false,
           "hasDefault": false
         },
@@ -1965,15 +2006,56 @@
           "hasDefault": true
         },
         {
-          "name": "totalTimeMs",
+          "name": "error",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "perfTiming",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        }
+      ]
+    },
+    {
+      "serialName": "cancel_ime_commit_result",
+      "fields": [
+        {
+          "name": "timestamp",
           "type": "long",
           "nullable": false,
           "hasDefault": false
         },
         {
-          "name": "error",
+          "name": "requestId",
           "type": "string",
           "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "success",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": true
+        },
+        {
+          "name": "targetRequestId",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "partialApplication",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "committedUnits",
+          "type": "int",
+          "nullable": false,
           "hasDefault": true
         },
         {
@@ -2000,12 +2082,6 @@
           "hasDefault": true
         },
         {
-          "name": "success",
-          "type": "boolean",
-          "nullable": false,
-          "hasDefault": false
-        },
-        {
           "name": "packageName",
           "type": "string",
           "nullable": false,
@@ -2014,6 +2090,12 @@
         {
           "name": "fileName",
           "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "success",
+          "type": "boolean",
           "nullable": false,
           "hasDefault": false
         },
@@ -2041,14 +2123,20 @@
           "hasDefault": true
         },
         {
+          "name": "action",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
           "name": "success",
           "type": "boolean",
           "nullable": false,
           "hasDefault": false
         },
         {
-          "name": "action",
-          "type": "string",
+          "name": "totalTimeMs",
+          "type": "long",
           "nullable": false,
           "hasDefault": false
         },
@@ -2057,12 +2145,6 @@
           "type": "string",
           "nullable": true,
           "hasDefault": true
-        },
-        {
-          "name": "totalTimeMs",
-          "type": "long",
-          "nullable": false,
-          "hasDefault": false
         },
         {
           "name": "error",
@@ -2104,6 +2186,36 @@
           "type": "long",
           "nullable": false,
           "hasDefault": false
+        },
+        {
+          "name": "partialApplication",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": true
+        },
+        {
+          "name": "committedUnits",
+          "type": "int",
+          "nullable": false,
+          "hasDefault": true
+        },
+        {
+          "name": "insertedText",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "editorConsumed",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": true
+        },
+        {
+          "name": "trace",
+          "type": "list",
+          "nullable": true,
+          "hasDefault": true
         },
         {
           "name": "error",
@@ -2175,16 +2287,16 @@
           "hasDefault": true
         },
         {
-          "name": "focusedElement",
-          "type": "string",
-          "nullable": true,
-          "hasDefault": true
-        },
-        {
           "name": "totalTimeMs",
           "type": "long",
           "nullable": false,
           "hasDefault": false
+        },
+        {
+          "name": "focusedElement",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
         },
         {
           "name": "error",
@@ -2311,6 +2423,18 @@
           "hasDefault": false
         },
         {
+          "name": "totalTimeMs",
+          "type": "long",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "packageName",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
           "name": "isDeviceOwner",
           "type": "boolean",
           "nullable": false,
@@ -2323,18 +2447,6 @@
           "hasDefault": false
         },
         {
-          "name": "packageName",
-          "type": "string",
-          "nullable": true,
-          "hasDefault": true
-        },
-        {
-          "name": "totalTimeMs",
-          "type": "long",
-          "nullable": false,
-          "hasDefault": false
-        },
-        {
           "name": "error",
           "type": "string",
           "nullable": true,
@@ -2343,6 +2455,71 @@
         {
           "name": "perfTiming",
           "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        }
+      ]
+    },
+    {
+      "serialName": "display_transition",
+      "fields": [
+        {
+          "name": "timestamp",
+          "type": "long",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "change",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "displayId",
+          "type": "int",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "panelUniqueId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "panelFingerprint",
+          "type": "object:dev.jasonpearson.automobile.protocol.DisplayPanelFingerprint",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "width",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "height",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "state",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "rotation",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "deviceState",
+          "type": "int",
           "nullable": true,
           "hasDefault": true
         }
@@ -2492,12 +2669,6 @@
           "hasDefault": true
         },
         {
-          "name": "success",
-          "type": "boolean",
-          "nullable": false,
-          "hasDefault": false
-        },
-        {
           "name": "packageName",
           "type": "string",
           "nullable": false,
@@ -2516,6 +2687,18 @@
           "hasDefault": false
         },
         {
+          "name": "success",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "found",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": true
+        },
+        {
           "name": "value",
           "type": "string",
           "nullable": true,
@@ -2525,12 +2708,6 @@
           "name": "valueType",
           "type": "string",
           "nullable": true,
-          "hasDefault": true
-        },
-        {
-          "name": "found",
-          "type": "boolean",
-          "nullable": false,
           "hasDefault": true
         },
         {
@@ -2615,13 +2792,19 @@
           "hasDefault": false
         },
         {
-          "name": "perfTiming",
+          "name": "requestId",
           "type": "string",
           "nullable": true,
           "hasDefault": true
         },
         {
-          "name": "requestId",
+          "name": "frameContext",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "perfTiming",
           "type": "string",
           "nullable": true,
           "hasDefault": true
@@ -2654,11 +2837,70 @@
           "type": "string",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "perfTiming",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
     {
       "serialName": "ime_action_result",
+      "fields": [
+        {
+          "name": "timestamp",
+          "type": "long",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "approximated",
+          "type": "boolean",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "action",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "success",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "totalTimeMs",
+          "type": "long",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "error",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "perfTiming",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        }
+      ]
+    },
+    {
+      "serialName": "insert_text_result",
       "fields": [
         {
           "name": "timestamp",
@@ -2679,12 +2921,6 @@
           "hasDefault": false
         },
         {
-          "name": "action",
-          "type": "string",
-          "nullable": true,
-          "hasDefault": true
-        },
-        {
           "name": "totalTimeMs",
           "type": "long",
           "nullable": false,
@@ -2697,14 +2933,67 @@
           "hasDefault": true
         },
         {
-          "name": "perfTiming",
+          "name": "warning",
           "type": "string",
           "nullable": true,
           "hasDefault": true
         },
         {
-          "name": "approximated",
+          "name": "caretPlaced",
           "type": "boolean",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "resultingTextLength",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "partialApplication",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": true
+        },
+        {
+          "name": "perfTiming",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        }
+      ]
+    },
+    {
+      "serialName": "insert_text_state_result",
+      "fields": [
+        {
+          "name": "timestamp",
+          "type": "long",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "success",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": true
+        },
+        {
+          "name": "state",
+          "type": "object:dev.jasonpearson.automobile.protocol.InsertTextState",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "perfTiming",
+          "type": "string",
           "nullable": true,
           "hasDefault": true
         }
@@ -2822,7 +3111,7 @@
         {
           "name": "profiles",
           "type": "list",
-          "nullable": false,
+          "nullable": true,
           "hasDefault": true
         },
         {
@@ -3247,14 +3536,14 @@
           "hasDefault": true
         },
         {
-          "name": "success",
-          "type": "boolean",
+          "name": "packageName",
+          "type": "string",
           "nullable": false,
           "hasDefault": false
         },
         {
-          "name": "packageName",
-          "type": "string",
+          "name": "success",
+          "type": "boolean",
           "nullable": false,
           "hasDefault": false
         },
@@ -3288,12 +3577,6 @@
           "hasDefault": true
         },
         {
-          "name": "success",
-          "type": "boolean",
-          "nullable": false,
-          "hasDefault": false
-        },
-        {
           "name": "packageName",
           "type": "string",
           "nullable": false,
@@ -3306,8 +3589,14 @@
           "hasDefault": false
         },
         {
-          "name": "data",
-          "type": "string",
+          "name": "success",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "entries",
+          "type": "list",
           "nullable": true,
           "hasDefault": true
         },
@@ -3512,6 +3801,12 @@
           "type": "int",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "fired",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -3531,12 +3826,6 @@
           "hasDefault": true
         },
         {
-          "name": "success",
-          "type": "boolean",
-          "nullable": false,
-          "hasDefault": false
-        },
-        {
           "name": "packageName",
           "type": "string",
           "nullable": false,
@@ -3551,6 +3840,12 @@
         {
           "name": "key",
           "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "success",
+          "type": "boolean",
           "nullable": false,
           "hasDefault": false
         },
@@ -3677,6 +3972,18 @@
           "type": "string",
           "nullable": false,
           "hasDefault": false
+        },
+        {
+          "name": "displayId",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "panelUniqueId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -3848,12 +4155,6 @@
           "hasDefault": true
         },
         {
-          "name": "success",
-          "type": "boolean",
-          "nullable": false,
-          "hasDefault": false
-        },
-        {
           "name": "packageName",
           "type": "string",
           "nullable": false,
@@ -3868,6 +4169,12 @@
         {
           "name": "key",
           "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "success",
+          "type": "boolean",
           "nullable": false,
           "hasDefault": false
         },
@@ -4137,14 +4444,14 @@
           "hasDefault": true
         },
         {
-          "name": "previousValue",
-          "type": "json",
+          "name": "changeType",
+          "type": "string",
           "nullable": true,
           "hasDefault": true
         },
         {
-          "name": "changeType",
-          "type": "string",
+          "name": "previousValue",
+          "type": "json",
           "nullable": true,
           "hasDefault": true
         },
@@ -4178,12 +4485,6 @@
           "hasDefault": true
         },
         {
-          "name": "success",
-          "type": "boolean",
-          "nullable": false,
-          "hasDefault": false
-        },
-        {
           "name": "packageName",
           "type": "string",
           "nullable": false,
@@ -4194,6 +4495,18 @@
           "type": "string",
           "nullable": false,
           "hasDefault": false
+        },
+        {
+          "name": "success",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "subscriptionId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
         },
         {
           "name": "error",
@@ -4313,16 +4626,16 @@
           "hasDefault": true
         },
         {
-          "name": "result",
-          "type": "object:dev.jasonpearson.automobile.protocol.TraversalOrderData",
-          "nullable": true,
-          "hasDefault": true
-        },
-        {
           "name": "totalTimeMs",
           "type": "long",
           "nullable": false,
           "hasDefault": false
+        },
+        {
+          "name": "result",
+          "type": "object:dev.jasonpearson.automobile.protocol.TraversalOrderData",
+          "nullable": true,
+          "hasDefault": true
         },
         {
           "name": "error",
@@ -4354,12 +4667,6 @@
           "hasDefault": true
         },
         {
-          "name": "success",
-          "type": "boolean",
-          "nullable": false,
-          "hasDefault": false
-        },
-        {
           "name": "packageName",
           "type": "string",
           "nullable": false,
@@ -4368,6 +4675,12 @@
         {
           "name": "fileName",
           "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "success",
+          "type": "boolean",
           "nullable": false,
           "hasDefault": false
         },
@@ -4410,6 +4723,7 @@
     "PrototypePagerPageSize": [],
     "PrototypeRepeat": [],
     "PrototypeScalar": [],
+    "PrototypeTransition": [],
     "PrototypeValidityKeys": [],
     "appendData": [
       {
@@ -4470,7 +4784,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -4544,7 +4864,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -4630,7 +4956,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -4766,7 +5098,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -4797,6 +5135,12 @@
       {
         "name": "repeat",
         "type": "object:PrototypeRepeat",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "stagger",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStagger",
         "nullable": true,
         "hasDefault": true
       }
@@ -4846,7 +5190,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -4891,6 +5241,14 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
+      }
+    ],
+    "cancelTimer": [
+      {
+        "name": "id",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "card": [
@@ -4950,7 +5308,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -5030,7 +5394,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -5083,6 +5453,110 @@
         "hasDefault": true
       }
     ],
+    "chart": [
+      {
+        "name": "id",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "testTag",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "contentDescription",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onTap",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "style",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStyle",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "styleWhen",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "visibleWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "transition",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "anchor",
+        "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "span",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "variant",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "series",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "yRange",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeChartRange",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "xLabels",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "goal",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "checkbox": [
       {
         "name": "id",
@@ -5128,7 +5602,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -5226,7 +5706,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -5330,7 +5816,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -5361,6 +5853,12 @@
       {
         "name": "repeat",
         "type": "object:PrototypeRepeat",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "stagger",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStagger",
         "nullable": true,
         "hasDefault": true
       }
@@ -5410,7 +5908,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -5624,6 +6128,20 @@
       },
       {
         "name": "sdkInt",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.DisplayPanelFingerprint": [
+      {
+        "name": "width",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "height",
         "type": "int",
         "nullable": false,
         "hasDefault": false
@@ -6255,7 +6773,7 @@
     ],
     "dev.jasonpearson.automobile.protocol.PackageEventData": [
       {
-        "name": "eventType",
+        "name": "action",
         "type": "string",
         "nullable": false,
         "hasDefault": false
@@ -6267,7 +6785,39 @@
         "hasDefault": false
       },
       {
-        "name": "className",
+        "name": "userId",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "uid",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "isSystem",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "removedForAllUsers",
+        "type": "boolean",
+        "nullable": false,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeAnimate": [
+      {
+        "name": "durationMs",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "easing",
         "type": "string",
         "nullable": true,
         "hasDefault": true
@@ -6323,8 +6873,14 @@
       {
         "name": "color",
         "type": "object:PrototypeModeValue",
-        "nullable": false,
-        "hasDefault": false
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "gradient",
+        "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeBounds": [
@@ -6351,6 +6907,52 @@
         "type": "double",
         "nullable": false,
         "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeChartRange": [
+      {
+        "name": "min",
+        "type": "double",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "max",
+        "type": "double",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeChartSeries": [
+      {
+        "name": "path",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "x",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "y",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "label",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "color",
+        "type": "object:PrototypeModeValue",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeCondition": [
@@ -6409,8 +7011,20 @@
         "hasDefault": true
       },
       {
+        "name": "platform",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "valid",
         "type": "object:PrototypeValidityKeys",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "empty",
+        "type": "boolean",
         "nullable": true,
         "hasDefault": true
       }
@@ -6461,6 +7075,32 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeFadeEdges": [
+      {
+        "name": "top",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "bottom",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "start",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "end",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeGradientStop": [
       {
         "name": "color",
@@ -6471,6 +7111,20 @@
       {
         "name": "position",
         "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeImageFilter": [
+      {
+        "name": "saturation",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "tint",
+        "type": "object:PrototypeModeValue",
         "nullable": true,
         "hasDefault": true
       }
@@ -6493,6 +7147,26 @@
         "type": "object:PrototypeModeValue",
         "nullable": true,
         "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeLinkifyOptions": [
+      {
+        "name": "kinds",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "style",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeTextSpanStyle",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onTap",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeOffset": [
@@ -6563,6 +7237,28 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypePermissionRequirement": [
+      {
+        "name": "name",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "purpose",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypePlatformHandlers": [
+      {
+        "name": "on",
+        "type": "map",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeRadioOption": [
       {
         "name": "value",
@@ -6575,6 +7271,26 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeRequires": [
+      {
+        "name": "platform",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "permissions",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "background",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding": [
@@ -6629,6 +7345,52 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeContainer",
         "nullable": true,
         "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeShadow": [
+      {
+        "name": "color",
+        "type": "object:PrototypeModeValue",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "radius",
+        "type": "double",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "spread",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "offset",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShadowOffset",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "inner",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeShadowOffset": [
+      {
+        "name": "x",
+        "type": "double",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "y",
+        "type": "double",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeSheetCondition": [
@@ -6691,6 +7453,18 @@
       {
         "name": "storage",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStorageBlock",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "requires",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeRequires",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "platform",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypePlatformHandlers",
         "nullable": true,
         "hasDefault": true
       }
@@ -6999,6 +7773,20 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeStagger": [
+      {
+        "name": "ms",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "order",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeStatusEntry": [
       {
         "name": "id",
@@ -7064,6 +7852,12 @@
         "name": "storage",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStorageReport",
         "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "timers",
+        "type": "list",
+        "nullable": false,
         "hasDefault": true
       }
     ],
@@ -7201,6 +7995,18 @@
         "hasDefault": true
       },
       {
+        "name": "shadows",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "cornerStyle",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "gradient",
         "type": "polymorphic",
         "nullable": true,
@@ -7227,6 +8033,30 @@
       {
         "name": "pressScale",
         "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shimmer",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scale",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "rotation",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "effects",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -7463,6 +8293,40 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeTimerReport": [
+      {
+        "name": "id",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "nextFireInMs",
+        "type": "long",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "runs",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeTooltipSpotlight": [
+      {
+        "name": "padding",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "cornerRadius",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeWindow": [
       {
         "name": "placement",
@@ -7493,6 +8357,14 @@
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeZoomable": [
+      {
+        "name": "maxScale",
+        "type": "double",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "dev.jasonpearson.automobile.protocol.SavedPrototypeEntry": [
@@ -7597,6 +8469,46 @@
         "type": "json",
         "nullable": true,
         "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.StorageEntry": [
+      {
+        "name": "key",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "value",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": false
+      },
+      {
+        "name": "type",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.StorageFileInfo": [
+      {
+        "name": "name",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "path",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "entryCount",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "dev.jasonpearson.automobile.protocol.TraversalOrderData": [
@@ -7714,7 +8626,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -7824,7 +8742,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -7849,6 +8773,110 @@
       {
         "name": "orientation",
         "type": "string",
+        "nullable": false,
+        "hasDefault": true
+      }
+    ],
+    "drawer": [
+      {
+        "name": "id",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "testTag",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "contentDescription",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onTap",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "style",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStyle",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "styleWhen",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "visibleWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "transition",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "anchor",
+        "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "span",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "edge",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "openWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSheetCondition",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "child",
+        "type": "polymorphic",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "scrim",
+        "type": "object:PrototypeModeValue",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "dismissOnSwipe",
+        "type": "boolean",
         "nullable": false,
         "hasDefault": true
       }
@@ -7944,7 +8972,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -8050,7 +9084,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -8144,7 +9184,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -8242,7 +9288,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -8322,7 +9374,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -8420,7 +9478,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -8449,9 +9513,21 @@
         "hasDefault": false
       },
       {
+        "name": "filter",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeImageFilter",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentScale",
         "type": "string",
         "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "zoomable",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeZoomable",
+        "nullable": true,
         "hasDefault": true
       }
     ],
@@ -8528,7 +9604,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -8632,7 +9714,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -8712,7 +9800,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -8767,6 +9861,50 @@
       {
         "name": "indicator",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "platform": [
+      {
+        "name": "call",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "args",
+        "type": "map",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "into",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "statusKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "timeoutMs",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onSuccess",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onError",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -8832,7 +9970,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -8885,6 +10029,12 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "transition",
+        "type": "enum",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "radial": [
@@ -8940,7 +10090,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -9013,6 +10169,12 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "transition",
+        "type": "enum",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "request": [
@@ -9140,7 +10302,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -9171,6 +10339,12 @@
       {
         "name": "repeat",
         "type": "object:PrototypeRepeat",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "stagger",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStagger",
         "nullable": true,
         "hasDefault": true
       },
@@ -9226,7 +10400,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -9261,10 +10441,60 @@
         "hasDefault": true
       },
       {
+        "name": "fadeEdges",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeFadeEdges",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "reverse",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "stickToEnd",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "atEndKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onStartReached",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "child",
         "type": "polymorphic",
         "nullable": false,
         "hasDefault": false
+      }
+    ],
+    "scrollTo": [
+      {
+        "name": "scroll",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "to",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "animated",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "searchBar": [
@@ -9312,7 +10542,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -9428,7 +10664,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -9508,7 +10750,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -9650,7 +10898,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -9766,7 +11020,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -9858,7 +11118,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -9926,7 +11192,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -9957,6 +11229,38 @@
       {
         "name": "screens",
         "type": "map",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "startTimer": [
+      {
+        "name": "id",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "afterMs",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "everyMs",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "maxRuns",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "actions",
+        "type": "list",
         "nullable": false,
         "hasDefault": false
       }
@@ -10014,7 +11318,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -10118,7 +11428,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -10149,6 +11465,12 @@
       {
         "name": "spans",
         "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "linkify",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLinkifyOptions",
         "nullable": true,
         "hasDefault": true
       }
@@ -10198,7 +11520,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -10374,7 +11702,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -10441,6 +11775,116 @@
         "hasDefault": false
       }
     ],
+    "tooltip": [
+      {
+        "name": "id",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "testTag",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "contentDescription",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onTap",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "style",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStyle",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "styleWhen",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "visibleWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "transition",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "anchor",
+        "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "span",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "text",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "openWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSheetCondition",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "anchorTo",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "caret",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "spotlight",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeTooltipSpotlight",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onDismiss",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "topAppBar": [
       {
         "name": "id",
@@ -10486,7 +11930,13 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },

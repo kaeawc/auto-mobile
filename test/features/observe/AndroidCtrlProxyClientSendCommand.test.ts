@@ -31,7 +31,7 @@ async function harness() {
   const timer = new FakeTimer();
   const socket = new RecordingSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "client-send-command", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "client-send-command", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
       webSocketFactory: () => socket,
@@ -42,17 +42,17 @@ async function harness() {
   );
   await Promise.resolve();
   client.connectionTestHooks.socket = socket;
-  client["supportedCommands"] = new Set([
+  client.connectionTestHooks.supportedCommands = new Set([
     "request_activate_accessibility_link",
     "discover_keystore",
     "tap_double_v1",
   ]);
-  const manager = client["requestManager"];
+  const manager = client.connectionTestHooks.requestManager;
   const ids = new CountingIdGenerator("wire");
   manager.generateId = (prefix) => `${prefix}_${ids.next()}`;
   client.ensureConnected = async () => true;
-  client["connectWebSocket"] = async () => true;
-  client["cancelScreenshotBackoff"] = () => {};
+  client.testHooks.overrideConnectWebSocket(async () => true);
+  client.testHooks.overrideCancelScreenshotBackoff(() => {});
   return { client, timer, socket, manager };
 }
 type Harness = Awaited<ReturnType<typeof harness>>;
@@ -122,15 +122,15 @@ const methods: Method[] = [
   {
     name: "requestActivateAccessibilityLink",
     invoke: (h, signal, onDispatch) =>
-      h.client.requestActivateAccessibilityLink(
-        " link ",
-        2,
+      h.client.requestActivateAccessibilityLink({
+        text: " link ",
+        occurrence: 2,
         selector,
-        50,
+        timeoutMs: 50,
         perf,
         signal,
         onDispatch,
-      ),
+      }),
     frame: (requestId) =>
       ctrlProxyRequests.requestActivateAccessibilityLink({
         requestId,
@@ -196,10 +196,10 @@ for (const method of methods) {
     test("preserves literal builder bytes and bypasses the generic command gate", async () => {
       const h = await harness();
       const frame = JSON.parse(method.literal);
-      h.client["rejectedCommands"].add(frame.type);
+      h.client.testHooks.rejectedCommands.add(frame.type);
       // Link activation retains its explicit capability check.
       if (method.name === "requestActivateAccessibilityLink") {
-        h.client["rejectedCommands"].delete(frame.type);
+        h.client.testHooks.rejectedCommands.delete(frame.type);
       }
       let dispatches = 0;
       const pending = method.invoke(h, undefined, () => {

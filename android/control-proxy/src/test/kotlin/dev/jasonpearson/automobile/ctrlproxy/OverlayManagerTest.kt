@@ -85,6 +85,18 @@ class OverlayManagerTest {
   }
 
   @Test
+  @Config(sdk = [24, 27])
+  fun `overlay can be shown before the cutout field exists`() {
+    val overlayManager = createOverlayManager(canDrawOverlays = false)
+
+    assertTrue(overlayManager.show())
+    assertEquals(
+      WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+      (paramsSlot.captured as WindowManager.LayoutParams).type,
+    )
+  }
+
+  @Test
   fun `resolveCutoutMode returns null before API 28`() {
     assertNull(OverlayManager.resolveCutoutMode(21))
     assertNull(OverlayManager.resolveCutoutMode(27))

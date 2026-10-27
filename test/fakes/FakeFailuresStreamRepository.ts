@@ -25,7 +25,7 @@ export class FakeFailuresStreamRepository implements FailuresStreamRepository {
     query: GroupsQuery,
   ): ReturnType<FailuresStreamRepository["getAggregatedGroups"]> {
     this.lastGroupsQuery = query;
-    return { groups: [], totals: { crashes: 0, anrs: 0, toolFailures: 0 } };
+    return { groups: [], totals: { crashes: 0, anrs: 0, toolFailures: 0, nonfatals: 0 } };
   }
 
   async getTimelineData(

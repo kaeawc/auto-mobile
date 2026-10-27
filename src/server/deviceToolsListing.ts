@@ -17,23 +17,28 @@ import {
   createConfiguredInventoryContract,
   projectConfiguredDeviceInventory,
 } from "../utils/configuredDeviceInventory";
-import { describeDevice, projectConfiguredImage } from "./deviceDescription";
+import { describeDevice, projectConfiguredImage } from "../daemon/deviceDescription";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { logger } from "../utils/logger";
+import type { ProgressCallback } from "./toolRegistry";
+import { ResourceRegistry } from "./resourceRegistry";
+import {
+  BOOTED_DEVICE_RESOURCE_URIS,
+  DEVICE_IMAGE_RESOURCE_URIS,
+} from "../constants/deviceResourceUris";
 import { errorMessage } from "../utils/describeUnknownError";
 import { describeDisplayRequirements, matchesDeviceCriteria } from "../utils/deviceMatcher";
 import { hydrateRequiredDisplayInventories } from "../devices/DisplayInventoryProvider";
 import { AndroidTransportAliases } from "../utils/androidSerial";
-import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
-import type { TransitionalHold } from "./inventoryDeviceDescription";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "../daemon/adbOfflineHeldDevices";
+import type { TransitionalHold } from "../daemon/inventoryDeviceDescription";
 import { describeBootCapacity } from "../features/bootAdmission/sharedBootAdmissionGates";
 import {
   ListDeviceImagesArgs,
   ListDevicesArgs,
   acceptancePresentationOrder,
   androidProvenanceByAvdName,
-  availableDeviceResourceNote,
   configuredImagesForBootedDevices,
   detailedDiscoveryOptions,
   getDeviceToolsDependencies,
@@ -48,6 +53,7 @@ async function transitionalHeldListing(input: {
   discovery: BootedDeviceDiscovery;
   pool: ReturnType<typeof initializedDevicePool>;
   deviceManager: ReturnType<ReturnType<typeof getDeviceToolsDependencies>["deviceManagerFactory"]>;
+  signal: AbortSignal | undefined;
 }): Promise<{
   devices: BootedDevice[];
   holds: Map<string, TransitionalHold>;
@@ -63,6 +69,7 @@ async function transitionalHeldListing(input: {
     discovered,
     devicePool: pool,
     deviceManager,
+    signal: input.signal,
     onProbeFailure: (failure) => {
       probeFailure = failure;
     },
@@ -201,7 +208,11 @@ export function createListingHandlers() {
     }
   };
 
-  const listDevicesHandler = async (args: ListDevicesArgs & Record<string, unknown>) => {
+  const listDevicesHandler = async (
+    args: ListDevicesArgs & Record<string, unknown>,
+    _progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
     // #5870: a tool named `listDevices` returns the devices. The data is right
     // here — enumerate booted devices directly instead of forcing a modality
     // switch to resources. The resource pointers (which also cover not-yet-booted
@@ -257,6 +268,7 @@ export function createListingHandlers() {
         discovery,
         pool,
         deviceManager,
+        signal,
       });
       booted = [...booted, ...transitional.devices];
       for (const [deviceId, hold] of transitional.holds) {
@@ -321,4 +333,29 @@ export function createListingHandlers() {
   };
 
   return { listDeviceImagesHandler, listDevicesHandler };
+}
+
+export function availableDeviceResourceNote() {
+  const listedResourceUris = new Set(
+    ResourceRegistry.getResourceDefinitions().map((resource) => resource.uri),
+  );
+  const resourceUris = [
+    BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
+    `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/android`,
+    `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/ios`,
+    DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES,
+    `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/android`,
+    `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/ios`,
+  ];
+  const availableResourceUris = resourceUris.filter((uri) => listedResourceUris.has(uri));
+  return {
+    message:
+      "Acquire a booted device with getAndroid { deviceId } or getApple { deviceId }. " +
+      (availableResourceUris.length > 0
+        ? "For available images and richer per-device detail, read these MCP resources:"
+        : "Refresh resources/list to discover available images and richer per-device detail."),
+    resources: availableResourceUris,
+    uriPrefix:
+      "All resource URIs use the 'automobile:' prefix. URIs like 'android://devices' are not supported.",
+  };
 }

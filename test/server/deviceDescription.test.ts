@@ -8,17 +8,18 @@ import {
   listDevicesEntrySchema,
   type DeviceDescription,
   type DeviceDescriptionInput,
-} from "../../src/server/deviceDescription";
-import type { DeviceInfo } from "../../src/models";
+} from "../../src/daemon/deviceDescription";
+import type { DeviceInfo, FormFactor } from "../../src/models";
+import { formFactorFrom } from "../../src/models/formFactor";
+import type { StableConfiguredDeviceImage } from "../../src/utils/configuredDeviceInventory";
 
-type Assert<T extends true> = T;
-type ProjectionCanonicalExact<T> = Assert<
-  keyof T extends keyof DeviceDescription
-    ? keyof DeviceDescription extends keyof T
+type CanonicalKey = Exclude<keyof DeviceDescription, "unhealthy">;
+type ProjectionCanonicalExact<T> =
+  Exclude<keyof T, "unhealthy"> extends CanonicalKey
+    ? CanonicalKey extends keyof T
       ? true
       : false
-    : false
->;
+    : false;
 
 const projectionKeys = {
   name: true,
@@ -39,7 +40,7 @@ const projectionKeys = {
   image: true,
   availabilityError: true,
   runtime: true,
-} satisfies Record<keyof DeviceDescription, boolean>;
+} satisfies Record<CanonicalKey, boolean>;
 
 function assertSharedKnownValuesAgree(...descriptions: DeviceDescription[]): void {
   const assertValuesAgree = (left: unknown, right: unknown, path: string): void => {
@@ -207,8 +208,10 @@ describe("device description projections", () => {
       screenDensity: 420,
       formFactor: "phone" as const,
       capabilityInventory: {
-        schemaVersion: 1,
-        capabilities: [{ id: "android.hardware.nfc", state: "available" as const }],
+        schemaVersion: 1 as const,
+        capabilities: [
+          { id: "android.hardware.nfc", state: "available" as const, source: "platform" as const },
+        ],
       },
       runtimeId: "system-images;android-36;google_apis;arm64-v8a",
       deviceType: "pixel_9",
@@ -257,8 +260,10 @@ describe("device description projections", () => {
       name: device.name,
       platform: "android" as const,
       status: "idle" as const,
+      sessionId: null,
       lastUsedAt: 0,
       assignmentCount: 0,
+      errorCount: 0,
       incarnation: 1,
       androidImage: { name: device.name, platform: "android" as const, isRunning: true },
     };
@@ -266,18 +271,16 @@ describe("device description projections", () => {
     expect(describeDevice({ kind: "booted", device, pooled, configured }).image).toEqual(
       configured.image,
     );
+    const pooledImage: StableConfiguredDeviceImage = {
+      ...configured,
+      image: { path: "/pooled.avd", target: undefined, basedOn: "Pooled base" },
+    };
     expect(
       describeDevice({
         kind: "booted",
         device,
         configured,
-        pooled: {
-          ...pooled,
-          androidImage: {
-            ...configured,
-            image: { path: "/pooled.avd", target: undefined, basedOn: "Pooled base" },
-          },
-        },
+        pooled: { ...pooled, androidImage: pooledImage },
       }).image,
     ).toEqual({
       path: "/pooled.avd",
@@ -322,8 +325,10 @@ describe("device description projections", () => {
           name: booted.name,
           platform: "android",
           status: "idle",
+          sessionId: null,
           lastUsedAt: 0,
           assignmentCount: 0,
+          errorCount: 0,
           incarnation: 1,
         },
       }),
@@ -349,8 +354,8 @@ describe("device description projections", () => {
 
   test("keeps Android and iOS virtual-device key sets and static enrichment in parity", () => {
     const capabilityInventory = {
-      schemaVersion: 1,
-      capabilities: [{ id: "camera", state: "available" as const }],
+      schemaVersion: 1 as const,
+      capabilities: [{ id: "camera", state: "available" as const, source: "platform" as const }],
     };
     const android = describeDevice({
       kind: "image",
@@ -458,8 +463,10 @@ describe("device description projections", () => {
         name: "Pixel_9_API_36",
         platform: "android",
         status: "idle",
+        sessionId: null,
         lastUsedAt: 0,
         assignmentCount: 0,
+        errorCount: 0,
         incarnation: 1,
         androidImage: {
           name: "Pixel_9_API_36",
@@ -492,8 +499,10 @@ describe("device description projections", () => {
       },
     });
     const discoveredInventory = {
-      schemaVersion: 1,
-      capabilities: [{ id: "ios.real-device.camera", state: "available" as const }],
+      schemaVersion: 1 as const,
+      capabilities: [
+        { id: "ios.real-device.camera", state: "available" as const, source: "platform" as const },
+      ],
     };
     const physicalWithInventory = describeDevice({
       kind: "booted",
@@ -520,7 +529,7 @@ describe("device description projections", () => {
           id: "ios.real-device.camera",
           state: "supported",
           reason: null,
-          source: null,
+          source: "platform",
         },
       ],
     });
@@ -551,8 +560,8 @@ describe("device description projections", () => {
           screenDensity: 460,
           formFactor: "phone",
           capabilityInventory: {
-            schemaVersion: 1,
-            capabilities: [{ id: "ios.simulator.camera", state: "available" }],
+            schemaVersion: 1 as const,
+            capabilities: [{ id: "ios.simulator.camera", state: "available", source: "platform" }],
           },
         },
       },
@@ -577,7 +586,7 @@ describe("device description projections", () => {
         id: "ios.simulator.camera",
         state: "supported",
         reason: null,
-        source: null,
+        source: "platform",
       },
     ]);
   });
@@ -601,6 +610,7 @@ describe("device description projections", () => {
         sessionId: "session-1",
         lastUsedAt: 0,
         assignmentCount: 1,
+        errorCount: 0,
         incarnation: 4,
       },
       session: { sessionId: "session-1", ownership: "owned" },
@@ -659,7 +669,7 @@ describe("device description projections", () => {
       kind: "provisioned",
       provisioned: {
         created: true,
-        resolvedSpec: { runtime: "android-36", deviceType: "pixel_9" },
+        resolvedSpec: { runtime: "android-36", deviceType: "pixel_9", displayCutout: "unknown" },
         device: {
           name: "Pixel_9_API_36",
           platform: "android",
@@ -707,21 +717,44 @@ describe("device description projections", () => {
     });
   });
 
-  test.each([
+  test.each<[FormFactor | undefined, FormFactor]>([
     ["phone", "phone"],
     ["tablet", "tablet"],
     ["foldable", "foldable"],
+    ["tv", "tv"],
+    ["watch", "watch"],
+    ["automotive", "automotive"],
     [undefined, "unknown"],
-    [null, "unknown"],
-    ["watch", "unknown"],
   ])("maps form factor %p to %s", (value, expected) => {
-    const image = {
+    const image: DeviceInfo = {
       name: "Form factor fixture",
       platform: "android",
       isRunning: false,
       formFactor: value,
-    } as unknown as DeviceInfo;
+    };
     expect(describeDevice({ kind: "image", image }).formFactor).toBe(expected);
+  });
+
+  // describeDevice forwards DeviceInfo.formFactor as the classifier hint; values outside the
+  // FormFactor vocabulary can only reach the classifier, which accepts arbitrary hint strings.
+  test.each<[string | null, FormFactor]>([
+    [null, "unknown"],
+    ["toaster", "unknown"],
+  ])("classifies out-of-vocabulary form factor hint %p as %s", (hint, expected) => {
+    expect(formFactorFrom({ hint })).toBe(expected);
+  });
+
+  test("classifies an Android TV image from its system-image tag, not its geometry", () => {
+    const image: DeviceInfo = {
+      name: "TV fixture",
+      platform: "android",
+      isRunning: false,
+      runtimeId: "system-images;android-34;android-tv;x86",
+      screenWidth: 1920,
+      screenHeight: 1080,
+      screenDensity: 160,
+    };
+    expect(describeDevice({ kind: "image", image }).formFactor).toBe("tv");
   });
 
   test("normalizes missing form factors without adding a display alias", () => {
@@ -802,7 +835,7 @@ describe("device description projections", () => {
         kind: "provisioned",
         provisioned: {
           created: true,
-          resolvedSpec: { runtime: "android-36", deviceType: "pixel_9" },
+          resolvedSpec: { runtime: "android-36", deviceType: "pixel_9", displayCutout: "unknown" },
           device: { name: "Pixel", platform: "android", deviceId: "Pixel", isRunning: false },
         },
       },

@@ -47,14 +47,17 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
 
   test("fails the request budget when a cold-cache path probe stalls", async () => {
     const timer = new FakeTimer();
-    const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
-    client["isTestMode"] = false;
-    client["execAsync"] = async () => new Promise<ExecResult>(() => {});
-    client["execWithSignal"] = async (_file, _args, _maxBuffer, timeoutMs) =>
+    const client = new AdbClient(null, null, { retryExecutor: defaultRetryExecutor, timer });
+    client.testHooks.isTestMode = false;
+    client.execAsync = async () => new Promise<ExecResult>(() => {});
+    client.testHooks.execWithSignal = async (_file, _args, _maxBuffer, timeoutMs) =>
       new Promise<ExecResult>((_resolve, reject) => {
+        if (timeoutMs === undefined) {
+          throw new Error("Expected an explicit path-discovery timeout");
+        }
         timer.setTimeout(
           () => reject(new AdbCommandTimeoutError(`Command timed out after ${timeoutMs}ms`)),
-          timeoutMs,
+          timeoutMs ?? 0,
         );
       });
 
@@ -78,10 +81,10 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
   test("getAdbPathOnly forwards the caller signal and deadline to path discovery (#7008)", async () => {
     const timer = new FakeTimer();
     const controller = new AbortController();
-    const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
-    client["isTestMode"] = false;
+    const client = new AdbClient(null, null, { retryExecutor: defaultRetryExecutor, timer });
+    client.testHooks.isTestMode = false;
     const probes: Array<{ timeoutMs?: number; signal?: AbortSignal }> = [];
-    client["execWithSignal"] = async (file, args, _maxBuffer, timeoutMs, signal) => {
+    client.testHooks.execWithSignal = async (file, args, _maxBuffer, timeoutMs, signal) => {
       probes.push({ timeoutMs, signal });
       return file === "which" && args[0] === "adb" ? ok("/sdk/platform-tools/adb\n") : ok();
     };
@@ -99,16 +102,16 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
 
   test("passes only the remaining request budget to the command after discovery", async () => {
     const timer = new FakeTimer();
-    const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
-    client["isTestMode"] = false;
-    client["execAsync"] = async (file, args) => {
+    const client = new AdbClient(null, null, { retryExecutor: defaultRetryExecutor, timer });
+    client.testHooks.isTestMode = false;
+    client.execAsync = async (file, args) => {
       expect([file, ...args]).toEqual(["which", "adb"]);
       timer.advanceTime(7);
       return ok("/sdk/platform-tools/adb\n");
     };
 
     const commandTimeouts: number[] = [];
-    client["execWithSignal"] = async (file, args, _maxBuffer, timeoutMs) => {
+    client.testHooks.execWithSignal = async (file, args, _maxBuffer, timeoutMs) => {
       if (file === "which" && args[0] === "adb") {
         timer.advanceTime(7);
         return ok("/sdk/platform-tools/adb\n");
@@ -126,12 +129,12 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
 
   test("propagates a fallback-detection timeout and does not cache an incomplete resolution", async () => {
     const timer = new FakeTimer();
-    const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
-    client["isTestMode"] = false;
+    const client = new AdbClient(null, null, { retryExecutor: defaultRetryExecutor, timer });
+    client.testHooks.isTestMode = false;
     let recover = false;
     let adbPathProbeCalls = 0;
     const executedCommands: string[] = [];
-    client["execWithSignal"] = async (file, args, _maxBuffer, timeoutMs) => {
+    client.testHooks.execWithSignal = async (file, args, _maxBuffer, timeoutMs) => {
       const command = [file, ...args].join(" ");
       executedCommands.push(command);
       if (command === "which adb") {
@@ -142,9 +145,12 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
         return ok();
       }
       return new Promise<ExecResult>((_resolve, reject) => {
+        if (timeoutMs === undefined) {
+          throw new Error("Expected an explicit path-discovery timeout");
+        }
         timer.setTimeout(
           () => reject(new AdbCommandTimeoutError(`Command timed out after ${timeoutMs}ms`)),
-          timeoutMs,
+          timeoutMs ?? 0,
         );
       });
     };
@@ -168,11 +174,14 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
 
   test("does not cache the fallback path when an environment probe is aborted", async () => {
     process.env.ANDROID_HOME = "/sdk";
-    const client = new AdbClient(null, null, null, defaultRetryExecutor, new FakeTimer());
-    client["isTestMode"] = false;
+    const client = new AdbClient(null, null, {
+      retryExecutor: defaultRetryExecutor,
+      timer: new FakeTimer(),
+    });
+    client.testHooks.isTestMode = false;
     let versionProbeCalls = 0;
     const commandFiles: string[] = [];
-    client["execWithSignal"] = async (file, args, _maxBuffer, _timeoutMs, signal) => {
+    client.testHooks.execWithSignal = async (file, args, _maxBuffer, _timeoutMs, signal) => {
       if (signal?.aborted) {
         throw new Error("probe aborted");
       }
@@ -207,11 +216,14 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
   });
 
   test("does not cache the fallback path when a later tool-discovery probe is aborted", async () => {
-    const client = new AdbClient(null, null, null, defaultRetryExecutor, new FakeTimer());
-    client["isTestMode"] = false;
+    const client = new AdbClient(null, null, {
+      retryExecutor: defaultRetryExecutor,
+      timer: new FakeTimer(),
+    });
+    client.testHooks.isTestMode = false;
     let adbPathProbeCalls = 0;
     const commandFiles: string[] = [];
-    client["execWithSignal"] = async (file, args, _maxBuffer, _timeoutMs, signal) => {
+    client.testHooks.execWithSignal = async (file, args, _maxBuffer, _timeoutMs, signal) => {
       if (signal?.aborted) {
         throw new Error("probe aborted");
       }
@@ -262,16 +274,13 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
         throw new Error("command not found");
       },
     };
-    const client = new AdbClient(
-      null,
-      null,
-      null,
-      defaultRetryExecutor,
+    const client = new AdbClient(null, null, {
+      retryExecutor: defaultRetryExecutor,
       timer,
-      () => stalledSystemDetection,
-    );
-    client["isTestMode"] = false;
-    client["execWithSignal"] = async (file, args) => {
+      systemDetectionFactory: () => stalledSystemDetection,
+    });
+    client.testHooks.isTestMode = false;
+    client.testHooks.execWithSignal = async (file, args) => {
       if (file === "which" && args[0] === "adb") {
         return ok("");
       }

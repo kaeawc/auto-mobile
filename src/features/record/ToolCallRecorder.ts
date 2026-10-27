@@ -1,75 +1,23 @@
-import { INTERNAL_TOOL_PARAM_NAMES } from "../../daemon/constants";
+import { INTERNAL_TOOL_PARAM_NAMES } from "../../daemon/wire/constants";
 import { PlanStep } from "../../models/Plan";
 import { logger } from "../../utils/logger";
 import type { SwipeAtRecordingContext } from "../../models/SwipeAtOptions";
 import { normalizedAxis } from "./normalizedAxis";
 import { isInternalStepParam } from "../../constants/internalStepParams";
+import { redactToolSecrets, TOOL_SECRET_PLACEHOLDER } from "../../utils/redactToolSecrets";
 
-/**
- * MCP tool names whose successful calls are recorded as plan steps.
- *
- * The registry carries no per-tool "mutates the device" flag (`planExecutable`
- * only widens which gated tools a plan may run), so this list is hand-kept.
- * Infrastructure tools (device management, recording meta-tools, read-only
- * queries) are excluded. `test/features/record/ToolCallRecorderCoverage.test.ts`
- * requires every tool in `schemas/tool-definitions.json` to be listed here or
- * excluded there with a reason, so a new action tool cannot be silently left
- * out of the exported plan (#9928).
- */
-export const PLAN_RELEVANT_TOOLS = new Set([
-  // App lifecycle
-  "launchApp",
-  "terminateApp",
-  "crashApp",
-  "appLifecycle",
-  // Observation
-  "observe",
-  // Interaction
-  "tapOn",
-  "tapAny",
-  "tapAt",
-  "swipeOn",
-  "swipeAt",
-  "sendKeys",
-  "pressButton",
-  "dragAndDrop",
-  "dragPath",
-  "pinchOn",
-  "multiTouch",
-  "selectAllText",
-  "clipboard",
-  "keyboard",
-  // Navigation and system UI
-  "homeScreen",
-  "recentApps",
-  "openLink",
-  "systemTray",
-  "wakeAndUnlock",
-  // Device state and orientation
-  "rotate",
-  "shake",
-  "setPosture",
-  "setDeviceState",
-  "displayConfig",
-  "changeLocalization",
-  "setAppPermissions",
-  "postNotification",
-  // Form filling
-  "setUIState",
-  // Telephony, biometrics and accessibility services (#9966)
-  "accessibility",
-  "biometricAuth",
-  "phoneCall",
-  "sendSms",
-  // App state and fixtures (#9966). The file-staging tools are recorded only
-  // when every file carries inline content; see referencesHostFile.
-  "setNotificationPolicy",
-  "setPreference",
-  "resetKeychain",
-  "resetAppLogs",
-  "putAppFile",
-  "stageSessionDownloads",
-]);
+/** The registry-declared tool traits the recorder reads (structural subset of `ToolTraits`). */
+export interface RecorderToolTraits {
+  /** Writes caller-supplied files, from a host `sourcePath` or inline content. */
+  stagesFiles?: boolean;
+  /** A successful call is recorded as a plan step (declared on the tool, #11825). */
+  planRelevant?: boolean;
+}
+
+/** Whether the tool declares the `planRelevant` trait, so its successful calls are plan steps. */
+function isPlanRelevant(traits: RecorderToolTraits | undefined): boolean {
+  return traits?.planRelevant === true;
+}
 
 /**
  * Params that reference observation state which cannot outlive the recording
@@ -100,6 +48,15 @@ const READ_ONLY_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
   keyboard: new Set(["detect", "listProfiles", "listImes"]),
   clipboard: new Set(["get"]),
   systemTray: new Set(["list", "find"]),
+  systemAlerts: new Set(["get"]),
+};
+
+/**
+ * `action` values that only read state unless the call also waits (`waitFor`): a wait
+ * holds a replayed plan until the device reaches a state, so it is a step (#14117).
+ */
+const READ_ONLY_ACTIONS_UNLESS_WAITING: Readonly<Record<string, ReadonlySet<string>>> = {
+  mediaSession: new Set(["get"]),
 };
 
 /**
@@ -108,7 +65,24 @@ const READ_ONLY_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
  * the TalkBack/VoiceOver state when neither toggle is given.
  */
 const READ_UNLESS_SET_FIELDS: Readonly<Record<string, readonly string[]>> = {
-  displayConfig: ["fontScale", "density", "theme", "reset"],
+  displayConfig: [
+    "fontScale",
+    "contentSize",
+    "density",
+    "theme",
+    "size",
+    "navigationMode",
+    "displayCutout",
+    "increaseContrast",
+    "reduceMotion",
+    "boldText",
+    "colorInversion",
+    "colorCorrection",
+    "magnification",
+    "magnificationScale",
+    "extraDim",
+    "reset",
+  ],
   accessibility: ["talkback", "voiceover"],
 };
 
@@ -117,6 +91,14 @@ export function isReadOnlyCall(toolName: string, params: Record<string, unknown>
   const setFields = READ_UNLESS_SET_FIELDS[toolName];
   if (setFields) {
     return setFields.every((field) => params[field] === undefined);
+  }
+  const readUnlessWaiting = READ_ONLY_ACTIONS_UNLESS_WAITING[toolName];
+  if (readUnlessWaiting) {
+    return (
+      params.waitFor === undefined &&
+      typeof params.action === "string" &&
+      readUnlessWaiting.has(params.action)
+    );
   }
   const readOnly = READ_ONLY_ACTIONS[toolName];
   return readOnly !== undefined && typeof params.action === "string" && readOnly.has(params.action);
@@ -167,9 +149,6 @@ function findOversizedParam(params: Record<string, unknown>): string | undefined
   );
 }
 
-/** Tools that write caller-supplied files, from a host path or inline content. */
-const FILE_STAGING_TOOLS: ReadonlySet<string> = new Set(["putAppFile", "stageSessionDownloads"]);
-
 function hasSourcePath(entry: unknown): boolean {
   return typeof entry === "object" && entry !== null && "sourcePath" in entry;
 }
@@ -181,8 +160,11 @@ function hasSourcePath(entry: unknown): boolean {
  * `contentBase64` are self-contained and are recorded. Covers both the
  * canonical `files[]` shape and the legacy single-file putAppFile shape.
  */
-export function referencesHostFile(toolName: string, params: Record<string, unknown>): boolean {
-  if (!FILE_STAGING_TOOLS.has(toolName)) {
+export function referencesHostFile(
+  traits: RecorderToolTraits | undefined,
+  params: Record<string, unknown>,
+): boolean {
+  if (traits?.stagesFiles !== true) {
     return false;
   }
   return hasSourcePath(params) || (Array.isArray(params.files) && params.files.some(hasSourcePath));
@@ -260,11 +242,11 @@ export class ToolCallRecorder {
     return this.steps.length;
   }
 
-  record(toolName: string, args: Record<string, unknown>): void {
+  record(toolName: string, args: Record<string, unknown>, traits?: RecorderToolTraits): void {
     if (!this.recording) {
       return;
     }
-    if (!PLAN_RELEVANT_TOOLS.has(toolName)) {
+    if (!isPlanRelevant(traits)) {
       return;
     }
 
@@ -272,19 +254,14 @@ export class ToolCallRecorder {
     if (isReadOnlyCall(toolName, params)) {
       return;
     }
-    const skipReason = this.skipReason(toolName, params);
+    const skipReason = this.skipReason(params, traits);
     if (skipReason) {
       const warning = `${toolName} was not recorded (after ${this.steps.length} recorded steps): ${skipReason}`;
       logger.warn(`[ToolCallRecorder] ${warning}`);
       this.warnings.push(warning);
       return;
     }
-    const recorded = withholdDestructiveConfirmations(toolName, params);
-    if (recorded !== params) {
-      this.warnings.push(
-        `${toolName} was recorded with its destructive confirmation set to false: a replay stops at this step until you set confirm: true in the plan by hand`,
-      );
-    }
+    const recorded = this.withholdUnsafeParams(toolName, params);
     const context = args.__tapAtRecordingContext as
       | import("../../models/TapAtGeometry").TapAtPlanContext
       | undefined;
@@ -309,6 +286,26 @@ export class ToolCallRecorder {
       this.steps.push({ tool: toolName, params: recordedParams });
     }
     logger.info(`[ToolCallRecorder] Recorded step ${this.steps.length}: ${toolName}`);
+  }
+
+  /** Withhold destructive confirmations and credentials, warning the author of each. */
+  private withholdUnsafeParams(
+    toolName: string,
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const confirmed = withholdDestructiveConfirmations(toolName, params);
+    if (confirmed !== params) {
+      this.warnings.push(
+        `${toolName} was recorded with its destructive confirmation set to false: a replay stops at this step until you set confirm: true in the plan by hand`,
+      );
+    }
+    const recorded = redactToolSecrets(toolName, confirmed);
+    if (recorded !== confirmed) {
+      this.warnings.push(
+        `${toolName} was recorded with its credentials replaced by ${TOOL_SECRET_PLACEHOLDER}: set them in the plan by hand before a replay`,
+      );
+    }
+    return recorded;
   }
 
   private paramsToStore(
@@ -361,8 +358,11 @@ export class ToolCallRecorder {
     };
   }
 
-  private skipReason(toolName: string, params: Record<string, unknown>): string | undefined {
-    if (referencesHostFile(toolName, params)) {
+  private skipReason(
+    params: Record<string, unknown>,
+    traits?: RecorderToolTraits,
+  ): string | undefined {
+    if (referencesHostFile(traits, params)) {
       return "it copies a host file (sourcePath), which a replay on another host cannot resolve; use contentText or contentBase64 to record it";
     }
     const oversized = findOversizedParam(params);

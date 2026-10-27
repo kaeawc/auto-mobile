@@ -12,7 +12,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HighlightShape } from "../../../../src/models/VisualHighlight";
-import type { NetworkMockRuleSync } from "../../../../src/server/networkMockRules";
+import type { NetworkMockRuleSync } from "../../../../src/utils/networkMockRules";
 import {
   SAVED_PROTOTYPE_ERROR_CODES,
   isSavedPrototypeErrorCode,
@@ -337,6 +337,19 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
       expected: '{"type":"delete_saved_prototype","requestId":"r12","id":"panel"}',
     },
     {
+      builder: "advancePrototypeClock",
+      name: "advance prototype clock",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.advancePrototypeClock({
+          requestId: "timer",
+          id: "panel",
+          advanceTimeMs: 100,
+        }),
+      ),
+      expected:
+        '{"type":"advance_prototype_clock","requestId":"timer","id":"panel","advanceTimeMs":100}',
+    },
+    {
       builder: "clearPrototypeStorage",
       name: "clear storage",
       actual: serializeCtrlProxyRequest(
@@ -494,6 +507,34 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
       ),
       expected:
         '{"type":"request_action","requestId":"a-3","action":"long_click","resourceId":"com.example:id/row","selector":{"resourceId":"com.example:id/row","testTag":"message_row_42","collectionRow":4,"collectionColumn":0}}',
+    },
+    {
+      builder: "requestAction",
+      name: "custom action label and progress are carried for semantic actions (#14077)",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.requestAction({
+          requestId: "a-4",
+          action: "set_progress",
+          resourceId: "com.example:id/slider",
+          progress: 0.25,
+        }),
+      ),
+      expected:
+        '{"type":"request_action","requestId":"a-4","action":"set_progress","resourceId":"com.example:id/slider","progress":0.25}',
+    },
+    {
+      builder: "requestAction",
+      name: "custom action label is carried",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.requestAction({
+          requestId: "a-5",
+          action: "custom",
+          resourceId: "com.example:id/row",
+          customAction: "Archive",
+        }),
+      ),
+      expected:
+        '{"type":"request_action","requestId":"a-5","action":"custom","resourceId":"com.example:id/row","customAction":"Archive"}',
     },
     {
       builder: "requestActivateAccessibilityLink",
@@ -1060,11 +1101,11 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   // total builder count is pinned. Ship builder #45 without a row and this fails — not a silently
   // uncovered send site. `request_two_finger_swipe` has no builder here by design (it goes through
   // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
-  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 54", () => {
+  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 55", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
-    expect(builderNames.length).toBe(54);
+    expect(builderNames.length).toBe(55);
     const covered = new Set(cases.map((row) => row.builder));
-    expect([...covered].sort()).toEqual([...builderNames].sort());
+    expect<unknown>([...covered].sort()).toEqual([...builderNames].sort());
   });
 });
 
@@ -1127,7 +1168,7 @@ test("saved prototype error codes match Kotlin", () => {
     "unsupported_format",
     "internal_error",
   ];
-  expect(SAVED_PROTOTYPE_ERROR_CODES).toEqual(kotlinCodes);
+  expect<unknown>(SAVED_PROTOTYPE_ERROR_CODES).toEqual(kotlinCodes);
   for (const code of kotlinCodes) {
     expect(isSavedPrototypeErrorCode(code)).toBe(true);
   }

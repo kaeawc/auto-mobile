@@ -59,7 +59,9 @@ export const IOS_KNOWN_REQUEST_TYPES = [
 
   // Device control
   "request_rotate",
+  "request_location",
   "set_hinge_angle",
+  "request_appearance",
 
   // Clipboard
   "request_clipboard",
@@ -72,6 +74,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "request_sdk_trigger",
   "get_voiceover_state",
   "set_voiceover_state",
+  "request_accessibility_audit",
 
   // Storage inspection
   "list_preference_files",
@@ -80,6 +83,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "set_preference",
   "remove_preference",
   "clear_preferences",
+  "delete_keychain_item",
 
   // Network mocking
   "set_network_mock_rules",

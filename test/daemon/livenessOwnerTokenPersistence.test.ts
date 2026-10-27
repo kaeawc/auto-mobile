@@ -5,7 +5,7 @@ import {
   resetDbWriteBarrier,
   InMemoryDbWriteBarrier,
 } from "../../src/db/dbWriteBarrier";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { logger } from "../../src/utils/logger";
 import { LivenessScenario } from "../helpers/livenessScenarioHarness";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";

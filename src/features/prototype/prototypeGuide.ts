@@ -24,8 +24,10 @@ import {
   GUIDE_PATCH,
   GUIDE_REPEAT,
   GUIDE_STORAGE,
+  GUIDE_TIMERS,
 } from "./prototypeGuideProse";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
+import { PROTOTYPE_NATIVE_ASSET_URI, PROTOTYPE_NATIVE_URI } from "./nativePrototypeUris";
 
 /** Resource URIs served by the prototype authoring guide. */
 export const PROTOTYPE_GUIDE_URI = "automobile:prototype";
@@ -175,7 +177,7 @@ function renderTheme(): string {
     "",
     `Material colour roles (a colour field takes a hex value or one of these): ${code(roles)}.`,
     "",
-    `Per-mode values, refused unless the device advertises \`${PROTOTYPE_THEME_MODES_CAPABILITY}\`: every colour field (style colours, \`border.color\`, gradient stops, \`window.placement.scrim\`, a bottomSheet \`scrim\`) also takes \`{light, dark}\`, each a hex value or a role, both required; gradient stops and scrims take a role name too. \`theme.colors.light\` and \`theme.colors.dark\` are \`{<role>: hex}\` maps applied after the flat role overrides for the resolved mode. \`image.asset\` and a tabBar or bottomNav item \`image\` take \`{light: assetId, dark: assetId}\`: upload both, and a pair naming two different assets counts as two images. Prefer a role name, which already follows the mode; use a pair for a brand literal that needs a hand-picked dark value.`,
+    `Per-mode values, refused unless the device advertises \`${PROTOTYPE_THEME_MODES_CAPABILITY}\`: every colour field (style colours, \`border.color\`, gradient stops, \`window.placement.scrim\`, a bottomSheet or drawer \`scrim\`) also takes \`{light, dark}\`, each a hex value or a role, both required; gradient stops and scrims take a role name too. \`theme.colors.light\` and \`theme.colors.dark\` are \`{<role>: hex}\` maps applied after the flat role overrides for the resolved mode. \`image.asset\` and a tabBar or bottomNav item \`image\` take \`{light: assetId, dark: assetId}\`: upload both, and a pair naming two different assets counts as two images. Prefer a role name, which already follows the mode; use a pair for a brand literal that needs a hand-picked dark value.`,
     "",
     `Text style roles (\`style.textStyle\`): ${code(fieldRuleValues("style", "textStyle"))}.`,
     "",
@@ -191,6 +193,14 @@ function renderIcons(): string {
     "",
     `Icon names are a closed set of ${iconNames().length} Material names; variants: ${code(contract.definitions.iconVariant.values)}.`,
     `Look names up with \`${PROTOTYPE_ICONS_URI}?query=<substring>\` (at most ${ICON_LOOKUP_LIMIT} matches per read).`,
+  ].join("\n");
+}
+
+function renderNativeCode(): string {
+  return [
+    "## Embedding in an app",
+    "",
+    `Read \`${PROTOTYPE_NATIVE_URI}?id=<id>\` (optional \`platform=android|ios\`, \`deviceId\`) for a shown or saved prototype as app code: the spec, its assets, a Jetpack Compose or SwiftUI host file that renders it with the published renderer library, the library coordinate to add, and the capabilities the spec needs. Asset bytes for saved prototypes come from \`${PROTOTYPE_NATIVE_ASSET_URI}?id=<id>&assetId=<asset>\`.`,
   ].join("\n");
 }
 
@@ -253,6 +263,7 @@ export function renderPrototypeGuide(): string {
     GUIDE_DATA,
     GUIDE_DATA_ACTIONS,
     GUIDE_STORAGE,
+    GUIDE_TIMERS,
     GUIDE_REQUEST,
     GUIDE_EMIT_CONTEXT,
     GUIDE_CHECKS,
@@ -264,6 +275,7 @@ export function renderPrototypeGuide(): string {
     GUIDE_DEVICE_LOOPBACK,
     renderIcons(),
     renderPlatformDifferences(),
+    renderNativeCode(),
     GUIDE_COST,
     GUIDE_ERRORS,
   ].join("\n\n");

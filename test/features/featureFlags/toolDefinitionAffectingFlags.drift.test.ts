@@ -9,13 +9,18 @@ import type { FeatureFlagKey } from "../../../src/features/featureFlags/FeatureF
 
 // AST drift guard (issue #2963): TOOL_DEFINITION_AFFECTING_FLAGS is a
 // hand-maintained set that must stay in sync with the config the tool-list output
-// actually depends on. `getToolDefinitions` decides the advertised outputSchema and
-// `getToolAvailabilityGateReasons` decides tool availability — both in toolRegistry.ts.
-// This test parses the module (oxc) and extracts every config getter those two methods call and asserts each maps
+// actually depends on. `getToolDefinitions` (ToolDefinitionListing.ts, split out of
+// toolRegistry.ts in #13693) decides the advertised outputSchema and
+// `getToolAvailabilityGateReasons` (toolRegistry.ts) decides tool availability.
+// This test parses both modules (oxc) and extracts every config getter those two methods call and asserts each maps
 // to a flag that is (or is deliberately excluded from) the set. If a new getter is
 // added without updating this mapping, the test fails loudly pointing the author here.
 
 const TOOL_REGISTRY_PATH = path.resolve(import.meta.dir, "../../../src/server/toolRegistry.ts");
+const TOOL_LISTING_PATH = path.resolve(
+  import.meta.dir,
+  "../../../src/server/ToolDefinitionListing.ts",
+);
 
 // Maps a config getter referenced by the tool-list methods to the runtime feature
 // flag that drives it, or `null` when it is NOT a runtime-toggleable feature flag
@@ -57,10 +62,17 @@ function findConfigGetters(program: Program, method: string): string[] {
 }
 
 describe("TOOL_DEFINITION_AFFECTING_FLAGS drift guard", () => {
-  const program = parseGuardSource(TOOL_REGISTRY_PATH, fs.readFileSync(TOOL_REGISTRY_PATH, "utf8"));
+  const registryProgram = parseGuardSource(
+    TOOL_REGISTRY_PATH,
+    fs.readFileSync(TOOL_REGISTRY_PATH, "utf8"),
+  );
+  const listingProgram = parseGuardSource(
+    TOOL_LISTING_PATH,
+    fs.readFileSync(TOOL_LISTING_PATH, "utf8"),
+  );
   const gettersUsed = [
-    ...findConfigGetters(program, "getToolDefinitions"),
-    ...findConfigGetters(program, "getToolAvailabilityGateReasons"),
+    ...findConfigGetters(listingProgram, "getToolDefinitions"),
+    ...findConfigGetters(registryProgram, "getToolAvailabilityGateReasons"),
   ];
 
   test("the tool-list methods actually reference some config getters (scan is live)", () => {

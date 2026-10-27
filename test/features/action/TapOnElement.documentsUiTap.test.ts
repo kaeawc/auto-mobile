@@ -1,4 +1,5 @@
-import { describe, expect, test, spyOn } from "bun:test";
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
+import { describe, expect, test, spyOn, afterEach, mock, beforeEach } from "bun:test";
 import type { Element } from "../../../src/models";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -9,18 +10,27 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { logger } from "../../../src/utils/logger";
 
+afterEach(() => mock.restore());
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+});
+
 function createTap(
   options: {
     supported?: boolean;
     success?: boolean;
     throws?: boolean;
     dispatchedTapFails?: boolean;
+    talkBackStrategy?: FakeTalkBackTapStrategy;
+    talkBackDriverFactory?: { createDriver: () => FakeTalkBackNavigationDriver };
   } = {},
 ) {
   const adb = new FakeAdbClient();
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  const gestures: unknown[] = [];
+  const gestures: TapCoordinatesRequest[] = [];
   const service = new FakeCtrlProxy(timer);
   service.setSupportsNodeActionSelectors(options.supported ?? true);
   service.setActionResult({ success: options.success ?? true, action: "click", totalTimeMs: 1 });
@@ -28,21 +38,25 @@ function createTap(
     service.setFailureMode("requestNodeAction", new Error("Runner disconnected"));
   }
   const requestTap = service.requestTapCoordinates.bind(service);
-  service.requestTapCoordinates = async (...args) => {
-    gestures.push(args);
+  service.requestTapCoordinates = async (request) => {
+    gestures.push(request);
     if (options.dispatchedTapFails) {
-      args[6]?.();
+      request.onDispatch?.();
       return { success: false, totalTimeMs: 1, error: "Tap timed out after 5000ms" };
     }
-    return requestTap(...args);
+    return requestTap(request);
   };
-  const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(service);
+  clientSpy.mockReturnValue(service);
   let tap: TapOnElement;
   try {
     tap = new TapOnElement(
       { name: "test-device", platform: "android", deviceId: "emulator-5554" },
       adb,
-      { timer },
+      {
+        timer,
+        talkBackStrategy: options.talkBackStrategy,
+        talkBackDriverFactory: options.talkBackDriverFactory,
+      },
     );
   } finally {
     clientSpy.mockRestore();
@@ -142,7 +156,7 @@ describe("DocumentsUI row activation (#6335)", () => {
       await execute(tap, { ...row, "resource-id": id });
       expect(service.getNodeActionHistory()).toHaveLength(0);
       expect(gestures).toEqual([
-        [540, 380, 10, undefined, undefined, undefined, expect.any(Function)],
+        expect.objectContaining({ x: 540, y: 380, duration: 10, onDispatch: expect.any(Function) }),
       ]);
       expect(adb.getAllCommands()).toHaveLength(0);
     });
@@ -170,12 +184,14 @@ describe("DocumentsUI row activation (#6335)", () => {
 
 for (const action of ["tap", "doubleTap"]) {
   test(`TalkBack ${action} recovers through DocumentsUI routing after activation failure`, async () => {
-    const { tap, adb } = createTap({ success: false });
     const strategy = new FakeTalkBackTapStrategy();
     strategy.setDirectActivationResult({ success: false, method: "accessibility-action" });
-    (tap as any).talkBackStrategy = strategy;
-    (tap as any).talkBackDriverFactory = { createDriver: () => new FakeTalkBackNavigationDriver() };
-    await tap.executeAndroidTap(action, 540, 380, 0, row, undefined, undefined, true);
+    const { tap, adb } = createTap({
+      success: false,
+      talkBackStrategy: strategy,
+      talkBackDriverFactory: { createDriver: () => new FakeTalkBackNavigationDriver() },
+    });
+    await tap.executeAndroidTap(action, 540, 380, 0, row, { isTalkBackEnabled: true });
     expect(strategy.fallbackCalls).toHaveLength(0);
     expect(adb.getAllCommands()).toHaveLength(action === "tap" ? 1 : 2);
   });
@@ -184,7 +200,7 @@ for (const action of ["tap", "doubleTap"]) {
 test("does not activate or fall back after cancellation during runner capability lookup", async () => {
   const { tap, adb, service } = createTap();
   const controller = new AbortController();
-  (tap as any).accessibilityService.supportsNodeActionSelectors = async () => {
+  service.supportsNodeActionSelectors = async () => {
     controller.abort();
     return true;
   };
@@ -198,7 +214,7 @@ test("does not activate or fall back after cancellation during runner capability
 test.each(["capability", "action"])(
   "propagates abort during pending %s without input fallback",
   async (stage) => {
-    const { tap, adb, gestures } = createTap();
+    const { tap, adb, gestures, service } = createTap();
     const controller = new AbortController();
     let received: AbortSignal | undefined;
     let finish!: () => void;
@@ -206,27 +222,18 @@ test.each(["capability", "action"])(
       finish = resolve;
     });
     if (stage === "capability") {
-      (tap as any).accessibilityService.supportsNodeActionSelectors = async (
-        _perf: unknown,
-        signal: AbortSignal,
-      ) => {
+      service.supportsNodeActionSelectors = async (_perf, signal) => {
         received = signal;
-        signal.addEventListener("abort", finish, { once: true });
+        signal?.addEventListener("abort", finish, { once: true });
         await pending;
         return true;
       };
     } else {
-      (tap as any).accessibilityService.requestNodeAction = async (
-        _action: string,
-        _selector: unknown,
-        _timeout: unknown,
-        _perf: unknown,
-        signal: AbortSignal,
-      ) => {
+      service.requestNodeAction = async (_action, _selector, _timeout, _perf, signal) => {
         received = signal;
-        signal.addEventListener("abort", finish, { once: true });
+        signal?.addEventListener("abort", finish, { once: true });
         await pending;
-        return { success: true };
+        return { success: true, action: "click", totalTimeMs: 1 };
       };
     }
     const result = tap.executeAndroidTapWithCoordinates("tap", 540, 380, 0, row, controller.signal);

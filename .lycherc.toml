@@ -9,6 +9,13 @@ exclude = [
   # Ignore common localhost URLs
   "^https?://localhost",
   "^https?://127\\.0\\.0\\.1",
+  # 10.0.2.2 is the Android emulator's alias for the host loopback; it is only
+  # routable inside an emulator, so CI times out on it (CHANGELOG.md #13018).
+  "^https?://10\\.0\\.2\\.2([:/?#]|$)",
+  # 192.168.1.10 is the illustrative LAN address in the iOS and Android prototype docs
+  # destination-policy examples; it is a placeholder, not a host CI can reach, so
+  # include_verbatim times out on it.
+  "^https?://192\\.168\\.1\\.10([:/?#]|$)",
   # Ignore RFC 2606 reserved example domains and any subdomain of them. Bare
   # `example.com` is not enough now that include_verbatim checks links inside
   # fenced code samples: docs/webrtc-streaming.md cites `mediamtx.example.com`,

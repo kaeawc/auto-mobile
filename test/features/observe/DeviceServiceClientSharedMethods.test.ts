@@ -11,7 +11,6 @@ import { createInstantFailureWebSocketFactory } from "../../fakes/FakeWebSocket"
 const device: BootedDevice = {
   deviceId: "shared-methods-test-device",
   platform: "android",
-  isEmulator: true,
   name: "Shared methods test device",
 };
 
@@ -51,6 +50,12 @@ class FailureCountingClient extends DeviceServiceClient {
   fail(): void {
     this.onConnectAttemptFailed();
   }
+  markClosed(): void {
+    this.closed = true;
+  }
+  get failureCount(): number {
+    return this.consecutiveConnectionFailures;
+  }
 }
 
 describe("DeviceServiceClient shared methods", () => {
@@ -63,7 +68,7 @@ describe("DeviceServiceClient shared methods", () => {
       expect(AndroidCtrlProxyClient["HANDSHAKE_POLL_INTERVAL_MS"]).toBe(50);
       for (const client of clients) {
         const started = timer.now();
-        await client["waitForHandshake"]();
+        await client.connectionTestHooks.waitForHandshake();
         expect(timer.now() - started).toBe(2000);
       }
       expect(timer.getSleepHistory()).toEqual(Array(80).fill(50));
@@ -81,7 +86,7 @@ describe("DeviceServiceClient shared methods", () => {
       for (const client of clients) {
         const controller = new AbortController();
         const reason = new Error("cancel handshake");
-        const pending = client["waitForHandshake"](undefined, controller.signal);
+        const pending = client.connectionTestHooks.waitForHandshake(undefined, controller.signal);
         expect(timer.getPendingTimeoutCount()).toBe(1);
         controller.abort(reason);
         await expect(pending).rejects.toBe(reason);
@@ -98,8 +103,8 @@ describe("DeviceServiceClient shared methods", () => {
     const timer = new FakeTimer();
     const [android, ios] = createClients(timer);
     try {
-      android["supportedCommands"] = new Set(["request_hierarchy"]);
-      ios["supportedCommands"] = new Set(["request_hierarchy"]);
+      android.connectionTestHooks.supportedCommands = new Set(["request_hierarchy"]);
+      ios.connectionTestHooks.supportedCommands = new Set(["request_hierarchy"]);
       const controller = new AbortController();
       const reason = new Error("already cancelled");
       controller.abort(reason);
@@ -127,7 +132,7 @@ describe("DeviceServiceClient shared methods", () => {
       8765,
       createInstantFailureWebSocketFactory(timer),
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     try {
       client.bindSession("shared-methods-session-a");
@@ -150,12 +155,12 @@ describe("DeviceServiceClient shared methods", () => {
         client.fail();
         expect(client.triggers).toBe(Math.floor(attempt / 3));
       }
-      client["autoReconnectEnabled"] = false;
+      client.connectionTestHooks.autoReconnectEnabled = false;
       client.fail();
-      client["autoReconnectEnabled"] = true;
-      client["closed"] = true;
+      client.connectionTestHooks.autoReconnectEnabled = true;
+      client.markClosed();
       client.fail();
-      expect(client["consecutiveConnectionFailures"]).toBe(6);
+      expect(client.failureCount).toBe(6);
     } finally {
       await client.close();
     }

@@ -34,6 +34,17 @@ const requestId = "fixture-request-id";
 // Concrete values deliberately independent of wire values: a missing field cannot pass
 // by comparing two undefineds. The Swift equality gate additionally detects encoder drift.
 const typedResults: Record<string, Record<string, unknown>> = {
+  delete_keychain_item_result: {
+    success: true,
+    totalTimeMs: 17,
+    outcome: "deleted",
+    deletedScope: {
+      itemClass: "genericPassword",
+      service: "test.service",
+      account: "fixture",
+      accessGroup: "TEAM.app",
+    },
+  },
   screenshot: {
     success: true,
     data: "aW9z",
@@ -69,6 +80,21 @@ const typedResults: Record<string, Record<string, unknown>> = {
     rotationPerformed: true,
   },
   hinge_angle_result: { success: false, angle: 90, error: "unsupported", totalTimeMs: 17 },
+  accessibility_audit_result: {
+    success: true,
+    issues: [
+      {
+        check: "contrast",
+        summary: "fixture issue",
+        detail: "fixture detail",
+        elementId: "fixture-element",
+        label: "Fixture",
+        bounds: { left: 1, top: 2, right: 3, bottom: 4 },
+      },
+    ],
+    unsupportedChecks: ["fixture-check"],
+    totalTimeMs: 17,
+  },
   magic_tap_result: {
     success: false,
     available: true,
@@ -166,6 +192,8 @@ const typedResults: Record<string, Record<string, unknown>> = {
     totalTimeMs: 17,
   },
   clipboard_result: { success: true, text: "fixture text", action: "", totalTimeMs: 17 },
+  appearance_result: { success: true, appearance: "dark", totalTimeMs: 17 },
+  location_result: { success: true, totalTimeMs: 17 },
 };
 const genericTypes = new Set([
   "tap_coordinates_result",
@@ -279,6 +307,13 @@ describe("Swift runner production response encoders → host decoder", () => {
           totalTimeMs: 17,
           errorMessage:
             "iOS runner is busy executing request_activate_accessibility_link for 35.0s (its deadline passed 5.0s ago; the gesture is a blocking XCUITest call the runner cannot interrupt); bounded runner recovery is required. The blocking action's outcome is unknown; observe fresh state before deciding whether to repeat it",
+        });
+      } else if (name === "delete_keychain_item_denied") {
+        expect(decoded?.result).toEqual({
+          success: false,
+          totalTimeMs: 17,
+          outcome: "mutation_not_authorized",
+          deletedScope: null,
         });
       } else if (name === "error_success_false_without_error") {
         expect(decoded?.result).toMatchObject({

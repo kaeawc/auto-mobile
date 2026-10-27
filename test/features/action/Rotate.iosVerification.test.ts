@@ -17,8 +17,23 @@ describe("iOS observed rotation verification (#8778)", () => {
   let observe: FakeObserveScreen;
   let instanceSpy: ReturnType<typeof spyOn>;
 
+  test("restore state is unobservable and never reads defaulted Android orientation on iOS", async () => {
+    const adb = new FakeAdbExecutor();
+    const iosRotate = new Rotate(
+      { deviceId: "ios-restore", name: "iPhone", platform: "ios" },
+      adb,
+      new FakeTimer(),
+    );
+    await expect(iosRotate.getRestoreState()).rejects.toThrow(
+      "iOS rotation restore state is unobservable",
+    );
+    expect(adb.getCommandCalls()).toEqual([]);
+  });
+
   const createObserveResult = (rotation?: number, knownSize = true): ObserveResult => ({
-    timestamp: 1000,
+    updatedAt: 1000,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     rotation,
     screenSize: knownSize
       ? rotation === 1 || rotation === 3
@@ -81,6 +96,48 @@ describe("iOS observed rotation verification (#8778)", () => {
     expect(result.warning).toContain(error);
     expect(result.error).toBeUndefined();
     expect(result.message).toContain("portrait to landscape");
+  });
+
+  test("restores the prior orientation when a rotate on the home screen fails (item6-rotate-residue)", async () => {
+    const error = "Rotation is not supported on this display (the screen size did not change)";
+    const spy = spyOn(runner, "requestRotate")
+      .mockResolvedValueOnce(runnerResult({ success: false, error, rotationPerformed: false }))
+      .mockResolvedValueOnce(runnerResult({ value: 0, currentOrientation: "portrait" }));
+    observe.setObserveSequence([createObserveResult(0), createObserveResult(0)]);
+    const result = await rotate.execute("landscape");
+    expect(result.success).toBe(false);
+    expect(spy.mock.calls.map((call) => call[0])).toEqual(["landscape", "portrait"]);
+    expect(result.warning).toBeUndefined();
+  });
+
+  test("accepts the daemon restore request shape after a failed landscape rotate", async () => {
+    spyOn(runner, "requestRotate").mockResolvedValue(
+      runnerResult({
+        value: 0,
+        rotationPerformed: true,
+        previousOrientation: "portrait",
+        currentOrientation: "portrait",
+      }),
+    );
+    observe.setObserveSequence([createObserveResult(0), createObserveResult(0)]);
+    const result = await rotate.execute("portrait");
+    expect(result.success).toBe(true);
+    expect(result.rotationPerformed).toBe(true);
+    expect(result.previousOrientation).toBe("portrait");
+    expect(result.currentOrientation).toBe("portrait");
+    expect(result.error).toBeUndefined();
+  });
+
+  test("warns when the orientation restore itself fails", async () => {
+    spyOn(runner, "requestRotate")
+      .mockResolvedValueOnce(
+        runnerResult({ success: false, error: "no", rotationPerformed: false }),
+      )
+      .mockRejectedValueOnce(new Error("runner gone"));
+    observe.setObserveSequence([createObserveResult(0), createObserveResult(0)]);
+    const result = await rotate.execute("landscape");
+    expect(result.success).toBe(false);
+    expect(result.warning).toContain("could not be restored to portrait");
   });
 
   test("rejects runner portrait no-op while observed display stays landscape", async () => {
@@ -148,8 +205,10 @@ describe("iOS observed rotation verification (#8778)", () => {
 
   test("preserves runner failure without proof of an observed orientation change", async () => {
     const error = "Rotation is not supported on this display (the screen size did not change)";
-    spyOn(runner, "requestRotate").mockResolvedValue(
-      runnerResult({ success: false, error, rotationPerformed: false }),
+    spyOn(runner, "requestRotate").mockImplementation(async (orientation) =>
+      orientation === "portrait"
+        ? runnerResult({ value: 0, currentOrientation: "portrait" })
+        : runnerResult({ success: false, error, rotationPerformed: false }),
     );
     for (const [before, after, previous, current] of [
       [createObserveResult(undefined, false), createObserveResult(1), "portrait", "landscape"],

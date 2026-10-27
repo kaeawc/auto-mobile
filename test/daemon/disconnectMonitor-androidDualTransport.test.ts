@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
@@ -17,6 +18,7 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { heldSession } from "../helpers/disconnectMonitorDaemon";
 
 // A phone reachable over USB and/or wireless adb (#11133).
 const USB = "R58N12ABCDE";
@@ -30,6 +32,7 @@ const ROWS: Record<string, string> = {
 
 const timers: FakeTimer[] = [];
 afterEach(() => {
+  DaemonState.getInstance().reset();
   timers.splice(0).forEach((timer) => timer.reset());
   resetAdbDeviceListCache();
 });
@@ -42,9 +45,7 @@ async function adbDevices(timer: FakeTimer, ...serials: string[]): Promise<Boote
   const client = new AdbClient(
     null,
     async (_file: string, _args: string[], _maxBuffer?: number) => createExecResult(stdout, ""),
-    null,
-    new DefaultRetryExecutor(timer),
-    timer,
+    { retryExecutor: new DefaultRetryExecutor(timer), timer },
   );
   return await client.getBootedAndroidDevices({ bypassCache: true });
 }
@@ -76,27 +77,18 @@ async function harness(initial: string[], manager = new PhoneManager()) {
   await pool.refreshDevices();
   const canonical = await pool.assignDeviceToSession("owner", "android");
   const cleanups: string[] = [];
-  const daemon = Object.assign(Object.create(Daemon.prototype), {
-    timer,
-    deviceDisconnectMonitor: null,
-    deviceDisconnectMisses: new Map<string, number>(),
-    deviceDisconnectMissIncarnations: new Map<string, number>(),
-    confirmedDisconnectedDeviceIds: new Set(),
-    forceDisconnectedDeviceIds: new Set(),
-    offlineRecoveryAttemptedDeviceIds: new Set(),
-    offlineRecoveryAttemptedIncarnations: new Map(),
-    offlineEpisodes: new Map(),
-    deferredSessionRecoverySweeps: new Set(),
-    devicePool: pool,
-    sessionManager: {
-      getAssignedDevices: () => [canonical],
-      getAllSessions: () => [{ assignedDevice: canonical, platform: "android" }],
-    },
-    cleanupDisconnectedDevice: async (deviceId: string) => {
-      cleanups.push(deviceId);
-    },
+  const daemon = new Daemon({}, { timer });
+  daemon.testHooks.replaceDevicePool(pool);
+  spyOn(daemon.testHooks.sessionManager, "getAssignedDevices").mockImplementation(
+    () => new Set([canonical]),
+  );
+  spyOn(daemon.testHooks.sessionManager, "getAllSessions").mockImplementation(() => [
+    heldSession(canonical),
+  ]);
+  daemon.testHooks.overrideCleanupDisconnectedDevice(async (deviceId) => {
+    cleanups.push(deviceId);
   });
-  daemon.startDeviceDisconnectMonitor(manager, async () => []);
+  daemon.testHooks.startDeviceDisconnectMonitor(manager, async () => []);
   return {
     timer,
     manager,
@@ -105,7 +97,7 @@ async function harness(initial: string[], manager = new PhoneManager()) {
     canonical,
     cleanups,
     daemon,
-    monitor: daemon.deviceDisconnectMonitor as SingleFlightInterval,
+    monitor: daemon.testHooks.runtime.deviceDisconnectMonitor as SingleFlightInterval,
   };
 }
 
@@ -121,8 +113,8 @@ describe("disconnect monitor folds a re-ported wireless transport (#11133)", () 
       for (let tick = 0; tick < 4; tick++) {
         await h.monitor.run();
       }
-      expect(h.daemon.deviceDisconnectMisses.size).toBe(0);
-      expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+      expect(h.daemon.testHooks.deviceLoss.misses.size).toBe(0);
+      expect(h.daemon.testHooks.deviceLoss.confirmedDisconnectedIds.size).toBe(0);
       expect(h.cleanups).toEqual([]);
       expect(h.pool.getDevice(expected)?.sessionId).toBe("owner");
       expect(h.pool.getAndroidTransportRouting().resolveTransport(expected)).toBe(WIFI_NEW_PORT);
@@ -139,7 +131,7 @@ describe("disconnect monitor folds a re-ported wireless transport (#11133)", () 
     try {
       await h.monitor.run();
       expect(h.probe.getExecutedCommands()).toHaveLength(probes);
-      expect(h.daemon.deviceDisconnectMisses.has(USB)).toBe(true);
+      expect(h.daemon.testHooks.deviceLoss.misses.has(USB)).toBe(true);
     } finally {
       await h.monitor.stop();
     }
@@ -179,10 +171,12 @@ describe("listed-state probe follows a held phone's alias serials (#11133)", () 
         await h.monitor.run();
         expect(probes).toEqual([[USB, WIFI]]);
         expect(received).toEqual([[...offline]]);
-        expect(h.daemon.offlineRecoveryAttemptedDeviceIds).toEqual(new Set([USB]));
-        expect([...h.daemon.offlineRecoveryAttemptedIncarnations.keys()]).toEqual([USB]);
-        expect([...h.daemon.offlineEpisodes.keys()]).toEqual([USB]);
-        expect(h.daemon.deviceDisconnectMisses.size).toBe(0);
+        expect(h.daemon.testHooks.deviceLoss.offlineRecoveryAttemptedIds).toEqual(new Set([USB]));
+        expect([
+          ...h.daemon.testHooks.deviceLoss.offlineRecoveryAttemptedIncarnations.keys(),
+        ]).toEqual([USB]);
+        expect([...h.daemon.testHooks.deviceLoss.offlineEpisodes.keys()]).toEqual([USB]);
+        expect(h.daemon.testHooks.deviceLoss.misses.size).toBe(0);
         await h.monitor.run();
         expect(received).toEqual([[...offline]]);
         expect(h.cleanups).toEqual([]);
@@ -204,10 +198,12 @@ describe("listed-state probe follows a held phone's alias serials (#11133)", () 
       try {
         await h.monitor.run();
         expect(h.cleanups).toEqual([]);
-        expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+        expect(h.daemon.testHooks.deviceLoss.confirmedDisconnectedIds.size).toBe(0);
         expect(h.pool.getDevice(USB)?.sessionId).toBe("owner");
         // `offline` is held by the offline budget; other states keep the debounce.
-        expect(h.daemon.deviceDisconnectMisses.get(USB)).toBe(state === "offline" ? undefined : 1);
+        expect(h.daemon.testHooks.deviceLoss.misses.get(USB)).toBe(
+          state === "offline" ? undefined : 1,
+        );
       } finally {
         await h.monitor.stop();
       }

@@ -1,3 +1,4 @@
+import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { DefaultDeviceWindowCacheInvalidator } from "../../../src/features/action/TerminateApp";
@@ -28,6 +29,7 @@ import {
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeAndroidBuildToolsLocator } from "../../fakes/FakeAndroidBuildToolsLocator";
+import { FakeAndroidArtifactHost } from "../../fakes/FakeAndroidArtifactHost";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
@@ -219,7 +221,7 @@ describe("InstallApp", () => {
     platform: "ios",
   };
 
-  let fakeAdb: FakeAdbExecutor;
+  let fakeAdb: InstallAppFakeAdbExecutor;
   let fakeAdbFactory: AdbClientFactory;
   let fakeHost: FakeHostCommandExecutor;
   let fakeLocator: FakeAndroidBuildToolsLocator;
@@ -867,7 +869,7 @@ describe("InstallApp", () => {
   // (no extension → ""). Rejections throw BEFORE any device I/O, so no host /
   // locator / simctl fakes are needed.
   describe("artifact extension routing rejects the wrong artifact", () => {
-    // Android accepts only .apk; the thrown message echoes the extracted ext.
+    // Android accepts .apk, .apks, .aab or a split directory; the message echoes the extracted ext.
     const androidRejections: Array<[string, string]> = [
       [".app bundle", "/tmp/MyApp.app"],
       [".ipa file", "/tmp/MyApp.ipa"],
@@ -893,11 +895,14 @@ describe("InstallApp", () => {
         hostExecutor: fakeHost,
         buildToolsLocator: fakeLocator,
         performanceTrackerFactory: () => perf,
+        // No path is a split-APK directory, so every one falls through to the extension check.
+        artifactHost: new FakeAndroidArtifactHost(),
       });
 
       await expect(installApp.execute(artifactPath)).rejects.toThrow(
-        `Android devices only support .apk files, but got "${androidExpectedExt[artifactPath]}" file. Use an .apk file for Android installation.`,
+        `Android devices support .apk, .apks (APK set), .aab (app bundle), or a directory of split APKs, but got "${androidExpectedExt[artifactPath]}" file.`,
       );
+      expect(fakeAdb.wasCommandExecuted("install")).toBe(false);
     });
 
     // iOS simulator accepts only .app; an .ipa gets a simulator-specific message,
@@ -1554,7 +1559,7 @@ describe("InstallApp", () => {
       "downgrade reinstall finishes before reporting cancellation: %s (during reinstall: %s)",
       async (source, duringReinstall) => {
         const command = configureDowngrade();
-        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        const adb = fakeAdb;
         adb.honourRequestAbort = true;
         const controller = new AbortController();
         const pending = Promise.withResolvers<ExecResult>();
@@ -1601,11 +1606,11 @@ describe("InstallApp", () => {
       },
     );
 
-    test.each(cancellationSources)(
+    test.each([...cancellationSources])(
       "cancelled downgrade reinstall failure discloses missing app: %s",
       async (source) => {
         const command = configureDowngrade();
-        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        const adb = fakeAdb;
         adb.honourRequestAbort = true;
         const failure = new Error("adb: device offline");
         adb.reinstallError = failure;
@@ -1621,11 +1626,11 @@ describe("InstallApp", () => {
       },
     );
 
-    test.each(cancellationSources)(
+    test.each([...cancellationSources])(
       "cancelled downgrade reinstall output failure discloses missing app: %s",
       async (source) => {
         const command = configureDowngrade();
-        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        const adb = fakeAdb;
         adb.honourRequestAbort = true;
         adb.setCommandResponseSequence(command, [
           createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
@@ -1647,7 +1652,7 @@ describe("InstallApp", () => {
       "cancellation before downgrade uninstall prevents removal and reinstall: %s",
       async (source) => {
         const command = configureDowngrade();
-        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        const adb = fakeAdb;
         adb.honourRequestAbort = true;
         const controller = new AbortController();
         adb.abortAfterCommand("shell am force-stop", controller);
@@ -1663,7 +1668,7 @@ describe("InstallApp", () => {
       "cancellation during downgrade uninstall does not trigger reinstall: %s",
       async (source) => {
         const command = configureDowngrade();
-        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        const adb = fakeAdb;
         adb.honourRequestAbort = true;
         const controller = new AbortController();
         const uninstall = adb.executeCommand.bind(adb);
@@ -1687,7 +1692,7 @@ describe("InstallApp", () => {
       async (source) => {
         configureDowngrade();
         fakeTimer = new FakeTimer();
-        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        const adb = fakeAdb;
         adb.honourRequestAbort = true;
         emptyUserTenListingAfterUninstall(adb);
         const pending = Promise.withResolvers<ExecResult>();
@@ -2073,11 +2078,9 @@ describe("InstallApp", () => {
       performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
       plist: fakePlist("com.example.app"),
       installedAppsRepository: repository,
-      cacheInvalidator: {
-        invalidate: () => {
-          calls.push("invalidate");
-        },
-      },
+      cacheInvalidator: new FakeDeviceWindowCacheInvalidator(() => {
+        calls.push("invalidate");
+      }),
       iosInstallBackendResolver: () => ({
         kind: "simulator",
         listApps: async () => {
@@ -2174,11 +2177,9 @@ describe("InstallApp", () => {
             return bundleId;
           },
         },
-        cacheInvalidator: {
-          invalidate: () => {
-            calls.push("invalidate");
-          },
-        },
+        cacheInvalidator: new FakeDeviceWindowCacheInvalidator(() => {
+          calls.push("invalidate");
+        }),
         installedAppsRepository: Object.assign(new FakeInstalledAppsRepository(), {
           markDeviceStale: async () => {
             calls.push("stale");
@@ -2927,13 +2928,12 @@ describe("InstallApp", () => {
               );
             });
           },
-          clientTimer,
-          "darwin",
-          undefined,
-          undefined,
-          undefined,
-          // Listings parse through plutil; keep every process behind a fake.
-          fakePlist(bundleId),
+          {
+            timer: clientTimer,
+            platform: "darwin",
+            plist: // Listings parse through plutil; keep every process behind a fake.
+              fakePlist(bundleId),
+          },
         );
         const action = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
           // A separate clock: only simctl's own bound is under test, not the 120 s race.

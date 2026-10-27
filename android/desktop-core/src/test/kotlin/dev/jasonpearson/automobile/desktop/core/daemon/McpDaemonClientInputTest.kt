@@ -25,9 +25,209 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 
-class McpDaemonClientInputTest {
-  private val json = Json { ignoreUnknownKeys = true }
+internal abstract class McpDaemonClientInputFixture {
+  protected val json = Json { ignoreUnknownKeys = true }
 
+  protected fun captureInputRequest(
+    resultJson: String? = null,
+    error: String? = null,
+    call: (McpDaemonClient) -> InputActionResult,
+  ): CapturedInputCall {
+    TestDaemonSocket(resultJson = resultJson, error = error).use { server ->
+      val response = call(McpDaemonClient(socketPathValue = server.socketPath.toString()))
+      return CapturedInputCall(server.awaitRequest(), response)
+    }
+  }
+
+  protected inner class TestDaemonSocket(
+    resultJson: String? = null,
+    error: String? = null,
+    private val responses: List<SocketResponse> = listOf(SocketResponse(resultJson, error)),
+  ) : AutoCloseable {
+    private val tempDir = Files.createTempDirectory(Path.of("/tmp"), "amk-")
+    val socketPath: Path = tempDir.resolve("daemon.sock")
+    private val serverChannel =
+      ServerSocketChannel.open(StandardProtocolFamily.UNIX)
+        .bind(UnixDomainSocketAddress.of(socketPath))
+    private val capturedRequests = mutableListOf<CapturedDaemonRequest>()
+    private var failure: Throwable? = null
+    private val thread = Thread {
+      try {
+        responses.forEach { response ->
+          serverChannel.accept().use { channel ->
+            val reader =
+              BufferedReader(
+                InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8),
+              )
+            val writer =
+              BufferedWriter(
+                OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8),
+              )
+            val requestLine = reader.readLine()
+            val request = json.parseToJsonElement(requestLine).jsonObject
+            capturedRequests.add(
+              CapturedDaemonRequest(
+                method = request.getValue("method").jsonPrimitive.content,
+                params = request.getValue("params").jsonObject,
+                clientVersion = request["clientVersion"]?.jsonPrimitive?.content,
+                timeoutMs = request["timeoutMs"]?.jsonPrimitive?.content?.toLong(),
+              ),
+            )
+            writer.write(responseLine(request.getValue("id").jsonPrimitive.content, response))
+            writer.newLine()
+            writer.flush()
+          }
+        }
+      } catch (throwable: Throwable) {
+        failure = throwable
+      }
+    }
+      .also { it.start() }
+
+    fun awaitRequest(): CapturedDaemonRequest {
+      thread.join(REQUEST_TIMEOUT_MILLIS)
+      if (thread.isAlive) {
+        throw AssertionError("Daemon client did not send a request before timeout")
+      }
+      failure?.let { throw AssertionError("Test daemon socket failed", it) }
+      return capturedRequests.firstOrNull()
+        ?: throw AssertionError("Daemon client did not send a request")
+    }
+
+    fun awaitRequests(): List<CapturedDaemonRequest> {
+      thread.join(REQUEST_TIMEOUT_MILLIS)
+      if (thread.isAlive) {
+        throw AssertionError("Daemon client did not send every request before timeout")
+      }
+      failure?.let { throw AssertionError("Test daemon socket failed", it) }
+      return capturedRequests.toList()
+    }
+
+    private fun responseLine(requestId: String, response: SocketResponse): String {
+      val body =
+        if (response.error == null) {
+          """"result": ${compactJson(response.resultJson ?: "{}")}"""
+        } else {
+          """"error": ${JsonPrimitive(response.error)}"""
+        }
+      val success = response.error == null
+      return """{ "id": "$requestId", "type": "mcp_response", "success": $success, $body }"""
+    }
+
+    private fun compactJson(value: String): String =
+      value.lineSequence().joinToString(separator = "") { it.trim() }
+
+    override fun close() {
+      serverChannel.close()
+      Files.deleteIfExists(socketPath)
+      Files.deleteIfExists(tempDir)
+    }
+  }
+
+  protected companion object {
+    const val REQUEST_TIMEOUT_MILLIS = 5_000L
+  }
+
+  protected fun assertButtonSerialization() {
+    val pressButton =
+      captureInputRequest(
+        """{ "action": "input/pressButton", "success": true, "button": "back" }""",
+      ) { client ->
+        client.inputPressButton(
+          button = "back",
+          platform = "android",
+          deviceId = "device-1",
+          frameContext = "android:43",
+        )
+      }
+    assertEquals("input/pressButton", pressButton.request.method)
+    assertEquals(
+      mapOf(
+        "platform" to JsonPrimitive("android"),
+        "deviceId" to JsonPrimitive("device-1"),
+        "button" to JsonPrimitive("back"),
+        "frameContext" to JsonPrimitive("android:43"),
+      ),
+      pressButton.request.params,
+    )
+    assertEquals("back", pressButton.response.button)
+  }
+
+  protected fun assertTextSerialization() {
+    val typeText =
+      captureInputRequest(
+        """{ "action": "input/typeText", "success": true, "textLength": 5, "submitted": true }""",
+      ) { client ->
+        client.inputTypeText(
+          input =
+            TextInput(
+              text = "hello",
+              platform = "ios",
+              deviceId = "device-2",
+              submit = true,
+              frameContext = "ios:43",
+            ),
+        )
+      }
+    assertEquals("input/typeText", typeText.request.method)
+    assertEquals(
+      mapOf(
+        "platform" to JsonPrimitive("ios"),
+        "deviceId" to JsonPrimitive("device-2"),
+        "text" to JsonPrimitive("hello"),
+        "submit" to JsonPrimitive(true),
+        "frameContext" to JsonPrimitive("ios:43"),
+      ),
+      typeText.request.params,
+    )
+    assertEquals(5, typeText.response.textLength)
+    assertEquals(true, typeText.response.submitted)
+  }
+
+  protected fun assertKeySerialization() {
+    val key =
+      captureInputRequest("""{ "action": "input/key", "success": true, "key": "enter" }""") { client
+        ->
+        client.inputKey(
+          key = "enter",
+          platform = "android",
+          deviceId = "device-3",
+          frameContext = "android:44",
+        )
+      }
+
+    assertEquals("input/key", key.request.method)
+    assertEquals(
+      mapOf(
+        "platform" to JsonPrimitive("android"),
+        "deviceId" to JsonPrimitive("device-3"),
+        "key" to JsonPrimitive("enter"),
+        "frameContext" to JsonPrimitive("android:44"),
+      ),
+      key.request.params,
+    )
+    assertEquals("enter", key.response.key)
+  }
+
+  protected data class CapturedInputCall(
+    val request: CapturedDaemonRequest,
+    val response: InputActionResult,
+  )
+
+  protected data class SocketResponse(
+    val resultJson: String? = null,
+    val error: String? = null,
+  )
+
+  protected data class CapturedDaemonRequest(
+    val method: String,
+    val params: JsonObject,
+    val clientVersion: String?,
+    val timeoutMs: Long? = null,
+  )
+}
+
+internal class McpDaemonClientInputTest : McpDaemonClientInputFixture() {
   @Test
   fun `socket requests declare the desktop client version`() {
     TestDaemonSocket(resultJson = "{}", error = null).use { server ->
@@ -94,9 +294,9 @@ class McpDaemonClientInputTest {
             sessionUuid = "desktop-session",
           )
 
-        client.callTool("observe", JsonObject(emptyMap()))
+        client.callTool("tapOn", JsonObject(emptyMap()))
         client.callTool(
-          "observe",
+          "tapOn",
           JsonObject(mapOf("sessionUuid" to JsonPrimitive("explicit-session"))),
         )
         client.callTool("setToolEnabled", JsonObject(emptyMap()))
@@ -381,10 +581,19 @@ class McpDaemonClientInputTest {
         val client =
           McpDaemonClient(
             socketPathValue = server.socketPath.toString(),
-            inputRequestTimeoutMs = 1_234,
+            requestTimeouts =
+              DaemonRequestTimeouts(
+                inputRequestTimeoutMs = 1_234,
+              ),
           )
 
-        client.inputTap(x = 1.0, y = 2.0)
+        client.inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+            ),
+        )
         client.callTool("observe", JsonObject(emptyMap()))
 
         val requests = server.awaitRequests()
@@ -412,9 +621,23 @@ class McpDaemonClientInputTest {
             inputSessionUuidProvider = { current },
           )
 
-        client.inputTap(x = 1.0, y = 2.0, deviceId = "emulator-5554")
+        client.inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+              deviceId = "emulator-5554",
+            ),
+        )
         current = null
-        client.inputTap(x = 1.0, y = 2.0, deviceId = "emulator-5554")
+        client.inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+              deviceId = "emulator-5554",
+            ),
+        )
 
         val requests = server.awaitRequests()
         assertEquals("desktop-1", requests[0].params["sessionUuid"]?.jsonPrimitive?.content)
@@ -438,7 +661,9 @@ class McpDaemonClientInputTest {
         )
       }
   }
+}
 
+internal class McpDaemonClientTypedInputTest : McpDaemonClientInputFixture() {
   @Test
   fun `inputTap serializes to input tap socket request`() {
     val responseResult =
@@ -456,12 +681,15 @@ class McpDaemonClientInputTest {
     val result =
       captureInputRequest(responseResult) { client ->
         client.inputTap(
-          x = 240.5,
-          y = 640.25,
-          platform = "android",
-          deviceId = "emulator-5554",
-          duration = 50,
-          frameContext = "android:41",
+          input =
+            TapInput(
+              x = 240.5,
+              y = 640.25,
+              platform = "android",
+              deviceId = "emulator-5554",
+              duration = 50,
+              frameContext = "android:41",
+            ),
         )
       }
 
@@ -485,7 +713,13 @@ class McpDaemonClientInputTest {
   fun `an input without a frame context omits the param for legacy daemons`() {
     val result =
       captureInputRequest("""{ "action": "input/tap", "success": true }""") { client ->
-        client.inputTap(x = 1.0, y = 2.0)
+        client.inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+            ),
+        )
       }
 
     assertFalse("frameContext" in result.request.params)
@@ -510,14 +744,17 @@ class McpDaemonClientInputTest {
     val result =
       captureInputRequest(responseResult) { client ->
         client.inputSwipe(
-          startX = 520.75,
-          startY = 1700.5,
-          endX = 520.25,
-          endY = 500.5,
-          platform = "android",
-          deviceId = "emulator-5554",
-          durationMs = 350,
-          frameContext = "android:42",
+          input =
+            SwipeInput(
+              startX = 520.75,
+              startY = 1700.5,
+              endX = 520.25,
+              endY = 500.5,
+              platform = "android",
+              deviceId = "emulator-5554",
+              durationMs = 350,
+              frameContext = "android:42",
+            ),
         )
       }
 
@@ -543,77 +780,9 @@ class McpDaemonClientInputTest {
 
   @Test
   fun `button text and key helpers serialize to their input socket methods`() {
-    val pressButton =
-      captureInputRequest(
-        """{ "action": "input/pressButton", "success": true, "button": "back" }""",
-      ) { client ->
-        client.inputPressButton(
-          button = "back",
-          platform = "android",
-          deviceId = "device-1",
-          frameContext = "android:43",
-        )
-      }
-    val typeText =
-      captureInputRequest(
-        """{ "action": "input/typeText", "success": true, "textLength": 5, "submitted": true }""",
-      ) { client ->
-        client.inputTypeText(
-          text = "hello",
-          platform = "ios",
-          deviceId = "device-2",
-          submit = true,
-          frameContext = "ios:43",
-        )
-      }
-    val key =
-      captureInputRequest("""{ "action": "input/key", "success": true, "key": "enter" }""") { client
-        ->
-        client.inputKey(
-          key = "enter",
-          platform = "android",
-          deviceId = "device-3",
-          frameContext = "android:44",
-        )
-      }
-
-    assertEquals("input/pressButton", pressButton.request.method)
-    assertEquals(
-      mapOf(
-        "platform" to JsonPrimitive("android"),
-        "deviceId" to JsonPrimitive("device-1"),
-        "button" to JsonPrimitive("back"),
-        "frameContext" to JsonPrimitive("android:43"),
-      ),
-      pressButton.request.params,
-    )
-    assertEquals("back", pressButton.response.button)
-
-    assertEquals("input/typeText", typeText.request.method)
-    assertEquals(
-      mapOf(
-        "platform" to JsonPrimitive("ios"),
-        "deviceId" to JsonPrimitive("device-2"),
-        "text" to JsonPrimitive("hello"),
-        "submit" to JsonPrimitive(true),
-        "frameContext" to JsonPrimitive("ios:43"),
-      ),
-      typeText.request.params,
-    )
-    assertEquals(5, typeText.response.textLength)
-    assertEquals(true, typeText.response.submitted)
-
-    assertEquals("input/key", key.request.method)
-    assertEquals(
-      mapOf(
-        "platform" to JsonPrimitive("android"),
-        "deviceId" to JsonPrimitive("device-3"),
-        "key" to JsonPrimitive("enter"),
-        "frameContext" to JsonPrimitive("android:44"),
-      ),
-      key.request.params,
-    )
-    assertEquals("enter", key.response.key)
+    assertButtonSerialization()
+    assertTextSerialization()
+    assertKeySerialization()
   }
 
   @Test
@@ -641,13 +810,19 @@ class McpDaemonClientInputTest {
       .use { server ->
         McpDaemonClient(socketPathValue = server.socketPath.toString())
           .inputTypeText(
-            text = "a",
-            append = true,
+            input =
+              TextInput(
+                text = "a",
+                append = true,
+              ),
           )
         McpDaemonClient(socketPathValue = server.socketPath.toString())
           .inputTypeText(
-            text = "b",
-            append = true,
+            input =
+              TextInput(
+                text = "b",
+                append = true,
+              ),
           )
 
         assertEquals(
@@ -671,8 +846,11 @@ class McpDaemonClientInputTest {
         val result =
           McpDaemonClient(socketPathValue = server.socketPath.toString())
             .inputTypeText(
-              text = "a",
-              append = true,
+              input =
+                TextInput(
+                  text = "a",
+                  append = true,
+                ),
             )
 
         assertEquals("daemon/capabilities", server.awaitRequest().method)
@@ -698,8 +876,11 @@ class McpDaemonClientInputTest {
         val result =
           McpDaemonClient(socketPathValue = server.socketPath.toString())
             .inputTypeText(
-              text = "a",
-              append = true,
+              input =
+                TextInput(
+                  text = "a",
+                  append = true,
+                ),
             )
 
         assertEquals(
@@ -724,8 +905,11 @@ class McpDaemonClientInputTest {
             clientVersion = "1.2.0",
           )
           .inputTypeText(
-            text = "a",
-            append = true,
+            input =
+              TextInput(
+                text = "a",
+                append = true,
+              ),
           )
 
       assertEquals("daemon/capabilities", server.awaitRequest().method)
@@ -744,8 +928,11 @@ class McpDaemonClientInputTest {
       val result =
         McpDaemonClient(socketPathValue = server.socketPath.toString())
           .inputTypeText(
-            text = "a",
-            append = true,
+            input =
+              TextInput(
+                text = "a",
+                append = true,
+              ),
           )
 
       assertEquals(listOf("daemon/capabilities"), server.awaitRequests().map { it.method })
@@ -759,13 +946,16 @@ class McpDaemonClientInputTest {
     TestDaemonSocket(resultJson = """{ "success": true }""").use { server ->
       McpDaemonClient(socketPathValue = server.socketPath.toString())
         .setKeyValue(
-          deviceId = "ios-sim-1",
-          appId = "com.example.app",
-          fileName = "prefs",
-          key = "theme",
-          value = "dark",
-          type = "STRING",
-          platform = "ios",
+          input =
+            SetKeyValueRequest(
+              deviceId = "ios-sim-1",
+              appId = "com.example.app",
+              fileName = "prefs",
+              key = "theme",
+              value = "dark",
+              type = "STRING",
+              platform = "ios",
+            ),
         )
 
       val request = server.awaitRequest()
@@ -787,11 +977,14 @@ class McpDaemonClientInputTest {
       .use { server ->
         McpDaemonClient(socketPathValue = server.socketPath.toString())
           .removeKeyValue(
-            deviceId = "ios-sim-1",
-            appId = "com.example.app",
-            fileName = "prefs",
-            key = "theme",
-            platform = "ios",
+            input =
+              RemoveKeyValueRequest(
+                deviceId = "ios-sim-1",
+                appId = "com.example.app",
+                fileName = "prefs",
+                key = "theme",
+                platform = "ios",
+              ),
           )
         McpDaemonClient(socketPathValue = server.socketPath.toString())
           .clearKeyValueFile(
@@ -815,7 +1008,14 @@ class McpDaemonClientInputTest {
   fun `input helpers reject malformed success payloads`() {
     TestDaemonSocket(resultJson = "{}", error = null).use { server ->
       assertFailsWith<SerializationException> {
-        McpDaemonClient(socketPathValue = server.socketPath.toString()).inputTap(x = 10.0, y = 20.0)
+        McpDaemonClient(socketPathValue = server.socketPath.toString())
+          .inputTap(
+            input =
+              TapInput(
+                x = 10.0,
+                y = 20.0,
+              ),
+          )
       }
       assertEquals("input/tap", server.awaitRequest().method)
     }
@@ -825,7 +1025,13 @@ class McpDaemonClientInputTest {
   fun `input helpers reject success payloads for a different action`() {
     val result =
       captureInputRequest("""{ "action": "input/swipe", "success": true }""") { client ->
-        client.inputTap(x = 10.0, y = 20.0)
+        client.inputTap(
+          input =
+            TapInput(
+              x = 10.0,
+              y = 20.0,
+            ),
+        )
       }
 
     assertEquals(false, result.response.success)
@@ -837,8 +1043,29 @@ class McpDaemonClientInputTest {
 
   @Test
   fun `non socket clients explicitly report unsupported typed input`() {
-    val httpResult = McpHttpClient("http://localhost:1/auto-mobile/streamable").inputTap(1.0, 2.0)
-    val stdioResult = McpStdioClient("unused").inputTap(1.0, 2.0)
+    val httpResult =
+      McpHttpClient(
+          dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+            "http://localhost:1/auto-mobile/streamable",
+            tokenProvider = DaemonHttpTokenProvider { null },
+          ),
+        )
+        .inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+            ),
+        )
+    val stdioResult =
+      McpStdioClient("unused")
+        .inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+            ),
+        )
 
     assertEquals(false, httpResult.success)
     assertEquals("input/tap", httpResult.action)
@@ -847,7 +1074,9 @@ class McpDaemonClientInputTest {
     assertEquals("input/tap", stdioResult.action)
     assertEquals("MCP STDIO does not support direct daemon input helpers", stdioResult.error)
   }
+}
 
+internal class McpDaemonClientInputDeadlineTest : McpDaemonClientInputFixture() {
   @Test
   fun `a daemon that accepts but never replies fails the input call at its deadline`() {
     // The request socket is a blocking SocketChannel, which has NO read timeout: without the
@@ -878,17 +1107,23 @@ class McpDaemonClientInputTest {
       val client =
         McpDaemonClient(
           socketPathValue = socketPath.toString(),
-          inputRequestTimeoutMs = 100,
+          requestTimeouts =
+            DaemonRequestTimeouts(
+              inputRequestTimeoutMs = 100,
+            ),
         )
       val error =
         assertFailsWith<DaemonUnavailableException> {
           client.inputTap(
-            x = 1.0,
-            y = 2.0,
-            platform = "android",
-            deviceId = "emulator-5554",
-            duration = null,
-            frameContext = null,
+            input =
+              TapInput(
+                x = 1.0,
+                y = 2.0,
+                platform = "android",
+                deviceId = "emulator-5554",
+                duration = null,
+                frameContext = null,
+              ),
           )
         }
       assertTrue(error.message.orEmpty().contains("timed out"))
@@ -928,11 +1163,21 @@ class McpDaemonClientInputTest {
       val client =
         McpDaemonClient(
           socketPathValue = socketPath.toString(),
-          inputRequestTimeoutMs = 100,
+          requestTimeouts =
+            DaemonRequestTimeouts(
+              inputRequestTimeoutMs = 100,
+            ),
         )
       val error =
         assertFailsWith<DaemonUnavailableException> {
-          client.inputTypeText(text = "hello", platform = "android", append = true)
+          client.inputTypeText(
+            input =
+              TextInput(
+                text = "hello",
+                platform = "android",
+                append = true,
+              ),
+          )
         }
       assertTrue(error.message.orEmpty().contains("timed out"))
     } finally {
@@ -943,121 +1188,4 @@ class McpDaemonClientInputTest {
       Files.deleteIfExists(socketDir)
     }
   }
-
-  private fun captureInputRequest(
-    resultJson: String? = null,
-    error: String? = null,
-    call: (McpDaemonClient) -> InputActionResult,
-  ): CapturedInputCall {
-    TestDaemonSocket(resultJson = resultJson, error = error).use { server ->
-      val response = call(McpDaemonClient(socketPathValue = server.socketPath.toString()))
-      return CapturedInputCall(server.awaitRequest(), response)
-    }
-  }
-
-  private inner class TestDaemonSocket(
-    resultJson: String? = null,
-    error: String? = null,
-    private val responses: List<SocketResponse> = listOf(SocketResponse(resultJson, error)),
-  ) : AutoCloseable {
-    private val tempDir = Files.createTempDirectory(Path.of("/tmp"), "amk-")
-    val socketPath = tempDir.resolve("daemon.sock")
-    private val serverChannel =
-      ServerSocketChannel.open(StandardProtocolFamily.UNIX)
-        .bind(UnixDomainSocketAddress.of(socketPath))
-    private val capturedRequests = mutableListOf<CapturedDaemonRequest>()
-    private var failure: Throwable? = null
-    private val thread = Thread {
-      try {
-        responses.forEach { response ->
-          serverChannel.accept().use { channel ->
-            val reader =
-              BufferedReader(
-                InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8),
-              )
-            val writer =
-              BufferedWriter(
-                OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8),
-              )
-            val requestLine = reader.readLine()
-            val request = json.parseToJsonElement(requestLine).jsonObject
-            capturedRequests.add(
-              CapturedDaemonRequest(
-                method = request.getValue("method").jsonPrimitive.content,
-                params = request.getValue("params").jsonObject,
-                clientVersion = request["clientVersion"]?.jsonPrimitive?.content,
-                timeoutMs = request["timeoutMs"]?.jsonPrimitive?.content?.toLong(),
-              ),
-            )
-            writer.write(responseLine(request.getValue("id").jsonPrimitive.content, response))
-            writer.newLine()
-            writer.flush()
-          }
-        }
-      } catch (throwable: Throwable) {
-        failure = throwable
-      }
-    }
-      .also { it.start() }
-
-    fun awaitRequest(): CapturedDaemonRequest {
-      thread.join(REQUEST_TIMEOUT_MILLIS)
-      if (thread.isAlive) {
-        throw AssertionError("Daemon client did not send a request before timeout")
-      }
-      failure?.let { throw AssertionError("Test daemon socket failed", it) }
-      return capturedRequests.firstOrNull()
-        ?: throw AssertionError("Daemon client did not send a request")
-    }
-
-    fun awaitRequests(): List<CapturedDaemonRequest> {
-      thread.join(REQUEST_TIMEOUT_MILLIS)
-      if (thread.isAlive) {
-        throw AssertionError("Daemon client did not send every request before timeout")
-      }
-      failure?.let { throw AssertionError("Test daemon socket failed", it) }
-      return capturedRequests.toList()
-    }
-
-    private fun responseLine(requestId: String, response: SocketResponse): String {
-      val body =
-        if (response.error == null) {
-          """"result": ${compactJson(response.resultJson ?: "{}")}"""
-        } else {
-          """"error": ${JsonPrimitive(response.error)}"""
-        }
-      val success = response.error == null
-      return """{ "id": "$requestId", "type": "mcp_response", "success": $success, $body }"""
-    }
-
-    private fun compactJson(value: String): String =
-      value.lineSequence().joinToString(separator = "") { it.trim() }
-
-    override fun close() {
-      serverChannel.close()
-      Files.deleteIfExists(socketPath)
-      Files.deleteIfExists(tempDir)
-    }
-  }
-
-  private companion object {
-    const val REQUEST_TIMEOUT_MILLIS = 5_000L
-  }
 }
-
-private data class CapturedInputCall(
-  val request: CapturedDaemonRequest,
-  val response: InputActionResult,
-)
-
-private data class SocketResponse(
-  val resultJson: String? = null,
-  val error: String? = null,
-)
-
-private data class CapturedDaemonRequest(
-  val method: String,
-  val params: JsonObject,
-  val clientVersion: String?,
-  val timeoutMs: Long? = null,
-)

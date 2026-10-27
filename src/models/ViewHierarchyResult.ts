@@ -203,6 +203,8 @@ export type IosHierarchyUnavailableReason =
   | "simulator_not_booted"
   | "request_timed_out"
   | "auto_setup_failed"
+  /** Runner launch is waiting in the launch gate or still starting in the background after the read budget; retry. */
+  | "runner_launch_queued"
   | "service_recovering"
   | "unknown";
 
@@ -257,6 +259,13 @@ export interface ViewHierarchyWindowInfo {
    * window and only from an APK advertising `prototype_appearance_v1`; absent otherwise.
    */
   prototypeAppearance?: PrototypeWindowAppearance;
+  /**
+   * The animations running in that prototype window (#15114). `active` settles (fades, slides,
+   * style animations, page scrolls) and `observe(waitFor: stable)` waits for it to reach zero;
+   * `loops` are intentional infinite animations and are ignored. Only on the prototype window and
+   * only from an APK advertising `prototype_window_metadata_v1`; absent reads as settled.
+   */
+  prototypeMotion?: { active: number; loops: number };
   hierarchy?: ViewHierarchyNode;
   /** Per-window truncation attribution; absent from older runners and complete windows. */
   truncationReasons?: string[] | null;
@@ -294,6 +303,33 @@ export type ViewHierarchyNode = {
   text?: string;
   class?: string;
   checked?: boolean | string;
+  /**
+   * Emitted by the iOS runner (`UIElementInfo.checkable`/`selected`, e.g.
+   * `test/fixtures/ios/keyboard-modes/software-docked.runner-hierarchy.json`); string-typed on the wire.
+   */
+  /**
+   * Flat attributes captured from real Android dumps (`test/fixtures/android-enabled/playground-disabled-control-api36.json`
+   * carries `enabled`, `scrollable` and `pane-title` on its nodes).
+   */
+  enabled?: boolean | string;
+  scrollable?: boolean | string;
+  "pane-title"?: string;
+  /**
+   * Captured on real nodes: iOS `role` and `hint-text` (`test/fixtures/observe-output/ios-keyboard-tabbar/observe-keyboard-up.json`)
+   * and the Android collection column index (`test/fixtures/identify-interactions/playground-text-fields.json`).
+   */
+  /** Emitted by the Android extractor (`ViewHierarchyExtractor.kt`) and the iOS runner. */
+  focusable?: boolean | string;
+  role?: string;
+  "hint-text"?: string;
+  "collection-column-index"?: number | string;
+  checkable?: boolean | string;
+  selected?: boolean | string;
+  /**
+   * Accessibility action names (`click`, `focus`, ...) from the Android extractor
+   * (`ViewHierarchyExtractor.kt`) and the iOS runner (`UIElementInfo.actions`).
+   */
+  actions?: string[];
   extras?: Record<string, string>;
 };
 

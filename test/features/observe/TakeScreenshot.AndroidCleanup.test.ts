@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   TakeScreenshot,
   type ScreenshotOptions,
@@ -33,18 +33,19 @@ interface Base64Capture {
 
 function captureFor(adb: FakeAdbExecutor): Base64Capture {
   const timer = new FakeTimer();
-  const screenshot = new TakeScreenshot(
-    androidDevice("base64-cleanup"),
-    new FakeAdbClientFactory(adb),
+  const screenshot = new TakeScreenshot(androidDevice("base64-cleanup"), {
+    adbFactory: new FakeAdbClientFactory(adb),
     timer,
-    new FakeIdGenerator(["cleanup"]),
-    new FakeScreenshotFileWriter(),
-    new FakeFileSystem(),
-    () => "/screenshots/cache",
-    new FakeAndroidPhysicalDisplayIdResolver(new Map([[0, "4619827259835644672"]])),
-    false,
-    { pathProtection: new FakeScreenshotPathProtection(timer) },
-  );
+    idGenerator: new FakeIdGenerator(["cleanup"]),
+    fileWriter: new FakeScreenshotFileWriter(),
+    fileSystem: new FakeFileSystem(),
+    cacheDirResolver: () => "/screenshots/cache",
+    physicalDisplayIdResolver: new FakeAndroidPhysicalDisplayIdResolver(
+      new Map([[0, "4619827259835644672"]]),
+    ),
+    cleanupOnCreate: false,
+    pathProtection: new FakeScreenshotPathProtection(timer),
+  });
   return {
     captureScreenshotBase64: (finalPath, options, signal, readOnly) =>
       screenshot.testHooks.base64(finalPath, options, signal, readOnly),
@@ -58,7 +59,7 @@ const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /** Bound the assertion with microtasks rather than a real timer if cleanup never settles. */
 async function pendingSentinel(): Promise<"pending"> {
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 200; i++) {
     await Promise.resolve();
   }
   return "pending";
@@ -110,7 +111,7 @@ describe("Android base64 screenshot cleanup", () => {
       const removals: Array<{ args: string[]; options: AdbExecuteOptions }> = [];
       adb.execute = async (args, cleanupOptions = {}) => {
         removals.push({ args, options: cleanupOptions });
-        return new Promise(() => {});
+        return new Promise<ReturnType<typeof createExecResult>>(() => {});
       };
 
       const capture = captureFor(adb).captureScreenshotBase64(
@@ -139,7 +140,7 @@ describe("Android base64 screenshot cleanup", () => {
 
   test("keeps the successful capture command and command count unchanged", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("screencap", { stdout: pngBytes.toString("base64"), stderr: "" });
+    adb.setCommandResponse("screencap", createExecResult(pngBytes.toString("base64"), ""));
 
     const result = await captureFor(adb).captureScreenshotBase64(
       "/screenshots/result.png",
@@ -207,14 +208,14 @@ function filePullHarness(
   const timer = new FakeTimer();
   const commands: string[] = [];
   const failure = new Error("capture failed");
-  const cleanupFailure = new Error("device offline during cleanup");
+  const cleanupFailure = new Error("permission denied during cleanup");
   const adb = new AdbClient(
     androidDevice("file-pull-cleanup"),
-    async (command) => {
+    async (command: string) => {
       commands.push(command);
       if (command.includes("shell rm -f")) {
         if (cleanupOutcome === "pending") {
-          return new Promise(() => {});
+          return new Promise<ReturnType<typeof createExecResult>>(() => {});
         }
         if (cleanupOutcome === "failure") {
           throw cleanupFailure;
@@ -234,20 +235,17 @@ function filePullHarness(
       }
       return createExecResult(command.includes("screencap") ? "AM_SCREENCAP_RC:0" : "", "");
     },
-    null,
-    undefined,
-    timer,
+    { timer },
   );
-  const execute = spyOn(adb, "execute");
+  const execute = executeSpy;
   const fileSystem = new FakeFileSystem();
   const finalPath = "/screenshots/result.png";
   fileSystem.setBinaryFile(`${finalPath}.temp`, pngBytes);
-  const screenshot = new TakeScreenshot(
-    androidDevice("file-pull-cleanup"),
-    new FakeAdbClientFactory(adb),
+  const screenshot = new TakeScreenshot(androidDevice("file-pull-cleanup"), {
+    adbFactory: new FakeAdbClientFactory(adb),
     timer,
-    new FakeIdGenerator(["cleanup"]),
-    {
+    idGenerator: new FakeIdGenerator(["cleanup"]),
+    fileWriter: {
       async write(path, bytes) {
         fileSystem.setBinaryFile(path, bytes);
         if (captureOutcome === "write cancelled") {
@@ -259,11 +257,13 @@ function filePullHarness(
       },
     },
     fileSystem,
-    () => "/screenshots/cache",
-    new FakeAndroidPhysicalDisplayIdResolver(new Map([[0, "4619827259835644672"]])),
-    false,
-    { pathProtection: new FakeScreenshotPathProtection(timer) },
-  );
+    cacheDirResolver: () => "/screenshots/cache",
+    physicalDisplayIdResolver: new FakeAndroidPhysicalDisplayIdResolver(
+      new Map([[0, "4619827259835644672"]]),
+    ),
+    cleanupOnCreate: false,
+    pathProtection: new FakeScreenshotPathProtection(timer),
+  });
   return {
     commands,
     execute,
@@ -392,4 +392,12 @@ describe("Android file-pull screenshot cleanup with ambient cancellation", () =>
       }
     },
   );
+});
+
+let executeSpy: ReturnType<typeof spyOn<typeof AdbClient.prototype, "execute">>;
+beforeEach(() => {
+  executeSpy = spyOn(AdbClient.prototype, "execute");
+});
+afterEach(() => {
+  executeSpy.mockRestore();
 });

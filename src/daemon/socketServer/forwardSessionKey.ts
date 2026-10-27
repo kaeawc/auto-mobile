@@ -36,12 +36,24 @@ export function currentForwardTaskOwnerKey(): string | undefined {
   return forwardSessionKey.getStore()?.taskOwnerKey;
 }
 
+/** The slice of the loopback MCP client a forward uses; the SDK `Client` satisfies it. */
+export type ForwardMcpClient = Pick<
+  Client,
+  | "callTool"
+  | "request"
+  | "listTools"
+  | "listResources"
+  | "readResource"
+  | "listResourceTemplates"
+  | "close"
+>;
+
 /** Opens the MCP client one control-socket forward runs through; closed when the forward ends. */
 export type McpClientFactory = (
   boundSessionUuid?: string,
   toolSelectionProfileUuid?: string,
   releasedSessionUuid?: string,
-) => Promise<Client>;
+) => Promise<ForwardMcpClient>;
 
 /**
  * How long an execution key may stay unused before its cached per-device helpers (the append

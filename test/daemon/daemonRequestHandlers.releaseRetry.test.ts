@@ -1,3 +1,4 @@
+import { defaultTimer } from "../../src/utils/SystemTimer";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
@@ -13,6 +14,15 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
+import { registerScreenLockSessionCleanup } from "../../src/daemon/screenLockSessionCleanup";
+import { registerPowerSessionCleanup } from "../../src/daemon/powerSessionCleanup";
+import { AdbPowerClient } from "../../src/features/utility/power/AndroidPowerClient";
+import { PowerRegistry } from "../../src/features/utility/power/PowerRegistry";
+import { FakePowerAdb } from "../fakes/FakePowerAdb";
+import { ScreenLockRegistry } from "../../src/features/utility/screenLock/ScreenLockRegistry";
+import { logger } from "../../src/utils/logger";
+import { FakeLockSettingsClient } from "../fakes/FakeLockSettingsClient";
 
 const deviceId = "emulator-5554";
 const explicitSessionId = "00000000-0000-4000-8000-000000000001";
@@ -81,7 +91,7 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
 
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each<T>([...table])(
         name,
         async (row: T) => {
           await arrangeHarness();
@@ -204,7 +214,7 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
     const replacementId = "00000000-0000-4000-8000-000000000002";
     await manager.createSession(replacementId, deviceId, "android");
     const device = pool.getDevice(deviceId)!;
-    device.sessionId = replacementId;
+    patchDeviceBinding(device, { sessionId: replacementId });
     device.assignmentCount++;
     persistence.failure = null;
     if (path === "retry") {
@@ -240,14 +250,17 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
             device: deviceId,
             alreadyReleased: false,
             ...(reported ? { keepAwakeRestore: report } : {}),
+            ...(reported === "failed" ? { cleanup: "failed" } : {}),
           },
         });
         expect(await release()).toEqual({
           success: true,
           result: {
-            message: `Session ${sessionId} already released or never existed`,
+            message: `Session ${sessionId} already released${reported === "failed" ? "; cleanup failed" : ""}`,
+            known: true,
             alreadyReleased: true,
             ...(reported ? { keepAwakeRestore: report } : {}),
+            ...(reported === "failed" ? { cleanup: "failed" } : {}),
           },
         });
       } finally {
@@ -255,6 +268,107 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
       }
     },
   );
+
+  arrangedEach(["screenLock", "power"] as const)(
+    "already released reports pending %s cleanup",
+    async (kind) => {
+      await release();
+      const cleanupTimer = new FakeTimer();
+      const screenLock = new ScreenLockRegistry();
+      const power = new PowerRegistry();
+      if (kind === "screenLock") {
+        screenLock.noteRestore(sessionId, new Promise(() => {}));
+      } else {
+        power.noteRestore(sessionId, new Promise(() => {}));
+      }
+      state = { ...state, getScreenLockRegistry: () => screenLock, getPowerRegistry: () => power };
+      const timeout = spyOn(defaultTimer, "setTimeout").mockImplementation(
+        cleanupTimer.setTimeout.bind(cleanupTimer),
+      );
+      const clear = spyOn(defaultTimer, "clearTimeout").mockImplementation(
+        cleanupTimer.clearTimeout.bind(cleanupTimer),
+      );
+      cleanupTimer.enableAutoAdvance();
+      try {
+        const response = await release();
+        expect(response).toMatchObject({
+          success: true,
+          result: {
+            alreadyReleased: true,
+            known: true,
+            cleanup: "pending",
+            message: `Session ${sessionId} already released; cleanup still pending`,
+          },
+        });
+      } finally {
+        timeout.mockRestore();
+        clear.mockRestore();
+      }
+    },
+  );
+
+  arranged("a lock-screen clear that fails is reported in the release result", async () => {
+    const registry = new ScreenLockRegistry();
+    const client = new FakeLockSettingsClient({ type: "pin", credential: "1357" });
+    client.nextResults.push({ outcome: "failed" }, { outcome: "failed" });
+    const cleanupTimer = new FakeTimer();
+    cleanupTimer.enableAutoAdvance();
+    registerScreenLockSessionCleanup(manager, {
+      registry,
+      timer: cleanupTimer,
+      clientFactory: () => client,
+      forgetRememberedUnlock: async () => {},
+    });
+    registry.record({ deviceId, sessionId, type: "pin", credential: "1357" });
+    state = { ...state, getScreenLockRegistry: () => registry };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const released = await release();
+      expect(released).toMatchObject({
+        success: true,
+        result: { screenLockRestore: { status: "failed", deviceId, type: "pin" } },
+      });
+      expect(JSON.stringify(released)).not.toContain("1357");
+      expect(await release()).toMatchObject({
+        result: { alreadyReleased: true, screenLockRestore: { status: "failed" } },
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  arranged("a power restore that fails is reported in the release result", async () => {
+    const registry = new PowerRegistry();
+    const adb = new FakePowerAdb();
+    adb.failing.add("restrict-background false");
+    const cleanupTimer = new FakeTimer();
+    cleanupTimer.enableAutoAdvance();
+    registerPowerSessionCleanup(manager, {
+      registry,
+      timer: cleanupTimer,
+      clientFactory: () => new AdbPowerClient(adb),
+    });
+    registry.ensure(deviceId, sessionId).changed.push("dataSaver");
+    state = { ...state, getPowerRegistry: () => registry };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await release()).toMatchObject({
+        success: true,
+        result: {
+          powerRestore: {
+            status: "failed",
+            deviceId,
+            fields: [{ field: "dataSaver", status: "failed" }],
+          },
+        },
+      });
+      expect(await release()).toMatchObject({
+        result: { alreadyReleased: true, powerRestore: { status: "failed" } },
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
 
   arranged("normal release and genuinely absent retries remain idempotent", async () => {
     const free = spyOn(pool, "releaseDevice");

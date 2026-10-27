@@ -86,6 +86,24 @@ enum PrototypeMenus {
         if let actions = fields["onTap"] { try validateActions(actions, path: "\(path).onTap") }
     }
 
+    private static func validateDataAction(_ fields: [String: JSONValue], type: String, path: String) throws {
+        _ = try string(fields["path"], "\(path).path")
+        if type != "removeData" {
+            guard let binding = fields["value"],
+                  (try? PrototypeEmitContext.validate(.object(["value": binding]), path: "value")) != nil
+            else { throw fail("\(path).value", "Invalid data write value") }
+        }
+    }
+
+    private static func validatePageAction(_ fields: [String: JSONValue], path: String) throws {
+        _ = try string(fields["pager"], "\(path).pager")
+        let page = fields["page"]
+        let number = page?.numberValue
+        guard page == .string("next") || page == .string("prev") ||
+            (number.map { $0 >= 0 && $0 <= 2_147_483_647 && $0.rounded(.down) == $0 } ?? false)
+        else { throw fail("\(path).page", "Invalid value") }
+    }
+
     private static func validateActions(_ value: JSONValue, path: String) throws {
         for (index, action) in try array(value, 1 ... 32, path).enumerated() {
             let path = "\(path)[\(index)]"
@@ -103,36 +121,23 @@ enum PrototypeMenus {
             case "toggle", "increment", "decrement":
                 keys = type == "toggle" ? ["type", "key"] : ["type", "key", "by"]
                 try key(fields["key"], "\(path).key")
-                if let by = fields["by"], by.numberValue?.isFinite != true {
+                if let amount = fields["by"], amount.numberValue?.isFinite != true {
                     throw fail("\(path).by", "Expected number")
                 }
             case "setPage":
                 keys = ["type", "pager", "page"]
-                _ = try string(fields["pager"], "\(path).pager")
-                let page = fields["page"]
-                let number = page?.numberValue
-                guard page == .string("next") || page == .string("prev") ||
-                    (number.map { $0 >= 0 && $0 <= 2_147_483_647 && $0.rounded(.down) == $0 } ?? false)
-                else { throw fail("\(path).page", "Invalid value") }
+                try validatePageAction(fields, path: path)
             case "dismiss": keys = ["type"]
             case "setData", "appendData", "removeData":
                 keys = type == "removeData" ? ["type", "path"] : ["type", "path", "value"]
-                _ = try string(fields["path"], "\(path).path")
-                if type != "removeData" {
-                    guard let binding = fields["value"],
-                          (try? PrototypeEmitContext.validate(.object(["value": binding]), path: "value")) != nil
-                    else { throw fail("\(path).value", "Invalid data write value") }
-                }
+                try validateDataAction(fields, type: type, path: path)
             default: throw fail("\(path).type", "Invalid string value")
             }
             try strict(fields, keys, path)
         }
     }
 
-    /// Repeat templates are visited even when they expand to no nodes. Keys and actions are
-    /// checked after expansion, when their repeat placeholders have been bound.
-    static func validateAuthoredText(_ raw: JSONValue, path: String = "root") throws {
-        guard case let .object(fields) = raw else { return }
+    private static func validateOwnAuthoredText(_ fields: [String: JSONValue], path: String) throws {
         if fields["type"] == .string("menu"), case let .array(items)? = fields["items"] {
             for (index, item) in items.enumerated() {
                 guard case let .object(entry) = item, entry["type"] != .string("divider") else { continue }
@@ -149,6 +154,13 @@ enum PrototypeMenus {
                 }
             }
         }
+    }
+
+    /// Repeat templates are visited even when they expand to no nodes. Keys and actions are
+    /// checked after expansion, when their repeat placeholders have been bound.
+    static func validateAuthoredText(_ raw: JSONValue, path: String = "root") throws {
+        guard case let .object(fields) = raw else { return }
+        try validateOwnAuthoredText(fields, path: path)
         if case let .array(children)? = fields["children"] {
             for (index, child) in children.enumerated() {
                 try validateAuthoredText(child, path: "\(path).children[\(index)]")
@@ -157,6 +169,25 @@ enum PrototypeMenus {
         if let child = fields["child"] { try validateAuthoredText(child, path: "\(path).child") }
         for (screen, screenPath) in PrototypeStacks.screenChildren(in: fields, path: path) {
             try validateAuthoredText(screen, path: screenPath)
+        }
+    }
+
+    private static func validateSelect(_ fields: [String: JSONValue], state: [String: JSONValue], path: String) throws {
+        let options = try array(fields["options"], 2 ... 32, "\(path).options")
+        if let label = fields["label"] { _ = try string(label, "\(path).label", allowEmpty: true) }
+        var values = Set<[UInt16]>()
+        for (index, option) in options.enumerated() {
+            let optionPath = "\(path).options[\(index)]"
+            let fields = try object(option, optionPath)
+            try strict(fields, ["value", "label"], optionPath)
+            let value = try string(fields["value"], "\(optionPath).value")
+            _ = try string(fields["label"], "\(optionPath).label", allowEmpty: true)
+            if !values.insert(Array(value.utf16)).inserted {
+                throw fail("\(optionPath).value", "Duplicate select option value")
+            }
+        }
+        if let key = fields["stateKey"]?.stringValue, state[key]?.stringValue == nil {
+            throw fail("\(path).stateKey", "Select requires a string state key")
         }
     }
 
@@ -189,22 +220,7 @@ enum PrototypeMenus {
                 }
             } else {
                 try key(fields["stateKey"], "\(path).stateKey")
-                let options = try array(fields["options"], 2 ... 32, "\(path).options")
-                if let label = fields["label"] { _ = try string(label, "\(path).label", allowEmpty: true) }
-                var values = Set<[UInt16]>()
-                for (index, option) in options.enumerated() {
-                    let optionPath = "\(path).options[\(index)]"
-                    let fields = try object(option, optionPath)
-                    try strict(fields, ["value", "label"], optionPath)
-                    let value = try string(fields["value"], "\(optionPath).value")
-                    _ = try string(fields["label"], "\(optionPath).label", allowEmpty: true)
-                    if !values.insert(Array(value.utf16)).inserted {
-                        throw fail("\(optionPath).value", "Duplicate select option value")
-                    }
-                }
-                if let key = fields["stateKey"]?.stringValue, state[key]?.stringValue == nil {
-                    throw fail("\(path).stateKey", "Select requires a string state key")
-                }
+                try validateSelect(fields, state: state, path: path)
             }
         }
         if case let .array(children)? = fields["children"] {
@@ -220,13 +236,7 @@ enum PrototypeMenus {
 
     /// Bottom-end alignment in window-local coordinates, clamped on both axes.
     static func origin(anchor: CGRect, surface: CGSize, window: CGSize, rightToLeft: Bool = false) -> CGPoint {
-        CGPoint(
-            x: min(
-                max(0, rightToLeft ? anchor.minX : anchor.maxX - surface.width),
-                max(0, window.width - surface.width)
-            ),
-            y: min(max(0, anchor.maxY), max(0, window.height - surface.height))
-        )
+        PrototypePlacement.menuOrigin(anchor: anchor, surface: surface, window: window, rightToLeft: rightToLeft)
     }
 }
 

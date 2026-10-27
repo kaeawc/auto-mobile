@@ -1,12 +1,14 @@
 import { FakeSocket } from "../../fakes/FakeNetServer";
 import { expect, describe, test, beforeEach } from "bun:test";
 import { ActionableError } from "../../../src/models/ActionableError";
+import { InMemoryEmulatorConsoleBusyRegistry } from "../../../src/utils/android-cmdline-tools/EmulatorConsoleBusyRegistry";
 import {
   consolePortFromSerial,
   EmulatorConsoleAuthTokenReader,
   parseConsoleAcknowledgement,
   RealEmulatorConsoleClient,
   EmulatorConsoleTransport,
+  AVD_SNAPSHOT_CONSOLE_TIMEOUT_MS,
 } from "../../../src/utils/android-cmdline-tools/EmulatorConsoleClient";
 
 class RecordingTransport implements EmulatorConsoleTransport {
@@ -16,6 +18,7 @@ class RecordingTransport implements EmulatorConsoleTransport {
     authToken: string | null;
     commands: string[];
     signal?: AbortSignal;
+    timeoutMs?: number;
   }[] = [];
   public nextOutput: string = "Android Console\nOK\nOK\nOK\n";
   public failWith: Error | null = null;
@@ -26,8 +29,9 @@ class RecordingTransport implements EmulatorConsoleTransport {
     authToken: string | null,
     commands: string[],
     signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<string> {
-    this.calls.push({ host, port, authToken, commands, signal });
+    this.calls.push({ host, port, authToken, commands, signal, timeoutMs });
     if (this.failWith) {
       throw this.failWith;
     }
@@ -201,6 +205,9 @@ describe("RealEmulatorConsoleClient", () => {
   test("reports CRLF KO reasons without carriage returns", async () => {
     transport.nextOutput = "Android Console\r\nOK\r\nOK\r\nKO: some reason\r\n";
     const error = await client.gsmCall("5551234567").catch((caught: Error) => caught);
+    if (!(error instanceof Error)) {
+      throw new Error("Expected console command to fail");
+    }
     expect(error.message).toContain("some reason");
     expect(error.message).not.toContain("\r");
   });
@@ -208,6 +215,137 @@ describe("RealEmulatorConsoleClient", () => {
   test("propagates transport errors", async () => {
     transport.failWith = new Error("ECONNREFUSED");
     await expect(client.smsSend("5551234567", "hi")).rejects.toThrow(/ECONNREFUSED/);
+  });
+});
+
+describe("RealEmulatorConsoleClient device-condition verbs (#14057)", () => {
+  let transport: RecordingTransport;
+  let registry: InMemoryEmulatorConsoleBusyRegistry;
+  let client: RealEmulatorConsoleClient;
+
+  beforeEach(() => {
+    transport = new RecordingTransport();
+    registry = new InMemoryEmulatorConsoleBusyRegistry();
+    client = new RealEmulatorConsoleClient(
+      5554,
+      transport,
+      new StaticTokenReader("test-token"),
+      registry,
+    );
+  });
+
+  test("each verb sends its console command line", async () => {
+    await client.powerAc(false);
+    await client.powerAc(true);
+    await client.powerStatus("discharging");
+    await client.powerHealth("overheat");
+    await client.powerCapacity(5);
+    await client.sensorSet("acceleration", [0, 9.81, 0.5]);
+    await client.networkSpeed("edge");
+    await client.networkSpeed({ upKbps: 64, downKbps: 128 });
+    await client.networkDelay("gprs");
+    await client.networkDelay({ minMs: 200, maxMs: 800 });
+    await client.gsmData("unregistered");
+    await client.gsmVoice("roaming");
+    await client.gsmSignal(4, 99);
+    await client.fingerTouch(1);
+    await client.fingerRemove();
+    await client.posture("rotate");
+    await client.posture("fold");
+    await client.posture("unfold");
+
+    expect(transport.calls.map((call) => call.commands)).toEqual([
+      ["power ac off"],
+      ["power ac on"],
+      ["power status discharging"],
+      ["power health overheat"],
+      ["power capacity 5"],
+      ["sensor set acceleration 0:9.81:0.5"],
+      ["network speed edge"],
+      ["network speed 64:128"],
+      ["network delay gprs"],
+      ["network delay 200:800"],
+      ["gsm data unregistered"],
+      ["gsm voice roaming"],
+      ["gsm signal 4 99"],
+      ["finger touch 1"],
+      ["finger remove"],
+      ["rotate"],
+      ["fold"],
+      ["unfold"],
+    ]);
+    // Short verbs keep the transport's default deadline.
+    expect(transport.calls.every((call) => call.timeoutMs === undefined)).toBe(true);
+  });
+
+  test("sensorGet parses the data line printed before the acknowledgement", async () => {
+    transport.nextOutput =
+      "Android Console\r\nOK\r\nOK\r\nacceleration = 0:9.77622:0.812349\r\nOK\r\n";
+    await expect(client.sensorGet("acceleration")).resolves.toEqual([0, 9.77622, 0.812349]);
+    expect(transport.calls[0].commands).toEqual(["sensor get acceleration"]);
+  });
+
+  test("sensorGet rejects when the console acknowledges without a value line", async () => {
+    await expect(client.sensorGet("light")).rejects.toThrow(
+      /did not report a value for sensor 'light'/,
+    );
+  });
+
+  test.each([
+    ["powerStatus", () => client.powerStatus("charging")],
+    ["sensorSet", () => client.sensorSet("proximity", [1])],
+    ["networkDelay", () => client.networkDelay("none")],
+    ["gsmData", () => client.gsmData("home")],
+    ["fingerTouch", () => client.fingerTouch(2)],
+    ["avdSnapshot", () => client.avdSnapshot("load", "fixture")],
+    ["posture", () => client.posture("fold")],
+  ])("%s rejects with the console's KO reason", async (_name, invoke) => {
+    transport.nextOutput = "Android Console\r\nOK\r\nOK\r\nKO: bad argument\r\n";
+    await expect(invoke()).rejects.toThrow(/Emulator console rejected command: bad argument/);
+  });
+
+  test("invalid arguments are rejected before the console is opened", async () => {
+    await expect(client.powerCapacity(101)).rejects.toThrow(/Battery capacity/);
+    await expect(client.powerCapacity(12.5)).rejects.toThrow(/Battery capacity/);
+    await expect(client.sensorSet("accel\nquit", [1])).rejects.toThrow(/Invalid sensor name/);
+    await expect(client.sensorSet("acceleration", [])).rejects.toThrow(/1 to 3 values/);
+    await expect(client.gsmSignal(32)).rejects.toThrow(/rssi/);
+    await expect(client.fingerTouch(0)).rejects.toThrow(/Fingerprint id/);
+    await expect(client.avdSnapshot("save", "two words")).rejects.toThrow(/not valid/);
+    expect(transport.calls).toEqual([]);
+  });
+
+  test("avdSnapshot uses the console verb spelling, a long deadline, and the caller's signal", async () => {
+    const controller = new AbortController();
+    await client.avdSnapshot("save", "rooted-fixture", controller.signal);
+    await client.avdSnapshot("delete", "rooted-fixture");
+
+    expect(transport.calls.map((call) => call.commands)).toEqual([
+      ["avd snapshot save rooted-fixture"],
+      ["avd snapshot del rooted-fixture"],
+    ]);
+    expect(transport.calls[0].timeoutMs).toBe(AVD_SNAPSHOT_CONSOLE_TIMEOUT_MS);
+    expect(transport.calls[0].signal).toBe(controller.signal);
+  });
+
+  test("avdSnapshot marks the emulator console busy until the exchange settles", async () => {
+    const busyDuringExchange: boolean[] = [];
+    const generationBefore = registry.getGeneration("emulator-5554");
+    transport.execute = async () => {
+      busyDuringExchange.push(registry.isBusy("emulator-5554"));
+      return "Android Console\nOK\nOK\nKO: snapshot failed\n";
+    };
+
+    await expect(client.avdSnapshot("load", "fixture")).rejects.toThrow(/snapshot failed/);
+
+    expect(busyDuringExchange).toEqual([true]);
+    expect(registry.isBusy("emulator-5554")).toBe(false);
+    expect(registry.getGeneration("emulator-5554")).toBe(generationBefore + 2);
+  });
+
+  test("non-snapshot verbs do not mark the console busy", async () => {
+    await client.powerAc(true);
+    expect(registry.getGeneration("emulator-5554")).toBe(0);
   });
 });
 
@@ -235,7 +373,6 @@ describe("parseConsoleAcknowledgement", () => {
   });
 });
 
-import type * as net from "node:net";
 import { NetEmulatorConsoleTransport } from "../../../src/utils/android-cmdline-tools/EmulatorConsoleClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -248,7 +385,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("NetEmulatorConsoleTransport wire protocol", () => {
   function makeTransport(socket: FakeSocket, timer: FakeTimer): NetEmulatorConsoleTransport {
-    return new NetEmulatorConsoleTransport(() => socket as unknown as net.Socket, 5000, timer);
+    return new NetEmulatorConsoleTransport(() => socket, 5000, timer);
   }
 
   test("abort closes an in-flight socket and clears its deadline", async () => {
@@ -317,6 +454,23 @@ describe("NetEmulatorConsoleTransport wire protocol", () => {
 
     await expect(pending).rejects.toThrow(/timed out after 5000ms/);
     expect(socket.destroyed).toBe(true);
+  });
+
+  test("a per-call timeout overrides the transport default", async () => {
+    const socket = new FakeSocket();
+    const timer = new FakeTimer();
+    const pending = makeTransport(socket, timer).execute(
+      "localhost",
+      5554,
+      null,
+      ["avd snapshot save fixture"],
+      undefined,
+      30_000,
+    );
+    timer.advanceTime(5000);
+    expect(socket.destroyed).toBe(false);
+    timer.advanceTime(25_000);
+    await expect(pending).rejects.toThrow(/timed out after 30000ms/);
   });
 
   test("rejects when the socket errors before settling", async () => {

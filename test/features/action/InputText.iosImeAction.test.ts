@@ -106,7 +106,7 @@ describe("InputText iOS IME action", () => {
   });
 
   test("carries the requested action on success without warnings", async () => {
-    const result = await inputText.execute("hello", "next");
+    const result = await inputText.execute("hello", { imeAction: "next" });
 
     expect(result).toMatchObject({
       success: true,
@@ -122,7 +122,7 @@ describe("InputText iOS IME action", () => {
   test("reports a failed runner action after typing without inviting a retype", async () => {
     fakeIosCtrlProxy.setFailureMode("imeAction", new Error("no focused field"));
 
-    const result = await inputText.execute("hello", "next");
+    const result = await inputText.execute("hello", { imeAction: "next" });
 
     expect(result).toMatchObject({ success: false, text: "hello", method: "a11y" });
     expect(result.error).toBe(
@@ -139,7 +139,7 @@ describe("InputText iOS IME action", () => {
   test("uses a stable fallback when the runner omits its error", async () => {
     imeActionSpy.mockResolvedValue({ success: false, action: "done", totalTimeMs: 0 });
 
-    const result = await inputText.execute("hello", "done");
+    const result = await inputText.execute("hello", { imeAction: "done" });
 
     expect(result.success).toBe(false);
     expect(result.error).toBe(
@@ -150,7 +150,7 @@ describe("InputText iOS IME action", () => {
   test("reports a thrown transport error as an IME failure after typing", async () => {
     imeActionSpy.mockRejectedValue(new Error("runner disconnected"));
 
-    const result = await inputText.execute("hello", "done");
+    const result = await inputText.execute("hello", { imeAction: "done" });
 
     expect(result).toMatchObject({ success: false, text: "hello", method: "a11y" });
     expect(result.error).toBe(
@@ -180,15 +180,7 @@ describe("InputText iOS IME action", () => {
       const controller = new AbortController();
       try {
         expect(
-          (
-            await inputText.execute(
-              "a".repeat(length),
-              undefined,
-              false,
-              undefined,
-              controller.signal,
-            )
-          ).success,
+          (await inputText.execute("a".repeat(length), {}, { signal: controller.signal })).success,
         ).toBe(true);
         expect(setText.mock.calls[0][1]).toEqual({
           timeoutMs: length === 5 ? 5000 : 102000,
@@ -231,12 +223,13 @@ describe("InputText iOS IME action", () => {
       try {
         const result = await inputText.execute(
           "hello",
-          "done",
-          false,
-          undefined,
-          controller.signal,
+          { imeAction: "done" },
+          { signal: controller.signal },
         );
-        expect(result).toMatchObject({ success: false, error, retryable: false });
+        expect(result).toMatchObject({ success: false, retryable: false });
+        // The guidance is kept verbatim; the bounded read-back appends what was committed.
+        expect(result.error?.startsWith(error)).toBe(true);
+        expect(result.error).toContain("Observed afterwards:");
         expect(setText).toHaveBeenCalledTimes(1);
         expect(imeActionSpy).not.toHaveBeenCalled();
       } finally {
@@ -258,7 +251,7 @@ describe("InputText iOS IME action", () => {
       });
 
       await expect(
-        inputText.execute("hello", "next", false, undefined, controller.signal),
+        inputText.execute("hello", { imeAction: "next" }, { signal: controller.signal }),
       ).rejects.toBe(abortError);
       expect(fakeIosCtrlProxy.getTextInputHistory()).toEqual([
         { text: "hello", resourceId: undefined },
@@ -274,7 +267,7 @@ describe("InputText iOS IME action", () => {
     fakeAdb.setCommandError("shell input keyevent KEYCODE_TAB", new Error("key event failed"));
     const androidInputText = createInputText({ ...iosDevice, platform: "android" });
 
-    const result = await androidInputText.execute("hello", "next", false, "a11y");
+    const result = await androidInputText.execute("hello", { imeAction: "next", mode: "a11y" });
 
     expect(result).toMatchObject({
       success: false,

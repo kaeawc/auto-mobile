@@ -14,8 +14,8 @@ import { defaultDeviceClockRestoreRegistry } from "../../src/features/utility/De
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
-import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
-import { NetworkState } from "../../src/server/NetworkState";
+import { registerNetworkStateSessionCleanup } from "../../src/daemon/networkStateSessionCleanup";
+import { NetworkState } from "../../src/utils/NetworkState";
 import {
   registerLocationRouteSessionCleanup,
   LocationRouteRegistry,
@@ -81,12 +81,23 @@ async function setup(saved = true) {
       if ((kind === "rotation" && behavior.rotationFails) || kind === behavior.failingKind) {
         throw new Error("restore not confirmed");
       }
-      return { status: "restored" as const };
     },
   });
+  const recordKeepAwake = (kind: string) => {
+    const base = record(kind);
+    return (device: BootedDevice) => {
+      const restorer = base(device);
+      return {
+        restore: async (state: unknown, signal?: AbortSignal) => {
+          await restorer.restore(state, signal);
+          return { status: "restored" as const };
+        },
+      };
+    };
+  };
   const sessions = new SessionManager(timer, persistence, {
     barrier: () => new FakeDbWriteBarrier(),
-    keepScreenAwakeRestorer: record("keep-awake"),
+    keepScreenAwakeRestorer: recordKeepAwake("keep-awake"),
     biometricEnrollmentRestorer: record("biometric"),
     restorers: {
       networkCondition: record("network"),
@@ -321,9 +332,15 @@ for (const superseded of [true, false]) {
         });
         h.manager.bootedDevices = [stranger];
         const settlement = h.pool.settlePooledRuntimeIdentity(original.deviceId);
-        await drainUntil(() => h.sessions["identityReplacementFences"].has(original.deviceId), {
-          description: "provisional serial handoff fence",
-        });
+        await drainUntil(
+          () =>
+            h.sessions.testHooks.wiring.restoreHealth.identityReplacementFences.has(
+              original.deviceId,
+            ),
+          {
+            description: "provisional serial handoff fence",
+          },
+        );
         gate.resolve();
         let rebound = false;
         void rebind.then(() => {
@@ -332,7 +349,11 @@ for (const superseded of [true, false]) {
         await drainUntil(() => rebound, { description: "fenced rebind without advancing time" });
         await rebind;
         expect(h.holder.assignedDevice).toBe("emulator-5556");
-        expect(h.sessions["identityReplacementFences"].has(original.deviceId)).toBe(true);
+        expect(
+          h.sessions.testHooks.wiring.restoreHealth.identityReplacementFences.has(
+            original.deviceId,
+          ),
+        ).toBe(true);
         expect(h.restores).toEqual([]);
         expect(unbound).toEqual([]);
         if (superseded) {
@@ -469,7 +490,11 @@ for (const forced of [false, true]) {
         const release = h.sessions.releaseSession("holder", "device-restart:AVD-A", {
           deviceIdentityReplaced: true,
         });
-        expect(h.sessions["identityReplacementFences"].has(original.deviceId)).toBe(true);
+        expect(
+          h.sessions.testHooks.wiring.restoreHealth.identityReplacementFences.has(
+            original.deviceId,
+          ),
+        ).toBe(true);
         if (forced) {
           expect(h.sessions.forceStuckRelease("holder")?.stage).toBe("awaiting-rebind");
         }
@@ -487,11 +512,15 @@ for (const forced of [false, true]) {
         }
         await ordinary;
         expect(h.restores).toEqual([allRestores[0]!, allRestores[4]!]);
-        expect(h.sessions["identityReplacementFences"].size).toBe(0);
-        expect(h.sessions["replacedRestoreGenerations"].get(original.deviceId)).toBe(
-          forced ? undefined : 1,
-        );
-        expect(h.sessions["replacedRestoreGenerations"].has("emulator-5556")).toBe(false);
+        expect(h.sessions.testHooks.wiring.restoreHealth.identityReplacementFences.size).toBe(0);
+        expect(
+          h.sessions.testHooks.wiring.restoreHealth.replacedRestoreGenerations.get(
+            original.deviceId,
+          ),
+        ).toBe(forced ? undefined : 1);
+        expect(
+          h.sessions.testHooks.wiring.restoreHealth.replacedRestoreGenerations.has("emulator-5556"),
+        ).toBe(false);
       } finally {
         gate.resolve();
         write.mockRestore();
@@ -529,7 +558,7 @@ for (const outcome of ["persist-throw", "recovery-expiry", "forced-teardown"] as
         await tracked;
         await release;
       }
-      expect(h.sessions["identityReplacementFences"].size).toBe(0);
+      expect(h.sessions.testHooks.wiring.restoreHealth.identityReplacementFences.size).toBe(0);
     } finally {
       gate.resolve();
       h.cleanup();
@@ -602,7 +631,7 @@ warmedTest(
           String(message).startsWith("Dropped restore state"),
         ),
       ).toEqual([]);
-      expect(h.sessions["identityReplacementFences"].size).toBe(0);
+      expect(h.sessions.testHooks.wiring.restoreHealth.identityReplacementFences.size).toBe(0);
     } finally {
       gate.resolve();
       h.cleanup();
@@ -638,7 +667,7 @@ for (const kind of ["keep-awake", "biometric", "network", "clock", "rotation", "
             String(message).startsWith("Dropped restore state"),
           ),
         ).toEqual([]);
-        expect(h.sessions["identityReplacementFences"].size).toBe(0);
+        expect(h.sessions.testHooks.wiring.restoreHealth.identityReplacementFences.size).toBe(0);
       } finally {
         gate.resolve();
         h.cleanup();
@@ -1061,18 +1090,17 @@ for (const key of savedKeys) {
 
 function startRetry(h: Awaited<ReturnType<typeof setup>>, kind: (typeof retryKinds)[number]) {
   if (kind === "clock") {
-    return h.sessions["stateRestore"].getPendingClockRestoration.bind(h.sessions["stateRestore"])(
-      h.holder,
-      null,
-    );
-  }
-  if (kind === "rotation") {
-    return h.sessions["stateRestore"].getPendingRotationRestoration.bind(
-      h.sessions["stateRestore"],
+    return h.sessions.testHooks.wiring.host.stateRestore.getPendingClockRestoration.bind(
+      h.sessions.testHooks.wiring.host.stateRestore,
     )(h.holder, null);
   }
-  return h.sessions["stateRestore"].getPendingScreenReaderRestoration.bind(
-    h.sessions["stateRestore"],
+  if (kind === "rotation") {
+    return h.sessions.testHooks.wiring.host.stateRestore.getPendingRotationRestoration.bind(
+      h.sessions.testHooks.wiring.host.stateRestore,
+    )(h.holder, null);
+  }
+  return h.sessions.testHooks.wiring.host.stateRestore.getPendingScreenReaderRestoration.bind(
+    h.sessions.testHooks.wiring.host.stateRestore,
   )(h.holder, null);
 }
 
@@ -1303,18 +1331,18 @@ for (const kind of ["rotation", "screen-reader"] as const) {
         expect(h.restores).toHaveLength(kind === "rotation" ? 6 : 3);
         const abandoned =
           kind === "rotation"
-            ? h.sessions["stateRestore"].abandonedRotations
-            : h.sessions["stateRestore"].abandonedScreenReaders;
+            ? h.sessions.testHooks.wiring.host.stateRestore.abandonedRotations
+            : h.sessions.testHooks.wiring.host.stateRestore.abandonedScreenReaders;
         expect(abandoned.has(original.deviceId)).toBe(true);
         h.behavior.failingKind = "";
         h.restores.length = 0;
         const retry =
           kind === "rotation"
-            ? h.sessions["stateRestore"].retryAbandonedRotationAfter.bind(
-                h.sessions["stateRestore"],
+            ? h.sessions.testHooks.wiring.host.stateRestore.retryAbandonedRotationAfter.bind(
+                h.sessions.testHooks.wiring.host.stateRestore,
               )(original.deviceId, own.promise)
-            : h.sessions["stateRestore"].retryAbandonedScreenReaderAfter.bind(
-                h.sessions["stateRestore"],
+            : h.sessions.testHooks.wiring.host.stateRestore.retryAbandonedScreenReaderAfter.bind(
+                h.sessions.testHooks.wiring.host.stateRestore,
               )(original.deviceId, own.promise);
         if (outcome === "control") {
           own.resolve();
@@ -1375,7 +1403,7 @@ for (const reason of ["keep-screen-awake", "biometric-enrollment", "network-cond
           () => true,
           fixedBackoff(250),
         );
-        h.sessions["abandonRestore"](
+        h.sessions.testHooks.wiring.restoreHealth.abandonRestore(
           { deviceId: original.deviceId, incarnation: 1 },
           reason,
           async () => {

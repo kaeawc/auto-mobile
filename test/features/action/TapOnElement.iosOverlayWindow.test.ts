@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { afterEach, describe, expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -35,33 +36,34 @@ async function tapElement(hierarchy: ViewHierarchyResult, elementId: string) {
     new FakeAdbExecutor(),
     {
       timer,
-      tapStrategy: new FakeTapStrategy(),
+      tapStrategy: FakeTapStrategy.ios(),
       visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     },
   );
   const observation: ObserveResult = {
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     observationId: "ios-overlay-window",
     updatedAt: 1,
     screenSize: { width: 402, height: 874 },
     viewHierarchy: hierarchy,
-    systemInsets: hierarchy.systemInsets,
+    systemInsets: hierarchy.systemInsets ?? { top: 0, right: 0, bottom: 0, left: 0 },
   };
   const points: Array<{ x: number; y: number }> = [];
-  tap.observedInteraction = async (action) => ({
-    ...(await action(recordObservationRead(observation))),
+  tap.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
     observation,
   });
   tap.refreshViewHierarchy = async () => hierarchy;
-  tap.executeiOSTap = async (_action, x, y) => {
+  tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
     points.push({ x, y });
-  };
+  });
   tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
+    effect: undefined,
     observation: current,
   });
   tap.prepareSelectionCapture = async () => null;
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   const result = await tap.execute({ elementId, action: "tap", searchUntil: { duration: 200 } });
   return { result, points };

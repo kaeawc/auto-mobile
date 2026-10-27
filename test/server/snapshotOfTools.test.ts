@@ -12,6 +12,7 @@ import { SearchableHierarchy } from "../../src/features/utility/SearchableNode";
 import type { ViewHierarchyResult } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeImageBackend } from "../fakes/FakeImageBackend";
+import { toolJson } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -20,11 +21,13 @@ const hierarchy: ViewHierarchyResult = {
   screenWidth: 4,
   screenHeight: 4,
   hierarchy: {
-    node: [
-      { "resource-id": "target", bounds: { left: 1, top: 1, right: 3, bottom: 3 } },
-      { "resource-id": "duplicate", bounds: { left: 0, top: 0, right: 1, bottom: 1 } },
-      { "resource-id": "duplicate", bounds: { left: 2, top: 2, right: 4, bottom: 4 } },
-    ],
+    node: {
+      node: [
+        { "resource-id": "target", bounds: { left: 1, top: 1, right: 3, bottom: 3 } },
+        { "resource-id": "duplicate", bounds: { left: 0, top: 0, right: 1, bottom: 1 } },
+        { "resource-id": "duplicate", bounds: { left: 2, top: 2, right: 4, bottom: 4 } },
+      ],
+    },
   },
 };
 
@@ -83,7 +86,7 @@ describe("snapshotOf tool", () => {
           { ...device, platform: "ios" },
           tool.schema.parse(args),
         );
-        const result = JSON.parse(response.content[0].text);
+        const result = toolJson(response);
         const requested = "elementId" in args ? { left: 1, top: 1, right: 3, bottom: 3 } : bounds;
         expect(result).toMatchObject({
           imageSize: {
@@ -145,10 +148,14 @@ describe("snapshotOf tool", () => {
       device,
       tool.schema.parse({ elementId: "target" }),
     );
-    const result = JSON.parse(response.content[0].text);
-    expect(protection.isProtected(result.path)).toBe(true);
+    const result = toolJson(response);
+    const resultPath = result.path;
+    if (typeof resultPath !== "string") {
+      throw new Error(`snapshotOf returned no path: ${JSON.stringify(resultPath)}`);
+    }
+    expect(protection.isProtected(resultPath)).toBe(true);
     timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS);
-    expect(protection.isProtected(result.path)).toBe(false);
+    expect(protection.isProtected(resultPath)).toBe(false);
     expect(captures).toBe(1);
     expect(result).toMatchObject({
       path: path.join(dir, "snapshot-of-crop-1.png"),
@@ -158,10 +165,10 @@ describe("snapshotOf tool", () => {
       expiresAt: SCREENSHOT_PATH_MIN_LIFETIME_MS,
     });
     expect(JSON.stringify(result)).not.toContain("png-crop");
-    expect(await fs.readFile(result.path, "utf8")).toBe("png-crop");
+    expect(await fs.readFile(resultPath, "utf8")).toBe("png-crop");
     if (process.platform !== "win32") {
       // Windows does not enforce POSIX file permission modes.
-      expect((await fs.stat(result.path)).mode & 0o777).toBe(0o600);
+      expect((await fs.stat(resultPath)).mode & 0o777).toBe(0o600);
     }
     await expect(
       tool.deviceAwareHandler!(device, tool.schema.parse({ elementId: "missing" })),

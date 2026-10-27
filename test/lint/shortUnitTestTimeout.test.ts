@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import ts from "typescript";
 import { fileURLToPath } from "node:url";
 
@@ -208,9 +209,7 @@ describe("unit tests use the default runner deadline", () => {
     );
     expect(files.length).toBeGreaterThan(0);
     offenders = files.flatMap((file) =>
-      shortTimeouts(readFileSync(new URL(file, root), "utf8")).map(
-        (violation) => `${file}:${violation}`,
-      ),
+      shortTimeouts(readGuardFile(new URL(file, root))).map((violation) => `${file}:${violation}`),
     );
   }, 20_000);
 

@@ -20,23 +20,15 @@ class NetworkMockRuleStoreTest {
     return NetworkMockRuleStore(clock)
   }
 
-  private fun rule(
-    mockId: String = "mock-1",
-    host: String = "api\\.example\\.com",
-    path: String = "/users",
-    method: String = "*",
-    limit: Int? = null,
-    remaining: Int? = null,
-    statusCode: Int = 500,
-  ) =
+  private fun rule() =
     NetworkMockRuleDto(
-      mockId = mockId,
-      host = host,
-      path = path,
-      method = method,
-      limit = limit,
-      remaining = remaining,
-      statusCode = statusCode,
+      mockId = "mock-1",
+      host = "api\\.example\\.com",
+      path = "/users",
+      method = "*",
+      limit = null,
+      remaining = null,
+      statusCode = 500,
       responseHeaders = mapOf("X-Mock" to "true"),
       responseBody = """{"error":"mocked"}""",
       contentType = "application/json",
@@ -65,7 +57,7 @@ class NetworkMockRuleStoreTest {
   @Test
   fun `matches regex host pattern`() {
     val store = createStore()
-    store.setRules(listOf(rule(host = ".*\\.example\\.com")))
+    store.setRules(listOf(rule().copy(host = ".*\\.example\\.com")))
 
     assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
     assertNotNull(store.findMatchingRule("cdn.example.com", "/users", "GET"))
@@ -75,7 +67,7 @@ class NetworkMockRuleStoreTest {
   @Test
   fun `matches regex path pattern`() {
     val store = createStore()
-    store.setRules(listOf(rule(path = "/users/\\d+")))
+    store.setRules(listOf(rule().copy(path = "/users/\\d+")))
 
     assertNotNull(store.findMatchingRule("api.example.com", "/users/123", "GET"))
     assertNull(store.findMatchingRule("api.example.com", "/users/abc", "GET"))
@@ -84,7 +76,7 @@ class NetworkMockRuleStoreTest {
   @Test
   fun `wildcard method matches any method`() {
     val store = createStore()
-    store.setRules(listOf(rule(method = "*")))
+    store.setRules(listOf(rule().copy(method = "*")))
 
     assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
     assertNotNull(store.findMatchingRule("api.example.com", "/users", "POST"))
@@ -94,7 +86,7 @@ class NetworkMockRuleStoreTest {
   @Test
   fun `specific method only matches that method`() {
     val store = createStore()
-    store.setRules(listOf(rule(method = "POST")))
+    store.setRules(listOf(rule().copy(method = "POST")))
 
     assertNotNull(store.findMatchingRule("api.example.com", "/users", "POST"))
     assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
@@ -103,7 +95,7 @@ class NetworkMockRuleStoreTest {
   @Test
   fun `method matching is case insensitive`() {
     val store = createStore()
-    store.setRules(listOf(rule(method = "post")))
+    store.setRules(listOf(rule().copy(method = "post")))
 
     assertNotNull(store.findMatchingRule("api.example.com", "/users", "POST"))
   }
@@ -111,7 +103,7 @@ class NetworkMockRuleStoreTest {
   @Test
   fun `limit decrements remaining and stops matching when exhausted`() {
     val store = createStore()
-    store.setRules(listOf(rule(limit = 2, remaining = 2)))
+    store.setRules(listOf(rule().copy(limit = 2, remaining = 2)))
 
     assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
     assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
@@ -121,7 +113,7 @@ class NetworkMockRuleStoreTest {
   @Test
   fun `unlimited rule matches indefinitely`() {
     val store = createStore()
-    store.setRules(listOf(rule(limit = null, remaining = null)))
+    store.setRules(listOf(rule().copy(limit = null, remaining = null)))
 
     repeat(100) {
       assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
@@ -131,10 +123,12 @@ class NetworkMockRuleStoreTest {
   @Test
   fun `setRules replaces all rules`() {
     val store = createStore()
-    store.setRules(listOf(rule(mockId = "first")))
+    store.setRules(listOf(rule().copy(mockId = "first")))
     assertEquals(1, store.getRuleCount())
 
-    store.setRules(listOf(rule(mockId = "second"), rule(mockId = "third", path = "/posts")))
+    store.setRules(
+      listOf(rule().copy(mockId = "second"), rule().copy(mockId = "third", path = "/posts")),
+    )
     assertEquals(2, store.getRuleCount())
 
     val match = store.findMatchingRule("api.example.com", "/users", "GET")
@@ -157,8 +151,8 @@ class NetworkMockRuleStoreTest {
     val store = createStore()
     store.setRules(
       listOf(
-        rule(mockId = "bad", host = "[invalid"),
-        rule(mockId = "good"),
+        rule().copy(mockId = "bad", host = "[invalid"),
+        rule().copy(mockId = "good"),
       ),
     )
 
@@ -173,7 +167,7 @@ class NetworkMockRuleStoreTest {
     // `/users/{id}` is a valid JavaScript RegExp (the brace is a literal) but the JVM/ICU engine
     // throws "Illegal repetition"; the host rejects it up front (#10059).
     val store = createStore()
-    store.setRules(listOf(rule(mockId = "braced", path = "/users/{id}/profile")))
+    store.setRules(listOf(rule().copy(mockId = "braced", path = "/users/{id}/profile")))
 
     assertEquals(0, store.getRuleCount())
     assertNull(store.findMatchingRule("api.example.com", "/users/{id}/profile", "GET"))
@@ -182,7 +176,7 @@ class NetworkMockRuleStoreTest {
   @Test
   fun `accepts a leading inline flag that JavaScript rejects`() {
     val store = createStore()
-    store.setRules(listOf(rule(mockId = "flagged", host = "(?i)API\\.example\\.com")))
+    store.setRules(listOf(rule().copy(mockId = "flagged", host = "(?i)API\\.example\\.com")))
 
     assertEquals(1, store.getRuleCount())
     assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
@@ -203,7 +197,7 @@ class NetworkMockRuleStoreTest {
   @Test
   fun `replacing rules never exposes an empty set to concurrent readers`() {
     val store = createStore()
-    val dtos = listOf(rule(host = "api.example.com"))
+    val dtos = listOf(rule().copy(host = "api.example.com"))
     store.setRules(dtos)
     val started = CountDownLatch(1)
     val stop = AtomicBoolean(false)
@@ -247,10 +241,10 @@ class NetworkMockRuleStoreTest {
     val store = createStore()
     store.setRules(
       listOf(
-        rule(mockId = "first"),
-        rule(mockId = "bad", path = "[invalid"),
-        rule(mockId = "second"),
-        rule(mockId = "posts", path = "/posts"),
+        rule().copy(mockId = "first"),
+        rule().copy(mockId = "bad", path = "[invalid"),
+        rule().copy(mockId = "second"),
+        rule().copy(mockId = "posts", path = "/posts"),
       ),
     )
 
@@ -258,7 +252,7 @@ class NetworkMockRuleStoreTest {
     assertEquals("first", store.findMatchingRule("api.example.com", "/users", "GET")?.mockId)
     assertEquals("posts", store.findMatchingRule("api.example.com", "/posts", "GET")?.mockId)
 
-    store.setRules(listOf(rule(mockId = "replacement", path = "/replacement")))
+    store.setRules(listOf(rule().copy(mockId = "replacement", path = "/replacement")))
 
     assertEquals(1, store.getRuleCount())
     assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
@@ -278,9 +272,9 @@ class NetworkMockRuleStoreTest {
     val rejected =
       store.applyRules(
         listOf(
-          rule(mockId = "ok"),
-          rule(mockId = "brace", path = "/items/{id}"),
-          rule(mockId = "bracket", host = "[invalid"),
+          rule().copy(mockId = "ok"),
+          rule().copy(mockId = "brace", path = "/items/{id}"),
+          rule().copy(mockId = "bracket", host = "[invalid"),
         ),
       )
 
@@ -295,7 +289,9 @@ class NetworkMockRuleStoreTest {
   fun `applyRules reports nothing when every rule compiles`() {
     val store = createStore()
 
-    assertTrue(store.applyRules(listOf(rule(mockId = "a"), rule(mockId = "b"))).isEmpty())
+    assertTrue(
+      store.applyRules(listOf(rule().copy(mockId = "a"), rule().copy(mockId = "b"))).isEmpty(),
+    )
     assertTrue(store.applyRules(emptyList()).isEmpty())
   }
 
@@ -304,12 +300,12 @@ class NetworkMockRuleStoreTest {
   @Test
   fun `setRules keeps the consumed counter for an unchanged rule when another rule is added`() {
     val store = createStore()
-    val first = rule(mockId = "mock-1", path = "/login", limit = 1, remaining = 1)
+    val first = rule().copy(mockId = "mock-1", path = "/login", limit = 1, remaining = 1)
     store.setRules(listOf(first))
     assertNotNull(store.findMatchingRule("api.example.com", "/login", "POST"))
     assertNull(store.findMatchingRule("api.example.com", "/login", "POST"))
 
-    store.setRules(listOf(first, rule(mockId = "mock-2", path = "/profile")))
+    store.setRules(listOf(first, rule().copy(mockId = "mock-2", path = "/profile")))
 
     assertNull(store.findMatchingRule("api.example.com", "/login", "POST"))
     assertNotNull(store.findMatchingRule("api.example.com", "/profile", "GET"))
@@ -318,7 +314,7 @@ class NetworkMockRuleStoreTest {
   @Test
   fun `setRules keeps a partially consumed counter across an identical re-push`() {
     val store = createStore()
-    val dtos = listOf(rule(limit = 3, remaining = 3))
+    val dtos = listOf(rule().copy(limit = 3, remaining = 3))
     store.setRules(dtos)
     assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
 
@@ -332,25 +328,25 @@ class NetworkMockRuleStoreTest {
   @Test
   fun `setRules gives a fresh counter to a new mockId or a changed definition`() {
     val store = createStore()
-    store.setRules(listOf(rule(mockId = "mock-1", limit = 1, remaining = 1)))
+    store.setRules(listOf(rule().copy(mockId = "mock-1", limit = 1, remaining = 1)))
     assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
     assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
 
     // Same id, different limit: a different rule, so it starts fresh.
-    store.setRules(listOf(rule(mockId = "mock-1", limit = 2, remaining = 2)))
+    store.setRules(listOf(rule().copy(mockId = "mock-1", limit = 2, remaining = 2)))
     assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
     assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
     assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
 
     // New id, same definition: also fresh.
-    store.setRules(listOf(rule(mockId = "mock-9", limit = 2, remaining = 2)))
+    store.setRules(listOf(rule().copy(mockId = "mock-9", limit = 2, remaining = 2)))
     assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
   }
 
   @Test
   fun `setRules with an empty list drops counters so a later push starts fresh`() {
     val store = createStore()
-    val dtos = listOf(rule(limit = 1, remaining = 1))
+    val dtos = listOf(rule().copy(limit = 1, remaining = 1))
     store.setRules(dtos)
     assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
     assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))

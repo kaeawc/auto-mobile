@@ -1,0 +1,13 @@
+{
+  "CFBundleIdentifier": "com.example.deeplinkdemo",
+  "CFBundleShortVersionString": "1.2.0",
+  "CFBundleVersion": "42",
+  "CFBundleURLTypes": [
+    {
+      "CFBundleURLName": "com.example.deeplinkdemo",
+      "CFBundleURLSchemes": ["deeplinkdemo", "ddemo"]
+    },
+    { "CFBundleURLName": "com.example.deeplinkdemo.oauth", "CFBundleURLSchemes": ["ddemo-oauth"] }
+  ],
+  "CFBundleDocumentTypes": [{ "CFBundleTypeName": "Image", "LSItemContentTypes": ["public.png"] }]
+}

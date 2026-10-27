@@ -38,6 +38,10 @@ function makeDependencies(
       ...pass("/opt/android/cmdline-tools/latest"),
       message: "Android command line tools detected (version v12.3).",
     }),
+    checkBundletool: async () => ({
+      ...pass("/opt/homebrew/bin/bundletool"),
+      message: "bundletool 1.18.1",
+    }),
     checkXcodeInstallation: async () => pass("v16.1"),
     checkXcodeCommandLineTools: async () => pass("/Applications/Xcode.app/Contents/Developer"),
     checkXcrunAvailable: async () => pass(),
@@ -65,7 +69,7 @@ describe("host toolchain resource", () => {
     const payload = await read(makeDependencies());
 
     expect(payload.lastUpdated).toBe("2026-09-14T12:00:00.000Z");
-    expect(payload.entries).toHaveLength(9);
+    expect(payload.entries).toHaveLength(10);
     const entry = payload.entries.find((item: { name: string }) => item.name === "devicectl");
     expect("downgradeGuard" in entry.coreDevice).toBe(false);
     expect(
@@ -89,6 +93,12 @@ describe("host toolchain resource", () => {
         available: true,
         version: "12.3",
         location: "/opt/android/cmdline-tools/latest",
+      },
+      bundletool: {
+        name: "bundletool",
+        available: true,
+        version: "1.18.1",
+        location: "/opt/homebrew/bin/bundletool",
       },
       xcodebuild: { name: "xcodebuild", available: true, version: "16.1" },
       "xcode-select": {
@@ -177,6 +187,27 @@ describe("host toolchain resource", () => {
     expect(entries.simctl).toMatchObject({ available: false, error: "simctl missing" });
     expect(entries.adb).toMatchObject({ available: true });
     expect(entries.xcrun).toMatchObject({ available: true });
+  });
+
+  test("reports a missing bundletool as unavailable with the install hint", async () => {
+    const payload = await read(
+      makeDependencies({
+        checkBundletool: async () => ({
+          name: "bundletool",
+          status: "warn",
+          message: "bundletool not found (bundletool is not on PATH)",
+        }),
+      }),
+    );
+    const bundletool = payload.entries.find(
+      (entry: { name: string }) => entry.name === "bundletool",
+    );
+
+    expect(bundletool).toEqual({
+      name: "bundletool",
+      available: false,
+      error: "bundletool not found (bundletool is not on PATH)",
+    });
   });
 
   test("times out one hanging probe using the injected fake timer", async () => {
@@ -392,8 +423,8 @@ describe("host toolchain resource", () => {
       simctl: {
         getDeviceInfo: async () => null,
         listSimulatorImages: async () => [
-          { name: "one", platform: "ios", deviceId: "one", state: "Booted" },
-          { name: "two", platform: "ios", deviceId: "two", state: "Shutdown" },
+          { name: "one", platform: "ios", deviceId: "one", state: "Booted", isRunning: true },
+          { name: "two", platform: "ios", deviceId: "two", state: "Shutdown", isRunning: false },
         ],
       },
     });

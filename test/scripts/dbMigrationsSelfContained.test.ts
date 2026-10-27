@@ -192,7 +192,9 @@ describe("raw DB migration override folder is self-contained", () => {
 
   test("bundled migration runtime packages are devDependencies", () => {
     for (const dependency of BUNDLED_MIGRATION_RUNTIME_PACKAGES) {
-      expect(packageJson.devDependencies[dependency]).toBeDefined();
+      expect(
+        Object.entries(packageJson.devDependencies).find(([name]) => name === dependency)?.[1],
+      ).toBeDefined();
     }
   });
 });

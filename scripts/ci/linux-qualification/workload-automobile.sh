@@ -2,7 +2,7 @@
 # Cadence: cold-launch Settings, tap search, type wifi + enter, screenshot, pause 1s.
 # Raw control uses the same sequence/pause; measured op durations remain in ops.log.
 set -euo pipefail
-# shellcheck source=scripts/ci/linux-qualification/lib.sh disable=SC1091
+# shellcheck source=scripts/ci/linux-qualification/lib.sh
 source "$(dirname "$0")/lib.sh"
 end=$(( $(now) + LOAD_SECONDS ))
 timestamp=$(now)

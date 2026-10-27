@@ -48,7 +48,7 @@ cleanup() {
     exit 0
   fi
 }
-trap cleanup EXIT
+trap 'cleanup' EXIT
 
 # cc <path-or-query> -> body on stdout. 401/403/404 skip the whole run (bad token or no project
 # access) and never print the response body, which can echo auth data. Messages go to stderr
@@ -71,8 +71,7 @@ cc() {
 }
 
 # jq program fragment; $cutoff is a jq variable, not a shell expansion.
-# shellcheck disable=SC2016
-in_window='(.created_at | sub("\\.[0-9]+"; "") | fromdateiso8601) >= $cutoff'
+in_window="(.created_at | sub(\"\\\\.[0-9]+\"; \"\") | fromdateiso8601) >= \$cutoff"
 
 # Recent main pipelines (the setup pipeline and its continuation) inside the window.
 pipelines="${work}/pipelines.jsonl"

@@ -8,9 +8,9 @@ import {
   sessionUuidFromArgs,
 } from "../../../src/daemon/proxy/SessionBinding";
 import { ProxySessionState } from "../../../src/daemon/proxy/ProxySessionState";
-import { DaemonBoundSessionExpiredError } from "../../../src/daemon/proxy/daemonErrors";
-import type { ListChangedKind } from "../../../src/server/listChangedBroadcast";
-import { withRoutedSessionMeta } from "../../../src/server/routedSessionMeta";
+import { DaemonBoundSessionExpiredError } from "../../../src/daemon/proxy/DaemonBoundSessionExpiredError";
+import type { ListChangedKind } from "../../../src/daemon/listChangedBroadcast";
+import { withRoutedSessionMeta } from "../../../src/daemon/routedSessionMeta";
 import { FakeDaemonManager } from "../../fakes/FakeDaemonManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -310,15 +310,15 @@ describe("SessionBinding", () => {
       timer: new FakeTimer(),
       daemonManager: new FakeDaemonManager(),
     });
-    const port = proxy["createSessionBindingPort"]();
+    const port = proxy.getInternalsForTesting().createSessionBindingPort();
     const calls: unknown[][] = [];
-    proxy["holdPreviousBinding"] = (...args) => {
+    proxy.getInternalsForTesting().sessionOwnership.holdPreviousBinding = (...args) => {
       calls.push(args);
     };
     port.holdPreviousBinding("named");
     expect(calls).toEqual([["named"]]);
     expect(port.isHeartbeatKeeperStarted()).toBe(false);
-    proxy["latestBindingKeeper"].started = true;
+    proxy.getInternalsForTesting().latestBindingKeeper.started = true;
     expect(port.isHeartbeatKeeperStarted()).toBe(true);
   });
 });

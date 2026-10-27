@@ -26,7 +26,7 @@ async function harness(commands: string[] | null = ASSET_COMMANDS) {
   const timer = new FakeTimer();
   const socket = new FakeWebSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "asset-test", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "asset-test", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
       webSocketFactory: () => socket,
@@ -38,7 +38,7 @@ async function harness(commands: string[] | null = ASSET_COMMANDS) {
   await Promise.resolve();
   client.connectionTestHooks.socket = socket;
   spyOn(client, "ensureConnected").mockResolvedValue(true);
-  const receive = (frame: object) => client["handleWebSocketMessage"](JSON.stringify(frame));
+  const receive = (frame: object) => client.testHooks.handleWebSocketMessage(JSON.stringify(frame));
   if (commands !== null) {
     await receive({ type: "connected", supportedCommands: commands });
   }
@@ -107,7 +107,7 @@ describe("CtrlProxy prototype assets", () => {
       acknowledged: true,
       requestId: frames[0].requestId,
     });
-    expect(client["requestManager"].getPendingCount()).toBe(0);
+    expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
   });
 
   test("put encodes only the view's bytes, not the pool behind it", async () => {
@@ -181,7 +181,7 @@ describe("CtrlProxy prototype assets", () => {
     expect(result).toMatchObject({ success: false, dispatched: true, acknowledged: false });
     expect(result.error).toContain("Upload of prototype asset 'hero' outcome is indeterminate");
     expect(result.error).toContain("timed out after 50ms");
-    expect(client["requestManager"].getPendingCount()).toBe(0);
+    expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
   });
 
   test("abort after dispatch is indeterminate and clears the waiter", async () => {
@@ -195,7 +195,7 @@ describe("CtrlProxy prototype assets", () => {
     const result = await pending;
     expect(result).toMatchObject({ success: false, dispatched: true, acknowledged: false });
     expect(result.error).toContain("Removal of prototype asset 'hero' outcome is indeterminate");
-    expect(client["requestManager"].getPendingCount()).toBe(0);
+    expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
   });
 
   test("abort before dispatch sends nothing and is not indeterminate", async () => {
@@ -246,7 +246,7 @@ describe("CtrlProxy prototype assets", () => {
       commands: ["full_command_set_v1", "show_prototype", "dismiss_prototype"],
     },
   ])("older device ($label) is never sent an asset request", async ({ commands }) => {
-    const { client, socket } = await harness(commands);
+    const { client, socket } = await harness([...commands]);
     const send = spyOn(socket, "send");
     await expect(client.requestPutPrototypeAsset(asset)).rejects.toBeInstanceOf(ActionableError);
     await expect(client.requestPutPrototypeAsset(asset)).rejects.toThrow(

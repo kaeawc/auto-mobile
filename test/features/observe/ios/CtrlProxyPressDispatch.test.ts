@@ -28,16 +28,14 @@ const cases: PressCase[] = [
   {
     name: "coordinate tap",
     request: (h, s, d) =>
-      new CtrlProxyGestures(h.context).requestTapCoordinates(
-        1,
-        2,
-        50,
-        50,
-        undefined,
-        undefined,
-        s,
-        d,
-      ),
+      new CtrlProxyGestures(h.context).requestTapCoordinates({
+        x: 1,
+        y: 2,
+        duration: 50,
+        timeoutMs: 50,
+        signal: s,
+        onDispatch: d,
+      }),
   },
   {
     name: "home",
@@ -343,9 +341,24 @@ describe("IOSCtrlProxyClient press option forwarding", () => {
         onDispatch,
         beforeSend,
       });
-      expect(await client.requestPinch(1, 2, 3, 4, 0, 300, 50, undefined, signal, onDispatch)).toBe(
-        result,
-      );
+      expect(
+        await client.requestPinch(
+          {
+            centerX: 1,
+            centerY: 2,
+            distanceStart: 3,
+            distanceEnd: 4,
+            rotationDegrees: 0,
+            duration: 300,
+            timeoutMs: 50,
+            perf: undefined,
+            signal: signal,
+            displayId: 2,
+            beforeSend,
+          },
+          onDispatch,
+        ),
+      ).toBe(result);
       expect(pinch).toHaveBeenCalledWith(
         {
           centerX: 1,

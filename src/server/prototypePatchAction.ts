@@ -1,3 +1,4 @@
+import { prototypeTimerWarnings } from "../features/prototype/prototypeTimers";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 import {
@@ -17,6 +18,14 @@ import type { PrototypeTransport } from "../features/prototype/PrototypeTranspor
 import type { PrototypeResult } from "../features/observe/android/ctrlProxyProtocol";
 import { MAX_PROTOTYPE_SPEC_BYTES, type PrototypeSpec } from "../features/prototype/prototypeSpec";
 import { validatePrototypeSpec } from "../features/prototype/prototypeValidation";
+import {
+  prototypeAccessibilityOutput,
+  type PrototypeAccessibilityFinding,
+} from "../features/prototype/prototypeAccessibilityLint";
+import {
+  prototypePlaceholderOutput,
+  type PrototypePlaceholderFinding,
+} from "../features/prototype/prototypePlaceholderLint";
 import type { ShownSpecJson } from "../features/prototype/PrototypeShownSpecs";
 
 export interface PrototypePatchQueue {
@@ -67,6 +76,10 @@ export interface PrototypePatchOutput {
   revision?: number;
   conflict?: PrototypePatchConflict;
   warning?: string;
+  accessibilityFindings?: PrototypeAccessibilityFinding[];
+  accessibilityFindingsTotal?: number;
+  placeholderFindings?: PrototypePlaceholderFinding[];
+  placeholderFindingsTotal?: number;
 }
 const failure = (error: string): PrototypePatchOutput => ({ success: false, error });
 
@@ -179,7 +192,16 @@ async function finishPatch(
     deps.store.recordPatchedData(deviceId, args.id, applied.validated.data);
   }
   deps.retire(result);
-  return successfulPatchOutput(fields.revision, committed, args.id);
+  const output = successfulPatchOutput(fields.revision, committed, args.id);
+  const warning = [output.warning, ...prototypeTimerWarnings(applied.spec)]
+    .filter(Boolean)
+    .join(" ");
+  return {
+    ...output,
+    ...(warning ? { warning } : {}),
+    ...prototypeAccessibilityOutput(applied.spec),
+    ...prototypePlaceholderOutput(applied.spec),
+  };
 }
 
 /** The patched spec, unless the patch is invalid or would overwrite device `/data` writes. */

@@ -18,15 +18,15 @@ import {
 } from "../../src/daemon/toolCallActivity";
 import { cancelAndReleaseSession } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 
 // #10051: after lease expiry a session is held as suspect for a short grace window
 // with its device reserved for the owner token, and the daemon never reaps on the
@@ -43,6 +43,7 @@ const SCAN_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
+  releaseDevice: async () => {},
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
 };
 

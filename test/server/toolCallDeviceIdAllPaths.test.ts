@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { toJSONSchema, z } from "zod/v4";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -164,7 +164,7 @@ async function daemon(options: DaemonOptions): Promise<Daemon> {
   DaemonState.getInstance().initialize(sessions, pool, new DeviceSessionRegistry(timer));
   const tools = new RealToolCallPath([...options.pooledRows, ...(options.iosRows ?? [])]).install();
   const readinessScan = (rows: BootedDevice[]) =>
-    tools.deviceSessionManager.setConnectedDevices([
+    tools.deviceReadiness.setConnectedDevices([
       ...pool.mapAndroidReadinessDiscovery(rows),
       ...(options.iosRows ?? []),
     ]);
@@ -471,7 +471,7 @@ describe("a failed adb listing never fails open (#11618)", () => {
     expect([sessionless, stranger, plain]).toEqual(Array(3).fill("discovery_incomplete"));
     expect(d.tools.runs).toEqual([]);
     expect(d.plainCalls).toEqual([]);
-    expect(d.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(d.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
     expect(d.sessions.getSession(HOLDER)!.lastUsedAt).toBe(before.lastUsedAt);
     expect(d.sessions.getSession(HOLDER)!.expiresAt).toBe(before.expiresAt);
     expect(d.sessions.getSessionForDevice(USB)).toBe(HOLDER);
@@ -498,7 +498,7 @@ describe("a failed adb listing never fails open (#11618)", () => {
     expect(read).toContain(`Device ${UNSEEN} not found on android platform.`);
     expect(read).not.toBe("discovery_incomplete");
     expect(d.tools.runs.map((run) => run.name)).toEqual(["controlProbe"]);
-    expect(d.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(d.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
     // The read's ingress, resolver and held-alias gate share the failed placement listing.
     expect(d.listings()).toBe(1);
   });
@@ -529,7 +529,7 @@ describe("a failed adb listing never fails open (#11618)", () => {
     expect(d.tools.runs).toEqual([]);
     expect(d.pool.getAndroidTransportAliases(USB)).toEqual([UNSEEN]);
     expect(d.listings()).toBe(2);
-    expect(d.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(d.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("a control call after a failed read listing still asks adb and refuses", async () => {
@@ -543,7 +543,7 @@ describe("a failed adb listing never fails open (#11618)", () => {
     expect(await d.call("controlProbe", args)).toBe("discovery_incomplete");
     expect(d.listings()).toBe(2);
     expect(d.tools.runs).toEqual([]);
-    expect(d.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(d.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("a read with no possible held alias still proceeds to readiness after a failed listing", async () => {
@@ -553,7 +553,7 @@ describe("a failed adb listing never fails open (#11618)", () => {
 
     expect(await d.call("readProbe", { platform: "android", deviceId: UNSEEN })).toBe("ran");
     expect(d.tools.runs.map((run) => run.deviceId)).toEqual([UNSEEN]);
-    expect(d.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+    expect(d.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(1);
   });
 
   test("the refusal is not remembered: the first call after adb recovers is judged as the phone", async () => {
@@ -602,7 +602,7 @@ describe("a control call naming a transport address the pool has never seen (#11
 
     expect(outcome).not.toBe("discovery_incomplete");
     expect(outcome).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    expect(d.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(d.tools.deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
     expect(d.pool.getAndroidTransportAliases(USB)).toEqual([]);
   });
 

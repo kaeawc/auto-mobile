@@ -240,8 +240,11 @@ class McpStdioClientRestartTest {
   private fun client(): McpStdioClient =
     McpStdioClient(
         command = COMMAND,
-        processStarter = { server.start(clock) },
-        nowNanos = clock::nowNanos,
+        options =
+          McpStdioOptions(
+            processStarter = { server.start(clock) },
+            nowNanos = clock::nowNanos,
+          ),
       )
       .also { clients += it }
 

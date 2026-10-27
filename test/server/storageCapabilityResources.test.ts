@@ -17,6 +17,7 @@ import type { StorageCapabilityDependencies } from "../../src/server/storageCapa
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { AndroidUserTargetUnavailableError } from "../../src/utils/android-cmdline-tools/AndroidUserTargetResolver";
+import { readTemplateMatch } from "../helpers/resourceTemplate";
 
 // Like storageResources, the handler builds a URI, resolves a booted device, and
 // returns a JSON envelope. With no booted device it returns "device not found"
@@ -60,7 +61,7 @@ describe("storageCapabilityResources", () => {
     if (!match) {
       throw new Error(`no template matched: ${uri}`);
     }
-    return match.template.handler(match.params);
+    return readTemplateMatch(match);
   }
 
   const androidPhysical: BootedDevice = { ...androidEmulator, deviceId: "1A2B3C4D" };

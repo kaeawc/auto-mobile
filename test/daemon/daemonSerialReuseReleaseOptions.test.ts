@@ -40,10 +40,10 @@ async function fixture() {
   sessions.stopCleanupTimer();
   const pool = daemon.getDevicePool();
   const manager = new FakeDeviceManager([], [original]);
-  Object.assign(pool, { deviceManager: manager });
+  pool.testHooks.deviceManager = manager;
   const restores: string[] = [];
   Object.assign(sessions, { getBarrier: () => new FakeDbWriteBarrier() });
-  Object.assign(sessions["stateRestore"], {
+  Object.assign(sessions.testHooks.wiring.host.stateRestore, {
     keepScreenAwakeRestorer: (device: BootedDevice) => ({
       restore: async () => {
         restores.push(device.deviceId);
@@ -94,7 +94,7 @@ for (const fenced of [true, false]) {
   test(`daemon ordinary device-loss wiring retains restores with fence=${fenced}`, async () => {
     const h = await fixture();
     try {
-      await h.pool["releaseSessionForDisconnectedDevice"](
+      await h.pool.testHooks.releaseSessionForDisconnectedDevice.call(
         "holder",
         original.deviceId,
         "device-disconnected:emulator-5554",

@@ -37,6 +37,7 @@ import {
   type AndroidAppCatalogEntry,
 } from "./androidAppCatalog";
 import { CtrlProxyInstalledPackageSource } from "./CtrlProxyInstalledPackageSource";
+import { findDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 
 /** Label + launchability per Android user id; launchability is a per-user fact. */
 type AndroidAppCatalogByUser = Map<number, AndroidAppCatalog>;
@@ -139,7 +140,7 @@ interface ListInstalledAppsOptions {
 
 export class ListInstalledApps {
   private adb: AdbExecutor;
-  private simctl: SimCtlClient;
+  private simctl: Pick<SimCtlClient, "listAppsOrThrow">;
   private device: BootedDevice;
   private installedAppsRepository: InstalledAppsStore;
   private cacheEnabled: boolean;
@@ -157,7 +158,7 @@ export class ListInstalledApps {
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    simctl: SimCtlClient | null = null,
+    simctl: Pick<SimCtlClient, "listAppsOrThrow"> | null = null,
     options: ListInstalledAppsOptions = {},
   ) {
     this.adb = adbFactory.create(device);
@@ -552,8 +553,6 @@ export class ListInstalledApps {
       timestampMs: this.timer.now(),
       foregroundApp: null,
     };
-    let hadUserErrors = false;
-
     // Get all users on the device
     logger.info("[ListInstalledApps] Getting list of users...");
     const users = await this.adb.listUsers(signal);
@@ -563,14 +562,55 @@ export class ListInstalledApps {
     );
     if (users.length === 0) {
       logger.warn("[ListInstalledApps] No users reported; skipping cache update");
-      return { apps: installedApps, successful: false };
+      return {
+        apps: installedApps,
+        successful: false,
+        error: new ActionableError(
+          `No users reported for ${this.device.deviceId}; retry the installed-app listing.`,
+        ),
+      };
     }
 
     // Get the current foreground app
     accumulator.foregroundApp = await this.adb.getForegroundApp(signal);
     signal?.throwIfAborted();
 
+    const { hadUserErrors, error } = await this.collectPackagesForUsers(
+      accumulator,
+      users,
+      signal,
+      options,
+    );
+
+    installedApps.system = Array.from(systemAppsMap.values());
+    const profileAppCount = Object.values(installedApps.profiles).reduce(
+      (count, apps) => count + apps.length,
+      0,
+    );
+
+    logger.info(
+      `Found ${profileAppCount} user app(s) across ${users.length} user(s); ${installedApps.system.length} system app(s) deduped`,
+    );
+
+    if (this.cacheEnabled) {
+      await this.persistRebuiltCache(cacheGeneration, cacheEntries, hadUserErrors);
+    }
+
+    return hadUserErrors
+      ? { apps: installedApps, successful: false, error }
+      : { apps: installedApps, successful: true };
+  }
+
+  /** Collect partial inventory while preserving the first, preferably transport, failure. */
+  private async collectPackagesForUsers(
+    accumulator: InventoryAccumulator,
+    users: AndroidUser[],
+    signal: AbortSignal | undefined,
+    options: DetailedListingOptions,
+  ): Promise<{ hadUserErrors: boolean; error?: unknown }> {
     const proxyRequest = await this.fetchCtrlProxyPackages(signal);
+    let hadUserErrors = false;
+    let firstUserError: unknown;
 
     // List packages for each user
     for (const user of users) {
@@ -594,27 +634,19 @@ export class ListInstalledApps {
         this.collectSystemPackages(accumulator, user, systemPackages, catalog);
       } catch (error) {
         signal?.throwIfAborted();
+        if (
+          !hadUserErrors ||
+          (!findDeviceTransportUnavailable(firstUserError) && findDeviceTransportUnavailable(error))
+        ) {
+          firstUserError = error;
+        }
         hadUserErrors = true;
         logger.warn(`Failed to list packages for user ${user.userId}:`, error);
         // Continue with other users
       }
     }
 
-    installedApps.system = Array.from(systemAppsMap.values());
-    const profileAppCount = Object.values(installedApps.profiles).reduce(
-      (count, apps) => count + apps.length,
-      0,
-    );
-
-    logger.info(
-      `Found ${profileAppCount} user app(s) across ${users.length} user(s); ${installedApps.system.length} system app(s) deduped`,
-    );
-
-    if (this.cacheEnabled) {
-      await this.persistRebuiltCache(cacheGeneration, cacheEntries, hadUserErrors);
-    }
-
-    return { apps: installedApps, successful: !hadUserErrors };
+    return { hadUserErrors, error: firstUserError };
   }
 
   /**

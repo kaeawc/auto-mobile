@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.PixelFormat
 import android.os.Build
@@ -10,17 +9,16 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 
+// WindowManager.LayoutParams constants are inlined on every API level; preserve their values.
+private const val CUTOUT_MODE_SHORT_EDGES = 1 // LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES, API 28.
+private const val CUTOUT_MODE_ALWAYS = 3 // LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS, API 30.
+private const val APPLICATION_OVERLAY_TYPE = 2038 // TYPE_APPLICATION_OVERLAY, API 26.
+
 class OverlayManager(
   private val context: Context,
   private val windowManager: WindowManager =
     context.getSystemService(Context.WINDOW_SERVICE) as WindowManager,
-  private val canDrawOverlays: (Context) -> Boolean = {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-      Settings.canDrawOverlays(it)
-    } else {
-      true
-    }
-  },
+  private val canDrawOverlays: (Context) -> Boolean = { Settings.canDrawOverlays(it) },
   private val viewFactory: (Context) -> View = { HighlightOverlayView(it) },
   private val sdkInt: Int = Build.VERSION.SDK_INT,
 ) {
@@ -31,9 +29,8 @@ class OverlayManager(
     internal fun resolveCutoutMode(sdkInt: Int): Int? =
       when {
         sdkInt < Build.VERSION_CODES.P -> null
-        sdkInt < Build.VERSION_CODES.R ->
-          WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-        else -> WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        sdkInt < Build.VERSION_CODES.R -> CUTOUT_MODE_SHORT_EDGES
+        else -> CUTOUT_MODE_ALWAYS
       }
   }
 
@@ -52,7 +49,20 @@ class OverlayManager(
       try {
         windowManager.addView(view, layoutParams)
         overlayAdded = true
-      } catch (e: Exception) {
+      } catch (e: IllegalArgumentException) {
+        Log.e(TAG, "Failed to add overlay view", e)
+        return false
+      } catch (e: IllegalStateException) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        Log.e(TAG, "Failed to add overlay view", e)
+        return false
+      } catch (e: SecurityException) {
+        Log.e(TAG, "Failed to add overlay view", e)
+        return false
+      } catch (e: WindowManager.BadTokenException) {
+        Log.e(TAG, "Failed to add overlay view", e)
+        return false
+      } catch (e: WindowManager.InvalidDisplayException) {
         Log.e(TAG, "Failed to add overlay view", e)
         return false
       }
@@ -75,7 +85,7 @@ class OverlayManager(
     if (view != null && overlayAdded) {
       try {
         windowManager.removeViewImmediate(view)
-      } catch (error: Exception) {
+      } catch (error: IllegalArgumentException) {
         Log.e(TAG, "Failed to restack highlight overlay", error)
         return false
       }
@@ -101,7 +111,7 @@ class OverlayManager(
     if (overlayAdded) {
       try {
         windowManager.removeViewImmediate(view)
-      } catch (e: Exception) {
+      } catch (e: IllegalArgumentException) {
         Log.e(TAG, "Failed to remove overlay view", e)
       }
     }
@@ -118,8 +128,6 @@ class OverlayManager(
 
   internal fun isOverlayVisibleForTest(): Boolean = overlayVisible
 
-  // Injected sdkInt defaults to the runtime API; resolveCutoutMode guards the API 28+ field.
-  @SuppressLint("NewApi")
   private fun createLayoutParams(): WindowManager.LayoutParams {
     val overlayType = resolveOverlayType()
     return WindowManager.LayoutParams(
@@ -137,7 +145,9 @@ class OverlayManager(
         x = 0
         y = 0
         title = "AutoMobile Overlay"
-        resolveCutoutMode(sdkInt)?.let { mode -> layoutInDisplayCutoutMode = mode }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+          resolveCutoutMode(sdkInt)?.let { mode -> layoutInDisplayCutoutMode = mode }
+        }
         // No setFitInsetsTypes(0): overlay layout flags normally ignore system-bar insets.
       }
   }
@@ -146,7 +156,7 @@ class OverlayManager(
     return if (prototypeAttached) {
       WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
     } else if (canDrawOverlays(context)) {
-      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+      APPLICATION_OVERLAY_TYPE
     } else {
       Log.w(TAG, "SYSTEM_ALERT_WINDOW not granted; using accessibility overlay.")
       WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY

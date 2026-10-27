@@ -77,12 +77,7 @@ test("runDoctor and the CLI doctor tool pass injected iOS dependencies to the ch
   const checks = spyOn(iosChecks, "runIosChecks").mockResolvedValue([]);
   const system = spyOn(systemChecks, "runSystemChecks").mockReturnValue([]);
   const autoMobile = spyOn(autoMobileChecks, "runAutoMobileChecks").mockResolvedValue([]);
-  let handler: Parameters<typeof ToolRegistry.register>[3] | undefined;
-  const registration = spyOn(ToolRegistry, "register").mockImplementation(
-    (_name, _description, _schema, registeredHandler) => {
-      handler = registeredHandler;
-    },
-  );
+  const registration = spyOn(ToolRegistry, "register").mockImplementation(() => {});
   try {
     await runDoctor({ ios: true }, { iosDependencies: ios });
     expect(checks.mock.calls[0]?.[1]).toBe(ios);
@@ -95,6 +90,7 @@ test("runDoctor and the CLI doctor tool pass injected iOS dependencies to the ch
       expect.any(Function),
       expect.objectContaining({ defaultEnabled: true, readOnly: true }),
     );
+    const handler = registration.mock.calls[0]?.[3];
     expect(handler).toBeDefined();
     await handler!({ ios: true });
     expect(checks.mock.calls[1]?.[1]).toBe(ios);

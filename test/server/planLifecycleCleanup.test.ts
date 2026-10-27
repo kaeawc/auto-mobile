@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { bindDevice } from "../../src/daemon/deviceBinding";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -30,6 +31,9 @@ import { FakeLogger } from "../fakes/FakeLogger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
+import { ControlDiscoveryCache } from "../../src/daemon/socketServer/controlRoutes";
+import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
+import type { McpForwardContext } from "../../src/daemon/socketServerParts/socketServerContracts";
 
 const devices: BootedDevice[] = [
   { name: "Pixel A", deviceId: "device-A", platform: "android" },
@@ -165,7 +169,7 @@ describe("executePlan cleans every acquired device before release", () => {
 
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each([...table])(
         name,
         async (row: T) => {
           await arrangeHarness();
@@ -229,7 +233,7 @@ describe("executePlan cleans every acquired device before release", () => {
     "nested executePlan retains the outer session and assigned device without cleanup",
     async () => {
       await acquire([devices[0]], false);
-      pool.getDevice("device-A")!.sessionId = "base";
+      bindDevice(pool.getDevice("device-A")!, "base");
       const session = sessionManager.getSession("base");
 
       await lifecycle.afterExecution(input({ nestedInPlan: true }));
@@ -252,6 +256,45 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
+  arranged(
+    "deleting released session overrides refreshes a warm sessionUuid-routed tool list",
+    async () => {
+      await acquire([devices[0]], false);
+      const disabled = new Set(["base"]);
+      const cache = new ControlDiscoveryCache(async () => {}, timer);
+      const context: McpForwardContext = {
+        request: { id: "list", type: "mcp_request", method: "tools/list", params: {} },
+        route: { clientKey: "base", executionKey: "base", sessionUuid: "base" },
+        socketSessionId: "socket",
+        totalTimeoutMs: 1000,
+        deadline: new ProgressExtendableDeadline(timer.now(), 1000),
+      };
+      let loads = 0;
+      const list = () =>
+        cache.read(context, async () => {
+          loads++;
+          return { tools: disabled.has("base") ? [] : [{ name: "restoredTool" }] };
+        });
+      expect(await list()).toEqual({ tools: [] });
+      expect(await list()).toEqual({ tools: [] });
+      expect(loads).toBe(1);
+      await lifecycle.afterExecution(
+        input({
+          args: {},
+          sessionToolSelectionService: {
+            deleteSession: async (sessionUuid) => {
+              disabled.delete(sessionUuid);
+            },
+          },
+        }),
+      );
+      expect(disabled.size).toBe(0);
+      expect(await list()).toEqual({ tools: [{ name: "restoredTool" }] });
+      expect(await list()).toEqual({ tools: [{ name: "restoredTool" }] });
+      expect(loads).toBe(2);
+    },
+  );
+
   describe("holdSessionOnFailure (#10834)", () => {
     const failedResult: ExecutePlanResult = { success: false, executedSteps: 1, totalSteps: 2 };
     const hold = (overrides: Partial<PlanLifecycleInput> = {}): PlanLifecycleInput =>
@@ -259,7 +302,7 @@ describe("executePlan cleans every acquired device before release", () => {
 
     arranged("a failed plan with recovery pending keeps its session and device", async () => {
       await acquire([devices[0]], false);
-      pool.getDevice("device-A")!.sessionId = "base";
+      bindDevice(pool.getDevice("device-A")!, "base");
       const session = sessionManager.getSession("base");
 
       await lifecycle.afterExecution(hold({ succeeded: false }));
@@ -322,7 +365,7 @@ describe("executePlan cleans every acquired device before release", () => {
       async () => {
         await acquire([devices[0]]);
         expect(sessionManager.getDeviceLabels("base")).toEqual({ A: "base" });
-        pool.getDevice("device-A")!.sessionId = "base";
+        bindDevice(pool.getDevice("device-A")!, "base");
         const session = sessionManager.getSession("base");
 
         await lifecycle.afterExecution(hold({ succeeded: false }));
@@ -393,7 +436,7 @@ describe("executePlan cleans every acquired device before release", () => {
         await acquire([devices[0]], false);
         await lifecycle.afterExecution(holdWithCleanup());
 
-        await sessionManager.releaseSession("base", "client-release");
+        await sessionManager.releaseSession("base", "explicit-release");
         await flush();
 
         expect(cleanup.calls).toEqual([
@@ -411,7 +454,7 @@ describe("executePlan cleans every acquired device before release", () => {
         async () => {
           await acquire([devices[0]], false);
           await lifecycle.afterExecution(holdWithCleanup());
-          await sessionManager.releaseSession("base", "client-release", {
+          await sessionManager.releaseSession("base", "explicit-release", {
             deviceIdentityReplaced: true,
           });
           await flush();
@@ -427,7 +470,7 @@ describe("executePlan cleans every acquired device before release", () => {
           await sessionManager.rebindSession("base", "device-B", "android");
           await sessionManager.createSession("other", "device-A", "android");
 
-          await sessionManager.releaseSession("base", "client-release");
+          await sessionManager.releaseSession("base", "explicit-release");
           await flush();
 
           expect(cleanup.calls).toEqual([]);
@@ -881,7 +924,7 @@ describe("executePlan cleans every acquired device before release", () => {
           new ClearAppData(device, undefined, {
             simctl,
             isSimulatorFn: () => true,
-            cacheInvalidator: { invalidate: () => {} },
+            cacheInvalidator: { invalidate: () => {}, retireAppProcess: () => {} },
           }),
         logger: log,
       });

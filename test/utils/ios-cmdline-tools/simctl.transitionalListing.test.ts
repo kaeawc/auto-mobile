@@ -12,7 +12,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 // fleet tests do) the test flips `state` on captured entries.
 
 interface CapturedList {
-  devices: Record<string, Array<Record<string, unknown>>>;
+  devices: Record<string, Array<{ udid: string; isAvailable: boolean; state: string }>>;
 }
 
 function listingWithStates(states: string[]): { payload: string; udids: string[] } {
@@ -22,7 +22,10 @@ function listingWithStates(states: string[]): { payload: string; udids: string[]
   const entries = Object.values(captured.devices)
     .flat()
     .filter((device) => device.isAvailable !== false);
-  const flipped = states.map((state, index) => ({ ...entries[index], state }));
+  const flipped = states.map((state, index): Record<string, unknown> => ({
+    ...entries[index],
+    state,
+  }));
   return {
     payload: JSON.stringify({
       ...captured,
@@ -37,7 +40,7 @@ function simctlFor(payload: string): Simctl {
     file === "xcrun" && args.join(" ") === "simctl list devices --json"
       ? createExecResult(payload, "")
       : createExecResult("", "");
-  return new Simctl(null, exec, new FakeTimer());
+  return new Simctl(null, exec, { timer: new FakeTimer() });
 }
 
 describe("SimCtlClient.getSimulatorListingChecked", () => {
@@ -76,7 +79,7 @@ describe("SimCtlClient.getSimulatorListingChecked", () => {
           'xcrun: error: unable to find utility "simctl", not a developer tool or in PATH',
         );
       },
-      new FakeTimer(),
+      { timer: new FakeTimer() },
     );
     await expect(client.listSimulatorImages()).rejects.toBeInstanceOf(SimctlUnavailableError);
     await expect(client.listSimulatorImages()).rejects.toThrow(
@@ -90,7 +93,7 @@ describe("SimCtlClient.getSimulatorListingChecked", () => {
       async () => {
         throw new Error("listing timeout");
       },
-      new FakeTimer(),
+      { timer: new FakeTimer() },
     );
     await expect(client.listSimulatorImages()).rejects.not.toBeInstanceOf(SimctlUnavailableError);
     await expect(client.listSimulatorImages()).rejects.toThrow(

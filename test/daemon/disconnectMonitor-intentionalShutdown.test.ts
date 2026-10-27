@@ -1,28 +1,18 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
-import { expect, spyOn, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/missingDeviceLiveness";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
-import { ExecutionTracker, executionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker, executionTracker } from "../../src/daemon/executionTracker";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-
-interface DisconnectMonitorSurface {
-  deviceDisconnectMonitor: SingleFlightInterval;
-  deviceDisconnectMisses: Map<string, number>;
-  confirmedDisconnectedDeviceIds: Set<string>;
-  startDeviceDisconnectMonitor(
-    manager: MissingDeviceManager,
-    listRecordings: () => Promise<[]>,
-  ): void;
-}
 
 class MissingDeviceManager extends FakeDeviceManager {
   async getAndroidOfflineDeviceIds() {
@@ -40,7 +30,7 @@ async function withMonitor(
   try {
     await action(h);
   } finally {
-    await h.daemon.deviceDisconnectMonitor.stop();
+    await h.daemon.testHooks.runtime.deviceDisconnectMonitor!.stop();
     h.tracker.endExecution(h.execution.id);
     h.tracker.endExecution(h.killExecution.id);
     h.tracker.endExecution(h.deviceExecution.id);
@@ -100,20 +90,9 @@ async function monitorHarness(platform: "android" | "ios", initiatingSessionId: 
   // Like the existing monitor harnesses, use the real daemon tick without
   // constructing its unrelated socket/database/process services. Keep pool,
   // shutdown reservation, incident recording, and session release real.
-  const daemon = Object.assign(Object.create(Daemon.prototype), {
-    timer,
-    devicePool: pool,
-    sessionManager: sessions,
-    deviceDisconnectMonitor: null,
-    deviceDisconnectMisses: new Map<string, number>(),
-    deviceDisconnectMissIncarnations: new Map(),
-    confirmedDisconnectedDeviceIds: new Set<string>(),
-    forceDisconnectedDeviceIds: new Set(),
-    forceDisconnectedDeviceGenerations: new Map(),
-    offlineRecoveryAttemptedDeviceIds: new Set(),
-    offlineRecoveryAttemptedIncarnations: new Map(),
-    deferredSessionRecoverySweeps: new Set(),
-  }) as DisconnectMonitorSurface;
+  const daemon = new Daemon({}, { timer });
+  daemon.testHooks.replaceDevicePool(pool);
+  daemon.testHooks.replaceSessionManager(sessions);
   const deviceExecution = tracker.startExecution("observe");
   tracker.bindDeviceExecution(deviceExecution.id, device.id);
   const execution = tracker.startExecution(
@@ -129,14 +108,14 @@ async function monitorHarness(platform: "android" | "ios", initiatingSessionId: 
     (sessionId, reason) => tracker.cancelSessionUuidExecutions(sessionId, reason),
   );
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  daemon.startDeviceDisconnectMonitor(manager, async () => []);
+  daemon.testHooks.startDeviceDisconnectMonitor(manager, async () => []);
   const tick = async () => {
     // The kill's owner remains connected while its device disappears.
     if (sessions.getSession("kill-session")) {
       await deliverDaemonHeartbeat(sessions, "kill-session");
     }
     timer.advanceTime(5000);
-    await daemon.deviceDisconnectMonitor.run();
+    await daemon.testHooks.runtime.deviceDisconnectMonitor!.run();
   };
   const reachThreshold = async () => {
     for (let miss = 0; miss < MISSING_DEVICE_MISS_THRESHOLD; miss++) {
@@ -172,8 +151,8 @@ async function expectDeferred(h: Awaited<ReturnType<typeof monitorHarness>>) {
   expect(await h.incidents.list()).toEqual([]);
   expect(h.sessions.getSession("kill-session")).not.toBeNull();
   expect(h.pool.getDevice(h.device.id)).toBe(h.device);
-  expect(h.daemon.confirmedDisconnectedDeviceIds.has(h.device.id)).toBe(false);
-  expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(MISSING_DEVICE_MISS_THRESHOLD);
+  expect(h.daemon.testHooks.deviceLoss.confirmedDisconnectedIds.has(h.device.id)).toBe(false);
+  expect(h.daemon.testHooks.deviceLoss.misses.get(h.device.id)).toBe(MISSING_DEVICE_MISS_THRESHOLD);
   expect(
     h.warn.mock.calls.filter(([message]) =>
       message.includes("Retaining intentionally stopped device"),
@@ -186,8 +165,8 @@ async function expectCleanedUp(h: Awaited<ReturnType<typeof monitorHarness>>) {
   expect(h.cancel).toHaveBeenCalledTimes(1);
   expect(h.sessions.getSession("kill-session")).toBeNull();
   expect(h.pool.getDevice(h.device.id)).toBeNull();
-  expect(h.daemon.confirmedDisconnectedDeviceIds.has(h.device.id)).toBe(true);
-  expect(h.daemon.deviceDisconnectMisses.has(h.device.id)).toBe(false);
+  expect(h.daemon.testHooks.deviceLoss.confirmedDisconnectedIds.has(h.device.id)).toBe(true);
+  expect(h.daemon.testHooks.deviceLoss.misses.has(h.device.id)).toBe(false);
   const incidents = await h.incidents.list();
   if (h.device.platform === "android") {
     expect(incidents).toHaveLength(1);
@@ -558,4 +537,8 @@ test("kill replacement cancels the retired serial's work and stale retirement pr
       reservation?.releaseRecoveryRouteLease();
     }
   });
+});
+
+afterEach(() => {
+  DaemonState.getInstance().reset();
 });

@@ -4,7 +4,7 @@ import {
 } from "../../utils/deviceExecutionBinding";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { SessionToolSelectionService } from "./SessionToolSelectionService";
-import type { ProgressCallback } from "../../server/toolRegistry";
+import type { ProgressCallback } from "../action/BaseVisualChange";
 
 export type ToolSelectionContext = {
   /** A device-aware wrapper already owns this execution's session resolution (#11680). */
@@ -30,6 +30,8 @@ export type ToolSelectionContext = {
    * for a call with no originating connection.
    */
   callerMcpSessionId?: string;
+  /** The connection key the call's per-connection device pin is stored under (#14385). */
+  deviceConnectionKey?: string;
   /** Connection-bound ownership proof for read-only cross-device checks. */
   ownsDeviceSession?: (sessionUuid: string) => boolean;
   execution?: {
@@ -76,6 +78,14 @@ function resolveCallerMcpSessionId(
   return context.callerMcpSessionId ?? parent?.callerMcpSessionId;
 }
 
+/** A nested call without its own device-pin key keeps the enclosing call's (#14385). */
+function resolveDeviceConnectionKey(
+  context: ToolSelectionContext,
+  parent: ToolSelectionContext | undefined,
+): string | undefined {
+  return context.deviceConnectionKey ?? parent?.deviceConnectionKey;
+}
+
 export const runWithToolSelectionContext = async <T>(
   context: ToolSelectionContext,
   fn: () => Promise<T>,
@@ -88,6 +98,7 @@ export const runWithToolSelectionContext = async <T>(
       planRequest: context.planRequest ?? parent?.planRequest,
       routingSessionUuid: context.routingSessionUuid ?? parent?.routingSessionUuid,
       callerMcpSessionId: resolveCallerMcpSessionId(context, parent),
+      deviceConnectionKey: resolveDeviceConnectionKey(context, parent),
       execution: context.execution ?? parent?.execution,
       toolSelectionProfileUuid:
         context.toolSelectionProfileUuid ?? parent?.toolSelectionProfileUuid,

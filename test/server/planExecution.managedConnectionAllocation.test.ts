@@ -1,17 +1,19 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { readToolResponse, toolJson, toolStructured } from "../helpers/toolResponse";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { registerPlanTools } from "../../src/server/planTools";
-import * as videoRecordingManager from "../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { DEVICE_OUTSIDE_BROKER_GRANT_CODE } from "../../src/daemon/sessionBroker/connectionRefusal";
 import type { BindingKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import type { BootedDevice } from "../../src/models";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -68,7 +70,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
         fake.stopVideoRecording,
       ),
       spyOn(videoRecordingManager, "rollbackVideoRecordingStart").mockResolvedValue(undefined),
-      spyOn(videoRecordingManager, "getVideoRecordingStatus").mockResolvedValue(null),
+      spyOn(videoRecordingManager, "getVideoRecordingStatus").mockResolvedValue(undefined),
       spyOn(videoRecordingManager, "getVideoRecordingMetadata").mockResolvedValue(null),
     ];
     return () => spies.forEach((spy) => spy.mockRestore());
@@ -89,10 +91,10 @@ describe("managed connection executePlan device labels (#11397)", () => {
         },
       },
     });
-    const devices = new FakeDeviceSessionManager();
+    const devices = new FakeDeviceReadiness();
     devices.setConnectedDevices([slotA, free]);
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: devices });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { async recordToolCall(): Promise<void> {} },
     });
@@ -149,17 +151,19 @@ describe("managed connection executePlan device labels (#11397)", () => {
     planContent: string,
     args: Record<string, unknown> = {},
   ): Promise<Record<string, unknown>> => {
-    const response = await ToolRegistry.getTool("executePlan")!.handler({
-      planContent,
-      startStep: 0,
-      platform: "ios",
-      sessionUuid: execA,
-      deviceAllocationTimeoutMs: 1_000,
-      abortStrategy: "immediate",
-      __mcpSessionId: mcpA,
-      ...args,
-    });
-    return response.structuredContent ?? JSON.parse(response.content[0].text);
+    const response = readToolResponse(
+      await ToolRegistry.getTool("executePlan")!.handler({
+        planContent,
+        startStep: 0,
+        platform: "ios",
+        sessionUuid: execA,
+        deviceAllocationTimeoutMs: 1_000,
+        abortStrategy: "immediate",
+        __mcpSessionId: mcpA,
+        ...args,
+      }),
+    );
+    return response.structuredContent === undefined ? toolJson(response) : toolStructured(response);
   };
 
   // The first executePlan call pays the plan pipeline's one-time module and schema cost, which put
@@ -173,61 +177,99 @@ describe("managed connection executePlan device labels (#11397)", () => {
     }
   });
 
-  beforeEach(setUp);
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await setUp();
+        await fn();
+      },
+      timeout,
+    );
+  }
+
+  type CriterionRow = [criterion: string, line: string];
+
+  function arrangedEachRow(table: CriterionRow[]) {
+    return (
+      name: string,
+      fn: (...row: CriterionRow) => void | Promise<void>,
+      timeout?: number,
+    ): void => {
+      test.each(table)(
+        name,
+        async (...row: CriterionRow) => {
+          await setUp();
+          await fn(...row);
+        },
+        timeout,
+      );
+    };
+  }
   afterEach(tearDown);
 
-  test("a label beyond the binding sessions is refused before the generic allocator is asked", async () => {
-    const result = await runPlan(PLAN, { devices: ["A", "B"] });
+  arranged(
+    "a label beyond the binding sessions is refused before the generic allocator is asked",
+    async () => {
+      const result = await runPlan(PLAN, { devices: ["A", "B"] });
 
-    // The connection's only device is its slot device; label B needs a device from the generic pool.
-    expect(allocatorCalls).toEqual([]);
-    expect(result).toMatchObject({
-      success: false,
-      code: DEVICE_OUTSIDE_BROKER_GRANT_CODE,
-      retryable: false,
-      // #11421: the refusal's own evidence is on the wire, not only in the message.
-      action: "executePlan",
-      reason: "tool",
-      scopeKey: keyA.scopeKey,
-      deviceLabel: "B",
-      // The plan result's own fields are not replaced by the refusal payload.
-      platform: "ios",
-      deviceId: slotA.deviceId,
-    });
-    expect(typeof result.error).toBe("string");
-    expect(sessionManager.getDeviceLabels(execA)).toBeUndefined();
-    expect(sessionManager.getSession(`${execA}:B`)).toBeFalsy();
-  });
+      // The connection's only device is its slot device; label B needs a device from the generic pool.
+      expect(allocatorCalls).toEqual([]);
+      expect(result).toMatchObject({
+        success: false,
+        code: DEVICE_OUTSIDE_BROKER_GRANT_CODE,
+        retryable: false,
+        // #11421: the refusal's own evidence is on the wire, not only in the message.
+        action: "executePlan",
+        reason: "tool",
+        scopeKey: keyA.scopeKey,
+        deviceLabel: "B",
+        // The plan result's own fields are not replaced by the refusal payload.
+        platform: "ios",
+        deviceId: slotA.deviceId,
+      });
+      expect(typeof result.error).toBe("string");
+      expect(sessionManager.getDeviceLabels(execA)).toBeUndefined();
+      expect(sessionManager.getSession(`${execA}:B`)).toBeFalsy();
+    },
+  );
 
-  test("labels declared only in the plan are refused the same way, with or without the socket id", async () => {
-    const viaSocket = await runPlan(PLAN);
-    // An internal caller carries no socket session id: the slot session identifies the connection.
-    const viaSession = await runPlan(PLAN, { __mcpSessionId: undefined });
+  arranged(
+    "labels declared only in the plan are refused the same way, with or without the socket id",
+    async () => {
+      const viaSocket = await runPlan(PLAN);
+      // An internal caller carries no socket session id: the slot session identifies the connection.
+      const viaSession = await runPlan(PLAN, { __mcpSessionId: undefined });
 
-    expect(allocatorCalls).toEqual([]);
-    const refusal = { code: DEVICE_OUTSIDE_BROKER_GRANT_CODE, reason: "tool", deviceLabel: "B" };
-    expect(viaSocket).toMatchObject(refusal);
-    expect(viaSession).toMatchObject(refusal);
-  });
+      expect(allocatorCalls).toEqual([]);
+      const refusal = { code: DEVICE_OUTSIDE_BROKER_GRANT_CODE, reason: "tool", deviceLabel: "B" };
+      expect(viaSocket).toMatchObject(refusal);
+      expect(viaSession).toMatchObject(refusal);
+    },
+  );
 
-  test("a label whose declared platform the binding device cannot satisfy is refused", async () => {
-    const result = await runPlan(
-      [
-        "name: slots-platform",
-        "devices:",
-        "  - label: A",
-        "    platform: android",
-        "steps:",
-        "  - tool: observe",
-        "    device: A",
-        "    params: {}",
-        "",
-      ].join("\n"),
-    );
+  arranged(
+    "a label whose declared platform the binding device cannot satisfy is refused",
+    async () => {
+      const result = await runPlan(
+        [
+          "name: slots-platform",
+          "devices:",
+          "  - label: A",
+          "    platform: android",
+          "steps:",
+          "  - tool: observe",
+          "    device: A",
+          "    params: {}",
+          "",
+        ].join("\n"),
+      );
 
-    expect(allocatorCalls).toEqual([]);
-    expect(result).toMatchObject({ code: DEVICE_OUTSIDE_BROKER_GRANT_CODE, deviceLabel: "A" });
-  });
+      expect(allocatorCalls).toEqual([]);
+      expect(result).toMatchObject({ code: DEVICE_OUTSIDE_BROKER_GRANT_CODE, deviceLabel: "A" });
+    },
+  );
 
   // #11421: the slot serves a label with its own device or not at all.
   describe("a label's declared simulator criteria", () => {
@@ -245,20 +287,48 @@ describe("managed connection executePlan device labels (#11397)", () => {
         "",
       ].join("\n");
 
-    beforeEach(() => {
+    function arrangeNested(): void {
       ToolRegistry.registerDeviceAware(
         "slotProbe",
         "Binding probe",
         z.object({}).passthrough(),
         async () => ({ success: true }),
       );
-    });
+    }
+
+    function arrangedNestedEachRow(table: CriterionRow[]) {
+      return (
+        name: string,
+        fn: (...row: CriterionRow) => void | Promise<void>,
+        timeout?: number,
+      ): void => {
+        arrangedEachRow(table)(
+          name,
+          async (...row: CriterionRow) => {
+            await arrangeNested();
+            await fn(...row);
+          },
+          timeout,
+        );
+      };
+    }
+
+    function arrangedNested(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+      arranged(
+        name,
+        async () => {
+          await arrangeNested();
+          await fn();
+        },
+        timeout,
+      );
+    }
 
     const slotDeviceIs = (facts: { simulatorType?: string; iosVersion?: string }): void => {
       Object.assign(pool.getDevice(slotA.deviceId)!, facts);
     };
 
-    test.each([
+    arrangedNestedEachRow([
       ["simulatorType", 'simulatorType: "iPad Pro"'],
       ["iosVersion", 'iosVersion: "17.5"'],
     ])("a %s the binding device does not have is refused", async (_criterion, line) => {
@@ -274,7 +344,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
       });
     });
 
-    test("criteria the binding device meets are served by it", async () => {
+    arrangedNested("criteria the binding device meets are served by it", async () => {
       slotDeviceIs({ simulatorType: "iPhone 16", iosVersion: "18.0" });
 
       const result = await runPlan(labelPlan('simulatorType: "iPhone 16"', 'iosVersion: "18.0"'));
@@ -282,43 +352,49 @@ describe("managed connection executePlan device labels (#11397)", () => {
       expect(result).toMatchObject({ success: true, deviceMapping: { A: slotA.deviceId } });
     });
 
-    test("criteria the pool cannot evaluate for the binding device are not a refusal", async () => {
-      // The harness device carries neither a simulator type nor an iOS version.
-      const result = await runPlan(labelPlan('simulatorType: "iPad Pro"', 'iosVersion: "17.5"'));
+    arrangedNested(
+      "criteria the pool cannot evaluate for the binding device are not a refusal",
+      async () => {
+        // The harness device carries neither a simulator type nor an iOS version.
+        const result = await runPlan(labelPlan('simulatorType: "iPad Pro"', 'iosVersion: "17.5"'));
 
-      expect(result).toMatchObject({ success: true, deviceMapping: { A: slotA.deviceId } });
-    });
-  });
-
-  test("a single label is served by the binding device without the generic allocator", async () => {
-    const probed: string[] = [];
-    ToolRegistry.registerDeviceAware(
-      "slotProbe",
-      "Binding probe",
-      z.object({}).passthrough(),
-      async (device: BootedDevice) => {
-        probed.push(device.deviceId);
-        return { success: true };
+        expect(result).toMatchObject({ success: true, deviceMapping: { A: slotA.deviceId } });
       },
     );
-
-    const result = await runPlan(
-      [
-        "name: slots-single",
-        "devices:",
-        "  - A",
-        "steps:",
-        "  - tool: slotProbe",
-        "    device: A",
-        "    params: {}",
-        "",
-      ].join("\n"),
-    );
-
-    expect(allocatorCalls).toEqual([]);
-    expect(result).toMatchObject({ success: true, deviceMapping: { A: slotA.deviceId } });
-    expect(probed).toEqual([slotA.deviceId]);
   });
+
+  arranged(
+    "a single label is served by the binding device without the generic allocator",
+    async () => {
+      const probed: string[] = [];
+      ToolRegistry.registerDeviceAware(
+        "slotProbe",
+        "Binding probe",
+        z.object({}).passthrough(),
+        async (device: BootedDevice) => {
+          probed.push(device.deviceId);
+          return { success: true };
+        },
+      );
+
+      const result = await runPlan(
+        [
+          "name: slots-single",
+          "devices:",
+          "  - A",
+          "steps:",
+          "  - tool: slotProbe",
+          "    device: A",
+          "    params: {}",
+          "",
+        ].join("\n"),
+      );
+
+      expect(allocatorCalls).toEqual([]);
+      expect(result).toMatchObject({ success: true, deviceMapping: { A: slotA.deviceId } });
+      expect(probed).toEqual([slotA.deviceId]);
+    },
+  );
 
   // #11421: the slot session belongs to the connection for its lifetime. Plan auto-release frees
   // the sessions a plan run owns; a managed connection's slot session is not one of them.
@@ -340,7 +416,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
         __mcpSessionId: mcpSessionId,
       });
 
-    beforeEach(() => {
+    function arrangeNested2(): void {
       probed = [];
       ToolRegistry.registerDeviceAware(
         "slotProbe",
@@ -351,7 +427,18 @@ describe("managed connection executePlan device labels (#11397)", () => {
           return { success: true };
         },
       );
-    });
+    }
+
+    function arrangedNested2(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+      arranged(
+        name,
+        async () => {
+          await arrangeNested2();
+          await fn();
+        },
+        timeout,
+      );
+    }
 
     const expectSlotSessionLive = async (): Promise<void> => {
       expect(sessionManager.getSession(execA)?.assignedDevice).toBe(slotA.deviceId);
@@ -362,38 +449,44 @@ describe("managed connection executePlan device labels (#11397)", () => {
       expect(probed).toEqual([slotA.deviceId]);
     };
 
-    test("a successful plan leaves the binding session and its device with the connection", async () => {
-      const result = await runPlan(PROBE_PLAN);
+    arrangedNested2(
+      "a successful plan leaves the binding session and its device with the connection",
+      async () => {
+        const result = await runPlan(PROBE_PLAN);
 
-      expect(result).toMatchObject({ success: true, deviceId: slotA.deviceId });
-      await expectSlotSessionLive();
-    });
+        expect(result).toMatchObject({ success: true, deviceId: slotA.deviceId });
+        await expectSlotSessionLive();
+      },
+    );
 
-    test("a successful single-label plan leaves the binding session with the connection", async () => {
-      const result = await runPlan(
-        planOf(
-          "name: slots-label",
-          "devices:",
-          "  - A",
-          "steps:",
-          "  - tool: slotProbe",
-          "    device: A",
-          "    params: {}",
-        ),
-      );
+    arrangedNested2(
+      "a successful single-label plan leaves the binding session with the connection",
+      async () => {
+        const result = await runPlan(
+          planOf(
+            "name: slots-label",
+            "devices:",
+            "  - A",
+            "steps:",
+            "  - tool: slotProbe",
+            "    device: A",
+            "    params: {}",
+          ),
+        );
 
-      expect(result).toMatchObject({ success: true });
-      await expectSlotSessionLive();
-    });
+        expect(result).toMatchObject({ success: true });
+        await expectSlotSessionLive();
+      },
+    );
 
-    test("a refused plan leaves the binding session with the connection", async () => {
+    arrangedNested2("a refused plan leaves the binding session with the connection", async () => {
       const result = await runPlan(PLAN, { devices: ["A", "B"] });
 
       expect(result.code).toBe(DEVICE_OUTSIDE_BROKER_GRANT_CODE);
       await expectSlotSessionLive();
     });
 
-    test("a failed plan leaves the binding session with the connection", async () => {
+    arrangedNested2("a failed plan leaves the binding session with the connection", async () => {
       const result = await runPlan(
         planOf("name: slots-fail", "steps:", "  - tool: noSuchTool", "    params: {}"),
       );
@@ -402,25 +495,47 @@ describe("managed connection executePlan device labels (#11397)", () => {
       await expectSlotSessionLive();
     });
 
-    // docs/tools.md (`holdSessionOnFailure` "instead of auto-releasing them") and the
-    // `plan-auto-release` row of docs/using/device-ownership.md: a generic connection's plan
-    // frees its base session and device, whether or not the session existed before the plan.
-    test("a generic connection's session is still auto-released after its plan", async () => {
+    arrangedNested2("a generic connection keeps its caller-held session after a plan", async () => {
       await sessionManager.createSession(genericSession, free.deviceId, "ios");
       sessionManager.setDeviceReadiness(genericSession, "automationReady");
       await probe(genericSession);
-
       const result = await runPlan(PROBE_PLAN, {
         sessionUuid: genericSession,
         __mcpSessionId: "mcp-socket-generic",
       });
-
       expect(result).toMatchObject({ success: true, deviceId: free.deviceId });
-      expect(probed).toEqual([free.deviceId, free.deviceId]);
-      expect(sessionManager.getSession(genericSession)).toBeFalsy();
-      expect(sessionManager.getSessionForDevice(free.deviceId)).toBeNull();
-      // The managed connection next to it is untouched.
-      expect(sessionManager.getSession(execA)?.assignedDevice).toBe(slotA.deviceId);
+      expect(sessionManager.peekSession(genericSession)?.assignedDevice).toBe(free.deviceId);
+      expect(sessionManager.getSessionForDevice(free.deviceId)).toBe(genericSession);
+      await expectSlotSessionLive();
     });
+
+    // A generic connection's plan frees a base it acquired itself, unlike a binding session.
+    arrangedNested2(
+      "a generic connection's session is still auto-released after its plan",
+      async () => {
+        await sessionManager.createSession(genericSession, free.deviceId, "ios");
+        sessionManager.setDeviceReadiness(genericSession, "automationReady");
+        await probe(genericSession);
+        await releaseSessionAndDevice(
+          sessionManager,
+          pool,
+          free.deviceId,
+          genericSession,
+          "plan-auto-release",
+        );
+
+        const result = await runPlan(PROBE_PLAN, {
+          sessionUuid: genericSession,
+          __mcpSessionId: "mcp-socket-generic",
+        });
+
+        expect(result).toMatchObject({ success: true, deviceId: free.deviceId });
+        expect(probed).toEqual([free.deviceId, free.deviceId]);
+        expect(sessionManager.getSession(genericSession)).toBeFalsy();
+        expect(sessionManager.getSessionForDevice(free.deviceId)).toBeNull();
+        // The managed connection next to it is untouched.
+        expect(sessionManager.getSession(execA)?.assignedDevice).toBe(slotA.deviceId);
+      },
+    );
   });
 });

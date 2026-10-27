@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
-import type { NetworkMockRuleSync } from "../../../../src/server/networkMockRules";
+import type { NetworkMockRuleSync } from "../../../../src/utils/networkMockRules";
 import { PortManager } from "../../../../src/utils/PortManager";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeInstalledAppsRepository } from "../../../fakes/FakeInstalledAppsRepository";
@@ -40,7 +40,7 @@ async function harness(commands: string[]) {
   const timer = new FakeTimer();
   const socket = new FakeWebSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "mock-rules-test", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "mock-rules-test", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
       webSocketFactory: () => socket,
@@ -52,7 +52,7 @@ async function harness(commands: string[]) {
   await Promise.resolve();
   client.connectionTestHooks.socket = socket;
   spyOn(client, "ensureConnected").mockResolvedValue(true);
-  const receive = (frame: object) => client["handleWebSocketMessage"](JSON.stringify(frame));
+  const receive = (frame: object) => client.testHooks.handleWebSocketMessage(JSON.stringify(frame));
   await receive({ type: "connected", supportedCommands: commands });
   const sent: Record<string, unknown>[] = [];
   spyOn(socket, "send").mockImplementation((data) => {
@@ -99,7 +99,7 @@ describe("AndroidCtrlProxyClient.pushNetworkMockRules (#10101)", () => {
         rejected: [{ mockId: "mock-1", reason: "invalid regex: Illegal repetition" }],
       },
     });
-    expect(client["requestManager"].getPendingCount()).toBe(0);
+    expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
   });
 
   test("an empty rejection list means every rule was installed", async () => {

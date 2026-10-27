@@ -1,8 +1,0 @@
-src/ctrlProxy/CtrlProxyManager.ts -> src/daemon/deviceAcquisitionRefusals
-src/ctrlProxy/CtrlProxyManager.ts -> src/features/accessibility/AccessibilityDetector
-src/ctrlProxy/CtrlProxyManager.ts -> src/features/accessibility/interfaces/AccessibilityDetector
-src/ctrlProxy/CtrlProxyManager.ts -> src/features/observe/android/foreignCtrlProxyForwardEvidence
-src/ctrlProxy/CtrlProxyManager.ts -> src/features/prototype/savedPrototypeMirror
-src/ctrlProxy/CtrlProxyManager.ts -> src/features/prototype/savedPrototypeRestore
-src/ctrlProxy/RunnerReadinessService.ts -> src/features/observe/android
-src/ctrlProxy/RunnerReadinessService.ts -> src/features/observe/ios

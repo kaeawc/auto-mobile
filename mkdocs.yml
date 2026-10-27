@@ -112,7 +112,9 @@ not_in_nav: |
   /design-docs/plat/ios/xctestrunner/ci-integration.md
   /decisions/ios-user-files-provider.md
   /decisions/mcp-sdk-v2-split-packages.md
+  /decisions/prototype-embedded-request-routing.md
   /decisions/prototype-request-retrofit.md
+  /decisions/types-bun-test-typecheck.md
 
 nav:
   - "Overview": index.md
@@ -121,13 +123,16 @@ nav:
       - "Agent Examples": using/agent-examples.md
       - "UI tests": using/ui-tests.md
       - "Test prep tools": using/test-prep-tools.md
+      - "Manufacturer profiles": using/oem-personas.md
       - "Session execution logs": using/session-logs.md
-      - "Session Downloads fixtures": using/session-downloads.md
       - "Storage capabilities": using/storage-capabilities.md
+      - "Keystore test state": using/keystore-test-state.md
+      - "Keystore metadata": using/keystore-metadata.md
       - "SDK capabilities": using/sdk-capabilities.md
       - "Live device acceptance": using/live-device-acceptance.md
       - "Manual-test harness": using/manual-test-harness.md
       - "Agent benchmarks": using/agent-benchmarks.md
+      - "Embedding prototypes in an app": using/prototype-embedding.md
       - "Dynamic Tools": using/dynamic-tools.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
@@ -138,33 +143,54 @@ nav:
   - "How it Works":
       - "System design": design-docs/index.md
       - "Device-description audit": design-docs/device-description-audit.md
+      - "Live device acceptance": design-docs/live-device-acceptance.md
+      - "Manual-test harness": design-docs/manual-test-harness.md
       - "Device resources": design-docs/device-resources.md
       - "Host toolchain resource": design-docs/host-toolchain-resource.md
       - "Session broker experiment": design-docs/session-broker-experiment.md
+      - "Session broker device mutation journal": design-docs/session-broker-device-mutation-journal.md
+      - "Session broker device reuse": design-docs/session-broker-device-reuse.md
       - "Session device requirements": design-docs/session-requirements.md
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
       - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md
       - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md
       - "iOS Playground theme parity": design-docs/plat/ios/playground-theme-parity.md
       - "iOS Photos full access": design-docs/plat/ios/photos-full-access.md
+      - "iOS simulator load reduction": design-docs/plat/ios/simulator-load-reduction.md
+      - "iOS keep-booted reset": design-docs/ios-keep-booted-reset.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
+      - "Android emulator host cost": design-docs/android-emulator-host-cost.md
       - "Android prototype specification": design-docs/plat/android/prototype-ux.md
       - "Prototype performance measurement": design-docs/plat/android/prototype-performance-measurement.md
       - "Prototype Compose compiler report": design-docs/plat/android/prototype-compose-compiler-report.md
       - "iOS simulator prototype agent": design-docs/plat/ios/prototype-agent.md
+      - "ProtoViewer": design-docs/protoviewer.md
+      - "ProtoViewer localization": design-docs/protoviewer-localization.md
+      - "ProtoViewer agent": design-docs/protoviewer-agent.md
+      - "ProtoViewer privacy": protoviewer/privacy.md
+      - "ProtoViewer store listing": design-docs/protoviewer-store-listing.md
+      - "Native prototype embedding": design-docs/prototype-embedding.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "CI attestation shadow promotion": design-docs/ci/attestation-shadow-promotion.md
       - "CI attestation GitHub App transport": design-docs/ci/attestation-github-app-transport.md
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md
       - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
+      - "macOS-only iOS tests": design-docs/ci/macos-only-tests.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
+      - "Stylus, pressure and hover injection": design-docs/mcp/stylus-pressure-hover-injection.md
       - "Daemon": design-docs/mcp/daemon.md
+      - "Push-stream backpressure": push-stream-backpressure.md
       - "MCP SDK v2 and stateless daemon": design-docs/mcp/sdk-v2-stateless-migration.md
+      - "Live observe App shell": design-docs/mcp/observe-app-shell.md
       - "Session state record": design-docs/session-state-record.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "InputConnection trace comparison": design-docs/plat/android/ime-trace-conformance.md
       - "Android physical panel identity": design-docs/plat/android/physical-panel-identity.md
+      - "Android windowing": design-docs/plat/android/windowing.md
+      - "Android form factors": design-docs/plat/android/form-factors.md
+      - "Device-condition capability probe": design-docs/plat/android/device-condition-capability-probe.md
+      - "Device-condition attestation ceiling": design-docs/plat/android/device-condition-attestation-ceiling.md
       - "Desktop App": design-docs/plat/android/desktop-app.md
       - "Pressure, hover and stylus input": design-docs/plat/pressure-hover-stylus-input.md
   - "Contributing": contributing.md

@@ -132,9 +132,9 @@ export class DefaultEmulatorLaunchCoordinator implements EmulatorLaunchCoordinat
       // resident emulator's whole lifetime — mirroring the iOS `simctl boot`
       // leaf (see PerfContext).
       // Raced against the request's abort so a cancel does not outwait the
-      // startup validation: that can run its full 5 s fallback against an
-      // emulator that ignores SIGTERM, and the owner needs the child handle
-      // inside its abort grace to confirm the exit (#10075).
+      // startup validation: without an early serial/stdout signal it can still
+      // take the 5 s fallback against an emulator that ignores SIGTERM. The owner
+      // needs the child handle inside its abort grace to confirm the exit (#10075).
       const launch = await raceWithDeadline(
         () =>
           trackAmbient(`emulator launch ${request.avdName}`, () =>
@@ -200,6 +200,7 @@ export class DefaultEmulatorLaunchCoordinator implements EmulatorLaunchCoordinat
         dispose();
         release();
       },
+      release,
     };
   }
 
@@ -223,7 +224,15 @@ export class DefaultEmulatorLaunchCoordinator implements EmulatorLaunchCoordinat
         { bypassDeviceListCache: true },
         signal,
       );
-      if (runningEmulators.some((emulator) => emulator.name === avdName)) {
+      // Foreign placeholders carry no AVD name; the launcher's AVD lock still decides those.
+      if (runningEmulators.some((emulator) => emulator.foreignOwned && emulator.name === avdName)) {
+        throw new ActionableError(
+          `another daemon owns AVD '${avdName}'. Use another AVD or release it in that daemon before retrying.`,
+        );
+      }
+      if (
+        runningEmulators.some((emulator) => !emulator.foreignOwned && emulator.name === avdName)
+      ) {
         logger.info(`AVD '${avdName}' is already running - waiting for it to be ready`);
         return true;
       }

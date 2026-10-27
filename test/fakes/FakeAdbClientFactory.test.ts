@@ -138,8 +138,8 @@ describe("FakeAdbClientFactory routing and reset outcomes", () => {
     const clientB = factory.create(deviceB);
 
     expect(clientA).not.toBe(clientB);
-    expect(factory.getClientForDevice("emulator-5554")).toBe(clientA);
-    expect(factory.getClientForDevice("emulator-5556")).toBe(clientB);
+    expect(clientA === factory.getClientForDevice("emulator-5554")).toBe(true);
+    expect(clientB === factory.getClientForDevice("emulator-5556")).toBe(true);
   });
 
   it("reset() swaps in a fresh shared client, discarding prior configuration", async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parseArgs } from "../../src/cli/parseArgs";
+import type { SessionConfig } from "../../src/devices/sessionConfig";
 
 const logger = { warn: () => {} };
 
@@ -188,10 +189,10 @@ describe("parseArgs (#4277)", () => {
     },
   ])("characterizes argv $args", ({ args, warnings, expected }) => {
     const logged: string[] = [];
-    expect(parseArgs(args, { warn: (message) => logged.push(message) }, {})).toMatchObject(
+    expect(parseArgs([...args], { warn: (message) => logged.push(message) }, {})).toMatchObject(
       expected,
     );
-    expect(logged).toEqual(warnings);
+    expect(logged).toEqual([...warnings]);
   });
 
   test.each([
@@ -212,7 +213,7 @@ describe("parseArgs (#4277)", () => {
         "AUTOMOBILE_TOOLSET_OLD is retired; use AUTOMOBILE_ENABLED_TOOLS or AUTOMOBILE_DISABLED_TOOLS.",
     },
   ])("characterizes parsing errors $message", ({ args, environment, message }) => {
-    expect(() => parseArgs(args, logger, environment)).toThrow(message);
+    expect(() => parseArgs([...args], logger, environment)).toThrow(message);
   });
 
   test("parses CLI feature flags without loading the server entrypoint", () => {
@@ -330,7 +331,7 @@ describe("parseArgs (#4277)", () => {
         expected: { livenessOwnerToken: undefined, debug: true },
       },
     ])("$name", ({ args, expected }) => {
-      const parsed = parseArgs(args, logger);
+      const parsed = parseArgs([...args], logger);
 
       for (const [key, value] of Object.entries(expected)) {
         expect(parsed[key as keyof typeof parsed]).toBe(value);
@@ -363,7 +364,7 @@ describe("parseArgs (#4277)", () => {
         value: "harness-token",
       },
     ])("$name still parses correctly", ({ args, key, value }) => {
-      const parsed = parseArgs(args, logger);
+      const parsed = parseArgs([...args], logger);
 
       expect(parsed[key as keyof typeof parsed]).toBe(value);
     });
@@ -380,7 +381,7 @@ describe("--session-config", () => {
       hardware: { kind: "archetype", archetype: "phone" },
       os: { kind: "minimum", version: "18.0" },
     },
-  };
+  } satisfies SessionConfig;
   const json = JSON.stringify(config);
   const noFile = (): string => {
     throw new Error("unexpected file read");
@@ -416,7 +417,7 @@ describe("--session-config", () => {
     );
   });
 
-  test.each([["--cli", "observe"], ["--daemon-mode"], ["--daemon", "status"]])(
+  test.each<string[]>([["--cli", "observe"], ["--daemon-mode"], ["--daemon", "status"]])(
     "ignores inherited environment config for %j",
     (...args) => {
       expect(

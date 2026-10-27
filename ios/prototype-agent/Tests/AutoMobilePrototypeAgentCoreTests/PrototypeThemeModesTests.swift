@@ -47,18 +47,29 @@ final class PrototypeThemeModesTests: XCTestCase {
             "prototype_swipe_actions_v1",
             "prototype_text_field_actions_v1",
             "prototype_carousel_v1",
+            "prototype_chart_v1",
+            "prototype_loading_states_v1",
+            "prototype_style_polish_v2",
             "prototype_text_field_leading_icon_v1",
             "prototype_refresh_v1",
             "prototype_search_bar_v1",
             "prototype_rich_text_v1",
+            "prototype_linkify_v1",
             "prototype_menus_v1",
+            "prototype_tooltip_v1",
+            "prototype_drawer_v1",
             "prototype_stack_v1",
+            "prototype_stack_transitions_v1",
             "prototype_emit_context_v1",
             "prototype_checks_v1",
             "prototype_identifier_test_tag_only_v1",
             "prototype_bottom_sheet_drag_v1",
             "clear_prototype_storage",
             "prototype_storage_v1",
+            "prototype_timers_v1",
+            "prototype_platform_v1",
+            "prototype_platform_device_v1",
+            "advance_prototype_clock",
         ])
     }
 
@@ -322,6 +333,19 @@ final class PrototypeThemeModesTests: XCTestCase {
         XCTAssertEqual(session.state["open"], .bool(false))
     }
 
+    /// #15117: a sheet with no authored `scrim` resolves the `scrim` role at 40% like Android's
+    /// default; an authored hex, role or pair wins over the fallback.
+    func testASheetWithoutAScrimDrawsTheDefaultScrimRoleInBothModes() throws {
+        let dim = PrototypeRGBA(red: 0, green: 0, blue: 0, alpha: 0.4)
+        XCTAssertEqual(light.sheetScrim(nil), dim)
+        XCTAssertEqual(dark.sheetScrim(nil), dim)
+        try XCTAssertEqual(light.sheetScrim("#52000000"), hex("#52000000"))
+        try XCTAssertEqual(light.sheetScrim(.modes(light: "#52000000", dark: "scrim")), hex("#52000000"))
+        XCTAssertEqual(dark.sheetScrim(.modes(light: "#52000000", dark: "scrim")), dim)
+        XCTAssertEqual(dark.sheetScrim("scrim"), dim)
+        XCTAssertNil(light.scrim(nil), "only a sheet falls back; other scrim slots stay undrawn")
+    }
+
     // MARK: Scrim resolution
 
     /// Owner decision 2026-10-10: only the `scrim` role is given an alpha when it is a scrim.
@@ -373,7 +397,7 @@ final class PrototypeThemeModesTests: XCTestCase {
         func item(_ json: String) throws -> NavItem {
             try JSONDecoder().decode(NavItem.self, from: Data(json.utf8))
         }
-        XCTAssertEqual(try item(#"{"label":"Absent"}"#).visual(dark: false, available: []), .none)
+        XCTAssertEqual(try item(#"{"label":"Absent"}"#).visual(dark: false, available: []), .absent)
         XCTAssertEqual(try item(#"{"label":"Skew","icon":"skew"}"#).visual(dark: false, available: []), .placeholder)
         XCTAssertEqual(
             try item(#"{"label":"Unmapped","icon":"android"}"#).visual(dark: false, available: []),

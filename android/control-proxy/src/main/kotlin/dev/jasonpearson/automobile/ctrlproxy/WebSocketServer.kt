@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
-import android.os.Build
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDisplayRouting
@@ -16,8 +15,6 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
-import java.net.InetSocketAddress
-import java.net.ServerSocket
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.*
@@ -33,49 +30,28 @@ import kotlinx.serialization.json.JsonPrimitive
  * commands. Designed to work with adb port forwarding for MCP server communication.
  *
  * Inbound messages are decoded into the sealed [ProtocolRequest] hierarchy and dispatched through
- * the injected [messageHandler]. Callers that only broadcast (e.g. lifecycle tests) may omit it, in
- * which case inbound messages are ignored.
+ * the injected [WebSocketServerOptions.messageHandler]. Callers that only broadcast (e.g. lifecycle
+ * tests) may omit it, in which case inbound messages are ignored.
  */
 class WebSocketServer(
   private val port: Int = 8765,
   private val scope: CoroutineScope,
   private val perfProvider: PerfProvider = PerfProvider.instance,
-  /** Type-safe handler that receives decoded requests. When null, inbound messages are ignored. */
-  private val messageHandler: WebSocketMessageHandler? = null,
-  private val onPermanentStartFailure: () -> Unit = {},
-  private val portAvailable: (Int) -> Boolean = { candidatePort ->
-    if (candidatePort != 0) {
-      ServerSocket().use { it.bind(InetSocketAddress("127.0.0.1", candidatePort)) }
-    }
-    true
-  },
-  private val onRetryLockAcquired: () -> Unit = {},
-  /** Test seam for a new request arriving as a prior terminal frame finishes enqueueing. */
-  private val onCorrelatedRoutingStep: () -> Unit = {},
-  private val sendFrame: suspend (DefaultWebSocketSession, String) -> Unit =
-    { connection, message ->
-      connection.send(Frame.Text(message))
-    },
-  private val sdkInt: () -> Int = { Build.VERSION.SDK_INT },
-  private val sendTimeoutMs: Long = OUTBOUND_SEND_TIMEOUT_MS,
-  /** Non-blocking queue cleanup, invoked after ownership removal outside the connections lock. */
-  private val onClientDisconnected: (ConnectedClient) -> Unit = {},
-  /** Removal-time snapshot; a reconnect must not erase the zero-client edge before delivery. */
-  private val onClientCountChanged: (Int, Int) -> Unit = { _, _ -> },
-  /**
-   * Called once a client is registered, so state held back while no host was attached can go out.
-   */
-  private val onClientConnected: () -> Unit = {},
-  /** Per-request-type caps checked on the raw frame before it is decoded (#9935). */
-  private val inboundFrameLimits: InboundFrameLimits = InboundFrameLimits.DEFAULT,
-  /**
-   * A host's `prototype_response` (#12528) answers a `prototype_request` this device sent. It is
-   * not a protocol request, so it is routed here before decoding rather than to [messageHandler].
-   */
-  private val onPrototypeResponse: (String) -> Unit = {},
+  private val options: WebSocketServerOptions = WebSocketServerOptions(),
+  private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
+    dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
+    private val inboundTypePattern = Regex("[a-z_]+")
+    private val inboundLogSink =
+      object : InboundLogSink {
+        override fun isDebugEnabled(): Boolean = Log.isLoggable(TAG, Log.DEBUG)
+
+        override fun debug(message: String) {
+          Log.d(TAG, message)
+        }
+      }
     private const val MAX_START_ATTEMPTS = 5
     private const val START_RETRY_BASE_DELAY_MS = 250L
     private const val CONNECTOR_RESOLVE_TIMEOUT_MS = 2_000L
@@ -111,8 +87,9 @@ class WebSocketServer(
         (lenientJson.parseToJsonElement(raw) as? JsonObject)?.get(field)?.let { element ->
           (element as? JsonPrimitive)?.takeIf { it.isString }?.content
         }
-      } catch (e: Exception) {
+      } catch (e: IllegalArgumentException) {
         // Expected for genuinely malformed payloads; correlation is best-effort by design.
+        Log.d(TAG, "Could not extract request ID from malformed payload", e)
         null
       }
 
@@ -151,6 +128,7 @@ class WebSocketServer(
         "delete_saved_prototype",
         "pin_saved_prototype",
         "clear_prototype_storage",
+        "advance_prototype_clock",
       ) + prototypeAssetRequestTypes
 
     /** Requests whose payload is typed user input, which may be a password. */
@@ -174,10 +152,23 @@ class WebSocketServer(
       }
 
     /** Log only the protocol type and length, never free-form request fields. */
-    internal fun inboundFrameLogLine(connectionId: Int, raw: String): String {
+    internal fun inboundFrameLogLine(
+      connectionId: Int,
+      raw: String,
+      frameBytes: ByteArray = raw.toByteArray(Charsets.UTF_8),
+    ): String {
       val type =
-        extractStringField(raw, "type")?.takeIf { it.matches(Regex("[a-z_]+")) } ?: "unknown"
+        InboundFrameHeader.peek(frameBytes, validateObject = true).type?.takeIf {
+          it.matches(inboundTypePattern)
+        } ?: "unknown"
       return "Received from client #$connectionId: type=$type length=${raw.length}"
+    }
+
+    internal fun logInboundFrame(
+      sink: InboundLogSink = inboundLogSink,
+      buildLine: () -> String,
+    ) {
+      if (sink.isDebugEnabled()) sink.debug(buildLine())
     }
 
     /** Substring every correlated frame carries; passive event frames omit it. */
@@ -202,72 +193,12 @@ class WebSocketServer(
 
     /**
      * `requestId` read directly off a typed [response], avoiding the encode→parse round-trip the
-     * raw-string [extractRequestId] path pays. Exhaustive over the sealed hierarchy so a newly
-     * added correlated response type fails to compile until it is wired in here (mirrors what
-     * `sendErrorResponse` reads off `ErrorResponse` directly). See #5462.
+     * raw-string [extractRequestId] path pays. Every response that echoes a request id implements
+     * [CorrelatedResponse]; `CorrelatedResponseTest` in `:protocol` fails when a response type
+     * declares `requestId` without it. See #5462, #11877.
      */
     internal fun correlationRequestId(response: WebSocketResponse): String? =
-      when (response) {
-        is ErrorResponse -> response.requestId
-        is ScreenshotResult -> response.requestId
-        is ScreenshotErrorResult -> response.requestId
-        is SwipeResult -> response.requestId
-        is TapCoordinatesResult -> response.requestId
-        is DragResult -> response.requestId
-        is PinchResult -> response.requestId
-        is SetTextResult -> response.requestId
-        is CommitTextResult -> response.requestId
-        is SetKeyboardProfileResult -> response.requestId
-        is SetNetworkMockRulesResult -> response.requestId
-        is KeyboardProfileCatalogResult -> response.requestId
-        is ImeActionResult -> response.requestId
-        is SelectAllResult -> response.requestId
-        is ActionResult -> response.requestId
-        is ClipboardResult -> response.requestId
-        is SettingsGetResult -> response.requestId
-        is SettingsPutResult -> response.requestId
-        is SettingsListResult -> response.requestId
-        is CaCertResult -> response.requestId
-        is DeviceOwnerStatusResult -> response.requestId
-        is PermissionResult -> response.requestId
-        is GlobalActionResult -> response.requestId
-        is FrameContextValidationResult -> response.requestId
-        is DeviceInfoResult -> response.requestId
-        is CurrentFocusResult -> response.requestId
-        is TraversalOrderResult -> response.requestId
-        is HighlightResponse -> response.requestId
-        is PrototypeResult -> response.requestId
-        is dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult -> response.requestId
-        is dev.jasonpearson.automobile.protocol.SdkCapabilitiesResult -> response.requestId
-        is PreferenceFilesResult -> response.requestId
-        is PreferencesResult -> response.requestId
-        is SubscribeStorageResult -> response.requestId
-        is UnsubscribeStorageResult -> response.requestId
-        is GetPreferenceResult -> response.requestId
-        is SetPreferenceResult -> response.requestId
-        is RemovePreferenceResult -> response.requestId
-        is ClearPreferencesResult -> response.requestId
-        is InstalledPackagesResult -> response.requestId
-        is PackageInfoResult -> response.requestId
-        is LaunchIntentResult -> response.requestId
-        is HierarchyUpdateEvent -> response.requestId
-        // Other event/status frames never echo a requestId.
-        is ConnectedResponse,
-        is PrototypeEvent,
-        is InteractionEvent,
-        is PackageEvent,
-        is NavigationEventResponse,
-        is HandledExceptionEvent,
-        is NetworkEventResponse,
-        is WebSocketFrameResponse,
-        is LogEventResponse,
-        is BroadcastEventResponse,
-        is LifecycleEventResponse,
-        is FrameMetricsEventResponse,
-        is StorageChangedEvent,
-        is CrashEvent,
-        is AnrEvent -> null
-      }
+      (response as? CorrelatedResponse)?.requestId
 
     /** The sealed wire serializer is the single source of registered top-level request names. */
     private val registeredRequestTypes: List<String> = run {
@@ -332,10 +263,41 @@ class WebSocketServer(
       .getOrNull()
   }
 
+  internal interface InboundLogSink {
+    fun isDebugEnabled(): Boolean
+
+    fun debug(message: String)
+  }
+
   internal fun supportedCommands(): List<String> = buildList {
     // The handler dispatches exhaustively over this sealed hierarchy, so its serializer is the
     // source of truth for every request type accepted by the wire decoder.
     addAll(registeredRequestTypes)
+    addInputAndGestureFlags()
+    addPrototypeSpecFlags()
+    addPrototypeRuntimeFlags()
+    addPrototypeWindowFlags()
+    add("prototype_menus_v1")
+    add("prototype_tooltip_v1")
+    add("prototype_drawer_v1")
+    // request_action honours the semantic actions (expand, collapse, dismiss, select, scroll and
+    // page directions, press_and_hold, set_progress with progress, custom with customAction) and
+    // lists the node's available actions in a refusal (#14077). Older APKs refuse them as
+    // unsupported, so hosts require this flag before sending one.
+    add("semantic_node_actions_v1")
+    // request_global_action accepts the system actions beyond back/home/recent/notifications
+    // (power_dialog, quick_settings, split_screen, lock_screen, screenshot,
+    // dismiss_notification_shade). Each flag is advertised only when the device API level can
+    // perform it (#14095), so a host needs one check to cover both the APK and the API level.
+    addAll(SystemGlobalActions.advertisedFlags(options.sdkInt()))
+    add("full_command_set_v1")
+    // Every response to a request carrying requestId echoes it, including hierarchy_update for
+    // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.
+    add("request_id_echo_v1")
+  }
+
+  /** IME, gesture and display-routing flags. */
+  private fun MutableList<String>.addInputAndGestureFlags() {
     add("node_selector_actions")
     add("ime_key_events_v1")
     add("ime_clear_field_v1")
@@ -355,15 +317,19 @@ class WebSocketServer(
     // get_sdk_capabilities honours userId (work or secondary profile). Hosts omit the field for a
     // service lacking this flag, which would otherwise read the app instance of its own user.
     add("sdk_capabilities_user_id_v1")
-    if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
+    if (options.sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
     // show_prototype honours displayId. Hosts must not send it to a device lacking this flag: the
     // decoder ignores unknown fields, so the prototype would silently land on the default display.
     // v1 stays for hosts that predate v2; v2 is what current hosts require, so an APK cut before
     // the API 32 floor (which advertised v1 on API 30/31) can never satisfy them (#13164).
-    if (sdkInt() >= PrototypeDisplayRouting.DISPLAY_API) {
+    if (options.sdkInt() >= PrototypeDisplayRouting.DISPLAY_API) {
       add("prototype_display_id_v1")
       add("prototype_display_id_v2")
     }
+  }
+
+  /** Prototype spec feature flags: layout, data, text, motion and charts. */
+  private fun MutableList<String>.addPrototypeSpecFlags() {
     // ORCHESTRATOR-CHOSEN: to be folded into the PROTOTYPE_SPEC_CAPABILITY_GATES registry.
     // show_prototype honours replaceOthers=false and addresses up to four independent surfaces.
     add("prototype_multi_surface_v1")
@@ -398,18 +364,36 @@ class WebSocketServer(
     // The device runs a via "device" request with its own HTTP stack (Retrofit over OkHttp), to any
     // http or https host. Without it a host refuses a spec that asks for via "device".
     add("prototype_network_device_v1")
+    add("prototype_platform_v1")
+    add("prototype_platform_device_v1")
+    addAll(platform.registry.capabilities)
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
     add("prototype_text_field_options_v1")
-    add("prototype_gestures_v1")
-    add("prototype_swipe_actions_v1")
-    add("prototype_text_field_actions_v1")
-    add("prototype_carousel_v1")
+    addAll(listOf("prototype_gestures_v1", "prototype_swipe_actions_v1"))
+    addAll(listOf("prototype_text_field_actions_v1", "prototype_carousel_v1"))
     add("prototype_text_field_leading_icon_v1")
     add("prototype_refresh_v1")
     // In-tree search fields support query edits, search actions and active-key result subtrees.
     add("prototype_search_bar_v1")
     add("prototype_rich_text_v1")
+    // {data, empty} conditions and style shimmer for loading placeholders (#14207).
+    addAll(listOf("prototype_loading_states_v1", "prototype_style_polish_v2"))
+    // Node animate, style scale/rotation, slideStart/slideEnd/scale transitions, zoomable images.
+    add("prototype_motion_v2")
+    // Transition delayMs, container stagger and the blurReplace transition (#15247).
+    add("prototype_choreography_v1")
+    add("prototype_stack_transitions_v1")
+    // Line, area, bar and ring charts over /data arrays (#14209).
+    add("prototype_chart_v1")
+    // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).
+    add("prototype_linkify_v1")
+    // Chat-list scrolls: reverse, stickToEnd, atEndKey, onStartReached and scrollTo (#14232).
+    add("prototype_chat_scroll_v1")
+  }
+
+  /** Prototype runtime flags: checks, appearance, persistence, storage and timers. */
+  private fun MutableList<String>.addPrototypeRuntimeFlags() {
     // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands.
     add("prototype_emit_context_v1")
     // Prototype checks expose validity and guard actions; older APKs ignore these spec fields.
@@ -429,6 +413,11 @@ class WebSocketServer(
     // A spec's storage block is kept across shows, inspect reports the stored keys and
     // clear_prototype_storage wipes them (#12522). Hosts refuse storage without this flag.
     add("prototype_storage_v1")
+    add("prototype_timers_v1")
+  }
+
+  /** Prototype window, patch, anchor and screenshot flags. */
+  private fun MutableList<String>.addPrototypeWindowFlags() {
     // show_prototype replaces a same-id prototype in place (display and pager pages kept) unless
     // reset
     // is set. Older APKs ignore reset and re-show fresh; hosts warn that pages restarted (#10642).
@@ -451,11 +440,6 @@ class WebSocketServer(
     // ignore the field, so hosts keep reporting that an app-layer screenshot includes the
     // prototype.
     add("screenshot_hide_prototype_v1")
-    add("prototype_menus_v1")
-    add("full_command_set_v1")
-    // Every response to a request carrying requestId echoes it, including hierarchy_update for
-    // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.
-    add("request_id_echo_v1")
   }
 
   @Volatile private var server: EmbeddedServer<*, *>? = null
@@ -532,7 +516,7 @@ class WebSocketServer(
   private suspend fun sendWithDeadline(send: suspend () -> Unit): Boolean =
     // Use the injected dispatcher for deadlines without replacing the caller's cancellation job.
     withContext(scope.coroutineContext.minusKey(Job)) {
-      withTimeoutOrNull(sendTimeoutMs) {
+      withTimeoutOrNull(options.sendTimeoutMs) {
         send()
         true
       } ?: false
@@ -560,7 +544,10 @@ class WebSocketServer(
                   }
                 } ?: break
               if (!sendWithDeadline { transport.send(frame.message) }) {
-                Log.w(TAG, "Client #$id send timed out after ${sendTimeoutMs}ms; disconnecting")
+                Log.w(
+                  TAG,
+                  "Client #$id send timed out after ${options.sendTimeoutMs}ms; disconnecting",
+                )
                 disconnectClient(client, "Outbound send timed out")
                 return@launch
               }
@@ -568,7 +555,10 @@ class WebSocketServer(
           }
         } catch (e: CancellationException) {
           throw e
-        } catch (e: Exception) {
+        } catch (e: java.io.IOException) {
+          Log.w(TAG, "Client #$id send failed; disconnecting", e)
+          disconnectClient(client, "Outbound send failed")
+        } catch (e: IllegalStateException) {
           Log.w(TAG, "Client #$id send failed; disconnecting", e)
           disconnectClient(client, "Outbound send failed")
         }
@@ -580,7 +570,7 @@ class WebSocketServer(
     }
     firstClientConnection.complete(Unit)
     client.sender.start()
-    onClientConnected()
+    options.onClientConnected()
     return client
   }
 
@@ -616,8 +606,8 @@ class WebSocketServer(
         }
       }
     if (snapshot == null) return
-    onClientDisconnected(client)
-    onClientCountChanged(snapshot.remaining, snapshot.observerSession)
+    options.onClientDisconnected(client)
+    options.onClientCountChanged(snapshot.remaining, snapshot.observerSession)
     Log.w(
       TAG,
       "Disconnecting client #${client.id}: $reason; discarded ${snapshot.discarded} queued frames; shed ${client.droppedCount} frames total",
@@ -628,7 +618,9 @@ class WebSocketServer(
         client.transport.close(CloseReason(code, reason))
       } catch (e: CancellationException) {
         throw e
-      } catch (e: Exception) {
+      } catch (e: java.io.IOException) {
+        Log.w(TAG, "Failed to close client #${client.id}", e)
+      } catch (e: IllegalStateException) {
         Log.w(TAG, "Failed to close client #${client.id}", e)
       }
     }
@@ -652,11 +644,11 @@ class WebSocketServer(
         for (retry in 1 until MAX_START_ATTEMPTS) {
           delay(START_RETRY_BASE_DELAY_MS * (1L shl (retry - 1)))
           synchronized(startLock) {
-            onRetryLockAcquired()
+            options.onRetryLockAcquired()
             if (!coroutineContext.isActive || server != null || tryStart()) return@launch
             if (retry == MAX_START_ATTEMPTS - 1) {
               Log.e(TAG, "WebSocket server failed to start after $MAX_START_ATTEMPTS attempts")
-              onPermanentStartFailure()
+              options.onPermanentStartFailure()
             }
           }
         }
@@ -666,130 +658,168 @@ class WebSocketServer(
 
   private fun tryStart(): Boolean {
     var startedServer: EmbeddedServer<*, *>? = null
-    try {
-      // CIO binds on an internal coroutine and reports an occupied port as an uncaught failure.
-      // Detect the common occupied-port case before starting that coroutine.
-      if (!portAvailable(port)) return false
+    val failure =
+      try {
+        // CIO binds on an internal coroutine and reports an occupied port as an uncaught failure.
+        // Detect the common occupied-port case before starting that coroutine.
+        if (!options.portAvailable(port)) return false
 
-      val candidate =
-        // CtrlProxy is reached exclusively through adb forward. Binding loopback
-        // prevents the accessibility-control endpoint from being exposed to the
-        // device LAN when the runner is installed on a physical device.
-        embeddedServer(CIO, host = "127.0.0.1", port = port) {
-            install(WebSockets) {
-              pingPeriod = 15.seconds
-              timeout = 60.seconds
-              maxFrameSize = MAX_FRAME_SIZE_BYTES
-              masking = false
+        val candidate =
+          // CtrlProxy is reached exclusively through adb forward. Binding loopback
+          // prevents the accessibility-control endpoint from being exposed to the
+          // device LAN when the runner is installed on a physical device.
+          embeddedServer(CIO, host = "127.0.0.1", port = port) { configureApplication() }
+            .start(wait = false)
+        startedServer = candidate
+
+        // CIO starts its accept loop asynchronously. Wait for the connector to resolve so a bind
+        // failure is caught here, before this instance reports that it is listening. This single
+        // bounded bridge preserves the start/stop lock's atomic publication of a live listener.
+        // start() launches on the injected scope (CtrlProxy's IO serviceScope), never inline in
+        // onServiceConnected on Main; tests inject their scheduler instead.
+        awaitConnector(candidate)
+        server = candidate
+
+        Log.i(TAG, "WebSocket server started on port $port")
+        return true
+      } catch (e: CancellationException) {
+        stopPartiallyStartedServer(startedServer)
+        server = null
+        throw e
+      } catch (e: java.io.IOException) {
+        e
+      } catch (e: IllegalStateException) {
+        e
+      } catch (e: IllegalArgumentException) {
+        e
+      } catch (e: SecurityException) {
+        e
+      }
+    Log.e(TAG, "Failed to start WebSocket server", failure)
+    stopPartiallyStartedServer(startedServer)
+    server = null
+    return false
+  }
+
+  private fun Application.configureApplication() {
+    install(WebSockets) {
+      pingPeriod = 15.seconds
+      timeout = 60.seconds
+      maxFrameSize = MAX_FRAME_SIZE_BYTES
+      masking = false
+    }
+
+    install(ContentNegotiation) { json(json) }
+
+    routing {
+      webSocket("/ws") {
+        handleSession(this)
+      }
+
+      // Health check endpoint
+      get("/health") { call.respond(HttpStatusCode.OK, "OK") }
+    }
+  }
+
+  private suspend fun handleSession(session: DefaultWebSocketServerSession) =
+    with(session) {
+      val connectionId = connectionCount.incrementAndGet()
+      Log.d(TAG, "Client #$connectionId connected")
+
+      try {
+        // Send connection greeting before registering for broadcasts
+        val greetingSent = sendWithDeadline {
+          send(
+            Frame.Text(
+              responseJson.encodeToString(
+                WebSocketResponse.serializer(),
+                ConnectedResponse(
+                  id = connectionId,
+                  supportedCommands = supportedCommands(),
+                ),
+              ),
+            ),
+          )
+        }
+        if (!greetingSent) {
+          Log.w(
+            TAG,
+            "Client #$connectionId greeting send timed out after ${options.sendTimeoutMs}ms; disconnecting",
+          )
+          // Abandon the unregistered session without another potentially blocked write.
+          cancel("Outbound greeting send timed out")
+          return@with
+        }
+
+        readRegisteredSession(session, connectionId)
+      } catch (e: CancellationException) {
+        // Read loop is a coroutine: on scope shutdown, `incoming` / the inline
+        // `handleClientMessage` throw cancellation. Let it unwind (after `finally`)
+        // instead of logging a connection error and re-swallowing the rethrow
+        // handleClientMessage already performs (#3130).
+        throw e
+      } catch (e: Exception) {
+        Log.e(TAG, "Error in WebSocket connection #$connectionId", e)
+      } finally {
+        Log.d(
+          TAG,
+          "Client #$connectionId disconnected. Active connections: ${connections.size}",
+        )
+      }
+    }
+
+  private suspend fun readRegisteredSession(
+    session: DefaultWebSocketServerSession,
+    connectionId: Int,
+  ) =
+    with(session) {
+      val client =
+        registerClient(
+          connectionId,
+          object : ClientTransport {
+            override suspend fun send(message: String) {
+              session.send(Frame.Text(message))
             }
 
-            install(ContentNegotiation) { json(json) }
+            override suspend fun close(reason: CloseReason) {
+              session.close(reason)
+            }
+          },
+        )
 
-            routing {
-              webSocket("/ws") {
-                val connectionId = connectionCount.incrementAndGet()
-                Log.d(TAG, "Client #$connectionId connected")
-
-                try {
-                  // Send connection greeting before registering for broadcasts
-                  val greetingSent = sendWithDeadline {
-                    send(
-                      Frame.Text(
-                        responseJson.encodeToString(
-                          WebSocketResponse.serializer(),
-                          ConnectedResponse(
-                            id = connectionId,
-                            supportedCommands = supportedCommands(),
-                          ),
-                        ),
-                      ),
-                    )
-                  }
-                  if (!greetingSent) {
-                    Log.w(
-                      TAG,
-                      "Client #$connectionId greeting send timed out after ${sendTimeoutMs}ms; disconnecting",
-                    )
-                    // Abandon the unregistered session without another potentially blocked write.
-                    cancel("Outbound greeting send timed out")
-                    return@webSocket
-                  }
-
-                  val session = this
-                  val client =
-                    registerClient(
-                      connectionId,
-                      object : ClientTransport {
-                        override suspend fun send(message: String) {
-                          session.send(Frame.Text(message))
-                        }
-
-                        override suspend fun close(reason: CloseReason) {
-                          session.close(reason)
-                        }
-                      },
-                    )
-
-                  try {
-                    // Listen for incoming messages
-                    for (frame in incoming) {
-                      when (frame) {
-                        is Frame.Text -> handleInboundTextFrame(connectionId, frame, client)
-                        is Frame.Close -> {
-                          Log.d(TAG, "Client #$connectionId closed connection")
-                        }
-                        else -> {
-                          Log.d(TAG, "Received frame type: ${frame.frameType}")
-                        }
-                      }
-                    }
-                  } finally {
-                    unregisterClient(client)
-                  }
-                } catch (e: CancellationException) {
-                  // Read loop is a coroutine: on scope shutdown, `incoming` / the inline
-                  // `handleClientMessage` throw cancellation. Let it unwind (after `finally`)
-                  // instead of logging a connection error and re-swallowing the rethrow
-                  // handleClientMessage already performs (#3130).
-                  throw e
-                } catch (e: Exception) {
-                  Log.e(TAG, "Error in WebSocket connection #$connectionId", e)
-                } finally {
-                  Log.d(
-                    TAG,
-                    "Client #$connectionId disconnected. Active connections: ${connections.size}",
-                  )
-                }
-              }
-
-              // Health check endpoint
-              get("/health") { call.respond(HttpStatusCode.OK, "OK") }
+      try {
+        // Listen for incoming messages
+        for (frame in incoming) {
+          when (frame) {
+            is Frame.Text -> handleInboundTextFrame(connectionId, frame, client)
+            is Frame.Close -> {
+              Log.d(TAG, "Client #$connectionId closed connection")
+            }
+            else -> {
+              Log.d(TAG, "Received frame type: ${frame.frameType}")
             }
           }
-          .start(wait = false)
-      startedServer = candidate
-
-      // CIO starts its accept loop asynchronously. Wait for the connector to resolve so a bind
-      // failure is caught here, before this instance reports that it is listening. This single
-      // bounded bridge preserves the start/stop lock's atomic publication of a live listener.
-      // start() launches on the injected scope (CtrlProxy's IO serviceScope), never inline in
-      // onServiceConnected on Main; tests inject their scheduler instead.
-      runBlocking {
-        withTimeout(CONNECTOR_RESOLVE_TIMEOUT_MS) { candidate.engine.resolvedConnectors() }
+        }
+      } finally {
+        unregisterClient(client)
       }
-      server = candidate
+    }
 
-      Log.i(TAG, "WebSocket server started on port $port")
-      return true
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to start WebSocket server", e)
-      try {
-        startedServer?.stop(0, 0)
-      } catch (stopError: Exception) {
-        Log.e(TAG, "Failed to stop partially started WebSocket server", stopError)
-      }
-      server = null
-      return false
+  private fun stopPartiallyStartedServer(startedServer: EmbeddedServer<*, *>?) {
+    try {
+      startedServer?.stop(0, 0)
+    } catch (stopError: java.io.IOException) {
+      Log.e(TAG, "Failed to stop partially started WebSocket server", stopError)
+    } catch (stopError: IllegalStateException) {
+      if (stopError is CancellationException) throw stopError
+      Log.e(TAG, "Failed to stop partially started WebSocket server", stopError)
+    }
+  }
+
+  private fun awaitConnector(candidate: EmbeddedServer<*, *>) {
+    runBlocking {
+      withTimeoutOrNull(CONNECTOR_RESOLVE_TIMEOUT_MS) { candidate.engine.resolvedConnectors() }
+        ?: throw java.io.IOException("Timed out resolving WebSocket connectors")
     }
   }
 
@@ -808,7 +838,10 @@ class WebSocketServer(
         server = null
       }
       Log.i(TAG, "WebSocket server stopped")
-    } catch (e: Exception) {
+    } catch (e: java.io.IOException) {
+      Log.e(TAG, "Error stopping WebSocket server", e)
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
       Log.e(TAG, "Error stopping WebSocket server", e)
     }
   }
@@ -828,7 +861,7 @@ class WebSocketServer(
    * @param messageBuilder Function that takes optional perfTiming JsonElement and returns the
    *   complete message
    */
-  suspend fun broadcastWithPerf(
+  fun broadcastWithPerf(
     routeByRequestId: Boolean = true,
     messageBuilder: (perfTiming: JsonElement?) -> String,
   ) {
@@ -856,7 +889,7 @@ class WebSocketServer(
    * @param messageBuilder Function that takes optional perfTiming JsonElement and returns the
    *   complete message
    */
-  suspend fun broadcastWithPerfSync(
+  fun broadcastWithPerfSync(
     routeByRequestId: Boolean = true,
     messageBuilder: (perfTiming: JsonElement?) -> String,
   ) {
@@ -902,7 +935,7 @@ class WebSocketServer(
       return
     }
 
-    broadcastSerialized(message, mode, waitForClient)
+    broadcastSerialized(message, waitForClient)
   }
 
   /**
@@ -918,13 +951,11 @@ class WebSocketServer(
     waitForClient: Boolean = false,
   ) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
-    broadcastSerialized(message, mode, waitForClient)
+    broadcastSerialized(message, waitForClient)
   }
 
-  @Suppress("UNUSED_PARAMETER")
   private suspend fun broadcastSerialized(
     message: String,
-    mode: BroadcastMode,
     waitForClient: Boolean,
   ) {
     if (waitForClient) {
@@ -977,7 +1008,7 @@ class WebSocketServer(
         if (connections.contains(target) && !enqueueForClient(target, outgoingFrame(message))) {
           overflowed = target
         }
-        onCorrelatedRoutingStep()
+        options.onCorrelatedRoutingStep()
       }
     }
     overflowed?.let { disconnectClient(it, "Outgoing buffer full") }
@@ -996,7 +1027,7 @@ class WebSocketServer(
     waitForClient: Boolean = false,
   ) {
     val message = responseJson.encodeToString(SdkEvent.serializer(), event)
-    broadcastSerialized(message, mode, waitForClient)
+    broadcastSerialized(message, waitForClient)
   }
 
   /** Wait for a live client to accept the event into its bounded outgoing queue. */
@@ -1111,7 +1142,7 @@ class WebSocketServer(
   }
 
   /** Send a typed terminal failure only to the client whose inbound message failed. */
-  private suspend fun sendErrorResponse(connection: ConnectedClient, response: WebSocketResponse) {
+  private fun sendErrorResponse(connection: ConnectedClient, response: WebSocketResponse) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
     correlationRequestId(response)?.let { requestId ->
       synchronized(connections) { requestConnections.remove(requestId) }
@@ -1178,21 +1209,23 @@ class WebSocketServer(
    * Get the actual port the server is listening on. Useful when port 0 is specified to let the OS
    * assign an available port. Returns null if server is not running.
    */
-  @Suppress("UNCHECKED_CAST")
   suspend fun getActualPort(): Int? {
     val srv = server ?: return null
     return try {
-      val engine = (srv as EmbeddedServer<CIOApplicationEngine, *>).engine
+      val engine = srv.engine
       engine.resolvedConnectors().firstOrNull()?.port ?: port
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: IllegalStateException) {
       Log.w(TAG, "Could not get actual port, returning configured port", e)
       port
     }
   }
 
-  /** Handle an incoming client message by decoding it and dispatching via [messageHandler]. */
+  /**
+   * Handle an incoming client message by decoding it and dispatching via
+   * [WebSocketServerOptions.messageHandler].
+   */
   /**
    * Checks [frame] against its request type's cap on the raw bytes, so an oversized frame is
    * answered with a correlated error without being decoded into a String or deserialized (#9935).
@@ -1202,10 +1235,10 @@ class WebSocketServer(
     frame: Frame.Text,
     connection: ConnectedClient,
   ) {
-    val rejection = inboundFrameLimits.check(frame.data)
+    val rejection = options.inboundFrameLimits.check(frame.data)
     if (rejection == null) {
       val text = frame.readText()
-      Log.d(TAG, inboundFrameLogLine(connectionId, text))
+      logInboundFrame { inboundFrameLogLine(connectionId, text, frame.data) }
       handleClientMessage(text, connection)
       return
     }
@@ -1231,10 +1264,10 @@ class WebSocketServer(
 
   internal suspend fun handleClientMessage(message: String, connection: ConnectedClient) {
     if (message.startsWith(PrototypeNetworkFrames.RESPONSE_PREFIX)) {
-      onPrototypeResponse(message)
+      options.onPrototypeResponse(message)
       return
     }
-    val handler = messageHandler
+    val handler = options.messageHandler
     if (handler == null) {
       // Length only: an inbound frame can carry prototype asset bytes.
       Log.w(
@@ -1244,49 +1277,65 @@ class WebSocketServer(
       return
     }
 
-    val request =
-      try {
-        protocolJson.decodeFromString<ProtocolRequest>(message)
-      } catch (e: CancellationException) {
-        // `decodeFromString` is synchronous, so cooperative cancellation cannot arise here today;
-        // rethrow anyway so this fn stays compliant with the auto-discovered suspend-fn scan
-        // (#3191) if this try ever grows a suspend call.
-        throw e
-      } catch (e: Exception) {
-        // Surface a structured error (correlated by best-effort requestId) rather than swallowing
-        // the failure: a silent return leaves the daemon's awaiter hanging until timeout. See
-        // #2985.
-        val type = extractStringField(message, "type")
-        if (isPrototypeAssetFrame(message, type)) {
-          // Never echo the frame or the decoder's input snippet: it holds asset bytes.
-          Log.w(
-            TAG,
-            "Failed to parse ${type ?: "asset request"} (${message.length} chars): " +
-              e.javaClass.simpleName,
+    val request = decodeRequest(message, connection) ?: return
+    handleDecodedRequest(request, connection, handler)
+  }
+
+  private fun decodeRequest(message: String, connection: ConnectedClient): ProtocolRequest? {
+    return try {
+      protocolJson.decodeFromString<ProtocolRequest>(message)
+    } catch (e: CancellationException) {
+      // `decodeFromString` is synchronous, so cooperative cancellation cannot arise here today;
+      // rethrow anyway so this fn stays compliant with the auto-discovered suspend-fn scan
+      // (#3191) if this try ever grows a suspend call.
+      throw e
+    } catch (e: IllegalArgumentException) {
+      // Surface a structured error (correlated by best-effort requestId) rather than swallowing
+      // the failure: a silent return leaves the daemon's awaiter hanging until timeout. See
+      // #2985.
+      val type = logDecodeFailure(message, e)
+      sendErrorResponse(
+        connection,
+        if (type in prototypeRequestTypes) {
+          PrototypeResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = extractRequestId(message),
+            success = false,
+            error = describeDecodeFailure(message, e),
           )
         } else {
-          val textInputLine = textInputParseFailureLogLine(message, type, e)
-          if (textInputLine != null) Log.w(TAG, textInputLine)
-          else Log.w(TAG, "Failed to parse client message: $message", e)
-        }
-        sendErrorResponse(
-          connection,
-          if (type in prototypeRequestTypes) {
-            PrototypeResult(
-              timestamp = System.currentTimeMillis(),
-              requestId = extractRequestId(message),
-              success = false,
-              error = describeDecodeFailure(message, e),
-            )
-          } else {
-            CorrelatedErrorReporter.frame(
-              requestId = extractRequestId(message),
-              errorMessage = describeDecodeFailure(message, e),
-            )
-          },
-        )
-        return
-      }
+          CorrelatedErrorReporter.frame(
+            requestId = extractRequestId(message),
+            errorMessage = describeDecodeFailure(message, e),
+          )
+        },
+      )
+      return null
+    }
+  }
+
+  private fun logDecodeFailure(message: String, e: IllegalArgumentException): String? {
+    val type = extractStringField(message, "type")
+    if (isPrototypeAssetFrame(message, type)) {
+      // Never echo the frame or the decoder's input snippet: it holds asset bytes.
+      Log.w(
+        TAG,
+        "Failed to parse ${type ?: "asset request"} (${message.length} chars): " +
+          e.javaClass.simpleName,
+      )
+    } else {
+      val textInputLine = textInputParseFailureLogLine(message, type, e)
+      if (textInputLine != null) Log.w(TAG, textInputLine)
+      else Log.w(TAG, "Failed to parse client message: $message", e)
+    }
+    return type
+  }
+
+  private suspend fun handleDecodedRequest(
+    request: ProtocolRequest,
+    connection: ConnectedClient,
+    handler: WebSocketMessageHandler,
+  ) {
 
     Log.d(TAG, "Received ${request::class.simpleName} (requestId: ${request.requestId})")
     // Owned terminal replies route to and clear the entry. Hierarchy errors use that routing;

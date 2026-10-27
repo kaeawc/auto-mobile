@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${SCRIPT_DIR}/lib/spotlight-exclude.sh"
+
 start_api="${1:-21}"
 end_api="${2:-35}"
 tag="${3:-google_apis}"
@@ -25,7 +29,7 @@ for tool in "$sdkmanager" "$avdmanager" "$emulator" "$adb"; do
 done
 
 scratch_dir="scratch/avd-experiments"
-mkdir -p "$scratch_dir"
+mkdir_spotlight_excluded "$scratch_dir"
 
 list_log="${scratch_dir}/sdkmanager-list.log"
 install_log="${scratch_dir}/sdkmanager-install-${start_api}-${end_api}.log"
@@ -75,7 +79,7 @@ for pkg in "${requested_packages[@]}"; do
   mkdir -p "$outdir"
 
   echo "Starting emulator for ${name}" | tee "$outdir/run.log"
-  "$emulator" -avd "$name" -no-window -no-audio -gpu swiftshader_indirect -no-snapshot-save -no-boot-anim -wipe-data >"$outdir/emulator.log" 2>&1 &
+  "$emulator" -avd "$name" -no-window -no-audio -gpu swiftshader -no-snapshot-save -no-boot-anim -wipe-data >"$outdir/emulator.log" 2>&1 &
   emu_pid=$!
 
   "$adb" wait-for-device

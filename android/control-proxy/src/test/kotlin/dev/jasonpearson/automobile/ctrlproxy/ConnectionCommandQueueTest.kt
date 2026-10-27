@@ -138,17 +138,23 @@ class ConnectionCommandQueueTest {
         scope = scope,
         dispatcher = StandardTestDispatcher(test.testScheduler),
         delegate = delegate,
-        reply = { requestId, response, routing ->
-          beforeReply(response)
-          if (routing != QueuedReplyRouting.OWNER || requestId in owners) {
-            replies += response
-            owners.remove(requestId)
-          }
-        },
-        hasRequestOwner = { it in owners },
-        logError = { _, error -> failures += error },
-        logWarning = { warnings += it },
-        logDebug = {},
+        replies =
+          ConnectionReplyDependencies(
+            reply = { requestId, response, routing ->
+              beforeReply(response)
+              if (routing != QueuedReplyRouting.OWNER || requestId in owners) {
+                replies += response
+                owners.remove(requestId)
+              }
+            },
+            hasRequestOwner = { it in owners },
+          ),
+        logging =
+          ConnectionLogDependencies(
+            logError = { _, error -> failures += error },
+            logWarning = { warnings += it },
+            logDebug = {},
+          ),
         capacity = capacity,
       )
     val handler = QueuedWebSocketMessageHandler(delegate, queue)
@@ -340,11 +346,17 @@ class ConnectionCommandQueueTest {
                 assertSame(client, CommandOriginContext.currentClient())
                 CorrelatedErrorReporter.frame(it.requestId, "done")
               },
-            reply = { _, _, _ -> finished.complete(Unit) },
-            hasRequestOwner = { false },
-            logError = { _, error -> finished.completeExceptionally(error) },
-            logWarning = { finished.completeExceptionally(AssertionError(it)) },
-            logDebug = {},
+            replies =
+              ConnectionReplyDependencies(
+                reply = { _, _, _ -> finished.complete(Unit) },
+                hasRequestOwner = { false },
+              ),
+            logging =
+              ConnectionLogDependencies(
+                logError = { _, error -> finished.completeExceptionally(error) },
+                logWarning = { finished.completeExceptionally(AssertionError(it)) },
+                logDebug = {},
+              ),
           )
         try {
           withTimeout(1_000) {
@@ -650,17 +662,24 @@ class ConnectionCommandQueueTest {
     val calls = mutableListOf<String?>()
     val queue =
       ConnectionCommandQueue(
-        scope,
-        StandardTestDispatcher(testScheduler),
-        FakeHandler {
-          calls += it.requestId
-          awaitCancellation()
-        },
-        reply = { _, _, _ -> error("shutdown must not reply") },
-        hasRequestOwner = { false },
-        logError = { _, error -> throw AssertionError(error) },
-        logWarning = { error(it) },
-        logDebug = {},
+        scope = scope,
+        dispatcher = StandardTestDispatcher(testScheduler),
+        delegate =
+          FakeHandler {
+            calls += it.requestId
+            awaitCancellation()
+          },
+        replies =
+          ConnectionReplyDependencies(
+            reply = { _, _, _ -> error("shutdown must not reply") },
+            hasRequestOwner = { false },
+          ),
+        logging =
+          ConnectionLogDependencies(
+            logError = { _, error -> throw AssertionError(error) },
+            logWarning = { error(it) },
+            logDebug = {},
+          ),
       )
     try {
       val finishedConnection = Job()

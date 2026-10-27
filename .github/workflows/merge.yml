@@ -30,12 +30,8 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-build-desktop-core
         with:
-          gradle-tasks: ":desktop-core:build -x test"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
   # The full desktop-core suite stays off the merge path (consistently >1 minute, not required for
@@ -99,32 +95,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-build-ide-plugin
         with:
-          gradle-tasks: "build -x test"
-          gradle-project-directory: "android/ide-plugin"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Build Plugin ZIP"
-        shell: bash
-        working-directory: android/ide-plugin
-        run: |
-          ./gradlew buildPlugin --stacktrace --continue
-
-      - name: "Verify Plugin"
-        shell: bash
-        working-directory: android/ide-plugin
-        run: |
-          ./gradlew verifyPlugin --stacktrace --continue
-
-      - name: "Upload IDE Plugin ZIP"
-        uses: actions/upload-artifact@v6
-        if: success()
-        with:
-          name: ide-plugin-zip
-          path: android/ide-plugin/build/distributions/*.zip
 
   ide-plugin-unit-tests:
     name: "Run IDE Plugin Unit Tests"
@@ -142,20 +115,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-ide-plugin-unit-tests
         with:
-          gradle-tasks: "test"
-          gradle-project-directory: "android/ide-plugin"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Upload Test Results"
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: ide-plugin-test-results
-          path: android/ide-plugin/build/reports/tests/test/
 
   desktop-app-unit-tests:
     name: "Run Desktop App Unit Tests"
@@ -172,20 +134,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-desktop-app-unit-tests
         with:
-          gradle-tasks: ":desktop-app:test"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Upload Test Results"
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: desktop-app-test-results
-          path: android/desktop-app/build/reports/tests/test/
 
   validate-xml:
     name: "Validate XML"
@@ -241,7 +192,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: "Install Bun dependencies"
         run: bun install --frozen-lockfile
@@ -263,10 +214,11 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
+          fetch-depth: 0
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: "detektMain detektTest :build-logic:test"
+          gradle-tasks: "detektMain detektTest :build-logic:test lintDebug"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           # Configuration-cache reuse is deliberately OFF here (#5332), matching
@@ -280,6 +232,25 @@ jobs:
           # test/bats/detekt-config-cache-disabled.bats.
           reuse-configuration-cache: false
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      # origin/main already contains this push. Compare against the previous
+      # main tip; manual dispatch falls back to the first parent.
+      - name: "Check Android lint baselines only shrink"
+        if: success() || failure()
+        env:
+          LINT_BASE_REF: ${{ github.event.before || 'HEAD^' }}
+        run: bash scripts/android/check-lint-baseline-shrink.sh --base-ref "$LINT_BASE_REF"
+
+      - name: "Upload Android Lint Reports"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-lint-reports
+          path: |
+            android/**/build/reports/lint-results-*.html
+            android/**/build/reports/lint-results-*.sarif
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: "Upload Detekt Reports"
         if: failure()
@@ -357,7 +328,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       # Stays in the foreground: it appends node_modules/.bin to $GITHUB_PATH.
       - name: "Install Bun dependencies"
@@ -419,7 +390,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: "Install Bun dependencies"
         shell: bash
@@ -457,7 +428,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       # Stays in the foreground: it appends node_modules/.bin to $GITHUB_PATH.
       - name: "Install Bun dependencies"
@@ -545,7 +516,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: "Install Bun dependencies"
         shell: "bash"
@@ -697,23 +668,23 @@ jobs:
       actions: write
       contents: read
     runs-on: ${{ matrix.os }}
-    # 1560s unit lane cap (one infra retry) + 600s rechecks + 120s reserve < 2400s.
+    # Windows unsets the shard wall budget below; the 40-minute job timeout
+    # bounds setup, the complete unit lane, diagnostics and rerun dispatch.
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [windows-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
-          fetch-depth: 2
 
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: "Install Bun dependencies"
         shell: bash
@@ -727,22 +698,11 @@ jobs:
           # 2 x (720s budget + 60s attempt overhead): a shard that times out or
           # is killed by a signal is retried once (#10583).
           AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560"
-          AUTOMOBILE_UNIT_JUNIT_DIR: scratch/timing-unit-reports
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
           fi
           bash scripts/test-ts.sh unit
-
-      - name: "Enforce 100ms budget for merged unit tests"
-        if: runner.os == 'Linux'
-        shell: bash
-        env:
-          BUN_TEST_TIMING_BASE_REF: HEAD^
-          BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
-          # 1560s unit lane cap + 600s rechecks + 120s reserve < 2400s job timeout.
-          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "600"
-        run: bash scripts/validate-bun-test-timings.sh
 
       - name: "Upload unit test diagnostics"
         if: always()
@@ -788,7 +748,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: "Install Bun dependencies"
         shell: bash
@@ -1201,31 +1161,31 @@ jobs:
 
   ts-code-coverage:
     name: "TypeScript Code Coverage"
+    # The per-merge README badge and Ubuntu unit gate share this one run (#13569).
+    # PRs retain their separate required, uninstrumented build-and-test check.
+    permissions:
+      actions: write
+      contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 1560s lane + 600s rechecks + 480s for setup/build/global install,
+    # post-lane probes, report merging and badge upload < 2700s.
+    timeout-minutes: 45
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          fetch-depth: 2
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Run Tests with Coverage"
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+          AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+          # One infra retry; the shared unit supervisor bounds both attempts.
+          AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560"
         run: bash scripts/ci/run-ts-coverage.sh
-
-      - name: "Upload TypeScript Coverage Diagnostics"
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: ts-coverage-diagnostics
-          path: |
-            ci-logs/ts-coverage.log
-            coverage/shards/*.ndjson
-            coverage/shards/*.log
-            coverage/shards/*-chunk-*.log
-          if-no-files-found: ignore
-          retention-days: 7
 
       - name: "Recover Coverage if needed"
         run: bash scripts/ci/verify-ts-coverage-output.sh
@@ -1239,6 +1199,48 @@ jobs:
           name: ts-coverage-badge
           path: coverage/ts-coverage-badge.json
           retention-days: 90
+
+      # Coverage JUnit selects provisional offenders only. The validator measures
+      # their uninstrumented isolated medians, so instrumentation cannot fail 100ms.
+      - name: "Enforce 100ms budget for merged unit tests"
+        shell: bash
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+          BUN_TEST_TIMING_BASE_REF: HEAD^
+          BUN_TEST_TIMING_REPORT_DIR: coverage/shards
+          BUN_TEST_TIMING_REPORTS_INSTRUMENTED: "true"
+          # The 45-minute job also reserves setup and post-lane headroom.
+          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "600"
+        run: bash scripts/validate-bun-test-timings.sh
+
+      - name: "Upload TypeScript Coverage Diagnostics"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ts-coverage-diagnostics
+          path: |
+            ci-logs/ts-coverage.log
+            coverage/shards/**
+            scratch/bun-test-report.recheck.d/**
+            scratch/watchdog-snapshot-*.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Last step on purpose: qualify a failure from this job's own summary file
+      # (test-ts.sh appends RUNNER-CONTENDED there) and, on attempt 1, ask
+      # rerun-contended-runner.yml to rerun the failed jobs once the run
+      # completes. A job cannot rerun its own in-progress run. Fork PRs have a
+      # read-only token, so they skip; the script is a logged no-op on any
+      # dispatch error and never changes this job's result (#12758).
+      - name: "Request fresh-runner rerun on runner contention"
+        if: failure() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: bash scripts/ci/rerun-contended-runner.sh dispatch "$GITHUB_STEP_SUMMARY" "$RUN_ID" "$RUN_ATTEMPT"
 
   # =============================================================================
   # Kotlin Code Coverage
@@ -1256,7 +1258,7 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":junit-runner:test :junit-runner:jacocoTestReport :control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test"
+          gradle-tasks: ":junit-runner:test :junit-runner:jacocoTestReport :control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :protoviewer:testDebugUnitTest :protoviewer:createDebugUnitTestCoverageReport :protoviewer:verifyProtoViewerDependencies :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
@@ -1430,41 +1432,3 @@ jobs:
             exit 1
           fi
           echo "::notice::MCP context baseline benchmark completed"
-
-  # =============================================================================
-  # Auto-update README Test Count Badges
-  # =============================================================================
-
-  update-readme-badges:
-    name: "Update README Test Count Badges"
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    # Serialize badge pushes so two merges can't race to push a badge commit to
-    # main at once (issue #3590). cancel-in-progress:false lets a queued run wait
-    # rather than drop the update; the run recomputes counts from scratch anyway.
-    concurrency:
-      group: update-readme-badges
-      cancel-in-progress: false
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-          fetch-depth: 0 # Full history so the badge commit push to main isn't rejected as a shallow update
-          token: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
-
-      - name: "Commit and push badge update to main"
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # AUTO_MOBILE_PR_TOKEN is an admin actor and bypasses the green-main
-          # ruleset, so the script pushes straight to main with no PR or status
-          # checks. It re-syncs to origin/main and regenerates the badge each
-          # attempt (exiting cleanly when counts are unchanged), so a concurrent
-          # push can never leave a conflicted rebase.
-          bash scripts/push-readme-badges.sh

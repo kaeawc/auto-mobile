@@ -13,8 +13,13 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 const action = fc.constantFrom<"save" | "load">("save", "load");
 const snapshotName = fc.string({ unit: fc.constantFrom("a", "b", "1", "_", "-"), maxLength: 12 });
 // evaluate only reads .stdout/.stderr off the ExecResult.
-const asResult = (stdout: string, stderr: string): ExecResult =>
-  ({ stdout, stderr }) as unknown as ExecResult;
+const asResult = (stdout: string, stderr: string): ExecResult => ({
+  stdout,
+  stderr,
+  toString: () => stdout,
+  trim: () => stdout.trim(),
+  includes: (s: string) => stdout.includes(s),
+});
 
 // Output lines biased toward the OK/KO tokens (and near-misses like OKAY/BOOK).
 const line = fc.oneof(

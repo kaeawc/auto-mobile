@@ -242,8 +242,8 @@ final class FakeUserDefaultsDriver: UserDefaultsDriver, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         let key = suiteName ?? "standard"
-        return (storage[key] ?? [:]).map { k, v in
-            KeyValuePair(key: k, value: v.value, type: v.type)
+        return (storage[key] ?? [:]).map { k, entry in
+            KeyValuePair(key: k, value: entry.value, type: entry.type)
         }.sorted { $0.key < $1.key }
     }
 

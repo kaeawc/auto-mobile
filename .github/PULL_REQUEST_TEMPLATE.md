@@ -26,10 +26,12 @@ Closes #
 <!-- Almost everything in CI runs locally; see the scripts/ directory. -->
 
 - [ ] `scripts/all_fast_validate_checks.sh` passes (`bun run lint` + `bun test`)
-- [ ] `bun run typecheck` reports no new errors (baseline gate)
+- [ ] `bun run typecheck` and `bun run typecheck:test` report no errors (no baseline)
+- [ ] ProtoViewer screen changes: strings are in the catalog/strings.xml with translator comments; RTL and font-scale/Dynamic Type checked; 48dp/44pt targets and VoiceOver/TalkBack labels checked
 - [ ] Android/iOS changes: ran the matching `scripts/` validation
 - [ ] New code uses interfaces + fakes + FakeTimer; unit tests run in <100ms
 - [ ] New generic code reuses the standard library or an existing project helper; any new direct dependency has a decision record under `docs/decisions/`
+- [ ] Docs describe current behavior only (no progress/status/history narration); `docs/using/` stays end-user, internals go in `docs/design-docs/`
 - [ ] Rebased onto latest `main`, conflicts resolved
 
 ## Kotlin Reuse Check

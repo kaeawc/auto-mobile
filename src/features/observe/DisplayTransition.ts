@@ -1,4 +1,5 @@
 import type { BootedDevice, DisplayRef, ObserveResult } from "../../models";
+import { type ActionClockSkewCache, actionClockSkewCache } from "../action/ActionClockSkewCache";
 import {
   POSTURE_PANEL_ROLES,
   panelKeyForFingerprint,
@@ -543,6 +544,7 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
   }
 
   reset(deviceId: string): void {
+    actionClockSkewCache.invalidate(deviceId);
     this.panels.delete(deviceId);
     this.observationIds.delete(deviceId);
     this.panelRevisions.delete(deviceId);
@@ -557,9 +559,11 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
 
 export function createDisplayCacheInvalidator(
   frameInvalidator: ObservationFrameInvalidator = observationStreamFrameInvalidator,
+  clockSkew: Pick<ActionClockSkewCache, "invalidate"> = actionClockSkewCache,
 ): (deviceId: string, reason: string) => void {
   return (deviceId, reason) => {
     logger.info(`[DisplayTransition] ${deviceId}: ${reason}; clearing panel-scoped state`);
+    clockSkew.invalidate(deviceId);
     try {
       frameInvalidator.invalidateDeviceFrames(deviceId);
     } catch (error) {

@@ -1,7 +1,8 @@
 import { describe, it, expect } from "bun:test";
-import { DefaultDeviceMatcher, compareVersions } from "../../src/server/deviceMatcher";
+import { DefaultDeviceMatcher, compareVersions } from "../../src/utils/deviceMatcher";
 import { matchesDeviceCriteria, describeDisplayRequirements } from "../../src/utils/deviceMatcher";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
+import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";
 import {
   canonicalReleaseVersionsByApiLevel,
   versionToApiLevelRange,
@@ -589,7 +590,12 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
       screenHeight: 2400,
       [displayInventoryOutcome]: { kind: "unreadable", reason: "display service offline" },
     });
-    for (const requires of [{ panels: 1 }, { panels: 2 }, { posture: "default" }]) {
+    const requirements: DeviceMatchCriteria["requires"][] = [
+      { panels: 1 },
+      { panels: 2 },
+      { posture: "opened" },
+    ];
+    for (const requires of requirements) {
       expect(
         matcher.matchBootedDevice({ platform: "android", requires }, [fold], "LATEST"),
       ).toBeNull();
@@ -884,6 +890,23 @@ describe("DefaultDeviceMatcher.matchDeviceImage", () => {
       matcher.matchDeviceImage({ platform: "android", formFactor: "tablet" }, images, "LATEST")
         ?.name,
     ).toBe("Tablet");
+  });
+
+  it("never matches tv, watch or automotive images to phone or tablet criteria", () => {
+    const images = [
+      deviceImage({ name: "TV", formFactor: "tv", osVersion: "14" }),
+      deviceImage({ name: "Watch", formFactor: "watch", osVersion: "14" }),
+      deviceImage({ name: "Car", formFactor: "automotive", osVersion: "14" }),
+    ];
+    for (const formFactor of ["phone", "tablet"] as const) {
+      expect(matcher.matchDeviceImage({ platform: "android", formFactor }, images, "LATEST")).toBe(
+        null,
+      );
+    }
+    expect(
+      matcher.matchDeviceImage({ platform: "android", formFactor: "watch" }, images, "LATEST")
+        ?.name,
+    ).toBe("Watch");
   });
 
   it("returns null when no images match", () => {

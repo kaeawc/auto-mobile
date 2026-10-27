@@ -4,7 +4,6 @@ import { runWithSelectedDisplayPin } from "../../src/features/observe/SessionDis
 import type {
   TapAtResult,
   TapOnElementResult,
-  TapAnyElementResult,
   SwipeOnResult,
   DragAndDropResult,
   PinchOnResult,
@@ -37,6 +36,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { observation } from "../helpers/tapAtCoordinate";
+import type { TapAnyElementResult } from "../../src/models/TapAnyElementResult";
 
 const interactionDeps: InteractionToolDependencies = {};
 const bounds = { left: 0, top: 0, right: 0, bottom: 0 };
@@ -118,7 +118,7 @@ describe("stale-display result channel", () => {
     });
     const response = await tapOnHandler(
       device,
-      { selector: { text: "Target" } },
+      { action: "tap", selector: { text: "Target" } },
       undefined,
       undefined,
       interactionDeps,

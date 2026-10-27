@@ -17,7 +17,7 @@ public enum SdkHierarchyExtractor {
     ) {
         // Fast path: skip full JSON decode if batch doesn't contain a hierarchy event.
         // Scan the raw UTF-8 bytes rather than allocating a whole-buffer String copy.
-        guard batchData.range(of: viewHierarchyEventTypeBytes) != nil else { return }
+        guard batchData.contains(viewHierarchyEventTypeBytes) else { return }
 
         let batch: SdkEventBatchEnvelope
         do {
@@ -74,7 +74,7 @@ struct SdkEventBatchEnvelope: Decodable {
         while !list.isAtEnd {
             // A failed element decode does not advance the container; decode a placeholder to skip it.
             do {
-                entries.append(.success(try list.decode(SdkEventEnvelopeEntry.self)))
+                try entries.append(.success(list.decode(SdkEventEnvelopeEntry.self)))
             } catch {
                 _ = try list.decode(SdkSkippedElement.self)
                 entries.append(.failure(error))

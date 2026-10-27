@@ -1,3 +1,4 @@
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 /**
  * The placeholder grammar and bindable-field set shared by `repeat` list templates and reusable
  * components (#11051, #11053).
@@ -11,14 +12,13 @@
 export type Raw = Record<string, unknown>;
 
 /** A literal state key, and the shape of every repeat field name and component prop name. */
-export const STATE_KEY = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+export const STATE_KEY = prototypeContractPatterns.stateKey;
 
 /**
  * A state-key field: a literal key, or key characters mixed with at least one placeholder that
  * must bind to a literal key for every instance. Both validators re-check the bound result.
  */
-export const BOUND_STATE_KEY_PATTERN =
-  /^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\{)(?:[A-Za-z0-9_]|\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\.[A-Za-z_][A-Za-z0-9_]{0,63})\})+)$/;
+export const BOUND_STATE_KEY_PATTERN = prototypeContractPatterns.boundKey;
 
 export type Segment =
   | { kind: "literal"; text: string }
@@ -146,7 +146,10 @@ export type FieldKind =
   | "dataPath"
   | "requestInto"
   | "request"
-  | "deviceRequest";
+  | "deviceRequest"
+  | "scrollTo"
+  | "timer"
+  | "stackTransition";
 
 /** True for the kinds holding a `/data/...` path with `{index}` segments. */
 export const isDataPathKind = (kind: FieldKind): boolean =>
@@ -223,6 +226,39 @@ function mapBinding(value: unknown, at: string, visit: FieldVisitor): unknown {
     : visit(value, at, "emitBinding");
 }
 
+function mapEmitAction(action: Raw, path: string, visit: FieldVisitor): void {
+  mapField(action, "name", path, "emitName", visit);
+  mapField(action, "context", path, "emitContext", visit);
+  if (record(action.context)) {
+    action.context = Object.fromEntries(
+      Object.entries(record(action.context)!).map(([name, value]) => {
+        const at = prototypeContractPatterns.pathKey.test(name)
+          ? `${path}.context.${name}`
+          : `${path}.context[${JSON.stringify(name)}]`;
+        return [name, mapBinding(value, at, visit)];
+      }),
+    );
+  }
+  mapKeyList(action, "requireValid", path, visit);
+}
+
+function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
+  mapField(action, "path", path, "dataPath", visit);
+  if (action.type !== "removeData" && action.value !== undefined) {
+    action.value = mapBinding(action.value, `${path}.value`, visit);
+  }
+}
+
+function mapTimerAction(action: Raw, path: string, visit: FieldVisitor): void {
+  if (action.type !== "startTimer" && action.type !== "cancelTimer") {
+    return;
+  }
+  visit(action, path, "timer");
+  if (action.type === "startTimer") {
+    mapList(action, "actions", path, (entry, at) => mapAction(entry, at, visit));
+  }
+}
+
 function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
   switch (action.type) {
     case "setState":
@@ -230,19 +266,7 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       mapField(action, "value", path, "operand", visit);
       break;
     case "emit":
-      mapField(action, "name", path, "emitName", visit);
-      mapField(action, "context", path, "emitContext", visit);
-      if (record(action.context)) {
-        action.context = Object.fromEntries(
-          Object.entries(record(action.context)!).map(([name, value]) => {
-            const at = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
-              ? `${path}.context.${name}`
-              : `${path}.context[${JSON.stringify(name)}]`;
-            return [name, mapBinding(value, at, visit)];
-          }),
-        );
-      }
-      mapKeyList(action, "requireValid", path, visit);
+      mapEmitAction(action, path, visit);
       break;
     case "toggle":
     case "increment":
@@ -251,25 +275,37 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       break;
     case "setData":
     case "appendData":
-      mapField(action, "path", path, "dataPath", visit);
-      if (action.value !== undefined) {
-        action.value = mapBinding(action.value, `${path}.value`, visit);
-      }
-      break;
     case "removeData":
-      mapField(action, "path", path, "dataPath", visit);
+      mapDataAction(action, path, visit);
       break;
     case "request":
       mapRequestAction(action, path, visit);
       break;
+    case "platform":
+      mapPlatformAction(action, path, visit);
+      break;
+    case "scrollTo":
+      // Marks the whole action so the chat scroll gate can locate it (#14232).
+      visit(action, path, "scrollTo");
+      break;
     default:
+      mapTimerAction(action, path, visit);
+      mapNavigationTransition(action, path, visit);
       break;
   }
   return action;
 }
 
+function mapNavigationTransition(action: Raw, path: string, visit: FieldVisitor): void {
+  if (action.type === "push" || action.type === "replace") {
+    mapField(action, "transition", path, "stackTransition", visit);
+  }
+}
+
 const memberPath = (path: string, name: string): string =>
-  /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? `${path}.${name}` : `${path}[${JSON.stringify(name)}]`;
+  prototypeContractPatterns.pathKey.test(name)
+    ? `${path}.${name}`
+    : `${path}[${JSON.stringify(name)}]`;
 
 /** A header or query entry: a literal is text, an object is a value binding. */
 function mapRequestEntries(action: Raw, field: string, path: string, visit: FieldVisitor): void {
@@ -298,6 +334,24 @@ function mapRequestAction(action: Raw, path: string, visit: FieldVisitor): void 
   mapRequestEntries(action, "query", path, visit);
   if (action.body !== undefined) {
     action.body = mapBinding(action.body, `${path}.body`, visit);
+  }
+  mapField(action, "into", path, "requestInto", visit);
+  mapField(action, "statusKey", path, "key", visit);
+  for (const field of ["onSuccess", "onError"]) {
+    mapList(action, field, path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  }
+}
+
+/** A `platform` call (#14294): each argument is a value binding, `into` the request grammar. */
+function mapPlatformAction(action: Raw, path: string, visit: FieldVisitor): void {
+  const args = record(action.args);
+  if (args) {
+    action.args = Object.fromEntries(
+      Object.entries(args).map(([name, value]) => [
+        name,
+        mapBinding(value, memberPath(`${path}.args`, name), visit),
+      ]),
+    );
   }
   mapField(action, "into", path, "requestInto", visit);
   mapField(action, "statusKey", path, "key", visit);
@@ -342,6 +396,10 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
     mapList(node, "trailingActions", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
     mapList(node, "onSubmit", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
   },
+  tooltip: (node, path, visit) => {
+    mapField(node, "text", path, "text", visit);
+    mapList(node, "onDismiss", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  },
   dialog: (node, path, visit) => {
     mapField(node, "title", path, "text", visit);
     mapField(node, "text", path, "text", visit);
@@ -369,7 +427,7 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
 
 /** State-key fields a node binds besides its condition and action keys. */
 function mapNodeKeys(node: Raw, path: string, visit: FieldVisitor): void {
-  for (const field of ["stateKey", "activeKey", "hourKey", "minuteKey"]) {
+  for (const field of ["stateKey", "activeKey", "hourKey", "minuteKey", "atEndKey"]) {
     mapField(node, field, path, "key", visit);
   }
   for (const part of ["trailing", "openWhen", "refresh"]) {
@@ -389,6 +447,10 @@ export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor):
   const copy = { ...node };
   if (copy.type === "text") {
     mapField(copy, "text", path, "text", visit);
+    mapObject(copy, "linkify", path, (options, optionsPath) => {
+      mapActions(options, optionsPath, visit);
+      return options;
+    });
     mapList(copy, "spans", path, (span, spanPath) => {
       mapField(span, "text", spanPath, "text", visit);
       mapActions(span, spanPath, visit);
@@ -480,7 +542,15 @@ export function bindCheckedKeys(value: Raw, instance: Instance): Raw {
     );
   }
   const bind = (entry: unknown) => (typeof entry === "string" ? bindText(entry, instance) : entry);
-  for (const field of ["key", "stateKey", "statusKey", "activeKey", "hourKey", "minuteKey"]) {
+  for (const field of [
+    "key",
+    "stateKey",
+    "statusKey",
+    "activeKey",
+    "hourKey",
+    "minuteKey",
+    "atEndKey",
+  ]) {
     if (copy[field] !== undefined) {
       copy[field] = bind(copy[field]);
     }
@@ -498,4 +568,21 @@ export function bindCheckedKeys(value: Raw, instance: Instance): Raw {
     copy.refresh = { ...refresh, stateKey: bind(refresh.stateKey) };
   }
   return copy;
+}
+
+/** Visit root platform handler actions, in the contract's sorted event-name order. */
+export function visitPrototypeHandlerFields(spec: unknown, visit: FieldVisitor): void {
+  const handlers = record(record(record(spec)?.platform)?.on);
+  for (const name of Object.keys(handlers ?? {}).sort()) {
+    const actions = handlers![name];
+    if (!Array.isArray(actions)) {
+      continue;
+    }
+    actions.forEach((action, index) => {
+      const value = record(action);
+      if (value) {
+        mapAction(value, `platform.on[${JSON.stringify(name)}][${index}]`, visit);
+      }
+    });
+  }
 }

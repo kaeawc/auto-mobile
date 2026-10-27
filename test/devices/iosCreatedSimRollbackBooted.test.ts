@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import {
   resetDeviceCreationGate,
   setDeviceCreationGate,
 } from "../../src/devices/deviceCreationGate";
 import { logger } from "../../src/utils/logger";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import type { DeviceClientSimctl } from "../../src/daemon/readiness/DeviceReadiness";
+import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -13,6 +14,8 @@ import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
+import { SimulatorStillShuttingDownError } from "../../src/utils/ios-cmdline-tools/SimulatorStillShuttingDownError";
 
 const CREATED = "ROLLBACK-CREATED-UDID";
 const EXISTING = "ROLLBACK-EXISTING-UDID";
@@ -21,6 +24,8 @@ interface SimState {
   /** UDID -> simctl state of every simulator that exists. */
   sims: Map<string, "Booted" | "Shutdown">;
   calls: string[];
+  shutdownTimeoutMs?: number;
+  deleteTimeoutMs?: number;
   /** Leave the created simulator listed after a successful delete. */
   ghostAfterDelete?: boolean;
   shutdownError?: Error;
@@ -34,12 +39,10 @@ function newState(): SimState {
 }
 
 /**
- * Stateful simctl fake: CoreSimulator refuses `delete` of a simulator that is not
- * Shutdown ("Unable to delete device in current state: Booted"), and `shutdown` of a
- * Shutdown one reports its current state, the same state-machine rule the real
- * client's boot 405 encodes.
+ * Stateful simctl fake: delete rejects a running device, and shutdown of a
+ * stopped device reports the same state-machine 405 as the real client.
  */
-function statefulSimctl(state: SimState): SimCtlClient {
+function statefulSimctl(state: SimState): DeviceClientSimctl {
   const listed = (): DeviceInfo[] =>
     [...state.sims].map(([deviceId, simState]) => ({
       name: "iPhone 17",
@@ -50,6 +53,7 @@ function statefulSimctl(state: SimState): SimCtlClient {
       isAvailable: true,
     }));
   return {
+    ...fakeDeviceManagerSimctl(),
     listSimulatorImages: async () => listed(),
     getBootedSimulators: async () => [],
     getBootedSimulatorsChecked: async () => [],
@@ -77,8 +81,9 @@ function statefulSimctl(state: SimState): SimCtlClient {
       return { deviceId: udid, name: "AutoMobile-iPhone-17", platform: "ios" };
     },
     presentSimulatorAfterStart: async () => {},
-    killSimulator: async (device: BootedDevice) => {
+    killSimulator: async (device: BootedDevice, options) => {
       state.calls.push(`shutdown ${device.deviceId}`);
+      state.shutdownTimeoutMs = options?.timeoutMs;
       if (state.shutdownError) {
         throw state.shutdownError;
       }
@@ -89,8 +94,9 @@ function statefulSimctl(state: SimState): SimCtlClient {
       }
       state.sims.set(device.deviceId, "Shutdown");
     },
-    deleteSimulator: async (udid: string) => {
+    deleteSimulator: async (udid: string, options) => {
       state.calls.push(`delete ${udid}`);
+      state.deleteTimeoutMs = options?.timeoutMs;
       if (state.deleteError) {
         throw state.deleteError;
       }
@@ -107,7 +113,7 @@ function statefulSimctl(state: SimState): SimCtlClient {
     getDeviceInfo: async () => {
       throw new Error("runner readiness failed");
     },
-  } as unknown as SimCtlClient;
+  };
 }
 
 function makeManager(state: SimState, runner: FakeIOSCtrlProxyManager, timer = new FakeTimer()) {
@@ -117,7 +123,7 @@ function makeManager(state: SimState, runner: FakeIOSCtrlProxyManager, timer = n
     await stop();
   };
   const adb = new FakeAdbExecutor();
-  return DeviceSessionManager.createInstance(
+  return DeviceReadiness.createInstance(
     new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), statefulSimctl(state), {
       iosCtrlProxyManager: runner,
     }),
@@ -154,6 +160,8 @@ describe("findOrStartIosDevice rollback of a created simulator", () => {
       `delete ${CREATED}`,
     ]);
     expect(state.sims.has(CREATED)).toBe(false);
+    expect(state.shutdownTimeoutMs).toBe(DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS);
+    expect(state.deleteTimeoutMs).toBe(DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS);
     expect(warnings().some((message) => message.includes("may be left behind"))).toBe(false);
   });
 
@@ -170,18 +178,39 @@ describe("findOrStartIosDevice rollback of a created simulator", () => {
     expect(warnings().some((message) => message.includes("may be left behind"))).toBe(false);
   });
 
-  test("a failed shutdown surfaces the original error, warns with UDID and state, and skips delete", async () => {
+  test.each([
+    new Error("simctl shutdown timed out"),
+    new SimulatorStillShuttingDownError(CREATED, "Created simulator", "Shutting Down", 10_000),
+  ])(
+    "a failed shutdown attempts delete and warns when Booted prevents deletion: %s",
+    async (shutdownError) => {
+      const state = newState();
+      state.shutdownError = shutdownError;
+      const manager = makeManager(state, new FakeIOSCtrlProxyManager());
+
+      await expect(manager.findOrStartIosDevice()).rejects.toThrow("runner readiness failed");
+
+      expect(state.calls).toContain(`delete ${CREATED}`);
+      expect(state.sims.get(CREATED)).toBe("Booted");
+      const warning = warnings().find((message) => message.includes("attempting delete"));
+      expect(warning).toContain(CREATED);
+      expect(warning).toContain(shutdownError.message);
+      const leftover = warnings().find((message) => message.includes("may be left behind"));
+      expect(leftover).toContain("state: Booted");
+      expect(leftover).toContain("Unable to delete device in current state: Booted");
+    },
+  );
+
+  test("a shutdown failure followed by a delete failure still reports the leftover state", async () => {
     const state = newState();
     state.shutdownError = new Error("simctl shutdown timed out");
+    state.deleteError = new Error("delete failed too");
     const manager = makeManager(state, new FakeIOSCtrlProxyManager());
-
     await expect(manager.findOrStartIosDevice()).rejects.toThrow("runner readiness failed");
-
-    expect(state.calls).not.toContain(`delete ${CREATED}`);
+    expect(state.calls).toContain(`delete ${CREATED}`);
     const leftover = warnings().find((message) => message.includes("may be left behind"));
-    expect(leftover).toContain(CREATED);
     expect(leftover).toContain("state: Booted");
-    expect(leftover).toContain("simctl shutdown timed out");
+    expect(leftover).toContain("delete failed too");
   });
 
   test("a failed delete surfaces the original error and warns with the leftover state", async () => {

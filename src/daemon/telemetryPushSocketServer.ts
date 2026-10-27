@@ -23,11 +23,8 @@ import {
 import { TELEMETRY_PUSH_SOCKET_CONFIG } from "./daemonFiles";
 import { truncateBodyText, boundStructuredField } from "../utils/truncateBodyText";
 import { buildNavigationNodeScreenshotUri } from "../utils/navigationResourceUri";
-import {
-  type DeviceSessionResolver,
-  nullDeviceSessionResolver,
-  SuspendedDeviceRoutingLog,
-} from "./deviceSessionResolver";
+import { type DeviceSessionResolver, nullDeviceSessionResolver } from "./deviceSessionResolver";
+import { SuspendedDeviceRoutingLog } from "./SuspendedDeviceRoutingLog";
 
 /**
  * Opaque plain-text fields that the backfill fans out (limit=100) and that can
@@ -159,6 +156,40 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
   /** Wire the serial↔`deviceSessionUuid` resolver used to stamp and route events. */
   setDeviceSessionResolver(resolver: DeviceSessionResolver): void {
     this.deviceSessionResolver = resolver;
+  }
+
+  /**
+   * Whether a live subscriber could receive performance telemetry for this device.
+   * A subscriber still backfilling counts: pushToSubscribers queues its live events
+   * until the backfill finishes, and push-only performance events have no DB copy
+   * the backfill could recover (#14461).
+   */
+  hasSubscriberForPerformanceTelemetry(deviceId: string): boolean {
+    return this.hasSubscriberForCategory(deviceId, "performance");
+  }
+
+  /** Whether a live subscriber (including backfill) could receive this device's logs. */
+  hasSubscriberForLogTelemetry(deviceId: string): boolean {
+    return this.hasSubscriberForCategory(deviceId, "log");
+  }
+
+  private hasSubscriberForCategory(
+    deviceId: string,
+    category: TelemetryEvent["category"],
+  ): boolean {
+    const deviceSessionUuid = this.deviceSessionResolver.resolveUuid(deviceId);
+    for (const subscriber of this.subscribers.values()) {
+      const { filter } = subscriber;
+      // The event's sessionId is unknown at demand time; ignoring it only over-counts demand.
+      if (
+        !subscriber.socket.destroyed &&
+        (filter.category === null || filter.category === category) &&
+        (filter.deviceSessionUuid === null || filter.deviceSessionUuid === deviceSessionUuid)
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Stamp the live `deviceSessionUuid` for an event's serial (epic #5256). */

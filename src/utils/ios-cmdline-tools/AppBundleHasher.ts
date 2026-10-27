@@ -6,12 +6,20 @@ import { sortedReaddir } from "../io";
 interface AppBundleHasherDependencies {
   readDir: (path: string) => Promise<string[]>;
   stat: (path: string) => Promise<{ isDirectory: () => boolean; isFile: () => boolean }>;
+  lstat: (path: string) => Promise<{
+    isDirectory: () => boolean;
+    isFile: () => boolean;
+    isSymbolicLink: () => boolean;
+  }>;
+  readLink: (path: string) => Promise<string>;
   readFile: (path: string) => Promise<Buffer>;
 }
 
 const defaultDependencies: AppBundleHasherDependencies = {
   readDir: async (path) => sortedReaddir(path),
   stat: async (path) => fs.stat(path),
+  lstat: async (path) => fs.lstat(path),
+  readLink: async (path) => fs.readlink(path),
   readFile: async (path) => fs.readFile(path),
 };
 
@@ -30,25 +38,46 @@ const shouldSkipPath = (relativePath: string): boolean => {
   return skipFileName(fileName);
 };
 
+interface AppBundleHasherOptions {
+  includeSigningMetadata?: boolean;
+  lengthPrefixed?: boolean;
+  /** Seal entry types and link targets without following symlinks; implies length framing. */
+  sealLinks?: boolean;
+}
+
+interface BundleEntry {
+  relativePath: string;
+  type: "file" | "directory" | "symlink" | "other";
+}
+
 const collectPaths = async (
   root: string,
   current: string,
   deps: AppBundleHasherDependencies,
-  output: string[],
+  output: BundleEntry[],
+  options: AppBundleHasherOptions,
 ): Promise<void> => {
   const entries = await deps.readDir(current);
   entries.sort();
   for (const entry of entries) {
     const fullPath = join(current, entry);
-    const stats = await deps.stat(fullPath);
+    const linkStats = options.sealLinks ? await deps.lstat(fullPath) : undefined;
+    const stats = linkStats ?? (await deps.stat(fullPath));
     const relPath = relative(root, fullPath).replace(/\\/g, "/");
-    if (shouldSkipPath(relPath)) {
+    if (!options.includeSigningMetadata && shouldSkipPath(relPath)) {
       continue;
     }
-    if (stats.isDirectory()) {
-      await collectPaths(root, fullPath, deps, output);
+    let type: BundleEntry["type"] = "other";
+    if (linkStats?.isSymbolicLink()) {
+      type = "symlink";
+    } else if (stats.isDirectory()) {
+      type = "directory";
+      await collectPaths(root, fullPath, deps, output, options);
     } else if (stats.isFile()) {
-      output.push(relPath);
+      type = "file";
+    }
+    if (options.sealLinks || type === "file") {
+      output.push({ relativePath: relPath, type });
     }
   }
 };
@@ -56,18 +85,42 @@ const collectPaths = async (
 export const hashAppBundle = async (
   bundlePath: string,
   deps: AppBundleHasherDependencies = defaultDependencies,
+  options: AppBundleHasherOptions = {},
 ): Promise<string> => {
+  if (options.sealLinks) {
+    const root = await deps.lstat(bundlePath);
+    if (!root.isDirectory()) {
+      throw new Error("Sealed app bundle root must be a real directory");
+    }
+  }
   const hash = createHash("sha256");
-  const files: string[] = [];
-  await collectPaths(bundlePath, bundlePath, deps, files);
-  files.sort();
-  for (const relativePath of files) {
+  const entries: BundleEntry[] = [];
+  await collectPaths(bundlePath, bundlePath, deps, entries, options);
+  entries.sort((a, b) =>
+    a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : 0,
+  );
+  for (const { relativePath, type } of entries) {
     const fullPath = join(bundlePath, relativePath);
-    hash.update(relativePath);
-    hash.update("\0");
-    const contents = await deps.readFile(fullPath);
-    hash.update(contents);
-    hash.update("\0");
+    const fields: Buffer[] = options.sealLinks ? [Buffer.from(type, "utf8")] : [];
+    fields.push(Buffer.from(relativePath, "utf8"));
+    if (type === "file") {
+      fields.push(await deps.readFile(fullPath));
+    } else if (type === "symlink") {
+      fields.push(Buffer.from(await deps.readLink(fullPath), "utf8"));
+    }
+    // Preserve the legacy digest for persisted app-content/compatibility hashes.
+    // Security cache keys opt into unambiguous byte-length framing instead.
+    for (const bytes of fields) {
+      if (options.lengthPrefixed || options.sealLinks) {
+        const length = Buffer.alloc(8);
+        length.writeBigUInt64BE(BigInt(bytes.length));
+        hash.update(length);
+        hash.update(bytes);
+      } else {
+        hash.update(bytes);
+        hash.update("\0");
+      }
+    }
   }
   return hash.digest("hex");
 };

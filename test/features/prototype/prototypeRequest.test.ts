@@ -1,3 +1,5 @@
+import type { PrototypeRequestJson } from "../../../src/features/prototype/prototypeRequestProtocol";
+
 import { describe, expect, test } from "bun:test";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
@@ -44,7 +46,7 @@ const request = (extra: Raw = {}): Raw =>
 function spec(onTap: Raw[], extra: Raw = {}, state: Raw = {}) {
   return {
     id: "req",
-    window: { placement: { type: "fullscreen" } },
+    window: { placement: { type: "fullscreen" }, opacity: 1 },
     state: { status: "idle", count: 0, flag: false, q: "a", ...state },
     data: { title: "T" },
     root: { type: "button", label: "Go", onTap },
@@ -79,7 +81,7 @@ describe("request action validation", () => {
     expect(check({ type: "request", url: "https://example.com" }).success).toBe(true);
   });
 
-  test.each(PROTOTYPE_REQUEST_METHODS)("accepts method %s", (method) => {
+  test.each([...PROTOTYPE_REQUEST_METHODS])("accepts method %s", (method) => {
     const body = method === "GET" || method === "HEAD" ? {} : { body: { value: 1 } };
     expect(check(request({ method, ...body })).success).toBe(true);
   });
@@ -240,7 +242,7 @@ describe("request action validation", () => {
     expect(check(nested(depth)).success).toBe(true);
     const over = failure(nested(depth + 1));
     expect(over?.message).toBe("Action nesting limit exceeded");
-    expect(over?.path.split("onSuccess").length - 1).toBe(depth);
+    expect((over?.path.split("onSuccess").length ?? 0) - 1).toBe(depth);
   });
 
   test("the emit name used for request events is reserved", () => {
@@ -289,11 +291,11 @@ describe("request contract mirror", () => {
     expect(Object.keys(option!.shape).sort()).toEqual(Object.keys(variant.fields).sort());
   });
 
-  test("request is the only action whose lists nest actions", () => {
+  test("request, platform and startTimer are the actions whose lists nest actions", () => {
     const nesting = Object.entries(contract.definitions.action.variants).filter(([, variant]) =>
       JSON.stringify(variant).includes('"name":"action"'),
     );
-    expect(nesting.map(([name]) => name)).toEqual(["request"]);
+    expect(nesting.map(([name]) => name)).toEqual(["request", "platform", "startTimer"]);
   });
 });
 
@@ -379,7 +381,7 @@ describe("request capability gates", () => {
   test("component definitions are located at their authored path", () => {
     const fields = gatesOf({
       id: "c",
-      window: { placement: { type: "fullscreen" } },
+      window: { placement: { type: "fullscreen" }, opacity: 1 },
       components: {
         Loader: { root: { type: "button", label: "x", onTap: [request({ via: "device" })] } },
       },
@@ -530,16 +532,15 @@ describe("resolvePrototypeRequest", () => {
 });
 
 describe("applyPrototypeRequestOutcome", () => {
-  const ok = (body: unknown, status = 200) =>
-    ({
-      type: "prototype_response",
-      requestId: "r",
-      ok: true,
-      status,
-      headers: { "content-type": "application/json" },
-      body,
-      durationMs: 12,
-    }) as never;
+  const ok = (body: PrototypeRequestJson, status = 200) => ({
+    type: "prototype_response" as const,
+    requestId: "r",
+    ok: true as const,
+    status,
+    headers: { "content-type": "application/json" },
+    body,
+    durationMs: 12,
+  });
 
   test("meta is a sibling key with the suffix on the last segment", () => {
     expect(prototypeRequestMetaPath("/data/feed")).toBe("/data/feed__meta");
@@ -553,7 +554,7 @@ describe("applyPrototypeRequestOutcome", () => {
     expect(result.wroteInto).toBe(false);
     expect(result.meta.error).toEqual({ code: "invalid_response", message });
     // `into` is untouched and the error metadata still fits, so it is written.
-    expect(result.data).toEqual({ feed__meta: result.meta });
+    expect<unknown>(result.data).toEqual({ feed__meta: result.meta });
     const pad = { pad: "p".repeat(262100) };
     const full = applyPrototypeRequestOutcome(pad, "/data/feed", ok("ab"));
     expect(full.status).toBe("error");
@@ -631,7 +632,11 @@ describe("applyPrototypeRequestOutcome", () => {
 
   test("headers are dropped when only they push the metadata past the write limit", () => {
     const filler = "y".repeat(MAX_PROTOTYPE_DATA_WRITE_BYTES - 400);
-    const response = { ...ok("body"), headers: { "x-big": "z".repeat(1000) } } as never;
+    const success = ok("body");
+    if (typeof success !== "object" || success === null || Array.isArray(success)) {
+      throw new Error("Expected successful response object");
+    }
+    const response = { ...success, headers: { "x-big": "z".repeat(1000) } };
     const result = applyPrototypeRequestOutcome({ pad: filler }, "/data/feed", response);
     expect(result.data.feed).toBe("body");
     expect(result.data.feed__meta).toEqual({ status: 200, durationMs: 12 });
@@ -668,7 +673,7 @@ describe("request events", () => {
   test("decodes a finished request and surfaces it from the decoded event", () => {
     const event = decodeForTest(frame(success));
     expect(event).toBeDefined();
-    expect(prototypeRequestEventOf(event!)).toEqual(success);
+    expect<unknown>(prototypeRequestEventOf(event!)).toEqual(success);
   });
 
   test("an error outcome carries a typed error, with or without a status", () => {

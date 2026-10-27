@@ -200,6 +200,41 @@ extension ElementLocator {
             }
         }
 
+        private func shouldIncludeSnapshotChild(
+            _ child: XCUIElementSnapshot, enclosingFrame: CGRect, coordinateOffset: CGPoint, screenBounds: CGRect
+        )
+            -> Bool
+        {
+            // Skip dialog elements - they are extracted separately to ensure
+            // they're always visible as top-level children.
+            if child.elementType == .alert || child.elementType == .sheet {
+                return false
+            }
+
+            let childFrame = Self.screenFrame(
+                child.frame,
+                enclosingFrame: enclosingFrame,
+                coordinateOffset: coordinateOffset
+            ).frame
+
+            if Self.hasZeroArea(childFrame) {
+                // A zero-area wrapper can still contain on-screen descendants.
+                guard Self.shouldKeepZeroAreaChild(
+                    hasNonZeroAreaDescendant: hasNonZeroAreaDescendant(child)
+                ) else {
+                    return false
+                }
+            } else {
+                // Skip completely offscreen children (with margin)
+                let margin: CGFloat = 50
+                let expandedScreen = screenBounds.insetBy(dx: -margin, dy: -margin)
+                if !expandedScreen.intersects(childFrame) {
+                    return false
+                }
+            }
+            return true
+        }
+
         /// Build element info from XCUIElementSnapshot - all data is already captured, no IPC calls
         /// Applies early filtering: offscreen elements, empty zero-area subtrees
         /// Only sets boolean fields when true (nil = false) to reduce JSON size
@@ -254,33 +289,9 @@ extension ElementLocator {
                 let children = snapshot.children
                 if !children.isEmpty {
                     var filteredChildren = children.enumerated().compactMap { idx, child -> UIElementInfo? in
-                        // Skip dialog elements - they are extracted separately to ensure
-                        // they're always visible as top-level children.
-                        if child.elementType == .alert || child.elementType == .sheet {
-                            return nil
-                        }
-
-                        let childFrame = Self.screenFrame(
-                            child.frame,
-                            enclosingFrame: frame,
-                            coordinateOffset: resolved.offset
-                        ).frame
-
-                        if Self.hasZeroArea(childFrame) {
-                            // A zero-area wrapper can still contain on-screen descendants.
-                            guard Self.shouldKeepZeroAreaChild(
-                                hasNonZeroAreaDescendant: hasNonZeroAreaDescendant(child)
-                            ) else {
-                                return nil
-                            }
-                        } else {
-                            // Skip completely offscreen children (with margin)
-                            let margin: CGFloat = 50
-                            let expandedScreen = screenBounds.insetBy(dx: -margin, dy: -margin)
-                            if !expandedScreen.intersects(childFrame) {
-                                return nil
-                            }
-                        }
+                        guard shouldIncludeSnapshotChild(
+                            child, enclosingFrame: frame, coordinateOffset: resolved.offset, screenBounds: screenBounds
+                        ) else { return nil }
 
                         return buildElementInfoFromSnapshot(
                             child,

@@ -1,3 +1,6 @@
+import { createSendKeysTextClient } from "../../../src/features/action/sendkeys/CtrlProxyTextClient";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../../src/utils/debug";
 import type { ObserveResult } from "../../../src/models";
@@ -12,7 +15,7 @@ const device = { ...android, deviceId: "ime-trace-fake" };
 afterEach(() => clearAndroidImeQuarantine(device.deviceId));
 
 function passwordField(): ObserveResult {
-  return {
+  return buildObserveResult({
     ...focused,
     viewHierarchy: {
       hierarchy: {
@@ -21,7 +24,7 @@ function passwordField(): ObserveResult {
         },
       },
     },
-  };
+  });
 }
 
 function harness(
@@ -144,7 +147,7 @@ describe("IME trace opt-in", () => {
     async (path) => {
       setDebugModeEnabled(true);
       const h = harness("hello");
-      h.adb.setCommandResponse("shell ime disable", { stdout: "", stderr: "disable failed" });
+      h.adb.setCommandResponse("shell ime disable", createExecResult("", "disable failed"));
       h.client.supportsImeTrace = async () => true;
       h.client.commitViaIme = async () => ({
         success: true,
@@ -170,6 +173,7 @@ describe("IME trace opt-in", () => {
     h.client.commitViaIme = async (text) => ({
       success: true,
       insertedText: text,
+      totalTimeMs: 0,
       imeTrace: [`seq=${++commits} t=0 event=complete`],
     });
     const result = await h.action.execute([
@@ -238,13 +242,14 @@ test("Android SendKeys adapter forwards the consumed verdict", async () => {
   const client = AndroidCtrlProxyClient.createForTesting(device, h.adb);
   const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
   const commit = spyOn(client, "commitViaIme").mockResolvedValue({
+    totalTimeMs: 0,
     success: true,
     insertedText: "helloworld",
     editorConsumed: true,
   });
   try {
-    const adapter = h.executor["createTextClient"](h.adbFactory);
-    expect(await adapter.commitViaIme("hello\nworld", undefined)).toMatchObject({
+    const adapter = createSendKeysTextClient(device, h.adbFactory);
+    expect(await adapter.commitViaIme("hello\nworld", null)).toMatchObject({
       success: true,
       insertedText: "helloworld",
       editorConsumed: true,

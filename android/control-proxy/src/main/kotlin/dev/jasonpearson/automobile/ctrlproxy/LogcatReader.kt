@@ -206,21 +206,39 @@ internal constructor(
 
   private fun isOwnDiagnostic(line: String): Boolean {
     if (line.length < 22) return false
-    var index = 18 // after MM-DD HH:MM:SS.mmm
+    val header = DiagnosticHeader(line)
+    val pid = header.readPid()
+    if (pid == null || pid != processId) return false
+    val index = header.levelIndex()
+    return index < line.length &&
+      (line[index] == 'D' || line[index] == 'V') &&
+      index + 1 < line.length &&
+      line[index + 1] == ' '
+  }
+}
+
+private class DiagnosticHeader(private val line: String) {
+  private var index = 18 // after MM-DD HH:MM:SS.mmm
+
+  private fun skipSpaces() {
     while (index < line.length && line[index] == ' ') index++
-    val pidStart = index
+  }
+
+  fun readPid(): Int? {
+    skipSpaces()
+    val start = index
     var pid = 0
     while (index < line.length && line[index].isDigit()) {
       pid = pid * 10 + (line[index] - '0')
       index++
     }
-    if (pidStart == index || pid != processId) return false
-    while (index < line.length && line[index] == ' ') index++
+    return if (start == index) null else pid
+  }
+
+  fun levelIndex(): Int {
+    skipSpaces()
     while (index < line.length && line[index].isDigit()) index++ // TID
-    while (index < line.length && line[index] == ' ') index++
-    return index < line.length &&
-      (line[index] == 'D' || line[index] == 'V') &&
-      index + 1 < line.length &&
-      line[index + 1] == ' '
+    skipSpaces()
+    return index
   }
 }

@@ -12,16 +12,16 @@ import {
   DeviceCleanupInProgressError,
   DeviceOwnedByOtherDaemonError,
   DeviceShuttingDownError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { LIFECYCLE_TOOL_REMEDY } from "../../src/server/lifecycleDeviceOwnership";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { createTeardownFailureResponse } from "../../src/server/deviceTools";
 import {
   SessionNoLongerOwnsDeviceError,
   SessionRebindingError,
   SessionTerminalReleaseInProgressError,
 } from "../../src/daemon/sessionManager";
-import { readDeviceCleanupInProgressRefusal } from "../../src/server/deviceSessionResult";
+import { readDeviceCleanupInProgressRefusal } from "../../src/daemon/deviceSessionResult";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 describe("cliDeviceOwnershipHint (#10743, #10783, #10785)", () => {

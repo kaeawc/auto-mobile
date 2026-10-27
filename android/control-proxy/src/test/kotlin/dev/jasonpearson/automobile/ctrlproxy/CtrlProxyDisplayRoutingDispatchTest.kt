@@ -87,10 +87,13 @@ class CtrlProxyDisplayRoutingDispatchTest {
       HierarchyDebouncer(
         scope = ReflectionHelpers.getField<CoroutineScope>(fixture.service, "serviceScope"),
         timeProvider = time,
-        extractHierarchy = { _, snapshotOptions ->
-          optionsSeen.add(snapshotOptions)
-          null
-        },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, snapshotOptions ->
+              optionsSeen.add(snapshotOptions)
+              null
+            },
+          ),
       )
     for (displayId in listOf(2, null)) {
       reads = 0

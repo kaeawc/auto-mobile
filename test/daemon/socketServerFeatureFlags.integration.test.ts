@@ -12,7 +12,7 @@ import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
 import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonResponse } from "../../src/daemon/types";
-import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
+import { ListChangedBroadcaster } from "../../src/daemon/listChangedBroadcast";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
 function createTestService(): FeatureFlagService {
@@ -30,7 +30,13 @@ function createTestService(): FeatureFlagService {
 function createFakeDaemonState() {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      hasSession: () => false,
+      getSession: () => null,
+      getDeviceLabels: () => undefined,
+      releaseSession: async () => null,
+    }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -126,6 +132,11 @@ describe("UnixSocketServer feature flag handlers", () => {
   test("ide/setSessionToolEnabled persists then broadcasts a tools list refresh", async () => {
     const writes: Array<{ sessionUuid: string; toolName: string; enabled: boolean }> = [];
     const profileService = {
+      isEnabled: async (
+        _sessionUuid: string | undefined,
+        _toolName: string,
+        declaredDefault: boolean,
+      ) => declaredDefault,
       setEnabled: async (sessionUuid: string, toolName: string, enabled: boolean) => {
         writes.push({ sessionUuid, toolName, enabled });
       },

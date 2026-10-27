@@ -12,12 +12,13 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * #10906: the desktop control-socket / PID resolver must agree with the daemon's
- * `resolveDaemonStatePath` (`src/daemon/constants.ts`). Both are tested against the shared vectors
- * in `test/fixtures/daemon-isolation-paths.json`, as are the JUnit runner and XCTestRunner ports.
+ * `resolveDaemonStatePath` (`src/daemon/wire/constants.ts`). Both are tested against the shared
+ * vectors in `test/fixtures/daemon-isolation-paths.json`, as are the JUnit runner and XCTestRunner
+ * ports.
  */
 class DaemonIsolationPathVectorsTest {
   @Test
-  fun `control socket and PID paths match the shared daemon vectors`() {
+  fun `control socket PID and token paths match the shared daemon vectors`() {
     assertTrue(cases.isNotEmpty())
     // The vectors are POSIX paths; on Windows `/tmp/...` is not even absolute.
     if (File.separatorChar != '/') return
@@ -26,6 +27,17 @@ class DaemonIsolationPathVectorsTest {
       val env = case.getValue("env").jsonObject.mapValues { it.value.jsonPrimitive.content }
       // Every vector is absolute or names an absolute launch cwd, so userDir must never be used.
       val userDir = "/never/used"
+      assertEquals(
+        case.getValue("tokenFilePath").jsonPrimitive.content,
+        AutoMobileSocketPaths.daemonStatePath(
+          DaemonStateFile.TOKEN,
+          { uid },
+          env::get,
+          userDir,
+          tokenPlatform = DaemonTokenPlatform(windows = false),
+        ),
+        name,
+      )
       assertEquals(
         case.getValue("suffix").jsonPrimitive.content,
         AutoMobileSocketPaths.daemonIsolationSuffix(env::get, userDir),

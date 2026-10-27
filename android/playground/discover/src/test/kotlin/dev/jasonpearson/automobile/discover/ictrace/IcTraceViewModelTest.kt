@@ -9,7 +9,7 @@ class IcTraceViewModelTest {
     val recorder = IcTraceRecorder(nowMs = { 0L })
     val viewModel = IcTraceViewModel(recorder)
     val firstAccess = viewModel.recorder
-    firstAccess.record("commitText", "text=length=1", 0, 0, -1, -1)
+    firstAccess.record("commitText", "text=length=1", IcTraceSelection(0, 0, -1, -1))
 
     assertSame(recorder, viewModel.recorder)
     assertSame(firstAccess, viewModel.recorder)

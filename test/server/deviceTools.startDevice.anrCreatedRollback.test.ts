@@ -1,5 +1,6 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { describe, it, expect, beforeAll, beforeEach, afterEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeAll, afterEach, spyOn } from "bun:test";
 import {
   setDeviceToolsDependencies,
   resetDeviceToolsDependencies,
@@ -13,7 +14,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
 
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -28,7 +29,7 @@ import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingReposit
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 
 isolateToolRegistry();
 
@@ -57,6 +58,7 @@ describe("createIfMissing rollback after System UI recovery", () => {
     fakeMatcher.setImageResult(null);
 
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       deviceManagerFactory: () => fakeDeviceUtils,
       deviceMatcherFactory: () => fakeMatcher,
       notifyResourcesChanged: async () => {},
@@ -90,7 +92,17 @@ describe("createIfMissing rollback after System UI recovery", () => {
     );
     registerDeviceTools();
   };
-  beforeEach(arrange);
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    it(
+      name,
+      async () => {
+        await arrange();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   const dispose = (): void => {
     resetDeviceToolsDependencies();
@@ -154,131 +166,140 @@ describe("createIfMissing rollback after System UI recovery", () => {
     }
   });
 
-  it("deletes the AVD it created when binding fails after a System UI ANR replacement boot", async () => {
-    fakeGate.setAllowed(true);
-    const created = {
-      platform: "android" as const,
-      name: "AutoMobile-android-34-abcd1234",
-      deviceType: "system-images;android-34;google_apis;arm64-v8a",
-      runtime: "android-34",
-    };
-    let readinessAttempts = 0;
-    setDeviceToolsDependencies({
-      deviceProvisionerFactory: () => ({
-        provision: async (criteria, _signal, identityHooks) => {
-          fakeProvisioner.requests.push(criteria);
-          await identityHooks?.reserveBeforeCreate(created);
-          fakeDeviceUtils.setDeviceImages("android", [
-            { name: created.name, platform: "android", isRunning: false },
-          ]);
-          await identityHooks?.bindAfterCreate(created);
-          return created;
+  arranged(
+    "deletes the AVD it created when binding fails after a System UI ANR replacement boot",
+    async () => {
+      fakeGate.setAllowed(true);
+      const created = {
+        platform: "android" as const,
+        name: "AutoMobile-android-34-abcd1234",
+        deviceType: "system-images;android-34;google_apis;arm64-v8a",
+        runtime: "android-34",
+      };
+      let readinessAttempts = 0;
+      setDeviceToolsDependencies({
+        deviceProvisionerFactory: () => ({
+          provision: async (criteria, _signal, identityHooks) => {
+            fakeProvisioner.requests.push(criteria);
+            await identityHooks?.reserveBeforeCreate(created);
+            fakeDeviceUtils.setDeviceImages("android", [
+              { name: created.name, platform: "android", isRunning: false },
+            ]);
+            await identityHooks?.bindAfterCreate(created);
+            return created;
+          },
+        }),
+        ensureCtrlProxyReady: async () => {
+          readinessAttempts++;
+          // The first runner check on the freshly created AVD hits a System UI ANR;
+          // the replacement boot of the SAME AVD then passes.
+          if (readinessAttempts === 1) {
+            throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+          }
         },
-      }),
-      ensureCtrlProxyReady: async () => {
-        readinessAttempts++;
-        // The first runner check on the freshly created AVD hits a System UI ANR;
-        // the replacement boot of the SAME AVD then passes.
-        if (readinessAttempts === 1) {
-          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-        }
-      },
-    });
-    await useFakeTeardown("android");
-    const bind = spyOn(DevicePool.prototype, "bindOrReuseDeviceSession").mockRejectedValue(
-      new Error("session bind failed"),
-    );
-
-    try {
-      await expect(callStartDevice({ platform: "android", createIfMissing: true })).rejects.toThrow(
-        /session bind failed/,
+      });
+      await useFakeTeardown("android");
+      const bind = spyOn(DevicePool.prototype, "bindOrReuseDeviceSession").mockRejectedValue(
+        new Error("session bind failed"),
       );
-    } finally {
-      bind.mockRestore();
-    }
 
-    expect(readinessAttempts).toBe(2);
-    // The AVD was created by THIS call; a failed call must not leave it behind.
-    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
-      `destroyDevice:android:${created.name}`,
-    );
-    expect(await fakeDeviceUtils.listDeviceImages("android")).toEqual([]);
-  });
+      try {
+        await expect(
+          callStartDevice({ platform: "android", createIfMissing: true }),
+        ).rejects.toThrow(/session bind failed/);
+      } finally {
+        bind.mockRestore();
+      }
 
-  it("never deletes an AVD that pre-existed when binding fails after a System UI ANR", async () => {
-    fakeGate.setAllowed(true);
-    const existing = { name: "Pixel_8_API_34", platform: "android" as const, isRunning: false };
-    fakeDeviceUtils.setDeviceImages("android", [existing]);
-    fakeMatcher.setImageResult(existing);
-    let readinessAttempts = 0;
-    setDeviceToolsDependencies({
-      ensureCtrlProxyReady: async () => {
-        readinessAttempts++;
-        if (readinessAttempts === 1) {
-          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-        }
-      },
-    });
-    await useFakeTeardown("android");
-    const bind = spyOn(DevicePool.prototype, "bindOrReuseDeviceSession").mockRejectedValue(
-      new Error("session bind failed"),
-    );
-
-    try {
-      await expect(callStartDevice({ platform: "android", createIfMissing: true })).rejects.toThrow(
-        /session bind failed/,
+      expect(readinessAttempts).toBe(2);
+      // The AVD was created by THIS call; a failed call must not leave it behind.
+      expect(fakeDeviceUtils.getExecutedOperations()).toContain(
+        `destroyDevice:android:${created.name}`,
       );
-    } finally {
-      bind.mockRestore();
-    }
+      expect(await fakeDeviceUtils.listDeviceImages("android")).toEqual([]);
+    },
+  );
 
-    expect(readinessAttempts).toBe(2);
-    expect(fakeProvisioner.requests).toEqual([]);
-    expect(fakeDeviceUtils.getExecutedOperations().join("\n")).not.toContain("destroyDevice");
-  });
-
-  it("keeps the AVD it created once another session selected it while its runner was prepared", async () => {
-    fakeGate.setAllowed(true);
-    const created = {
-      platform: "android" as const,
-      name: "AutoMobile-android-34-abcd1234",
-      deviceType: "system-images;android-34;google_apis;arm64-v8a",
-      runtime: "android-34",
-    };
-    const createdDeviceId = `mock-${created.name}`;
-    setDeviceToolsDependencies({
-      deviceProvisionerFactory: () => ({
-        provision: async (_criteria, _signal, identityHooks) => {
-          await identityHooks?.reserveBeforeCreate(created);
-          fakeDeviceUtils.setDeviceImages("android", [
-            { name: created.name, platform: "android", isRunning: false },
-          ]);
-          await identityHooks?.bindAfterCreate(created);
-          return created;
+  arranged(
+    "never deletes an AVD that pre-existed when binding fails after a System UI ANR",
+    async () => {
+      fakeGate.setAllowed(true);
+      const existing = { name: "Pixel_8_API_34", platform: "android" as const, isRunning: false };
+      fakeDeviceUtils.setDeviceImages("android", [existing]);
+      fakeMatcher.setImageResult(existing);
+      let readinessAttempts = 0;
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          readinessAttempts++;
+          if (readinessAttempts === 1) {
+            throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+          }
         },
-      }),
-      ensureCtrlProxyReady: async () => {
-        // An internal binder remains permissive under the readiness reservation (#11651);
-        // setActiveDevice now refuses this window, so exercise the cleanup safety net directly.
-        await DaemonState.getInstance().getDevicePool().bindOrReuseDeviceSession({
-          sessionId: "other-session",
-          deviceId: createdDeviceId,
-          platform: "android",
-        });
-        throw new Error("automation runner did not become ready");
-      },
-    });
-    await useFakeTeardown("android");
+      });
+      await useFakeTeardown("android");
+      const bind = spyOn(DevicePool.prototype, "bindOrReuseDeviceSession").mockRejectedValue(
+        new Error("session bind failed"),
+      );
 
-    await expect(callStartDevice({ platform: "android", createIfMissing: true })).rejects.toThrow(
-      /automation runner did not become ready/,
-    );
+      try {
+        await expect(
+          callStartDevice({ platform: "android", createIfMissing: true }),
+        ).rejects.toThrow(/session bind failed/);
+      } finally {
+        bind.mockRestore();
+      }
 
-    // Stopping or deleting it would be lifecycle on the other session's device.
-    expect(sessionManager.getSession("other-session")?.assignedDevice).toBe(createdDeviceId);
-    const operations = fakeDeviceUtils.getExecutedOperations().join("\n");
-    expect(operations).not.toContain("destroyDevice");
-    expect(operations).not.toContain("killDevice");
-    expect(await fakeDeviceUtils.listDeviceImages("android")).toHaveLength(1);
-  });
+      expect(readinessAttempts).toBe(2);
+      expect(fakeProvisioner.requests).toEqual([]);
+      expect(fakeDeviceUtils.getExecutedOperations().join("\n")).not.toContain("destroyDevice");
+    },
+  );
+
+  arranged(
+    "keeps the AVD it created once another session selected it while its runner was prepared",
+    async () => {
+      fakeGate.setAllowed(true);
+      const created = {
+        platform: "android" as const,
+        name: "AutoMobile-android-34-abcd1234",
+        deviceType: "system-images;android-34;google_apis;arm64-v8a",
+        runtime: "android-34",
+      };
+      const createdDeviceId = `mock-${created.name}`;
+      setDeviceToolsDependencies({
+        deviceProvisionerFactory: () => ({
+          provision: async (_criteria, _signal, identityHooks) => {
+            await identityHooks?.reserveBeforeCreate(created);
+            fakeDeviceUtils.setDeviceImages("android", [
+              { name: created.name, platform: "android", isRunning: false },
+            ]);
+            await identityHooks?.bindAfterCreate(created);
+            return created;
+          },
+        }),
+        ensureCtrlProxyReady: async () => {
+          // An internal binder remains permissive under the readiness reservation (#11651);
+          // setActiveDevice now refuses this window, so exercise the cleanup safety net directly.
+          await DaemonState.getInstance().getDevicePool().bindOrReuseDeviceSession({
+            sessionId: "other-session",
+            deviceId: createdDeviceId,
+            platform: "android",
+          });
+          throw new Error("automation runner did not become ready");
+        },
+      });
+      await useFakeTeardown("android");
+
+      await expect(callStartDevice({ platform: "android", createIfMissing: true })).rejects.toThrow(
+        /automation runner did not become ready/,
+      );
+
+      // Stopping or deleting it would be lifecycle on the other session's device.
+      expect(sessionManager.getSession("other-session")?.assignedDevice).toBe(createdDeviceId);
+      const operations = fakeDeviceUtils.getExecutedOperations().join("\n");
+      expect(operations).not.toContain("destroyDevice");
+      expect(operations).not.toContain("killDevice");
+      expect(await fakeDeviceUtils.listDeviceImages("android")).toHaveLength(1);
+    },
+  );
 });

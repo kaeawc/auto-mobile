@@ -209,7 +209,7 @@ describe("DevicePool", () => {
 
     test("should assign different devices to different sessions", async () => {
       const deviceIds = ["emulator-5554", "emulator-5556"];
-      await devicePool.initializeWithDevices(deviceIds.map(createBootedDevice));
+      await initializeLiveDevices(deviceIds.map((deviceId) => createBootedDevice(deviceId)));
       const device1 = await devicePool.assignDeviceToSession("session-1");
       const device2 = await devicePool.assignDeviceToSession("session-2");
       expect(device1).not.toBe(device2);

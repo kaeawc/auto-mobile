@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { ErrorCode, McpError } from "../../src/server/mcpError";
+import { ErrorCode, McpError } from "../../src/daemon/mcpError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -9,34 +9,15 @@ import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { sendSocketRequest } from "./helpers/socketRequest";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
+import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import type { DaemonResponse } from "../../src/daemon/types";
-import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
+import type { Session, SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+import { StubMcpClient, type StubMcpClientHandlers } from "./helpers/fakeMcpClient";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
-/**
- * Minimal fake MCP client interface for testing.
- * Only implements the methods exercised by handleIdeRequest.
- */
-interface FakeMcpClient {
-  listTools: () => Promise<{ tools: unknown[] }>;
-  callTool: (...args: unknown[]) => Promise<unknown>;
-  listResources: () => Promise<{ resources: unknown[] }>;
-  readResource: (...args: unknown[]) => Promise<unknown>;
-  listResourceTemplates: () => Promise<{ resourceTemplates: unknown[] }>;
-  close: () => Promise<void>;
-}
-
-function createFakeMcpClient(overrides: Partial<FakeMcpClient> = {}): FakeMcpClient {
-  return {
-    listTools: async () => ({ tools: [] }),
-    callTool: async () => ({ content: [] }),
-    listResources: async () => ({ resources: [] }),
-    readResource: async () => ({ contents: [] }),
-    listResourceTemplates: async () => ({ resourceTemplates: [] }),
-    close: async () => {},
-    ...overrides,
-  };
+function createFakeMcpClient(handlers: StubMcpClientHandlers = {}): StubMcpClient {
+  return new StubMcpClient(handlers);
 }
 
 function socketClosedError(sensitiveDetail = ""): Error {
@@ -53,8 +34,8 @@ function createFakeDaemonState(
   resolvePrimaryDeviceOwnerSession: () => string | undefined,
   resolvePrimarySessionGeneration: () => number,
   resolveTerminalReleaseSnapshot: () => SessionReleaseSnapshot | undefined,
-) {
-  const session = {
+): DaemonStateAccess {
+  const session: Session = {
     sessionId: "session-a",
     assignedDevice: "emulator-5554",
     platform: "android" as const,
@@ -67,13 +48,16 @@ function createFakeDaemonState(
     heartbeatTimeoutMs: 60_000,
     heartbeatTimeoutSource: "default" as const,
     hasReceivedHeartbeat: true,
+    activityGeneration: 0,
+    ownership: "owned",
+    livenessPolicy: "heartbeat",
   };
-  const secondarySession = {
+  const secondarySession: Session = {
     ...session,
     sessionId: "session-b",
     assignedDevice: "emulator-5556",
   };
-  const replacementSession = {
+  const replacementSession: Session = {
     ...session,
     cacheData: {},
   };
@@ -88,20 +72,22 @@ function createFakeDaemonState(
     deviceSessionUuid: "device-epoch-b",
     deviceId: "emulator-5556",
   };
+  const getSession = (sessionId: string): Session | null =>
+    sessionId === session.sessionId && sessionIsValid()
+      ? resolvePrimarySessionGeneration() === 0
+        ? session
+        : replacementSession
+      : sessionId === secondarySession.sessionId && secondarySessionIsValid()
+        ? secondarySession
+        : null;
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
-      getSession: (sessionId: string) =>
-        sessionId === session.sessionId && sessionIsValid()
-          ? resolvePrimarySessionGeneration() === 0
-            ? session
-            : replacementSession
-          : sessionId === secondarySession.sessionId && secondarySessionIsValid()
-            ? secondarySession
-            : null,
+      hasSession: (sessionId: string) => getSession(sessionId) !== null,
+      getSession,
       getSessionForDevice: (deviceId: string) =>
         deviceId === session.assignedDevice
-          ? resolvePrimaryDeviceOwnerSession()
+          ? (resolvePrimaryDeviceOwnerSession() ?? null)
           : deviceId === secondarySession.assignedDevice
             ? secondarySession.sessionId
             : null,
@@ -395,7 +381,9 @@ describe("UnixSocketServer MCP forward failures: no reconnect or replay (#11820)
     server.mcpClientFactory = async (boundSessionUuid) => {
       clientBindings.push(boundSessionUuid);
       return createFakeMcpClient({
-        listTools: async () => ({ tools: [{ name: boundSessionUuid ?? "unbound" }] }),
+        listTools: async () => ({
+          tools: [{ name: boundSessionUuid ?? "unbound", inputSchema: { type: "object" } }],
+        }),
       });
     };
 
@@ -404,8 +392,9 @@ describe("UnixSocketServer MCP forward failures: no reconnect or replay (#11820)
     expect(response.success).toBe(true);
     // The loopback transport was seeded with the requested session, not left unbound.
     expect(clientBindings).toEqual(["session-a"]);
-    const result = response.result as { tools: Array<{ name: string }> };
-    expect(result.tools).toEqual([{ name: "session-a" }]);
+    expect(response.result?.tools).toEqual([
+      { name: "session-a", inputSchema: { type: "object" } },
+    ]);
   });
 
   test("a forward that fails to connect answers its error once: no reconnect (#11820)", async () => {

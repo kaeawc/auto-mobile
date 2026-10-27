@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { ActionableError } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
-import { DAEMON_VERSION, DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
+import {
+  DAEMON_VERSION,
+  DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+} from "../../src/daemon/wire/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 
@@ -13,7 +16,7 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 // invalidate the matching cache and re-emit to its own listeners — so proxy-mode
 // clients observe flag-driven tool/resource changes without a daemon restart.
 
-const TOOLS_V1 = { tools: [{ name: "toolA", inputSchema: {} }] };
+const TOOLS_V1 = { tools: [{ name: "toolA", inputSchema: { type: "object" as const } }] };
 const RESOURCES_V1 = { resources: [{ uri: "automobile:one", name: "one" }] };
 const TEMPLATES_V1 = { resourceTemplates: [{ uriTemplate: "automobile:{x}", name: "x" }] };
 
@@ -77,7 +80,7 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
 
     const tools = await proxy.listTools();
 
-    expect(tools).toEqual(TOOLS_V1.tools as any);
+    expect(tools).toEqual(TOOLS_V1.tools);
     expect(proxy.isConnected()).toBe(true);
   });
 
@@ -259,7 +262,7 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
     // Simulate the stale-session recovery path: reset then reconnect. The
     // factory returns the SAME fake client, so a leaked handler would double
     // every subsequent notification.
-    await (proxy as unknown as { resetConnection(): Promise<void> }).resetConnection();
+    await proxy.getInternalsForTesting().resetConnection();
     await proxy.listTools();
 
     fakeClient.emitNotification("notifications/tools/list_changed");
@@ -411,9 +414,7 @@ describe("DaemonMcpProxy resource subscriptions", () => {
       );
       expect(received).toEqual(["automobile:one"]);
       await proxy.close();
-      expect(
-        (proxy as unknown as { resourceSubscriptions: Set<string> }).resourceSubscriptions.size,
-      ).toBe(0);
+      expect(proxy.getInternalsForTesting().resourceSubscriptions.size).toBe(0);
     } finally {
       stop();
       await proxy.close();

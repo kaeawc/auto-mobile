@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import { convertIosHierarchy } from "../../../helpers/iosHierarchyConverter";
 import { describe, expect, test } from "bun:test";
 import { getHierarchyNodeSource } from "../../../../src/features/observe/output/elementProvenance";
@@ -93,18 +94,24 @@ for (const { name, hierarchy, nodes } of captures) {
     });
 
     test("observe rebuilds elements using only the selected window", () => {
-      const result: ObserveResult = {
+      const result: ObserveResult = buildObserveResult({
         updatedAt: 1,
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
         screenSize: { width: 390, height: 844 },
         viewHierarchy: hierarchy,
         // Deliberately stale elements: layer scoping must replace them.
         elements: scopeObserveResultToLayer(
-          { updatedAt: 1, viewHierarchy: hierarchy },
+          buildObserveResult({
+            updatedAt: 1,
+            screenSize: { width: 390, height: 844 },
+            systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+            viewHierarchy: hierarchy,
+          }),
           "app",
           "ios",
         ).elements,
-      };
+      });
       for (const layer of ["prototype", "app"] as const) {
         const scoped = scopeObserveResultToLayer(result, layer, "ios");
         const projected = project(scoped.viewHierarchy!);

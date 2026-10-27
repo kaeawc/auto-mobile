@@ -1,10 +1,19 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { ToolRegistry } from "./toolRegistry";
 import { putAppFileSchema, type PutAppFileArgs } from "./appFileContract";
 import { getAppFileService, type AppFileService } from "./appFileService";
-import { registerPendingDeviceCleanup } from "./downloadsFixtureService";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { putAppFileResultSchema } from "./appFileToolOutputSchemas";
 import type { BootedDevice } from "../models";
+
+function registerPendingDeviceCleanup(
+  deviceId: string,
+  cleanup: Promise<unknown>,
+  daemon: DaemonContext = defaultDaemonContext,
+): void {
+  daemon.sessionManager()?.registerPendingDeviceCleanup(deviceId, cleanup);
+}
 
 export function registerAppFileTools(
   deps: {
@@ -31,6 +40,11 @@ export function registerAppFileTools(
       const result = await writePromise;
       return createStructuredToolResponse(result);
     },
-    { defaultEnabled: true, outputSchema: putAppFileResultSchema },
+    {
+      ...PLAN_RELEVANT,
+      defaultEnabled: true,
+      outputSchema: putAppFileResultSchema,
+      stagesFiles: true,
+    },
   );
 }

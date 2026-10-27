@@ -8,7 +8,6 @@ import { runAdbExecutorContract, type ScriptedAdb } from "./AdbExecutorContract"
 const DEVICE: BootedDevice = {
   deviceId: "emulator-5554",
   platform: "android",
-  isEmulator: true,
   name: "Test Device",
 };
 
@@ -56,9 +55,7 @@ function scriptedReal(): ScriptedAdb {
       }
       return match?.result ?? execResult("");
     },
-    null,
-    new DefaultRetryExecutor(timer),
-    timer,
+    { retryExecutor: new DefaultRetryExecutor(timer), timer },
   );
   const script: ScriptedAdb["script"] = (pattern, output) => {
     responses.unshift({ pattern, result: execResult(output.stdout, output.stderr ?? "") });

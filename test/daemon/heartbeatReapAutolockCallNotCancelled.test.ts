@@ -1,14 +1,15 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Daemon } from "../../src/daemon/daemon";
+import { DaemonLifecycleHarness } from "./helpers/DaemonLifecycleHarness";
 import { DaemonState } from "../../src/daemon/daemonState";
 import type { DevicePool } from "../../src/daemon/devicePool";
-import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
+import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettledExecutionVeto";
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import type { BootedDevice } from "../../src/models";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
-import { executionTracker, type ActiveExecution } from "../../src/server/executionTracker";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
+import { executionTracker, type ActiveExecution } from "../../src/daemon/executionTracker";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -24,11 +25,6 @@ import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerSte
 // aborted and its caller never gets `session_ownership_lost`. The idle-expiry release aborts the
 // same call (`cancelDeviceSessionExecutions`, #10820).
 
-interface DaemonMonitorInternals {
-  heartbeatMonitor: { stop(): Promise<void> } | null;
-  startHeartbeatMonitor(): void;
-}
-
 const DEVICE: BootedDevice = {
   name: "Pixel_8_API_35",
   deviceId: "emulator-5554",
@@ -40,7 +36,7 @@ const CALL_DEADLINE_MS = 20_000;
 
 describe("heartbeat reap of a session with an implicit (autolock) control call in flight", () => {
   let timer: FakeTimer;
-  let daemon: Daemon;
+  let daemon: DaemonLifecycleHarness;
   let started: ActiveExecution[];
 
   const settle = (ms: number) =>
@@ -49,7 +45,7 @@ describe("heartbeat reap of a session with an implicit (autolock) control call i
   beforeEach(() => {
     resetDbWriteBarrier();
     timer = new FakeTimer();
-    daemon = new Daemon(
+    daemon = new DaemonLifecycleHarness(
       {},
       {
         installedAppsRepository: new FakeInstalledAppsRepository(),
@@ -65,7 +61,7 @@ describe("heartbeat reap of a session with an implicit (autolock) control call i
     for (const execution of started) {
       executionTracker.endExecution(execution.id);
     }
-    await (daemon as unknown as DaemonMonitorInternals).heartbeatMonitor?.stop();
+    await daemon.stopMonitorAndWait();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
@@ -78,7 +74,7 @@ describe("heartbeat reap of a session with an implicit (autolock) control call i
     const devicePool = daemon.getDevicePool();
     const deviceManager = new FakeDeviceManager();
     deviceManager.bootedDevices = [DEVICE];
-    Object.assign(devicePool, { deviceManager });
+    devicePool.testHooks.deviceManager = deviceManager;
     await devicePool.initializeWithDevices([DEVICE]);
     await devicePool.bindOrReuseDeviceSession({
       sessionId: SESSION,
@@ -97,8 +93,8 @@ describe("heartbeat reap of a session with an implicit (autolock) control call i
   async function reapPastHungCall(startCall: () => ActiveExecution): Promise<ActiveExecution> {
     const sessionManager = daemon.getSessionManager();
     const devicePool = await sessionOnPooledDevice();
-    sessionManager.recordHeartbeat(SESSION);
-    (daemon as unknown as DaemonMonitorInternals).startHeartbeatMonitor();
+    await deliverDaemonHeartbeat(sessionManager, SESSION);
+    daemon.startMonitor();
 
     const hung = startCall();
     started.push(hung);

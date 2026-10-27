@@ -163,7 +163,7 @@ final class SQLiteDatabaseSqlErrorTests: XCTestCase {
         }
         let rows = try execute("SELECT name FROM users")
         XCTAssertEqual(rows.statusCode, 200)
-        XCTAssertTrue(String(decoding: rows.body, as: UTF8.self).contains("ada"))
+        XCTAssertTrue(try XCTUnwrap(String(data: rows.body, encoding: .utf8)).contains("ada"))
     }
 
     func testReadOnlyRequestStillRunsReads() throws {

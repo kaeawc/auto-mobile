@@ -1,4 +1,5 @@
-import { McpError } from "../../src/server/mcpError";
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { McpError } from "../../src/daemon/mcpError";
 import { AndroidAvdIdentityUnresolvedError } from "../../src/devices/deviceBootService";
 import { ActionableError } from "../../src/models/ActionableError";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
@@ -8,9 +9,9 @@ import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecovery
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { SessionHeldByRecoveryError, SessionSuspectError } from "../../src/daemon/sessionManager";
-import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { isTypedToolRefusal, shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import {
   DeviceAssignedToBindingError,
   BindingDiscoveryIncompleteError,
@@ -22,7 +23,7 @@ import { logger } from "../../src/utils/logger";
 import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { typedRefusalFields } from "../../src/models/typedRefusalFields";
 
-import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../../src/models/deviceAcquisitionRefusals";
 
 const context = { toolName: "observe", source: "MCP" } as const;
 
@@ -35,6 +36,41 @@ describe("shapeToolCallError", () => {
 
   afterEach(() => {
     errorSpy.mockRestore();
+  });
+
+  test("transport refusal exposes retry and dispatch fields on both boundaries", () => {
+    const error = new AdbDeviceTransportUnavailableError(
+      "emulator-5554",
+      new Error("adb: device 'emulator-5554' not found"),
+    );
+    for (const source of ["MCP", "ProxyServer"] as const) {
+      expect(isTypedToolRefusal(error)).toBe(true);
+      expect(JSON.parse(shapeToolCallError(error, { ...context, source }).content[0].text)).toEqual(
+        { success: false, error: error.message, ...error.toPayload() },
+      );
+    }
+  });
+
+  test('post-dispatch transport loss exposes dispatched: "unknown" on both boundaries', () => {
+    const error = new AdbDeviceTransportUnavailableError(
+      "emulator-5554",
+      new Error("connection terminated: read failed"),
+      1000,
+      "unknown",
+    );
+    for (const source of ["MCP", "ProxyServer"] as const) {
+      const result = shapeToolCallError(error, { toolName: "openLink", source });
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: false,
+        error: error.message,
+        code: "device_transport_unavailable",
+        retryable: true,
+        retryAfterMs: 1000,
+        deviceId: "emulator-5554",
+        dispatched: "unknown",
+      });
+    }
   });
 
   test("an unrelated structurally coded actionable error stays plain text", () => {
@@ -85,8 +121,6 @@ describe("shapeToolCallError", () => {
         holder: "session_broker",
         scopeKey: "scope",
         bindingIndex: 0,
-        scopeState: "valid",
-        execSessionUuid: null,
       }),
       new BindingDiscoveryIncompleteError("registry busy"),
       new BindingOwnershipUnconfirmedError("session"),

@@ -80,4 +80,20 @@ class SdkBatchReceiversTest {
     receiver.onReceive(context, Intent(AutoMobileAnr.ACTION_ANR))
     receiver.onReceive(context, Intent("other.action"))
   }
+
+  @Test
+  fun `plain runtime extras failures are contained by both receivers`() {
+    val intent = mockk<Intent>()
+    every { intent.getStringExtra(any()) } throws RuntimeException("Parcel.readValue failed")
+    val batch = mockk<SdkEventBatchBroadcastHandler>(relaxed = true)
+    val anr = mockk<SdkAnrBroadcastHandler>(relaxed = true)
+
+    every { intent.action } returns SdkEventSerializer.ACTION_SDK_EVENT_BATCH
+    EventBatchReceiver(batch).onReceive(context, intent)
+    every { intent.action } returns AutoMobileAnr.ACTION_ANR
+    AnrReceiver(anr).onReceive(context, intent)
+
+    verify(exactly = 0) { batch.handle(any(), any(), any()) }
+    verify(exactly = 0) { anr.handle(any(), any(), any()) }
+  }
 }

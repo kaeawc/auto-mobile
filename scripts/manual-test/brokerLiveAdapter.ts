@@ -2,8 +2,11 @@ import "./harnessLogSink";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { isSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
-import { parseSessionBrokerHostConfig } from "../../src/daemon/sessionBroker/hostConfig";
-import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
+import {
+  iosReusePolicy,
+  parseSessionBrokerHostConfig,
+} from "../../src/daemon/sessionBroker/hostConfig";
+import { readToolEnvelopePayload } from "../../src/daemon/toolEnvelopePayload";
 import { readBrokerClients, readBrokerIdentity, resolveBrokerClient } from "./brokerClientFiles";
 import { BrokerDeviceLedger, type LedgerDevicesView } from "./brokerDeviceLedger";
 import {
@@ -91,10 +94,12 @@ export function assertPrivateBrokerBatch(
     totalDeviceCap > maxDevices ||
     sessionCap < totalDeviceCap ||
     host.limits.idlePoolCap !== 0 ||
-    host.reuseCleanDevices
+    host.reuseCleanDevices ||
+    iosReusePolicy(host).mode !== "off" ||
+    host.reuseAndroidCleanDevices
   ) {
     throw new Error(
-      "Broker acceptance requires positive capacity <= --max-devices, sessionCap >= totalDeviceCap, idlePoolCap 0 and reuseCleanDevices false.",
+      "Broker acceptance requires positive capacity <= --max-devices, sessionCap >= totalDeviceCap, idlePoolCap 0, reuseCleanDevices false and reuseAndroidCleanDevices false.",
     );
   }
   return { batch, spec, host, totalDeviceCap };

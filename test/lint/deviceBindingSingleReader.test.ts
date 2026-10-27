@@ -1,12 +1,14 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
 import {
-  Visitor,
   type Expression,
   type MemberExpression,
   type ParamPattern,
-  type AssignmentTarget,
+  type AssignmentTargetMaybeDefault,
+  type AssignmentTargetRest,
+  type BindingPattern,
+  type BindingRestElement,
 } from "oxc-parser";
 import {
   localBindings,
@@ -14,6 +16,9 @@ import {
   relativePosix,
   typeScriptFiles,
   unwrapCallee,
+  guardTextMayMatch,
+  readGuardFile,
+  GuardVisitor as Visitor,
 } from "./astGuard";
 import preChangeReaders from "./fixtures/deviceBindingReaders.json";
 
@@ -42,23 +47,24 @@ const DIRECT_READ_ALLOWLIST: Readonly<Record<string, number>> = {
   // Session objects and autolock session-candidate records.
   "src/daemon/deviceAutolockManager.ts": 3,
   // PlanLossTarget capture records, not the target's nested device.
-  "src/daemon/deviceDisconnectHandler.ts": 2,
+  "src/daemon/planDeviceLossMonitor.ts": 2,
   // DeviceHoldFacts is an already captured availability projection.
   "src/daemon/deviceHold.ts": 2,
   // Deferred-release record (1) and discovery options (1).
-  "src/daemon/devicePool.ts": 2,
+  "src/daemon/devicePoolParts/release.ts": 1,
+  "src/daemon/devicePoolParts/targetDiscovery.ts": 1,
   // Candidate is a Session identity from pooledSessionIdentities.
   "src/daemon/deviceReservations.ts": 1,
   // existingSession is a Session, not its assigned PooledDevice.
   "src/daemon/explicitDeviceBind.ts": 1,
   // Session objects.
-  "src/daemon/sessionManager.ts": 13,
+  "src/daemon/sessionManager/recoveryPublication.ts": 13,
   // Keep-awake, biometric and network restore targets moved from SessionManager; no additional reads.
   "src/daemon/sessionDeviceStateRestore.ts": 15,
   // Finalization callback record moved from SessionManager; no additional reads.
   "src/daemon/sessionSlots.ts": 1,
   // MCP failure options and live-acceptance Session candidates.
-  "src/daemon/socketServer.ts": 1,
+  "src/daemon/socketServerParts/SocketAdmission.ts": 1,
   // Live-acceptance Session candidates, moved from socketServer.ts.
   "src/daemon/socketServer/restartAdmission.ts": 2,
   // CoreDevice diagnostic capability entries.
@@ -89,7 +95,15 @@ function unwrapRead(expression: Expression): Expression {
 }
 
 function scan(file: string, source: string): { reads: string[] } {
-  const program = parseGuardSource(file, source);
+  // Every finding names a binding field, including destructures and receiver aliases.
+  const program = parseGuardSource(
+    file,
+    source,
+    guardTextMayMatch(source, /sessionId|status|health/),
+  );
+  if (!program) {
+    return { reads: [] };
+  }
   const binding = localBindings(program);
   const reads: string[] = [];
   const writes = new Set<MemberExpression>();
@@ -139,7 +153,7 @@ function scan(file: string, source: string): { reads: string[] } {
       `${file}:${source.slice(0, offset).split("\n").length}: read ${text} through holderOf/statusOf/isIdle/isBusy/isErrored in ${OWNER}`,
     );
   };
-  const markWrite = (target: AssignmentTarget | Expression): void => {
+  const markWrite = (target: AssignmentTargetMaybeDefault | Expression): void => {
     if (target.type === "ObjectPattern") {
       for (const property of target.properties) {
         markWrite(property.type === "RestElement" ? property.argument : property.value);
@@ -159,7 +173,14 @@ function scan(file: string, source: string): { reads: string[] } {
       }
     }
   };
-  const checkPattern = (pattern: ParamPattern | AssignmentTarget): void => {
+  const checkPattern = (
+    pattern:
+      | ParamPattern
+      | AssignmentTargetMaybeDefault
+      | AssignmentTargetRest
+      | BindingPattern
+      | BindingRestElement,
+  ): void => {
     if (pattern.type === "AssignmentPattern") {
       checkPattern(pattern.left);
     } else if (pattern.type === "RestElement") {
@@ -217,7 +238,8 @@ function scan(file: string, source: string): { reads: string[] } {
         (isDeviceReceiver(node.init, node.start) ||
           // The intentional snapshot bridge has a non-device receiver name.
           // Include it explicitly so removing either field must shrink the ratchet.
-          (file === "src/daemon/devicePool.ts" &&
+          ((file === "src/daemon/devicePool.ts" ||
+            file === "src/daemon/devicePoolParts/release.ts") &&
             node.init.type === "Identifier" &&
             node.init.name === "snapshot"))
       ) {
@@ -306,7 +328,7 @@ describe("device binding single reader", () => {
     for (const file of typeScriptFiles(path.join(ROOT, "src"))) {
       const relative = relativePosix(ROOT, file);
       if (relative !== OWNER) {
-        facts.set(relative, scan(relative, readFileSync(file, "utf8")));
+        facts.set(relative, scan(relative, readGuardFile(file)));
       }
     }
     for (const row of preChangeReaders) {
@@ -400,7 +422,7 @@ describe("device binding single reader", () => {
 
   test("direct reads outside the owner can only shrink", () => {
     expect(facts.size).toBeGreaterThan(0);
-    expect(facts.has("src/daemon/devicePool.ts")).toBe(true);
+    expect(facts.has("src/daemon/devicePoolParts/release.ts")).toBe(true);
     expect(readViolations(facts)).toEqual([]);
   });
   test.each([1, 0, undefined])("requires lowering the constant when reads drop to %s", (count) => {

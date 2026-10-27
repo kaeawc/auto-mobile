@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test, beforeEach } from "bun:test";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { BootedDevice, ObserveResult, DeviceLockState } from "../../../src/models";
@@ -22,13 +23,14 @@ describe("BaseVisualChange device-lock warning (#4280)", () => {
   let fakeTimer: FakeTimer;
   let fakeWindow: FakeWindow;
 
-  const observeWith = (deviceLock?: DeviceLockState): ObserveResult => ({
-    updatedAt: 1,
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { hierarchy: {} },
-    ...(deviceLock ? { deviceLock } : {}),
-  });
+  const observeWith = (deviceLock?: DeviceLockState): ObserveResult =>
+    buildObserveResult({
+      updatedAt: 1,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: {} },
+      ...(deviceLock ? { deviceLock } : {}),
+    });
 
   function createVisualChange(platform: "android" | "ios"): BaseVisualChange {
     const device: BootedDevice = { name: "test-device", platform, deviceId: "device-123" };
@@ -67,7 +69,7 @@ describe("BaseVisualChange device-lock warning (#4280)", () => {
     expect(result.success).toBe(true);
     expect(result.deviceLock).toEqual({ locked: true, keyguardShowing: true, secure: true });
     expect(typeof result.deviceLockWarning).toBe("string");
-    expect(result.deviceLockWarning.toLowerCase()).toContain("unlock");
+    expect(result.deviceLockWarning?.toLowerCase()).toContain("unlock");
   });
 
   test("swipe lock: warning points at dismissing the keyguard, not a PIN", async () => {
@@ -80,7 +82,7 @@ describe("BaseVisualChange device-lock warning (#4280)", () => {
     );
 
     expect(result.deviceLock).toEqual({ locked: true, keyguardShowing: true, secure: false });
-    expect(result.deviceLockWarning.toLowerCase()).toContain("dismiss");
+    expect(result.deviceLockWarning?.toLowerCase()).toContain("dismiss");
   });
 
   test("unlocked device: no deviceLock annotation", async () => {

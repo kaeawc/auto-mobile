@@ -40,6 +40,7 @@ import dev.jasonpearson.automobile.desktop.core.layout.DiffKeyMode
 import dev.jasonpearson.automobile.desktop.core.layout.HierarchyDiff
 import dev.jasonpearson.automobile.desktop.core.layout.HierarchyDiffEntry
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorDashboard
+import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorOptions
 import dev.jasonpearson.automobile.desktop.core.layout.NodeDiffStatus
 import dev.jasonpearson.automobile.desktop.core.layout.ParsedHierarchy
 import dev.jasonpearson.automobile.desktop.core.layout.diffHierarchies
@@ -78,69 +79,60 @@ fun TwoDeviceCompareView(
   columnA: DeviceColumn,
   columnB: DeviceColumn,
   modifier: Modifier = Modifier,
-  sessionUuidProvider: () -> String? = { null },
-  observationStreamFactory: () -> ObservationStream = {
-    ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
-  },
-  backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
-  socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
-  sideContent: @Composable (DeviceColumn, ObservationStream) -> Unit = { column, stream ->
-    LayoutInspectorDashboard(
-      dataSourceMode = DataSourceMode.Real,
-      observationStream = stream,
-      deviceId = column.deviceId,
-      platform = if (column.platform == Platform.Ios) "ios" else "android",
-    )
-  },
-  // Parses a hierarchy stream frame off the main thread. Injected so a test can deterministically
-  // interleave a slow parse with a device-loss to exercise the stale-restore guard.
-  parseHierarchy: suspend (JsonElement) -> ParsedHierarchy? = { json ->
-    withContext(Dispatchers.Default) { parseHierarchyFromJson(json) }
-  },
+  options: DeviceCompareOptions = DeviceCompareOptions(),
 ) {
-  var hierarchyA by remember(columnA.deviceId) { mutableStateOf<ParsedHierarchy?>(null) }
-  var hierarchyB by remember(columnB.deviceId) { mutableStateOf<ParsedHierarchy?>(null) }
-  val diff =
-    remember(hierarchyA, hierarchyB, columnA.platform, columnB.platform) {
-      val a = hierarchyA
-      val b = hierarchyB
-      // A cross-platform pair keys by structural role (issue #4872); a same-platform pair keeps the
-      // raw-class identity, which lines up class names and resource ids exactly.
-      val keyMode =
-        if (columnA.platform == columnB.platform) DiffKeyMode.ClassName
-        else DiffKeyMode.StructuralRole
-      if (a != null && b != null) diffHierarchies(a.root, b.root, keyMode) else null
-    }
+  return with(options) {
+    var hierarchyA by remember(columnA.deviceId) { mutableStateOf<ParsedHierarchy?>(null) }
+    var hierarchyB by remember(columnB.deviceId) { mutableStateOf<ParsedHierarchy?>(null) }
+    val diff =
+      remember(hierarchyA, hierarchyB, columnA.platform, columnB.platform) {
+        val a = hierarchyA
+        val b = hierarchyB
+        // A cross-platform pair keys by structural role (issue #4872); a same-platform pair keeps
+        // the
+        // raw-class identity, which lines up class names and resource ids exactly.
+        val keyMode =
+          if (columnA.platform == columnB.platform) DiffKeyMode.ClassName
+          else DiffKeyMode.StructuralRole
+        if (a != null && b != null) diffHierarchies(a.root, b.root, keyMode) else null
+      }
 
-  Column(modifier.fillMaxSize().semantics { contentDescription = "Two-device compare" }) {
-    Row(Modifier.weight(1f).fillMaxWidth()) {
-      CompareSide(
-        column = columnA,
-        observationStreamFactory = observationStreamFactory,
-        backoffDelay = backoffDelay,
-        socketAvailable = socketAvailable,
-        sideContent = sideContent,
-        parseHierarchy = parseHierarchy,
-        onHierarchy = { hierarchyA = it },
-        modifier = Modifier.weight(1f).fillMaxHeight(),
-      )
-      CompareSide(
-        column = columnB,
-        observationStreamFactory = observationStreamFactory,
-        backoffDelay = backoffDelay,
-        socketAvailable = socketAvailable,
-        sideContent = sideContent,
-        parseHierarchy = parseHierarchy,
-        onHierarchy = { hierarchyB = it },
-        modifier = Modifier.weight(1f).fillMaxHeight(),
+    Column(modifier.fillMaxSize().semantics { contentDescription = "Two-device compare" }) {
+      Row(Modifier.weight(1f).fillMaxWidth()) {
+        CompareSide(
+          column = columnA,
+          modifier = Modifier.weight(1f).fillMaxHeight(),
+          options =
+            CompareSideOptions(
+              observationStreamFactory = observationStreamFactory,
+              backoffDelay = backoffDelay,
+              socketAvailable = socketAvailable,
+              sideContent = sideContent,
+              parseHierarchy = parseHierarchy,
+              onHierarchy = { hierarchyA = it },
+            ),
+        )
+        CompareSide(
+          column = columnB,
+          modifier = Modifier.weight(1f).fillMaxHeight(),
+          options =
+            CompareSideOptions(
+              observationStreamFactory = observationStreamFactory,
+              backoffDelay = backoffDelay,
+              socketAvailable = socketAvailable,
+              sideContent = sideContent,
+              parseHierarchy = parseHierarchy,
+              onHierarchy = { hierarchyB = it },
+            ),
+        )
+      }
+      HierarchyDiffStrip(
+        diff = diff,
+        labelA = columnA.name,
+        labelB = columnB.name,
+        modifier = Modifier.fillMaxWidth().height(DIFF_STRIP_HEIGHT_DP.dp),
       )
     }
-    HierarchyDiffStrip(
-      diff = diff,
-      labelA = columnA.name,
-      labelB = columnB.name,
-      modifier = Modifier.fillMaxWidth().height(DIFF_STRIP_HEIGHT_DP.dp),
-    )
   }
 }
 
@@ -164,59 +156,61 @@ fun TwoDeviceCompareView(
 @Composable
 private fun CompareSide(
   column: DeviceColumn,
-  observationStreamFactory: () -> ObservationStream,
-  backoffDelay: suspend (attempt: Int) -> Unit,
-  socketAvailable: () -> Boolean,
-  sideContent: @Composable (DeviceColumn, ObservationStream) -> Unit,
-  parseHierarchy: suspend (JsonElement) -> ParsedHierarchy?,
-  onHierarchy: (ParsedHierarchy?) -> Unit,
   modifier: Modifier,
+  options: CompareSideOptions,
 ) {
-  // Shared reconnect lifecycle: a side that drops (daemon restart / EOF while the overlay is open)
-  // reconnects instead of staying in "waiting" until the user closes and reopens compare.
-  val stream =
-    rememberReconnectingObservationStream(
-      deviceId = column.deviceId,
-      streamFactory = observationStreamFactory,
-      backoffDelay = backoffDelay,
-      socketAvailable = socketAvailable,
-    )
-  val activeStream = stream ?: return
-  // Fresh token per stream instance (i.e. per mount / device change). A reconnect reuses the same
-  // instance, so the token and these collectors deliberately persist across it; correctness only
-  // needs the token bumped on every clearHierarchy(), which still holds.
-  val generation = remember(activeStream) { AtomicInteger(0) }
-  val clearHierarchy = {
-    generation.incrementAndGet()
-    onHierarchy(null)
-  }
-  LaunchedEffect(activeStream) {
-    activeStream.hierarchyUpdates.collect { update ->
-      val json = update.data ?: return@collect
-      val launchGeneration = generation.get()
-      val parsed = parseHierarchy(json)
-      // Drop a result whose generation was invalidated by a clear while the parse was suspended.
-      if (parsed != null && generation.get() == launchGeneration) onHierarchy(parsed)
+  return with(options) {
+
+    // Shared reconnect lifecycle: a side that drops (daemon restart / EOF while the overlay is
+    // open)
+    // reconnects instead of staying in "waiting" until the user closes and reopens compare.
+    val stream =
+      rememberReconnectingObservationStream(
+        ReconnectingObservationOptions(
+          deviceId = column.deviceId,
+          streamFactory = observationStreamFactory,
+          backoffDelay = backoffDelay,
+          socketAvailable = socketAvailable,
+        ),
+      )
+    val activeStream = stream ?: return
+    // Fresh token per stream instance (i.e. per mount / device change). A reconnect reuses the same
+    // instance, so the token and these collectors deliberately persist across it; correctness only
+    // needs the token bumped on every clearHierarchy(), which still holds.
+    val generation = remember(activeStream) { AtomicInteger(0) }
+    val clearHierarchy = {
+      generation.incrementAndGet()
+      onHierarchy(null)
     }
-  }
-  LaunchedEffect(activeStream) {
-    activeStream.deviceEvents.collect { event ->
-      when (event) {
-        is DeviceStreamEvent.DeviceSessionSuperseded -> Unit
-        // Device unplugged/offline: retire the snapshot so the diff shows "waiting" until a fresh
-        // frame arrives, rather than diffing the live device against a dead one's stale tree.
-        is DeviceStreamEvent.DeviceConnectionLost -> clearHierarchy()
+    LaunchedEffect(activeStream) {
+      activeStream.hierarchyUpdates.collect { update ->
+        val json = update.data ?: return@collect
+        val launchGeneration = generation.get()
+        val parsed = parseHierarchy(json)
+        // Drop a result whose generation was invalidated by a clear while the parse was suspended.
+        if (parsed != null && generation.get() == launchGeneration) onHierarchy(parsed)
       }
     }
-  }
-  LaunchedEffect(activeStream) {
-    activeStream.connectionState.collect { state ->
-      // Only a confirmed disconnect clears; Connecting/Reconnecting/Error keep the last snapshot so
-      // a brief stream blip does not flush a still-valid hierarchy.
-      if (state is ConnectionState.Disconnected) clearHierarchy()
+    LaunchedEffect(activeStream) {
+      activeStream.deviceEvents.collect { event ->
+        when (event) {
+          is DeviceStreamEvent.DeviceSessionSuperseded -> Unit
+          // Device unplugged/offline: retire the snapshot so the diff shows "waiting" until a fresh
+          // frame arrives, rather than diffing the live device against a dead one's stale tree.
+          is DeviceStreamEvent.DeviceConnectionLost -> clearHierarchy()
+        }
+      }
     }
+    LaunchedEffect(activeStream) {
+      activeStream.connectionState.collect { state ->
+        // Only a confirmed disconnect clears; Connecting/Reconnecting/Error keep the last snapshot
+        // so
+        // a brief stream blip does not flush a still-valid hierarchy.
+        if (state is ConnectionState.Disconnected) clearHierarchy()
+      }
+    }
+    Box(modifier) { sideContent(column, activeStream) }
   }
-  Box(modifier) { sideContent(column, activeStream) }
 }
 
 /**
@@ -328,3 +322,37 @@ private fun diffRowDescription(entry: HierarchyDiffEntry, labelA: String, labelB
     NodeDiffStatus.Equal -> label
   }
 }
+
+data class DeviceCompareOptions(
+  val sessionUuidProvider: () -> String? = { null },
+  val observationStreamFactory: () -> ObservationStream = {
+    ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
+  },
+  val backoffDelay: suspend (attempt: Int) -> Unit = { attempt ->
+    delay(reconnectBackoffMs(attempt))
+  },
+  val socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
+  val sideContent: @Composable (DeviceColumn, ObservationStream) -> Unit = { column, stream ->
+    LayoutInspectorDashboard(
+      options =
+        LayoutInspectorOptions(
+          dataSourceMode = DataSourceMode.Real,
+          deviceId = column.deviceId,
+          platform = if (column.platform == Platform.Ios) "ios" else "android",
+        ),
+      observationStream = stream,
+    )
+  },
+  val parseHierarchy: suspend (JsonElement) -> ParsedHierarchy? = { json ->
+    withContext(Dispatchers.Default) { parseHierarchyFromJson(json) }
+  },
+)
+
+private data class CompareSideOptions(
+  val observationStreamFactory: () -> ObservationStream,
+  val backoffDelay: suspend (attempt: Int) -> Unit,
+  val socketAvailable: () -> Boolean,
+  val sideContent: @Composable (DeviceColumn, ObservationStream) -> Unit,
+  val parseHierarchy: suspend (JsonElement) -> ParsedHierarchy?,
+  val onHierarchy: (ParsedHierarchy?) -> Unit,
+)

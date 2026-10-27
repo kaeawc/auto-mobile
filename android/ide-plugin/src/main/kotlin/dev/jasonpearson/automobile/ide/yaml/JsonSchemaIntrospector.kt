@@ -1,10 +1,7 @@
 package dev.jasonpearson.automobile.ide.yaml
 
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
 
 data class SchemaPathSegment(val key: String, val isArrayItem: Boolean)
 
@@ -31,9 +28,11 @@ object JsonSchemaIntrospector {
     schemas.forEach { schema -> collectProperties(schema, rootSchema, propertySchemas, required) }
 
     return propertySchemas.mapValues { (name, schemasForProperty) ->
-      val description = schemasForProperty.firstNotNullOfOrNull { it.stringValue("description") }
+      val description = schemasForProperty.firstNotNullOfOrNull {
+        it.schemaStringValue("description")
+      }
       val deprecated =
-        schemasForProperty.any { it.booleanValue("deprecated") == true } ||
+        schemasForProperty.any { it.schemaBooleanValue("deprecated") == true } ||
           description?.startsWith("DEPRECATED") == true
       SchemaPropertyInfo(
         name = name,
@@ -54,7 +53,9 @@ object JsonSchemaIntrospector {
     val values = mutableSetOf<String>()
     schemas.forEach { schema ->
       val resolved = resolveRef(schema, rootSchema)
-      resolved.arrayValue("enum")?.forEach { entry -> entry.stringValue()?.let { values.add(it) } }
+      resolved.schemaArrayValue("enum")?.forEach { entry ->
+        entry.schemaStringValue()?.let { values.add(it) }
+      }
     }
 
     return values
@@ -95,11 +96,13 @@ object JsonSchemaIntrospector {
   ): List<JsonObject> {
     val resolved = resolveRef(schema, rootSchema)
     val result = mutableListOf<JsonObject>()
-    resolved.objectValue("properties")?.get(key)?.asObjectOrNull()?.let { result.add(it) }
+    resolved.schemaObjectValue("properties")?.get(key)?.schemaAsObjectOrNull()?.let {
+      result.add(it)
+    }
 
     for (keyword in listOf("allOf", "anyOf", "oneOf")) {
-      resolved.arrayValue(keyword)?.forEach { element ->
-        val child = element.asObjectOrNull() ?: return@forEach
+      resolved.schemaArrayValue(keyword)?.forEach { element ->
+        val child = element.schemaAsObjectOrNull() ?: return@forEach
         result.addAll(collectPropertySchemas(child, key, rootSchema))
       }
     }
@@ -114,17 +117,20 @@ object JsonSchemaIntrospector {
     required: MutableSet<String>,
   ) {
     val resolved = resolveRef(schema, rootSchema)
-    resolved.objectValue("properties")?.forEach { (key, value) ->
-      value.asObjectOrNull()?.let { propertySchema ->
+    resolved.schemaObjectValue("properties")?.forEach { (key, value) ->
+      value.schemaAsObjectOrNull()?.let { propertySchema ->
         properties.getOrPut(key) { mutableListOf() }.add(propertySchema)
       }
     }
 
-    resolved.arrayValue("required")?.mapNotNull { it.stringValue() }?.forEach { required.add(it) }
+    resolved
+      .schemaArrayValue("required")
+      ?.mapNotNull { it.schemaStringValue() }
+      ?.forEach { required.add(it) }
 
     for (keyword in listOf("allOf", "anyOf", "oneOf")) {
-      resolved.arrayValue(keyword)?.forEach { element ->
-        val child = element.asObjectOrNull() ?: return@forEach
+      resolved.schemaArrayValue(keyword)?.forEach { element ->
+        val child = element.schemaAsObjectOrNull() ?: return@forEach
         collectProperties(child, rootSchema, properties, required)
       }
     }
@@ -132,12 +138,12 @@ object JsonSchemaIntrospector {
 
   private fun unwrapArrayItemSchema(schema: JsonObject, rootSchema: JsonObject): JsonObject? {
     val resolved = resolveRef(schema, rootSchema)
-    val items = resolved["items"]?.asObjectOrNull() ?: return null
+    val items = resolved["items"]?.schemaAsObjectOrNull() ?: return null
     return resolveRef(items, rootSchema)
   }
 
   private fun resolveRef(schema: JsonObject, rootSchema: JsonObject): JsonObject {
-    val ref = schema.stringValue("\$ref") ?: return schema
+    val ref = schema.schemaStringValue("\$ref") ?: return schema
     if (!ref.startsWith("#/")) {
       return schema
     }
@@ -146,25 +152,9 @@ object JsonSchemaIntrospector {
     val segments = ref.removePrefix("#/").split("/")
     for (segment in segments) {
       val key = segment.replace("~1", "/").replace("~0", "~")
-      current = current.asObjectOrNull()?.get(key) ?: return schema
+      current = current.schemaAsObjectOrNull()?.get(key) ?: return schema
     }
 
-    return current.asObjectOrNull() ?: schema
+    return current.schemaAsObjectOrNull() ?: schema
   }
-
-  private fun JsonObject.objectValue(key: String): JsonObject? = this[key]?.asObjectOrNull()
-
-  private fun JsonObject.arrayValue(key: String): JsonArray? = this[key]?.asArrayOrNull()
-
-  private fun JsonObject.stringValue(key: String): String? = this[key]?.stringValue()
-
-  private fun JsonObject.booleanValue(key: String): Boolean? {
-    return (this[key] as? JsonPrimitive)?.booleanOrNull
-  }
-
-  private fun JsonElement.stringValue(): String? = (this as? JsonPrimitive)?.content
-
-  private fun JsonElement.asObjectOrNull(): JsonObject? = this as? JsonObject
-
-  private fun JsonElement.asArrayOrNull(): JsonArray? = this as? JsonArray
 }

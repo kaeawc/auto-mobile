@@ -1,3 +1,4 @@
+import { viewHierarchyFromFixture } from "../../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import {
   deriveIosScreenIdentity,
@@ -45,7 +46,9 @@ function withKeyboardShiftedDown(source: ViewHierarchyResult, dy: number): ViewH
     }
   };
   shift(shifted, false);
-  return viewHierarchyResultSchema.required({ hierarchy: true }).parse(shifted);
+  return viewHierarchyFromFixture(
+    viewHierarchyResultSchema.required({ hierarchy: true }).parse(shifted),
+  );
 }
 
 describe("deriveIosScreenIdentity keyboard visibility on captured states (#10027)", () => {

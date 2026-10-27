@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import type { NavigationGraphService } from "../../src/features/navigation/NavigationGraphService";
 import type { NavigationEvent, NavigationGraph } from "../../src/utils/interfaces/NavigationGraph";
 
+type ContractGraph = NavigationGraph &
+  Pick<NavigationGraphService, "setGraphUpdateListener" | "exportGraphForApp">;
+
 export interface NavigationGraphHandle {
-  graph: NavigationGraph;
+  graph: ContractGraph;
   dispose?: () => Promise<void>;
 }
 
@@ -31,7 +35,7 @@ export function runNavigationGraphContract(
   name: string,
   make: () => Promise<NavigationGraphHandle>,
 ): void {
-  const withGraph = async (body: (graph: NavigationGraph) => Promise<void>): Promise<void> => {
+  const withGraph = async (body: (graph: ContractGraph) => Promise<void>): Promise<void> => {
     const handle = await make();
     try {
       await body(handle.graph);

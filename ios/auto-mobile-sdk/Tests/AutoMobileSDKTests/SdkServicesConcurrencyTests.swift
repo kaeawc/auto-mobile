@@ -78,10 +78,9 @@ final class SdkServicesConcurrencyTests: XCTestCase {
         XCTAssertEqual(failures.eventCount, 32)
         XCTAssertEqual(Set(events.map(\.errorDomain)), Set((0 ..< 32).map { "failure-\($0)" }))
         XCTAssertTrue(events.allSatisfy { $0.bundleId == "concurrency.bundle" })
-        XCTAssertTrue(events.allSatisfy { $0.customMessage == $0.errorDomain.replacingOccurrences(
-            of: "failure",
-            with: "message"
-        ) })
+        XCTAssertTrue(events.allSatisfy { event in
+            event.customMessage == event.errorDomain.replacingOccurrences(of: "failure", with: "message")
+        })
     }
 
     func testConcurrentTapsShareOneDebounceDecisionAndEmitOutsideLock() {

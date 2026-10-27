@@ -5,6 +5,8 @@ struct DemosTab: View {
     @Environment(\.autoMobileTheme) private var theme
     @State private var shouldOpenTapAtTargets = false
     @State private var didCheckDeepLink = false
+    /// Scene-stored so a restored scene reopens the State Restoration demo (#14098).
+    @SceneStorage("demos.showStateRestoration") private var showStateRestoration = false
 
     var body: some View {
         NavigationStack {
@@ -178,6 +180,19 @@ struct DemosTab: View {
                     }
                 }
 
+                Section("Lifecycle") {
+                    Button {
+                        showStateRestoration = true
+                    } label: {
+                        DemoRow(
+                            title: "State Restoration",
+                            description: "SceneStorage survives background + kill",
+                            icon: "arrow.counterclockwise.circle"
+                        )
+                    }
+                    .accessibilityIdentifier("open_state_restoration")
+                }
+
                 Section("View Hierarchy") {
                     NavigationLink {
                         NestedSelectionDemo()
@@ -204,6 +219,10 @@ struct DemosTab: View {
             .navigationTitle("Demos")
             .navigationDestination(isPresented: $shouldOpenTapAtTargets) {
                 TapAtTargetsDemo()
+                    .font(nil)
+            }
+            .navigationDestination(isPresented: $showStateRestoration) {
+                StateRestorationDemo()
                     .font(nil)
             }
             .onAppear {
@@ -488,10 +507,10 @@ struct HeavyComputationDemo: View {
             for i in 0 ..< iterations {
                 sum += sin(Double(i)) * cos(Double(i))
 
-                if i % updateInterval == 0 {
-                    let p = Double(i) / Double(iterations)
+                if i.isMultiple(of: updateInterval) {
+                    let fraction = Double(i) / Double(iterations)
                     DispatchQueue.main.async {
-                        progress = p
+                        progress = fraction
                     }
                 }
             }
@@ -1214,12 +1233,12 @@ struct ViewHierarchyDebugDemo: View {
             .gesture(
                 DragGesture(minimumDistance: 30)
                     .onEnded { value in
-                        let h = value.translation.width
-                        let v = value.translation.height
-                        if abs(h) > abs(v) {
-                            swipeDirection = h > 0 ? "right" : "left"
+                        let horizontal = value.translation.width
+                        let vertical = value.translation.height
+                        if abs(horizontal) > abs(vertical) {
+                            swipeDirection = horizontal > 0 ? "right" : "left"
                         } else {
-                            swipeDirection = v > 0 ? "down" : "up"
+                            swipeDirection = vertical > 0 ? "down" : "up"
                         }
                     }
             )
@@ -1414,6 +1433,39 @@ struct SegmentedControlView: UIViewRepresentable {
 #Preview {
     DemosTab()
         .autoMobileTheme()
+}
+
+// MARK: - State Restoration Demo
+
+/// Proves the iOS `appLifecycle` contract (#14098). `@SceneStorage` values are restored when the
+/// system terminates a backgrounded app (`background` then `killBackgrounded`, then `launchApp`)
+/// and discarded after an app-switcher force-quit (`terminateApp`). The plain `@State` counter is
+/// never restored, so `restoration_ephemeral` returning to 0 shows the process really restarted.
+struct StateRestorationDemo: View {
+    @SceneStorage("restoration.counter") private var storedCounter = 0
+    @SceneStorage("restoration.note") private var storedNote = ""
+    @State private var ephemeralCounter = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("restoration_stored: \(storedCounter)")
+                .accessibilityIdentifier("restoration_stored")
+            Text("restoration_ephemeral: \(ephemeralCounter)")
+                .accessibilityIdentifier("restoration_ephemeral")
+            Button("Increment both") {
+                storedCounter += 1
+                ephemeralCounter += 1
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("restoration_increment")
+            TextField("Note (scene-stored)", text: $storedNote)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("restoration_note")
+            Spacer()
+        }
+        .padding()
+        .navigationTitle("State Restoration")
+    }
 }
 
 // MARK: - Nested Selection Demo

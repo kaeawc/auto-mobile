@@ -1,3 +1,4 @@
+import { createObserveResultForTest } from "./flatHierarchyBuilders";
 import { describe, expect, test } from "bun:test";
 import { Rotate } from "../../../src/features/action/Rotate";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
@@ -54,7 +55,7 @@ async function harness() {
   await Promise.resolve();
   client.connectionTestHooks.socket = socket;
   const requestIds = new CountingIdGenerator("wire");
-  const manager = client["requestManager"];
+  const manager = client.connectionTestHooks.requestManager;
   manager.generateId = (prefix) => `${prefix}_${requestIds.next()}`;
   let connects = 0;
   let backoffCancels = 0;
@@ -62,9 +63,9 @@ async function harness() {
     connects++;
     return true;
   };
-  client["cancelScreenshotBackoff"] = () => {
+  client.testHooks.overrideCancelScreenshotBackoff(() => {
     backoffCancels++;
-  };
+  });
   return {
     device,
     adb,
@@ -91,7 +92,7 @@ test("cancelled Rotate sends the auto-rotate restore put through the real settin
       }
     }
     queueMicrotask(() => {
-      void h.client["handleWebSocketMessage"](
+      void h.client.testHooks.handleWebSocketMessage(
         JSON.stringify({
           type: frame.type.replace("request_", "") + "_result",
           requestId: frame.requestId,
@@ -107,12 +108,16 @@ test("cancelled Rotate sends the auto-rotate restore put through the real settin
   h.adb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0", ""));
   const rotate = new Rotate(h.device, h.adb, h.timer);
   const observeScreen = new FakeObserveScreen();
-  observeScreen.setObserveResult(() => ({
-    timestamp: h.timer.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} },
-  }));
+  observeScreen.setObserveResult(() =>
+    createObserveResultForTest({
+      observationId: "settings",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+      updatedAt: h.timer.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: { node: {} } },
+    }),
+  );
   const window = new FakeWindow();
   window.configureCachedActiveWindow(null);
   window.configureActiveWindow({ appId: "com.test.app", activityName: "Main", layoutSeqSum: 1 });
@@ -202,14 +207,16 @@ for (const method of methods) {
 
     test("preserves the exact old frame, support bypass, and response correlation", async () => {
       const h = await harness();
-      h.client["supportedCommands"] = new Set([ANDROID_FULL_COMMAND_SET_CAPABILITY]);
-      h.client["rejectedCommands"].add(`request_settings_${method.operation}`);
+      h.client.connectionTestHooks.supportedCommands = new Set([
+        ANDROID_FULL_COMMAND_SET_CAPABILITY,
+      ]);
+      h.client.testHooks.rejectedCommands.add(`request_settings_${method.operation}`);
       const pending = method.invoke(h.client);
       expect(h.socket.frames).toEqual([method.literal]);
       expect(h.socket.frames[0]).toBe(method.oldFrame(id));
       expect(h.connects()).toBe(0);
       expect(h.cancels()).toBe(0);
-      await h.client["handleWebSocketMessage"](
+      await h.client.testHooks.handleWebSocketMessage(
         JSON.stringify({
           type: `settings_${method.operation}_result`,
           requestId: id,
@@ -261,7 +268,7 @@ for (const method of methods) {
           }
           expect(h.socket.frames).toEqual([method.literal]);
           expect(h.manager.getPendingCount()).toBe(1);
-          await h.client["handleWebSocketMessage"](
+          await h.client.testHooks.handleWebSocketMessage(
             JSON.stringify({
               type: `settings_${method.operation}_result`,
               requestId: id,
@@ -305,7 +312,7 @@ describe("Android delegate timestamped IDs", () => {
   test("shares the injected generator across storage, packages, hierarchy, and certificate paths", async () => {
     const h = await harness();
     h.timer.advanceTime(123);
-    const storage = h.client["storage"].listPreferenceFiles("example.app");
+    const storage = h.client.testHooks.storage().listPreferenceFiles("example.app");
     await Promise.resolve();
     expect(JSON.parse(h.socket.frames[0]).requestId).toBe("list_preference_files_123_delegate-1");
     h.manager.resolve("list_preference_files_123_delegate-1", {
@@ -314,7 +321,7 @@ describe("Android delegate timestamped IDs", () => {
       files: [],
     });
     await storage;
-    const packages = h.client["packages"].requestInstalledPackages();
+    const packages = h.client.testHooks.packages().requestInstalledPackages();
     expect(JSON.parse(h.socket.frames[1]).requestId).toBe("installed_packages_123_delegate-2");
     h.manager.resolve<BaseResult>("installed_packages_123_delegate-2", {
       success: true,
@@ -328,7 +335,7 @@ describe("Android delegate timestamped IDs", () => {
     expect(hierarchy["sendHierarchyIfStaleRequest"](0)).toBe("stale_123_delegate-4");
     expect(hierarchy["sendRecompositionTrackingRequest"](true)).toBe(true);
     expect(JSON.parse(h.socket.frames[4]).requestId).toBe("recomp_123_delegate-5");
-    expect(h.client["certificates"]["buildDeviceCertificatePath"]("/tmp/root.crt")).toBe(
+    expect(h.client.testHooks.certificates()["buildDeviceCertificatePath"]("/tmp/root.crt")).toBe(
       "/sdcard/Download/automobile/ca_certs/root_123_delegate-6.crt",
     );
     expect(h.manager.getPendingCount()).toBe(0);

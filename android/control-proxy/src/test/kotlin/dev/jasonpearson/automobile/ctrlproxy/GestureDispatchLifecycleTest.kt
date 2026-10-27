@@ -196,7 +196,7 @@ class GestureDispatchLifecycleTest {
     lifecycle.startDispatch()
     val thrown =
       assertThrows(RuntimeException::class.java) {
-        runTest { lifecycle.completed { throw RuntimeException("result failed") } }
+        runTest { lifecycle.completed { throw IllegalStateException("result failed") } }
       }
 
     assertEquals("result failed", thrown.message)

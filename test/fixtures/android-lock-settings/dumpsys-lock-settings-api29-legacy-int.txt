@@ -1,0 +1,11 @@
+Current lock settings service state:
+SP Enabled = true
+User State:
+    User 0
+        SP Handle: 1a2b3c4d5e6f7081
+        Last changed: 2026-10-21 09:40:10 (1a2b3c4d5e6f7081)
+        SID: 4e5f60718293a4b5
+        Quality: 131072
+        CredentialType: 2
+        SeparateChallenge: false
+        Metrics: known

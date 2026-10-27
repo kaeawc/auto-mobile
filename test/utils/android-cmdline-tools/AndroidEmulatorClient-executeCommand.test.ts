@@ -17,10 +17,11 @@ function newClientWithFakeExec(
   execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>,
   timer: FakeTimer,
 ): AndroidEmulatorClient {
-  const client = new AndroidEmulatorClient({ execAsync, timer });
-  (client as unknown as { emulatorPath: string }).emulatorPath = "emulator";
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
-    async () => "emulator";
+  const client = new AndroidEmulatorClient({
+    emulatorPathLocator: async () => "emulator",
+    execAsync,
+    timer,
+  });
   return client;
 }
 

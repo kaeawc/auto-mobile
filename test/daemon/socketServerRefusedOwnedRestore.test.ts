@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import {
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import type { RefusedOwnedSessionRestore } from "../../src/daemon/devicePool";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { FakeTimer } from "../fakes/FakeTimer";

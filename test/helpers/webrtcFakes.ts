@@ -1,3 +1,4 @@
+import type { PublisherPeerConnection } from "../../src/features/webrtc/PublisherPeerConnection";
 import type { FetchLike } from "../../src/features/webrtc/WhipClient";
 
 /**
@@ -25,19 +26,20 @@ export interface RecordedWhipRequest {
   method: string;
 }
 
-export class FakeConnectedPeerConnection {
+export class FakeConnectedPeerConnection implements PublisherPeerConnection {
   closed = false;
-  connectionState = "connected";
-  iceGatheringState = "complete";
+  connectionState: PublisherPeerConnection["connectionState"] = "connected";
+  iceGatheringState: PublisherPeerConnection["iceGatheringState"] = "complete";
   connectionStateChange = { subscribe: () => {} };
   iceGatheringStateChange = { watch: async () => {} };
+  onIceCandidate = { subscribe: () => ({ unSubscribe: () => {} }) };
   localDescription = { sdp: "v=0" };
 
   addTransceiver() {
     return { sender: { ssrc: 1, onPictureLossIndication: { subscribe: () => {} } } };
   }
 
-  async createOffer() {
+  async createOffer(): ReturnType<PublisherPeerConnection["createOffer"]> {
     return { type: "offer", sdp: "v=0" };
   }
 

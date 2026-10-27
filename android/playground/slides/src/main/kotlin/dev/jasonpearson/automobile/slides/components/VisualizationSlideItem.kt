@@ -33,9 +33,9 @@ import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCar
 @Composable
 fun VisualizationSlideItem(
   imageUrl: String,
+  modifier: Modifier = Modifier,
   caption: String? = null,
   contentDescription: String? = null,
-  modifier: Modifier = Modifier,
   captionColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
   Column(

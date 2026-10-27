@@ -1,65 +1,14 @@
-import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import type { PrototypeJson } from "../prototypeSpec";
-import type { PrototypeAssetUpload } from "../prototypeAssets";
+import { logger } from "../../../utils/logger";
 import {
-  DirectorySavedPrototypeLayoutWriter,
-  type SavedPrototypeLayoutWriter,
-} from "../savedPrototypeLayout";
+  resolveOwnAppDataContainer,
+  SimulatorContainerUnresolvedError,
+  type SimulatorContainerOwnershipOptions,
+} from "../../../utils/ios-cmdline-tools/simulatorOwnContainer";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../utils/deviceTimeouts";
 import type { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
-import type {
-  DataContainerWriter,
-  InstallerFileSystem,
-  InstalledPrototype,
-  PrototypeSimctl,
-} from "./iosPrototypeInstaller";
-
-export class DefaultInstallerFileSystem implements InstallerFileSystem {
-  mkdtemp(): Promise<string> {
-    return mkdtemp(path.posix.join(tmpdir(), "automobile-prototype-"));
-  }
-  cp(source: string, destination: string): Promise<void> {
-    return cp(source, destination, { recursive: true });
-  }
-  writeFile(path: string, data: string | Buffer): Promise<void> {
-    return writeFile(path, data);
-  }
-  async mkdir(path: string): Promise<void> {
-    await mkdir(path, { recursive: true });
-  }
-  rm(path: string): Promise<void> {
-    return rm(path, { recursive: true, force: true });
-  }
-}
-
-export class DefaultDataContainerWriter implements DataContainerWriter {
-  constructor(
-    private readonly layout: SavedPrototypeLayoutWriter = new DirectorySavedPrototypeLayoutWriter(),
-    private readonly files: Pick<InstallerFileSystem, "rm"> = new DefaultInstallerFileSystem(),
-  ) {}
-  async write(
-    containerPath: string,
-    spec: PrototypeJson,
-    assets?: readonly PrototypeAssetUpload[],
-  ): Promise<void> {
-    const result = await this.layout.write(
-      {
-        specJson: JSON.stringify(spec),
-        assets: (assets ?? []).map((asset) => ({
-          id: asset.id,
-          mediaType: asset.mimeType,
-          bytes: asset.bytes,
-        })),
-      },
-      path.posix.join(containerPath, "Documents", "prototype"),
-    );
-    if (result.kind === "rejected") {
-      throw Object.assign(new Error(result.message), { reason: result.reason });
-    }
-    await this.files.rm(path.posix.join(containerPath, "Documents", "prototype.json"));
-  }
-}
+import type { InstalledPrototype, PrototypeSimctl } from "./iosPrototypeInstaller";
+export { DefaultInstallerFileSystem } from "./DefaultInstallerFileSystem";
+export { DefaultDataContainerWriter } from "./DefaultDataContainerWriter";
 
 type SimctlInstallerClient = Pick<
   SimCtlClient,
@@ -67,17 +16,32 @@ type SimctlInstallerClient = Pick<
 >;
 
 export class DefaultPrototypeSimctl implements PrototypeSimctl {
-  constructor(private readonly client: SimctlInstallerClient) {}
+  constructor(
+    private readonly client: SimctlInstallerClient,
+    private readonly ownership: SimulatorContainerOwnershipOptions = {},
+  ) {}
   install(udid: string, appPath: string): Promise<void> {
-    return this.client.installApp(appPath, udid);
+    return this.client.installApp(appPath, udid, { timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS });
   }
   uninstall(udid: string, bundleId: string): Promise<void> {
     return this.client.uninstallApp(bundleId, udid);
   }
   async getDataContainer(udid: string, bundleId: string): Promise<string> {
-    return (
-      await this.client.executeCommandArgs(["get_app_container", udid, bundleId, "data"])
-    ).stdout.trim();
+    try {
+      return await resolveOwnAppDataContainer({
+        ...this.ownership,
+        deviceId: udid,
+        bundleId,
+        run: (args) => this.client.executeCommandArgs(args),
+      });
+    } catch (error) {
+      if (error instanceof SimulatorContainerUnresolvedError) {
+        // The installer owns the existing actionable empty-container message.
+        logger.debug("Simulator returned an empty prototype data container path");
+        return "";
+      }
+      throw error;
+    }
   }
   async listApps(udid: string): Promise<InstalledPrototype[]> {
     const apps: unknown[] = await this.client.listAppsOrThrow(udid);

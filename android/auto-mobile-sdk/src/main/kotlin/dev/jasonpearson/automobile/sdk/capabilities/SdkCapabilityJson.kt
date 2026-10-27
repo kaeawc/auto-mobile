@@ -47,12 +47,8 @@ fun decodeSdkCapabilitySnapshot(json: String): SdkCapabilitySnapshotResult {
     val policy =
       document["policy"] as? JsonObject
         ?: return SdkCapabilitySnapshotResult.Failure("Missing or invalid policy")
-    // kotlinx serialization accepts quoted booleans, so validate authorization flags explicitly.
-    for (flag in listOf("captureHeaders", "captureBodies", "allowMutations")) {
-      val value = policy[flag] ?: continue
-      if (value !is JsonPrimitive || value.isString || value.booleanOrNull == null) {
-        return SdkCapabilitySnapshotResult.Failure("policy.$flag must be a JSON boolean")
-      }
+    validatePolicy(policy)?.let {
+      return it
     }
     SdkCapabilitySnapshotResult.Success(
       snapshotJson.decodeFromJsonElement<SdkCapabilityDocument>(normalizeUnknownStates(document)),
@@ -75,4 +71,15 @@ private fun normalizeUnknownState(element: JsonElement): JsonElement {
   return if (state.isString && SdkCapabilityState.entries.none { it.name == state.content }) {
     JsonObject(descriptor + ("state" to JsonPrimitive(SdkCapabilityState.UNKNOWN.name)))
   } else descriptor
+}
+
+private fun validatePolicy(policy: JsonObject): SdkCapabilitySnapshotResult.Failure? {
+  // kotlinx serialization accepts quoted booleans, so validate authorization flags explicitly.
+  for (flag in listOf("captureHeaders", "captureBodies", "allowMutations")) {
+    val value = policy[flag] ?: continue
+    if (value !is JsonPrimitive || value.isString || value.booleanOrNull == null) {
+      return SdkCapabilitySnapshotResult.Failure("policy.$flag must be a JSON boolean")
+    }
+  }
+  return null
 }

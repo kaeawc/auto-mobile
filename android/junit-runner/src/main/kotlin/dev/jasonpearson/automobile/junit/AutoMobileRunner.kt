@@ -299,7 +299,11 @@ private constructor(
           futures.forEach { future ->
             try {
               future.get()
-            } catch (e: Exception) {
+            } catch (e: java.util.concurrent.ExecutionException) {
+              exceptions.add(e.cause ?: e)
+            } catch (e: InterruptedException) {
+              exceptions.add(e.cause ?: e)
+            } catch (e: java.util.concurrent.CancellationException) {
               exceptions.add(e.cause ?: e)
             }
           }

@@ -25,6 +25,32 @@ class AudioCapture(
       throw IllegalStateException("Audio capture already started")
     }
 
+    val (recorder, bufferSize) = createRecorder()
+    if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+      running.set(false)
+      recorder.release()
+      throw IllegalStateException("AudioRecord REMOTE_SUBMIX failed to initialize")
+    }
+
+    try {
+      recorder.startRecording()
+      record = recorder
+    } catch (e: RuntimeException) {
+      running.set(false)
+      recorder.release()
+      throw e
+    }
+    thread =
+      Thread(
+          {
+            captureAudio(recorder, bufferSize, onData, onError)
+          },
+          "automobile-audio-capture",
+        )
+        .also { it.start() }
+  }
+
+  private fun createRecorder(): Pair<AudioRecord, Int> {
     val minBuffer =
       AudioRecord.getMinBufferSize(
         sampleRate,
@@ -47,50 +73,38 @@ class AudioCapture(
         .setBufferSizeInBytes(bufferSize)
         .build()
 
-    if (recorder.state != AudioRecord.STATE_INITIALIZED) {
-      running.set(false)
-      recorder.release()
-      throw IllegalStateException("AudioRecord REMOTE_SUBMIX failed to initialize")
-    }
+    return recorder to bufferSize
+  }
 
+  private fun captureAudio(
+    recorder: AudioRecord,
+    bufferSize: Int,
+    onData: (ByteArray, Long) -> Boolean,
+    onError: (String) -> Unit,
+  ) {
+    val buffer = ByteArray(bufferSize)
+    val startedAtUs = System.nanoTime() / 1_000L
     try {
-      recorder.startRecording()
-      record = recorder
+      while (running.get()) {
+        val read = recorder.read(buffer, 0, buffer.size)
+        if (read > 0) {
+          val ptsUs = (System.nanoTime() / 1_000L) - startedAtUs
+          if (!onData(buffer.copyOf(read), ptsUs)) {
+            running.set(false)
+            break
+          }
+        } else if (read < 0) {
+          running.set(false)
+          onError("AudioRecord read failed with code $read")
+          break
+        }
+      }
     } catch (e: RuntimeException) {
-      running.set(false)
-      recorder.release()
-      throw e
+      if (running.get()) {
+        running.set(false)
+        onError("AudioRecord read failed: ${e.message}")
+      }
     }
-    thread =
-      Thread(
-          {
-            val buffer = ByteArray(bufferSize)
-            val startedAtUs = System.nanoTime() / 1_000L
-            try {
-              while (running.get()) {
-                val read = recorder.read(buffer, 0, buffer.size)
-                if (read > 0) {
-                  val ptsUs = (System.nanoTime() / 1_000L) - startedAtUs
-                  if (!onData(buffer.copyOf(read), ptsUs)) {
-                    running.set(false)
-                    break
-                  }
-                } else if (read < 0) {
-                  running.set(false)
-                  onError("AudioRecord read failed with code $read")
-                  break
-                }
-              }
-            } catch (e: RuntimeException) {
-              if (running.get()) {
-                running.set(false)
-                onError("AudioRecord read failed: ${e.message}")
-              }
-            }
-          },
-          "automobile-audio-capture",
-        )
-        .also { it.start() }
   }
 
   fun stop() {

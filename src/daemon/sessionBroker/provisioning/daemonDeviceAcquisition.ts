@@ -1,3 +1,4 @@
+import type { reserveBootCapacity } from "../../../features/bootAdmission/sharedBootAdmissionGates";
 /**
  * Assembles the broker's native-device acquisition (#11173 part b) from production parts: the
  * host-wide binding registry, the reconciler over real inventory / provisionDevice / deleteDevice /
@@ -11,6 +12,7 @@ import {
   MultiPlatformDeviceManager,
   type PlatformDeviceManager,
 } from "../../../devices/deviceUtils";
+import type { ForeignAndroidSerialSource } from "../../../devices/deviceDiscoveryContracts";
 import type { ExactIosRuntimeCatalog } from "../../../devices/exactDeviceProvisioning";
 import {
   FileAvdConfigReader,
@@ -25,15 +27,13 @@ import type { Timer } from "../../../utils/SystemTimer";
 import { runAsBindingReconciler } from "./exclusion";
 import { WorkflowBindingDeviceDeleter } from "./deviceDeleter";
 import { BrokerDeviceAcquisition, type BrokerDeviceAcquisitionSessions } from "./deviceAcquisition";
+import { DeviceManagerBindingInventory } from "./DeviceManagerBindingInventory";
 import {
-  DeviceManagerBindingInventory,
   GateBindingBootCapacity,
-  PoolBindingDeviceClaims,
-  ToolBindingProvisioner,
   type BindingBootCapacityAssertion,
-  type BindingClaimPool,
-  type BindingToolInvoker,
-} from "./reconcilerPorts";
+} from "./GateBindingBootCapacity";
+import { PoolBindingDeviceClaims, type BindingClaimPool } from "./PoolBindingDeviceClaims";
+import { ToolBindingProvisioner, type BindingToolInvoker } from "./reconcilerPorts";
 import {
   DefaultManagedSpecMatcher,
   DefaultManagedSpecResolver,
@@ -43,11 +43,8 @@ import {
   type ManagedAndroidImageCatalog,
   type ManagedAndroidProfileCatalog,
 } from "./reconciler";
-import {
-  BindingJournalRedriveLoop,
-  type BindingJournal,
-  type BindingJournalInFlight,
-} from "../registry/bindingJournal";
+import { BindingJournalRedriveLoop } from "../registry/BindingJournalRedriveLoop";
+import { type BindingJournal, type BindingJournalInFlight } from "../registry/bindingJournal";
 import type {
   BindingJournalOwner,
   BindingProcessIdentity,
@@ -58,11 +55,12 @@ import {
   withLiveExecutionSessions,
   type LiveExecutionSessions,
 } from "../registry/ownerLiveness";
+import { daemonToolRegistry } from "../../toolRegistryPort";
 
 export interface DaemonBrokerDeviceAcquisitionOptions {
   registry: () => Promise<BindingRegistry>;
   sessions: BrokerDeviceAcquisitionSessions;
-  pool: BindingClaimPool & FreeDeviceBusyPool;
+  pool: BindingClaimPool & FreeDeviceBusyPool & Partial<ForeignAndroidSerialSource>;
   resourceBudgetPolicy?: BindingResourceBudgetPolicy;
   /** Which sessions this daemon holds as live managed executions (#11275). */
   executions?: LiveExecutionSessions;
@@ -73,17 +71,21 @@ export interface DaemonBrokerDeviceAcquisitionOptions {
   invokeTool?: BindingToolInvoker;
   /** The host device tooling behind the reconciler's ports; tests inject fakes. */
   tooling?: DaemonBindingTooling;
+  /** True when released Android emulators are destroyed, not reused warm (#15477). */
+  discardAndroidSnapshotOnExit?: () => boolean;
 }
 
 /** Each part defaults to the host's real tooling. */
 export interface DaemonBindingTooling {
-  deviceManager?: Pick<PlatformDeviceManager, "listDeviceImages">;
+  deviceManager?: Pick<PlatformDeviceManager, "listDeviceImages"> &
+    Partial<Pick<PlatformDeviceManager, "getBootedDevicesDetailed">>;
   androidConfigReader?: Pick<AvdConfigReader, "readConfig">;
   androidImageCatalog?: ManagedAndroidImageCatalog;
   androidProfileCatalog?: ManagedAndroidProfileCatalog;
   iosRuntimeCatalog?: ExactIosRuntimeCatalog;
   /** Defaults to the process-wide boot admission gates. */
   checkBootCapacity?: BindingBootCapacityAssertion;
+  reserveBootCapacity?: typeof reserveBootCapacity;
   /** Native preparation port; defaults to the daemon tool workflow. */
   provisioner?: BindingDeviceProvisioner;
   /** Verified native deletion port; defaults to the daemon delete workflow. */
@@ -103,9 +105,13 @@ const sdkAndroidProfileCatalog: ManagedAndroidProfileCatalog = {
 };
 
 /** The injected tooling with the host's real tooling filled in. */
-function hostTooling(tooling: DaemonBindingTooling = {}) {
+function hostTooling(tooling: DaemonBindingTooling = {}, source?: ForeignAndroidSerialSource) {
   return {
-    deviceManager: tooling.deviceManager ?? new MultiPlatformDeviceManager(),
+    deviceManager:
+      tooling.deviceManager ??
+      (source
+        ? new MultiPlatformDeviceManager().withForeignAndroidSerialSource(source)
+        : new MultiPlatformDeviceManager()),
     androidConfigReader: tooling.androidConfigReader ?? new FileAvdConfigReader(),
     androidImageCatalog: tooling.androidImageCatalog ?? sdkAndroidImageCatalog,
     androidProfileCatalog: tooling.androidProfileCatalog ?? sdkAndroidProfileCatalog,
@@ -114,6 +120,7 @@ function hostTooling(tooling: DaemonBindingTooling = {}) {
       tooling.iosRuntimeCatalog ??
       (process.platform === "darwin" ? new SimCtlClient(null) : undefined),
     checkBootCapacity: tooling.checkBootCapacity,
+    reserveBootCapacity: tooling.reserveBootCapacity,
   };
 }
 
@@ -123,8 +130,7 @@ function hostTooling(tooling: DaemonBindingTooling = {}) {
  * tool module. Exported so the real-handler integration test drives exactly this seam (#11266).
  */
 export const defaultBindingToolInvoker: BindingToolInvoker = async (name, args, signal) => {
-  const { ToolRegistry } = await import("../../../server/toolRegistry");
-  return await ToolRegistry.callInternal(name, args, undefined, signal);
+  return await daemonToolRegistry().callInternal(name, args, undefined, signal);
 };
 
 export interface DaemonBrokerDeviceAcquisitionHandle {
@@ -150,7 +156,12 @@ export function createDaemonBrokerDeviceAcquisition(
     let reconciler = reconcilers.get(registry);
     if (!reconciler) {
       // Built on the first acquisition: daemons that never serve a binding never touch them.
-      const tooling = hostTooling(options.tooling);
+      const tooling = hostTooling(
+        options.tooling,
+        options.pool.foreignSerials
+          ? { foreignSerials: (serials, signal) => options.pool.foreignSerials!(serials, signal) }
+          : undefined,
+      );
       const { deviceManager, androidConfigReader } = tooling;
       const inventory = new DeviceManagerBindingInventory(deviceManager);
       const claims = new PoolBindingDeviceClaims(options.pool, options.executions);
@@ -180,6 +191,7 @@ export function createDaemonBrokerDeviceAcquisition(
             androidConfigReader,
             timer: options.timer,
             releaseSession: (sessionUuid) => options.sessions.releaseSession(sessionUuid),
+            discardAndroidSnapshotOnExit: options.discardAndroidSnapshotOnExit,
           }),
         // The verified delete workflow run as the daemon (#11178): a journaled delete of an idle or
         // abandoned binding's device has no execution session for the tool-level ownership check.
@@ -194,9 +206,13 @@ export function createDaemonBrokerDeviceAcquisition(
               ),
             }
           : {}),
-        // The provision path refuses a boot at the limit, but only after a replacement deleted the
-        // old device: the reconciler asks the same gates first, so it fails before deleting.
-        capacity: new GateBindingBootCapacity(options.timer, tooling.checkBootCapacity),
+        // Replacement reserves in the shared boot ledger before deletion, then transfers the slot
+        // to the provision-path boot. Fresh creates retain their read-only preflight.
+        capacity: new GateBindingBootCapacity(
+          options.timer,
+          tooling.checkBootCapacity,
+          tooling.reserveBootCapacity,
+        ),
         timer: options.timer,
         journal: { owner: options.journal.owner, inFlight: options.journal.inFlight },
       });

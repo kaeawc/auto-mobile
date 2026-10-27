@@ -15,24 +15,28 @@ class NavigationProvenanceTest {
   private val activeContext =
     NavigationActiveContext(deviceId = "emulator-5554", packageId = "com.example.app")
 
-  private fun record(
-    versionCode: Long = 1L,
-    contentHash: String = "hashA",
-    deviceId: String = "emulator-5554",
-    sessionUuid: String = "session-1",
-    lastSeen: Long = 100L,
-    packageId: String = "com.example.app",
-  ) =
-    ScreenProvenance(
-      buildKey = ProvenanceBuildKey(packageId, versionCode, contentHash),
-      deviceId = deviceId,
-      sessionUuid = sessionUuid,
-      lastSeen = lastSeen,
-    )
+  private data class RecordSpec(
+    val versionCode: Long = 1L,
+    val contentHash: String = "hashA",
+    val deviceId: String = "emulator-5554",
+    val sessionUuid: String = "session-1",
+    val lastSeen: Long = 100L,
+    val packageId: String = "com.example.app",
+  )
+
+  private fun record(spec: RecordSpec = RecordSpec()) =
+    with(spec) {
+      ScreenProvenance(
+        buildKey = ProvenanceBuildKey(packageId, versionCode, contentHash),
+        deviceId = deviceId,
+        sessionUuid = sessionUuid,
+        lastSeen = lastSeen,
+      )
+    }
 
   @Test
   fun `node reached in active context is full opacity`() {
-    val provenance = listOf(record(deviceId = "emulator-5554"))
+    val provenance = listOf(record(RecordSpec(deviceId = "emulator-5554")))
     assertEquals(
       ProvenanceOpacity.ACTIVE_ALPHA,
       ProvenanceOpacity.alphaFor(provenance, activeContext),
@@ -42,7 +46,7 @@ class NavigationProvenanceTest {
 
   @Test
   fun `node reached only by another device is faded`() {
-    val provenance = listOf(record(deviceId = "emulator-9999"))
+    val provenance = listOf(record(RecordSpec(deviceId = "emulator-9999")))
     assertEquals(
       ProvenanceOpacity.FADED_ALPHA,
       ProvenanceOpacity.alphaFor(provenance, activeContext),
@@ -52,7 +56,11 @@ class NavigationProvenanceTest {
 
   @Test
   fun `active wins when reached by both active and other contexts`() {
-    val provenance = listOf(record(deviceId = "emulator-9999"), record(deviceId = "emulator-5554"))
+    val provenance =
+      listOf(
+        record(RecordSpec(deviceId = "emulator-9999")),
+        record(RecordSpec(deviceId = "emulator-5554")),
+      )
     assertEquals(
       ProvenanceOpacity.ACTIVE_ALPHA,
       ProvenanceOpacity.alphaFor(provenance, activeContext),
@@ -70,25 +78,27 @@ class NavigationProvenanceTest {
         buildKey = ProvenanceBuildKey("com.example.app", versionCode = 2, contentHash = "hashB"),
       )
     // Same device, but an older build → historical.
-    val provenance = listOf(record(versionCode = 1, contentHash = "hashA"))
+    val provenance = listOf(record(RecordSpec(versionCode = 1, contentHash = "hashA")))
     assertEquals(
       ProvenanceOpacity.FADED_ALPHA,
       ProvenanceOpacity.alphaFor(provenance, ctxWithBuild),
     )
     // A matching build on the active device → active.
-    val matching = listOf(record(versionCode = 2, contentHash = "hashB"))
+    val matching = listOf(record(RecordSpec(versionCode = 2, contentHash = "hashB")))
     assertEquals(ProvenanceOpacity.ACTIVE_ALPHA, ProvenanceOpacity.alphaFor(matching, ctxWithBuild))
   }
 
   @Test
   fun `large build version matches exactly and each build dimension can fade`() {
-    val matching = record(versionCode = 20260102123L)
+    val matching = record(RecordSpec(versionCode = 20260102123L))
     val context = activeContext.copy(buildKey = matching.buildKey)
     assertTrue(ProvenanceOpacity.isActiveRecord(matching, context))
-    assertTrue(ProvenanceOpacity.isFaded(listOf(record(versionCode = 20260102124L)), context))
+    assertTrue(
+      ProvenanceOpacity.isFaded(listOf(record(RecordSpec(versionCode = 20260102124L))), context),
+    )
     assertTrue(
       ProvenanceOpacity.isFaded(
-        listOf(record(versionCode = 20260102123L, contentHash = "other")),
+        listOf(record(RecordSpec(versionCode = 20260102123L, contentHash = "other"))),
         context,
       ),
     )
@@ -101,7 +111,7 @@ class NavigationProvenanceTest {
     assertTrue(ProvenanceOpacity.isActiveRecord(matching, activeContext))
     assertTrue(
       ProvenanceOpacity.isActiveRecord(
-        record(versionCode = 20260102124L, contentHash = "other"),
+        record(RecordSpec(versionCode = 20260102124L, contentHash = "other")),
         activeContext,
       ),
     )
@@ -109,7 +119,7 @@ class NavigationProvenanceTest {
 
   @Test
   fun `null context renders union at full opacity (offline)`() {
-    val provenance = listOf(record(deviceId = "emulator-9999"))
+    val provenance = listOf(record(RecordSpec(deviceId = "emulator-9999")))
     assertEquals(ProvenanceOpacity.ACTIVE_ALPHA, ProvenanceOpacity.alphaFor(provenance, null))
     assertEquals(
       "Home — union view (no active context)",
@@ -133,7 +143,14 @@ class NavigationProvenanceTest {
   fun `faded description surfaces build device session and lastSeen`() {
     val provenance =
       listOf(
-        record(versionCode = 2, contentHash = "hashB", deviceId = "emulator-9999", lastSeen = 250L),
+        record(
+          RecordSpec(
+            versionCode = 2,
+            contentHash = "hashB",
+            deviceId = "emulator-9999",
+            lastSeen = 250L,
+          ),
+        ),
       )
     assertEquals(
       "Home — historical: build v2 (hashB), device emulator-9999, session session-1, last seen 250",
@@ -147,7 +164,16 @@ class NavigationProvenanceTest {
     // formats as "no hash". Uses a real device — a legacy-device record is unclassified/opaque, not
     // historical (see below), so it would never reach the historical formatter.
     val provenance =
-      listOf(record(versionCode = 0, contentHash = "", deviceId = "emulator-9999", lastSeen = 100L))
+      listOf(
+        record(
+          RecordSpec(
+            versionCode = 0,
+            contentHash = "",
+            deviceId = "emulator-9999",
+            lastSeen = 100L,
+          ),
+        ),
+      )
     assertEquals(
       "Home — historical: build v0 (no hash), device emulator-9999, session session-1, last seen 100",
       ProvenanceOpacity.contentDescription("Home", provenance, activeContext),
@@ -161,10 +187,12 @@ class NavigationProvenanceTest {
     val provenance =
       listOf(
         record(
-          versionCode = 0,
-          contentHash = "",
-          deviceId = ProvenanceOpacity.LEGACY_DEVICE_SENTINEL,
-          sessionUuid = "legacy",
+          RecordSpec(
+            versionCode = 0,
+            contentHash = "",
+            deviceId = ProvenanceOpacity.LEGACY_DEVICE_SENTINEL,
+            sessionUuid = "legacy",
+          ),
         ),
       )
     assertEquals(
@@ -182,7 +210,7 @@ class NavigationProvenanceTest {
   fun `other real device still fades even alongside a legacy record`() {
     // The legacy short-circuit must not weaken the real-device fade: a record from another concrete
     // device is still historical.
-    val otherDevice = listOf(record(deviceId = "emulator-9999"))
+    val otherDevice = listOf(record(RecordSpec(deviceId = "emulator-9999")))
     assertEquals(
       ProvenanceOpacity.FADED_ALPHA,
       ProvenanceOpacity.alphaFor(otherDevice, activeContext),

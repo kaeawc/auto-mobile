@@ -504,13 +504,16 @@ test("generic wrappers mark only raw-valued properties", () => {
 test("the sanctioned accessor module is out of scope, and its callers read no raw field", () => {
   const code = 'function read(props: Record<string, unknown>) { return props["resource-id"]; }';
   expect(check(code, "src/features/utility/elementProperties.ts")).toEqual([]);
-  expect(check(code, "src/features/systemTray/systemTrayHelpers.ts")).toHaveLength(1);
-  expect(
-    check(
-      "function read(props: Record<string, unknown>) { return rawResourceId(props) + rawText(props); }",
-      "src/features/systemTray/systemTrayHelpers.ts",
-    ),
-  ).toEqual([]);
+  for (const file of ["hierarchy", "matching", "groupExpansion", "dismissal"]) {
+    const filename = `src/features/systemTray/helpers/${file}.ts`;
+    expect(check(code, filename)).toHaveLength(1);
+    expect(
+      check(
+        "function read(props: Record<string, unknown>) { return rawResourceId(props) + rawText(props); }",
+        filename,
+      ),
+    ).toEqual([]);
+  }
 });
 
 test("raw accessor imports are rejected outside the allow-list", () => {
@@ -524,6 +527,13 @@ test("raw accessor imports are rejected outside the allow-list", () => {
     ),
   ).toHaveLength(1);
   expect(check(code, "src/features/systemTray/notificationHints.ts")).toEqual([]);
+  for (const file of ["hierarchy", "matching", "groupExpansion", "dismissal"]) {
+    expect(check(code, `src/features/systemTray/helpers/${file}.ts`)).toEqual([]);
+  }
+  for (const file of ["dependencies", "runtime", "listing"]) {
+    expect(check(code, `src/features/systemTray/helpers/${file}.ts`)).toHaveLength(1);
+  }
+  expect(check(code, "src/features/systemTray/systemTrayHelpers.ts")).toHaveLength(1);
   expect(check(code, "src/features/action/LongPressMetadataDetector.ts")).toEqual([]);
   expect(
     check(
@@ -537,4 +547,36 @@ test("raw accessor imports are rejected outside the allow-list", () => {
       "src/features/action/TapOnElement.ts",
     ),
   ).toEqual([]);
+});
+
+test("selecting through a raw accessor is rejected, not just reading a raw field (#12635)", () => {
+  expect(
+    check(
+      'import { rawText } from "../utility/elementProperties"; const hit = nodes.find((n) => rawText(n) === query);',
+    ),
+  ).toHaveLength(1);
+});
+
+test.each([
+  'import * as props from "../utility/elementProperties"; const hit = nodes.find((n) => props.rawText(n) === query);',
+  'export { rawText } from "../utility/elementProperties";',
+  'export { rawResourceId as readId } from "../utility/elementProperties";',
+  'export * from "../utility/elementProperties";',
+  'import { rawContentDesc } from "./rawBarrel"; const hit = nodes.find((n) => rawContentDesc(n) === query);',
+  'const { rawText } = await import("../utility/elementProperties");',
+])(
+  "namespace imports, re-exports, barrels and dynamic imports cannot launder raw accessors: %s",
+  (code) => {
+    expect(check(code)).toHaveLength(1);
+    expect(check(code, "src/features/systemTray/notificationHints.ts")).toEqual([]);
+  },
+);
+
+test.each([
+  'import type * as props from "../utility/elementProperties";',
+  'export { isTruthyFlag } from "../utility/elementProperties";',
+  'export type * from "../utility/elementProperties";',
+  'const other = await import("../utility/SearchableNode");',
+])("non-accessor imports and exports of the module remain permitted: %s", (code) => {
+  expect(check(code)).toEqual([]);
 });

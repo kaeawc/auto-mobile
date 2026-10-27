@@ -6,6 +6,7 @@ import {
 } from "../../src/server/appResources";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { BootedDevice } from "../../src/models";
+import type { InstalledAppsDetailedResult } from "../../src/features/observe/ListInstalledApps";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 
@@ -27,7 +28,7 @@ const secondDevice: BootedDevice = {
   platform: "android",
 };
 
-function successfulAppsResult(packageName = "com.example.app") {
+function successfulAppsResult(packageName = "com.example.app"): InstalledAppsDetailedResult {
   return {
     apps: {
       profiles: {
@@ -45,7 +46,7 @@ function successfulAppsResult(packageName = "com.example.app") {
       system: [],
     },
     successful: true,
-  } as const;
+  };
 }
 
 describe("ensureAppsCacheEntry single-flight", () => {
@@ -66,7 +67,7 @@ describe("ensureAppsCacheEntry single-flight", () => {
   });
 
   test("shares one fetch and returns the same cache snapshot to concurrent callers", async () => {
-    const pending = Promise.withResolvers<ReturnType<typeof successfulAppsResult>>();
+    const pending = Promise.withResolvers<InstalledAppsDetailedResult>();
     const fetchStarted = Promise.withResolvers<void>();
     let fetches = 0;
     useListInstalledAppsFactoryForTests(() => ({
@@ -92,7 +93,7 @@ describe("ensureAppsCacheEntry single-flight", () => {
   });
 
   test("shares a rejected fetch and retries on the next call", async () => {
-    const pending = Promise.withResolvers<ReturnType<typeof successfulAppsResult>>();
+    const pending = Promise.withResolvers<InstalledAppsDetailedResult>();
     const fetchStarted = Promise.withResolvers<void>();
     const failure = new Error("listing failed");
     let fetches = 0;
@@ -146,7 +147,7 @@ describe("ensureAppsCacheEntry single-flight", () => {
   });
 
   test("starts a fresh fetch after invalidation while an older fetch is pending", async () => {
-    const oldFetch = Promise.withResolvers<ReturnType<typeof successfulAppsResult>>();
+    const oldFetch = Promise.withResolvers<InstalledAppsDetailedResult>();
     const oldStarted = Promise.withResolvers<void>();
     const newStarted = Promise.withResolvers<void>();
     let oldResult: Awaited<ReturnType<typeof queryInstalledApps>> | undefined;

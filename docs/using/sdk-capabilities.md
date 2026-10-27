@@ -2,8 +2,7 @@
 
 Read `automobile:devices/{deviceId}/sdk/capabilities` to learn which AutoMobile SDK
 features the app on an Android device exposes and what its capture policy allows.
-The read goes through the connected CtrlProxy (`get_sdk_capabilities`) to the app's
-debug SDK bridge. Add `?appId={packageName}` to name an app; without it the
+Add `?appId={packageName}` to name an app; without it the
 foreground app of the device is used.
 
 ## Work and secondary profiles

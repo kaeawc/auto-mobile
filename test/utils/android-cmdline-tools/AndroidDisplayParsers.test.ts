@@ -26,14 +26,14 @@ const logicalCoverKey = "4619827259835644673";
 const innerInfo = {
   logicalId: "0",
   uniqueId: `local:${innerKey}`,
-  type: "INTERNAL",
+  type: "INTERNAL" as const,
   sizePx: { width: 2076, height: 2152 },
   hasDisplayInfo: true,
 };
 const coverInfo = {
   logicalId: "3",
   uniqueId: `local:${logicalCoverKey}`,
-  type: "INTERNAL",
+  type: "INTERNAL" as const,
   sizePx: { width: 1080, height: 2364 },
   hasDisplayInfo: true,
 };

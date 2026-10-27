@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.4.1" type="baseline" client="gradle" dependencies="false" name="AGP (9.4.1)" variant="all" version="9.4.1">
+
+    <issue
+        id="ConfigurationScreenWidthHeight"
+        message="Using Configuration.screenWidthDp instead of LocalWindowInfo.current.containerSize"
+        errorLine1="    else screenPx(configuration.screenWidthDp),"
+        errorLine2="                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeImages.kt"
+            line="148"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="ConfigurationScreenWidthHeight"
+        message="Using Configuration.screenHeightDp instead of LocalWindowInfo.current.containerSize"
+        errorLine1="    else screenPx(configuration.screenHeightDp),"
+        errorLine2="                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeImages.kt"
+            line="150"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun fillAuthoredAxes(style: PrototypeStyle): Modifier {"
+        errorLine2="            ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeImages.kt"
+            line="262"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun prototypeNodeModifier("
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1244"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun authoredSizeModifier("
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1587"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun dimensionModifier("
+        errorLine2="            ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1612"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun wrapContent(modifier: Modifier, horizontal: Boolean): Modifier ="
+        errorLine2="            ~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1627"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun RowScope.rowWeight(child: PrototypeRenderNode): Modifier ="
+        errorLine2="                     ~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1643"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun ColumnScope.columnWeight(child: PrototypeRenderNode): Modifier ="
+        errorLine2="                        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1647"
+            column="25"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun sizeConstraintModifier(modifier: Modifier, style: PrototypeStyle): Modifier ="
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1651"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be named modifier"
+        errorLine1="  parentModifier: Modifier = Modifier,"
+        errorLine2="  ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="417"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be named modifier"
+        errorLine1="  parentModifier: Modifier,"
+        errorLine2="  ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="456"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be named modifier"
+        errorLine1="  parentModifier: Modifier = Modifier,"
+        errorLine2="  ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="508"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be named modifier"
+        errorLine1="  parentModifier: Modifier,"
+        errorLine2="  ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1700"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="UnclosedTrace"
+        message="The `beginSection()` call is not always closed with a matching `endSection()` because the code in between may return early"
+        errorLine1="  override fun begin(name: String) = Trace.beginSection(name)"
+        errorLine2="                                           ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeTrace.kt"
+            line="66"
+            column="44"/>
+    </issue>
+
+    <issue
+        id="UseRequiresApi"
+        message="Use `@RequiresApi(Build.VERSION_CODES.R)` instead of `@TargetApi` to propagate the requirement to callers of `navigationBarBottomPx`"
+        errorLine1="@TargetApi(Build.VERSION_CODES.R)"
+        errorLine2="~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeInsetFloor.kt"
+            line="62"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableLongStateOf` instead of `mutableStateOf`"
+        errorLine1="  var revealCounter by mutableStateOf(0L)"
+        errorLine2="                       ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeEscape.kt"
+            line="32"
+            column="24"/>
+    </issue>
+
+</issues>

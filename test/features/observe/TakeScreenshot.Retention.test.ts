@@ -1,3 +1,5 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { BASE_CAP_SCREENSHOT_LIMITS } from "../../helpers/screenshotRetentionLimits";
 import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../../src/features/observe/ScreenshotRetention";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { logger } from "../../../src/utils/logger";
@@ -54,18 +56,16 @@ let files: RetentionFiles;
 let protection: BoundedScreenshotPathProtection;
 let states: InMemoryScreenshotStateStore;
 function capture(cleanupOnCreate = false) {
-  return new TakeScreenshot(
-    androidDevice("retention"),
-    new FakeAdbClientFactory(new FakeAdbExecutor()),
+  return new TakeScreenshot(androidDevice("retention"), {
+    adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
     timer,
-    new CountingIdGenerator(),
-    new FakeScreenshotFileWriter(),
-    files,
-    () => "/screenshots",
-    undefined,
+    idGenerator: new CountingIdGenerator(),
+    fileWriter: new FakeScreenshotFileWriter(),
+    fileSystem: files,
+    cacheDirResolver: () => "/screenshots",
     cleanupOnCreate,
-    { pathProtection: protection },
-  );
+    pathProtection: protection,
+  });
 }
 async function sweep() {
   await protection.sweep("/screenshots", files);
@@ -73,7 +73,12 @@ async function sweep() {
 beforeEach(() => {
   timer = new FakeTimer();
   files = new RetentionFiles();
-  protection = new BoundedScreenshotPathProtection(timer, undefined);
+  protection = new BoundedScreenshotPathProtection(
+    timer,
+    undefined,
+    undefined,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
   files.setDirectory("/screenshots");
   setObserveCacheStore(new FakeObserveCacheStore(timer));
   states = new InMemoryScreenshotStateStore(timer);
@@ -96,18 +101,16 @@ test("constructing multiple screenshot services sweeps a cache directory once", 
   const sweepSpy = spyOn(protection, "sweep").mockResolvedValue(undefined);
   const cacheDir = "/screenshots";
   const create = () =>
-    new TakeScreenshot(
-      androidDevice("retention"),
-      new FakeAdbClientFactory(new FakeAdbExecutor()),
+    new TakeScreenshot(androidDevice("retention"), {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
       timer,
-      new CountingIdGenerator(),
-      new FakeScreenshotFileWriter(),
-      files,
-      () => cacheDir,
-      undefined,
-      true,
-      { pathProtection: protection },
-    );
+      idGenerator: new CountingIdGenerator(),
+      fileWriter: new FakeScreenshotFileWriter(),
+      fileSystem: files,
+      cacheDirResolver: () => cacheDir,
+      cleanupOnCreate: true,
+      pathProtection: protection,
+    });
 
   create();
   create();
@@ -118,21 +121,24 @@ test("constructing multiple screenshot services sweeps a cache directory once", 
 test("a fresh protection sweeps the same cache directory once again", async () => {
   const firstSweep = spyOn(protection, "sweep").mockResolvedValue(undefined);
   const create = (pathProtection: BoundedScreenshotPathProtection) =>
-    new TakeScreenshot(
-      androidDevice("retention"),
-      new FakeAdbClientFactory(new FakeAdbExecutor()),
+    new TakeScreenshot(androidDevice("retention"), {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
       timer,
-      new CountingIdGenerator(),
-      new FakeScreenshotFileWriter(),
-      files,
-      () => "/screenshots",
-      undefined,
-      true,
-      { pathProtection },
-    );
+      idGenerator: new CountingIdGenerator(),
+      fileWriter: new FakeScreenshotFileWriter(),
+      fileSystem: files,
+      cacheDirResolver: () => "/screenshots",
+      cleanupOnCreate: true,
+      pathProtection,
+    });
 
   create(protection);
-  const freshProtection = new BoundedScreenshotPathProtection(timer, undefined);
+  const freshProtection = new BoundedScreenshotPathProtection(
+    timer,
+    undefined,
+    undefined,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
   const freshSweep = spyOn(freshProtection, "sweep").mockResolvedValue(undefined);
   create(freshProtection);
   await Promise.resolve();
@@ -152,12 +158,15 @@ test("equivalent reference spellings in both stores survive a stale sweep", asyn
   const statePath = files.add("snapshot-of-state.png", 1, 0);
   const observePath = files.add("snapshot-of-observe.png", 1, 0);
   states.update("retention", "/screenshots/./snapshot-of-state.png");
-  await getObserveCacheStore().put("retention", {
-    updatedAt: timer.now(),
-    screenSize: { width: 1, height: 1 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    screenshotPath: "/screenshots/./snapshot-of-observe.png",
-  });
+  await getObserveCacheStore().put(
+    "retention",
+    buildObserveResult({
+      updatedAt: timer.now(),
+      screenSize: { width: 1, height: 1 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      screenshotPath: "/screenshots/./snapshot-of-observe.png",
+    }),
+  );
   await sweep();
   expect(files.existsSync(statePath)).toBe(true);
   expect(files.existsSync(observePath)).toBe(true);
@@ -336,12 +345,15 @@ test("over-budget cleanup logs protected count without deleting the live lease",
 test("cache invalidation drops both reference stores without unlinking a returned file", async () => {
   timer.advanceTime(60_000);
   const path = files.add("screenshot_0_device_clear.png", 129 * 1024 * 1024, 0);
-  await getObserveCacheStore().put("retention", {
-    updatedAt: timer.now(),
-    screenSize: { width: 1, height: 1 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    screenshotPath: path,
-  });
+  await getObserveCacheStore().put(
+    "retention",
+    buildObserveResult({
+      updatedAt: timer.now(),
+      screenSize: { width: 1, height: 1 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      screenshotPath: path,
+    }),
+  );
   states.update("retention", path);
   await protection.protect(path);
   const unlink = spyOn(files, "unlink");
@@ -401,7 +413,12 @@ test("a newly added equivalent reference prevents deleting the next stale file",
 
 test("restart gives old files a full process-start grace, then age sweeps them", async () => {
   timer.advanceTime(2_000_000);
-  protection = new BoundedScreenshotPathProtection(timer, undefined);
+  protection = new BoundedScreenshotPathProtection(
+    timer,
+    undefined,
+    undefined,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
   const old = files.add("snapshot-of-restart.png", 1, 0);
   await sweep();
   timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS - 1);
@@ -414,7 +431,12 @@ test("restart gives old files a full process-start grace, then age sweeps them",
 
 test("restart grace never shortens a newer file's mtime floor", async () => {
   timer.advanceTime(2_000_000);
-  protection = new BoundedScreenshotPathProtection(timer, undefined);
+  protection = new BoundedScreenshotPathProtection(
+    timer,
+    undefined,
+    undefined,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
   const recent = files.add("snapshot-of-newer.png", 1, timer.now() + 100);
   await sweep();
   timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS);
@@ -472,7 +494,12 @@ test("count capacity evicts the oldest file instead of refusing a new one", asyn
   // A small injected cap exercises the same admission path as the production 4096 without
   // building and sweeping 4096 fake files (~10 ms, the slowest test in this file).
   const countCap = 16;
-  protection = new BoundedScreenshotPathProtection(timer, undefined, countCap);
+  protection = new BoundedScreenshotPathProtection(
+    timer,
+    undefined,
+    countCap,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
   for (let i = 0; i < countCap; i++) {
     files.add(`crop-count-${i}.png`, 1, i);
   }

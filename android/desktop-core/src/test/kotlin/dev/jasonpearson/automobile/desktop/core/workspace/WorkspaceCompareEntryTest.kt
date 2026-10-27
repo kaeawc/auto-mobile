@@ -64,7 +64,16 @@ class WorkspaceCompareEntryTest {
         focusedDeviceId = "a",
       )
     setContent {
-      MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) }
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
     }
     onNodeWithContentDescription("Compare two devices").assertIsDisplayed()
   }
@@ -72,7 +81,18 @@ class WorkspaceCompareEntryTest {
   @Test
   fun `compare glyph is hidden with a single device`() = runComposeUiTest {
     val state = WorkspaceUiState.Content(columns = listOf(col("a", "Pixel")), focusedDeviceId = "a")
-    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+            ),
+        )
+      }
+    }
     onNodeWithContentDescription("Compare two devices").assertDoesNotExist()
   }
 
@@ -89,8 +109,11 @@ class WorkspaceCompareEntryTest {
           WorkspaceShell(
             state = state,
             onAction = {},
-            onOpenPicker = {},
-            compareContent = { a, b -> Text("compare ${a.deviceId} vs ${b.deviceId}") },
+            options =
+              WorkspaceShellOptions(
+                onOpenPicker = {},
+                compareContent = { a, b -> Text("compare ${a.deviceId} vs ${b.deviceId}") },
+              ),
           )
         }
       }
@@ -113,8 +136,11 @@ class WorkspaceCompareEntryTest {
         WorkspaceShell(
           state = state,
           onAction = {},
-          onOpenPicker = {},
-          compareContent = { _, _ -> Text("compare-body") },
+          options =
+            WorkspaceShellOptions(
+              onOpenPicker = {},
+              compareContent = { _, _ -> Text("compare-body") },
+            ),
         )
       }
     }

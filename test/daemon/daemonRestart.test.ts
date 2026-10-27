@@ -4,17 +4,28 @@ import {
   restartAcceptanceSession,
   restartAdmitted,
   restartDaemon,
+  restartExpectedGeneration,
   restartResultFromStart,
   type DaemonRestartHost,
 } from "../../src/daemon/daemonRestart";
 import {
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
-} from "../../src/daemon/constants";
-import { DaemonRestartDeferredError } from "../../src/daemon/daemonRestartAdmission";
+} from "../../src/daemon/wire/constants";
+import {
+  DaemonRestartDeferredError,
+  type DaemonRestartPreparation,
+} from "../../src/daemon/daemonRestartAdmission";
+import { resolveDaemonInstallSpecifier } from "../../src/constants/release";
+import {
+  DefaultTakeoverDeferralLedger,
+  TAKEOVER_ACTIVE_OPERATIONS_TIME_BOUND_MS,
+  TAKEOVER_DEFERRAL_TIME_BOUND_MS,
+} from "../../src/daemon/manager/TakeoverDeferralLedger";
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeStartupFailureStore } from "../fakes/FakeStartupFailureStore";
 
 type StartResult = "started" | "joined" | "replaced";
 
@@ -22,6 +33,10 @@ type StartResult = "started" | "joined" | "replaced";
 class FakeRestartHost implements DaemonRestartHost {
   readonly calls: string[] = [];
   readonly timer = new FakeTimer();
+  readonly deferralStore = new FakeStartupFailureStore();
+  readonly takeoverDeferrals = new DefaultTakeoverDeferralLedger(this.deferralStore);
+  preparation: DaemonRestartPreparation = { accepted: true };
+  preparationError: Error | undefined;
   status: DaemonStatus = { running: false };
   recorded: DaemonStatus = { running: false };
   locked = false;
@@ -37,6 +52,9 @@ class FakeRestartHost implements DaemonRestartHost {
 
   log(message: string): void {
     this.calls.push(`log:${message}`);
+  }
+  now(): number {
+    return this.timer.now();
   }
   async sleep(ms: number): Promise<void> {
     this.calls.push(`sleep:${ms}`);
@@ -124,11 +142,14 @@ class FakeRestartHost implements DaemonRestartHost {
   async verifyDaemonGenerationBeforeSignal(): Promise<boolean> {
     return true;
   }
-  async prepareDaemonForConditionalRestart(): Promise<{ accepted: boolean; reason?: never }> {
-    return { accepted: true };
+  async prepareDaemonForConditionalRestart(): Promise<DaemonRestartPreparation> {
+    if (this.preparationError) {
+      throw this.preparationError;
+    }
+    return this.preparation;
   }
-  async prepareIdentityRecoveryRestart(): Promise<{ accepted: boolean }> {
-    return { accepted: true };
+  async prepareIdentityRecoveryRestart(): Promise<DaemonRestartPreparation> {
+    return this.prepareDaemonForConditionalRestart();
   }
   async admitMaintenanceRestart(): Promise<{ accepted: boolean; reason?: never }> {
     this.calls.push("admit");
@@ -231,6 +252,208 @@ describe("restartDaemon (namespace restart)", () => {
     expect(host.calls).toContain("stopRunningDaemon");
     expect(host.calls).toContain("startWithRunningOptions");
   });
+});
+
+describe("restartExpectedGeneration deferral bound (#13792)", () => {
+  const firstDeferredAtMs = Date.UTC(2026, 9, 20);
+
+  function deferredHost(): FakeRestartHost {
+    const host = new FakeRestartHost();
+    host.timer.setCurrentTime(firstDeferredAtMs);
+    host.status = {
+      running: true,
+      pid: 13792,
+      version: "0.0.1",
+      startedAt: 100,
+      processGenerationToken: "original-generation",
+    };
+    return host;
+  }
+
+  function attempt(host: FakeRestartHost, recovering: boolean): Promise<"restarted" | "joined"> {
+    return restartExpectedGeneration(host, host.status, host.status, {}, recovering);
+  }
+
+  function guidance(
+    host: FakeRestartHost,
+    attempts: number,
+    original: DaemonRestartDeferredError,
+  ): string {
+    return new DaemonRestartDeferredError(
+      `daemon pid ${host.status.pid} (version ${host.status.version}) has deferred this restart ` +
+        `${attempts} times since ${new Date(firstDeferredAtMs).toISOString()} (${original.message}); ` +
+        `it is never stopped automatically — run \`bunx ${resolveDaemonInstallSpecifier()} --daemon restart\` ` +
+        "to replace it once no device operation is active",
+    ).message;
+  }
+
+  function expectNoLifecycleCalls(host: FakeRestartHost): void {
+    expect(host.calls.filter((call) => !call.startsWith("log:"))).toEqual([]);
+    expect(host.startedWith).toEqual([]);
+  }
+
+  test("recovering=true: thrown active-operations refusal waits ten minutes before guidance", async () => {
+    const host = deferredHost();
+    const original = new DaemonRestartDeferredError("active_operations", "active_operations");
+    host.preparationError = original;
+
+    await expect(attempt(host, true)).rejects.toBe(original);
+    await expect(attempt(host, true)).rejects.toBe(original);
+    await expect(attempt(host, true)).rejects.toBe(original);
+    host.timer.advanceTime(TAKEOVER_DEFERRAL_TIME_BOUND_MS);
+    await expect(attempt(host, true)).rejects.toBe(original);
+    host.timer.advanceTime(
+      TAKEOVER_ACTIVE_OPERATIONS_TIME_BOUND_MS - TAKEOVER_DEFERRAL_TIME_BOUND_MS - 1,
+    );
+    await expect(attempt(host, true)).rejects.toBe(original);
+    host.timer.advanceTime(1);
+
+    await expect(attempt(host, true)).rejects.toMatchObject({
+      message: guidance(host, 6, original),
+    });
+    expectNoLifecycleCalls(host);
+  });
+
+  for (const recovering of [false, true]) {
+    describe(`recovering=${recovering}`, () => {
+      test("unavailable admission preserves the original error twice, then gives guidance", async () => {
+        const host = deferredHost();
+        const original = new DaemonRestartDeferredError("safe-restart admission is unavailable");
+        host.preparationError = original;
+
+        await expect(attempt(host, recovering)).rejects.toBe(original);
+        await expect(attempt(host, recovering)).rejects.toBe(original);
+        const third = attempt(host, recovering);
+        await expect(third).rejects.toBeInstanceOf(DaemonRestartDeferredError);
+        await expect(third).rejects.toMatchObject({ message: guidance(host, 3, original) });
+        expectNoLifecycleCalls(host);
+      });
+
+      test.each([
+        ["shutdown_unavailable", "the daemon could not initiate its own shutdown"],
+        [undefined, "the daemon returned an unrecognized safe-restart admission result"],
+      ] as const)("%s admission gives guidance on the third attempt", async (reason, message) => {
+        const host = deferredHost();
+        host.preparation = { accepted: false, reason };
+        const original = new DaemonRestartDeferredError(message);
+
+        await expect(attempt(host, recovering)).rejects.toMatchObject({
+          message: original.message,
+        });
+        await expect(attempt(host, recovering)).rejects.toMatchObject({
+          message: original.message,
+        });
+        await expect(attempt(host, recovering)).rejects.toMatchObject({
+          message: guidance(host, 3, original),
+        });
+        expectNoLifecycleCalls(host);
+      });
+
+      test("unavailable admission also gives guidance at the elapsed-time bound", async () => {
+        const host = deferredHost();
+        const original = new DaemonRestartDeferredError("safe-restart admission is unavailable");
+        host.preparationError = original;
+        await expect(attempt(host, recovering)).rejects.toBe(original);
+        host.timer.advanceTime(TAKEOVER_DEFERRAL_TIME_BOUND_MS);
+
+        await expect(attempt(host, recovering)).rejects.toMatchObject({
+          message: guidance(host, 2, original),
+        });
+        expectNoLifecycleCalls(host);
+      });
+
+      test("active operations defer until the ten-minute bound without stopping", async () => {
+        const host = deferredHost();
+        host.preparation = { accepted: false, reason: "active_operations" };
+        const message = "a device operation is active";
+        const original = new DaemonRestartDeferredError(message);
+        await expect(attempt(host, recovering)).rejects.toMatchObject({
+          message: original.message,
+        });
+        await expect(attempt(host, recovering)).rejects.toMatchObject({
+          message: original.message,
+        });
+        host.timer.advanceTime(TAKEOVER_ACTIVE_OPERATIONS_TIME_BOUND_MS - 1);
+        await expect(attempt(host, recovering)).rejects.toMatchObject({
+          message: original.message,
+        });
+        host.timer.advanceTime(1);
+
+        await expect(attempt(host, recovering)).rejects.toMatchObject({
+          message: guidance(host, 4, original),
+        });
+        expectNoLifecycleCalls(host);
+      });
+
+      test.each([
+        { pid: 13793 },
+        { processGenerationToken: "successor-generation" },
+        { startedAt: 200 },
+      ])("a different generation %j resets the count to one", async (generation) => {
+        const host = deferredHost();
+        const original = new DaemonRestartDeferredError("safe-restart admission is unavailable");
+        host.preparationError = original;
+        await expect(attempt(host, recovering)).rejects.toBe(original);
+        await expect(attempt(host, recovering)).rejects.toBe(original);
+        host.status = { ...host.status, ...generation };
+
+        await expect(attempt(host, recovering)).rejects.toBe(original);
+        expect(JSON.parse(host.deferralStore.contents ?? "null")).toMatchObject({
+          key: { ...generation },
+          attempts: 1,
+        });
+        expectNoLifecycleCalls(host);
+      });
+
+      test("accepted admission clears the ledger before stopping and restarts", async () => {
+        const host = deferredHost();
+        host.preparation = { accepted: false, reason: "shutdown_unavailable" };
+        await expect(attempt(host, recovering)).rejects.toThrow();
+        host.preparation = { accepted: true };
+        host.stopRunningDaemon = async () => {
+          expect(host.deferralStore.contents).toBeNull();
+          host.calls.push("stopRunningDaemon");
+        };
+
+        expect(await attempt(host, recovering)).toBe("restarted");
+        expect(host.deferralStore.contents).toBeNull();
+        expect(host.calls).toEqual([
+          "stopRunningDaemon",
+          `sleep:${DAEMON_RESTART_HANDOFF_DELAY_MS}`,
+          recovering ? "startUnlocked" : "startWithRunningOptions",
+        ]);
+        host.preparation = { accepted: false, reason: "shutdown_unavailable" };
+        await expect(attempt(host, recovering)).rejects.toThrow();
+        expect(JSON.parse(host.deferralStore.contents ?? "null")).toMatchObject({ attempts: 1 });
+      });
+
+      test.each(["generation_changed", "restart_pending"] as const)(
+        "%s joins without writing the ledger",
+        async (reason) => {
+          const host = deferredHost();
+          host.preparation = { accepted: false, reason: "shutdown_unavailable" };
+          await expect(attempt(host, recovering)).rejects.toThrow();
+          const before = host.deferralStore.contents;
+          expect(before).not.toBeNull();
+          host.preparation = { accepted: false, reason };
+
+          expect(await attempt(host, recovering)).toBe("joined");
+          expect(host.deferralStore.contents).toBe(before);
+          expectNoLifecycleCalls(host);
+        },
+      );
+
+      test("other preparation errors propagate unchanged without recording a deferral", async () => {
+        const host = deferredHost();
+        const original = new Error("unexpected preparation failure");
+        host.preparationError = original;
+
+        await expect(attempt(host, recovering)).rejects.toBe(original);
+        expect(host.deferralStore.contents).toBeNull();
+        expectNoLifecycleCalls(host);
+      });
+    });
+  }
 });
 
 describe("restartAdmitted", () => {

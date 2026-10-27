@@ -8,11 +8,16 @@ import type { GestureEmitter, GestureEvent } from "./types";
 import type { TouchInputNode } from "./TouchNodeDiscovery";
 import type { GestureScaler } from "./AxisRanges";
 import { TouchFrameReconstructor } from "./TouchFrameReconstructor";
-import { GestureClassifier } from "./GestureClassifier";
+import { GestureClassifier, type PressureRange } from "./GestureClassifier";
 
 interface GetEventReaderOptions {
   adb: AdbExecutor;
   touchNode: TouchInputNode;
+  /**
+   * Additional pen digitizer nodes read by their own `getevent` process each. Each has
+   * its own axis ranges, so it needs its own scaler.
+   */
+  penNodes?: ReadonlyArray<{ node: TouchInputNode; scaler: GestureScaler }>;
   /** A timeline-backed scaler maps each touch with the geometry current at its DOWN. */
   scaler: GestureScaler;
   /** Display density in dp multiplier (e.g. 2.75 for 440dpi) */
@@ -21,17 +26,22 @@ interface GetEventReaderOptions {
 }
 
 /**
- * Spawns `adb shell getevent -lt <touchNode.path>` through AdbClient and pipes
- * the output through TouchFrameReconstructor → GestureClassifier.
+ * Spawns one `adb shell getevent -lt <path>` process per input node through
+ * AdbClient (the touch node first, then one per pen node) and pipes each
+ * process's output through its own TouchFrameReconstructor → GestureClassifier.
+ * One process per node keeps every line attributed to its node without parsing
+ * device-path prefixes, and the touch process is exactly what it was before pen
+ * support. A pen process that fails is logged and dropped; finger recording
+ * continues. A touch process failure is reported through `onError`.
  *
  * Implements GestureEmitter so it can be replaced with a fake in tests.
  */
 export class GetEventReader implements GestureEmitter {
-  private child: AdbProcess | null = null;
+  private children = new Set<AdbProcess>();
   private starting = false;
 
   private generation = 0;
-  private cleanupChild: (() => void) | null = null;
+  private cleanups = new Set<() => void>();
   private readonly timer: Timer;
 
   constructor(private readonly opts: GetEventReaderOptions) {
@@ -39,45 +49,62 @@ export class GetEventReader implements GestureEmitter {
   }
 
   start(onGesture: (event: GestureEvent) => void, onError?: (err: Error) => void): void {
-    if (this.child || this.starting) {
+    if (this.children.size > 0 || this.starting) {
       return;
     } // already running
     this.starting = true;
-    void this.startProcess(++this.generation, onGesture, onError);
+    const generation = ++this.generation;
+    void this.startProcess(generation, this.opts.touchNode, this.opts.scaler, onGesture, onError);
+    for (const { node, scaler } of this.opts.penNodes ?? []) {
+      void this.startProcess(generation, node, scaler, onGesture, (error) =>
+        logger.warn(
+          `[GetEventReader] pen node ${node.path} stopped; finger recording continues: ${error.message}`,
+          error,
+        ),
+      );
+    }
   }
 
   private async startProcess(
     generation: number,
+    node: TouchInputNode,
+    scaler: GestureScaler,
     onGesture: (event: GestureEvent) => void,
     onError?: (err: Error) => void,
   ): Promise<void> {
-    const reconstructor = new TouchFrameReconstructor();
-    const classifier = new GestureClassifier(this.opts.scaler, this.opts.density);
+    const reconstructor = new TouchFrameReconstructor({
+      singleTouch: node.kind === "pen",
+      onHover: onGesture,
+    });
+    const classifier = new GestureClassifier(scaler, this.opts.density, pressureRangeOf(node));
 
-    const args = ["shell", "getevent", "-lt", this.opts.touchNode.path];
+    const args = ["shell", "getevent", "-lt", node.path];
 
     logger.debug(`[GetEventReader] Spawning: ${args.join(" ")}`);
+    let child: AdbProcess;
     try {
-      const child = await this.opts.adb.spawn(args);
-      if (!this.starting || generation !== this.generation) {
-        child.on("error", () => {});
-        child.kill();
-        return;
-      }
-      this.child = child;
+      child = await this.opts.adb.spawn(args);
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error));
       logger.error(`[GetEventReader] spawn error: ${normalized.message}`);
       if (generation === this.generation) {
-        this.starting = false;
+        // Only the touch process gates start(): a pen spawn failing first must not let a second
+        // start() spawn duplicates while the touch spawn is still pending.
+        if (node === this.opts.touchNode) {
+          this.starting = false;
+        }
         onError?.(normalized);
       }
       return;
     }
-    this.starting = false;
-    const child = this.child;
-    if (!child) {
+    if (generation !== this.generation) {
+      child.on("error", () => {});
+      child.kill();
       return;
+    }
+    this.children.add(child);
+    if (node === this.opts.touchNode) {
+      this.starting = false;
     }
 
     let lineBuffer = "";
@@ -124,10 +151,8 @@ export class GetEventReader implements GestureEmitter {
       child.on("error", ignoreError);
       child.off("error", onChildError);
       child.off("exit", onExit);
-      if (this.child === child) {
-        this.child = null;
-        this.cleanupChild = null;
-      }
+      this.children.delete(child);
+      this.cleanups.delete(cleanup);
     };
     const ignoreError = (): void => {};
     const onChildError = (err: Error): void => {
@@ -153,7 +178,7 @@ export class GetEventReader implements GestureEmitter {
       onError?.(error);
     };
 
-    this.cleanupChild = cleanup;
+    this.cleanups.add(cleanup);
     child.stdout.on("data", onData);
     child.stderr.on("data", onStderr);
     child.on("error", onChildError);
@@ -163,14 +188,24 @@ export class GetEventReader implements GestureEmitter {
   stop(): void {
     this.starting = false;
     ++this.generation;
-    const child = this.child;
-    this.cleanupChild?.();
-    if (child && !child.killed) {
-      logger.debug("[GetEventReader] Stopping getevent process");
-      child.kill();
+    const children = [...this.children];
+    for (const cleanup of [...this.cleanups]) {
+      cleanup();
     }
-    this.child = null;
+    for (const child of children) {
+      if (!child.killed) {
+        logger.debug("[GetEventReader] Stopping getevent process");
+        child.kill();
+      }
+    }
+    this.children.clear();
   }
+}
+
+function pressureRangeOf(node: TouchInputNode): PressureRange | undefined {
+  return node.pressureMin !== undefined && node.pressureMax !== undefined
+    ? { min: node.pressureMin, max: node.pressureMax }
+    : undefined;
 }
 
 function isRawTouchFrame(

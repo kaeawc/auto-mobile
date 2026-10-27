@@ -1,4 +1,4 @@
-import { ErrorCode, McpError } from "./mcpError";
+import { ErrorCode, McpError } from "../daemon/mcpError";
 
 /** Keep the wire message unprefixed; the SDK client adds its own MCP error prefix. */
 export class InvalidToolParamsError extends McpError {

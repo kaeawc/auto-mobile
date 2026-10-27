@@ -1,13 +1,16 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
-import { Visitor, type AssignmentTarget, type Expression, type MemberExpression } from "oxc-parser";
+import { type AssignmentTarget, type Expression, type MemberExpression } from "oxc-parser";
 import {
   localBindings,
   parseGuardSource,
   relativePosix,
   typeScriptFiles,
   unwrapCallee,
+  guardTextMayMatch,
+  readGuardFile,
+  GuardVisitor as Visitor,
 } from "./astGuard";
 import preChangeWriters from "./fixtures/deviceBindingWriters.json";
 
@@ -31,7 +34,11 @@ const DEVICE_RECEIVERS = new Set([
 // releaseSessionAndDevice.ts funnel or DevicePool's own internal calls.
 const RELEASE_DEVICE_ALLOWLIST: Readonly<Record<string, number>> = {
   // Includes the unrelated installed-apps cache write coordinator's releaseDevice call.
-  "src/daemon/devicePool.ts": 7,
+  "src/daemon/devicePoolParts/allocationWiring.ts": 1,
+  "src/daemon/devicePoolParts/recoveryWiring.ts": 1,
+  "src/daemon/devicePoolParts/release.ts": 3,
+  "src/daemon/devicePoolParts/reporting.ts": 1,
+  "src/daemon/devicePoolParts/sessionRecovery.ts": 1,
   // Unrelated APIs sharing the name: prototype agent registry, viewer connections,
   // events, and the installed-apps cache write coordinator. These counts do not
   // permit new DevicePool release callers.
@@ -39,6 +46,13 @@ const RELEASE_DEVICE_ALLOWLIST: Readonly<Record<string, number>> = {
   "src/server/appTools.ts": 2,
   "src/server/deviceToolsShutdown.ts": 1,
   "src/server/prototypeLifecycle.ts": 1,
+};
+
+// The one receiver per file whose `releaseDevice(...args)` forwards an existing release.
+const RELEASE_FORWARDING_RECEIVERS: Readonly<Record<string, string>> = {
+  "src/daemon/devicePool.ts": "this.parts.release",
+  "src/daemon/devicePoolSeams.ts": "pool",
+  "src/daemon/devicePoolParts/release.ts": "seams",
 };
 
 function memberName(node: MemberExpression): string | undefined {
@@ -53,7 +67,14 @@ function memberName(node: MemberExpression): string | undefined {
 }
 
 function scan(file: string, source: string): { writes: string[]; releases: number } {
-  const program = parseGuardSource(file, source);
+  const program = parseGuardSource(
+    file,
+    source,
+    guardTextMayMatch(source, /sessionId|status|health|releaseDevice/),
+  );
+  if (!program) {
+    return { writes: [], releases: 0 };
+  }
   const binding = localBindings(program);
   const writes: string[] = [];
   let releases = 0;
@@ -202,7 +223,19 @@ function scan(file: string, source: string): { writes: string[]; releases: numbe
     CallExpression(node) {
       const callee = unwrapCallee(node.callee);
       if (callee.type === "MemberExpression" && memberName(callee) === "releaseDevice") {
-        releases++;
+        // The facade and its connection port forward the same release, with no new caller.
+        // Only each file's exact rest-argument delegate, named by its receiver, is excluded (#14570);
+        // real calls, and any other receiver forwarding `...args`, still consume the inventory.
+        const forwarded =
+          RELEASE_FORWARDING_RECEIVERS[file] ===
+            source.slice(callee.object.start, callee.object.end) &&
+          node.arguments.length === 1 &&
+          node.arguments[0].type === "SpreadElement" &&
+          node.arguments[0].argument.type === "Identifier" &&
+          node.arguments[0].argument.name === "args";
+        if (!forwarded) {
+          releases++;
+        }
       }
       if (
         callee.type !== "MemberExpression" ||
@@ -274,7 +307,7 @@ describe("device binding single writer", () => {
   beforeAll(() => {
     for (const file of typeScriptFiles(path.join(ROOT, "src"))) {
       const relative = relativePosix(ROOT, file);
-      facts.set(relative, scan(relative, readFileSync(file, "utf8")));
+      facts.set(relative, scan(relative, readGuardFile(file)));
     }
   }, 20_000);
 
@@ -364,6 +397,22 @@ describe("device binding single writer", () => {
     expect(facts.has("src/daemon/deviceAllocation.ts")).toBe(true);
     expect([...facts].flatMap(([file, fact]) => (file === OWNER ? [] : fact.writes))).toEqual([]);
   });
+
+  test.each([
+    ["src/daemon/devicePool.ts", "this.parts.release.releaseDevice(...args);", 0],
+    ["src/daemon/devicePoolSeams.ts", "pool.releaseDevice(...args);", 0],
+    ["src/daemon/devicePoolParts/release.ts", "seams.releaseDevice(...args);", 0],
+    ["src/daemon/devicePoolSeams.ts", "rogue.releaseDevice(...args);", 1],
+    ["src/daemon/devicePoolParts/release.ts", "pool.releaseDevice(...args);", 1],
+    ["src/daemon/devicePool.ts", "this.parts.allocation.releaseDevice(...args);", 1],
+    ["src/daemon/devicePoolSeams.ts", "pool.releaseDevice(id);", 1],
+    ["src/daemon/sessionManager.ts", "pool.releaseDevice(...args);", 1],
+  ] as const)(
+    "only the named forwarding delegate is exempt: %s %s counts %d (#14570)",
+    (file, source, releases) => {
+      expect(scan(file, source).releases).toBe(releases);
+    },
+  );
 
   test("releaseDevice member calls outside the release owner can only shrink", () => {
     expect(facts.size).toBeGreaterThan(0);

@@ -1,5 +1,4 @@
 import { describe, expect, mock, test } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ActionableError } from "../../../src/models";
@@ -96,12 +95,13 @@ function createClient(overrides: Partial<ConstructorParameters<typeof AvdManager
         available_tools: ["avdmanager"],
       },
     ],
+    getAndroidHomeWithSystemImages: () => null,
     getBestAndroidToolsLocation: (locations) => locations[0] ?? null,
     validateRequiredTools: () => ({ valid: true, missing: [] }),
     existsSync: (path) => path.endsWith("avdmanager") || path.endsWith("system-images"),
     spawn: (command, args, options) => {
       calls.push({ command, args, env: options.env, shell: options.shell });
-      return child as unknown as ChildProcess;
+      return child;
     },
     logger: { info() {}, warn() {}, error() {} },
     timer,

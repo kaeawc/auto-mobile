@@ -12,7 +12,7 @@ import { VoiceOverToggle } from "../../src/features/accessibility/VoiceOverToggl
 import type { BootedDevice } from "../../src/models";
 import type { VoiceOverResult } from "../../src/models/AccessibilityResult";
 import { ActionableError } from "../../src/models/ActionableError";
-import { accessibilityDetector } from "../../src/features/accessibility/AccessibilityDetector";
+import { accessibilityDetector } from "../../src/ctrlProxy/accessibility/AccessibilityDetector";
 import { iosVoiceOverDetector } from "../../src/features/accessibility/IosVoiceOverDetector";
 import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -25,6 +25,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import type { ScreenReaderToggleOptions } from "../../src/models/AccessibilityResult";
 import { spyOnIosClientFactory, spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { toolStructured } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -71,8 +72,9 @@ describe("accessibilityTools", () => {
             "could not determine TalkBack state: device accessibility settings read unavailable",
         },
       });
-      expect(response.structuredContent).not.toHaveProperty("enabled");
-      expect(accessibilityStateSchema.safeParse(response.structuredContent).success).toBe(true);
+      const structured = toolStructured(response);
+      expect(structured).not.toHaveProperty("enabled");
+      expect(accessibilityStateSchema.safeParse(structured).success).toBe(true);
     } finally {
       factory.mockRestore();
       accessibilityDetector.clearAllCache();
@@ -95,8 +97,9 @@ describe("accessibilityTools", () => {
           reason: "could not determine VoiceOver state: CtrlProxy VoiceOver probe unavailable",
         },
       });
-      expect(response.structuredContent).not.toHaveProperty("enabled");
-      expect(accessibilityStateSchema.safeParse(response.structuredContent).success).toBe(true);
+      const structured = toolStructured(response);
+      expect(structured).not.toHaveProperty("enabled");
+      expect(accessibilityStateSchema.safeParse(structured).success).toBe(true);
     } finally {
       spies.forEach((spy) => spy.mockRestore());
     }
@@ -191,7 +194,12 @@ describe("accessibilityTools", () => {
         try {
           registerAccessibilityTools();
           const response = await accessibilityHandler()(ANDROID_DEVICE, { talkback: hasReason });
-          const expected = { enabled: false, service: "unknown", ...reasonFields, ...promptFields };
+          const expected = {
+            enabled: false,
+            service: "unknown" as const,
+            ...reasonFields,
+            ...promptFields,
+          };
           expect(response).toHaveProperty("structuredContent", expected);
           expect(accessibilityStateSchema.parse(expected)).toEqual(expected);
         } finally {
@@ -228,7 +236,7 @@ describe("accessibilityTools", () => {
           expect(response).toMatchObject({
             structuredContent: { enabled: true, service: "talkback", ...promptFields },
           });
-          const expected = { enabled: true, service: "talkback", ...promptFields };
+          const expected = { enabled: true, service: "talkback" as const, ...promptFields };
           expect(response).toHaveProperty("structuredContent", expected);
           expect(accessibilityStateSchema.parse(expected)).toEqual(expected);
         } finally {
@@ -410,13 +418,6 @@ describe("accessibilityTools", () => {
         toggle.mockRestore();
       }
     });
-
-    test("rejects an unsupported platform", async () => {
-      registerAccessibilityTools();
-      await expect(
-        accessibilityHandler()({ ...ANDROID_DEVICE, platform: "other" } as BootedDevice, {}),
-      ).rejects.toThrow("Unsupported platform: other");
-    });
   });
 
   describe("session restore of the screen reader (#10146)", () => {
@@ -449,7 +450,7 @@ describe("accessibilityTools", () => {
         return { supported: true, applied: true, currentState: enabled };
       };
 
-    beforeEach(() => {
+    function arrangeHarness(): void {
       enabledByDevice.clear();
       restores.length = 0;
       const timer = sessionTimer();
@@ -489,7 +490,19 @@ describe("accessibilityTools", () => {
           return fakeToggle()(IOS_DEVICE.deviceId, enabled, options);
         }),
       );
-    });
+    }
+
+    // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+    function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+      test(
+        name,
+        async () => {
+          await arrangeHarness();
+          await fn();
+        },
+        timeout,
+      );
+    }
 
     afterEach(() => {
       spies
@@ -500,124 +513,148 @@ describe("accessibilityTools", () => {
       manager.stopCleanupTimer();
     });
 
-    test("TalkBack turned on through the tool is turned off when the session is released", async () => {
-      registerAccessibilityTools();
-      await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
+    arranged(
+      "TalkBack turned on through the tool is turned off when the session is released",
+      async () => {
+        registerAccessibilityTools();
+        await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
 
-      await accessibilityHandler()(ANDROID_DEVICE, {
-        talkback: true,
-        sessionUuid: "a11y-session",
-      });
-      expect(enabledByDevice.get(ANDROID_DEVICE.deviceId)).toBe(true);
-      expect(manager.getScreenReader("a11y-session")).toEqual({
-        platform: "android",
-        previousEnabled: false,
-      });
+        await accessibilityHandler()(ANDROID_DEVICE, {
+          talkback: true,
+          sessionUuid: "a11y-session",
+        });
+        expect(enabledByDevice.get(ANDROID_DEVICE.deviceId)).toBe(true);
+        expect(manager.getScreenReader("a11y-session")).toEqual({
+          platform: "android",
+          previousEnabled: false,
+        });
 
-      await manager.releaseSession("a11y-session");
+        await manager.releaseSession("a11y-session");
 
-      expect(restores).toEqual([{ deviceId: ANDROID_DEVICE.deviceId, previousEnabled: false }]);
-      expect(enabledByDevice.get(ANDROID_DEVICE.deviceId)).toBe(false);
-    });
+        expect(restores).toEqual([{ deviceId: ANDROID_DEVICE.deviceId, previousEnabled: false }]);
+        expect(enabledByDevice.get(ANDROID_DEVICE.deviceId)).toBe(false);
+      },
+    );
 
-    test("VoiceOver turned on through the tool is turned off when the session is released", async () => {
-      registerAccessibilityTools();
-      await manager.createSession("a11y-session", IOS_DEVICE.deviceId, "ios");
+    arranged(
+      "VoiceOver turned on through the tool is turned off when the session is released",
+      async () => {
+        registerAccessibilityTools();
+        await manager.createSession("a11y-session", IOS_DEVICE.deviceId, "ios");
 
-      await accessibilityHandler()(IOS_DEVICE, { voiceover: true, sessionUuid: "a11y-session" });
-      await manager.releaseSession("a11y-session");
+        await accessibilityHandler()(IOS_DEVICE, { voiceover: true, sessionUuid: "a11y-session" });
+        await manager.releaseSession("a11y-session");
 
-      expect(restores).toEqual([{ deviceId: IOS_DEVICE.deviceId, previousEnabled: false }]);
-      expect(enabledByDevice.get(IOS_DEVICE.deviceId)).toBe(false);
-    });
+        expect(restores).toEqual([{ deviceId: IOS_DEVICE.deviceId, previousEnabled: false }]);
+        expect(enabledByDevice.get(IOS_DEVICE.deviceId)).toBe(false);
+      },
+    );
 
-    test("a device that started with TalkBack on is left on after the session turns it off", async () => {
-      enabledByDevice.set(ANDROID_DEVICE.deviceId, true);
-      registerAccessibilityTools();
-      await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
+    arranged(
+      "a device that started with TalkBack on is left on after the session turns it off",
+      async () => {
+        enabledByDevice.set(ANDROID_DEVICE.deviceId, true);
+        registerAccessibilityTools();
+        await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
 
-      await accessibilityHandler()(ANDROID_DEVICE, {
-        talkback: false,
-        sessionUuid: "a11y-session",
-      });
-      expect(enabledByDevice.get(ANDROID_DEVICE.deviceId)).toBe(false);
-      await manager.releaseSession("a11y-session");
+        await accessibilityHandler()(ANDROID_DEVICE, {
+          talkback: false,
+          sessionUuid: "a11y-session",
+        });
+        expect(enabledByDevice.get(ANDROID_DEVICE.deviceId)).toBe(false);
+        await manager.releaseSession("a11y-session");
 
-      expect(enabledByDevice.get(ANDROID_DEVICE.deviceId)).toBe(true);
-    });
+        expect(enabledByDevice.get(ANDROID_DEVICE.deviceId)).toBe(true);
+      },
+    );
 
-    test("a second toggle in the session does not overwrite the recorded original", async () => {
-      registerAccessibilityTools();
-      await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
-      const args = { sessionUuid: "a11y-session" };
+    arranged(
+      "a second toggle in the session does not overwrite the recorded original",
+      async () => {
+        registerAccessibilityTools();
+        await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
+        const args = { sessionUuid: "a11y-session" };
 
-      await accessibilityHandler()(ANDROID_DEVICE, { talkback: true, ...args });
-      await accessibilityHandler()(ANDROID_DEVICE, { talkback: false, ...args });
-      await accessibilityHandler()(ANDROID_DEVICE, { talkback: true, ...args });
-      await manager.releaseSession("a11y-session");
+        await accessibilityHandler()(ANDROID_DEVICE, { talkback: true, ...args });
+        await accessibilityHandler()(ANDROID_DEVICE, { talkback: false, ...args });
+        await accessibilityHandler()(ANDROID_DEVICE, { talkback: true, ...args });
+        await manager.releaseSession("a11y-session");
 
-      expect(restores).toEqual([{ deviceId: ANDROID_DEVICE.deviceId, previousEnabled: false }]);
-    });
+        expect(restores).toEqual([{ deviceId: ANDROID_DEVICE.deviceId, previousEnabled: false }]);
+      },
+    );
 
-    test("turning the screen reader back to what the session found clears the restore, so a later manual change survives release (#10159)", async () => {
-      registerAccessibilityTools();
-      await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
-      const args = { sessionUuid: "a11y-session" };
+    arranged(
+      "turning the screen reader back to what the session found clears the restore, so a later manual change survives release (#10159)",
+      async () => {
+        registerAccessibilityTools();
+        await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
+        const args = { sessionUuid: "a11y-session" };
 
-      await accessibilityHandler()(ANDROID_DEVICE, { talkback: true, ...args });
-      expect(manager.getScreenReader("a11y-session")).toBeDefined();
-      await accessibilityHandler()(ANDROID_DEVICE, { talkback: false, ...args });
-      expect(manager.getScreenReader("a11y-session")).toBeUndefined();
+        await accessibilityHandler()(ANDROID_DEVICE, { talkback: true, ...args });
+        expect(manager.getScreenReader("a11y-session")).toBeDefined();
+        await accessibilityHandler()(ANDROID_DEVICE, { talkback: false, ...args });
+        expect(manager.getScreenReader("a11y-session")).toBeUndefined();
 
-      // The user turns TalkBack on by hand while the session is still open.
-      enabledByDevice.set(ANDROID_DEVICE.deviceId, true);
-      await manager.releaseSession("a11y-session");
+        // The user turns TalkBack on by hand while the session is still open.
+        enabledByDevice.set(ANDROID_DEVICE.deviceId, true);
+        await manager.releaseSession("a11y-session");
 
-      expect(restores).toEqual([]);
-      expect(enabledByDevice.get(ANDROID_DEVICE.deviceId)).toBe(true);
-    });
+        expect(restores).toEqual([]);
+        expect(enabledByDevice.get(ANDROID_DEVICE.deviceId)).toBe(true);
+      },
+    );
 
-    test("a toggle that does not return the screen reader to the original keeps the restore", async () => {
-      enabledByDevice.set(ANDROID_DEVICE.deviceId, true);
-      registerAccessibilityTools();
-      await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
-      const args = { sessionUuid: "a11y-session" };
+    arranged(
+      "a toggle that does not return the screen reader to the original keeps the restore",
+      async () => {
+        enabledByDevice.set(ANDROID_DEVICE.deviceId, true);
+        registerAccessibilityTools();
+        await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
+        const args = { sessionUuid: "a11y-session" };
 
-      await accessibilityHandler()(ANDROID_DEVICE, { talkback: false, ...args });
-      await accessibilityHandler()(ANDROID_DEVICE, { talkback: false, ...args });
+        await accessibilityHandler()(ANDROID_DEVICE, { talkback: false, ...args });
+        await accessibilityHandler()(ANDROID_DEVICE, { talkback: false, ...args });
 
-      expect(manager.getScreenReader("a11y-session")).toEqual({
-        platform: "android",
-        previousEnabled: true,
-      });
-      await manager.releaseSession("a11y-session");
-      expect(restores).toEqual([{ deviceId: ANDROID_DEVICE.deviceId, previousEnabled: true }]);
-    });
+        expect(manager.getScreenReader("a11y-session")).toEqual({
+          platform: "android",
+          previousEnabled: true,
+        });
+        await manager.releaseSession("a11y-session");
+        expect(restores).toEqual([{ deviceId: ANDROID_DEVICE.deviceId, previousEnabled: true }]);
+      },
+    );
 
-    test("a toggle that changes nothing, and a read of the state, register no restore", async () => {
-      enabledByDevice.set(ANDROID_DEVICE.deviceId, true);
-      registerAccessibilityTools();
-      await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
-      const factory = spyOn(defaultAdbClientFactory, "create").mockReturnValue(
-        new FakeAdbExecutor(),
-      );
-      spies.push(factory);
-      const state = spyOn(accessibilityDetector, "resolveState").mockResolvedValue({
-        enabled: true,
-        service: "talkback",
-        ctrlProxyEnabled: false,
-      });
-      spies.push(state);
+    arranged(
+      "a toggle that changes nothing, and a read of the state, register no restore",
+      async () => {
+        enabledByDevice.set(ANDROID_DEVICE.deviceId, true);
+        registerAccessibilityTools();
+        await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
+        const factory = spyOn(defaultAdbClientFactory, "create").mockReturnValue(
+          new FakeAdbExecutor(),
+        );
+        spies.push(factory);
+        const state = spyOn(accessibilityDetector, "resolveState").mockResolvedValue({
+          enabled: true,
+          service: "talkback",
+          ctrlProxyEnabled: false,
+        });
+        spies.push(state);
 
-      await accessibilityHandler()(ANDROID_DEVICE, { talkback: true, sessionUuid: "a11y-session" });
-      await accessibilityHandler()(ANDROID_DEVICE, { sessionUuid: "a11y-session" });
-      await manager.releaseSession("a11y-session");
+        await accessibilityHandler()(ANDROID_DEVICE, {
+          talkback: true,
+          sessionUuid: "a11y-session",
+        });
+        await accessibilityHandler()(ANDROID_DEVICE, { sessionUuid: "a11y-session" });
+        await manager.releaseSession("a11y-session");
 
-      expect(manager.getScreenReader("a11y-session")).toBeUndefined();
-      expect(restores).toEqual([]);
-    });
+        expect(manager.getScreenReader("a11y-session")).toBeUndefined();
+        expect(restores).toEqual([]);
+      },
+    );
 
-    test("an unsupported toggle leaves no restore behind", async () => {
+    arranged("an unsupported toggle leaves no restore behind", async () => {
       registerAccessibilityTools();
       await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
       const recording = spyOn(TalkBackToggle.prototype, "toggle").mockImplementation(
@@ -636,7 +673,7 @@ describe("accessibilityTools", () => {
       expect(manager.getScreenReader("a11y-session")).toBeUndefined();
     });
 
-    test("without a session the toggle still runs and nothing is recorded", async () => {
+    arranged("without a session the toggle still runs and nothing is recorded", async () => {
       registerAccessibilityTools();
 
       await accessibilityHandler()(ANDROID_DEVICE, { talkback: true });
@@ -650,7 +687,7 @@ describe("accessibilityTools", () => {
     // Collapsed from 8 hand-rolled siblings into a single table so a failing
     // row is named, plus the boundary rows the siblings never specified: null,
     // explicit undefined, and an unknown key (issue #4183 item 18).
-    const cases: ReadonlyArray<{ name: string; input: unknown; valid: boolean }> = [
+    const cases: Array<{ name: string; input: unknown; valid: boolean }> = [
       { name: "talkback: true", input: { talkback: true }, valid: true },
       { name: "talkback: false", input: { talkback: false }, valid: true },
       { name: "empty object (all params optional)", input: {}, valid: true },

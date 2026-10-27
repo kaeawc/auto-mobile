@@ -120,7 +120,7 @@ test.each(predicates.flatMap((predicate) => cases.map((kind) => ({ predicate, ki
         : kind === "stale-op"
           ? "live"
           : kind;
-    expect(deriveSlot(view, "id").tag).toBe(expectedTag);
+    expect<string>(deriveSlot(view, "id").tag).toBe(expectedTag);
     switch (predicate) {
       case "current":
         for (const s of [session, older]) {

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  latestBarrierCompletionOrder,
+  nextSocketRequestOrder,
   resolveSocketAdmissionLane,
   SocketRequestAdmissionQueue,
 } from "../../src/daemon/socketRequestAdmission";
@@ -7,7 +9,7 @@ import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { createFakeDaemonState } from "./helpers/inputSocketHarness";
 import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
 import { FakeSocket } from "../fakes/FakeNetServer";
@@ -42,6 +44,44 @@ async function flush(): Promise<void> {
 }
 
 describe("SocketRequestAdmissionQueue", () => {
+  test("tracks barriers across queues by completion order", async () => {
+    const queueA = new SocketRequestAdmissionQueue();
+    const queueB = new SocketRequestAdmissionQueue();
+    const before = latestBarrierCompletionOrder();
+    const first = enqueueBlocked(queueA, undefined, "first", []);
+    const second = enqueueBlocked(queueB, undefined, "second", []);
+    expect(latestBarrierCompletionOrder()).toBe(before);
+
+    const flightOrder = nextSocketRequestOrder();
+    second.release();
+    await second.done;
+    await flush();
+    const secondCompletion = latestBarrierCompletionOrder();
+    expect(secondCompletion).toBeGreaterThan(flightOrder);
+
+    first.release();
+    await first.done;
+    await flush();
+    expect(latestBarrierCompletionOrder()).toBeGreaterThan(secondCompletion);
+  });
+
+  test("failed barriers advance the cutoff but laned requests do not", async () => {
+    const queue = new SocketRequestAdmissionQueue();
+    const before = latestBarrierCompletionOrder();
+    await expect(
+      queue.run(undefined, async () => {
+        throw new Error("barrier failed after possible mutation");
+      }),
+    ).rejects.toThrow("barrier failed after possible mutation");
+    await flush();
+    const completion = latestBarrierCompletionOrder();
+    expect(completion).toBeGreaterThan(before);
+
+    await queue.run("host:inventory", async () => {});
+    await flush();
+    expect(latestBarrierCompletionOrder()).toBe(completion);
+  });
+
   test("starts requests in different lanes concurrently", async () => {
     const queue = new SocketRequestAdmissionQueue();
     const started: string[] = [];
@@ -227,3 +267,27 @@ test.each([undefined, "device:a"])(
     });
   },
 );
+
+test("overlapping host inventory reads respect earlier and later barriers", async () => {
+  const queue = new SocketRequestAdmissionQueue();
+  const started: string[] = [];
+  const earlier = enqueueBlocked(queue, undefined, "earlier", started);
+  const first = enqueueBlocked(queue, "host:inventory", "first", started);
+  const second = enqueueBlocked(queue, "host:inventory", "second", started);
+  const later = enqueueBlocked(queue, undefined, "later", started);
+  expect(started).toEqual(["earlier"]);
+  earlier.release();
+  await earlier.done;
+  await flush();
+  expect(started).toEqual(["earlier", "first", "second"]);
+  first.release();
+  await first.done;
+  await flush();
+  expect(started).not.toContain("later");
+  second.release();
+  await second.done;
+  await flush();
+  expect(started).toEqual(["earlier", "first", "second", "later"]);
+  later.release();
+  await later.done;
+});

@@ -1,3 +1,5 @@
+import { wireCapture } from "../../../helpers/wireCapture";
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { ViewHierarchyResult } from "../../../../src/models";
@@ -31,7 +33,7 @@ function observation(
   viewHierarchy: ViewHierarchyResult,
   platform: "android" | "ios",
 ): ObserveResult {
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 402, height: 874 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -47,7 +49,7 @@ function observation(
             components: { bundleId: "com.example" },
           }
         : undefined,
-  };
+  });
 }
 
 type Json = Record<string, unknown>;
@@ -210,8 +212,8 @@ describe("diffObserveResult — a parked iOS keyboard is not collapsed (#10027)"
 });
 
 describe("diffObserveResult — Android keyboard collapse is unchanged (#9980)", () => {
-  const before = observation(androidPreTap.viewHierarchy, "android");
-  const after = observation(androidPostTap.viewHierarchy, "android");
+  const before = observation(wireCapture(androidPreTap.viewHierarchy), "android");
+  const after = observation(wireCapture(androidPostTap.viewHierarchy), "android");
 
   test("the captured Android keyboard-appearing pair still yields no keyboard rows", () => {
     const diff = diffObserveResult(before, after, COLLAPSE);

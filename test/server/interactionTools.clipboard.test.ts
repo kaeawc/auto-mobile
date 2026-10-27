@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { clipboardSchema, registerInteractionTools } from "../../src/server/interactionTools";
 import {
-  clipboardSchema,
   formatClipboardMessage,
   formatRecentAppsMessage,
-  registerInteractionTools,
-} from "../../src/server/interactionTools";
+} from "../../src/server/interactionToolHandlers";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -62,13 +61,13 @@ describe("clipboard tool schema", () => {
     );
 
     expect(toolDefinition).toBeDefined();
-    const schema = toolDefinition!.inputSchema as any;
+    const schema = toolDefinition!.inputSchema;
     // #6154: platform is optional wherever deviceId/session resolves it.
-    expect(schema.required).toEqual(["action"]);
-    expect(schema.properties.action.enum).toEqual(["copy", "paste", "clear", "get"]);
-    expect(schema.anyOf).toBeUndefined();
-    expect(schema.oneOf).toBeUndefined();
-    expect(schema.allOf).toBeUndefined();
+    expect(schema).toHaveProperty("required", ["action"]);
+    expect(schema).toHaveProperty("properties.action.enum", ["copy", "paste", "clear", "get"]);
+    expect(schema).not.toHaveProperty("anyOf");
+    expect(schema).not.toHaveProperty("oneOf");
+    expect(schema).not.toHaveProperty("allOf");
   });
 
   test("formats failed actions without success wording", () => {

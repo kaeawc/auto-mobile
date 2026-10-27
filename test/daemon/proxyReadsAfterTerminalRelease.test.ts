@@ -6,9 +6,9 @@ import {
   DaemonMcpProxy,
 } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

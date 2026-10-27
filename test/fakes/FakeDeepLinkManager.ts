@@ -10,7 +10,10 @@ import { DeepLinkManager } from "../../src/features/utility/DeepLinkManager";
  * Fake implementation of DeepLinkManager for testing
  * Allows configuring deep link responses and asserting method calls
  */
-export class FakeDeepLinkManager implements DeepLinkManager {
+export class FakeDeepLinkManager implements Pick<
+  DeepLinkManager,
+  "setDeviceId" | "getDeepLinks" | "detectIntentChooser" | "handleIntentChooser"
+> {
   private configuredDeepLinks: Map<string, DeepLinkResult> = new Map();
   private configuredIntentChooserResponses: Map<string, IntentChooserResult> = new Map();
   private executedOperations: string[] = [];

@@ -6,8 +6,8 @@ import {
   setInstalledAppResourceRefresh,
 } from "../../../src/server/appTools";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import type { TaskLeaseHoldRequest } from "../../../src/server/tasks/taskLeaseKeepalive";
-import { TASK_ELIGIBLE_TOOLS } from "../../../src/server/tasks/toolCallTasks";
+import type { TaskLeaseHoldRequest } from "../../../src/daemon/tasks/taskLeaseKeepalive";
+import { TASK_ELIGIBILITY } from "../../../src/server/tasks/toolCallTasks";
 import { FakeTaskManager } from "../../fakes/FakeTaskManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { connect, type Frame } from "../../helpers/mcpTaskWire";
@@ -37,8 +37,17 @@ describe("installApp as an MCP task (#13089)", () => {
   let install: (signal: AbortSignal | undefined) => Promise<Record<string, unknown>>;
   let installSignals: Array<AbortSignal | undefined>;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     restoreHermetic = installHermeticServerFixture();
+    // The first createMcpServer registers every real tool; pay that one-time cost here, outside
+    // the timed tests, so the first test stays inside the unit-test budget.
+    const warm = await connect({
+      requestMcpSessionId: KEY,
+      taskManager: new FakeTaskManager({ timer: new FakeTimer() }),
+      taskEligibleTools: TASK_ELIGIBILITY,
+      taskLeaseKeepalive: { hold: () => () => {} },
+    });
+    await warm.close();
   });
   afterAll(() => restoreHermetic());
 
@@ -73,7 +82,7 @@ describe("installApp as an MCP task (#13089)", () => {
     server = await connect({
       requestMcpSessionId: KEY,
       taskManager,
-      taskEligibleTools: TASK_ELIGIBLE_TOOLS,
+      taskEligibleTools: TASK_ELIGIBILITY,
       taskLeaseKeepalive: {
         hold: (request) => {
           holds.push(request);
@@ -108,7 +117,7 @@ describe("installApp as an MCP task (#13089)", () => {
   const payloadOf = (result: Frame) => JSON.parse(result.content[0].text);
 
   test("installApp is task-eligible", () => {
-    expect(TASK_ELIGIBLE_TOOLS.has("installApp")).toBe(true);
+    expect(TASK_ELIGIBILITY({ name: "installApp", args: {} })).toEqual({ onCancel: "abort" });
   });
 
   test("a non-declaring call gets the synchronous result and no task or hold", async () => {

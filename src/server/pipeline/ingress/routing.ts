@@ -10,20 +10,20 @@ import {
 } from "../../../features/toolSelection/selectionSessionResolver";
 import { getRemovedToolHint } from "../../../utils/removedTools";
 import { assertBrokerConnectionPlainToolCall } from "../../brokerConnectionToolGate";
-import { SessionOutsideBoundSessionError } from "../../deviceOutsideBoundSessionRefusal";
+import { SessionOutsideBoundSessionError } from "../../../daemon/deviceOutsideBoundSessionRefusal";
 import { isDeviceInventoryTool } from "../../../daemon/daemonMcpProxy";
-import { isDeviceSessionAcquisitionTool } from "../../deviceSessionResult";
-import { resolveDirectSessionDevice } from "../../directSessionDeviceRegistry";
+import { isDeviceSessionAcquisitionTool } from "../../../daemon/deviceSessionResult";
+import { resolveDirectSessionDevice } from "../../../utils/directSessionDeviceRegistry";
 import type { McpServerOptions } from "../../index";
 import type { SessionToolBinding } from "../../SessionToolBinding";
 import { ToolRegistry } from "../../toolRegistry";
-import { ToolUnavailableError, UnknownToolError } from "../../toolUnavailableError";
+import { ToolUnavailableError, UnknownToolError } from "../../../daemon/toolUnavailableError";
 import {
   assertUserConfigurableToolNames,
   requestedToolNamesFromSetToolEnabledArgs,
   SET_TOOL_ENABLED_TOOL_NAME,
 } from "../../toolSelectionTools";
-import type { ToolSelectionProfileRegistry } from "../../toolSelectionProfileRegistry";
+import type { ToolSelectionProfileRegistry } from "../../../daemon/toolSelectionProfileRegistry";
 import {
   resolveActionsCompactMetadata,
   resolveToolResultsNoStructuredContent,

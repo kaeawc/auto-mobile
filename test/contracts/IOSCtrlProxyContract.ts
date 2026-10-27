@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import type { IosCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import type { WebSocketMessage } from "../../src/features/observe/ios/types";
 
 /**
@@ -38,7 +38,7 @@ export interface ContractRequest {
 }
 
 export interface IosCtrlProxyHarness {
-  proxy: IOSCtrlProxy;
+  proxy: IosCtrlProxy;
   /** Requests that reached the runner (real: sent frames; fake: its call histories), in order. */
   requests(): ContractRequest[];
   close(): Promise<void>;
@@ -76,7 +76,7 @@ interface Scenario {
   name: string;
   /** Captured replies this scenario needs, by request type. */
   replies: IosCtrlProxyReplies;
-  run(proxy: IOSCtrlProxy): Promise<Observed[]>;
+  run(proxy: IosCtrlProxy): Promise<Observed[]>;
   expectedRequests: ContractRequest[];
   expected: Observed[];
 }
@@ -87,7 +87,9 @@ const SCENARIOS: Scenario[] = [
   {
     name: "a tap is sent with its coordinates and duration and counts as dispatched and acknowledged",
     replies: { request_tap_coordinates: capturedResponse("tap_coordinates_result") },
-    run: async (proxy) => [observed(await proxy.requestTapCoordinates(201, 406, 100))],
+    run: async (proxy) => [
+      observed(await proxy.requestTapCoordinates({ x: 201, y: 406, duration: 100 })),
+    ],
     expectedRequests: [{ type: "request_tap_coordinates", x: 201, y: 406, duration: 100 }],
     expected: [{ success: true, ...ack }],
   },
@@ -136,7 +138,7 @@ const SCENARIOS: Scenario[] = [
       request_swipe: capturedResponse("swipe_result"),
     },
     run: async (proxy) => [
-      observed(await proxy.requestTapCoordinates(1, 2, 50)),
+      observed(await proxy.requestTapCoordinates({ x: 1, y: 2, duration: 50 })),
       observed(await proxy.requestPressHome()),
       observed(await proxy.requestSwipe({ x1: 5, y1: 6, x2: 7, y2: 8, duration: 120 })),
     ],

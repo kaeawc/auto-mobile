@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "q": ""
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "visibleWhen": {
+        "empty": true
+      }
+    }
+  },
+  "expectedPath": "root.visibleWhen.key",
+  "expectedMessage": "Exactly one of key, data, platform, all, any, not, valid is required"
+}

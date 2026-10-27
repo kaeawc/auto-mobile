@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
-import { TASKS_EXTENSION_ID } from "../../src/server/tasks/mcpTasksExtension";
+import { TASKS_EXTENSION_ID } from "../../src/daemon/tasks/mcpTasksExtension";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 
@@ -79,18 +79,23 @@ class RawWire {
 }
 
 describe("stdio proxy relays the Tasks extension to the daemon (#4668)", () => {
-  let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
+  let isAvailableSpy: ReturnType<typeof spyOn>;
   let closeProxy: (() => Promise<void>) | undefined;
 
+  beforeEach(() => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+  });
+
   afterEach(async () => {
-    await closeProxy?.();
-    closeProxy = undefined;
-    isAvailableSpy?.mockRestore();
-    isAvailableSpy = null;
+    try {
+      await closeProxy?.();
+    } finally {
+      closeProxy = undefined;
+      isAvailableSpy.mockRestore();
+    }
   });
 
   async function connect(...clients: FakeDaemonClient[]): Promise<RawWire> {
-    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const daemonManager = new FakeDaemonManager();
     daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
     let next = 0;
@@ -224,6 +229,9 @@ describe("stdio proxy relays the Tasks extension to the daemon (#4668)", () => {
     const wire = await connect(client);
     await wire.call("executePlan", true);
     const ownerKey = client.callToolOptions[0]?.tasks?.ownerKey;
+    if (ownerKey === undefined) {
+      throw new Error("The task call must carry an owner key");
+    }
 
     const got = await wire.task("tasks/get", { taskId: "task-1" });
     const updated = await wire.task("tasks/update", {

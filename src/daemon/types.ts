@@ -1,3 +1,4 @@
+import type { AuxiliarySocketWarning } from "./auxiliarySocketAvailability";
 import { z } from "zod";
 import {
   idleReleaseField,
@@ -6,11 +7,11 @@ import {
 } from "./releaseReasons";
 import type { DeviceControlTransportFailure } from "./deviceControlTransportFailure";
 import type { SessionReleaseSnapshot } from "./sessionManager";
-import type { DaemonHandshakeFailure } from "./daemonHandshake";
+import type { DaemonHandshakeFailure } from "./wire/daemonHandshake";
 import type { DaemonShuttingDownFailure } from "./daemonShutdownOutcome";
-import type { McpOverloadFailure } from "./McpTimeoutError";
+import type { McpOverloadFailure } from "./wire/McpTimeoutError";
 import type { SocketRequestAdmissionQueue } from "./socketRequestAdmission";
-import type { RelayedJsonRpcError, TaskRelayFrame } from "../server/tasks/taskRelay";
+import type { RelayedJsonRpcError, TaskRelayFrame } from "./tasks/taskRelay";
 
 /**
  * Request sent from CLI client to daemon
@@ -53,6 +54,15 @@ export interface DaemonRequest {
    * own request declared the extension. Absent: the request never declares it. Additive.
    */
   tasks?: TaskRelayFrame;
+  /**
+   * Set by a client that understands {@link REQUEST_BUDGET_NOTIFICATION_METHOD} (#13797). The
+   * daemon then reports the budget it resolved for this request when that differs from the
+   * `timeoutMs` the client sent, so the client's own backstop waits as long as the daemon does.
+   * Absent: the request never gets that notification (older and Kotlin/Swift clients).
+   */
+  acceptsRequestBudget?: boolean;
+  /** Client's explicit per-tool budget; the daemon's own explicit override wins (#13797). */
+  requestedTimeoutMs?: number;
 }
 
 /**
@@ -395,6 +405,13 @@ export function sanitizeBoundSessionLoss(value: unknown): BoundSessionLoss | und
  */
 export const PROGRESS_NOTIFICATION_METHOD = "notifications/progress";
 
+/**
+ * Wire method for the daemon's effective request budget (#13797). An opted-in client adopts this
+ * budget whether larger or smaller than it sent, retaining response grace so the daemon's own
+ * deadline error arrives first. Carries `requestId` and `timeoutMs`.
+ */
+export const REQUEST_BUDGET_NOTIFICATION_METHOD = "notifications/automobile/requestBudget";
+
 export const RESOURCE_SUBSCRIBE_METHOD = "resources/subscribe";
 export const RESOURCE_UNSUBSCRIBE_METHOD = "resources/unsubscribe";
 
@@ -423,6 +440,11 @@ export interface DaemonNotification {
    * binding only when this exactly equals its bound (base) session UUID.
    */
   sessionId?: string;
+  previousDeviceId?: string;
+  deviceId?: string;
+  stableDeviceId?: string;
+  avdName?: string;
+  generation?: number;
   /** Diagnostic release reason for `notifications/session/released`. */
   reason?: string;
   /** True only for an idle release reason; absent otherwise. */
@@ -449,6 +471,8 @@ export interface DaemonNotification {
   total?: number;
   /** Optional human-readable status for `notifications/progress` frames. */
   message?: string;
+  /** The daemon's resolved budget for `requestId`, for budget notifications (#13797). */
+  timeoutMs?: number;
 }
 
 /** Discriminates a daemon socket frame as a server-pushed notification. */
@@ -493,6 +517,8 @@ export type DaemonSocketPaths = Record<DaemonSocketName, string>;
  * Daemon status information
  */
 export interface DaemonStatus {
+  launchNonce?: string;
+  unavailableSockets?: AuxiliarySocketWarning[];
   reportedPidFilePath?: string;
   reportedSocketPath?: string;
   reportedSockets?: Record<string, string>;
@@ -511,7 +537,7 @@ export interface DaemonStatus {
   /** Unix socket path */
   socketPath?: string;
   /** Unix socket paths exposed by the daemon, keyed by purpose */
-  sockets?: DaemonSocketPaths;
+  sockets?: Partial<DaemonSocketPaths>;
   /** Absolute path to the SQLite file this daemon owns (issue #2795) */
   dbPath?: string;
   /** Timestamp when daemon was started */
@@ -585,6 +611,7 @@ export interface SupersededSocketOwner {
 }
 
 export interface PidFileData {
+  launchNonce?: string;
   /** Process ID */
   pid: number;
   /**
@@ -595,7 +622,7 @@ export interface PidFileData {
   /** Unix socket path */
   socketPath: string;
   /** Unix socket paths exposed by the daemon, keyed by purpose */
-  sockets?: DaemonSocketPaths;
+  sockets?: Partial<DaemonSocketPaths>;
   /** HTTP port */
   port: number;
   /**

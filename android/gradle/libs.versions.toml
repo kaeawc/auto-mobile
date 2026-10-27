@@ -61,23 +61,26 @@ navigation3 = "1.1.5"              # Used in playground app
 circuit = "0.39.0"
 
 # Kotlin ecosystem
-kotlinx-serialization-json = "1.11.0"
+kotlinx-serialization-json = "1.12.0"
 appcompat = "1.8.0"
 material = "1.14.0"
 lifecycleViewmodelNavigation3Android = "2.11.0"
 
 # Network and server libraries
 ktor = "3.6.0"
-okhttp = "5.5.0"
+okhttp = "5.5.1"
 retrofit = "3.0.0"
 
 # Publishing
 mavenpublish = "0.37.0"
 dokka = "2.2.0"
-compose-multiplatform = "1.12.1"
+compose-multiplatform = "1.12.2"
 compose-hot-reload = "1.2.0"
 metro = "1.4.5"
 conveyor = "2.0"
+# Build-time license collection for ProtoViewer's in-app licenses screen (#14158). Gradle plugin only:
+# no runtime library, the app renders the generated JSON itself.
+aboutlibraries = "15.3.0"
 # Conveyor's in-app update control API (SoftwareUpdateController). Versioned independently of the
 # `conveyor` Gradle plugin above — this is the runtime library the desktop app links against.
 conveyor-control = "1.1"
@@ -95,6 +98,7 @@ compose-hot-reload = { id = "org.jetbrains.compose.hot-reload", version.ref = "c
 metro = { id = "dev.zacsweers.metro", version.ref = "metro" }
 detekt = { id = "dev.detekt", version.ref = "detekt" }
 conveyor = { id = "dev.hydraulic.conveyor", version.ref = "conveyor" }
+aboutlibraries = { id = "com.mikepenz.aboutlibraries.plugin.android", version.ref = "aboutlibraries" }
 
 [libraries]
 # H.264 decoding for the live device view. Deliberately org.bytedeco:ffmpeg and NOT

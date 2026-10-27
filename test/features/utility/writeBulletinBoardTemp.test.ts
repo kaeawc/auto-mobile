@@ -1,4 +1,4 @@
-import { describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { join } from "node:path";
 import { writeBulletinBoardTemp } from "../../../src/features/utility/ios/IosNotificationAuthorizationReader";
 import { logger } from "../../../src/utils/logger";
@@ -56,4 +56,8 @@ describe("writeBulletinBoardTemp", () => {
     expect(files.writeFile).toHaveBeenCalledWith(join(FAKE_DIR, "blob.bplist"), buffer);
     expect(files.rm).not.toHaveBeenCalled();
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

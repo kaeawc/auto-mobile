@@ -1,10 +1,14 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { harness } from "./displaySwipeHarness";
-import type { ObserveResult } from "../../../../src/models";
+import type { ObserveResult, ViewHierarchyResult } from "../../../../src/models";
 
 afterEach(() => mock.restore());
 
-function listFrame(observation: ObserveResult, page: number, found: boolean): ObserveResult {
+function listFrame(
+  observation: ObserveResult,
+  page: number,
+  found: boolean,
+): ObserveResult & { viewHierarchy: ViewHierarchyResult } {
   return {
     ...observation,
     viewHierarchy: {

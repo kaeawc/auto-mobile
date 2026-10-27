@@ -308,6 +308,15 @@ describe("affected tests", () => {
       expect(result.alwaysRunMissing).toEqual(["test/gone.test.ts"]);
       expect(affectedTestsExitCode(result)).toBe(3);
     });
+    test("the checked-in list covers the whole-repo stale path scan (#14499)", () => {
+      // It walks every tracked path, so a change under a directory the
+      // --changed repository-lint predicate omits (e.g. benchmark/) can still
+      // break it; always-run closes that gap without widening the predicate.
+      const listed = parseAlwaysRun(
+        readFileSync(path.join(import.meta.dir, "../always-run-tests.txt"), "utf8"),
+      );
+      expect(listed).toContain("test/lint/staleRepoPathReferences.test.ts");
+    });
     test("the checked-in list parses and has no duplicates", () => {
       const listed = parseAlwaysRun(
         readFileSync(path.join(import.meta.dir, "../always-run-tests.txt"), "utf8"),

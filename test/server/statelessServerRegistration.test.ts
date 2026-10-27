@@ -8,6 +8,8 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { createFakeDeviceManager } from "../daemon/helpers/inputSocketHarness";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import type { BootedDevice, SomePlatform } from "../../src/models";
 
 /*
  * The stateless daemon endpoint builds one createMcpServer per request (#4678). Each server must
@@ -50,7 +52,7 @@ describe("stateless createMcpServer", () => {
     await server.connect(serverSide as never);
 
     ToolRegistry.notifyToolListChanged();
-    ResourceRegistry.notifyResourceListChanged();
+    void ResourceRegistry.notifyResourceListChanged();
     expect(received).toEqual([]);
 
     await server.close();
@@ -92,23 +94,25 @@ describe("stateless createMcpServer", () => {
   test("repeated createMcpServer calls do not re-register resources or probe devices (#13068)", async () => {
     // Registering resources used to start a booted-device discovery (adb + simctl) on every
     // stateless request; with real devices that cost ~10-20 ms per daemon-bound call.
-    let probes = 0;
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevices: async () => {
-        probes++;
-        return [];
-      },
-    } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    class ProbeCountingDeviceUtils extends FakeDeviceUtils {
+      probes = 0;
+      override async getBootedDevices(platform: SomePlatform): Promise<BootedDevice[]> {
+        this.probes++;
+        return super.getBootedDevices(platform);
+      }
+    }
+    const deviceUtils = new ProbeCountingDeviceUtils();
+    PlatformDeviceManagerFactory.setInstance(deviceUtils);
     const iosDependencies = createIosDoctorDependencies();
     try {
       await createMcpServer({ stateless: true, iosDependencies }).close();
-      const afterFirst = probes;
+      const afterFirst = deviceUtils.probes;
 
       for (let i = 0; i < 3; i++) {
         await createMcpServer({ stateless: true, iosDependencies }).close();
       }
 
-      expect(probes).toBe(afterFirst);
+      expect(deviceUtils.probes).toBe(afterFirst);
       expect(ResourceRegistry.getResource("automobile:apps")).toBeDefined();
     } finally {
       PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([]));

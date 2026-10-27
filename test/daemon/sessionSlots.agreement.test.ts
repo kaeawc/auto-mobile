@@ -8,6 +8,7 @@ import {
 import { SESSION_RELEASE_TEARDOWN_CAP_MS } from "../../src/daemon/sessionManager";
 import { deriveSlot } from "../../src/daemon/sessionSlots";
 import { errorMessage } from "../../src/utils/describeUnknownError";
+import type { SessionReleaseReason } from "../../src/models/releaseReasons";
 import { SeededRandom } from "../fakes/SeededRandom";
 
 // Pinned to this generator: covers overlapping release, rebind, reissue and expiry windows.
@@ -97,7 +98,7 @@ async function runReleaseAgreement(seed: number, kind: "forced" | "stuck") {
   } else {
     rig.manager.setKeepScreenAwake(uuid, { applied: true });
   }
-  const reason = random.pick(["plan-auto-release", "daemon-shutdown"]);
+  const reason = random.pick<SessionReleaseReason>(["plan-auto-release", "daemon-shutdown"]);
   const release = rig.manager.releaseSession(uuid, reason);
   const op = view.releaseOps.get(uuid)!;
   check("release-start");

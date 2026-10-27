@@ -27,7 +27,10 @@ describe("a plan re-run after a label device was lost mid-plan", () => {
 
   const setUp = async (): Promise<void> => {
     hunt = await createPlanSessionHunt([deviceA, deviceB, deviceC]);
-    await hunt.acquire();
+    const deviceId = await hunt.acquire();
+    const { sessionManager, pool } = hunt.daemon();
+    // This suite covers plan-owned bases: the UUID was issued, but is not live at plan entry.
+    await releaseSessionAndDevice(sessionManager, pool, deviceId, BASE, "plan-auto-release");
   };
 
   // The first executePlan pays the plan pipeline's one-time module and schema cost.
@@ -45,7 +48,7 @@ describe("a plan re-run after a label device was lost mid-plan", () => {
   const cases: Array<[string, SessionReleaseReason]> = [
     // daemon.ts disconnect monitor: cancelAndReleaseSession(session, deviceLossCancellationReason(id))
     ["its device disconnected", deviceLossCancellationReason(deviceB.deviceId)],
-    // deviceToolsShutdown.ts releaseShutdownSessionOwnership: releaseSessionIfOwned(..., "device-killed")
+    // deviceToolsShutdown.ts releaseShutdownSessionOwnership: releaseSession(..., "device-killed", { expectedOwner })
     ["killDevice stopped its device", "device-killed"],
   ];
 

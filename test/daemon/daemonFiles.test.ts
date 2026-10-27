@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import * as asyncFiles from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { useScratchRoot } from "../helpers/scratchRoot";
@@ -17,8 +18,12 @@ import {
   shouldProtectLiveDaemonVersion,
   writePidFileDataAtomic,
   writePidFileDataAtomicSync,
+  type DaemonCleanupFileSystem,
 } from "../../src/daemon/daemonFiles";
-import { DEFAULT_PID_FILE_PATH } from "../../src/daemon/constants";
+import { FakeLockFileSystem } from "../fakes/FakeLockFileSystem";
+import { statFileIdentity } from "../../src/daemon/socketFileIdentity";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { DEFAULT_PID_FILE_PATH } from "../../src/daemon/wire/constants";
 import { logger } from "../../src/utils/logger";
 import * as loggerModule from "../../src/utils/logger";
 import type { PidFileData } from "../../src/daemon/types";
@@ -26,7 +31,10 @@ import type { PidFileData } from "../../src/daemon/types";
 test("daemonFiles module registers its real retention readers without eager discovery", async () => {
   const register = spyOn(loggerModule, "registerLogRetentionNamespaceSource");
   try {
-    const files = await import("../../src/daemon/daemonFiles.ts?retention-wiring");
+    const retentionWiringQuery = "retention-wiring";
+    const files: typeof import("../../src/daemon/daemonFiles") = await import(
+      `../../src/daemon/daemonFiles.ts?${retentionWiringQuery}`
+    );
     expect(register).toHaveBeenCalledWith({
       listDaemonPidFilesSync: files.listDaemonPidFilesSync,
       readPidFileDataSync: files.readPidFileDataSync,
@@ -572,6 +580,83 @@ describe("listDaemonPidFilePathsOrThrow", () => {
 describe("daemon file cleanup", () => {
   const scratch = useScratchRoot("daemonFiles-");
 
+  for (const sync of [false, true]) {
+    for (const scenario of [
+      { name: "link restores", newerAtRestore: false },
+      { name: "link EEXIST preserves newest", newerAtRestore: true },
+      { name: "EPERM restores via exclusive copy", linkError: "EPERM" },
+      { name: "ENOTSUP restores via exclusive copy", linkError: "ENOTSUP" },
+      { name: "EPERM copy EEXIST preserves newest", linkError: "EPERM", newerAtRestore: true },
+      { name: "EPERM copy EIO retains successor", linkError: "EPERM", copyError: "EIO" },
+      { name: "link EIO retains successor without copy", linkError: "EIO" },
+    ]) {
+      test(`handoff: successor published after final PID ownership read survives (${scenario.name}, sync=${sync})`, async () => {
+        const storage = new FakeLockFileSystem();
+        const pidFilePath = "/daemon/owner.pid";
+        const original: PidFileData = {
+          pid: 100,
+          socketPath: "/daemon/control.sock",
+          port: 3000,
+          startedAt: 1,
+          version: "test",
+        };
+        const successor = { ...original, pid: 200 };
+        const newest = { ...original, pid: 300 };
+        storage.seed(pidFilePath, JSON.stringify(original));
+        storage.linkError = scenario.linkError;
+        storage.failure = (operation) => {
+          const restoreOperation = scenario.linkError ? "copyExclusive" : "link";
+          if (operation === restoreOperation && scenario.newerAtRestore) {
+            storage.seed(pidFilePath, JSON.stringify(newest));
+          }
+          return operation === "copyExclusive" ? scenario.copyError : undefined;
+        };
+        let reads = 0;
+        const persistedOwners: (PidFileData | null)[] = [];
+        const files: DaemonCleanupFileSystem = {
+          exists: (path) => storage.exists(path),
+          stat: (path) => ({ dev: 1n, ino: storage.stat(path).ino }),
+          unlink: async (path) => storage.unlink(path),
+          unlinkSync: (path) => storage.unlink(path),
+          renameSync: (from, to) => storage.rename(from, to),
+          linkSync: (from, to) => storage.link(from, to),
+          copyFileExclusiveSync: (from, to) => storage.copyExclusive(from, to),
+          readPid: (path = pidFilePath) => {
+            const value: PidFileData = JSON.parse(storage.readText(path));
+            if (path === pidFilePath && ++reads === 3) {
+              // Atomic successor publication immediately after the final ownership read.
+              storage.seed(path, JSON.stringify(successor));
+            }
+            return value;
+          },
+          persistOwner: (owner) => {
+            persistedOwners.push(owner);
+          },
+        };
+        const options = {
+          pidFilePath,
+          socketPaths: [],
+          expectedPid: 100,
+          idGenerator: new CountingIdGenerator(),
+        };
+        const removed = sync
+          ? cleanupDaemonFilesSync(options, files)
+          : await cleanupDaemonFiles(options, files);
+        expect(removed).toBe(false);
+        expect(persistedOwners).toEqual([original]);
+        const retained = scenario.copyError !== undefined || scenario.linkError === "EIO";
+        const expectedPath = retained ? `${pidFilePath}.reap-${process.pid}-id-1` : pidFilePath;
+        expect(storage.paths()).toEqual([expectedPath]);
+        expect(JSON.parse(storage.readText(expectedPath))).toEqual(
+          scenario.newerAtRestore ? newest : successor,
+        );
+        expect(storage.operations.filter(({ op }) => op === "copyExclusive")).toHaveLength(
+          scenario.linkError && scenario.linkError !== "EIO" ? 1 : 0,
+        );
+      });
+    }
+  }
+
   function createTempFiles(): { dir: string; socketPath: string; pidFilePath: string } {
     const dir = scratch.next();
     const socketPath = join(dir, "daemon.sock");
@@ -588,6 +673,53 @@ describe("daemon file cleanup", () => {
       } satisfies PidFileData),
     );
     return { dir, socketPath, pidFilePath };
+  }
+
+  test("handoff: successor PID written during awaited aux unlink survives", async () => {
+    const { dir, socketPath, pidFilePath } = createTempFiles();
+    const auxPath = join(dir, "aux.sock");
+    writeFileSync(auxPath, "");
+    const unlink = asyncFiles.unlink;
+    const remove = spyOn(asyncFiles, "unlink").mockImplementation(async (path) => {
+      await unlink(path);
+      if (path === auxPath) {
+        writeFileSync(pidFilePath, JSON.stringify({ pid: 67890 }));
+      }
+    });
+    try {
+      await cleanupDaemonFiles({
+        pidFilePath,
+        socketPaths: [socketPath, auxPath],
+        expectedPid: 12345,
+      });
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(JSON.parse(readFileSync(pidFilePath, "utf-8")).pid).toBe(67890);
+    } finally {
+      remove.mockRestore();
+    }
+  });
+
+  for (const sync of [false, true]) {
+    test(`handoff: failed control unlink retains PID (sync=${sync})`, async () => {
+      const { dir, pidFilePath } = createTempFiles();
+      const controlSocketPath = join(dir, "blocked.sock");
+      // An isolated directory deterministically fails unlink without opening a socket.
+      mkdirSync(controlSocketPath);
+      const { dev, ino } = statFileIdentity(controlSocketPath);
+      const options = {
+        pidFilePath,
+        controlSocketPath,
+        socketPaths: [controlSocketPath],
+        expectedPid: 12345,
+        socketFileIdentities: new Map([[controlSocketPath, { dev, ino }]]),
+      };
+      if (sync) {
+        cleanupDaemonFilesSync(options);
+      } else {
+        await cleanupDaemonFiles(options);
+      }
+      expect(existsSync(pidFilePath)).toBe(true);
+    });
   }
 
   test("cleanupDaemonFiles removes configured socket and PID paths", async () => {

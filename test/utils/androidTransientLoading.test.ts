@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { DefaultElementParser } from "../../src/features/utility/ElementParser";
-import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
+import type { ViewHierarchyNode, ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../src/utils/androidTransientLoading";
 
 const parser = new DefaultElementParser();
 
-function hierarchyWithNode(node: Record<string, unknown>): ViewHierarchyResult {
+function hierarchyWithNode(node: ViewHierarchyNode): ViewHierarchyResult {
   return {
     hierarchy: { node },
-  } as unknown as ViewHierarchyResult;
+  };
 }
 
 describe("androidViewHierarchyIndicatesLikelyBlockingLoading", () => {

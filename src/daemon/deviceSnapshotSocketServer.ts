@@ -1,10 +1,7 @@
 import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { ConfigSocketServer, getSocketPath } from "./socketServer/index";
-import {
-  getDeviceSnapshotConfig,
-  updateDeviceSnapshotConfig,
-} from "../server/deviceSnapshotManager";
+import { getDeviceSnapshotConfig, updateDeviceSnapshotConfig } from "./deviceSnapshotManager";
 import { DEVICE_SNAPSHOT_SOCKET_CONFIG } from "./daemonFiles";
 import type { DeviceSnapshotConfig, DeviceSnapshotConfigInput } from "../models";
 

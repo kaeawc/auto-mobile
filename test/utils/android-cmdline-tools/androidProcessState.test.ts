@@ -2,7 +2,7 @@ import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { DUMPSYS_MAX_BUFFER } from "../../../src/utils/android-cmdline-tools/dumpsysLimits";
 import { createExecResult } from "../../../src/utils/execResult";
 import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import {
   findAndroidPackageProcessId,
   findAndroidPackageProcesses,
@@ -11,6 +11,10 @@ import {
 } from "../../../src/utils/android-cmdline-tools/androidProcessState";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const COMMAND = "shell dumpsys activity processes";
 const PROCESS_LIST = "  *APP* UID 10001 ProcessRecord{abc 1234:com.example.app/u0a1}";
@@ -190,9 +194,7 @@ test("launchApp's process reader forwards the bound through fake exec for a larg
       expect(Buffer.byteLength(stdout)).toBeLessThanOrEqual(maxBuffer ?? 1024 * 1024);
       return createExecResult(stdout, "");
     },
-    null,
-    new DefaultRetryExecutor(timer),
-    timer,
+    { retryExecutor: new DefaultRetryExecutor(timer), timer },
   );
   const state = await readAndroidPackageProcesses(adb, "com.example.app", { userId: 0, timer });
   expect(state.isRunning).toBe(true);

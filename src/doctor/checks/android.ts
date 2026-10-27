@@ -18,10 +18,11 @@ import {
   isHomebrewToolsPath,
 } from "../../utils/android-cmdline-tools/detection";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { readSdkManagerVersion } from "../../utils/android-cmdline-tools/SdkManagerClient";
 import { logger } from "../../utils/logger";
+import { AMBIENT_ENV, ENV, readEnvRaw } from "../../config/env";
 import type { AndroidToolsLocation } from "../../utils/android-cmdline-tools/detection";
 import {
   FileAvdConfigReader,
@@ -30,6 +31,13 @@ import {
 } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import type { AdbDeviceState } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { awaitDoctorProbe, remainingDoctorProbe } from "../deadline";
+import { checkAndroidIntegritySignals } from "./androidIntegrity";
+import {
+  detectSoftwareRenderingFallback,
+  SOFTWARE_RENDERING_RECOMMENDATION,
+  softwareRenderingMessage,
+} from "../../utils/android-cmdline-tools/EmulatorSoftwareRendering";
+import { parseExtraEmulatorArguments } from "../../utils/android-cmdline-tools/EmulatorLaunchSupport";
 
 const MIN_CMDLINE_TOOLS_VERSION = [9, 0] as const;
 type CmdlineToolsVersionReader = (
@@ -96,7 +104,7 @@ export interface AndroidDoctorDependencies {
   getBestAndroidToolsLocation: typeof getBestAndroidToolsLocation;
   getAndroidHomeWithSystemImages: typeof getAndroidHomeWithSystemImages;
   logger: typeof logger;
-  adbFactory?: AdbClientFactory;
+  adbFactory?: DoctorAdbFactory;
   getCmdlineToolsVersion?: CmdlineToolsVersionReader;
   listAvds?: (probe?: DoctorProbeOptions) => Promise<Array<{ name: string }>>;
   readAvdConfig?: AvdConfigReader;
@@ -306,7 +314,7 @@ export async function checkAndroidHome(
  * Check JAVA_HOME environment variable
  */
 export async function checkJavaHome(): Promise<CheckResult> {
-  const javaHome = process.env.JAVA_HOME;
+  const javaHome = readEnvRaw(AMBIENT_ENV.JAVA_HOME);
 
   if (!javaHome) {
     return {
@@ -339,8 +347,23 @@ export async function checkJavaHome(): Promise<CheckResult> {
 /**
  * Check ADB installation and get path
  */
+/** Every adb executor method the doctor checks drive. */
+type DoctorAdbMethod =
+  | "getAdbPathOnly"
+  | "executeCommand"
+  | "getBootedAndroidDevices"
+  | "getDeviceStates";
+
+/**
+ * Factory for the slice of the adb executor a check drives; the full `AdbClientFactory`
+ * satisfies every instantiation, and fakes implement just the methods their check calls.
+ */
+export interface DoctorAdbFactory<Method extends DoctorAdbMethod = DoctorAdbMethod> {
+  create(): Pick<AdbExecutor, Method>;
+}
+
 export async function checkAdbInstallation(
-  adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  adbFactory: DoctorAdbFactory<"getAdbPathOnly"> = defaultAdbClientFactory,
   probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   try {
@@ -371,7 +394,7 @@ export async function checkAdbInstallation(
  * Check ADB version
  */
 export async function checkAdbVersion(
-  adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  adbFactory: DoctorAdbFactory<"executeCommand"> = defaultAdbClientFactory,
   probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   try {
@@ -459,7 +482,9 @@ export async function checkEmulator(
  * Check connected Android devices
  */
 export async function checkConnectedDevices(
-  adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  adbFactory: DoctorAdbFactory<
+    "getBootedAndroidDevices" | "getDeviceStates"
+  > = defaultAdbClientFactory,
   probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   try {
@@ -603,6 +628,102 @@ export async function checkAvdMemory(
   }
 }
 
+export interface EmulatorRenderingDependencies extends Pick<
+  AndroidDoctorDependencies,
+  "listAvds" | "readAvdConfig"
+> {
+  platform?: NodeJS.Platform;
+  readEmulatorVersion?: (probe: DoctorProbeOptions) => Promise<string>;
+  /** Raw `AUTOMOBILE_EMULATOR_ARGS`, as read from the environment by default. */
+  emulatorArgsRaw?: string;
+}
+
+async function readEmulatorVersionOutput(probe: DoctorProbeOptions): Promise<string> {
+  const result = await new AndroidEmulatorClient().executeCommand(
+    ["-version"],
+    probe.timeoutMs,
+    probe.signal,
+  );
+  return result.stdout;
+}
+
+async function findSoftwareRenderingAvds(input: {
+  probe: DoctorProbeOptions;
+  platform: NodeJS.Platform;
+  versionOutput: string;
+  launchArgs: string[];
+  avds: Array<{ name: string }>;
+  reader: AvdConfigReader;
+}): Promise<{ emulatorVersion: string; affected: string[] } | null> {
+  const affected: string[] = [];
+  let emulatorVersion = "";
+  for (const avd of input.avds) {
+    input.probe.signal?.throwIfAborted();
+    const config = await awaitDoctorProbe(input.probe, () => input.reader.readConfig(avd.name));
+    const risk = detectSoftwareRenderingFallback({
+      platform: input.platform,
+      emulatorVersionOutput: input.versionOutput,
+      avdGpuMode: config?.gpuMode,
+      launchArgs: input.launchArgs,
+    });
+    if (risk) {
+      emulatorVersion = risk.emulatorVersion;
+      affected.push(avd.name);
+    }
+  }
+  return affected.length > 0 ? { emulatorVersion, affected } : null;
+}
+
+/**
+ * Warn when Emulator 37.2+ would silently render in software on macOS
+ * (https://issuetracker.google.com/issues/567150701).
+ */
+export async function checkEmulatorRendering(
+  probe: DoctorProbeOptions = {},
+  dependencies: EmulatorRenderingDependencies = createAndroidDoctorDependencies(),
+): Promise<CheckResult> {
+  const name = "Emulator Rendering";
+  const platform = dependencies.platform ?? process.platform;
+  if (platform !== "darwin") {
+    return { name, status: "skip", message: "Software-rendering fallback only affects macOS." };
+  }
+  if (!dependencies.listAvds || !dependencies.readAvdConfig) {
+    return { name, status: "skip", message: "Emulator rendering could not be checked." };
+  }
+
+  try {
+    const currentProbe = remainingDoctorProbe(probe);
+    const readVersion = dependencies.readEmulatorVersion ?? readEmulatorVersionOutput;
+    const versionOutput = await awaitDoctorProbe(currentProbe, () => readVersion(currentProbe));
+    const rawArgs = dependencies.emulatorArgsRaw ?? readEnvRaw(ENV.EMULATOR_ARGS);
+    const scan = await findSoftwareRenderingAvds({
+      probe: currentProbe,
+      platform,
+      versionOutput,
+      launchArgs: rawArgs ? parseExtraEmulatorArguments(rawArgs) : [],
+      avds: await dependencies.listAvds(currentProbe),
+      reader: dependencies.readAvdConfig,
+    });
+    if (!scan) {
+      return { name, status: "pass", message: "No AVD is expected to use software rendering." };
+    }
+    const { emulatorVersion, affected } = scan;
+    return {
+      name,
+      status: "warn",
+      message: softwareRenderingMessage(emulatorVersion, affected),
+      recommendation: SOFTWARE_RENDERING_RECOMMENDATION,
+    };
+  } catch (error) {
+    logger.warn(`Emulator rendering check failed: ${errorMessage(error)}`, error);
+    return {
+      name,
+      status: "skip",
+      message: `Could not check emulator rendering: ${errorMessage(error)}`,
+    };
+  }
+}
+
 /**
  * Check available AVDs
  */
@@ -659,8 +780,10 @@ export async function runAndroidChecks(options: DoctorOptions = {}): Promise<Che
   await run(() => checkAdbVersion(defaultAdbClientFactory, options));
   await run(() => checkEmulator(options));
   await run(() => checkConnectedDevices(defaultAdbClientFactory, options));
+  await run(() => checkAndroidIntegritySignals(defaultAdbClientFactory, options));
   await run(() => checkAvailableAvds(options));
   await run(() => checkAvdMemory(createAndroidDoctorDependencies(), options));
+  await run(() => checkEmulatorRendering(options));
 
   return results;
 }

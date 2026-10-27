@@ -105,8 +105,7 @@ public final class AutoMobileNetwork: Sendable {
     private let state = OSAllocatedUnfairLock(initialState: State())
 
     // Keep the internal testing seam while storing its value under the same lock.
-    // swiftlint:disable:next identifier_name
-    var _maxBodyBytes: Int {
+    var bodyByteLimit: Int {
         get { state.withLock { $0.maxBodyBytes } }
         set { state.withLock { $0.maxBodyBytes = newValue } }
     }
@@ -132,8 +131,9 @@ public final class AutoMobileNetwork: Sendable {
 
     /// Check if a content type is text-based and eligible for body capture.
     public static func isTextContentType(_ contentType: String?) -> Bool {
-        guard let ct = contentType else { return false }
-        let base = ct.split(separator: ";", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        guard let contentType = contentType else { return false }
+        let base = contentType.split(separator: ";", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces)
+            .lowercased() ?? ""
         return textContentTypes.contains(base) || base.hasPrefix("text/")
     }
 
@@ -628,12 +628,14 @@ public final class AutoMobileURLProtocol: URLProtocol, @unchecked Sendable {
                 headers["Content-Type"] = match.contentType
                 // HTTPURLResponse(url:statusCode:...) only fails on a nil-ish URL; `url`
                 // is a valid request URL and any Int statusCode is accepted.
-                let response = HTTPURLResponse(
+                guard let response = HTTPURLResponse(
                     url: url,
                     statusCode: match.statusCode,
                     httpVersion: "HTTP/1.1",
                     headerFields: headers
-                )! // swiftlint:disable:this force_unwrapping
+                ) else {
+                    preconditionFailure("Failed to construct HTTP response")
+                }
                 client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
                 if !body.isEmpty {
                     client?.urlProtocol(self, didLoad: body)
@@ -766,18 +768,21 @@ public final class AutoMobileURLProtocol: URLProtocol, @unchecked Sendable {
                 headers["Content-Type"] = contentType
             }
             let status = fault.statusCode ?? 200
-            let response = HTTPURLResponse(
+            guard let response = HTTPURLResponse(
                 url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers
-            )! // swiftlint:disable:this force_unwrapping
+            ) else {
+                preconditionFailure("Failed to construct HTTP response")
+            }
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             if !delivered.isEmpty {
                 client?.urlProtocol(self, didLoad: Data(delivered))
             }
+            // Fault payloads can contain invalid UTF-8; retain replacement characters in the record.
             AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
                 url: url.absoluteString, method: method, statusCode: status,
                 responseHeaders: headers, responseBodySize: delivered.count,
                 error: "fault:\(fault.faultId):\(fault.action.rawValue)",
-                responseBody: String(decoding: delivered, as: UTF8.self),
+                responseBody: String(decoding: delivered, as: Unicode.UTF8.self),
                 contentType: fault.contentType
             ))
             client?.urlProtocolDidFinishLoading(self)
@@ -829,12 +834,14 @@ public final class AutoMobileURLProtocol: URLProtocol, @unchecked Sendable {
             if simulation.errorType == "http500" {
                 // HTTPURLResponse(url:statusCode:...) only fails on a nil-ish URL; `url`
                 // is a valid request URL and 500 is a valid status code.
-                let response = HTTPURLResponse(
+                guard let response = HTTPURLResponse(
                     url: url,
                     statusCode: 500,
                     httpVersion: "HTTP/1.1",
                     headerFields: nil
-                )! // swiftlint:disable:this force_unwrapping
+                ) else {
+                    preconditionFailure("Failed to construct HTTP response")
+                }
                 AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
                     url: url.absoluteString,
                     method: method,

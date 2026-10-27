@@ -42,18 +42,29 @@ enum PrototypeAgentProtocol {
         swipeActionsCapability,
         textFieldActionsCapability,
         carouselCapability,
+        chartCapability,
+        loadingStatesCapability,
+        stylePolishV2Capability,
         textFieldLeadingIconCapability,
         refreshCapability,
         searchBarCapability,
         richTextCapability,
+        linkifyCapability,
         menusCapability,
+        tooltipCapability,
+        drawerCapability,
         stackCapability,
+        stackTransitionsCapability,
         emitContextCapability,
         checksCapability,
         identifierTestTagOnlyCapability,
         bottomSheetDragCapability,
         clearStorageRequest,
         storageCapability,
+        timersCapability,
+        "prototype_platform_v1",
+        "prototype_platform_device_v1",
+        advanceClockRequest,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -61,6 +72,7 @@ enum PrototypeAgentProtocol {
     static let showInPlaceCapability = "prototype_show_in_place_v1"
     /// Stack paths, four navigation actions, screen_changed and left-edge Back (#12068).
     static let stackCapability = "prototype_stack_v1"
+    static let stackTransitionsCapability = "prototype_stack_transitions_v1"
     /// Positions `{type: "bounds"}` node anchors (#9316). The host refuses anchors on an agent that
     /// does not advertise it, which would draw the node at its normal position. Same name as the
     /// CtrlProxy capability.
@@ -84,6 +96,7 @@ enum PrototypeAgentProtocol {
     /// spec that uses one on an agent that does not advertise it. Same name as the CtrlProxy
     /// capability.
     static let themeModesCapability = "prototype_theme_modes_v1"
+    static let stylePolishV2Capability = "prototype_style_polish_v2"
     /// Eager wrapping flow and equal-width spanning grid containers (#12070).
     static let flowGridCapability = "prototype_flow_grid_v1"
     /// Draws pager axis, pageSpacing, peek and pageSize natively. The host refuses a spec that
@@ -126,6 +139,10 @@ enum PrototypeAgentProtocol {
     static let textFieldActionsCapability = "prototype_text_field_actions_v1"
     /// The `carousel` node and the pager `indicator` option (#12071).
     static let carouselCapability = "prototype_carousel_v1"
+    /// The `chart` node (line, area, bar and ring over `/data` arrays) drawn with Swift Charts (#14679).
+    static let chartCapability = "prototype_chart_v1"
+    /// `{data, empty}` conditions and style `shimmer` on box, row, column and card (#14207, #14689).
+    static let loadingStatesCapability = "prototype_loading_states_v1"
     /// Text field `leadingIcon` drawn as an SF Symbol (#12066).
     static let textFieldLeadingIconCapability = "prototype_text_field_leading_icon_v1"
     /// Pull-to-refresh on a vertical scroll bound to a boolean state key (#12065).
@@ -134,8 +151,12 @@ enum PrototypeAgentProtocol {
     static let searchBarCapability = "prototype_search_bar_v1"
     /// Styled text runs with optional inline actions.
     static let richTextCapability = "prototype_rich_text_v1"
+    /// Text nodes turn mentions, hashtags and URLs into links that run `linkify.onTap` (#14233).
+    static let linkifyCapability = "prototype_linkify_v1"
     /// In-window menus and exposed select option lists.
     static let menusCapability = "prototype_menus_v1"
+    static let tooltipCapability = "prototype_tooltip_v1"
+    static let drawerCapability = "prototype_drawer_v1"
     // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands
     static let emitContextCapability = "prototype_emit_context_v1"
     /// Draws icons from schemas/prototype-ios-icon-symbols.json and honours filled/outlined
@@ -152,6 +173,8 @@ enum PrototypeAgentProtocol {
     /// Wipes the values stored for `{id}`; the reply carries `cleared`, the number of keys removed. Listed
     /// beside `storageCapability` because the host checks request types against `capabilities`.
     static let clearStorageRequest = "clear_prototype_storage"
+    static let timersCapability = "prototype_timers_v1"
+    static let advanceClockRequest = "advance_prototype_clock"
     /// Atomic in-place `/data`, `/state` and `replaceNode` patches with revisions and state conflicts
     /// (#11675). Same name as the CtrlProxy capability; the host sends `patch_prototype` only to an agent
     /// that advertises it.
@@ -271,7 +294,7 @@ struct PrototypeConnectionGate {
     private let capabilities: [String]
     private(set) var state: State = .awaitingHello
 
-    init(token: String, capabilities: [String] = PrototypeAgentProtocol.capabilities) {
+    init(token: String, capabilities: [String] = PrototypeAgentProtocol.advertisedCapabilities()) {
         self.token = token
         self.capabilities = capabilities
     }

@@ -310,6 +310,32 @@ describe("swipeAt snapshotId", () => {
     },
   );
 
+  test.each(devices)(
+    "rejects a changed snapshot layout before a swipe on $platform",
+    async (device) => {
+      const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+      const { captured, snapshotId } = capture(references, device);
+      const { swipeAt, observeScreen, swipes } = createSwipeAt(device, 100, 200, references);
+      observeScreen.setObserveResult({
+        ...captured,
+        viewHierarchy: {
+          ...captured.viewHierarchy!,
+          hierarchy: { node: { bounds: { left: 0, top: 0, right: 90, bottom: 90 } } },
+        },
+      });
+      const result = await swipeAt.execute({
+        from: { x: 10, y: 20 },
+        to: { x: 60, y: 120 },
+        snapshotId,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(
+        "Snapshot reference is stale (tap-targeting layout changed); re-observe.",
+      );
+      expect(swipes).toEqual([]);
+    },
+  );
+
   test("rejects an expired snapshot before dispatch", async () => {
     const timer = new FakeTimer();
     const references = new SnapshotReferenceStore(timer, new CountingIdGenerator("s"));

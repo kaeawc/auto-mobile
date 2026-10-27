@@ -95,7 +95,16 @@ class CtrlProxyImeTraceTest {
     assertTrue(service.traceSnapshot().isEmpty())
     var cancelled = false
     var result: ImeCommitResult? = null
-    service.commitText(SECRET, null, isCancelled = { cancelled }, trace = true) { result = it }
+    service.commitText(
+      ImeCommitRequest(
+        text = SECRET,
+        priorImeId = null,
+        isCancelled = { cancelled },
+        trace = true,
+      ),
+    ) {
+      result = it
+    }
     shadowOf(Looper.getMainLooper()).idle()
     service.onUpdateSelection(0, 0, 1, 1, -1, -1)
     val line = service.traceSnapshot().last()
@@ -127,7 +136,16 @@ class CtrlProxyImeTraceTest {
     assertEquals(info, service.currentInputEditorInfo)
     var cancelled = false
     var result: ImeCommitResult? = null
-    service.commitText(SECRET, null, isCancelled = { cancelled }, trace = true) { result = it }
+    service.commitText(
+      ImeCommitRequest(
+        text = SECRET,
+        priorImeId = null,
+        isCancelled = { cancelled },
+        trace = true,
+      ),
+    ) {
+      result = it
+    }
     shadowOf(Looper.getMainLooper()).idle()
     service.onUpdateSelection(0, 0, 1, 1, -1, -1)
     val selection = service.traceSnapshot().last()
@@ -160,7 +178,15 @@ class CtrlProxyImeTraceTest {
     val service = Robolectric.buildService(CtrlProxyIme::class.java).create().get()
     var cancelled = false
     var result: ImeCommitResult? = null
-    service.commitText(SECRET, null, isCancelled = { cancelled }) { result = it }
+    service.commitText(
+      ImeCommitRequest(
+        text = SECRET,
+        priorImeId = null,
+        isCancelled = { cancelled },
+      ),
+    ) {
+      result = it
+    }
     shadowOf(Looper.getMainLooper()).idle()
     cancelled = true
     shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(50))

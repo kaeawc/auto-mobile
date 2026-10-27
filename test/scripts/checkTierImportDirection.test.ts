@@ -33,4 +33,27 @@ describe("tier import direction rules (#11789)", () => {
     expect(isViolation(daemon, "src/features/video")).toBe(false);
     expect(isViolation(daemon, "src/server/appearanceManager")).toBe(true);
   });
+
+  test("the daemon client side may not import the session, pool or socket-server runtime", () => {
+    for (const tier of ["daemon/proxy", "daemon/mcpProxy"]) {
+      const client = rule(tier);
+      expect(isViolation(client, "src/daemon/sessionManager")).toBe(true);
+      expect(isViolation(client, "src/daemon/sessionManager/sessionTypes")).toBe(true);
+      expect(isViolation(client, "src/daemon/devicePoolParts/deviceAllocation")).toBe(true);
+      expect(isViolation(client, "src\\daemon\\socketServer")).toBe(true);
+      expect(isViolation(client, "src/daemon/sessionManager/releaseTypes")).toBe(false);
+      expect(isViolation(client, "src/daemon/sessionManager/sessionConstants")).toBe(false);
+      expect(isViolation(client, "src/daemon/client")).toBe(false);
+      expect(isViolation(client, "src/server/toolRegistry")).toBe(false);
+    }
+  });
+
+  test("the daemon wire package imports only itself from the daemon (#11790)", () => {
+    const wire = rule("daemon/wire");
+    expect(isViolation(wire, "src/daemon/wire/constants")).toBe(false);
+    expect(isViolation(wire, "src/daemon/sessionManager")).toBe(true);
+    expect(isViolation(wire, "src/daemon/types")).toBe(true);
+    expect(isViolation(wire, "src\\daemon\\wire\\LineFramer")).toBe(false);
+    expect(isViolation(wire, "src/utils/logger")).toBe(false);
+  });
 });

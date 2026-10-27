@@ -1,3 +1,6 @@
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
+import { createExecResult } from "../../../src/utils/execResult";
 import { expect, spyOn, test } from "bun:test";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { ImeSessionFocusLostError } from "../../../src/features/action/ImeSessionFocusLostError";
@@ -20,7 +23,7 @@ import { withAndroidImeLock } from "../../../src/features/action/androidImeLock"
 
 const original = "com.example.original/.Ime";
 const target = "com.example.keyboard/.Ime";
-const focused: ViewHierarchyResult = {
+const focused: ViewHierarchyResult = createHierarchyForTest({
   hierarchy: {
     node: {
       $: {
@@ -30,8 +33,8 @@ const focused: ViewHierarchyResult = {
       },
     },
   },
-};
-const keyWindow: ViewHierarchyResult = {
+});
+const keyWindow: ViewHierarchyResult = createHierarchyForTest({
   hierarchy: {
     node: {
       $: {},
@@ -54,7 +57,7 @@ const keyWindow: ViewHierarchyResult = {
       bounds: { left: 0, top: 300, right: 400, bottom: 600 },
     },
   ],
-};
+});
 
 let fixtureNumber = 0;
 function fixture(
@@ -216,7 +219,7 @@ function fixture(
   };
 }
 
-const focusedWithoutKey: ViewHierarchyResult = {
+const focusedWithoutKey: ViewHierarchyResult = createHierarchyForTest({
   ...focused,
   hierarchy: {
     node: {
@@ -227,8 +230,10 @@ const focusedWithoutKey: ViewHierarchyResult = {
     },
   },
   windows: keyWindow.windows,
-};
-const noFocusOrWindow: ViewHierarchyResult = { hierarchy: { node: { $: {} } } };
+});
+const noFocusOrWindow: ViewHierarchyResult = createHierarchyForTest({
+  hierarchy: { node: { $: {} } },
+});
 const restoreMessage = `Could not restore the original keyboard ${original}; run "keyboard setIme ${original}" or restart the daemon.`;
 
 test.each([
@@ -434,10 +439,10 @@ test("restores after a failed tap", async () => {
 });
 
 test("does not tap an app control when no real IME window contains the key", async () => {
-  const fakeWindow: ViewHierarchyResult = {
+  const fakeWindow: ViewHierarchyResult = createHierarchyForTest({
     hierarchy: { node: { $: { text: "a" } } },
     windows: [{ type: 1, bounds: { left: 0, top: 0, right: 400, bottom: 600 } }],
-  };
+  });
   const { session, events, timer } = fixture(fakeWindow);
   await expect(session.tapKey(target, "a")).rejects.toMatchObject({
     message: "Selected IME window did not appear within 2000 ms.",
@@ -449,7 +454,7 @@ test("does not tap an app control when no real IME window contains the key", asy
 });
 
 test("does not tap a key from another IME package", async () => {
-  const wrongPackage: ViewHierarchyResult = {
+  const wrongPackage: ViewHierarchyResult = createHierarchyForTest({
     ...keyWindow,
     hierarchy: {
       node: {
@@ -465,7 +470,7 @@ test("does not tap a key from another IME package", async () => {
         ],
       },
     },
-  };
+  });
   const { session, events } = fixture(wrongPackage);
   await expect(session.tapKey(target, "a")).rejects.toMatchObject({
     message: 'Visible key "a" was not found in the selected IME window.',
@@ -476,7 +481,7 @@ test("does not tap a key from another IME package", async () => {
 test("matches a live-shaped Gboard key in the root hierarchy using IME window bounds", async () => {
   const gboard =
     "com.google.android.inputmethod.latin/com.google.android.apps.inputmethod.latin.LatinIME";
-  const liveShape: ViewHierarchyResult = {
+  const liveShape: ViewHierarchyResult = createHierarchyForTest({
     frameContext: "gboard-frame",
     hierarchy: {
       node: {
@@ -500,7 +505,7 @@ test("matches a live-shaped Gboard key in the root hierarchy using IME window bo
       },
     },
     windows: [{ type: 2, bounds: { left: 0, top: 1517, right: 1080, bottom: 2400 } }],
-  };
+  });
   const { session, events } = fixture(liveShape, focused, liveShape, gboard);
   const result = await session.tapKey(gboard, "a");
   expect(result).toMatchObject({ imeId: gboard, key: "a", x: 85, y: 1886 });
@@ -508,7 +513,7 @@ test("matches a live-shaped Gboard key in the root hierarchy using IME window bo
 });
 
 test("collapses a Gboard clickable key and its labeled descendant to the ancestor", async () => {
-  const nested: ViewHierarchyResult = {
+  const nested: ViewHierarchyResult = createHierarchyForTest({
     ...keyWindow,
     hierarchy: {
       node: {
@@ -539,14 +544,14 @@ test("collapses a Gboard clickable key and its labeled descendant to the ancesto
         ],
       },
     },
-  };
+  });
   const { session, events } = fixture(nested);
   expect(await session.tapKey(target, "a")).toMatchObject({ x: 120, y: 420 });
   expect(events).toContain("tap:120,420:frame-one");
 });
 
 test("rejects separate same-label IME keys as ambiguous", async () => {
-  const separate: ViewHierarchyResult = {
+  const separate: ViewHierarchyResult = createHierarchyForTest({
     ...keyWindow,
     hierarchy: {
       node: {
@@ -569,14 +574,14 @@ test("rejects separate same-label IME keys as ambiguous", async () => {
         ],
       },
     },
-  };
+  });
   const { session, events } = fixture(separate);
   await expect(session.tapKey(target, "1")).rejects.toThrow("Visible key");
   expect(events.some((event) => event.startsWith("tap:"))).toBe(false);
 });
 
 test("matches a resource-id-less key below a marked IME root", async () => {
-  const marked: ViewHierarchyResult = {
+  const marked: ViewHierarchyResult = createHierarchyForTest({
     ...keyWindow,
     hierarchy: {
       node: {
@@ -586,7 +591,7 @@ test("matches a resource-id-less key below a marked IME root", async () => {
         ],
       },
     },
-  };
+  });
   const { session, events } = fixture(marked);
   expect(await session.tapKey(target, "a")).toMatchObject({ x: 120, y: 420 });
   expect(events).toContain("tap:120,420:frame-one");
@@ -611,18 +616,18 @@ test("a stale layout rejects the bound tap without fallback and still restores",
 });
 
 test("default tap sends the captured frame context once and fails closed", async () => {
-  const calls: unknown[][] = [];
+  const calls: TapCoordinatesRequest[] = [];
+  const refusal = { success: false, error: "stale frame context", totalTimeMs: 0 };
   const client = {
-    requestTapCoordinates: async (...args: unknown[]) => {
-      calls.push(args);
-      return { success: false, error: "stale frame context" };
+    requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+      calls.push(request);
+      return refusal;
     },
   };
-  expect(await tapFrameBoundImeKey(client, { x: 120, y: 420, frameContext: "frame-one" })).toEqual({
-    success: false,
-    error: "stale frame context",
-  });
-  expect(calls).toEqual([[120, 420, 10, undefined, undefined, "frame-one"]]);
+  expect(await tapFrameBoundImeKey(client, { x: 120, y: 420, frameContext: "frame-one" })).toEqual(
+    refusal,
+  );
+  expect(calls).toEqual([{ x: 120, y: 420, duration: 10, frameContext: "frame-one" }]);
   expect(await tapFrameBoundImeKey(client, { x: 120, y: 420, frameContext: "" })).toEqual({
     success: false,
     error: "The IME key observation has no frame context.",
@@ -631,7 +636,7 @@ test("default tap sends the captured frame context once and fails closed", async
 });
 
 test("reports a changed editor without returning its text", async () => {
-  const editorBefore: ViewHierarchyResult = {
+  const editorBefore: ViewHierarchyResult = createHierarchyForTest({
     hierarchy: {
       node: {
         $: {
@@ -643,8 +648,8 @@ test("reports a changed editor without returning its text", async () => {
         },
       },
     },
-  };
-  const editorAfter: ViewHierarchyResult = {
+  });
+  const editorAfter: ViewHierarchyResult = createHierarchyForTest({
     hierarchy: {
       node: {
         $: {
@@ -656,7 +661,7 @@ test("reports a changed editor without returning its text", async () => {
         },
       },
     },
-  };
+  });
   const { session } = fixture(keyWindow, editorBefore, editorAfter);
   const result = await session.tapKey(target, "a");
   expect(result.editorVerification).toEqual({ status: "changed" });
@@ -664,7 +669,7 @@ test("reports a changed editor without returning its text", async () => {
 });
 
 test("does not claim a key produced text when the focused editor is unchanged", async () => {
-  const editor: ViewHierarchyResult = {
+  const editor: ViewHierarchyResult = createHierarchyForTest({
     hierarchy: {
       node: {
         $: {
@@ -676,7 +681,7 @@ test("does not claim a key produced text when the focused editor is unchanged", 
         },
       },
     },
-  };
+  });
   const { session } = fixture(keyWindow, editor, editor);
   expect((await session.tapKey(target, "a")).editorVerification).toEqual({ status: "unchanged" });
 });
@@ -883,12 +888,12 @@ test("persistent selection waits for the session's subtype restore under the sam
   await selectionReached;
 
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("shell ime list -a -s", { stdout: `${original}\n`, stderr: "" });
-  adb.setCommandResponse("shell ime list -s", { stdout: `${original}\n`, stderr: "" });
-  adb.setCommandResponse("shell settings get secure default_input_method", {
-    stdout: original,
-    stderr: "",
-  });
+  adb.setCommandResponse("shell ime list -a -s", createExecResult(`${original}\n`, ""));
+  adb.setCommandResponse("shell ime list -s", createExecResult(`${original}\n`, ""));
+  adb.setCommandResponse(
+    "shell settings get secure default_input_method",
+    createExecResult(original, ""),
+  );
   const catalog = new AndroidImeCatalog(
     {
       execute: async (args) => {

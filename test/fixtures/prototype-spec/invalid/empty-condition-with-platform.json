@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["test"]
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "visibleWhen": {
+        "platform": "/test/ready",
+        "empty": true
+      }
+    }
+  },
+  "expectedPath": "root.visibleWhen.empty",
+  "expectedMessage": "empty applies only to data conditions"
+}

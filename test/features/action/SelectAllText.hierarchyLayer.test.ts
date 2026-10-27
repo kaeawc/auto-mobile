@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { describe, expect, test } from "bun:test";
 import { SelectAllText } from "../../../src/features/action/SelectAllText";
 import type { BootedDevice } from "../../../src/models";
@@ -44,7 +45,7 @@ async function selectAll(hierarchy: ViewHierarchyResult, layer?: HierarchyLayer)
       return { success: true, totalTimeMs: 1 };
     },
   }));
-  action.observedInteraction = (block) => block(observationOf(hierarchy));
+  action.observedInteraction = runBlockWith(() => observationOf(hierarchy));
   const result = await action.execute(undefined, undefined, { layer });
   return { result, requests };
 }

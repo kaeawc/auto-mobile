@@ -54,12 +54,15 @@ describe.serial("AdbClient missing ADB recovery", () => {
   });
 
   test("does not cache a failed detection's bare adb fallback", async () => {
-    const client = new AdbClient(null, null, null, undefined, new FakeTimer(), () => {
-      throw new Error("SDK detection unavailable");
+    const client = new AdbClient(null, null, {
+      timer: new FakeTimer(),
+      systemDetectionFactory: () => {
+        throw new Error("SDK detection unavailable");
+      },
     });
-    client["isTestMode"] = false;
+    client.testHooks.isTestMode = false;
     let whichCalls = 0;
-    client["execWithSignal"] = async (file, args) => {
+    client.testHooks.execWithSignal = async (file, args) => {
       if (file === "which" && args[0] === "adb") {
         whichCalls++;
         return result(whichCalls === 1 ? "" : "/sdk/platform-tools/adb\n");
@@ -75,13 +78,16 @@ describe.serial("AdbClient missing ADB recovery", () => {
 
   test("resets the missing probe guard after a real path is detected and scans recover", async () => {
     const timer = new FakeTimer();
-    const client = new AdbClient(null, null, null, undefined, timer, () => {
-      throw new Error("SDK detection unavailable");
+    const client = new AdbClient(null, null, {
+      timer,
+      systemDetectionFactory: () => {
+        throw new Error("SDK detection unavailable");
+      },
     });
-    client["isTestMode"] = false;
+    client.testHooks.isTestMode = false;
     let resolvedPath = false;
     let deviceCalls = 0;
-    client["execWithSignal"] = async (file, args) => {
+    client.testHooks.execWithSignal = async (file, args) => {
       if (file === "which" && args[0] === "adb") {
         return result(resolvedPath ? "/sdk/platform-tools/adb\n" : "");
       }
@@ -115,12 +121,15 @@ describe.serial("AdbClient missing ADB recovery", () => {
   });
 
   test("resets the missing probe guard after a successful adb command", async () => {
-    const client = new AdbClient(null, null, null, undefined, new FakeTimer(), () => {
-      throw new Error("SDK detection unavailable");
+    const client = new AdbClient(null, null, {
+      timer: new FakeTimer(),
+      systemDetectionFactory: () => {
+        throw new Error("SDK detection unavailable");
+      },
     });
-    client["isTestMode"] = false;
+    client.testHooks.isTestMode = false;
     let deviceCalls = 0;
-    client["execWithSignal"] = async (file, args) => {
+    client.testHooks.execWithSignal = async (file, args) => {
       if (file === "which" && args[0] === "adb") {
         return result("");
       }
@@ -149,12 +158,15 @@ describe.serial("AdbClient missing ADB recovery", () => {
 
   test("retries a skipped scan after the recovery window expires", async () => {
     const timer = new FakeTimer();
-    const client = new AdbClient(null, null, null, undefined, timer, () => {
-      throw new Error("SDK detection unavailable");
+    const client = new AdbClient(null, null, {
+      timer,
+      systemDetectionFactory: () => {
+        throw new Error("SDK detection unavailable");
+      },
     });
-    client["isTestMode"] = false;
+    client.testHooks.isTestMode = false;
     let deviceCalls = 0;
-    client["execWithSignal"] = async (file, args) => {
+    client.testHooks.execWithSignal = async (file, args) => {
       if (file === "which" && args[0] === "adb") {
         return result("");
       }

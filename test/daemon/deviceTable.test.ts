@@ -12,6 +12,7 @@ function device(id: string, overrides: Partial<PooledDevice> = {}): PooledDevice
     health: "ok",
     lastUsedAt: 0,
     assignmentCount: 0,
+    incarnation: 0,
     errorCount: 0,
     ...overrides,
   };

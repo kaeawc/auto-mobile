@@ -1,5 +1,7 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -13,6 +15,8 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { FakeVisionAnalyzer } from "../../fakes/FakeVisionAnalyzer";
 import type { VisionFallbackConfig } from "../../../src/vision/VisionTypes";
+
+afterEach(() => mock.restore());
 
 const enabledVisionConfig: VisionFallbackConfig = {
   enabled: true,
@@ -39,17 +43,18 @@ describe("PinchOn vision fallback", () => {
   let managerSpy: ReturnType<typeof spyOn> | null = null;
 
   const createHierarchy = (): ViewHierarchyResult => ({
-    hierarchy: { node: [] },
+    hierarchy: { node: createFlatNodeForTest({ node: [] }) },
     packageName: "com.test.app",
     updatedAt: Date.now(),
   });
 
-  const createObserveResult = (): ObserveResult => ({
-    updatedAt: Date.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: createHierarchy(),
-  });
+  const createObserveResult = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: createHierarchy(),
+    });
 
   beforeEach(() => {
     fakeObserveScreen = new FakeObserveScreen();

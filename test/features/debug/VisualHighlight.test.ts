@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import {
-  VisualHighlight,
-  VisualHighlightClient,
-} from "../../../src/features/debug/VisualHighlight";
+import { VisualHighlight } from "../../../src/features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../../../src/features/debug/VisualHighlightClient";
 import type { HighlightDeviceClient } from "../../../src/features/debug/VisualHighlight";
 import type { BootedDevice, HighlightOperationResult, HighlightShape } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -11,7 +9,6 @@ describe("VisualHighlight", () => {
   const androidDevice: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    isEmulator: true,
     name: "Test Device",
   };
   const iosDevice: BootedDevice = {
@@ -88,14 +85,14 @@ describe("VisualHighlight", () => {
     {
       dimension: "width",
       invalidShape: {
-        type: "box" as const,
+        type: "circle" as const,
         bounds: { x: 10, y: 20, width: 0, height: 80 },
       },
     },
     {
       dimension: "height",
       invalidShape: {
-        type: "box" as const,
+        type: "circle" as const,
         bounds: { x: 10, y: 20, width: 100, height: 0 },
       },
     },
@@ -138,7 +135,6 @@ describe("VisualHighlightClient", () => {
   const androidDevice: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    isEmulator: true,
     name: "Test Device",
   };
   const iosDevice: BootedDevice = {

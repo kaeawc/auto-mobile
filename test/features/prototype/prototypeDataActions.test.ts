@@ -21,7 +21,7 @@ function spec(
 ) {
   return {
     id: "shop",
-    window: { placement: { type: "fullscreen" } },
+    window: { placement: { type: "fullscreen" }, opacity: 1 },
     state: { picked: "apple" },
     root: { ...label, onTap: actions },
     ...extra,
@@ -278,7 +278,7 @@ describe("applyPrototypeDataWrite", () => {
       [{ op: "remove", path: "/data/cart/2" }, "not_found"],
     ];
     for (const [write, expected] of cases) {
-      expect(code(applyPrototypeDataWrite(data, write))).toBe(expected);
+      expect<unknown>(code(applyPrototypeDataWrite(data, write))).toBe(expected);
     }
   });
   test("a write that leaves data over the size limit changes nothing", () => {

@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { defineDeviceTool, type DeviceToolSchema } from "./defineTool";
@@ -9,7 +10,7 @@ import {
   FeatureFlagService,
   type FeatureFlagReader,
 } from "../features/featureFlags/FeatureFlagService";
-import { accessibilityDetector } from "../features/accessibility/AccessibilityDetector";
+import { accessibilityDetector } from "../ctrlProxy/accessibility/AccessibilityDetector";
 import { iosVoiceOverDetector } from "../features/accessibility/IosVoiceOverDetector";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -19,6 +20,8 @@ import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContex
 import type { ScreenReaderToggleOptions } from "../models/AccessibilityResult";
 import type { ScreenReaderRestoreSlot } from "../features/accessibility/ScreenReaderRestore";
 import { runSessionScreenReaderMutation } from "./sessionScreenReader";
+import { createAccessibilityAuditTool } from "./accessibilityAuditTool";
+import { createAuditTool } from "./auditTool";
 
 // `defineDeviceTool` applies `.strict()` and device targeting; the handler args below
 // (including `sessionUuid`) are inferred from this schema.
@@ -229,6 +232,7 @@ const accessibilityTool = defineDeviceTool({
     throw new ActionableError(`Unsupported platform: ${device.platform}`);
   },
   options: {
+    ...PLAN_RELEVANT,
     defaultEnabled: false,
     outputSchema: accessibilityStateSchema,
     // The check form (no talkback/voiceover) reads (#10965); a toggle is control.
@@ -241,4 +245,6 @@ export const accessibilitySchema = accessibilityTool.schema;
 
 export function registerAccessibilityTools() {
   accessibilityTool.register();
+  createAccessibilityAuditTool().register();
+  createAuditTool().register();
 }

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
@@ -61,11 +62,13 @@ function setup(
   const store = new FakeScreenshotStateStore(timer);
   const recorder = new FakeScreenshotRecorder();
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("cmd display get-displays", {
-    stdout:
+  adb.setCommandResponse(
+    "cmd display get-displays",
+    createExecResult(
       'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-    stderr: "",
-  });
+      "",
+    ),
+  );
   let captureFails = false;
   let captureSize: { width: number; height: number } | undefined = { width, height };
   recorder.captureSettled = async (observationId) => {
@@ -386,7 +389,7 @@ test.each([undefined, 0, -1, 1.5, NaN])(
 test("iOS multi-panel landscape capture is already display-oriented", async () => {
   const { screen, setCaptureSize } = setup("ios", 800, 400, 2, 1, {
     panels: [
-      { key: "0", role: "primary", sizePx: { width: 800, height: 400 } },
+      { key: "0", role: "unknown", sizePx: { width: 800, height: 400 } },
       { key: "1", role: "external", sizePx: { width: 100, height: 100 } },
     ],
     postures: [],
@@ -413,7 +416,7 @@ test.each([
     const displays = multiPanel
       ? {
           panels: [
-            { key: "0", role: "primary" as const, sizePx: { width, height } },
+            { key: "0", role: "unknown" as const, sizePx: { width, height } },
             { key: "1", role: "external" as const, sizePx: { width: 100, height: 100 } },
           ],
           postures: [],
@@ -453,7 +456,7 @@ test.each(["portrait", "unavailable", "incompatible"])(
   async (raster) => {
     const { screen, setCaptureSize } = setup("ios", 800, 400, 2, 1, {
       panels: [
-        { key: "0", role: "primary", sizePx: { width: 800, height: 400 } },
+        { key: "0", role: "unknown", sizePx: { width: 800, height: 400 } },
         { key: "1", role: "external", sizePx: { width: 100, height: 100 } },
       ],
       postures: [],

@@ -4,19 +4,24 @@ import {
   type SessionPreservingRecoveryPoolPort,
 } from "../../src/daemon/sessionPreservingRecovery";
 import { AndroidRecoveryRecordLedger } from "../../src/daemon/androidRecoveryRecordLedger";
-import { UnconfirmedRecoveryShutdownError } from "../../src/daemon/androidRebootCoordinator";
-import type { SessionContinuityDevice } from "../../src/daemon/devicePool";
+import { UnconfirmedRecoveryShutdownError } from "../../src/daemon/UnconfirmedRecoveryShutdownError";
+import type { PooledDevice } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-async function harness() {
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+type MutableContinuityDevice =
+  | (Mutable<PooledDevice> & { platform: "android" })
+  | (Mutable<PooledDevice> & { platform: "ios" });
+
+async function harness(platform: "android" | "ios" = "android") {
   const timer = new FakeTimer();
-  const device: SessionContinuityDevice = {
+  const device: MutableContinuityDevice = {
     id: "emulator-5554",
     name: "Pixel",
-    platform: "android",
+    platform,
     sessionId: "session",
     status: "busy",
     lastUsedAt: 0,
@@ -140,12 +145,11 @@ describe("SessionPreservingRecoveryRunner", () => {
   };
   for (const scenario of Object.keys(traces) as Array<keyof typeof traces>) {
     test(scenario, async () => {
-      const h = await harness();
+      const h = await harness(scenario === "ios-passive" ? "ios" : "android");
       const runtimeError = new Error("reboot failed");
       const releaseError = new Error("persistence failed");
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       if (scenario.endsWith("passive")) {
-        h.device.platform = scenario === "ios-passive" ? "ios" : "android";
         h.device.androidImage = undefined;
       } else if (scenario === "stale") {
         h.port.cancelDeviceSessionExecutions = async () => {

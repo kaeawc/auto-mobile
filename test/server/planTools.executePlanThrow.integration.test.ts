@@ -1,9 +1,10 @@
 import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
+import { toolJson } from "../helpers/toolResponse";
 import * as planUtils from "../../src/server/planExecutorFactory";
-import * as videoRecordingManager from "../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { registerPlanTools } from "../../src/server/planTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
@@ -56,7 +57,7 @@ describe("executePlanTool — executePlan throws", () => {
       deviceAllocationTimeoutMs: 5000,
     });
 
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
 
     // The original error from executePlan should propagate to the catch block
     // NOT a TypeError from accessing result.debug?.steps when result is undefined
@@ -79,7 +80,7 @@ describe("executePlanTool — executePlan throws", () => {
       deviceAllocationTimeoutMs: 5000,
     });
 
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
 
     // Verify the response contains the specific error message from executePlan
     expect(payload.error).toContain("device disconnected");

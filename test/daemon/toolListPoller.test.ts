@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ListChangedKind } from "../../src/server/listChangedBroadcast";
+import type { ListChangedKind } from "../../src/daemon/listChangedBroadcast";
 import { ToolListPoller } from "../../src/daemon/proxy/ToolListPoller";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";

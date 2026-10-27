@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.datasource
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.encodeResourceUriComponent
+import java.io.IOException
 import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -72,7 +73,9 @@ class RealAppListDataSource(
       Result.Success(apps)
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
-    } catch (e: Exception) {
+    } catch (e: IOException) {
+      Result.Error(e, "Failed to load installed apps: ${e.message}")
+    } catch (e: IllegalArgumentException) {
       Result.Error(e, "Failed to load installed apps: ${e.message}")
     }
   }

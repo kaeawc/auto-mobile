@@ -1,10 +1,11 @@
 import { Client } from "@modelcontextprotocol/client";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
 import { describe, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient, DaemonRequestNotDeliveredError } from "../../src/daemon/client";
-import { DAEMON_CANCEL_REQUEST_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
+import { DaemonClient } from "../../src/daemon/client";
+import { DAEMON_CANCEL_REQUEST_METHOD, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeSocket } from "../fakes/FakeNetServer";
@@ -36,7 +37,7 @@ async function setup() {
     timer,
     ISOLATED_DAEMON_RECOVERY,
     null,
-    new FakeIdGenerator(),
+    { idGenerator: new FakeIdGenerator() },
   );
   daemonClient.testHooks.attachSocket(socket);
   const fake = new FakeDaemonClient();

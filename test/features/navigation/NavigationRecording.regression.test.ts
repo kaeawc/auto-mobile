@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "
 import { readFileSync } from "node:fs";
 import { NavigationRepository } from "../../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
-import { INTERNAL_TOOL_PARAM_NAMES } from "../../../src/daemon/constants";
+import { INTERNAL_TOOL_PARAM_NAMES } from "../../../src/daemon/wire/constants";
 import { stripNavigationToolParams } from "../../../src/models/navigationToolParams";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { edgeReplayKey } from "../../../src/db/edgeReplayKey";
@@ -72,22 +72,18 @@ describe("navigation recording source state and routing", () => {
 
   function record(recordedArgs = args) {
     // Exercise the actual default registry recorder without invoking a device handler.
-    const recorder: {
-      record: (
-        name: string,
-        args: Record<string, unknown>,
-        device: undefined,
-        session: undefined,
-        traits: { recordsNavigation: boolean },
-      ) => ReturnType<NavigationGraphManager["recordToolCall"]>;
-    } = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
+    const recorder = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
     const cache = spyOn(RealObserveScreen, "getRecentCachedResult").mockReturnValue(
       capture.structuredContent,
     );
     try {
-      return recorder.record("tapOn", recordedArgs, undefined, undefined, {
+      const handle = recorder.record("tapOn", recordedArgs, undefined, undefined, {
         recordsNavigation: true,
       });
+      if (!handle) {
+        throw new Error("Expected navigation recording handle");
+      }
+      return handle;
     } finally {
       cache.mockRestore();
     }

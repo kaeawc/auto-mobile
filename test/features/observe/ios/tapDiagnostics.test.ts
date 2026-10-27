@@ -3,10 +3,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { CtrlProxyGestures } from "../../../../src/features/observe/ios/CtrlProxyGestures";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { decodeCtrlProxyMessage } from "../../../../src/features/observe/ios/decodeCtrlProxyMessage";
-import type {
-  CtrlProxyTapDiagnostics,
-  WebSocketMessage,
-} from "../../../../src/features/observe/ios/types";
+import type { CtrlProxyTapDiagnostics } from "../../../../src/features/observe/ios/types";
 import { logger, LogLevel } from "../../../../src/utils/logger";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -81,11 +78,11 @@ describe("iOS opt-in tap diagnostics", () => {
       environment.setEnvVar("AUTOMOBILE_IOS_TAP_STRATEGY", strategy);
       const { sent, gestures } = gestureHarness(environment);
       logger.setLogLevel(LogLevel.INFO);
-      await gestures.requestTapCoordinates(443, 202);
+      await gestures.requestTapCoordinates({ x: 443, y: 202 });
       expect(JSON.parse(sent[0])).not.toHaveProperty("tapStrategy");
       expect(JSON.parse(sent[0])).not.toHaveProperty("diagnostics");
       logger.setLogLevel(LogLevel.DEBUG);
-      await gestures.requestTapCoordinates(443, 202);
+      await gestures.requestTapCoordinates({ x: 443, y: 202 });
       expect(JSON.parse(sent[1])).toMatchObject({
         diagnostics: true,
         tapStrategy: strategy,
@@ -105,10 +102,10 @@ describe("iOS opt-in tap diagnostics", () => {
       const read = spyOn(environment, "getEnvVar");
       const { sent, gestures } = gestureHarness(environment);
       logger.setLogLevel(LogLevel.INFO);
-      await gestures.requestTapCoordinates(443, 202);
+      await gestures.requestTapCoordinates({ x: 443, y: 202 });
       expect(read).not.toHaveBeenCalled();
       logger.setLogLevel(LogLevel.DEBUG);
-      await gestures.requestTapCoordinates(443, 202);
+      await gestures.requestTapCoordinates({ x: 443, y: 202 });
       expect(JSON.parse(sent[1])).not.toHaveProperty("tapStrategy");
       expect(JSON.parse(sent[1]).diagnostics).toBe(true);
     } finally {
@@ -119,7 +116,7 @@ describe("iOS opt-in tap diagnostics", () => {
   test("debug off leaves the exact default wire JSON unchanged", async () => {
     logger.setLogLevel(LogLevel.INFO);
     const { sent, gestures } = gestureHarness();
-    await gestures.requestTapCoordinates(443, 202, 50);
+    await gestures.requestTapCoordinates({ x: 443, y: 202, duration: 50 });
     const wire = sent[0];
     const request: { requestId: string } = JSON.parse(wire);
     expect(wire).toBe(
@@ -236,25 +233,26 @@ describe("iOS opt-in tap diagnostics", () => {
       createSuccessWebSocketFactory(timer),
       timer,
     );
-    const boundary = client as unknown as {
-      requestManager: RequestManager;
-      processMessage(message: WebSocketMessage): void;
-    };
+    const boundary = client.testHooks;
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       logger.setLogLevel(LogLevel.INFO);
-      const pending = boundary.requestManager.register("tap", "tap_coordinates", 5000);
+      const pending = boundary.requestManager.register("tap", "tap_coordinates", 5000, () => ({
+        success: false,
+        error: "Tap timed out",
+      }));
       // Model JSON from an untrusted runner, including a malformed optional value.
-      const message: WebSocketMessage = JSON.parse(
-        JSON.stringify({
-          type: "tap_coordinates_result",
-          requestId: "tap",
-          success: true,
-          tapDiagnostics: payload,
-        }),
-      );
-      boundary.processMessage(message);
+      const message = {
+        type: "tap_coordinates_result",
+        requestId: "tap",
+        success: true,
+        tapDiagnostics: payload,
+      };
+      const receiveMessage = (value: unknown): void => {
+        client.getSdkEventPollingTestHooks().receiveMessage(JSON.stringify(value));
+      };
+      receiveMessage(message);
       expect(await pending).toMatchObject({ success: true, tapDiagnostics: payload });
       const lines = debug.mock.calls
         .map(([line]) => line)
@@ -292,7 +290,7 @@ describe("iOS opt-in tap diagnostics", () => {
 test("double tap adds only the optional doubleTap flag to the ordinary tap wire", async () => {
   logger.setLogLevel(LogLevel.INFO);
   const { gestures, sent } = gestureHarness();
-  await gestures.requestTapCoordinates(12.5, 24.25, 50);
+  await gestures.requestTapCoordinates({ x: 12.5, y: 24.25, duration: 50 });
   await gestures.requestDoubleTapCoordinates(12.5, 24.25, 5000);
   const single = JSON.parse(sent[0]!);
   const double = JSON.parse(sent[1]!);

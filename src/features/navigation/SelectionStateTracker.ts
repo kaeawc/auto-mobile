@@ -1,41 +1,18 @@
-import { BootedDevice, Element, ObserveResult } from "../../models";
-import {
-  AdbClientFactory,
-  defaultAdbClientFactory,
-} from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { Element, ObserveResult } from "../../models";
 import { logger } from "../../utils/logger";
 import { serverConfig } from "../../utils/ServerConfig";
 import type { TapEffect } from "../../models/TapOnElementResult";
 import { SelectedElement } from "../../utils/interfaces/NavigationGraph";
-import { TakeScreenshot } from "../observe/TakeScreenshot";
 import {
   SelectionDetectionContext,
   SelectionStateDetector,
   SelectionStateDetectorLike,
 } from "./SelectionStateDetector";
 import { UIStateExtractor } from "./UIStateExtractor";
+export { TakeScreenshotCapturer } from "./TakeScreenshotCapturer";
 
 export interface ScreenshotCapturer {
   capture(signal?: AbortSignal): Promise<string | null>;
-}
-
-export class TakeScreenshotCapturer implements ScreenshotCapturer {
-  private device: BootedDevice;
-  private adbFactory: AdbClientFactory;
-
-  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory) {
-    this.device = device;
-    this.adbFactory = adbFactory;
-  }
-
-  async capture(signal?: AbortSignal): Promise<string | null> {
-    const screenshot = new TakeScreenshot(this.device, this.adbFactory);
-    const result = await screenshot.execute({ format: "png" }, signal);
-    if (!result.success || !result.path) {
-      return null;
-    }
-    return result.path;
-  }
 }
 
 export interface SelectionCaptureState {

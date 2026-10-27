@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { logger } from "../logger";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 import { sortedReaddirSync } from "../io";
 import { isProcessRunning } from "../processLiveness";
 
@@ -49,8 +50,9 @@ export function runningAvdAdvertisementDirs(host: AdvertisementHost): string[] {
   if (host.platform === "darwin") {
     roots.push(join(host.homeDir, "Library", "Caches", "TemporaryItems"));
   } else if (host.platform !== "win32") {
-    const xdgRuntimeDir = host.env.XDG_RUNTIME_DIR;
-    const user = host.env.USER ?? host.env.LOGNAME;
+    const xdgRuntimeDir = readEnvRaw(AMBIENT_ENV.XDG_RUNTIME_DIR, host.env);
+    const user =
+      readEnvRaw(AMBIENT_ENV.USER, host.env) ?? readEnvRaw(AMBIENT_ENV.LOGNAME, host.env);
     if (xdgRuntimeDir) {
       roots.push(xdgRuntimeDir);
     } else if (user) {

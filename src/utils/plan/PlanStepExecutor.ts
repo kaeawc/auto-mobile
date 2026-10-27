@@ -3,7 +3,7 @@ import { waitForTimeoutDiagnostics, waitForTimeoutError } from "./waitForTimeout
 import { unsupportedToolResultError } from "./unsupportedToolResult";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 import { errorMessage } from "../describeUnknownError";
-import type { PlanStep, PlanExecutionResult } from "../../models/Plan";
+import type { PlanStep } from "../../models/Plan";
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models";
 import { logger, type Logger } from "../logger";
@@ -29,6 +29,9 @@ import {
   summarizeObserveResultForFailure,
   trimObservationForStepCapture,
 } from "./summarizeFailureObservation";
+import { PlanStepError } from "./PlanStepError";
+import { redactToolSecrets } from "../redactToolSecrets";
+export { PlanStepError } from "./PlanStepError";
 
 /** Only the registry operations and tool metadata required to execute a step. */
 export interface PlanStepTool {
@@ -147,7 +150,7 @@ function skippedOptionalResult(step: PlanStep, error: string): StepExecutionResu
   return {
     status: "skipped",
     error,
-    details: { params: step.params, error, optional: true },
+    details: { params: redactToolSecrets(step.tool, step.params), error, optional: true },
   };
 }
 
@@ -176,22 +179,6 @@ function skippedAnsweredFailure(
     details: { ...skipped.details, ...(waitForTimeout ? { waitForTimeout } : {}) },
     ...(warnings ? { warnings } : {}),
   };
-}
-
-/** Retain the plan-shaped failure and diagnostics without changing the legacy message. */
-export class PlanStepError extends ActionableError {
-  readonly warnings: string[];
-  readonly failureObservation;
-
-  constructor(
-    message: string,
-    warnings: string[],
-    readonly failedStep: NonNullable<PlanExecutionResult["failedStep"]>,
-  ) {
-    super(message);
-    this.warnings = [...warnings];
-    this.failureObservation = failedStep.failureObservation;
-  }
 }
 
 /** Which derived session a failure observation targets and the plan signal that can cancel it. */
@@ -689,7 +676,7 @@ export class DefaultPlanStepExecutor<
       { deviceLabel, signal: context.signal, targetDevice: context.targetDevice },
     );
     const details: Record<string, unknown> = {
-      params: step.params,
+      params: redactToolSecrets(step.tool, step.params),
       error,
       ...(toolResult && typeof toolResult === "object" && "debug" in toolResult
         ? { toolDebug: toolResult.debug }
@@ -714,7 +701,7 @@ export class DefaultPlanStepExecutor<
     toolResult: Record<string, unknown> | undefined,
   ): StepExecutionResult {
     const details: Record<string, unknown> = {
-      params: step.params,
+      params: redactToolSecrets(step.tool, step.params),
     };
     if (step.tool === "observe" && context.captureObserveSteps) {
       const stepObservation = this.buildObserveStepCaptureFromResponse(
@@ -788,7 +775,7 @@ export class DefaultPlanStepExecutor<
         error: errorMsg,
         ...(warnings ? { warnings } : {}),
         details: {
-          params: step.params,
+          params: redactToolSecrets(step.tool, step.params),
           error: errorMsg,
           optional: true,
         },
@@ -806,7 +793,7 @@ export class DefaultPlanStepExecutor<
       sourceError: error,
       error: errorMsg,
       details: {
-        params: step.params,
+        params: redactToolSecrets(step.tool, step.params),
         error: errorMsg,
         ...(failureObservation ? { failureObservation } : {}),
         ...(warnings ? { warnings } : {}),

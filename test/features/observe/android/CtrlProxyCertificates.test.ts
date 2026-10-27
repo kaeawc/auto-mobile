@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 /**
  * Wire-driven tests for the CtrlProxyCertificates delegate, exercised through AndroidCtrlProxyClient.
  *
@@ -41,13 +42,12 @@ describe("CtrlProxyCertificates (Android)", function () {
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
 
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     fakeAdb.setScreenState(true);
 
     testDevice = {
       deviceId: "test-device-certs",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 
@@ -586,7 +586,9 @@ describe("CtrlProxyCertificates (Android)", function () {
         process.on("unhandledRejection", onUnhandled);
         const { client, socket, sent, resultPromise } = await beginFileInstall();
         try {
-          const success = {
+          const success: Awaited<
+            ReturnType<AndroidCtrlProxyClient["requestInstallCaCertificate"]>
+          > = {
             success: true,
             action: "install",
             alias: "user-ca-cert",
@@ -697,7 +699,7 @@ describe("CtrlProxyCertificates (Android)", function () {
         expect(first?.requestId).toBeDefined();
         expect(second?.requestId).toBeDefined();
         expect(first?.requestId).not.toBe(second?.requestId);
-        expect(client["requestManager"].getPendingCount()).toBe(2);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(2);
 
         socket.simulateMessage(
           JSON.stringify({
@@ -723,7 +725,7 @@ describe("CtrlProxyCertificates (Android)", function () {
         const [firstResult, secondResult] = await Promise.all([firstPromise, secondPromise]);
         expect(firstResult.alias).toBe("first-alias");
         expect(secondResult.alias).toBe("second-alias");
-        expect(client["requestManager"].getPendingCount()).toBe(0);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
       } finally {
         await client.close();
       }
@@ -741,13 +743,13 @@ describe("CtrlProxyCertificates (Android)", function () {
           .map((raw) => JSON.parse(raw) as { type?: string; alias?: string; requestId?: string })
           .filter((message) => message.type === "remove_ca_cert");
         const live = sent.find((message) => message.alias === "long-timeout");
-        expect(client["requestManager"].getPendingCount()).toBe(2);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(2);
 
         fakeTimer.advanceTime(100);
         const timedOut = await timedOutPromise;
         expect(timedOut.success).toBe(false);
         expect(timedOut.error).toContain("timeout after 100ms");
-        expect(client["requestManager"].getPendingCount()).toBe(1);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(1);
 
         socket.simulateMessage(
           JSON.stringify({
@@ -762,7 +764,7 @@ describe("CtrlProxyCertificates (Android)", function () {
         const liveResult = await livePromise;
         expect(liveResult.success).toBe(true);
         expect(liveResult.alias).toBe("long-timeout");
-        expect(client["requestManager"].getPendingCount()).toBe(0);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
       } finally {
         await client.close();
       }

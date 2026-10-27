@@ -9,6 +9,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -31,8 +32,8 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun LargeTextSlideItem(
   title: String,
-  subtitle: String? = null,
   modifier: Modifier = Modifier,
+  subtitle: String? = null,
   titleColor: Color = MaterialTheme.colorScheme.onBackground,
   subtitleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
@@ -55,8 +56,7 @@ fun LargeTextSlideItem(
           color = titleColor,
         ),
       modifier = Modifier.weight(if (subtitle != null) 0.5f else 0.5f),
-      isLandscape = isLandscape,
-      hasSubtitle = subtitle != null,
+      fitting = TextFitting(isLandscape = isLandscape, hasSubtitle = subtitle != null),
     )
 
     // Optional subtitle
@@ -69,11 +69,14 @@ fun LargeTextSlideItem(
             color = subtitleColor,
             fontWeight = FontWeight.Normal,
           ),
-        maxFontSize = 48f,
-        minFontSize = 12f,
         modifier = Modifier.weight(0.3f).padding(top = 16.dp),
-        isLandscape = isLandscape,
-        hasSubtitle = false,
+        fitting =
+          TextFitting(
+            maxFontSize = 48f,
+            minFontSize = 12f,
+            isLandscape = isLandscape,
+            hasSubtitle = false,
+          ),
       )
     }
   }
@@ -88,11 +91,9 @@ private fun AutoResizingText(
   text: String,
   style: TextStyle,
   modifier: Modifier = Modifier,
-  maxFontSize: Float = 96f,
-  minFontSize: Float = 12f,
-  isLandscape: Boolean,
-  hasSubtitle: Boolean,
+  fitting: TextFitting,
 ) {
+  val (maxFontSize, minFontSize, isLandscape, hasSubtitle) = fitting
   val maxLines =
     when {
       isLandscape && hasSubtitle -> 2
@@ -102,7 +103,7 @@ private fun AutoResizingText(
     }
 
   val initialFontSize = if (isLandscape) maxFontSize else 48f
-  var fontSizeValue by remember { mutableStateOf(initialFontSize) }
+  var fontSizeValue by remember { mutableFloatStateOf(initialFontSize) }
   var readyToDraw by remember { mutableStateOf(false) }
 
   Text(
@@ -169,3 +170,10 @@ fun LargeResizingTextSlideItemLandscapePreview() {
 fun LargeResizingTextSlideItemTitleOnlyLandscapePreview() {
   MaterialTheme { LargeTextSlideItem(title = "AutoMobile") }
 }
+
+private data class TextFitting(
+  val maxFontSize: Float = 96f,
+  val minFontSize: Float = 12f,
+  val isLandscape: Boolean,
+  val hasSubtitle: Boolean,
+)

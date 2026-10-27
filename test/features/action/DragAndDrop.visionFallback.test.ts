@@ -1,4 +1,7 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -10,6 +13,8 @@ import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { FakeVisionAnalyzer } from "../../fakes/FakeVisionAnalyzer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import type { VisionFallbackConfig } from "../../../src/vision/VisionTypes";
+
+afterEach(() => mock.restore());
 
 const enabledVisionConfig: VisionFallbackConfig = {
   enabled: true,
@@ -35,7 +40,7 @@ describe("DragAndDrop vision fallback", () => {
   let managerSpy: ReturnType<typeof spyOn> | null = null;
 
   const createEmptyHierarchy = (): ViewHierarchyResult => ({
-    hierarchy: { node: [] },
+    hierarchy: { node: createFlatNodeForTest({ node: [] }) },
     packageName: "com.test.app",
     updatedAt: Date.now(),
   });
@@ -43,40 +48,43 @@ describe("DragAndDrop vision fallback", () => {
   // Hierarchy with source element but no target
   const createSourceOnlyHierarchy = (): ViewHierarchyResult => ({
     hierarchy: {
-      node: [
-        {
-          $: {
-            "resource-id": "source-id",
-            text: "Source",
-            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-            class: "android.widget.TextView",
-          },
-        },
-      ],
+      node: createFlatNodeForTest({
+        node: [
+          createFlatNodeForTest({
+            $: {
+              "resource-id": "source-id",
+              text: "Source",
+              bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+              class: "android.widget.TextView",
+            },
+          }),
+        ],
+      }),
     },
     packageName: "com.test.app",
     updatedAt: Date.now(),
   });
 
-  const createObserveResult = (hierarchy?: ViewHierarchyResult): ObserveResult => ({
-    updatedAt: Date.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: hierarchy ?? createEmptyHierarchy(),
-  });
+  const createObserveResult = (hierarchy?: ViewHierarchyResult): ObserveResult =>
+    buildObserveResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: hierarchy ?? createEmptyHierarchy(),
+    });
 
   beforeEach(() => {
     fakeObserveScreen = new FakeObserveScreen();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     fakeCtrlProxy = new FakeCtrlProxy();
-    fakeCtrlProxy.setHierarchyData(createEmptyHierarchy());
+    fakeCtrlProxy.setHierarchyData({ updatedAt: 0, packageName: "com.test.app", hierarchy: {} });
     fakeAdbClientFactory = new FakeAdbClientFactory();
     fakeObserveScreen.setObserveResult(() => createObserveResult());
 
-    managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-      isAvailable: async () => true,
-    });
+    managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+      FakeCtrlProxyManager.withAvailability(true),
+    );
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy);
   });
 
@@ -86,7 +94,7 @@ describe("DragAndDrop vision fallback", () => {
   });
 
   const createDragAndDrop = (capturer: FakeScreenshotCapturer, analyzer: FakeVisionAnalyzer) => {
-    const dnd = new DragAndDrop(device, fakeAdbClientFactory, fakeTimer, {
+    const dnd = new DragAndDrop(device, fakeAdbClientFactory.create(device), fakeTimer, {
       visionConfig: enabledVisionConfig,
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
@@ -162,7 +170,7 @@ describe("DragAndDrop vision fallback", () => {
     capturer.setPaths(["/screenshot.png"]);
     const analyzer = new FakeVisionAnalyzer();
 
-    const dnd = new DragAndDrop(device, fakeAdbClientFactory, fakeTimer, {
+    const dnd = new DragAndDrop(device, fakeAdbClientFactory.create(device), fakeTimer, {
       visionConfig: { ...enabledVisionConfig, enabled: false },
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,

@@ -1,3 +1,4 @@
+import { buildElement } from "../../helpers/elementBuilder";
 import { describe, expect, test } from "bun:test";
 import { FocusElementMatcher } from "../../../src/features/talkback/FocusElementMatcher";
 import type { Element } from "../../../src/models/Element";
@@ -31,9 +32,9 @@ describe("FocusElementMatcher.findCurrentFocusIndex", () => {
 
   test("prefers object identity among repeated resource ids without bounds", () => {
     const elements = [
-      { "resource-id": "row_title" },
-      { "resource-id": "row_title" },
-      { "resource-id": "row_title" },
+      buildElement({ "resource-id": "row_title" }),
+      buildElement({ "resource-id": "row_title" }),
+      buildElement({ "resource-id": "row_title" }),
     ];
 
     expect(matcher.findCurrentFocusIndex(elements[2], elements)).toBe(2);
@@ -51,7 +52,7 @@ describe("FocusElementMatcher.findCurrentFocusIndex", () => {
 
   test.each([
     ["mismatched bounds", boundsAt(9)],
-    ["missing bounds", undefined],
+    ["empty bounds", { left: 0, top: 0, right: 0, bottom: 0 }],
   ])("returns null for repeated resource ids with %s", (_label, bounds) => {
     const elements = [0, 1, 2].map((index) => ({
       "resource-id": "row_title",
@@ -157,13 +158,19 @@ describe("FocusElementMatcher.matchesSelector", () => {
   const boundsB = { left: 10, top: 10, right: 15, bottom: 15 };
 
   test("matches text exactly by default", () => {
-    expect(matcher.matchesSelector({ text: "Save as draft" }, { text: "Save" })).toBe(false);
-    expect(matcher.matchesSelector({ text: "Save" }, { text: "Save" })).toBe(true);
+    expect(matcher.matchesSelector(buildElement({ text: "Save as draft" }), { text: "Save" })).toBe(
+      false,
+    );
+    expect(matcher.matchesSelector(buildElement({ text: "Save" }), { text: "Save" })).toBe(true);
   });
 
   test("allows substring text matching only when requested", () => {
     expect(
-      matcher.matchesSelector({ text: "Save as draft" }, { text: "Save" }, { partialMatch: true }),
+      matcher.matchesSelector(
+        buildElement({ text: "Save as draft" }),
+        { text: "Save" },
+        { partialMatch: true },
+      ),
     ).toBe(true);
   });
 
@@ -171,7 +178,9 @@ describe("FocusElementMatcher.matchesSelector", () => {
     expect(
       matcher.matchesSelector({ text: "Save", bounds: boundsA }, { text: "Save", bounds: boundsB }),
     ).toBe(true);
-    expect(matcher.matchesSelector({ text: "Save" }, { text: "Save", bounds: boundsB })).toBe(true);
+    expect(
+      matcher.matchesSelector(buildElement({ text: "Save" }), { text: "Save", bounds: boundsB }),
+    ).toBe(true);
     expect(
       matcher.matchesSelector({ text: "Save", bounds: boundsB }, { text: "Save", bounds: boundsB }),
     ).toBe(true);
@@ -216,8 +225,8 @@ describe("FocusElementMatcher.findTargetIndex", () => {
 
   test("uses the first duplicate for discovery and arrival when selector bounds are absent", () => {
     const matcher = new FocusElementMatcher();
-    const first: Element = { text: "Save" };
-    const second: Element = { text: "Save" };
+    const first: Element = { text: "Save", bounds: boundsA };
+    const second: Element = { text: "Save", bounds: boundsB };
     const elements = [first, second];
 
     expect(matcher.findTargetIndex(elements, { text: "Save" })).toBe(0);

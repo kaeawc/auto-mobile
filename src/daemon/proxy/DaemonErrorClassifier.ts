@@ -1,11 +1,9 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import {
-  DaemonHandshakeMismatchError,
-  DaemonRequestNotDeliveredError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-} from "../client";
-import { isMcpQueueTimeoutError } from "../McpTimeoutError";
+import { DaemonHandshakeMismatchError } from "../DaemonHandshakeMismatchError";
+import { DaemonRequestNotDeliveredError } from "../DaemonRequestNotDeliveredError";
+import { DaemonShuttingDownError } from "../DaemonShuttingDownError";
+import { DaemonUnavailableError } from "../client";
+import { isMcpQueueTimeoutError } from "../wire/McpTimeoutError";
 import {
   DAEMON_SESSION_NOT_ACTIVE_CODE,
   DAEMON_SESSION_NOT_FOUND_CODE,
@@ -13,14 +11,11 @@ import {
   errorCodeOf,
   isGatedToolErrorCode,
 } from "../types";
-import {
-  DaemonAssetVersionMismatchError,
-  DaemonBuildMismatchError,
-  DaemonVersionMismatchError,
-  daemonInternalErrors,
-} from "./daemonErrors";
-
-const { DaemonPreflightConnectionError } = daemonInternalErrors;
+import { DaemonAssetVersionMismatchError } from "./DaemonAssetVersionMismatchError";
+import { DaemonBuildMismatchError } from "./DaemonBuildMismatchError";
+import { DaemonVersionMismatchError } from "./DaemonVersionMismatchError";
+import { DaemonPreflightConnectionError } from "./DaemonPreflightConnectionError";
+import { DaemonRestartOptionsUnknownError } from "./DaemonRestartOptionsUnknownError";
 
 /**
  * Connection facts the classifier reads:
@@ -51,7 +46,8 @@ export class DaemonErrorClassifier {
     if (
       error instanceof DaemonVersionMismatchError ||
       error instanceof DaemonBuildMismatchError ||
-      error instanceof DaemonAssetVersionMismatchError
+      error instanceof DaemonAssetVersionMismatchError ||
+      error instanceof DaemonRestartOptionsUnknownError
     ) {
       return false;
     }

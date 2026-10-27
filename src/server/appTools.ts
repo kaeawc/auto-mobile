@@ -1,92 +1,127 @@
-import { defineDeviceTool } from "./defineTool";
-import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
-import {
-  getAppPermissionsResultSchema,
-  inspectPackageSigningResultSchema,
-  listAppsResultSchema,
-} from "./appToolOutputSchemas";
-import { z } from "zod/v4";
-import { ToolRegistry } from "./toolRegistry";
-import {
-  ActionableError,
-  BootedDevice,
-  type CrashAppResult,
-  type AppLifecycleAction,
-  type AppLifecycleResult,
-  type LaunchAppResult,
-  type TerminateAppResult,
-  type InstallAppResult,
-} from "../models";
-import { toActionableError } from "../models/ActionableError";
-import { AppLifecycle, type AppLifecycleExecutionOptions } from "../features/action/AppLifecycle";
+import { SessionReleaseBroadcaster } from "../daemon/sessionReleaseBroadcast";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
 import type { ActionCall } from "../features/action/ActionCall";
+import { AppLifecycle, type AppLifecycleExecutionOptions } from "../features/action/AppLifecycle";
+import { AppPermissions, type SetAppPermissionsResult } from "../features/action/AppPermissions";
 import { CrashApp } from "../features/action/CrashApp";
-import { LaunchApp, type LaunchAppCall } from "../features/action/LaunchApp";
 import {
-  getLaunchObservationPackageNames,
-  isLaunchPermissionDialogObservation,
-} from "../features/action/launchObservationPackages";
-import { TerminateApp, type TerminateAppCall } from "../features/action/TerminateApp";
-import {
+  type AndroidInstallRequest,
   InstallApp,
   type InstallAppCall,
   type InstallGuardOptions,
 } from "../features/action/InstallApp";
+import { ResetKeychain } from "../features/action/ResetKeychain";
+import { TerminateApp, type TerminateAppCall } from "../features/action/TerminateApp";
 import {
   UninstallApp,
   type UninstallAppCall,
   type UninstallGuardOptions,
 } from "../features/action/UninstallApp";
-import { SIGNING_SHA256_PATTERN } from "../utils/signingIdentity";
 import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
-import type { PackageSigningInspection } from "../models/PackageSigningInspection";
-import type { UninstallAppResult } from "../models/UninstallAppResult";
-import { AppPermissions, type SetAppPermissionsResult } from "../features/action/AppPermissions";
-import { ResetKeychain } from "../features/action/ResetKeychain";
-import { resolveMissingForegroundWindow } from "../features/observe/ObserveScreen";
+import { IosPackageSigningInspector } from "../features/observe/IosPackageSigningInspector";
+import { iosMutationTokens } from "../features/storage/IosMutationTokens";
 import {
-  withIsErrorOnFailure,
+  ActionableError,
+  BootedDevice,
+  type AppLifecycleAction,
+  type AppTrimMemoryLevel,
+  type AppLifecycleResult,
+  type CrashAppResult,
+  type InstallAppResult,
+  type TerminateAppResult,
+} from "../models";
+import { toActionableError } from "../models/ActionableError";
+import type {
+  IosPackageSigningInspection,
+  PackageSigningInspection,
+} from "../models/PackageSigningInspection";
+import type { UninstallAppResult } from "../models/UninstallAppResult";
+import { isDeviceLostError } from "../utils/deviceLossOutcome";
+import { logger } from "../utils/logger";
+import {
   createJSONToolResponse,
   createStructuredToolResponse,
+  withIsErrorOnFailure,
 } from "../utils/toolUtils";
-import {
-  addDeviceTargetingToSchema,
-  responseShapeControlFields,
-  withAppIdAliases,
-  withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
 import {
   invalidateInstalledAppsCache,
   notifyInstalledAppResourceUpdated,
   queryInstalledApps,
   type AppsQueryResourceContent,
 } from "./appResources";
-import { logger } from "../utils/logger";
-import { isDeviceLostError } from "./deviceLossOutcome";
-import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
-import { iosMutationTokens } from "../features/storage/IosMutationTokens";
-import { PrototypeAgentProvider } from "../features/prototype/ios/PrototypeAgentProvider";
-import { NodePrototypeAgentConnector } from "../features/prototype/ios/prototypeAgentClient";
 import {
-  createPrototypeAgentConnect,
-  PrototypeAgentInjector,
-  prototypeAgentRegistry,
-  portManagerPrototypeAgentPorts,
-  type PrototypeAgentRecord,
-  type PrototypeAgentRegistry,
-  type PreparedPrototypeLaunch,
-} from "../features/prototype/ios/prototypeAgentInjection";
-import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
-import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
+  appLifecycleResultSchema,
+  crashAppResultSchema,
+  getAppPermissionsResultSchema,
+  inspectPackageSigningResultSchema,
+} from "./appToolOutputSchemas";
 import {
-  createPrototypeViewerAttacher,
-  prototypeViewerConnections,
-  type PrototypeViewerLaunchAttacher,
-  type PrototypeViewerConnections,
-} from "../features/prototype/ios/prototypeViewerAttach";
+  attachLaunchedViewer,
+  beginPrototypeLaunch,
+  buildLaunchAppResponse,
+  createDefaultLaunchAppToolDependencies,
+  executeLaunch,
+  type LaunchAppToolDependencies,
+  prepareLaunchArguments,
+  type PrototypeLaunch,
+} from "./appToolsLaunch";
+import {
+  type AppActionArgs,
+  appLifecycleSchema,
+  type CrashAppActionArgs,
+  crashAppSchema,
+  type GetAppPermissionsArgs,
+  getAppPermissionsSchema,
+  type InspectPackageSigningArgs,
+  inspectPackageSigningSchema,
+  type InstallAppArgs,
+  installAppTool,
+  type LaunchAppActionArgs,
+  launchAppSchema,
+  type ListAppsArgs,
+  listAppsTool,
+  type ResetKeychainArgs,
+  resetKeychainSchema,
+  type SetAppPermissionsArgs,
+  setAppPermissionsSchema,
+  terminateAppSchema,
+  type UninstallAppArgs,
+  uninstallAppSchema,
+} from "./appToolsSchemas";
+import { launchFailure, redactLaunchMessage } from "./launchAppFailure";
+import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
+import { ToolRegistry } from "./toolRegistry";
+import { PLAN_RELEVANT, PLAN_SKELETON } from "./toolRegistryTypes";
+export {
+  buildLaunchAppResponse,
+  type LaunchAppExecutor,
+  type LaunchAppToolDependencies,
+  type PrototypeAgentLaunchInjector,
+} from "./appToolsLaunch";
+export {
+  type AppActionArgs,
+  appLifecycleSchema,
+  type CrashAppActionArgs,
+  crashAppSchema,
+  type GetAppPermissionsArgs,
+  getAppPermissionsSchema,
+  type InspectPackageSigningArgs,
+  inspectPackageSigningSchema,
+  installAppSchema,
+  installAppTool,
+  type LaunchAppActionArgs,
+  launchAppSchema,
+  listAppsSchema,
+  listAppsTool,
+  packageNameSchema,
+  type ResetKeychainArgs,
+  resetKeychainSchema,
+  type SetAppPermissionsArgs,
+  setAppPermissionsSchema,
+  terminateAppSchema,
+  type UninstallAppArgs,
+  uninstallAppSchema,
+} from "./appToolsSchemas";
 
 export interface InstalledAppResourceRefresh {
   invalidate(deviceId: string): void;
@@ -125,64 +160,6 @@ export interface ListAppsToolDependencies {
 const createDefaultListAppsToolDependencies = (): ListAppsToolDependencies => ({
   queryInstalledApps,
 });
-
-export interface LaunchAppExecutor {
-  execute(appId: string, launch: LaunchAppCall): Promise<LaunchAppResult>;
-}
-
-/** Injects the iOS simulator prototype agent around a launch (#10567). */
-export interface PrototypeAgentLaunchInjector {
-  prepare(device: BootedDevice, bundleId: string): Promise<PreparedPrototypeLaunch>;
-  attach(prepared: PreparedPrototypeLaunch, pid?: number): Promise<PrototypeAgentRecord>;
-  abort(prepared: PreparedPrototypeLaunch): void;
-}
-
-// Injection seam for the launchApp handler (mirrors the terminateApp/crashApp
-// dependency seams in this file). Lets a unit test exercise the REGISTERED
-// handler wiring with a fake LaunchApp, so the already-foreground response shape
-// is covered by a test rather than only the response builder (issue #6868).
-export interface LaunchAppToolDependencies {
-  createLaunchApp(device: BootedDevice): LaunchAppExecutor;
-  idGenerator: IdGenerator;
-  /** Agent records shared by launchApp, terminateApp and the prototype tool. */
-  prototypeAgentRegistry: PrototypeAgentRegistry;
-  prototypeViewerAttacher: PrototypeViewerLaunchAttacher;
-  prototypeViewerConnections: Pick<PrototypeViewerConnections, "release" | "releaseDevice">;
-  timer: Timer;
-  /** Created on first `prototype: true`, so a normal launch never resolves the agent dylib. */
-  createPrototypeAgentInjector(registry: PrototypeAgentRegistry): PrototypeAgentLaunchInjector;
-}
-
-function createDefaultPrototypeAgentInjector(
-  registry: PrototypeAgentRegistry,
-): PrototypeAgentInjector {
-  return new PrototypeAgentInjector({
-    dylibResolver: PrototypeAgentProvider.getInstance(),
-    ports: portManagerPrototypeAgentPorts,
-    registry,
-    connect: createPrototypeAgentConnect(new NodePrototypeAgentConnector(), defaultTimer),
-    idGenerator: defaultIdGenerator,
-    hostEnv: process.env,
-  });
-}
-
-function createDefaultLaunchAppToolDependencies(): LaunchAppToolDependencies {
-  let viewerAttacher: ReturnType<typeof createPrototypeViewerAttacher> | undefined;
-  return {
-    createLaunchApp: (device) => new LaunchApp(device),
-    idGenerator: defaultIdGenerator,
-    prototypeAgentRegistry,
-    prototypeViewerConnections,
-    timer: defaultTimer,
-    prototypeViewerAttacher: {
-      attach: (device, bundleId) => {
-        viewerAttacher ??= createPrototypeViewerAttacher();
-        return viewerAttacher.attach(device, bundleId);
-      },
-    },
-    createPrototypeAgentInjector: createDefaultPrototypeAgentInjector,
-  };
-}
 
 export interface TerminateAppExecutor {
   execute(appId: string, call?: TerminateAppCall): Promise<TerminateAppResult>;
@@ -248,7 +225,7 @@ export interface InspectPackageSigningExecutor {
   execute(
     appId: string,
     options?: { userId?: number; signal?: AbortSignal },
-  ): Promise<PackageSigningInspection>;
+  ): Promise<PackageSigningInspection | IosPackageSigningInspection>;
 }
 
 export interface InspectPackageSigningToolDependencies {
@@ -256,78 +233,15 @@ export interface InspectPackageSigningToolDependencies {
 }
 
 const defaultInspectPackageSigningToolDependencies: InspectPackageSigningToolDependencies = {
-  createInspectPackageSigning: (device) => new InspectPackageSigning(device),
+  createInspectPackageSigning: (device) =>
+    device.platform === "ios"
+      ? new IosPackageSigningInspector(device)
+      : new InspectPackageSigning(device),
 };
 
 const defaultInstallAppToolDependencies: InstallAppToolDependencies = {
   createInstallApp: (device) => new InstallApp(device),
 };
-
-/** Report the first identity signal from the shared launch observation resolver. */
-function isVerifiedLaunchObservation(
-  appId: string,
-  observation: LaunchAppResult["observation"],
-): boolean {
-  const packageNames = getLaunchObservationPackageNames(observation);
-  return (
-    packageNames.length > 0 &&
-    packageNames.every((packageName) => packageName === appId) &&
-    observation?.freshness?.isFresh !== false &&
-    observation?.freshness?.verified !== false
-  );
-}
-
-/**
- * Reason a launch could not be verified (issue #6220), for the case where no
- * foreground application window was observed at all, or foreground identity
- * signals conflict with each other or the requested app.
- */
-type LaunchVerificationFailureReason =
-  | "no_observation"
-  | "no_foreground_window"
-  | `foreground signals disagree: activeWindow=${string}, hierarchy=${string}`
-  | `foreground package ${string} does not match requested ${string}`;
-
-function launchVerificationFailureReason(
-  appId: string,
-  observedAppId: string | undefined,
-  observation: LaunchAppResult["observation"],
-): LaunchVerificationFailureReason | undefined {
-  if (isLaunchPermissionDialogObservation(observation)) {
-    return undefined;
-  }
-  if (observation === undefined) {
-    return "no_observation";
-  }
-  // `resolveMissingForegroundWindow` (the SAME machine-readable verdict the
-  // observe freshness gate uses) is consulted here too, not just an empty
-  // `observedAppId` (issue #6239 review follow-up): a status-bar-only capture
-  // can still carry STALE `activeWindow.appId`/`packageName` metadata from a
-  // previously-resumed app, which would otherwise make `observedAppId` look
-  // like a real (if wrong) observed app and suppress this structured failure.
-  if (!observedAppId || resolveMissingForegroundWindow(observation) !== undefined) {
-    return "no_foreground_window";
-  }
-  const activeWindowPackage = observation.activeWindow?.appId;
-  const hierarchyPackage = observation.viewHierarchy?.packageName;
-  if (activeWindowPackage && hierarchyPackage && activeWindowPackage !== hierarchyPackage) {
-    return `foreground signals disagree: activeWindow=${activeWindowPackage}, hierarchy=${hierarchyPackage}`;
-  }
-  if (observedAppId !== appId) {
-    return `foreground package ${observedAppId} does not match requested ${appId}`;
-  }
-  return undefined;
-}
-
-function launchVerificationFailureMessage(reason: LaunchVerificationFailureReason): string {
-  if (reason === "no_observation") {
-    return "no observation was captured after launch";
-  }
-  if (reason === "no_foreground_window") {
-    return "no foreground application window could be observed after launch";
-  }
-  return reason;
-}
 
 function buildTerminateMessage(appId: string, result: TerminateAppResult): string {
   if (result.wasInstalled === false) {
@@ -339,539 +253,6 @@ function buildTerminateMessage(appId: string, result: TerminateAppResult): strin
   // Preserve the existing message when the backend cannot establish running state.
   return `Terminated app ${appId}`;
 }
-
-function buildLaunchMessage(
-  appId: string,
-  verified: boolean | undefined,
-  verifyFailureReason: LaunchVerificationFailureReason | undefined,
-  alreadyForeground: boolean | undefined,
-): string {
-  // An app that was already foreground was never launched — say so rather than
-  // claiming a launch that did not happen (issue #6868). The verification suffix
-  // is unchanged: it describes the observed end state either way.
-  const lead = alreadyForeground
-    ? `App ${appId} was already in the foreground`
-    : `Launched app ${appId}`;
-  if (verified === true) {
-    return `${lead} (foreground verified)`;
-  }
-  if (verifyFailureReason) {
-    return `${lead} (verification failed: ${launchVerificationFailureMessage(verifyFailureReason)})`;
-  }
-  return lead;
-}
-
-/**
- * Build the launchApp tool response from a {@link LaunchAppResult}, enforcing the
- * launch postcondition instead of reporting a flat "Launched app X" success
- * regardless of what actually happened (#5868).
- *
- * `LaunchApp.execute` already resolves the package (returning `success:false`
- * with "App is not installed" for an uninstalled package) and reconciles the
- * launch observation against the requested app (returning `success:false` when
- * the foreground app never matches). This surfaces those typed failures as a
- * real error — mirroring the terminate handler (#5621) — rather than swallowing
- * them behind a success message. On success it additionally reports the observed
- * foreground appId and whether it matched, so a client can skip a confirming
- * `observe` round-trip.
- *
- */
-/** Report the first reconciled package; verification requires every signal to agree. */
-function resolveLaunchObservedAppId(
-  observation: LaunchAppResult["observation"],
-): string | undefined {
-  return getLaunchObservationPackageNames(observation)[0];
-}
-
-/**
- * Build the launchApp response from a successful launch result. `verified` is
- * `true` when every reconciled foreground package matches the requested app in
- * a fresh, verified observation. It is `false` with a reason when no foreground
- * window is available, foreground identity signals disagree, or the observed
- * package differs from the requested app. It remains `undefined` for an
- * accepted notification permission surface or matching-but-stale observation,
- * where the surface or freshness prevents confirmation.
- */
-export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
-  if (!result.success) {
-    // `||` not `??`: an empty-string error must still yield the non-empty
-    // fallback rather than surfacing a blank message.
-    throw new ActionableError(result.error || `Failed to launch app ${appId}`);
-  }
-
-  const observedAppId = resolveLaunchObservedAppId(result.observation);
-  // Only assert verification on an exact foreground match with a fresh, verified
-  // observation. `LaunchApp.execute` retries an unverified observation, but this
-  // response-level guard preserves the true-or-undefined contract for any direct
-  // caller that supplies one. Identity conflicts and mismatches are then
-  // surfaced as a structured verification failure below.
-  const isVerified = isVerifiedLaunchObservation(appId, result.observation);
-  const verifyFailureReason = isVerified
-    ? undefined
-    : launchVerificationFailureReason(appId, observedAppId, result.observation);
-  const verified = isVerified ? true : verifyFailureReason ? false : undefined;
-
-  return {
-    message: buildLaunchMessage(appId, verified, verifyFailureReason, result.alreadyForeground),
-    verified,
-    ...(verifyFailureReason ? { verifyFailureReason } : {}),
-    observedAppId,
-    observation: result.observation,
-    ...result,
-  };
-}
-
-// Schema definitions
-// #6613: these app schemas advertised `additionalProperties: false` but were
-// not `.strict()`, so an undeclared caller argument (e.g. `installApp{userId}`,
-// which this tool does not support) was silently dropped and the call ran
-// against the auto-detected user instead of failing. `withAppIdAliases` runs its
-// `z.preprocess` alias normalization before these schemas parse, so documented
-// aliases still work under strict mode (same precedent as launchApp).
-export const packageNameSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        appId: z.string(),
-      })
-      .strict(),
-  ),
-);
-
-// terminateApp embeds a post-action observation, so it carries the same
-// response-shape control as the other action tools (issue #5886): the embedded
-// observation defaults to the compact skeleton, opt-out-able via raw/project.
-export const terminateAppSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        appId: z.string(),
-        ...responseShapeControlFields,
-      })
-      .strict(),
-  ),
-);
-
-export const crashAppSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        appId: z.string().trim().min(1),
-      })
-      .strict(),
-  ),
-);
-
-export const appLifecycleSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        appId: z.string().trim().min(1),
-        action: z.enum(["background", "killBackgrounded"]),
-      })
-      .strict(),
-  ),
-);
-
-export const appLifecycleResultSchema = z.object({
-  message: z.string(),
-  success: z.boolean(),
-  supported: z.boolean(),
-  action: z.enum(["background", "killBackgrounded"]),
-  platform: z.enum(["android", "ios"]),
-  appId: z.string(),
-  mechanism: z.enum(["home", "am-kill", "unsupported"]),
-  userId: z.number().int().nonnegative().optional(),
-  pid: z.number().int().positive().optional(),
-  pidBefore: z.number().int().positive().optional(),
-  pidAfter: z.number().int().positive().nullable().optional(),
-  processReclaimed: z.boolean().optional(),
-  errorCode: z
-    .enum([
-      "app_not_running",
-      "app_in_foreground",
-      "background_not_verified",
-      "kill_failed",
-      "ambiguous_user",
-      "invalid_app_id",
-    ])
-    .optional(),
-  error: z.string().optional(),
-});
-
-export const crashAppResultSchema = z.object({
-  message: z.string(),
-  success: z.boolean(),
-  supported: z.boolean(),
-  platform: z.enum(["android", "ios"]),
-  appId: z.string(),
-  processId: z.number().int().positive().optional(),
-  mechanism: z.enum(["android_am_crash", "ios_simulator_sigabrt", "unsupported"]),
-  timestamp: z.number().int().nonnegative(),
-  wasRunning: z.boolean().optional(),
-  confirmed: z.boolean(),
-  evidence: z
-    .object({
-      source: z.enum(["android_logcat", "ios_unified_log"]),
-      summary: z.string(),
-    })
-    .optional(),
-  userId: z.number().int().nonnegative().optional(),
-  error: z.string().optional(),
-});
-
-export const launchAppSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        appId: z.string(),
-        clearAppData: z
-          .boolean()
-          .optional()
-          .describe("Clear app data before launch (default false)"),
-        coldBoot: z.boolean().optional().describe("Cold boot app (default false)"),
-        launchArguments: z
-          .array(z.string())
-          .optional()
-          .describe(
-            "Arguments passed to the launched iOS app. Android does not support launch arguments.",
-          ),
-        prototype: z
-          .boolean()
-          .optional()
-          .describe(
-            "iOS simulator only: inject the prototype agent so the prototype tool can draw over this " +
-              "app. Always relaunches the app, losing its state. Rejected on physical iOS devices " +
-              "(use the in-app SDK), on Android (prototypes need no injection) and for com.apple.* apps.",
-          ),
-        ...responseShapeControlFields,
-      })
-      // #6154: the advertised `additionalProperties: false` was not actually
-      // enforced at runtime — `.strict()` closes that gap. `withAppIdAliases`
-      // runs its `z.preprocess` normalization (packageName -> appId, alias
-      // deleted) before this schema ever parses, so the documented alias still
-      // works under strict mode.
-      .strict(),
-  ),
-);
-
-const expectedSigningSha256Schema = z
-  .array(
-    z
-      .string()
-      .regex(
-        SIGNING_SHA256_PATTERN,
-        "Expected a SHA-256 digest: 64 hex characters, optionally colon-separated",
-      ),
-  )
-  .min(1)
-  .max(16);
-
-const installAppInput = z.object({
-  artifactPath: z.string().describe("App artifact path (.apk, .app, or .ipa)"),
-  expectedSigningSha256: expectedSigningSha256Schema
-    .optional()
-    .describe(
-      "Android: complete signer set (SHA-256 of every signing certificate) an already " +
-        "installed copy must have before it is replaced; any other signer set, or signers " +
-        "that cannot be read, refuses the install. See inspectPackageSigning.",
-    ),
-  allowDestructiveRecovery: z
-    .boolean()
-    .optional()
-    .describe(
-      "Android: false refuses the uninstall-and-reinstall recovery after " +
-        "INSTALL_FAILED_VERSION_DOWNGRADE (default true)",
-    ),
-});
-
-export const installAppTool = defineDeviceTool({
-  name: "installApp",
-  description: "Install app on device (.apk, .app, or .ipa)",
-  input: installAppInput,
-  options: {
-    defaultEnabled: true,
-    // Installation is a platform package-manager operation. Requiring
-    // accessibility automation here creates a dependency cycle on iOS:
-    // a freshly erased/booted simulator cannot install the app because its
-    // CtrlProxy runner is still starting, even though simctl install itself
-    // does not use CtrlProxy.
-    deviceReadiness: "booted",
-    replacesProcess: true,
-  },
-});
-
-export const installAppSchema = installAppTool.schema;
-
-export const uninstallAppSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        appId: z.string(),
-        keepData: z
-          .boolean()
-          .optional()
-          .describe("Keep app data after uninstall (Android only, default false)"),
-        expectedSigningSha256: expectedSigningSha256Schema
-          .optional()
-          .describe(
-            "Android: complete signer set (SHA-256 of every signing certificate) the installed " +
-              "package must have; a different signer set, absence, or signers that cannot be " +
-              "read refuses the uninstall, and removal is confirmed by a fresh presence read.",
-          ),
-      })
-      .strict(),
-  ),
-);
-
-const appPermissionActionSchema = z.enum(["grant", "revoke", "reset"]);
-
-export const setAppPermissionsSchema = withJsonSchemaOverride(
-  withAppIdAliases(
-    addDeviceTargetingToSchema(
-      z
-        .object({
-          appId: z.string().trim().min(1),
-          action: appPermissionActionSchema
-            .optional()
-            .describe(
-              "Action (default grant). Android reset requires permissions=['all'] device-wide; " +
-                "iOS physical devices support reset only.",
-            ),
-          permissions: z
-            .array(z.string().min(1))
-            .optional()
-            .describe("Permissions; Android reset accepts only 'all'; physical iOS accepts it too"),
-          userId: z
-            .number()
-            .int()
-            .nonnegative()
-            .optional()
-            .describe("Android user ID for grant/revoke, not reset"),
-          notificationsEnabled: z
-            .boolean()
-            .optional()
-            .describe("Android notification state, independent of POST_NOTIFICATIONS"),
-          notificationPolicyAccess: z
-            .boolean()
-            .optional()
-            .describe("Android: set DND policy access"),
-          scheduleExactAlarm: z
-            .enum(["allow", "deny"])
-            .optional()
-            .describe("Android: set SCHEDULE_EXACT_ALARM appop"),
-        })
-        .strict(),
-    ),
-  )
-    .refine(
-      (args) =>
-        (args.permissions !== undefined && args.permissions.length > 0) ||
-        args.notificationsEnabled !== undefined ||
-        args.notificationPolicyAccess !== undefined ||
-        args.scheduleExactAlarm !== undefined,
-      "Provide at least one permission or platform-specific permission option",
-    )
-    .refine(
-      (args) => args.action !== "reset" || args.userId === undefined,
-      "Android reset is device-wide and does not support userId",
-    )
-    .refine(
-      (args) =>
-        args.action !== "reset" ||
-        args.permissions?.some((permission) => permission.trim().length > 0) === true,
-      "Reset requires permissions",
-    )
-    .refine(
-      (args) =>
-        args.action !== "reset" ||
-        args.platform !== "android" ||
-        (args.permissions?.length === 1 && args.permissions[0] === "all"),
-      "Android reset requires permissions=['all']",
-    ),
-  (jsonSchema) => {
-    const properties = jsonSchema.properties as Record<string, Record<string, unknown>>;
-    delete properties.appId?.minLength;
-    delete properties.action?.type;
-    delete properties.scheduleExactAlarm?.type;
-    for (const name of [
-      "action",
-      "permissions",
-      "userId",
-      "notificationsEnabled",
-      "notificationPolicyAccess",
-      "scheduleExactAlarm",
-      "sessionUuid",
-      "device",
-    ]) {
-      delete properties[name]?.description;
-    }
-  },
-);
-
-export const getAppPermissionsSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        appId: z.string(),
-        permissions: z
-          .array(z.string().min(1))
-          .optional()
-          .describe("Optional permissions or simulator privacy services to query"),
-      })
-      .strict(),
-  ),
-);
-
-export const inspectPackageSigningSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        appId: z.string(),
-        userId: z
-          .number()
-          .int()
-          .nonnegative()
-          .optional()
-          .describe("Android user/profile to inspect; when omitted it is resolved and reported"),
-      })
-      .strict(),
-  ),
-);
-
-export const resetKeychainSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        appId: z
-          .string()
-          .trim()
-          .min(1)
-          .describe(
-            "Required. The app whose Keychain/Keystore state to reset. NOTE: iOS Simulator only supports a device-wide reset and erases EVERY app's Keychain regardless of this value.",
-          ),
-        confirm: z
-          .boolean()
-          .describe(
-            "Required. Must be true to proceed. On iOS Simulator this erases the Keychain for EVERY app on the target simulator, not just appId.",
-          ),
-      })
-      .strict(),
-  ),
-);
-
-// #6613: `listApps` advertises `additionalProperties: false` in tools/list, so
-// its runtime schema must reject undeclared arguments too. Without `.strict()`
-// a call such as `listApps({ appId: "com.example" })` had the unsupported
-// filter silently dropped and returned the full unfiltered listing.
-const listAppsInput = z.object({
-  type: z
-    .enum(["launchable", "user", "system", "all"])
-    .optional()
-    .describe(
-      "Filter by app type. Defaults to 'launchable': every app with a launcher entry point, " +
-        "user-installed or preinstalled, so the apps a human names (Contacts, Clock, Settings) " +
-        "are visible while content providers and RRO overlays are not. 'user' and 'system' " +
-        "keep their meaning and must be asked for explicitly; 'all' returns every installed " +
-        "package. The default degrades to 'user' when the device reports no launchability " +
-        "signal, and an explicit 'launchable' is then rejected rather than silently empty. " +
-        "On a physical iOS device, where user/system classification is unavailable (devicectl " +
-        "reports no such signal), an omitted type returns every app (reported as 'all') and an " +
-        "explicit 'user' or 'system' filter is rejected rather than silently honored.",
-    ),
-  search: z
-    .string()
-    .optional()
-    .describe(
-      "Filter by a case-insensitive substring of the package name/bundle id or of the app's " +
-        "display label ('contacts' matches both com.android.contacts and an app labelled " +
-        "Contacts). Android labels require the installed CtrlProxy APK; without it only the " +
-        "package name is matched.",
-    ),
-  profile: z
-    .number()
-    .int()
-    .min(0)
-    .optional()
-    .describe("Filter to apps visible to this user profile id."),
-});
-
-export const listAppsTool = defineDeviceTool({
-  name: "listApps",
-  description:
-    "List installed apps on a device, with optional display label and launchable fields when " +
-    "reported by the platform or transport. The label is typically omitted on Android when " +
-    "the installed CtrlProxy APK lacks label support; launchable is typically omitted for " +
-    "physical iOS/devicectl records. Filters by type (default: launchable — every app with a launcher entry point, " +
-    "preinstalled ones included), search (package name or label), and profile.",
-  input: listAppsInput,
-  options: {
-    defaultEnabled: true,
-    // Listing installed apps only needs adb/simctl/devicectl — never CtrlProxy
-    // automation — so it should not pay for (or trigger) automation-readiness
-    // setup on the target device (#6216 review).
-    deviceReadiness: "booted",
-    // Reads only; a non-holder watches a held device through the read-only path (#10830).
-    deviceReadOnly: true,
-    outputSchema: listAppsResultSchema,
-  },
-});
-
-export const listAppsSchema = listAppsTool.schema;
-
-type ListAppsArgs = z.output<typeof listAppsTool.schema>;
-type InstallAppArgs = z.output<typeof installAppTool.schema>;
-
-// Export interfaces for type safety
-export type AppActionArgs = z.output<typeof terminateAppSchema>;
-
-export type CrashAppActionArgs = z.output<typeof crashAppSchema>;
-
-export type LaunchAppActionArgs = z.output<typeof launchAppSchema>;
-
-function prepareLaunchArguments(
-  device: BootedDevice,
-  args: LaunchAppActionArgs,
-  idGenerator: IdGenerator,
-): { launchArguments?: string[]; mutationToken?: string } {
-  if (args.launchArguments?.includes("--automobile-mutation-token")) {
-    throw new ActionableError("launchArguments contains a reserved argument");
-  }
-  if (device.platform !== "ios") {
-    return { launchArguments: args.launchArguments };
-  }
-
-  iosMutationTokens.clear(device.deviceId, args.appId);
-  if (!args.launchArguments?.includes("--allow-storage-mutations")) {
-    return { launchArguments: args.launchArguments };
-  }
-  const mutationToken = idGenerator.next();
-  iosMutationTokens.set(device.deviceId, args.appId, mutationToken);
-  return {
-    launchArguments: [...args.launchArguments, "--automobile-mutation-token", mutationToken],
-    mutationToken,
-  };
-}
-
-function redactLaunchMessage(message: string, token: string | undefined): string {
-  return token ? message.split(token).join("[REDACTED]") : message;
-}
-
-function redactLaunchError(error: unknown, token: string | undefined): unknown {
-  return token && String(error).includes(token)
-    ? new Error(redactLaunchMessage(String(error), token))
-    : error;
-}
-
-export type UninstallAppArgs = z.output<typeof uninstallAppSchema>;
-
-export type SetAppPermissionsArgs = z.infer<typeof setAppPermissionsSchema>;
-
-export type InspectPackageSigningArgs = z.infer<typeof inspectPackageSigningSchema>;
-
-export type GetAppPermissionsArgs = z.infer<typeof getAppPermissionsSchema>;
-
-export type ResetKeychainArgs = z.infer<typeof resetKeychainSchema>;
 
 // Injection seam for the setAppPermissions handler (mirrors the tapAny
 // factory seam in interactionTools.ts). Lets a unit test exercise the
@@ -1001,43 +382,6 @@ const createListAppsHandler =
     }
   };
 
-function executeLaunch(
-  launchApp: LaunchAppExecutor,
-  args: LaunchAppActionArgs,
-  launchArguments: string[] | undefined,
-  prototypeLaunch: PrototypeLaunch | undefined,
-  signal: AbortSignal | undefined,
-): Promise<LaunchAppResult> {
-  return launchApp.execute(args.appId, {
-    clearAppData: args.clearAppData ?? false,
-    // Injection takes effect only in a fresh process.
-    coldBoot: (args.coldBoot ?? false) || prototypeLaunch !== undefined,
-    signal,
-    launchArguments,
-    launchEnvironment: prototypeLaunch?.environment,
-  });
-}
-
-/** Clears the launch's mutation token and returns the error to throw, token redacted. */
-function launchFailure(
-  error: unknown,
-  device: BootedDevice,
-  appId: string,
-  mutationToken: string | undefined,
-): unknown {
-  if (mutationToken) {
-    iosMutationTokens.clear(device.deviceId, appId, mutationToken);
-  }
-  const safeError = redactLaunchError(error, mutationToken);
-  // A typed launch failure (uninstalled package, foreground mismatch) is
-  // already an actionable error — surface it verbatim rather than re-wrapping
-  // it as "Failed to launch app: Error: ..." (#5868).
-  if (isDeviceLostError(error) || safeError instanceof ActionableError) {
-    return safeError;
-  }
-  return toActionableError(safeError, `Failed to launch app`);
-}
-
 // Launch app handler
 const createLaunchAppHandler =
   (dependencies: LaunchAppToolDependencies) =>
@@ -1091,83 +435,6 @@ const createLaunchAppHandler =
       }
     }
   };
-
-async function attachLaunchedViewer(
-  attacher: LaunchAppToolDependencies["prototypeViewerAttacher"],
-  timer: Timer,
-  device: BootedDevice,
-  args: Pick<LaunchAppActionArgs, "appId" | "prototype">,
-): Promise<void> {
-  if (args.prototype || device.platform !== "ios" || resolveIosDeviceKind(device) !== "simulator") {
-    return;
-  }
-  let timedOut = false;
-  try {
-    await raceWithDeadline(() => attacher.attach(device, args.appId), {
-      timer,
-      timeoutMs: 3000,
-      label: "Optional prototype viewer attach",
-      onTimeout: () => {
-        timedOut = true;
-        logger.debug("[AppTools] Optional prototype viewer attach timed out.");
-      },
-    });
-  } catch {
-    // Expected for every app that is not a viewer; safe to swallow because launch already succeeded.
-    if (!timedOut) {
-      logger.debug("[AppTools] Optional prototype viewer attach was unavailable.");
-    }
-  }
-}
-
-/** The agent fields a client may see; the auth token stays in the daemon. */
-function describePrototypeAgent(agent: PrototypeAgentRecord) {
-  return {
-    port: agent.port,
-    agentVersion: agent.handshake.agentVersion,
-    protocolVersion: agent.handshake.protocolVersion,
-    capabilities: agent.handshake.capabilities,
-  };
-}
-
-/** A `prototype: true` launch in progress: its env, then attach on success or abort on failure. */
-interface PrototypeLaunch {
-  environment: Record<string, string>;
-  attach<T extends { message: string }>(
-    response: T,
-    pid?: number,
-  ): Promise<T & { prototypeAgent: ReturnType<typeof describePrototypeAgent> }>;
-  /** Frees the port unless the agent attached; safe to call more than once. */
-  abort(): void;
-}
-
-async function beginPrototypeLaunch(
-  dependencies: LaunchAppToolDependencies,
-  device: BootedDevice,
-  appId: string,
-): Promise<PrototypeLaunch> {
-  const injector = dependencies.createPrototypeAgentInjector(dependencies.prototypeAgentRegistry);
-  const prepared = await injector.prepare(device, appId);
-  let settled = false;
-  return {
-    environment: prepared.environment,
-    async attach(response, pid) {
-      const agent = await injector.attach(prepared, pid);
-      settled = true;
-      return {
-        ...response,
-        message: `${response.message}; prototype agent ${agent.handshake.agentVersion} connected`,
-        prototypeAgent: describePrototypeAgent(agent),
-      };
-    },
-    abort() {
-      if (!settled) {
-        settled = true;
-        injector.abort(prepared);
-      }
-    },
-  };
-}
 
 // Terminate app handler
 const createTerminateAppHandler =
@@ -1260,7 +527,7 @@ const createAppLifecycleHandler =
   (dependencies: AppLifecycleToolDependencies) =>
   async (
     device: BootedDevice,
-    args: { appId: string; action: AppLifecycleAction },
+    args: { appId: string; action: AppLifecycleAction; level?: AppTrimMemoryLevel },
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
@@ -1271,6 +538,7 @@ const createAppLifecycleHandler =
         .createAppLifecycle(device)
         .execute(args.appId, args.action, {
           signal,
+          trimLevel: args.level,
           onMutation: () => {
             mutationMayHaveHappened = true;
           },
@@ -1307,6 +575,13 @@ function installGuardFromArgs(args: InstallAppArgs): InstallGuardOptions | undef
   };
 }
 
+/** Android-only install inputs, passed only when requested so a plain call keeps its shape. */
+function androidInstallRequestFromArgs(args: InstallAppArgs): AndroidInstallRequest | undefined {
+  const { splits, bundle, grantAllPermissions, allowDowngrade } = args;
+  const request = { splits, bundle, grantAllPermissions, allowDowngrade };
+  return Object.values(request).some((value) => value !== undefined) ? request : undefined;
+}
+
 // Install app handler
 const createInstallAppHandler =
   (dependencies: InstallAppToolDependencies) =>
@@ -1317,7 +592,12 @@ const createInstallAppHandler =
       const installApp = dependencies.createInstallApp(device);
       mutationMayHaveHappened = true;
       const guard = installGuardFromArgs(args);
-      const result = await installApp.execute(args.artifactPath, { signal, guard });
+      const android = androidInstallRequestFromArgs(args);
+      const result = await installApp.execute(args.artifactPath, {
+        signal,
+        guard,
+        ...(android ? { android } : {}),
+      });
       if (!result.success) {
         throw new ActionableError(
           result.error || `Failed to install app from ${args.artifactPath}`,
@@ -1554,7 +834,12 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker. prototype:true (iOS simulators only) relaunches the app with the prototype agent injected, so its current state is lost.",
     launchAppSchema,
     launchAppHandler,
-    { defaultEnabled: true, transportRecovery: "connect", outputSchema: launchAppResultSchema },
+    {
+      defaultEnabled: true,
+      transportRecovery: "connect",
+      outputSchema: launchAppResultSchema,
+      ...PLAN_SKELETON,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1562,7 +847,12 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Terminate app by package name",
     terminateAppSchema,
     terminateAppHandler,
-    { defaultEnabled: true, outputSchema: terminateAppResultSchema, stopsApp: true },
+    {
+      defaultEnabled: true,
+      outputSchema: terminateAppResultSchema,
+      stopsApp: true,
+      ...PLAN_SKELETON,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1570,15 +860,15 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Intentionally crash a running app through the platform crash path",
     crashAppSchema,
     crashAppHandler,
-    { defaultEnabled: true, outputSchema: crashAppResultSchema, stopsApp: true },
+    { ...PLAN_RELEVANT, defaultEnabled: true, outputSchema: crashAppResultSchema, stopsApp: true },
   );
 
   ToolRegistry.registerDeviceAware(
     "appLifecycle",
-    "State-preserving background-process kill for saved-state restoration tests.",
+    "State-preserving background-process kill for saved-state restoration tests (background, killBackgrounded; iOS kills with SIGKILL after Home); trimMemory (Android only) sends onTrimMemory(level) to the running app without killing it.",
     appLifecycleSchema,
     appLifecycleHandler,
-    { defaultEnabled: true, outputSchema: appLifecycleResultSchema },
+    { ...PLAN_RELEVANT, defaultEnabled: true, outputSchema: appLifecycleResultSchema },
   );
 
   installAppTool.register(ToolRegistry, installAppHandler);
@@ -1596,7 +886,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "userId grant/revoke; device-wide reset ['all']; no POST_NOTIFICATIONS.",
     setAppPermissionsSchema,
     setAppPermissionsHandler,
-    { defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1610,8 +900,9 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
 
   ToolRegistry.registerDeviceAware(
     "inspectPackageSigning",
-    "Android: fresh read of one package's presence (installed/absent/unknown) for a user and its " +
-      "SHA-256 signing certificates (complete signer set, rotation history). Never cached.",
+    "Fresh read of one app's presence (installed/absent/unknown) and signing. Android: a user's " +
+      "SHA-256 signer set and rotation history. iOS Simulator and physical: team, signing " +
+      "identity, CDHash, entitlements and embedded provisioning profile (expiry, UUID). Never cached.",
     inspectPackageSigningSchema,
     inspectPackageSigningHandler,
     {
@@ -1627,7 +918,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Reset an app's Keychain/Keystore state (scoped by appId). iOS Simulator resets the WHOLE device Keychain regardless of appId; physical iOS (#5188) and Android (#5190) not yet supported. Requires confirm:true.",
     resetKeychainSchema,
     resetKeychainHandler,
-    { defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false },
   );
 
   listAppsTool.register(ToolRegistry, listAppsHandler);

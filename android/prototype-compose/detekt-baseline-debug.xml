@@ -1,0 +1,81 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:PrototypeHandleVisuals.kt:tappable &amp;&amp; owner != null &amp;&amp; !owner.hasTextHandle &amp;&amp; owner.visuals.isNotEmpty()</ID>
+    <ID>ComplexCondition:PrototypeImages.kt:style.weight != null || node.source?.anchor != null || style.aspectRatio != null || style.minWidth != null || style.maxWidth != null || style.minHeight != null || style.maxHeight != null || node.safeArea != null</ID>
+    <ID>ComplexCondition:PrototypeRenderMapper.kt:PrototypeRenderMapper$previousSpec?.root === resolved.root &amp;&amp; previousSpec == resolved &amp;&amp; previousPages == pages &amp;&amp; previousStacks == stacks &amp;&amp; previousShownErrors == shownErrors</ID>
+    <ID>ComplexCondition:PrototypeSpecContent.kt:!tappable || node.role !in MERGEABLE_TAP_CONTAINERS || node.text.isNotEmpty() || !node.contentDescription.isNullOrEmpty()</ID>
+    <ID>ComplexCondition:PrototypeSpecContent.kt:child.testTag != null || child.spans?.any { it.onTap != null } == true || !child.contentDescription.isNullOrEmpty() || prototypeNodeTappable(child) || child.source?.visibleWhen != null || child.source?.anchor != null</ID>
+    <ID>ComplexCondition:PrototypeSpecContent.kt:node.role != "searchBar" &amp;&amp; !isSemanticsFreeContainer(node, tappable, description, state) &amp;&amp; (handleVisual || !isDecorativePrototypeVisual(node, tappable))</ID>
+    <ID>ComplexCondition:PrototypeSpecContent.kt:node.role !in setOf("textField", "searchBar") &amp;&amp; node.role !in SEMANTICS_FREE_CONTAINERS &amp;&amp; !(node.role == "text" &amp;&amp; node.spans != null)</ID>
+    <ID>ComplexCondition:PrototypeSpecContent.kt:style.minWidth == null &amp;&amp; style.maxWidth == null &amp;&amp; style.minHeight == null &amp;&amp; style.maxHeight == null</ID>
+    <ID>ComplexCondition:PrototypeSwipe.kt:g.fullSwipe &amp;&amp; (distance &gt;= PrototypeSwipeTuning.FULL_FRACTION * g.rowWidth || (distance &gt; width &amp;&amp; opening &gt;= PrototypeSwipeTuning.FULL_VELOCITY_DP * g.density))</ID>
+    <ID>CyclomaticComplexMethod:PrototypeAppearance.kt:@InternalAutoMobilePrototypeApi fun prototypeResolveAppearance: PrototypeAppearance</ID>
+    <ID>CyclomaticComplexMethod:PrototypeFlowGridLayout.kt:@Composable internal fun PrototypeGridLayout</ID>
+    <ID>CyclomaticComplexMethod:PrototypeHandleVisuals.kt:internal fun prototypeHandleVisuals: Set&lt;String&gt;</ID>
+    <ID>CyclomaticComplexMethod:PrototypeImages.kt:internal fun prototypeAuthoredImageSize: DpSize?</ID>
+    <ID>CyclomaticComplexMethod:PrototypeRenderModel.kt:PrototypeNodeMapping$fun map: PrototypeRenderNode</ID>
+    <ID>CyclomaticComplexMethod:PrototypeRenderModel.kt:internal fun prototypeNodeRole: String</ID>
+    <ID>CyclomaticComplexMethod:PrototypeRenderModel.kt:private fun prototypeNodeText: String</ID>
+    <ID>CyclomaticComplexMethod:PrototypeRepeat.kt:private fun PrototypeNode.bound: PrototypeNode</ID>
+    <ID>CyclomaticComplexMethod:PrototypeRuntime.kt:PrototypeRuntime$private suspend fun handleInteraction</ID>
+    <ID>CyclomaticComplexMethod:PrototypeRuntime.kt:PrototypeRuntime$private suspend fun run</ID>
+    <ID>CyclomaticComplexMethod:PrototypeRuntime.kt:PrototypeRuntime$suspend fun patch: PatchResult</ID>
+    <ID>CyclomaticComplexMethod:PrototypeRuntime.kt:internal fun prototypeDescendants: List&lt;PrototypeNode&gt;</ID>
+    <ID>CyclomaticComplexMethod:PrototypeSearchBar.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable internal fun RenderPrototypeSearchBar</ID>
+    <ID>CyclomaticComplexMethod:PrototypeSpecContent.kt:@Composable private fun RenderPrototypeNodeContent</ID>
+    <ID>CyclomaticComplexMethod:PrototypeSpecContent.kt:@Composable private fun RenderPrototypePager</ID>
+    <ID>CyclomaticComplexMethod:PrototypeSpecContent.kt:@Composable private fun RenderPrototypeTextField</ID>
+    <ID>CyclomaticComplexMethod:PrototypeSpecContent.kt:@OptIn(ExperimentalFoundationApi::class) @Composable private fun prototypeNodeModifier: Modifier</ID>
+    <ID>CyclomaticComplexMethod:PrototypeSpecContent.kt:internal fun prototypeMergedTapLabel: String?</ID>
+    <ID>CyclomaticComplexMethod:PrototypeStateLogic.kt:internal fun PrototypeCondition.holds: Boolean</ID>
+    <ID>CyclomaticComplexMethod:PrototypeStateLogic.kt:private fun PrototypeStyle.mergedOver: PrototypeStyle</ID>
+    <ID>CyclomaticComplexMethod:PrototypeSwipeRow.kt:@Composable internal fun PrototypeSwipeRow</ID>
+    <ID>CyclomaticComplexMethod:PrototypeTheme.kt:internal fun ColorScheme.withRoleMap: ColorScheme</ID>
+    <ID>CyclomaticComplexMethod:PrototypeTheme.kt:internal fun ColorScheme.withRoleOverrides: ColorScheme</ID>
+    <ID>CyclomaticComplexMethod:PrototypeTheme.kt:internal fun prototypeColorRole: Color?</ID>
+    <ID>CyclomaticComplexMethod:PrototypeTheme.kt:internal fun prototypeCornerShape: Shape</ID>
+    <ID>CyclomaticComplexMethod:PrototypeTheme.kt:internal fun prototypeTextRole: TextStyle?</ID>
+    <ID>CyclomaticComplexMethod:PrototypeValidation.kt:internal fun PrototypeNode.validationMode: PrototypeValidateOn</ID>
+    <ID>CyclomaticComplexMethod:PrototypeWindowMetadata.kt:@InternalAutoMobilePrototypeApi fun prototypeWindowMetadata: PrototypeWindowMetadata</ID>
+    <ID>LargeClass:PrototypeRuntime.kt:PrototypeRuntime</ID>
+    <ID>LongMethod:PrototypeComponents.kt:@Composable internal fun RenderPrototypeButton</ID>
+    <ID>LongMethod:PrototypeMaterialComponents.kt:@Composable internal fun RenderPrototypeDialog</ID>
+    <ID>LongMethod:PrototypeRenderModel.kt:PrototypeNodeMapping$fun map: PrototypeRenderNode</ID>
+    <ID>LongMethod:PrototypeRepeat.kt:private fun PrototypeNode.bound: PrototypeNode</ID>
+    <ID>LongMethod:PrototypeRuntime.kt:PrototypeRuntime$private suspend fun startRequest</ID>
+    <ID>LongMethod:PrototypeRuntime.kt:PrototypeRuntime$suspend fun patch: PatchResult</ID>
+    <ID>LongMethod:PrototypeSearchBar.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable internal fun RenderPrototypeSearchBar</ID>
+    <ID>LongMethod:PrototypeSpecContent.kt:@Composable private fun RenderPrototypeNodeContent</ID>
+    <ID>LongMethod:PrototypeSpecContent.kt:@Composable private fun RenderPrototypePager</ID>
+    <ID>LongMethod:PrototypeSpecContent.kt:@Composable private fun RenderPrototypeSheet</ID>
+    <ID>LongMethod:PrototypeSpecContent.kt:@Composable private fun RenderPrototypeTextField</ID>
+    <ID>LongMethod:PrototypeSpecContent.kt:@OptIn(ExperimentalFoundationApi::class) @Composable private fun prototypeNodeModifier: Modifier</ID>
+    <ID>LongMethod:PrototypeSwipeRow.kt:@Composable internal fun PrototypeSwipeRow</ID>
+    <ID>LongParameterList:PrototypeCarousel.kt:internal fun pagerIndicatorDots: List&lt;PrototypeDot&gt;</ID>
+    <ID>LongParameterList:PrototypeRenderModel.kt:PrototypeNodeMapping</ID>
+    <ID>LongParameterList:PrototypeRuntime.kt:PrototypeRuntime.RequestInFlight</ID>
+    <ID>LongParameterList:PrototypeRuntime.kt:PrototypeRuntime</ID>
+    <ID>LongParameterList:PrototypeSpecContent.kt:@Composable internal fun RenderPrototypeEditableField</ID>
+    <ID>LongParameterList:PrototypeSpecContent.kt:@Composable private fun RenderPrototypeNode</ID>
+    <ID>LongParameterList:PrototypeSpecContent.kt:internal fun prototypeContentDescription: String?</ID>
+    <ID>LongParameterList:PrototypeStorageSession.kt:PrototypeStorageSession</ID>
+    <ID>LongParameterList:PrototypeSwipeRow.kt:@Composable private fun androidx.compose.foundation.layout.BoxScope.PrototypeSwipeButtons</ID>
+    <ID>RedundantSuspendModifier:PrototypeTrace.kt:PrototypeTrace$suspend</ID>
+    <ID>TooGenericExceptionCaught:PrototypeAppearance.kt:AndroidPrototypeDeviceAppearance$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:PrototypeAssetStore.kt:PrototypeAssetStore$error: RuntimeException</ID>
+    <ID>TooGenericExceptionCaught:PrototypeFonts.kt:PrototypeFontCache$error: RuntimeException</ID>
+    <ID>TooGenericExceptionCaught:PrototypeInsetFloor.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PrototypePlatform.kt:error: Exception</ID>
+    <ID>TooGenericExceptionCaught:PrototypeRuntime.kt:PrototypeRuntime$error: Exception</ID>
+    <ID>TooManyFunctions:PrototypeAssetStore.kt:PrototypeAssetStore : PrototypeAssetSource</ID>
+    <ID>TooManyFunctions:PrototypeMaterialComponents.kt:dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeMaterialComponents.kt</ID>
+    <ID>TooManyFunctions:PrototypeRenderModel.kt:dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRenderModel.kt</ID>
+    <ID>TooManyFunctions:PrototypeRepeat.kt:dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRepeat.kt</ID>
+    <ID>TooManyFunctions:PrototypeRuntime.kt:PrototypeRuntime</ID>
+    <ID>TooManyFunctions:PrototypeSpecContent.kt:dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSpecContent.kt</ID>
+    <ID>TooManyFunctions:PrototypeStorageSession.kt:PrototypeStorageSession</ID>
+    <ID>TooManyFunctions:PrototypeTheme.kt:dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeTheme.kt</ID>
+  </CurrentIssues>
+</SmellBaseline>

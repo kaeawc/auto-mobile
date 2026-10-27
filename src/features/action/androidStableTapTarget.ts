@@ -112,6 +112,232 @@ export interface StableTapTargetDeps {
   ) => TapVerificationOptions;
 }
 
+type StableTapCandidate = Omit<Extract<StableTapTargetResult, { ok: true }>, "ok">;
+
+interface StableTapPollingState {
+  prevBounds: Element["bounds"] | null;
+  consecutiveStable: number;
+  best: StableTapCandidate | null;
+  startTime: number;
+  // Exclude failed refreshes and recovery sleeps from the productive deadline.
+  noHierarchyTimeMs: number;
+  budgetMs: number;
+  minProductivePolls: number;
+  consecutiveNoHierarchy: number;
+  refindAttempt: number;
+  firstIteration: boolean;
+  iterations: number;
+  deadlineGracePolls: number;
+}
+
+interface StableTapContext {
+  options: TapVerificationOptions;
+  observeResult: Partial<Pick<ObserveResult, "viewHierarchy" | "screenSize">>;
+  action: TapOnElementOptions["action"];
+  requireResourceId: boolean;
+  original: Element | null;
+  stableMatchesRequired: number;
+}
+
+function findOriginalTapElement(
+  deps: StableTapTargetDeps,
+  options: TapVerificationOptions,
+  observeResult: StableTapContext["observeResult"],
+): Element | null {
+  const selection = observeResult.viewHierarchy
+    ? deps.findElementInHierarchy(options, observeResult.viewHierarchy).selection
+    : null;
+  return selection?.matchedElement ?? selection?.element ?? null;
+}
+
+function shouldContinuePolling(
+  state: StableTapPollingState,
+  timer: Timer,
+  stableMatchesRequired: number,
+): boolean {
+  if (++state.iterations > ANDROID_PRE_TAP_MAX_ITERATIONS) {
+    return false;
+  }
+
+  // Both the productive-poll floor and wall-clock deadline must be exhausted.
+  const productiveElapsedMs = timer.now() - state.startTime - state.noHierarchyTimeMs;
+  const budgetExhausted =
+    state.refindAttempt >= state.minProductivePolls && productiveElapsedMs >= state.budgetMs;
+  const midStabilityRun =
+    state.best !== null &&
+    state.consecutiveStable > 0 &&
+    state.consecutiveStable < stableMatchesRequired;
+  if (!state.firstIteration && state.consecutiveNoHierarchy === 0 && budgetExhausted) {
+    // Bounded extra polls can finish confirming an already-stable candidate.
+    if (midStabilityRun && state.deadlineGracePolls > 0) {
+      state.deadlineGracePolls--;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+function recordMissingHierarchy(
+  state: StableTapPollingState,
+  timer: Timer,
+  refreshStart: number,
+): StableTapTargetResult | undefined {
+  // Exclude the failed refresh itself, not just its subsequent recovery sleep.
+  state.noHierarchyTimeMs += timer.now() - refreshStart;
+  state.consecutiveNoHierarchy++;
+  logger.warn(
+    `[TapOnElement] Android pre-tap refresh returned no hierarchy ` +
+      `(consecutive: ${state.consecutiveNoHierarchy}/${ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE}, ` +
+      `refind attempt: ${state.refindAttempt})`,
+  );
+  if (state.consecutiveNoHierarchy >= ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE) {
+    return {
+      ok: false,
+      error:
+        `Android tap aborted: accessibility service was unreachable for ${state.consecutiveNoHierarchy} consecutive attempts ` +
+        `(ctrl-proxy WebSocket unresponsive). The device may be under heavy load or the accessibility service may need reconnection.`,
+    };
+  }
+  state.consecutiveStable = 0;
+  state.prevBounds = null;
+  return undefined;
+}
+
+function extendLoadingBudget(
+  deps: StableTapTargetDeps,
+  state: StableTapPollingState,
+  freshHierarchy: ViewHierarchyResult,
+): void {
+  if (
+    androidViewHierarchyIndicatesLikelyBlockingLoading(freshHierarchy, deps.elementParser) &&
+    state.budgetMs < ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING
+  ) {
+    state.budgetMs = ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING;
+    state.minProductivePolls = ANDROID_PRE_TAP_REFIND_MIN_POLLS_WHEN_LOADING;
+    logger.info(
+      `[TapOnElement] Android pre-tap: loading/progress indicators present; ` +
+        `extending refind budget to ${state.budgetMs}ms / ${state.minProductivePolls} polls`,
+    );
+  }
+}
+
+function staleTapTargetError(
+  deps: StableTapTargetDeps,
+  context: StableTapContext,
+  freshHierarchy: ViewHierarchyResult,
+  selection: ElementSelectionResult,
+  element: Element,
+): string | undefined {
+  const { original, options, observeResult } = context;
+  if (
+    original?.["resource-id"] &&
+    original["resource-id"] !== (selection.matchedElement ?? element)["resource-id"]
+  ) {
+    return "Stale tap target: the fresh capture matched a different native ID. Observe again before acting.";
+  }
+
+  return options.elementId !== undefined && options.elementId === original?.["view-id"]
+    ? deps.staleSyntheticTarget(original, observeResult.viewHierarchy, freshHierarchy)
+    : undefined;
+}
+
+function recordStableTapCandidate({
+  state,
+  freshHierarchy,
+  selection,
+  refreshed,
+  stableMatchesRequired,
+}: {
+  state: StableTapPollingState;
+  freshHierarchy: ViewHierarchyResult;
+  selection: ElementSelectionResult;
+  refreshed: { element: Element; usedParent: boolean };
+  stableMatchesRequired: number;
+}): StableTapTargetResult | undefined {
+  const b = refreshed.element.bounds;
+  if (b === undefined || b === null) {
+    state.consecutiveStable = 0;
+    state.prevBounds = null;
+    return undefined;
+  }
+
+  if (
+    state.prevBounds !== null &&
+    boundsNearlyEqual(state.prevBounds, b, ANDROID_PRE_TAP_BOUNDS_EPSILON_PX)
+  ) {
+    state.consecutiveStable++;
+  } else {
+    state.consecutiveStable = 1;
+  }
+  state.prevBounds = b;
+  const refreshedCaptureId = getHierarchySnapshot(freshHierarchy)?.captureId;
+  state.best = {
+    viewHierarchy: freshHierarchy,
+    tapElement: refreshed.element,
+    usedParent: refreshed.usedParent,
+    // Carry refreshed metadata from the node actually tapped (#5888).
+    selection: refreshedCaptureId ? { ...selection, captureId: refreshedCaptureId } : selection,
+  };
+
+  if (state.consecutiveStable >= stableMatchesRequired) {
+    logger.info(
+      `[TapOnElement] Android tap target stable after ${state.refindAttempt} refresh(es) (bounds matched on last ${stableMatchesRequired} consecutive re-find(s), ε=${ANDROID_PRE_TAP_BOUNDS_EPSILON_PX}px)`,
+    );
+    return { ok: true, ...state.best };
+  }
+  return undefined;
+}
+
+function refindStableTapTarget(
+  deps: StableTapTargetDeps,
+  context: StableTapContext,
+  state: StableTapPollingState,
+  freshHierarchy: ViewHierarchyResult,
+): StableTapTargetResult | undefined {
+  state.consecutiveNoHierarchy = 0;
+  state.refindAttempt++;
+  extendLoadingBudget(deps, state, freshHierarchy);
+
+  const refind = deps.findElementInHierarchy(context.options, freshHierarchy);
+  if (!refind.selection.element) {
+    logger.warn(
+      `[TapOnElement] Android pre-tap refresh attempt ${state.refindAttempt} did not re-find tap target`,
+    );
+    state.consecutiveStable = 0;
+    state.prevBounds = null;
+    return undefined;
+  }
+
+  const staleError = staleTapTargetError(
+    deps,
+    context,
+    freshHierarchy,
+    refind.selection,
+    refind.selection.element,
+  );
+  if (staleError) {
+    return { ok: false, error: staleError };
+  }
+
+  const refreshed = deps.resolveTapTargetElement(
+    refind.selection.element,
+    freshHierarchy,
+    context.action,
+    {
+      requireResourceId: context.requireResourceId,
+      scoped: context.options.container !== undefined,
+    },
+  );
+  return recordStableTapCandidate({
+    state,
+    freshHierarchy,
+    selection: refind.selection,
+    refreshed,
+    stableMatchesRequired: context.stableMatchesRequired,
+  });
+}
+
 /**
  * Re-fetch the Android hierarchy and re-resolve the tap target until bounds match on enough
  * consecutive successful re-finds (±ε); the required count depends on selector type (see
@@ -129,74 +355,51 @@ export async function resolveAndroidStableTapTarget(
   },
 ): Promise<StableTapTargetResult> {
   const { observeResult, action, requireResourceId, signal } = request;
-  let { options } = request;
-  options = deps.withObservationScreenSize(options, observeResult);
+  const options = deps.withObservationScreenSize(request.options, observeResult);
   const stableMatchesRequired = androidPreTapConsecutiveStableMatchesRequired(options);
-  const originalSelection = observeResult.viewHierarchy
-    ? deps.findElementInHierarchy(options, observeResult.viewHierarchy).selection
-    : null;
-  const original = originalSelection?.matchedElement ?? originalSelection?.element ?? null;
-
-  let prevBounds: Element["bounds"] | null = null;
-  let consecutiveStable = 0;
-  let best: {
-    viewHierarchy: ViewHierarchyResult;
-    tapElement: Element;
-    usedParent: boolean;
-    selection: ElementSelectionResult;
-  } | null = null;
-
-  const startTime = deps.timer.now();
-  // Wall-clock time NOT attributable to productive polling — the "no hierarchy"
-  // recovery sleeps AND the wall-clock the failed refreshes themselves consumed.
-  // Excluded from the deadline so a temporarily-unresponsive ctrl-proxy WebSocket
-  // doesn't consume the element's patience (that streak is bounded separately by
-  // ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE).
-  let noHierarchyTimeMs = 0;
-  let budgetMs = ANDROID_PRE_TAP_REFIND_BUDGET_MS;
-  let minProductivePolls = ANDROID_PRE_TAP_REFIND_MIN_POLLS;
-  let consecutiveNoHierarchy = 0;
-  let refindAttempt = 0;
-  let firstIteration = true;
-  let iterations = 0;
-  // Extra polls allowed past the deadline to finish confirming an already-stable
-  // candidate, so a sibling selector isn't failed at the boundary (e.g. a null
-  // streak resets stability progress right as the deadline passes). Bounded by
-  // stableMatchesRequired so a perpetually-shifting target can't extend forever.
-  let deadlineGracePolls = stableMatchesRequired;
+  const original = findOriginalTapElement(deps, options, observeResult);
+  const context: StableTapContext = {
+    options,
+    observeResult,
+    action,
+    requireResourceId,
+    original,
+    stableMatchesRequired,
+  };
+  const state: StableTapPollingState = {
+    prevBounds: null,
+    consecutiveStable: 0,
+    best: null,
+    startTime: deps.timer.now(),
+    // The separately bounded no-hierarchy streak must not consume target patience.
+    noHierarchyTimeMs: 0,
+    budgetMs: ANDROID_PRE_TAP_REFIND_BUDGET_MS,
+    minProductivePolls: ANDROID_PRE_TAP_REFIND_MIN_POLLS,
+    consecutiveNoHierarchy: 0,
+    refindAttempt: 0,
+    firstIteration: true,
+    iterations: 0,
+    // Finish a stability run at the deadline without extending indefinitely.
+    deadlineGracePolls: stableMatchesRequired,
+  };
 
   while (true) {
     throwIfAborted(signal);
-    if (++iterations > ANDROID_PRE_TAP_MAX_ITERATIONS) {
+    if (!shouldContinuePolling(state, deps.timer, stableMatchesRequired)) {
       break;
     }
 
-    // Keep polling until BOTH the productive-poll floor and the wall-clock
-    // deadline are exceeded; the floor guarantees we never poll fewer times than
-    // the old fixed attempt count on a slow device.
-    const productiveElapsedMs = deps.timer.now() - startTime - noHierarchyTimeMs;
-    const budgetExhausted = refindAttempt >= minProductivePolls && productiveElapsedMs >= budgetMs;
-    const midStabilityRun =
-      best !== null && consecutiveStable > 0 && consecutiveStable < stableMatchesRequired;
-    if (!firstIteration && consecutiveNoHierarchy === 0 && budgetExhausted) {
-      if (midStabilityRun && deadlineGracePolls > 0) {
-        deadlineGracePolls--;
-      } else {
-        break;
-      }
-    }
-
-    if (!firstIteration) {
-      const inNoHierarchyRecovery = consecutiveNoHierarchy > 0;
+    if (!state.firstIteration) {
+      const inNoHierarchyRecovery = state.consecutiveNoHierarchy > 0;
       const delayMs = inNoHierarchyRecovery
         ? ANDROID_PRE_TAP_NO_HIERARCHY_DELAY_MS
         : ANDROID_PRE_TAP_REFIND_DELAY_MS;
       await deps.timer.sleep(delayMs);
       if (inNoHierarchyRecovery) {
-        noHierarchyTimeMs += delayMs;
+        state.noHierarchyTimeMs += delayMs;
       }
     }
-    firstIteration = false;
+    state.firstIteration = false;
 
     const refreshStart = deps.timer.now();
     const freshHierarchy = await deps.tapVerificationRefresh({
@@ -205,114 +408,16 @@ export async function resolveAndroidStableTapTarget(
       signal,
     })(ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS);
     if (!freshHierarchy) {
-      // The failed refresh itself burned wall-clock (up to the timeout); exclude
-      // that from the deadline too, not just the recovery sleep, otherwise a slow
-      // unresponsive proxy still eats the element's patience.
-      noHierarchyTimeMs += deps.timer.now() - refreshStart;
-      consecutiveNoHierarchy++;
-      logger.warn(
-        `[TapOnElement] Android pre-tap refresh returned no hierarchy ` +
-          `(consecutive: ${consecutiveNoHierarchy}/${ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE}, ` +
-          `refind attempt: ${refindAttempt})`,
-      );
-      if (consecutiveNoHierarchy >= ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE) {
-        return {
-          ok: false,
-          error:
-            `Android tap aborted: accessibility service was unreachable for ${consecutiveNoHierarchy} consecutive attempts ` +
-            `(ctrl-proxy WebSocket unresponsive). The device may be under heavy load or the accessibility service may need reconnection.`,
-        };
+      const failure = recordMissingHierarchy(state, deps.timer, refreshStart);
+      if (failure) {
+        return failure;
       }
-      consecutiveStable = 0;
-      prevBounds = null;
       continue;
     }
 
-    consecutiveNoHierarchy = 0;
-    refindAttempt++;
-
-    if (
-      androidViewHierarchyIndicatesLikelyBlockingLoading(freshHierarchy, deps.elementParser) &&
-      budgetMs < ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING
-    ) {
-      budgetMs = ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING;
-      minProductivePolls = ANDROID_PRE_TAP_REFIND_MIN_POLLS_WHEN_LOADING;
-      logger.info(
-        `[TapOnElement] Android pre-tap: loading/progress indicators present; ` +
-          `extending refind budget to ${budgetMs}ms / ${minProductivePolls} polls`,
-      );
-    }
-
-    const refind = deps.findElementInHierarchy(options, freshHierarchy);
-    if (!refind.selection.element) {
-      logger.warn(
-        `[TapOnElement] Android pre-tap refresh attempt ${refindAttempt} did not re-find tap target`,
-      );
-      consecutiveStable = 0;
-      prevBounds = null;
-      continue;
-    }
-
-    if (
-      original?.["resource-id"] &&
-      original["resource-id"] !==
-        (refind.selection.matchedElement ?? refind.selection.element)["resource-id"]
-    ) {
-      return {
-        ok: false,
-        error:
-          "Stale tap target: the fresh capture matched a different native ID. Observe again before acting.",
-      };
-    }
-
-    const staleSynthetic =
-      options.elementId !== undefined && options.elementId === original?.["view-id"]
-        ? deps.staleSyntheticTarget(original, observeResult.viewHierarchy, freshHierarchy)
-        : undefined;
-    if (staleSynthetic) {
-      return { ok: false, error: staleSynthetic };
-    }
-
-    const refreshed = deps.resolveTapTargetElement(
-      refind.selection.element as Element,
-      freshHierarchy,
-      action,
-      { requireResourceId, scoped: options.container !== undefined },
-    );
-    const b = refreshed.element.bounds;
-    if (b === undefined || b === null) {
-      consecutiveStable = 0;
-      prevBounds = null;
-      continue;
-    }
-
-    if (
-      prevBounds !== null &&
-      boundsNearlyEqual(prevBounds, b, ANDROID_PRE_TAP_BOUNDS_EPSILON_PX)
-    ) {
-      consecutiveStable++;
-    } else {
-      consecutiveStable = 1;
-    }
-    prevBounds = b;
-    const refreshedCaptureId = getHierarchySnapshot(freshHierarchy)?.captureId;
-    best = {
-      viewHierarchy: freshHierarchy,
-      tapElement: refreshed.element,
-      usedParent: refreshed.usedParent,
-      // Carry the refreshed selection so the caller can rebuild selectedElement
-      // metadata (bounds/indexInMatches/totalMatches) from the node actually
-      // tapped, not the stale pre-refresh selection (#5888).
-      selection: refreshedCaptureId
-        ? { ...refind.selection, captureId: refreshedCaptureId }
-        : refind.selection,
-    };
-
-    if (consecutiveStable >= stableMatchesRequired) {
-      logger.info(
-        `[TapOnElement] Android tap target stable after ${refindAttempt} refresh(es) (bounds matched on last ${stableMatchesRequired} consecutive re-find(s), ε=${ANDROID_PRE_TAP_BOUNDS_EPSILON_PX}px)`,
-      );
-      return { ok: true, ...best };
+    const result = refindStableTapTarget(deps, context, state, freshHierarchy);
+    if (result) {
+      return result;
     }
   }
 

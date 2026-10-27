@@ -55,7 +55,7 @@ describe("CallTool progress notifications echo the client's token (issue #6118)"
       { name: TOOL, arguments: {} },
       {
         onprogress: (notification) => {
-          received.push(notification as unknown as { progress: number; total?: number });
+          received.push(notification);
         },
       },
     );

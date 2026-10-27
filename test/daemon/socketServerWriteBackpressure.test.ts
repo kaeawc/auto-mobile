@@ -6,13 +6,13 @@ import { FakeSocket } from "../fakes/FakeNetServer";
 import { expect, spyOn, test } from "bun:test";
 import { DaemonSocketQueueOverflowError } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import {
   DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import {
   DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES as MAX_QUEUED_BYTES,
@@ -25,23 +25,31 @@ import { FakeTimer } from "../fakes/FakeTimer";
 const LARGE_FRAME_BYTES = 3 * 1024 * 1024;
 
 class BackpressuredSocket extends FakeSocket {
-  private queuedBytes = 0;
+  /** Queued-byte count the daemon reads; assigned directly (the base type declares a property). */
+  override writableLength = 0;
   readonly callbacks: Array<(error?: Error | null) => void> = [];
   readonly timeouts: number[] = [];
   backpressure = true;
-
-  override get writableLength(): number {
-    return this.queuedBytes;
-  }
 
   override setTimeout(ms?: number): this {
     this.timeouts.push(ms ?? 0);
     return this;
   }
 
-  override write(payload: string | Buffer, callback?: (error?: Error | null) => void): boolean {
+  override write(buffer: string | Uint8Array, cb?: (err?: Error | null) => void): boolean;
+  override write(
+    str: string | Uint8Array,
+    encoding?: BufferEncoding,
+    cb?: (err?: Error | null) => void,
+  ): boolean;
+  override write(
+    payload: string | Uint8Array,
+    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+    maybeCallback?: (error?: Error | null) => void,
+  ): boolean {
     super.write(payload);
-    this.queuedBytes += Buffer.byteLength(payload);
+    this.writableLength += Buffer.byteLength(payload);
+    const callback = typeof encodingOrCallback === "function" ? encodingOrCallback : maybeCallback;
     if (callback) {
       this.callbacks.push(callback);
     }
@@ -50,11 +58,11 @@ class BackpressuredSocket extends FakeSocket {
 
   /** Free queued bytes the way a reading peer does, without emptying the queue. */
   drainPartially(bytes: number): void {
-    this.queuedBytes = Math.max(0, this.queuedBytes - bytes);
+    this.writableLength = Math.max(0, this.writableLength - bytes);
   }
 
   flush(): void {
-    this.queuedBytes = 0;
+    this.writableLength = 0;
     for (const callback of this.callbacks.splice(0)) {
       callback();
     }

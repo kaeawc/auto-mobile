@@ -1,3 +1,4 @@
+import type { GestureStartRequest } from "../observe/android/CtrlProxyGestures";
 import type { A11ySwipeResult } from "../observe/android/types";
 import type { Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -8,14 +9,7 @@ import type { DragPathPlan } from "./dragPathPlan";
 
 /** The streaming-stroke subset of the CtrlProxy client a path drag needs. */
 export interface StrokeClient {
-  requestGestureStart(
-    gestureId: string,
-    x: number,
-    y: number,
-    timeoutMs?: number,
-    perf?: undefined,
-    displayId?: number,
-  ): Promise<A11ySwipeResult>;
+  requestGestureStart(request: GestureStartRequest): Promise<A11ySwipeResult>;
   requestGestureMove(
     gestureId: string,
     x: number,
@@ -75,14 +69,13 @@ export async function runDragPathStroke(
   let moveCount = 0;
   let last = plan.start;
   try {
-    const started = await client.requestGestureStart(
+    const started = await client.requestGestureStart({
       gestureId,
-      plan.start.x,
-      plan.start.y,
-      DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
-      undefined,
-      options.displayId,
-    );
+      x: plan.start.x,
+      y: plan.start.y,
+      timeoutMs: DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+      displayId: options.displayId,
+    });
     if (!started.success) {
       open = false;
       return {

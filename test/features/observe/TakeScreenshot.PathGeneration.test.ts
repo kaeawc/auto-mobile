@@ -13,20 +13,18 @@ import { mockDevice } from "./takeScreenshotTestHelpers";
 
 describe("TakeScreenshot path generation", function () {
   test("should generate correct screenshot path with png format", function () {
-    const screenshot = new TakeScreenshot(
-      mockDevice,
-      new FakeAdbClientFactory(new FakeAdbExecutor()),
-    );
+    const screenshot = new TakeScreenshot(mockDevice, {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+    });
     const result = screenshot.generateScreenshotPath(1234567890123, { format: "png" });
     expect(result).toContain("screenshot_1234567890123");
     expect(result).toMatch(/screenshot_1234567890123_[^.]+\.png$/);
   });
 
   test("should generate correct screenshot path with webp format", function () {
-    const screenshot = new TakeScreenshot(
-      mockDevice,
-      new FakeAdbClientFactory(new FakeAdbExecutor()),
-    );
+    const screenshot = new TakeScreenshot(mockDevice, {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+    });
     const result = screenshot.generateScreenshotPath(1234567890456, { format: "webp" });
     expect(result).toContain("screenshot_1234567890456");
     expect(result).toMatch(/screenshot_1234567890456_[^.]+\.webp$/);
@@ -34,10 +32,9 @@ describe("TakeScreenshot path generation", function () {
 
   test("should generate different timestamps for consecutive calls", function () {
     const fakeTimer = new FakeTimer();
-    const screenshot = new TakeScreenshot(
-      mockDevice,
-      new FakeAdbClientFactory(new FakeAdbExecutor()),
-    );
+    const screenshot = new TakeScreenshot(mockDevice, {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+    });
     const first = screenshot.generateScreenshotPath(fakeTimer.now(), { format: "png" });
     fakeTimer.advanceTime(1);
     const second = screenshot.generateScreenshotPath(fakeTimer.now(), { format: "png" });
@@ -46,12 +43,11 @@ describe("TakeScreenshot path generation", function () {
 
   test("uses an injected unique suffix when captures share a timestamp", function () {
     const fakeAdb = new FakeAdbExecutor();
-    const screenshot = new TakeScreenshot(
-      mockDevice,
-      new FakeAdbClientFactory(fakeAdb),
-      new FakeTimer(),
-      new CountingIdGenerator("capture"),
-    );
+    const screenshot = new TakeScreenshot(mockDevice, {
+      adbFactory: new FakeAdbClientFactory(fakeAdb),
+      timer: new FakeTimer(),
+      idGenerator: new CountingIdGenerator("capture"),
+    });
     const first = screenshot.generateScreenshotPath(1234567890123, { format: "png" });
     const second = screenshot.generateScreenshotPath(1234567890123, { format: "png" });
     const deviceToken = screenshotDeviceToken("test-device-id");
@@ -64,9 +60,11 @@ describe("TakeScreenshot path generation", function () {
     const fakeAdb = new FakeAdbExecutor();
     const screenshot = new TakeScreenshot(
       { name: "remote", platform: "android", deviceId: "127.0.0.1:5555", source: "local" },
-      new FakeAdbClientFactory(fakeAdb),
-      new FakeTimer(),
-      new CountingIdGenerator("capture"),
+      {
+        adbFactory: new FakeAdbClientFactory(fakeAdb),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("capture"),
+      },
     );
     const generated = screenshot.generateScreenshotPath(1234567890123, { format: "png" });
     expect(

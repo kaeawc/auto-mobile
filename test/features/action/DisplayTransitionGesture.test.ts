@@ -41,6 +41,7 @@ test("a coordinate action rejects a transition already detected before it starts
     action.observedInteraction(
       async () => {
         dispatched = true;
+        return { success: true };
       },
       { changeExpected: false, predictionContext: { toolName: "dragAndDrop", toolArgs: {} } },
     ),

@@ -11,11 +11,68 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeLockOwnerGenerationProbe } from "../fakes/FakeLockOwnerGenerationProbe";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import type { HostChildProcess } from "../../src/utils/HostCommandExecutor";
+import { createSimulatorLaunchHandle } from "../../src/utils/ios-cmdline-tools/simulatorLaunchHandle";
+import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 
 // #9920: the liveness watch on an emulator that survived SIGKILL, and the
 // request-bounded wait on a termination.
 
 const PID = 4242;
+
+describe("owned cleanup outcomes", () => {
+  it.each(["ios", "android"] as const)(
+    "preserves queued lifecycle waiter behavior for %s",
+    async (platform) => {
+      const timer = new FakeTimer();
+      const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+      const identity = { kind: "stable", platform, stableId: "device" } as const;
+      const lease = await coordinator.reserve(identity, { operation: "start", deadlineMs: 60_000 });
+      const next = coordinator.reserve(identity, { operation: "start", deadlineMs: 60_000 });
+      const waiter = next.then(
+        () => "granted",
+        () => "rejected",
+      );
+      const child = new FakeChildProcess(timer);
+      const signals: Array<NodeJS.Signals | number | undefined> = [];
+      child.kill = (signal) => {
+        signals.push(signal);
+        return true;
+      };
+      const handle =
+        platform === "ios"
+          ? createSimulatorLaunchHandle(async () => {
+              throw new Error("shutdown failed");
+            })
+          : child;
+      const termination = terminateOwnedEmulatorProcess(handle, "device", timer, {
+        markHeldByUnkillableProcess: (pid) => lease.markHeldByUnkillableProcess?.(pid),
+        isProcessRunning: () => true,
+        processGeneration: new FakeLockOwnerGenerationProbe(),
+      });
+      if (platform === "android") {
+        timer.advanceTime(COLD_BOOT_SETTLEMENT_GRACE_MS);
+        await settle();
+        timer.advanceTime(COLD_BOOT_SETTLEMENT_GRACE_MS);
+      }
+      const outcome = await termination;
+      expect(outcome.state).toBe(platform === "ios" ? "cleanup-unconfirmed" : "survived");
+      if (platform === "android") {
+        expect(await waiter).toBe("rejected");
+        expect(signals).toEqual([undefined, "SIGKILL"]);
+        child.emit("exit", 0, null);
+        if (outcome.state === "survived") {
+          await outcome.gone;
+        }
+      }
+      lease.release();
+      expect(await waiter).toBe(platform === "ios" ? "granted" : "rejected");
+      if (platform === "ios") {
+        (await next).release();
+      }
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+});
 
 async function settle(): Promise<void> {
   for (let attempt = 0; attempt < 3; attempt++) {

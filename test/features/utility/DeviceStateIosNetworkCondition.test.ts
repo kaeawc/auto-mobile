@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import {
   DeviceState,
@@ -19,6 +19,10 @@ import {
 import { logger } from "../../../src/utils/logger";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeNetworkFilterBridge } from "../../fakes/FakeNetworkFilterBridge";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const iosSimulator: BootedDevice = {
   name: "iPhone 16",

@@ -1,0 +1,67 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "heart": [
+        {
+          "t": "6:00",
+          "bpm": 58
+        },
+        {
+          "t": "9:00",
+          "bpm": 96
+        },
+        {
+          "t": "12:00",
+          "bpm": 141
+        },
+        {
+          "t": "15:00",
+          "bpm": 88
+        },
+        {
+          "t": "18:00",
+          "bpm": 72
+        }
+      ]
+    },
+    "root": {
+      "type": "chart",
+      "variant": "line",
+      "series": [
+        {
+          "path": "/heart",
+          "y": "bpm",
+          "label": "0"
+        },
+        {
+          "path": "/heart",
+          "y": "bpm",
+          "label": "1"
+        },
+        {
+          "path": "/heart",
+          "y": "bpm",
+          "label": "2"
+        },
+        {
+          "path": "/heart",
+          "y": "bpm",
+          "label": "3"
+        },
+        {
+          "path": "/heart",
+          "y": "bpm",
+          "label": "4"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.series",
+  "expectedMessage": "Array length out of range"
+}

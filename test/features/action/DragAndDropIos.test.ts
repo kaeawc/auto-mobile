@@ -1,3 +1,5 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
 import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -9,7 +11,7 @@ import {
   IOS_DRAG_TIMEOUT_DURATION_RATIO,
 } from "../../../src/features/action/DragAndDrop";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import type { IOSCtrlProxy } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
+import type { IosCtrlProxy } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
@@ -43,44 +45,46 @@ describe("DragAndDrop - iOS", () => {
   let fakeWindow: FakeWindow;
   let fakeIosClient: FakeCtrlProxy;
   let fakeAndroidClient: FakeCtrlProxy;
-  let iosDragClient: Pick<IOSCtrlProxy, "requestDrag">;
+  let iosDragClient: Pick<IosCtrlProxy, "requestDrag">;
   let fakeTimer: FakeTimer;
   let iosSpy: ReturnType<typeof spyOn> | null = null;
   let androidSpy: ReturnType<typeof spyOn> | null = null;
   let managerSpy: ReturnType<typeof spyOn> | null = null;
   let runnerFinishedAt = 0;
 
-  const createHierarchy = (): ViewHierarchyResult => ({
-    hierarchy: {
-      node: [
-        {
-          $: {
-            "resource-id": "source-id",
-            text: "Source",
-            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-            class: "XCUIElementTypeCell",
+  const createHierarchy = (): ViewHierarchyResult =>
+    createHierarchyForTest({
+      hierarchy: {
+        node: [
+          {
+            $: {
+              "resource-id": "source-id",
+              text: "Source",
+              bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+              class: "XCUIElementTypeCell",
+            },
           },
-        },
-        {
-          $: {
-            "resource-id": "target-id",
-            text: "Target",
-            bounds: { left: 200, top: 200, right: 300, bottom: 300 },
-            class: "XCUIElementTypeCell",
+          {
+            $: {
+              "resource-id": "target-id",
+              text: "Target",
+              bounds: { left: 200, top: 200, right: 300, bottom: 300 },
+              class: "XCUIElementTypeCell",
+            },
           },
-        },
-      ],
-    },
-    packageName: "com.test.app",
-    updatedAt: Date.now(),
-  });
+        ],
+      },
+      packageName: "com.test.app",
+      updatedAt: Date.now(),
+    });
 
-  const createObserveResult = (): ObserveResult => ({
-    updatedAt: Date.now(),
-    screenSize: { width: 1170, height: 2532 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: createHierarchy(),
-  });
+  const createObserveResult = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1170, height: 2532 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: createHierarchy(),
+    });
 
   beforeEach(() => {
     fakeObserveScreen = new FakeObserveScreen();
@@ -88,12 +92,16 @@ describe("DragAndDrop - iOS", () => {
     fakeWindow = new FakeWindow();
     fakeIosClient = new FakeCtrlProxy();
     // The shared fake retains Android positional arguments; view its iOS request contract.
-    iosDragClient = fakeIosClient as Pick<IOSCtrlProxy, "requestDrag">;
+    iosDragClient = fakeIosClient as Pick<IosCtrlProxy, "requestDrag">;
     fakeAndroidClient = new FakeCtrlProxy();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     runnerFinishedAt = 0;
-    fakeIosClient.setHierarchyData(createHierarchy());
+    fakeIosClient.setHierarchyData({
+      hierarchy: {},
+      updatedAt: Date.now(),
+      packageName: "com.test.app",
+    });
     fakeIosClient.setViewHierarchyResult(createHierarchy());
 
     fakeObserveScreen.setObserveResult(() => createObserveResult());
@@ -105,9 +113,8 @@ describe("DragAndDrop - iOS", () => {
     });
 
     // If the Android availability guard ran on iOS, this would force failure — it must NOT run.
-    managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-      isAvailable: async () => false,
-    });
+    const manager = AndroidCtrlProxyManager.getInstance(IOS_DEVICE);
+    managerSpy = spyOn(manager, "isAvailable").mockResolvedValue(false);
     androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeAndroidClient);
     iosSpy = spyOnIosClientInstance(fakeIosClient);
 
@@ -491,7 +498,7 @@ describe("DragAndDrop - iOS", () => {
   });
 
   test("direct iOS sync cannot resolve an offscreen source excluded by observe", async () => {
-    const freshHierarchy: ViewHierarchyResult = {
+    const freshHierarchy: ViewHierarchyResult = createHierarchyForTest({
       packageName: "com.test.app",
       updatedAt: 1,
       screenWidth: 100,
@@ -515,8 +522,12 @@ describe("DragAndDrop - iOS", () => {
           },
         ],
       },
-    };
-    fakeIosClient.setHierarchyData(freshHierarchy);
+    });
+    fakeIosClient.setHierarchyData({
+      hierarchy: {},
+      updatedAt: freshHierarchy.updatedAt ?? Date.now(),
+      packageName: freshHierarchy.packageName ?? "com.test.app",
+    });
     fakeIosClient.setViewHierarchyResult(freshHierarchy);
     const result = await dragAndDrop.execute({
       source: { elementId: "source-id" },
@@ -528,7 +539,11 @@ describe("DragAndDrop - iOS", () => {
 
   test("drag uses cleaned visible children and excludes filtered iOS nodes", async () => {
     const freshHierarchy = iosProjectionFixture();
-    fakeIosClient.setHierarchyData(freshHierarchy);
+    fakeIosClient.setHierarchyData({
+      hierarchy: {},
+      updatedAt: freshHierarchy.updatedAt ?? Date.now(),
+      packageName: freshHierarchy.packageName ?? "com.test.app",
+    });
     fakeIosClient.setViewHierarchyResult(freshHierarchy);
     fakeIosClient.setDragResult({ success: true, totalTimeMs: 1, gestureTimeMs: 1 });
 
@@ -683,7 +698,7 @@ describe("DragAndDrop - iOS", () => {
   test("drags against the freshly-refreshed hierarchy, not the stale observe cache", async () => {
     // The cached observe places the elements at (50,50)/(250,250); the fresh runner
     // snapshot reports new coordinates after the UI scrolled. The drag must use the fresh ones.
-    const freshHierarchy: ViewHierarchyResult = {
+    const freshHierarchy: ViewHierarchyResult = createHierarchyForTest({
       hierarchy: {
         node: [
           {
@@ -706,8 +721,12 @@ describe("DragAndDrop - iOS", () => {
       },
       packageName: "com.test.app",
       updatedAt: Date.now(),
-    };
-    fakeIosClient.setHierarchyData(freshHierarchy);
+    });
+    fakeIosClient.setHierarchyData({
+      hierarchy: {},
+      updatedAt: freshHierarchy.updatedAt ?? Date.now(),
+      packageName: freshHierarchy.packageName ?? "com.test.app",
+    });
     fakeIosClient.setViewHierarchyResult(freshHierarchy);
     fakeIosClient.setDragResult({ success: true, totalTimeMs: 1, gestureTimeMs: 1 });
 

@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { createProxyMcpServer, noActiveDeviceSessionResult } from "../../src/server/proxyServer";
 import {
   DaemonBoundSessionExpiredError,
@@ -16,7 +16,7 @@ import {
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import {
   DAEMON_STALL_RESUMED_CODE,
   DAEMON_RESTART_RESUMED_CODE,
@@ -31,7 +31,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntilQuiescent, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { logger } from "../../src/utils/logger";
 import type { Timer } from "../../src/utils/SystemTimer";
-import { SUSPECT_GRACE_MS } from "../../src/daemon/sessionLivenessWindows";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 
 // #10989: a daemon frozen for longer than the lease (SIGSTOP) that then resumes by itself
 // (SIGCONT), still the same process holding the same sessions. The proxy, the daemon's real
@@ -169,6 +169,7 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
       proxyConfig: {
         timer: new FakeTimer(),
         autoStartDaemon: false,
+        daemonAvailabilityProbe: async () => true,
         daemonManager: warmManager,
         clientFactory: () =>
           new FakeDaemonClient({
@@ -188,7 +189,6 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
     });
     const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "warm-plain-restart", version: "1" });
-    const available = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     try {
       await server.connect(serverTransport);
       await client.connect(clientTransport);
@@ -197,7 +197,6 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
       await client.close();
       await server.close();
       await proxy.close();
-      available.mockRestore();
     }
   });
 
@@ -208,6 +207,7 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
@@ -778,4 +778,8 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
     });
     expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled"]);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

@@ -6,13 +6,16 @@ import {
   AppearanceSocketRequest,
   AppearanceSocketResponse,
   AppearanceSocketCommand,
-} from "./appearanceSocketTypes";
+} from "./wire/appearanceSocketTypes";
 import {
   getAppearanceConfig,
   resolveAppearanceMode,
   updateAppearanceConfig,
-} from "../server/appearanceManager";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
+} from "./appearanceManager";
+import {
+  listDirectSessionDevices,
+  resolveDirectSessionDevice,
+} from "../utils/directSessionDeviceRegistry";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import {
   DEFAULT_APPEARANCE_APPLY_DEADLINE_MS,
@@ -25,7 +28,7 @@ import {
   executionTracker,
   sessionExecutionMetadataOf,
   type ActiveExecution,
-} from "../server/executionTracker";
+} from "./executionTracker";
 import { admitInputOnHolderSession } from "./inputDeviceOwnership";
 import { sessionReleaseThatCancelledCall } from "./sessionReleasedDuringCall";
 import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appearanceSyncPolicy";
@@ -45,12 +48,20 @@ import {
 const VALID_MODES = new Set(["light", "dark", "auto"]);
 const AUTOMATIC_SYNC_DISABLED_WARNING =
   "Automatic appearance sync is disabled by AUTOMOBILE_APPEARANCE_SYNC.";
+const NO_DEVICE_TARGETED_WARNING =
+  "No device was targeted: the configuration is stored, but no device was changed. " +
+  "Name a session or start a device first.";
 
 export interface AppearanceDeviceSource {
   getPooledDevices(): BootedDevice[];
-  getCurrentDevice(): BootedDevice | undefined;
-  /** Session registry owner, including derived device-label session IDs. */
-  getSessionForDevice(deviceId: string): string | null;
+  getSessionDevice(sessionUuid: string | undefined): BootedDevice | undefined;
+  /** Daemon registry owner (including label sessions), or the caller's matching direct registration. */
+  getSessionForDevice(deviceId: string, sessionUuid?: string): string | null;
+  /**
+   * Devices a request with no session may re-theme when stream auth is off. Direct mode has no
+   * pool, so these are the devices this process readied itself (#14375).
+   */
+  getSessionlessDevices?(): BootedDevice[];
   /**
    * The registry that admits control calls on a holder's session. A source without one (direct
    * mode, or a fake that models no session lifecycle) admits every apply.
@@ -64,7 +75,7 @@ interface AppearanceTarget {
   execution?: ActiveExecution;
 }
 
-const defaultDeviceSource: AppearanceDeviceSource = {
+export const defaultAppearanceDeviceSource: AppearanceDeviceSource = {
   getPooledDevices: () => {
     const pool = defaultDaemonContext.devicePool();
     if (!pool) {
@@ -76,12 +87,48 @@ const defaultDeviceSource: AppearanceDeviceSource = {
       platform: device.platform,
     }));
   },
-  getCurrentDevice: () => DeviceReadiness.getInstance().getCurrentDevice(),
-  getSessionForDevice: (deviceId) => {
-    return defaultDaemonContext.sessionManager()?.getSessionForDevice(deviceId) ?? null;
+  getSessionDevice: (sessionUuid) => {
+    const normalizedSessionUuid = sessionUuid?.trim();
+    if (!normalizedSessionUuid) {
+      return undefined;
+    }
+    const manager = defaultDaemonContext.sessionManager();
+    if (!manager) {
+      return resolveDirectSessionDevice(normalizedSessionUuid)?.device;
+    }
+    const deviceId = manager.getDeviceForSession(normalizedSessionUuid);
+    const device = deviceId ? defaultDaemonContext.devicePool()?.getDevice(deviceId) : undefined;
+    return device
+      ? { deviceId: device.id, name: device.name, platform: device.platform }
+      : undefined;
+  },
+  getSessionForDevice: (deviceId, sessionUuid) => {
+    const manager = defaultDaemonContext.sessionManager();
+    if (manager) {
+      return manager.getSessionForDevice(deviceId);
+    }
+    const normalizedSessionUuid = sessionUuid?.trim();
+    const direct = normalizedSessionUuid
+      ? resolveDirectSessionDevice(normalizedSessionUuid)
+      : undefined;
+    return direct?.device.deviceId === deviceId ? direct.sessionUuid : null;
   },
   getSessionManager: () => defaultDaemonContext.sessionManager(),
 };
+
+/**
+ * The source of a direct (`--no-proxy`) process. A sessionless request with stream auth off
+ * re-themes the devices this process readied: its explicit device pin and the devices its direct
+ * sessions hold. It never reaches devices it did not ready (#14375).
+ */
+export function createDirectModeAppearanceDeviceSource(
+  pinnedDevices: () => BootedDevice[],
+): AppearanceDeviceSource {
+  return {
+    ...defaultAppearanceDeviceSource,
+    getSessionlessDevices: () => [...pinnedDevices(), ...listDirectSessionDevices()],
+  };
+}
 
 export interface AppearanceSocketServerDependencies {
   getConfig: (sessionKey?: string) => Promise<AppearanceConfig>;
@@ -116,12 +163,12 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
   constructor(
     socketPath: string = getSocketPath(APPEARANCE_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
-    private readonly authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
+    protected readonly authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
       "appearance",
       // An observer may store its own config; it applies once the observer holds a device (#10976).
       { allowObserverSessions: true },
     ),
-    private readonly deviceSource: AppearanceDeviceSource = defaultDeviceSource,
+    private readonly deviceSource: AppearanceDeviceSource = defaultAppearanceDeviceSource,
     private readonly dependencies: AppearanceSocketServerDependencies = defaultDependencies,
   ) {
     super(socketPath, timer, "Appearance");
@@ -180,7 +227,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
         result: {
           config,
           appliedMode: appliedMode ?? undefined,
-          ...this.automaticSyncWarning(enabled),
+          ...this.warningFor(enabled, targets),
         },
       };
     });
@@ -212,7 +259,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
         result: {
           config,
           appliedMode: appliedMode ?? undefined,
-          ...this.automaticSyncWarning(normalizedMode === "auto"),
+          ...this.warningFor(normalizedMode === "auto", targets),
         },
       };
     });
@@ -285,6 +332,20 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
     };
   }
 
+  /** The automatic-sync warning, plus a note when an auth-off command changed no device. */
+  private warningFor(
+    automaticSyncRequested: boolean,
+    targets: AppearanceTarget[],
+  ): { warning: string } | Record<string, never> {
+    const warnings = [
+      this.automaticSyncWarning(automaticSyncRequested),
+      targets.length === 0 && this.authenticator.isAuthenticationEnforced?.() === false
+        ? { warning: NO_DEVICE_TARGETED_WARNING }
+        : {},
+    ].flatMap((entry) => ("warning" in entry ? [entry.warning] : []));
+    return warnings.length > 0 ? { warning: warnings.join(" ") } : {};
+  }
+
   private automaticSyncWarning(
     automaticSyncRequested: boolean,
   ): { warning: string } | Record<string, never> {
@@ -355,27 +416,40 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
     );
   }
 
-  private getTargets(sessionUuid: string | undefined): BootedDevice[] {
+  /** With stream auth off, a request naming no session reaches the devices its process readied. */
+  private sessionlessDevices(sessionUuid: string | undefined): BootedDevice[] {
+    return !sessionUuid && this.authenticator.isAuthenticationEnforced?.() === false
+      ? (this.deviceSource.getSessionlessDevices?.() ?? [])
+      : [];
+  }
+
+  private getTargets(requestedSessionUuid: string | undefined): BootedDevice[] {
+    // The stream authenticator accepts a padded UUID; look it up as it authorized it (#14379).
+    const sessionUuid = requestedSessionUuid?.trim() || undefined;
     const targets = new Map<string, BootedDevice>();
 
     for (const device of this.deviceSource.getPooledDevices()) {
       targets.set(device.deviceId, device);
     }
 
-    const current = this.deviceSource.getCurrentDevice();
-    if (current) {
-      targets.set(current.deviceId, current);
+    const sessionDevice = this.deviceSource.getSessionDevice(sessionUuid);
+    if (sessionDevice) {
+      targets.set(sessionDevice.deviceId, sessionDevice);
+    }
+
+    for (const device of this.sessionlessDevices(sessionUuid)) {
+      targets.set(device.deviceId, device);
     }
 
     if (this.authenticator.isAuthenticationEnforced?.() === false) {
       // AUTOMOBILE_DAEMON_STREAM_AUTH=0 leaves no verified caller identity;
-      // preserve the existing all-pooled-plus-current targeting in auth-off mode.
+      // target pooled devices plus the requesting session's direct device.
       return [...targets.values()];
     }
 
     const callerBase = this.configKey(sessionUuid);
     const owned = [...targets.values()].filter((device) => {
-      const owner = this.deviceSource.getSessionForDevice(device.deviceId);
+      const owner = this.deviceSource.getSessionForDevice(device.deviceId, sessionUuid);
       if (!callerBase || !owner) {
         return false;
       }
@@ -395,8 +469,12 @@ export function getAppearanceSocketPath(): string {
   return socketServer.instance?.getSocketPath() ?? getSocketPath(APPEARANCE_SOCKET_CONFIG);
 }
 
-export async function startAppearanceSocketServer(): Promise<void> {
-  await socketServer.start(() => new AppearanceSocketServer());
+export async function startAppearanceSocketServer(
+  deviceSource: AppearanceDeviceSource = defaultAppearanceDeviceSource,
+): Promise<void> {
+  await socketServer.start(
+    () => new AppearanceSocketServer(undefined, undefined, undefined, deviceSource),
+  );
 }
 
 export async function stopAppearanceSocketServer(): Promise<void> {

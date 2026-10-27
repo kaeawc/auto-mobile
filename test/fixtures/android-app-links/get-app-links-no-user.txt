@@ -1,0 +1,6 @@
+  com.example.shop:
+    ID: 3f6c2b1e-8d4a-4c7e-9b1f-2a5d6e7f8a9b
+    Signature: [B4:61:0E:2C:7D:94:3A:58:C1:0F:6B:22:9E:84:D7:13:5A:C8:FE:01:93:4B:7E:26:D0:8C:55:A1:39:F2:6E:10]
+    Domain verification state:
+      shop.example.com: migrated
+      www.shop.example.com: pre_verified

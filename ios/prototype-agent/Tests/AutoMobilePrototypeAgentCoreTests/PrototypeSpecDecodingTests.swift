@@ -2,10 +2,20 @@
 import XCTest
 
 final class PrototypeSpecDecodingTests: XCTestCase {
+    /// A contract-valid placement: a sheet needs its `edge` and `height`, a floating window its
+    /// `gravity` and `offset`.
+    private func placementObject(_ type: String) -> [String: Any] {
+        switch type {
+        case "sheet": ["type": type, "edge": "bottom", "height": 200]
+        case "floating": ["type": type, "gravity": "center", "offset": ["x": 0, "y": 0]]
+        default: ["type": type]
+        }
+    }
+
     func testWindowChromeDecodesOrNamesTheInvalidField() throws {
         for placement in ["fullscreen", "sheet", "floating"] {
             for value: String? in [nil, "none", "bar"] {
-                var window: [String: Any] = ["placement": ["type": placement]]
+                var window: [String: Any] = ["placement": placementObject(placement)]
                 if let value { window["chrome"] = value }
                 let data = try JSONSerialization.data(withJSONObject: window)
                 XCTAssertEqual(try JSONDecoder().decode(WindowSpec.self, from: data).chrome, value)
@@ -138,7 +148,7 @@ final class PrototypeSpecDecodingTests: XCTestCase {
         XCTAssertEqual(children.map(\.type), ["switch", "checkbox", "button", "text", "bottomSheet"])
         XCTAssertEqual(children[0].label, "Wi-Fi")
         XCTAssertEqual(children[2].variant, "outlined")
-        XCTAssertEqual(children[2].onTap?.last?.by, 2)
+        XCTAssertEqual(children[2].onTap?.last?.incrementAmount, 2)
         XCTAssertEqual(children[3].visibleWhen, .notEquals(key: "n", value: .number(0)))
         XCTAssertEqual(children[4].detents, [.half, .points(120), .full])
     }

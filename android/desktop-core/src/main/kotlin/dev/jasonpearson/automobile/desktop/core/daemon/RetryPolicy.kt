@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.min
 import kotlin.math.pow
@@ -35,14 +36,34 @@ fun <T> retryWithBackoffBlocking(
   var attempt = 0
   val attempts = maxOf(1, policy.maxRetries)
   while (true) {
-    try {
-      return block()
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      if (!isRetryable(e) || attempt == attempts - 1) throw e
-      Thread.sleep(policy.delayBeforeRetryMs(attempt))
-      attempt++
-    }
+    blockingRetryAttempt(block)
+      .fold(
+        onSuccess = {
+          return it
+        },
+        onFailure = { error ->
+          if (error !is Exception) throw error
+          if (!isRetryable(error) || attempt == attempts - 1) throw error
+        },
+      )
+    Thread.sleep(policy.delayBeforeRetryMs(attempt))
+    attempt++
   }
 }
+
+private fun <T> blockingRetryAttempt(block: () -> T): Result<T> =
+  try {
+    Result.success(block())
+  } catch (e: CancellationException) {
+    throw e
+  } catch (e: McpConnectionException) {
+    Result.failure(e)
+  } catch (e: IOException) {
+    Result.failure(e)
+  } catch (e: IllegalStateException) {
+    Result.failure(e)
+  } catch (e: IllegalArgumentException) {
+    Result.failure(e)
+  } catch (e: InterruptedException) {
+    Result.failure(e)
+  }

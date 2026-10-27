@@ -2,11 +2,16 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { testOverrides } from "./testOverrides";
+import { tryOrElse } from "../models/tryOrElse";
 import {
   defaultGitMetadataClient,
   type GitMetadataClient,
   type GitVersionInfo,
+  type GitDirtyState,
 } from "./GitMetadataClient";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
+import { defaultTimer, type Timer } from "./SystemTimer";
+import { logger } from "./logger";
 
 export type { GitVersionInfo } from "./GitMetadataClient";
 
@@ -27,7 +32,10 @@ export interface McpVersionDeps {
   readGitVersion: () => GitVersionInfo | null;
 }
 
-let cachedVersion: string | null = null;
+export interface McpVersionResolverDeps extends McpVersionDeps {
+  timer: Pick<Timer, "setTimeout">;
+  readDirtyState: () => Promise<GitDirtyState | null>;
+}
 
 const findPackageJson = (startDir: string): string | null => {
   let currentDir = startDir;
@@ -48,13 +56,14 @@ const findPackageJson = (startDir: string): string | null => {
 const moduleDir = (): string => path.dirname(fileURLToPath(import.meta.url));
 
 const readPackageName = (dir: string): string | null => {
-  try {
-    const raw = fs.readFileSync(path.join(dir, "package.json"), "utf-8");
-    return (JSON.parse(raw) as { name?: string }).name ?? null;
-  } catch {
-    // Version probing runs before logger setup; fall back to unstamped metadata.
-  }
-  return null;
+  // Version probing runs before logger setup; fall back to unstamped metadata.
+  return tryOrElse(
+    () => {
+      const raw = fs.readFileSync(path.join(dir, "package.json"), "utf-8");
+      return (JSON.parse(raw) as { name?: string }).name ?? null;
+    },
+    () => null,
+  );
 };
 
 const readPackageVersionFromDisk = (): string | null => {
@@ -62,14 +71,15 @@ const readPackageVersionFromDisk = (): string | null => {
   if (!packagePath) {
     return null;
   }
-  try {
-    const raw = fs.readFileSync(packagePath, "utf-8");
-    const parsed = JSON.parse(raw) as { version?: string };
-    return parsed.version ?? null;
-  } catch {
-    // Version probing runs before logger setup; fall back to other version sources.
-  }
-  return null;
+  // Version probing runs before logger setup; fall back to other version sources.
+  return tryOrElse(
+    () => {
+      const raw = fs.readFileSync(packagePath, "utf-8");
+      const parsed = JSON.parse(raw) as { version?: string };
+      return parsed.version ?? null;
+    },
+    () => null,
+  );
 };
 
 /**
@@ -77,7 +87,7 @@ const readPackageVersionFromDisk = (): string | null => {
  * null when git is unavailable or this is not AutoMobile's own source checkout
  * (i.e. a published/release install), which keeps release versions unstamped.
  *
- * `git rev-parse` searches *upward* from the package directory, so a release
+ * Repository discovery searches *upward* from the package directory, so a release
  * install vendored inside an unrelated git repo (or a `bunx`/global-cache layout
  * with no `node_modules` segment) would otherwise be stamped with the *host*
  * repo's commit. Two guards prevent that:
@@ -100,6 +110,10 @@ export const readGitVersion = (
  * place that knows the stamp format.
  */
 export const releaseVersion = (version: string): string => version.split("+")[0];
+
+/** Remove a trailing working-tree stamp only from git build metadata (+g<sha>). */
+export const withoutDirtyStamp = (version: string): string =>
+  version.replace(/(\+g[\da-f]+)\.dirty(?:\.[\da-f]+)?$/i, "$1");
 
 /**
  * Stamp a git short SHA (and dirty marker) onto a base version as semver build
@@ -144,18 +158,91 @@ export const resolveMcpServerVersion = (deps: McpVersionDeps): string => {
   return formatMcpServerVersion(base, deps.readGitVersion());
 };
 
-export const getMcpServerVersion = (): string => {
-  if (cachedVersion) {
-    return cachedVersion;
-  }
-
-  cachedVersion = resolveMcpServerVersion({
-    env: {
-      MCP_SERVER_VERSION: process.env.MCP_SERVER_VERSION,
-      npm_package_version: process.env.npm_package_version,
+/** Cache the startup stamp and refine tracked edits once, off the startup path. */
+export const createMcpVersionResolver = (
+  deps: McpVersionResolverDeps,
+): { current(): string; isSettled(): boolean; resolveSettled(): Promise<string> } => {
+  let cachedVersion: string | null = null;
+  let refine: (() => Promise<void>) | undefined;
+  let refinement: Promise<void> | undefined;
+  let refined = false;
+  const startRefinement = (): Promise<void> => (refinement ??= refine?.() ?? Promise.resolve());
+  return {
+    current() {
+      if (cachedVersion !== null) {
+        return cachedVersion;
+      }
+      const override = deps.env.MCP_SERVER_VERSION;
+      if (override) {
+        cachedVersion = override;
+        return cachedVersion;
+      }
+      const base = deps.readPackageVersion() || deps.env.npm_package_version || "unknown";
+      const git = base === "unknown" ? null : deps.readGitVersion();
+      cachedVersion = formatMcpServerVersion(base, git);
+      if (git) {
+        refine = async (): Promise<void> => {
+          try {
+            const state = await deps.readDirtyState();
+            if (state?.dirty) {
+              cachedVersion = formatMcpServerVersion(base, { ...git, ...state });
+            }
+          } catch (error) {
+            logger.warn("Background git dirty-state resolution failed", error);
+          } finally {
+            refined = true;
+          }
+        };
+        deps.timer.setTimeout(() => void startRefinement(), 0);
+      }
+      return cachedVersion;
     },
-    readPackageVersion: readPackageVersionFromDisk,
-    readGitVersion: () => readGitVersion(moduleDir(), testOverrides.gitMetadataClient),
-  });
-  return cachedVersion;
+    /** True once current() can no longer change: no refinement is due, or it has finished. */
+    isSettled() {
+      this.current();
+      return refine === undefined || refined;
+    },
+    async resolveSettled() {
+      this.current();
+      // Explicit identity consumers cannot rely on an unref'ed timer keeping the
+      // process alive. Start (or join) the same asynchronous probe immediately.
+      await startRefinement();
+      return this.current();
+    },
+  };
 };
+
+let resolver: ReturnType<typeof createMcpVersionResolver> | undefined;
+
+const defaultResolverDeps = (): McpVersionResolverDeps => ({
+  env: {
+    MCP_SERVER_VERSION: readEnvRaw(AMBIENT_ENV.MCP_SERVER_VERSION),
+    npm_package_version: readEnvRaw(AMBIENT_ENV.NPM_PACKAGE_VERSION),
+  },
+  readPackageVersion: readPackageVersionFromDisk,
+  readGitVersion: () => readGitVersion(moduleDir(), testOverrides.gitMetadataClient),
+  readDirtyState: () =>
+    (testOverrides.gitMetadataClient ?? defaultGitMetadataClient).readDirtyState(moduleDir()),
+  timer: {
+    setTimeout(callback, ms) {
+      const handle = defaultTimer.setTimeout(callback, ms);
+      handle.unref?.();
+      return handle;
+    },
+  },
+});
+
+const getResolver = (): ReturnType<typeof createMcpVersionResolver> =>
+  (resolver ??= createMcpVersionResolver(defaultResolverDeps()));
+
+/** Probe the version a process started from this checkout right now would report. */
+export const probeCheckoutMcpServerVersion = (): Promise<string> =>
+  createMcpVersionResolver(defaultResolverDeps()).resolveSettled();
+
+export const getMcpServerVersion = (): string => getResolver().current();
+
+/** Whether {@link getMcpServerVersion} already returns its final (dirty-aware) value. */
+export const isMcpServerVersionSettled = (): boolean => getResolver().isSettled();
+
+/** Await the same one-shot refinement used by normal background discovery. */
+export const getSettledMcpServerVersion = (): Promise<string> => getResolver().resolveSettled();

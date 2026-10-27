@@ -16,32 +16,49 @@ class HierarchySuspendWiringTest {
     assertTrue(body.contains("serviceScope.coroutineContext[Job]?.isActive == false"))
     assertTrue(body.contains("snapshotOptions = cancellableOptions"))
     assertTrue(body.contains("debouncer.extractImmediately("))
-    val delivery = body.indexOf("deliverHierarchyFrame(")
-    val cancellation = body.indexOf("commandJob?.ensureActive()")
+    assertTrue(
+      body.contains("ImmediateHierarchyDelivery(requestId, commandJob).deliver(hierarchy)"),
+    )
+    val deliveryBody = functionBody("suspend fun deliver(hierarchy:", "HierarchyController.kt")
+    val delivery = deliveryBody.indexOf("deliverHierarchyFrame(")
+    val cancellation = deliveryBody.indexOf("commandJob?.ensureActive()")
     assertTrue("cancellation must occur inside delivery's cleanup guard", cancellation > delivery)
-    assertTrue(body.contains("releaseFrameContext ="))
+    assertTrue(deliveryBody.contains("releaseFrameContext ="))
     assertFalse(body.contains("runBlocking"))
   }
 
   @Test
   fun `direct extraction forwards snapshot cancellation to both window walkers`() {
-    val body = functionBody("private fun extractHierarchyDirect(", "HierarchyController.kt")
+    val entry = functionBody("private fun extractHierarchyDirect(", "HierarchyController.kt")
+    assertTrue(
+      entry
+        .replace(Regex("\\s+"), "")
+        .contains("HierarchyCapture(snapshotOptions.displayId).extractDirect("),
+    )
+    val body = functionBody("fun walkDirect(", "HierarchyController.kt")
+    val extraction = functionBody("fun extractDirect(", "HierarchyController.kt")
+    val walk = extraction.indexOf("walkDirect(disableAllFiltering, snapshotOptions)")
+    assertTrue(walk >= 0)
     val allWindows = body.indexOf("viewHierarchyExtractor.extractFromAllWindows(")
     val activeWindow = body.indexOf("viewHierarchyExtractor.extractFromActiveWindow(")
     val firstForward = body.indexOf("snapshotOptions = snapshotOptions", allWindows)
     val secondForward = body.indexOf("snapshotOptions = snapshotOptions", activeWindow)
     assertTrue(firstForward in (allWindows + 1) until activeWindow)
     assertTrue(secondForward > activeWindow)
-    val cancellation = body.indexOf("if (snapshotOptions.isCancelled())")
-    val retainedContext = body.indexOf("extractedHierarchyFrameContexts[")
-    assertTrue(cancellation > secondForward)
+    val cancellation = extraction.indexOf("if (snapshotOptions.isCancelled())")
+    val retainedContext = extraction.indexOf("extractedHierarchyFrameContexts[")
+    assertTrue(cancellation > walk)
     assertTrue(retainedContext > cancellation)
   }
 
   @Test
   fun `text acknowledgement and async refresh use complete suspend paths`() {
-    val setText = functionBody("suspend fun performSetText(", "TextInputController.kt")
-    assertFalse(setText.contains("runBlocking"))
+    val entry = functionBody("suspend fun performSetText(", "TextInputController.kt")
+    assertTrue(
+      entry.contains("SetTextOperation(requestId, text, resourceId, dismissKeyboard).run()"),
+    )
+    val setText = functionBody("private inner class SetTextOperation(", "TextInputController.kt")
+    assertFalse((entry + setText).contains("runBlocking"))
     assertTrue(setText.contains("broadcastSetTextResult("))
     val refresh =
       functionBody("private fun refreshHierarchyAfterTextInput()", "TextInputController.kt")

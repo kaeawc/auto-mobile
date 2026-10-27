@@ -29,7 +29,7 @@ jobs:
     # `initializeDevicePoolWithTimeout(5s)` + `initializeIosServices(5s)`. The default
     # covers normal cold startup; this Xcode lane can add two serial iOS readiness probes,
     # so keep its explicit 60s budget. The env var name must match
-    # src/daemon/constants.ts exactly — a typo silently falls back to 30000.
+    # src/daemon/wire/constants.ts exactly — a typo silently falls back to 30000.
     env:
       AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS: "240"
       AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS: "150000"
@@ -112,7 +112,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 

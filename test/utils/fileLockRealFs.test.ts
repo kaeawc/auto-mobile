@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { formatLockContent, tryAcquireExclusiveLock } from "../../src/utils/fileLock";
 import { nodeLockFileSystem } from "../../src/utils/lockFileSystem";
@@ -45,6 +53,14 @@ describe("node lock filesystem contracts on every OS", () => {
       expect(readFileSync(path, "utf8")).toBe("existing bytes");
     },
   );
+
+  test("stat reports the exact inode and the number mtimeMs statSync reports", () => {
+    const path = join(scratch.next(), "file");
+    writeFileSync(path, "bytes");
+    const stat = nodeLockFileSystem.stat(path);
+    expect(stat.ino).toBe(statSync(path, { bigint: true }).ino);
+    expect(stat.mtimeMs).toBe(statSync(path).mtimeMs);
+  });
 
   test("stat is stable for unchanged files, hard links and renames", () => {
     const dir = scratch.next();
@@ -116,7 +132,7 @@ describe("node lock filesystem contracts on every OS", () => {
     writeFileSync(lock, stale);
     const { ino, mtimeMs } = nodeLockFileSystem.stat(lock);
     const hash = createHash("sha256").update(stale).digest("hex").slice(0, 32);
-    const guard = `${lock}.reclaim.${ino}.${mtimeMs}.${hash}.0`;
+    const guard = `${lock}.reclaim.${Number(ino)}.${mtimeMs}.${hash}.0`;
     writeFileSync(guard, "98\ndead-guard");
     expect(
       tryAcquireExclusiveLock(lock, {

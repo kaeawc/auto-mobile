@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import {
   registerDataStoreResources,
   clearDataStoreResourceCacheForTesting,
@@ -55,7 +56,7 @@ describe("dataStoreResources", () => {
     if (!match) {
       throw new Error(`no template matched: ${uri}`);
     }
-    return match.template.handler(match.params);
+    return invokeResourceTemplate(match);
   }
 
   async function readBody(uri: string): Promise<Record<string, unknown>> {

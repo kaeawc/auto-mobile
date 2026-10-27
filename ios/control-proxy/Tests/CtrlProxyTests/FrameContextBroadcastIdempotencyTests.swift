@@ -68,12 +68,12 @@ final class FrameContextBroadcastIdempotencyTests: XCTestCase {
         let context = FrameContext()
         let captured = ValueBox<Data>()
         let server = makeServer(frameContext: context, captured: captured)
-        let a = ViewHierarchy(packageName: "com.test.a")
-        let b = ViewHierarchy(packageName: "com.test.b")
+        let firstHierarchy = ViewHierarchy(packageName: "com.test.a")
+        let secondHierarchy = ViewHierarchy(packageName: "com.test.b")
 
-        server.broadcastHierarchyUpdate(a)
-        server.broadcastHierarchyUpdate(b)
-        server.broadcastHierarchyUpdate(a)
+        server.broadcastHierarchyUpdate(firstHierarchy)
+        server.broadcastHierarchyUpdate(secondHierarchy)
+        server.broadcastHierarchyUpdate(firstHierarchy)
 
         let issued = try tokens(captured)
         XCTAssertEqual(issued.count, 3)
@@ -81,6 +81,9 @@ final class FrameContextBroadcastIdempotencyTests: XCTestCase {
         XCTAssertNotEqual(issued[1], issued[2])
         XCTAssertNotEqual(issued[0], issued[2])
         XCTAssertTrue(issued[2].contains(":3:"))
-        XCTAssertThrowsError(try context.performIfCurrent(expected: issued[0], hierarchy: a) { "accepted" })
+        XCTAssertThrowsError(
+            try context
+                .performIfCurrent(expected: issued[0], hierarchy: firstHierarchy) { "accepted" }
+        )
     }
 }

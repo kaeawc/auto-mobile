@@ -38,4 +38,45 @@ describe("DefaultDeviceSettingsAccess (#11145)", () => {
     expect(commands).toContain("shell cmd uimode night no");
     expect(commands).toContain("shell settings delete system time_12_24");
   });
+
+  test("reads accessibility display preferences as raw restorable settings (#14088)", async () => {
+    const factory = new FakeAdbClientFactory();
+    const client = factory.getFakeClient();
+    client.setCommandResult("shell getprop ro.build.version.sdk", "34\n");
+    client.setCommandResult("shell settings get secure high_text_contrast_enabled", "1\n");
+    client.setCommandResult("shell settings get secure font_weight_adjustment", "null\n");
+    for (const key of [
+      "window_animation_scale",
+      "transition_animation_scale",
+      "animator_duration_scale",
+    ]) {
+      client.setCommandResult(`shell settings get global ${key}`, "0.5\n");
+    }
+    const values = await new DefaultDeviceSettingsAccess(factory).read(device, [
+      "increaseContrast",
+      "reduceMotion",
+      "boldText",
+    ]);
+    expect(values).toEqual({ increaseContrast: "1", reduceMotion: "0.5,0.5,0.5", boldText: null });
+    expect(client.getCommandCalls().map((call) => call.command)).not.toContain(
+      "shell cmd uimode night",
+    );
+  });
+
+  test("restores recorded accessibility display preferences (#14088)", async () => {
+    const factory = new FakeAdbClientFactory();
+    const client = factory.getFakeClient();
+    client.setCommandResult("shell getprop ro.build.version.sdk", "34\n");
+    const written = await new DefaultDeviceSettingsAccess(factory).write(device, {
+      increaseContrast: null,
+      reduceMotion: "1.0,null,1.0",
+      boldText: "0",
+    });
+    expect(written).toEqual(["increaseContrast", "reduceMotion", "boldText"]);
+    const commands = client.getCommandCalls().map((call) => call.command);
+    expect(commands).toContain("shell settings delete secure high_text_contrast_enabled");
+    expect(commands).toContain("shell settings put global window_animation_scale 1.0");
+    expect(commands).toContain("shell settings delete global transition_animation_scale");
+    expect(commands).toContain("shell settings put secure font_weight_adjustment 0");
+  });
 });

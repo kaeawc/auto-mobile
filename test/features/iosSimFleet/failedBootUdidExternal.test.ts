@@ -7,7 +7,7 @@ import { IosSimCapacityGate } from "../../../src/features/iosSimFleet/CapacityGa
 import { IosSimFleetCostCollector } from "../../../src/features/iosSimFleet/FleetCostCollector";
 import { FleetBootInstrumentation } from "../../../src/features/iosSimFleet/IosBootInstrumentation";
 import { IOS_SIM_MAX_BOOTED_ENV } from "../../../src/features/iosSimFleet/capacityPolicy";
-import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
+import { parsePsSnapshot } from "../../../src/devices/bootAdmission/psSnapshot";
 import { parseSimctlInventory } from "../../../src/features/iosSimFleet/simctlInventory";
 import { FakeFleetHostSource } from "../../fakes/FakeFleetHostSource";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -73,7 +73,7 @@ test("a simulator whose AutoMobile boot failed unlisted is external when booted 
   expect(error).toBeInstanceOf(BootCapacityExhaustedError);
   // Fails today: externalDevices is undefined and the message blames no external simulator.
   expect((error as BootCapacityExhaustedError).details.externalDevices).toEqual([IOS27]);
-  expect((error as Error).message).toContain("not started by AutoMobile");
+  expect((error as Error).message).toContain("have no AutoMobile owner");
 });
 
 function setup() {

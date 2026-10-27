@@ -1,0 +1,46 @@
+MEDIA SESSION SERVICE (dumpsys media_session)
+
+  3 sessions listeners.
+  Global priority session is null
+  User Records:
+Record for full_user=0
+  Volume key long-press listener: null
+  Volume key long-press listener package:
+  Media key event listener: null
+  Media key event listener package:
+  Callback: android.media.session.ICallback$Stub$Proxy@5d8e2a1
+  Last MediaButtonReceiver: MBR {pi=PendingIntent{a41c0f6: PendingIntentRecord{7b3d2e4 dev.example.player broadcastIntent}}, componentName=ComponentInfo{dev.example.player/androidx.media.session.MediaButtonReceiver}, type=1, pkg=dev.example.player}
+  Restored MediaButtonReceiver: null
+  Restored MediaButtonReceiver componentType: 0
+  Media button session is dev.example.player/PlaybackService (userId=0)
+  Sessions Stack - have 2 sessions:
+    PlaybackService dev.example.player/PlaybackService (userId=0)
+      ownerPid=8412, ownerUid=10213, userId=0
+      package=dev.example.player
+      launchIntent=PendingIntent{3f1b9c2: PendingIntentRecord{c0d47a8 dev.example.player startActivity}}
+      mediaButtonReceiver=MBR {pi=PendingIntent{a41c0f6: PendingIntentRecord{7b3d2e4 dev.example.player broadcastIntent}}, componentName=ComponentInfo{dev.example.player/androidx.media.session.MediaButtonReceiver}, type=1, pkg=dev.example.player}
+      active=true
+      flags=3
+      rating type=0
+      controllers: 3
+      state=PlaybackState {state=PLAYING(3), position=42150, buffered position=96000, speed=1.0, updated=1834567, actions=823, custom actions=[], active item id=0, error=null}
+      audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_MUSIC flags=0x800 tags= bundle=null
+      volumeType=LOCAL, controlType=VOLUME_CONTROL_ABSOLUTE, max=0, current=0, volumeControlId=null
+      metadata: size=7, description=Night Drive, Example Artist, Example Album
+      queueTitle=null, size=3
+    MediaSession com.example.podcasts/MediaSession (userId=0)
+      ownerPid=9120, ownerUid=10224, userId=0
+      package=com.example.podcasts
+      launchIntent=null
+      mediaButtonReceiver=null
+      active=false
+      flags=3
+      rating type=0
+      controllers: 1
+      state=PlaybackState {state=PAUSED(2), position=1205000, buffered position=1205000, speed=0.0, updated=1790012, actions=4195150, custom actions=[Action:mName='Skip 30s, mIcon=2131230890, mExtras=null], active item id=-1, error=null}
+      audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_SPEECH flags=0x800 tags= bundle=null
+      volumeType=LOCAL, controlType=VOLUME_CONTROL_ABSOLUTE, max=0, current=0, volumeControlId=null
+      metadata: size=4, description=Episode 12: Testing, The Test Podcast, null
+      queueTitle=null, size=0
+Audio playback (lastly played comes first)
+  uid=10213 packages=dev.example.player

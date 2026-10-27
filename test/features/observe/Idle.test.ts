@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Idle, ROTATION_READ_FLOOR_MS } from "../../../src/features/observe/Idle";
 import { AwaitIdle } from "../../../src/features/observe/AwaitIdle";
@@ -48,7 +49,11 @@ describe("Idle - Unit Tests", function () {
       new FakeAdbClientFactory(adb),
       new FakeTimer(),
     );
-    const result = await subject.getUiStability("com.example.app", null, null, null, null, false);
+    const result = await subject.getUiStability(
+      "com.example.app",
+      { missedVsync: null, slowUiThread: null, frameDeadlineMissed: null, totalFrames: null },
+      false,
+    );
     expect(result).toHaveProperty("frameStatsUnavailable", true);
     expect(result).not.toHaveProperty("noFrameData");
   });
@@ -551,7 +556,7 @@ describe("Idle - Unit Tests", function () {
       timer.enableAutoAdvance();
       const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
       const fakeAdb = new FakeAdbExecutor();
-      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
+      fakeAdb.setDefaultResponse(createExecResult("", ""));
       const snapshotIdle = new Idle(device, new FakeAdbClientFactory(fakeAdb), timer);
 
       const result = await snapshotIdle.getUiStabilitySnapshot("com.example.app", 200);
@@ -569,7 +574,7 @@ describe("Idle - Unit Tests", function () {
       const timer = new FakeTimer();
       const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
       const fakeAdb = new FakeAdbExecutor();
-      fakeAdb.setDefaultResponse({ stdout: validGfxinfoOutput, stderr: "" });
+      fakeAdb.setDefaultResponse(createExecResult(validGfxinfoOutput, ""));
       const awaitIdle = new AwaitIdle(device, new FakeAdbClientFactory(fakeAdb), timer);
       const executeSpy = spyOn(fakeAdb, "executeCommand");
       const stabilitySpy = spyOn(Idle.prototype, "checkStabilityCriteria");
@@ -678,7 +683,7 @@ describe("Idle - Unit Tests", function () {
       { pkg: "com.samsung.android.app.launcher", expected: true, why: "exact samsung launcher" },
       { pkg: "com.miui.home", expected: true, why: "exact miui home" },
       { pkg: "com.oneplus.launcher", expected: true, why: "exact oneplus" },
-      { pkg: "com.android.settings", expected: true, why: "exact settings" },
+      { pkg: "com.android.settings", expected: false, why: "Settings provides real gfxinfo" },
       // Sub-packages of a known system package (prefix match).
       { pkg: "com.miui.home.settings", expected: true, why: "sub-package of miui.home" },
       { pkg: "com.android.launcher3.dev", expected: true, why: "sub-package of launcher3" },
@@ -731,13 +736,16 @@ describe("Idle - Unit Tests", function () {
     ] as const)("reads display 0 from %s", async (capture, rotation) => {
       const timer = new FakeTimer();
       const adb = new FakeAdbExecutor();
-      adb.setCommandResponse("shell dumpsys window displays", {
-        stdout: readFileSync(
-          join(__dirname, "windowDumps", `dumpsys-window-displays-${capture}.txt`),
-          "utf8",
+      adb.setCommandResponse(
+        "shell dumpsys window displays",
+        createExecResult(
+          readFileSync(
+            join(__dirname, "windowDumps", `dumpsys-window-displays-${capture}.txt`),
+            "utf8",
+          ),
+          "",
         ),
-        stderr: "",
-      });
+      );
       const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
       const rotationIdle = new Idle(device, new FakeAdbClientFactory(adb), timer);
 
@@ -757,10 +765,10 @@ describe("Idle - Unit Tests", function () {
         const timer = new FakeTimer();
         timer.setCurrentTime(100);
         const adb = new FakeAdbExecutor();
-        adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
-          stdout: "mRotation=1",
-          stderr: "",
-        });
+        adb.setCommandResponse(
+          WINDOW_MANAGER_ROTATION_COMMAND,
+          createExecResult("mRotation=1", ""),
+        );
         const rotationIdle = new Idle(
           { deviceId: "d", name: "d", platform: "android" },
           new FakeAdbClientFactory(adb),
@@ -793,11 +801,11 @@ describe("Idle - Unit Tests", function () {
         timer.setCurrentTime(493);
         const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
         const adb = new FakeAdbExecutor();
-        adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
-          stdout,
-          stderr: "",
-        });
-        adb.setCommandResponse(WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND, { stdout, stderr: "" });
+        adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, createExecResult(stdout, ""));
+        adb.setCommandResponse(
+          WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND,
+          createExecResult(stdout, ""),
+        );
         const executeCommand = adb.executeCommand.bind(adb);
         adb.executeCommand = async (...args) => {
           const result = await executeCommand(...args);
@@ -829,10 +837,10 @@ describe("Idle - Unit Tests", function () {
           const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
           const adb = new FakeAdbExecutor();
           const controller = new AbortController();
-          adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
-            stdout: `mRotation=${currentRotation}`,
-            stderr: "",
-          });
+          adb.setCommandResponse(
+            WINDOW_MANAGER_ROTATION_COMMAND,
+            createExecResult(`mRotation=${currentRotation}`, ""),
+          );
           const rotationIdle = new Idle(device, new FakeAdbClientFactory(adb), timer);
 
           const result = await rotationIdle.getRotationStatus(

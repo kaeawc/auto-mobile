@@ -47,6 +47,7 @@ const DEVICE_C = "emulator-5558";
 const TERMINAL = { code: "session_ownership_lost", nextAction: "acquire_new_session" };
 /** Microtask turns that let a whole acquisition or re-bind chain finish. */
 const QUIET_TURNS = 400;
+const DISCONNECT_IDLE_POLL_MS = 30_000;
 
 let scenario: LivenessScenario;
 
@@ -128,7 +129,7 @@ describe("cell 1: the idle window alone, and against the heartbeat lease (T2, T2
       scenario.proxyConnection,
     );
     expect(info.idleReleaseAt).toBe(lastCallAt + IDLE_WINDOW_MS);
-    expect((ack.result as { idleReleaseAt: number }).idleReleaseAt).toBe(info.idleReleaseAt);
+    expect(ack.result?.idleReleaseAt).toBe(info.idleReleaseAt);
 
     await scenario.idle(IDLE_WINDOW_MS);
     expect(scenario.isHeld(session)).toBe(true);
@@ -217,7 +218,8 @@ describe("cell 2: a held device in a transitional platform state (T3 x T1)", () 
 
     // The device finishes its transition: idle, counted and unreserved.
     listing.set(DEVICE_A, "device");
-    await scenario.idle(2 * DISCONNECT_POLL_MS);
+    // With the owner gone, discovery clears transition evidence on its idle cadence.
+    await scenario.idle(DISCONNECT_IDLE_POLL_MS);
     expectFreed(DEVICE_A);
     expect(listing.episodes()).toEqual([]);
     expect(await inventory(scenario)).toMatchObject({ total: 2, available: 2, assigned: 0 });
@@ -344,7 +346,8 @@ describe("cell 5: the idle deadline passes while the device is transitional (T2 
     expect(await inventory(scenario)).toMatchObject({ total: 1, available: 1, assigned: 0 });
 
     listing.set(DEVICE_A, "device");
-    await scenario.idle(140_000 + DISCONNECT_POLL_MS - scenario.timer.now());
+    // The idle release also moves discovery to the slower idle cadence.
+    await scenario.idle(DISCONNECT_IDLE_POLL_MS);
     expect(listing.episodes()).toEqual([]);
     expectFreed(DEVICE_A);
     expect(await inventory(scenario)).toMatchObject({ total: 2, available: 2, assigned: 0 });

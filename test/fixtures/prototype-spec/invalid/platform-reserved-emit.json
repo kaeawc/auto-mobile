@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "emit",
+          "name": "prototype_custom"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].name",
+  "expectedMessage": "Emit names starting with prototype_ are reserved for runtime events"
+}

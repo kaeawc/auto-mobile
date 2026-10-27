@@ -1,3 +1,8 @@
+import { IosCtrlProxyProcessClient } from "../../src/ctrlProxy/ios/IosCtrlProxyProcessClient";
+import { FakeLockOwnerGenerationProbe } from "../fakes/FakeLockOwnerGenerationProbe";
+import { readFileSync } from "node:fs";
+import { IosRunnerLaunchFailures } from "../../src/ctrlProxy/ios/IosRunnerLaunchFailure";
+import type { RunnerLaunchProgressProbe } from "../../src/ctrlProxy/ios/IosRunnerLaunchProgress";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import type { IosCtrlProxyBuilderSurface } from "../../src/ctrlProxy/IosCtrlProxyBuilderSurface";
@@ -8,8 +13,13 @@ import { logger } from "../../src/utils/logger";
 import { PortManager } from "../../src/utils/PortManager";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import {
+  DefaultProcessSupervisor,
+  type ProcessSupervisorOptions,
+} from "../../src/utils/ProcessSupervisor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { fakeIosCtrlProxyBuilder } from "../helpers/iosCtrlProxyBuilderFake";
+import { settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
 // #10649: a caller such as getApple extends the shared health-poll deadline to its
 // whole acquisition budget. A runner frozen at launch must still be relaunched
@@ -45,6 +55,8 @@ interface Harness {
   /** Fake-clock time of each runner launch's first health poll. */
   launches: number[];
   terminated: number[];
+  restartSupervisor(): Promise<void>;
+  probe(): Promise<boolean>;
 }
 
 /**
@@ -53,21 +65,43 @@ interface Harness {
  */
 function createHarness(
   healthy: (launchIndex: number, sinceLaunchMs: number) => boolean,
-  options: { exitOnTerminate?: boolean } = {},
+  options: {
+    progressProbe?: RunnerLaunchProgressProbe;
+    onPoll?: (child: FakeChildProcess, elapsed: number) => void;
+    exitOnTerminate?: boolean;
+    deferredPid?: number;
+    defaultPortHealthyAfterMs?: number;
+  } = {},
 ): Harness {
   const timer = new FakeTimer();
   const executor = new FakeProcessExecutor();
+  const spawn = executor.spawn.bind(executor);
+  spyOn(executor, "spawn").mockImplementation((command, args, spawnOptions) => {
+    executor.setNextSpawnProcess(new FakeChildProcess(timer));
+    return spawn(command, args, spawnOptions);
+  });
   const launchedPids = (): number[] =>
     executor.getSpawnedProcesses().map((spawned) => spawned.process.pid ?? -1);
   const terminated: number[] = [];
+  let supervisorOptions: ProcessSupervisorOptions | undefined;
   const manager: IOSCtrlProxyManager = IOSCtrlProxyManager.createForTestingWithOptions({
     device: DEVICE,
+    runnerLaunchProgressProbe: options.progressProbe,
     timer,
     builder: fakeBuilder(),
     processExecutor: executor,
+    processClient: new IosCtrlProxyProcessClient(executor, timer, {
+      processGeneration: new FakeLockOwnerGenerationProbe(),
+    }),
+    processSupervisorFactory: (options) => {
+      supervisorOptions = options;
+      return new DefaultProcessSupervisor(options);
+    },
     steps: {
       isOwnRunnerProcessAlive: async (pid = manager.getXcTestProcessId()) =>
-        pid !== null && launchedPids().includes(pid) && !terminated.includes(pid),
+        pid !== null &&
+        (launchedPids().includes(pid) || pid === options.deferredPid) &&
+        !terminated.includes(pid),
       terminateHungRunnerProcess: async (pid) => {
         terminated.push(pid);
         if (options.exitOnTerminate) {
@@ -81,18 +115,42 @@ function createHarness(
       },
     },
   });
-  const harness: Harness = { manager, executor, timer, launches: [], terminated };
+  const harness: Harness = {
+    manager,
+    executor,
+    timer,
+    launches: [],
+    terminated,
+    probe: async () => {
+      if (!supervisorOptions) {
+        throw new Error("missing supervisor options");
+      }
+      return supervisorOptions.isAlive({ isCurrent: () => true });
+    },
+    restartSupervisor: async () => {
+      if (!supervisorOptions) {
+        throw new Error("missing supervisor options");
+      }
+      await supervisorOptions.restart();
+    },
+  };
   executor.setCommandResponse("pgrep", createExecResult("", ""));
-  executor.setCommandHandler("curl -s", () => {
+  executor.setCommandHandler("curl -s", (command) => {
     // The health poll begins right after each launch, so record launches here.
     while (harness.launches.length < launchedPids().length) {
       harness.launches.push(timer.now());
     }
     const launchIndex = launchedPids().length - 1;
+    const child = executor.getSpawnedProcesses()[launchIndex]?.process;
+    if (child instanceof FakeChildProcess) {
+      options.onPoll?.(child, timer.now() - harness.launches[launchIndex]);
+    }
     const answers =
-      launchIndex >= 0 &&
-      !harness.terminated.includes(launchedPids()[launchIndex]) &&
-      healthy(launchIndex, timer.now() - harness.launches[launchIndex]);
+      (command.includes(":8765/") &&
+        timer.now() >= (options.defaultPortHealthyAfterMs ?? Number.POSITIVE_INFINITY)) ||
+      (launchIndex >= 0 &&
+        !harness.terminated.includes(launchedPids()[launchIndex]) &&
+        healthy(launchIndex, timer.now() - harness.launches[launchIndex]));
     return createExecResult(
       answers ? JSON.stringify({ status: "ok", deviceId: DEVICE.deviceId }) : "",
       "",
@@ -129,6 +187,244 @@ describe("IOSCtrlProxyManager unresponsive runner relaunch (#10649)", () => {
     IOSCtrlProxyManager.resetInstances();
     PortManager.reset();
     PortManager.setPortAvailabilityCheckerForTesting(null);
+  });
+
+  const captured = readFileSync(
+    new URL("../fixtures/ios-runner-launch-failure/runner-output-captured.txt", import.meta.url),
+    "utf8",
+  )
+    .trimEnd()
+    .split("\n")
+    .map((line) => line.slice(line.indexOf("\t") + 1));
+
+  test.each(["listener failed", "Restarting after unexpected exit"])(
+    "retires captured %s promptly despite growing CPU",
+    async (marker) => {
+      delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+      const output = captured.find((chunk) => chunk.includes(marker))!;
+      let emitted = false;
+      let samples = 0;
+      const h = createHarness((index) => index === 1, {
+        progressProbe: { sample: async () => ++samples * 1000 },
+        onPoll: (child, elapsed) => {
+          if (!emitted && elapsed >= 2000) {
+            emitted = true;
+            child.stdout.emit("data", output);
+          }
+        },
+      });
+      await settleByFakeEvents(
+        h.timer,
+        h.manager.start({ minimumHealthPollDurationMs: ACQUISITION_BUDGET_MS }),
+        { description: "fatal output relaunch", maxEvents: 2000 },
+      );
+      expect(h.launches).toHaveLength(2);
+      expect(h.launches[1] - h.launches[0]).toBeLessThan(5000);
+      expect(samples).toBe(2); // Initial samples only; neither launch was extended.
+      expect(h.terminated).toEqual([h.executor.getSpawnedProcesses()[0].process.pid!]);
+    },
+  );
+
+  test.each([
+    ["listener failed", "listener-bind-failed"],
+    ["Restarting after unexpected exit", "runner-lost"],
+  ] as const)("records split captured %s and promptly relaunches", async (marker, reason) => {
+    delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    const output = captured.find((chunk) => chunk.includes(marker))!;
+    const split = output.indexOf(marker) + Math.floor(marker.length / 2);
+    let emitted = false;
+    const h = createHarness((index) => index === 1, {
+      progressProbe: { sample: async () => 1000 },
+      onPoll: (child, elapsed) => {
+        if (!emitted && elapsed >= 2000) {
+          emitted = true;
+          child.stdout.emit("data", output.slice(0, split));
+          child.stdout.emit("data", output.slice(split));
+        }
+      },
+    });
+    const record = spyOn(IosRunnerLaunchFailures.prototype, "record");
+    try {
+      await settleByFakeEvents(
+        h.timer,
+        h.manager.start({ minimumHealthPollDurationMs: ACQUISITION_BUDGET_MS }),
+        { description: "split fatal output relaunch", maxEvents: 2000 },
+      );
+      const pid = h.executor.getSpawnedProcesses()[0].process.pid!;
+      expect(record).toHaveBeenCalledWith(pid, expect.objectContaining({ reason }));
+      expect(h.launches).toHaveLength(2);
+      expect(h.launches[1] - h.launches[0]).toBeLessThan(5000);
+      expect(h.terminated).toEqual([pid]);
+    } finally {
+      record.mockRestore();
+    }
+  });
+
+  test.each(["stdout", "stderr"] as const)(
+    "%s tail expires old text, stays separate, and preserves split whitespace",
+    (stream) => {
+      const h = createHarness(() => false);
+      const child = new FakeChildProcess(h.timer);
+      child.pid = 12345;
+      h.manager.trackStartedXcodebuild(child);
+      const otherStream = stream === "stdout" ? "stderr" : "stdout";
+      const marker = "Restarting after unexpected exit, crash, or test timeout";
+      const split = marker.indexOf(" unexpected") + 1;
+      const record = spyOn(IosRunnerLaunchFailures.prototype, "record");
+      try {
+        child[stream].emit("data", marker.slice(0, split));
+        child[otherStream].emit("data", marker.slice(split));
+        expect(record).not.toHaveBeenCalled();
+        child[stream].emit("data", "CtrlProxy listener failed: ");
+        for (let i = 0; i < 20; i++) {
+          child[stream].emit("data", "benign output\n".repeat(100));
+        }
+        child[stream].emit("data", "Address already in use");
+        child[stream].emit("data", marker.slice(split));
+        expect(record).not.toHaveBeenCalled();
+        child[stream].emit("data", marker.slice(0, split));
+        child[stream].emit("data", marker.slice(split));
+        expect(record).toHaveBeenCalledWith(
+          12345,
+          expect.objectContaining({ reason: "runner-lost" }),
+        );
+        child[stream].emit("data", "more benign output");
+        expect(record).toHaveBeenCalledTimes(1);
+      } finally {
+        record.mockRestore();
+      }
+    },
+  );
+
+  test("a replacement child with a reused PID starts with an empty output tail", () => {
+    const h = createHarness(() => false);
+    const first = new FakeChildProcess(h.timer);
+    const replacement = new FakeChildProcess(h.timer);
+    first.pid = replacement.pid = 12345;
+    const record = spyOn(IosRunnerLaunchFailures.prototype, "record");
+    try {
+      h.manager.trackStartedXcodebuild(first);
+      first.stdout.emit("data", "Restarting after unexpected");
+      h.manager.trackStartedXcodebuild(replacement);
+      replacement.stdout.emit("data", " exit, crash, or test timeout");
+      first.stdout.emit("data", " exit, crash, or test timeout");
+      expect(record).not.toHaveBeenCalled();
+      replacement.stdout.emit("data", "Restarting after unexpected");
+      replacement.stdout.emit("data", " exit, crash, or test timeout");
+      expect(record).toHaveBeenCalledWith(
+        12345,
+        expect.objectContaining({ reason: "runner-lost" }),
+      );
+    } finally {
+      record.mockRestore();
+    }
+  });
+
+  test("bind failure relaunch uses a different service port", async () => {
+    const ports: number[] = [];
+    const h = createHarness((index) => index === 1, {
+      onPoll: (child) => {
+        ports.push(h.manager.getServicePort());
+        if (ports.length === 1) {
+          child.stdout.emit("data", "CtrlProxy listener failed: Address already in use");
+        }
+      },
+    });
+    await settleByFakeEvents(
+      h.timer,
+      h.manager.start({ minimumHealthPollDurationMs: ACQUISITION_BUDGET_MS }),
+      { description: "bind failure port replacement" },
+    );
+    expect(h.launches).toHaveLength(2);
+    expect(h.manager.getServicePort()).not.toBe(ports[0]);
+    expect(ports.at(-1)).not.toBe(ports[0]);
+  });
+
+  test("final error includes the last bind failure reason and detail", async () => {
+    const detail = "CtrlProxy listener failed: Address already in use";
+    const h = createHarness(() => false, {
+      onPoll: (child) => child.stdout.emit("data", detail),
+    });
+    const error = await settleByFakeEvents(
+      h.timer,
+      h.manager.start({ minimumHealthPollDurationMs: ACQUISITION_BUDGET_MS }).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      ),
+      { description: "all launches fail to bind" },
+    );
+    expect(h.launches).toHaveLength(3);
+    expect(error).toBeInstanceOf(ActionableError);
+    if (!(error instanceof Error)) {
+      throw new Error("Expected startup error");
+    }
+    expect(error.message).toContain("listener-bind-failed");
+    expect(error.message).toContain(detail);
+  });
+
+  test("supervisor exit clears failure evidence when untracking the runner", async () => {
+    const h = createHarness(() => false);
+    const child = new FakeChildProcess(h.timer);
+    child.pid = 12345;
+    h.manager.trackStartedXcodebuild(child);
+    child.stdout.emit("data", "CtrlProxy listener failed: Address already in use");
+    const clearFailure = IosRunnerLaunchFailures.prototype.clear;
+    const clear = spyOn(IosRunnerLaunchFailures.prototype, "clear").mockImplementation(function (
+      this: IosRunnerLaunchFailures,
+      pid: number,
+    ) {
+      expect(this.get(pid)?.reason).toBe("listener-bind-failed");
+      clearFailure.call(this, pid);
+      expect(this.get(pid)).toBeUndefined();
+    });
+    try {
+      h.manager.diagnostics.processSupervisor.setAutoRestart(false);
+      h.manager.diagnostics.processSupervisor.processExited();
+      expect(h.manager.getXcTestProcessId()).toBeNull();
+      expect(clear).toHaveBeenCalledWith(12345);
+    } finally {
+      clear.mockRestore();
+    }
+  });
+
+  test("retires a deferred runner with recorded lost-runner output without waiting", async () => {
+    delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    const h = createHarness(() => true, { deferredPid: 12345 });
+    const child = new FakeChildProcess(h.timer);
+    child.pid = 12345;
+    h.manager.trackStartedXcodebuild(child);
+    child.stderr.emit(
+      "data",
+      captured.find((chunk) => chunk.includes("Restarting after"))!,
+    );
+    await settleByFakeEvents(h.timer, h.manager.start(), { description: "failed deferred runner" });
+    expect(h.timer.now()).toBe(0);
+    expect(h.terminated).toEqual([12345]);
+    expect(h.executor.getSpawnedProcesses()).toHaveLength(1);
+  });
+
+  test("supervisor records its unhealthy verdict and clears it on a healthy probe", async () => {
+    const options = { deferredPid: 12345, defaultPortHealthyAfterMs: Number.POSITIVE_INFINITY };
+    const h = createHarness(() => false, options);
+    h.manager.testHooks.setState({ xcTestProcessId: 12345 });
+    const record = spyOn(IosRunnerLaunchFailures.prototype, "record");
+    const clear = spyOn(IosRunnerLaunchFailures.prototype, "clear");
+    try {
+      expect(await h.probe()).toBe(true);
+      expect(await h.probe()).toBe(true);
+      expect(record).not.toHaveBeenCalled();
+      expect(await h.probe()).toBe(false);
+      expect(record).toHaveBeenCalledWith(
+        12345,
+        expect.objectContaining({ reason: "supervisor-unhealthy" }),
+      );
+      options.defaultPortHealthyAfterMs = 0;
+      expect(await h.probe()).toBe(true);
+      expect(clear).toHaveBeenCalledWith(12345);
+    } finally {
+      record.mockRestore();
+      clear.mockRestore();
+    }
   });
 
   test("relaunches a runner frozen at launch after its window and succeeds on the second launch", async () => {
@@ -204,14 +500,80 @@ describe("IOSCtrlProxyManager unresponsive runner relaunch (#10649)", () => {
     expect(harness.terminated).toEqual([]);
   });
 
-  test("keeps the single default window when no caller extends the deadline", async () => {
+  test("default cold launch answers at 45s inside the real 60s first-launch window", async () => {
+    delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    const harness = createHarness((_index, elapsed) => elapsed >= 45_000);
+    harness.timer.enableAutoAdvance();
+    await harness.manager.start();
+    expect(harness.launches).toHaveLength(1);
+    expect(harness.terminated).toEqual([]);
+    expect(harness.timer.now() - harness.launches[0]).toBe(45_000);
+  });
+
+  test("a subsequent launch stops at the shared deadline without extending its window", async () => {
+    delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    const harness = createHarness(() => false);
+    harness.timer.enableAutoAdvance();
+    await expect(harness.manager.start({ minimumHealthPollDurationMs: 75_000 })).rejects.toThrow(
+      "CtrlProxy failed to start within timeout",
+    );
+    expect(harness.launches).toHaveLength(2);
+    expect(harness.launches[1] - harness.launches[0]).toBe(60_000);
+    expect(harness.timer.now() - harness.launches[0]).toBe(75_000);
+  });
+
+  test("a deferred runner without our exit handler retains the 30s default budget", async () => {
+    delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    const harness = createHarness(() => false, { deferredPid: 12345 });
+    harness.manager.testHooks.setState({ xcTestProcessId: 12345 });
+    harness.timer.enableAutoAdvance();
+    const startedAt = harness.timer.now();
+    await expect(harness.manager.start()).rejects.toThrow(
+      "CtrlProxy failed to start within timeout (30s)",
+    );
+    expect(harness.launches).toEqual([]);
+    expect(harness.executor.getSpawnedProcesses()).toHaveLength(0);
+    expect(harness.terminated).toEqual([12345]);
+    expect(harness.timer.now() - startedAt).toBe(30_000);
+  });
+
+  test("adopts a deferred runner on its healthy default port without a post-health sleep", async () => {
+    const harness = createHarness(() => false, {
+      deferredPid: 12345,
+      defaultPortHealthyAfterMs: WINDOW_MS,
+    });
+    harness.manager.testHooks.setState({ xcTestProcessId: 12345, servicePort: 8767 });
+    await settleByFakeEvents(harness.timer, harness.manager.start(), {
+      description: "deferred runner adoption",
+    });
+    expect(harness.manager.getServicePort()).toBe(8765);
+    expect(harness.timer.now()).toBe(WINDOW_MS);
+    expect(harness.timer.getSleepHistory()).toEqual(Array<number>(15).fill(100));
+    expect(harness.terminated).toEqual([]);
+    expect(harness.executor.getSpawnedProcesses()).toHaveLength(0);
+  });
+
+  test("supervisor restarts retain the 30s default health budget", async () => {
+    delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    const harness = createHarness(() => false);
+    harness.timer.enableAutoAdvance();
+    await expect(harness.restartSupervisor()).rejects.toThrow(
+      "CtrlProxy failed to start within timeout (30s)",
+    );
+    expect(harness.launches).toHaveLength(1);
+    expect(harness.timer.now() - harness.launches[0]).toBe(30_000);
+  });
+
+  test("gives a frozen first launch exactly twice the default window without a caller extension", async () => {
+    delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
     const harness = createHarness(() => false);
     harness.timer.enableAutoAdvance();
 
     await expect(harness.manager.start()).rejects.toThrow(
-      "CtrlProxy failed to start within timeout",
+      "CtrlProxy failed to start within timeout (60s)",
     );
 
     expect(harness.launches).toHaveLength(1);
+    expect(harness.timer.now() - harness.launches[0]).toBe(60_000);
   });
 });

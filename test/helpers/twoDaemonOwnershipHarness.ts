@@ -1,4 +1,4 @@
-import { DAEMON_DEVICE_LEASE_STATUS_METHOD } from "../../src/daemon/constants";
+import { DAEMON_DEVICE_LEASE_STATUS_METHOD } from "../../src/daemon/wire/constants";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -14,7 +14,7 @@ import {
 } from "../../src/daemon/foreignDeviceOwnership";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { PROXY_HEARTBEAT_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
+import { PROXY_HEARTBEAT_INTERVAL_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   createDaemonTerminalReleaseJournal,
@@ -1167,12 +1167,9 @@ export class TwoDaemonWorld {
           this.discovery.setBootedDevices("android", this.onlineDevices());
           const session = reservation.session;
           if (session && session.assignedDevice === device.deviceId) {
-            await process.manager.releaseSessionIfOwned(
-              session.sessionId,
-              session,
-              device.deviceId,
-              "device-killed",
-            );
+            await process.manager.releaseSession(session.sessionId, "device-killed", {
+              expectedOwner: { session: session, deviceId: device.deviceId },
+            });
           }
           if (process.pool.getDevice(device.deviceId) === reservation.device) {
             await process.pool.retireDeviceForShutdown(reservation.device);

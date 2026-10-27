@@ -19,9 +19,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IOS_DIR="${PROJECT_ROOT}/ios"
 
-# shellcheck source=scripts/ios/swift_test_counts.sh disable=SC1091
+# shellcheck source=scripts/ios/swift_test_counts.sh
 source "${SCRIPT_DIR}/swift_test_counts.sh"
-# shellcheck source=scripts/ios/xctestrunner_test_filter.sh disable=SC1091
+# shellcheck source=scripts/ios/xctestrunner_test_filter.sh
 source "${SCRIPT_DIR}/xctestrunner_test_filter.sh"
 
 echo -e "${CYAN}========================================${NC}"

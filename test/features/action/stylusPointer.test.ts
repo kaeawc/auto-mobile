@@ -169,7 +169,11 @@ describe("classifyStylusFailure (#13081)", () => {
   });
 
   test("a stale display and an already-classified refusal pass through unchanged", () => {
-    const stale = new StaleDisplayError({ observedGeneration: 1, currentGeneration: 2 });
+    const stale = new StaleDisplayError({
+      observedGeneration: 1,
+      currentGeneration: 2,
+      retry: "observe",
+    });
     const rejected = new InputCommandRejectedError("refused");
 
     expect(classifyStylusFailure(stale, { command, dispatched: true })).toBe(stale);

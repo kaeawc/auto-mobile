@@ -73,7 +73,7 @@ describe("swipeAtSchema", () => {
     expect(swipeAtSchema.safeParse(input).success).toBe(true);
   });
 
-  test.each([
+  test.each<[string, unknown, string[]]>([
     ["missing to", { platform: "android", from: { x: 1, y: 2 } }, ["to"]],
     ["missing from", { platform: "android", to: { x: 1, y: 2 } }, ["from"]],
     ["neither point nor image", { platform: "android" }, ["from"]],
@@ -156,7 +156,7 @@ describe("swipeAtSchema", () => {
       },
       ["durationMs"],
     ],
-    ...[0, -5, 1.5, 3001, Number.NaN].map((durationMs) => [
+    ...[0, -5, 1.5, 3001, Number.NaN].map((durationMs): [string, unknown, string[]] => [
       `out-of-range durationMs ${durationMs}`,
       { platform: "android", from: { x: 1, y: 2 }, to: { x: 3, y: 4 }, durationMs },
       ["durationMs"],

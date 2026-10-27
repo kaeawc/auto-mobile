@@ -8,7 +8,11 @@ class IcTraceScreenTest {
   @Test
   fun `export delivers captured text only to share callback`() {
     val recorder = IcTraceRecorder(captureText = true, nowMs = { 0L })
-    recorder.record("commitText", "text=${recorder.textArg("private")}", 0, 0, -1, -1)
+    recorder.record(
+      "commitText",
+      "text=${recorder.textArg("private")}",
+      IcTraceSelection(0, 0, -1, -1),
+    )
     val shared = mutableListOf<String>()
 
     exportIcTrace(recorder) { shared += it }

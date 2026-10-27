@@ -1,21 +1,22 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import { defaultAppearanceSyncDependencies } from "../../src/daemon/AppearanceSyncScheduler";
 import {
   DEFAULT_SOCKET_PATH,
   LOCK_FILE_PATH,
   PID_FILE_PATH,
   SOCKET_PATH,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { DefaultDeviceSettingsAccess } from "../../src/features/utility/DeviceSettingDefaults";
 import type { BootedDevice } from "../../src/models";
-import { resolveAppearanceMode } from "../../src/server/appearanceManager";
+import { resolveAppearanceMode } from "../../src/daemon/appearanceManager";
 import {
   LIST_CHANGED_NOTIFICATION_METHODS,
   ListChangedBroadcaster,
-} from "../../src/server/listChangedBroadcast";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+  type ListChangedKind,
+} from "../../src/daemon/listChangedBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { applyAppearanceToDevice } from "../../src/utils/deviceAppearance";
 import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
@@ -201,14 +202,13 @@ describe("the harness's control socket is opened by the socket server's own star
       ]);
 
       // A dead process's server is off the process-wide broadcasters: nothing is written for it.
-      const dead = scenario.daemon.socket.server as unknown as {
-        broadcastListChanged(kind: string): void;
-      };
+      const dead = scenario.daemon.socket.server.testHooks;
       await scenario.daemonRestart();
-      const deadFanOut = spyOn(dead, "broadcastListChanged");
+      const deadFanOut = mock<(kind: ListChangedKind) => void>();
+      const restore = dead.broadcastListChanged.intercept(() => deadFanOut);
       ListChangedBroadcaster.emit("tools");
       expect(deadFanOut).not.toHaveBeenCalled();
-      deadFanOut.mockRestore();
+      restore();
     },
   );
 });
@@ -228,9 +228,11 @@ describe("the harness's daemon runs every host step of the start sequence", () =
         "publishForwardLeaseOwner",
         "writeEarlyOwnerRecord",
         "openTerminalReleaseJournal",
+        "prepareHttpToken",
         "startHttpIngress",
         "sweepStaleAppearanceConfigs",
         "bindControlSocket",
+        "publishHttpToken",
         "startServicesAfterSocketBind",
         "startMaintenanceMonitors",
       ];

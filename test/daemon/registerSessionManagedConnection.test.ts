@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { DAEMON_REGISTER_SESSION_METHOD } from "../../src/daemon/constants";
+import { DAEMON_REGISTER_SESSION_METHOD } from "../../src/daemon/wire/constants";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -25,7 +25,6 @@ describe("daemon/registerSession on managed connections", () => {
   let sessionManager: SessionManager;
   let scopes: BrokerConnectionScopes;
   let state: DaemonStateAccess;
-  let reowned: string[][];
   let persistence: FakeDeviceSessionPersistence;
 
   async function managedSession(sessionId: string, deviceId: string, token: string) {
@@ -40,20 +39,14 @@ describe("daemon/registerSession on managed connections", () => {
     persistence = new FakeDeviceSessionPersistence();
     sessionManager = new SessionManager(timer, persistence);
     scopes = new BrokerConnectionScopes();
-    reowned = [];
     state = {
-      getBrokerExecutionReowner: () => ({
-        reown: async (sessionUuids) => {
-          reowned.push([...sessionUuids]);
-          return [];
-        },
-      }),
       isInitialized: () => true,
       getBrokerConnectionScopes: () => scopes,
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
         getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
+        releaseDevice: async () => {},
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
     };

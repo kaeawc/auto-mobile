@@ -320,8 +320,12 @@ describe("TouchFrameReconstructor", () => {
   ])("EV_KEY %s DOWN emits pressButton with the mapped button name", (keyCode, expectedButton) => {
     const results = feedLines(r, [`[  5.000000] EV_KEY    ${keyCode}             DOWN`]);
     expect(results).toHaveLength(1);
-    expect((results[0] as GestureEvent).type).toBe("pressButton");
-    expect((results[0] as GestureEvent).button).toBe(expectedButton);
+    const result = results[0];
+    if (!result || !("type" in result)) {
+      throw new Error("Expected gesture event");
+    }
+    expect(result.type).toBe("pressButton");
+    expect<unknown>(result.button).toBe(expectedButton);
   });
 
   test("EV_KEY DOWN for an unmapped key emits nothing", () => {

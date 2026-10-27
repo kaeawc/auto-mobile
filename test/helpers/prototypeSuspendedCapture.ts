@@ -1,9 +1,6 @@
 import capture from "../fixtures/android-launcher/launcher-recents-emulator-5602.json";
-import { CtrlProxyHierarchy } from "../../src/features/observe/android/CtrlProxyHierarchy";
-import type {
-  AccessibilityHierarchy,
-  HierarchyDelegateContext,
-} from "../../src/features/observe/android/types";
+import { AccessibilityHierarchyConverter } from "../../src/features/observe/android/AccessibilityHierarchyConverter";
+import type { AccessibilityHierarchy } from "../../src/features/observe/android/types";
 import { scopeHierarchyForSelector } from "../../src/features/observe/hierarchyLayer";
 import { ActionableError } from "../../src/models/ActionableError";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -21,9 +18,7 @@ export function suspendedCapture(
   if (rootless) {
     Reflect.deleteProperty(wire, "hierarchy");
   }
-  return new CtrlProxyHierarchy({
-    timer,
-  } as HierarchyDelegateContext).convertToViewHierarchyResult(wire);
+  return new AccessibilityHierarchyConverter({ timer }).convertToViewHierarchyResult(wire);
 }
 
 export function suspendedRefusal() {

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createExecResult } from "../../src/utils/execResult";
 import {
   ActionableError,
   AppNotInstalledError,
@@ -69,15 +70,15 @@ describe("DefaultAppCleanupService", () => {
         { userId: 0, name: "Owner", flags: 0x13, running: true },
         { userId: 10, name: "Work", flags: 0x30, running: true },
       ]);
-      adb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: installed ? "package:com.example.app" : "package:com.example.other",
-        stderr: "",
-      });
-      adb.setCommandResponse("shell pm list packages --user 10", {
-        stdout: "package:com.example.other",
-        stderr: "",
-      });
-      adb.setCommandResponse("shell pm clear", { stdout: "Success\n", stderr: "" });
+      adb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult(installed ? "package:com.example.app" : "package:com.example.other", ""),
+      );
+      adb.setCommandResponse(
+        "shell pm list packages --user 10",
+        createExecResult("package:com.example.other", ""),
+      );
+      adb.setCommandResponse("shell pm clear", createExecResult("Success\n", ""));
       const log = new FakeLogger();
       const cleanupService = new DefaultAppCleanupService({
         createClearAppData: (targetDevice) =>

@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { ANSWERS_SYSTEM_ALERTS, PLAN_SKELETON } from "./toolRegistryTypes";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { SwipeAtCoordinate } from "../features/action/SwipeAtCoordinate";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
@@ -11,7 +12,7 @@ import {
   SWIPE_DURATION_MIN_MS,
   validateDurationMs,
 } from "../features/action/swipeon/swipeTiming";
-import { hierarchyLayerSchema } from "./elementSelectorSchemas";
+import { hierarchyLayerSchema } from "../models/elementSelectorSchemas";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
 import { pointerSchema } from "./pointerSchema";
 import {
@@ -19,7 +20,7 @@ import {
   platformSchema,
   responseShapeControlFields,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 
 // The handler's arguments are the parsed wire schema; its exclusivity refinement (image xor
 // from/to) is narrowed where the options are built.
@@ -223,6 +224,12 @@ export function registerSwipeAtTools() {
     "Swipe from one screen point to another, including diagonals, in native, normalized, or percent units.",
     swipeAtSchema,
     swipeAtHandler,
-    { defaultEnabled: false, supportsProgress: true, outputSchema: swipeAtResultSchema },
+    {
+      defaultEnabled: false,
+      supportsProgress: true,
+      ...ANSWERS_SYSTEM_ALERTS,
+      outputSchema: swipeAtResultSchema,
+      ...PLAN_SKELETON,
+    },
   );
 }

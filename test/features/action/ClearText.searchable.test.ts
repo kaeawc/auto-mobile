@@ -1,5 +1,8 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, test } from "bun:test";
 import {
+  getFocusedTextField,
   getFocusedTextLength,
   hasFocusedTextInput,
   verifyKeyEventClear,
@@ -22,7 +25,14 @@ test.each([
       "hint-text": hint,
     });
     expect(
-      await verifyKeyEventClear(async () => ({ timestamp: 0, viewHierarchy: hierarchy })),
+      await verifyKeyEventClear(async () =>
+        buildObserveResult({
+          screenSize: { width: 1080, height: 1920 },
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          updatedAt: 0,
+          viewHierarchy: hierarchy,
+        }),
+      ),
     ).toEqual(
       remaining === 0
         ? { success: true }
@@ -47,7 +57,14 @@ test.each([
   expect(getFocusedTextLength(hierarchy)).toBe(0);
   expect(getFocusedTextLength(hierarchy, undefined, true)).toBe(0);
   expect(
-    await verifyKeyEventClear(async () => ({ timestamp: 0, viewHierarchy: hierarchy })),
+    await verifyKeyEventClear(async () =>
+      buildObserveResult({
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        updatedAt: 0,
+        viewHierarchy: hierarchy,
+      }),
+    ),
   ).toEqual({ success: true });
 });
 
@@ -64,7 +81,14 @@ test.each([
     expect(getFocusedTextLength(hierarchy)).toBeUndefined();
     expect(getFocusedTextLength(hierarchy, undefined, true)).toBeUndefined();
     expect(
-      await verifyKeyEventClear(async () => ({ timestamp: 0, viewHierarchy: hierarchy })),
+      await verifyKeyEventClear(async () =>
+        buildObserveResult({
+          screenSize: { width: 1080, height: 1920 },
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          updatedAt: 0,
+          viewHierarchy: hierarchy,
+        }),
+      ),
     ).toEqual({
       success: false,
       error: "Cannot verify key-event clear: focused field text length is unreadable",
@@ -73,15 +97,36 @@ test.each([
 );
 
 test.each([
-  { timestamp: 0, viewHierarchy: capture({ class: "android.widget.EditText", focused: false }) },
-  { timestamp: 0, viewHierarchy: capture({ class: "android.view.View", focused: true }) },
-  { timestamp: 0 },
-  { timestamp: 0, viewHierarchy: { hierarchy: { error: "unavailable" } } },
-  {
-    timestamp: 0,
+  buildObserveResult({
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    updatedAt: 0,
+    viewHierarchy: capture({ class: "android.widget.EditText", focused: false }),
+  }),
+  buildObserveResult({
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    updatedAt: 0,
+    viewHierarchy: capture({ class: "android.view.View", focused: true }),
+  }),
+  buildObserveResult({
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    updatedAt: 0,
+  }),
+  buildObserveResult({
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    updatedAt: 0,
+    viewHierarchy: { hierarchy: { error: "unavailable" } },
+  }),
+  buildObserveResult({
+    updatedAt: 0,
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     viewHierarchy: capture({ class: "android.widget.EditText", focused: true }),
     freshness: { isFresh: false },
-  },
+  }),
 ])(
   "key-event clear verification requires a fresh focused editable input: %j",
   async (observation) => {
@@ -96,7 +141,14 @@ test("key-event clear verification keeps a classless field without captured text
   const hierarchy = capture({ focused: true, actions: ["set_text"] });
   expect(getFocusedTextLength(hierarchy)).toBeUndefined();
   expect(
-    await verifyKeyEventClear(async () => ({ timestamp: 0, viewHierarchy: hierarchy })),
+    await verifyKeyEventClear(async () =>
+      buildObserveResult({
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        updatedAt: 0,
+        viewHierarchy: hierarchy,
+      }),
+    ),
   ).toEqual({
     success: false,
     error: "Cannot verify key-event clear: focused field text length is unreadable",
@@ -133,25 +185,31 @@ test("focused text length uses editable captured value and preserves empty value
 
 test("focused dialog field length is found in a secondary window", () => {
   const hierarchy = {
-    hierarchy: { node: [] },
+    hierarchy: { node: createFlatNodeForTest({ node: [] }) },
     windows: [
       {
         windowLayer: 5,
-        hierarchy: {
+        hierarchy: createFlatNodeForTest({
           node: [
-            {
+            createFlatNodeForTest({
               $: {
                 class: "android.widget.EditText",
                 focused: "true",
                 text: "Dialog text",
               },
-            },
+            }),
           ],
-        },
+        }),
       },
       {
         windowLayer: 0,
-        hierarchy: { node: [{ $: { class: "android.widget.TextView", text: "Behind dialog" } }] },
+        hierarchy: createFlatNodeForTest({
+          node: [
+            createFlatNodeForTest({
+              $: { class: "android.widget.TextView", text: "Behind dialog" },
+            }),
+          ],
+        }),
       },
     ],
   };
@@ -162,31 +220,31 @@ test("focused dialog field length is found in a secondary window", () => {
 
 test("focused field in the topmost window wins over a longer field below", () => {
   const hierarchy = {
-    hierarchy: { node: [] },
+    hierarchy: { node: createFlatNodeForTest({ node: [] }) },
     windows: [
       {
         windowLayer: 0,
-        hierarchy: {
+        hierarchy: createFlatNodeForTest({
           node: [
-            {
+            createFlatNodeForTest({
               $: {
                 class: "android.widget.EditText",
                 focused: true,
                 text: "longer lower value",
               },
-            },
+            }),
           ],
-        },
+        }),
       },
       {
         windowLayer: 5,
-        hierarchy: {
+        hierarchy: createFlatNodeForTest({
           node: [
-            {
+            createFlatNodeForTest({
               $: { class: "android.widget.EditText", focused: true, text: "top" },
-            },
+            }),
           ],
-        },
+        }),
       },
     ],
   };
@@ -196,4 +254,28 @@ test("focused field in the topmost window wins over a longer field below", () =>
 
 test("primary-window-only hierarchy still supplies the focused field length", () => {
   expect(getFocusedTextLength(capture({ focused: true, text: "Primary window" }))).toBe(14);
+});
+
+test("iOS focused-field reads prefer the native field over a focused web-page field", () => {
+  // Shape from the Safari repro (item3-sendkeys-falseneg): the page search box and the URL field both report focus.
+  const field = (id: string, value: string) => ({
+    className: "UITextField",
+    "resource-id": id,
+    focused: "true",
+    actions: ["set_text", "clear_text"],
+    value,
+  });
+  const hierarchy = capture({
+    className: "UIApplication",
+    node: [{ className: "WKWebView", node: [field("search", "example")] }, field("URL", "zq")],
+  });
+  expect(getFocusedTextField(hierarchy, undefined, { iosPlaceholderAsBlank: true })).toEqual({
+    value: "zq",
+    secure: false,
+  });
+  const webOnly = capture({
+    className: "UIApplication",
+    node: [{ className: "WKWebView", node: [field("search", "example")] }],
+  });
+  expect(getFocusedTextField(webOnly)?.value).toBe("example");
 });

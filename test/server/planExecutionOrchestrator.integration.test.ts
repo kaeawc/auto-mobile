@@ -19,7 +19,7 @@ import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonito
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { resolveToolSelectionBaseSessionUuid } from "../../src/features/toolSelection/selectionSessionResolver";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 
 import {
   PlanExecutionOrchestrator,
@@ -42,14 +42,12 @@ const iosDevice: BootedDevice = {
   deviceId: "AAAA1111-BBBB-2222-CCCC-3333DDDD4444",
   name: "iPhone 15 Sim",
   platform: "ios",
-  status: "booted",
 };
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
   name: "Android Emulator",
   platform: "android",
-  status: "booted",
 };
 
 const SIMPLE_PLAN = `
@@ -286,14 +284,16 @@ steps:
     expect(result.error).toContain("Device label requires a devices list");
   });
 
-  test.each([
+  const nestedLabelRequests: Array<Partial<PlanExecutionRequest>> = [
     { devices: ["X", "Y"] },
     { device: "X" },
     { planContent: `name: nested\ndevices: [X, Y]\nsteps: []` },
     {
       planContent: `base64:${Buffer.from("name: nested\ndevices: [{label: X, platform: ios}]\nsteps: []").toString("base64")}`,
     },
-  ])("rejects nested labels before allocation: %j", async (labels) => {
+  ];
+
+  test.each(nestedLabelRequests)("rejects nested labels before allocation: %j", async (labels) => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const devicePool = new DevicePool(
@@ -417,16 +417,20 @@ steps:
     });
     const executionTracker = new ExecutionTracker(timer);
     const execution = executionTracker.startExecution("executePlan", undefined, "base");
-    const hasActiveExecution = (sessionId: string, query?: { excludeExecutionId?: string }) =>
-      executionTracker.hasActiveSessionUuidExecutions(
-        resolveToolSelectionBaseSessionUuid(sessionId, sessionManager),
-        query,
+    const hasActiveExecution = (sessionId: string, query?: { excludeExecutionId?: string }) => {
+      const baseSessionUuid = resolveToolSelectionBaseSessionUuid(sessionId, sessionManager);
+      return (
+        baseSessionUuid !== undefined &&
+        executionTracker.hasActiveSessionUuidExecutions(baseSessionUuid, query)
       );
+    };
     sessionManager.setActiveSessionExecutionChecker(hasActiveExecution);
     const heartbeatMonitor = new SessionHeartbeatMonitor(
       sessionManager,
       hasActiveExecution,
-      (sessionId) => sessionManager.releaseSession(sessionId),
+      async (sessionId) => {
+        await sessionManager.releaseSession(sessionId);
+      },
       timer,
     );
 

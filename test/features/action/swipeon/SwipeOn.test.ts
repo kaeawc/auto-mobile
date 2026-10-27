@@ -43,7 +43,9 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
   };
 
   const createObserveResult = (hierarchyId: string): ObserveResult => ({
-    timestamp: 0,
+    updatedAt: 0,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 1000, height: 2000 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     viewHierarchy: { hierarchy: { node: { $: { _id: hierarchyId } } } },
@@ -218,10 +220,12 @@ describe("SwipeOn boomerang", () => {
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
 
   const createObserveResult = (): ObserveResult => ({
-    timestamp: Date.now(),
+    observationId: "swipe-test",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    updatedAt: Date.now(),
     screenSize: { width: 1000, height: 2000 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: null,
+    viewHierarchy: undefined,
   });
 
   const createSwipeOn = () => {

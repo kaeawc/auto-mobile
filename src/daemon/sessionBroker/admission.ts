@@ -2,6 +2,7 @@ export interface BrokerLimits {
   sessionCap?: number;
   totalDeviceCap?: number;
   idlePoolCap?: number;
+  maxConcurrentResetBoots?: number;
 }
 
 export type ResourceState = "reserved" | "active" | "idle" | "resetting" | "destroying" | "unknown";
@@ -12,11 +13,13 @@ export interface ResourceView {
   /** Larger values are newer. Equal values are ordered by resource id. */
   idleOrder: number;
   compatible: boolean;
+  expectedReadyMs?: number;
 }
 
 export interface BrokerSnapshot {
   activeOrAcquiringSessions: number;
   resources: readonly ResourceView[];
+  resetWaitThresholdMs?: number;
 }
 
 export type AdmissionRefusalReason =
@@ -27,6 +30,7 @@ export type AdmissionRefusalReason =
 export type AdmissionDecision =
   | { kind: "reuse"; resourceId: string }
   | { kind: "create" }
+  | { kind: "wait"; resourceId: string; waitMs: number }
   | { kind: "evict"; resourceId: string }
   | { kind: "refuse"; reason: AdmissionRefusalReason };
 
@@ -58,6 +62,12 @@ function validateLimits(limits: BrokerLimits): void {
   if (limits.idlePoolCap !== undefined) {
     assertNonNegativeInteger(limits.idlePoolCap, "limits.idlePoolCap");
   }
+  if (
+    limits.maxConcurrentResetBoots !== undefined &&
+    (!Number.isSafeInteger(limits.maxConcurrentResetBoots) || limits.maxConcurrentResetBoots < 1)
+  ) {
+    throw new TypeError("limits.maxConcurrentResetBoots must be a positive integer");
+  }
 }
 
 function validateResource(resource: ResourceView, index: number): void {
@@ -77,6 +87,12 @@ function validateResource(resource: ResourceView, index: number): void {
   if (typeof resource.compatible !== "boolean") {
     throw new TypeError(`${prefix}.compatible must be a boolean`);
   }
+  if (
+    resource.expectedReadyMs !== undefined &&
+    (!Number.isFinite(resource.expectedReadyMs) || resource.expectedReadyMs < 0)
+  ) {
+    throw new TypeError(`${prefix}.expectedReadyMs must be nonnegative and finite`);
+  }
 }
 
 function validateSnapshot(snapshot: BrokerSnapshot): void {
@@ -89,6 +105,12 @@ function validateSnapshot(snapshot: BrokerSnapshot): void {
   );
   if (!Array.isArray(snapshot.resources)) {
     throw new TypeError("snapshot.resources must be an array");
+  }
+  if (
+    snapshot.resetWaitThresholdMs !== undefined &&
+    (!Number.isFinite(snapshot.resetWaitThresholdMs) || snapshot.resetWaitThresholdMs < 0)
+  ) {
+    throw new TypeError("snapshot.resetWaitThresholdMs must be nonnegative and finite");
   }
 
   const ids = new Set<string>();
@@ -121,6 +143,14 @@ function newestCompatibleIdle(snapshot: BrokerSnapshot): ResourceView | undefine
 }
 
 /**
+ * A zero total cap admits nothing (#14462): its idle resources are evicted rather than handed to a
+ * new session, so there is nothing to reuse.
+ */
+function reusableIdle(snapshot: BrokerSnapshot, limits: BrokerLimits): ResourceView | undefined {
+  return limits.totalDeviceCap === 0 ? undefined : newestCompatibleIdle(snapshot);
+}
+
+/**
  * Selects the next admission action from one immutable view and returns immediately.
  *
  * These decisions are not reservations. The durable broker owner must evaluate this function
@@ -136,17 +166,58 @@ export function selectAdmission(snapshot: BrokerSnapshot, limits: BrokerLimits):
     return { kind: "refuse", reason: "session-cap-reached" };
   }
 
+  // Reuse does not increase the total, including after a cap reduction.
+  const reusable = reusableIdle(snapshot, limits);
+  if (reusable) {
+    return { kind: "reuse", resourceId: reusable.id };
+  }
+  return resettingWait(snapshot, limits) ?? totalCapDecision(snapshot, limits);
+}
+
+/**
+ * A compatible device whose reset finishes within the wait threshold is waited for rather than
+ * replaced. A zero total cap admits nothing (#14462), so it waits for nothing either.
+ */
+function resettingWait(
+  snapshot: BrokerSnapshot,
+  limits: BrokerLimits,
+): AdmissionDecision | undefined {
+  if (limits.totalDeviceCap === 0) {
+    return undefined;
+  }
+  const resetting = snapshot.resources
+    .filter(
+      (resource) =>
+        resource.state === "resetting" &&
+        resource.compatible &&
+        snapshot.resetWaitThresholdMs !== undefined &&
+        snapshot.resetWaitThresholdMs > 0 &&
+        resource.expectedReadyMs !== undefined &&
+        resource.expectedReadyMs > 0 &&
+        resource.expectedReadyMs <= snapshot.resetWaitThresholdMs,
+    )
+    .sort(
+      (left, right) =>
+        left.expectedReadyMs! - right.expectedReadyMs! || left.id.localeCompare(right.id),
+    )[0];
+  if (resetting && snapshot.resetWaitThresholdMs! > 0) {
+    return {
+      kind: "wait",
+      resourceId: resetting.id,
+      waitMs: Math.min(resetting.expectedReadyMs!, snapshot.resetWaitThresholdMs!),
+    };
+  }
+  return undefined;
+}
+
+/** Without a reusable resource: create under the total cap, else evict the oldest idle one. */
+function totalCapDecision(snapshot: BrokerSnapshot, limits: BrokerLimits): AdmissionDecision {
   const total = snapshot.resources.length;
   if (limits.totalDeviceCap !== undefined && total > limits.totalDeviceCap) {
     const candidate = oldestIdle(snapshot);
     return candidate
       ? { kind: "evict", resourceId: candidate.id }
       : { kind: "refuse", reason: "total-device-cap-exceeded" };
-  }
-
-  const reusable = newestCompatibleIdle(snapshot);
-  if (reusable) {
-    return { kind: "reuse", resourceId: reusable.id };
   }
 
   if (limits.totalDeviceCap === undefined || total < limits.totalDeviceCap) {

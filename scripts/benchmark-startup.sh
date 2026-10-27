@@ -55,7 +55,7 @@ untrack_child_pid() {
 # Kill all tracked child processes (from both in-memory array and PID file).
 # Also kills direct children of this script to catch command-substitution
 # subshells whose PIDs are never explicitly tracked.
-# shellcheck disable=SC2317,SC2329  # Function is invoked indirectly via cleanup/timeout handlers
+# shellcheck disable=SC2317,SC2329 # Only reached through signal/EXIT traps; ShellCheck does not trace these calls.
 _kill_all_tracked_pids() {
   local signal="${1:-KILL}"
   local seen=""
@@ -84,7 +84,7 @@ _kill_all_tracked_pids() {
 }
 
 # Global timeout handler - logs diagnostics and exits
-# shellcheck disable=SC2317,SC2329  # Function is invoked indirectly via trap
+# shellcheck disable=SC2317,SC2329 # Only reached through signal/EXIT traps; ShellCheck does not trace these calls.
 global_timeout_handler() {
   local elapsed_ms=$(( $(get_time_ms) - script_start_ms ))
 
@@ -1053,7 +1053,7 @@ else
 fi
 
 # Cleanup handler to kill all tracked children on exit
-# shellcheck disable=SC2317,SC2329  # Function is invoked indirectly via trap
+# shellcheck disable=SC2317,SC2329 # Only reached through signal/EXIT traps; ShellCheck does not trace these calls.
 cleanup_on_exit() {
   # Stop the timeout monitor first to prevent a USR1 race when pkill kills
   # the timeout subshell inside _kill_all_tracked_pids.

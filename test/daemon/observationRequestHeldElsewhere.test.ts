@@ -4,7 +4,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
 import type { OnObservationRequestedCallback } from "../../src/daemon/deviceDataStreamSocketServer";
 import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
-import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import type { ObserveResult } from "../../src/models";
@@ -35,7 +35,7 @@ class FakeStreamServer extends DeviceDataStreamSocketServer {
 /** A real `Daemon` whose data-stream server and observation callback wiring a test drives. */
 class ObservationDaemon extends Daemon {
   useStreamServer(stream: DeviceDataStreamSocketServer): void {
-    this.deviceDataStreamServer = stream;
+    this.runtime.deviceDataStreamServer = stream;
   }
 
   wireObservationCallback(): void {
@@ -45,6 +45,7 @@ class ObservationDaemon extends Daemon {
 
 const observation: ObserveResult = {
   observationId: "observed",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   updatedAt: 0,
   screenSize: { width: 1, height: 1 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -91,8 +92,6 @@ async function observeAs(options: {
         holder: "session_broker",
         scopeKey: "scope",
         bindingIndex: 0,
-        scopeState: null,
-        execSessionUuid: SLOT_EXEC,
       });
     }
   });

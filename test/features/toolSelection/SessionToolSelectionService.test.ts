@@ -1,10 +1,10 @@
+import type { SessionToolSelectionRepository } from "../../../src/db/sessionToolSelectionRepository";
 import { FakeToolSelectionRepository as FakeRepository } from "../../fakes/FakeToolSelectionRepository";
 import { describe, expect, test } from "bun:test";
 import {
   getEnvironmentToolDefaults,
   getStartupToolDefaults,
   SessionToolSelectionService,
-  type SessionToolSelectionRepository,
 } from "../../../src/features/toolSelection/SessionToolSelectionService";
 
 /** A repository with no batch support, to exercise the per-name fallback. */

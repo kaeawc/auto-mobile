@@ -80,7 +80,8 @@ fun GlobalSearchOverlay(
       if (query.isBlank()) emptyList() else searchProvider.search(query)
     }
   val flatItems = remember(results) { buildFlatItems(results) }
-  var selectedIndex by remember { mutableIntStateOf(0) }
+  val selectedIndexState = remember { mutableIntStateOf(0) }
+  var selectedIndex by selectedIndexState
   val focusRequester = remember { FocusRequester() }
 
   LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -103,34 +104,7 @@ fun GlobalSearchOverlay(
           .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
           .clickable(enabled = false, onClick = {})
           .onPreviewKeyEvent { event ->
-            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-            when (event.key) {
-              Key.Escape -> {
-                onDismiss()
-                true
-              }
-              Key.DirectionDown -> {
-                if (flatItems.isNotEmpty()) {
-                  selectedIndex = nextSelectableIndex(flatItems, selectedIndex, 1)
-                }
-                true
-              }
-              Key.DirectionUp -> {
-                if (flatItems.isNotEmpty()) {
-                  selectedIndex = nextSelectableIndex(flatItems, selectedIndex, -1)
-                }
-                true
-              }
-              Key.Enter -> {
-                val item = flatItems.getOrNull(selectedIndex)
-                if (item is FlatItem.ResultItem) {
-                  item.result.onSelect()
-                  onDismiss()
-                }
-                true
-              }
-              else -> false
-            }
+            handlePaletteKey(event, flatItems, selectedIndexState, onDismiss)
           },
     ) {
       TextField(
@@ -142,59 +116,7 @@ fun GlobalSearchOverlay(
         textStyle = MaterialTheme.typography.bodyLarge,
       )
 
-      LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
-        itemsIndexed(flatItems) { index, item ->
-          when (item) {
-            is FlatItem.Header -> {
-              Text(
-                text = item.category.displayName,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = colors.text.normal.copy(alpha = 0.5f),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-              )
-            }
-            is FlatItem.ResultItem -> {
-              val isSelected = index == selectedIndex
-              val bg =
-                if (isSelected) {
-                  MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                } else {
-                  MaterialTheme.colorScheme.surface
-                }
-              Row(
-                modifier =
-                  Modifier.fillMaxWidth()
-                    .background(bg)
-                    .clickable {
-                      item.result.onSelect()
-                      onDismiss()
-                    }
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-              ) {
-                Text(
-                  text = item.result.label,
-                  fontSize = 14.sp,
-                  color = colors.text.normal,
-                  modifier = Modifier.weight(1f),
-                  maxLines = 1,
-                  overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.width(12.dp))
-                Text(
-                  text = item.result.preview,
-                  fontSize = 12.sp,
-                  color = colors.text.normal.copy(alpha = 0.4f),
-                  maxLines = 1,
-                  overflow = TextOverflow.Ellipsis,
-                  modifier = Modifier.widthIn(max = 200.dp),
-                )
-              }
-            }
-          }
-        }
-      }
+      GlobalSearchResults(flatItems, selectedIndex, onDismiss)
 
       if (query.isNotBlank() && results.isEmpty()) {
         Box(
@@ -240,4 +162,113 @@ internal fun nextSelectableIndex(items: List<FlatItem>, current: Int, direction:
     attempts++
   }
   return next
+}
+
+private fun handlePaletteKey(
+  event: androidx.compose.ui.input.key.KeyEvent,
+  flatItems: List<FlatItem>,
+  selectedIndexState: androidx.compose.runtime.MutableState<Int>,
+  onDismiss: () -> Unit,
+): Boolean = run {
+  var selectedIndex by selectedIndexState
+
+  if (event.type != KeyEventType.KeyDown) return@run false
+  when (event.key) {
+    Key.Escape -> {
+      onDismiss()
+      true
+    }
+    Key.DirectionDown -> {
+      if (flatItems.isNotEmpty()) {
+        selectedIndex = nextSelectableIndex(flatItems, selectedIndex, 1)
+      }
+      true
+    }
+    Key.DirectionUp -> {
+      if (flatItems.isNotEmpty()) {
+        selectedIndex = nextSelectableIndex(flatItems, selectedIndex, -1)
+      }
+      true
+    }
+    Key.Enter -> {
+      val item = flatItems.getOrNull(selectedIndex)
+      if (item is FlatItem.ResultItem) {
+        item.result.onSelect()
+        onDismiss()
+      }
+      true
+    }
+    else -> false
+  }
+}
+
+@Composable
+private fun GlobalSearchResults(
+  flatItems: List<FlatItem>,
+  selectedIndex: Int,
+  onDismiss: () -> Unit,
+) {
+  val colors = SharedTheme.globalColors
+  LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
+    itemsIndexed(flatItems) { index, item ->
+      when (item) {
+        is FlatItem.Header -> {
+          Text(
+            text = item.category.displayName,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.text.normal.copy(alpha = 0.5f),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+          )
+        }
+        is FlatItem.ResultItem -> {
+          val isSelected = index == selectedIndex
+          val bg =
+            if (isSelected) {
+              MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+            } else {
+              MaterialTheme.colorScheme.surface
+            }
+          SearchResultRow(item, isSelected, onDismiss)
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun SearchResultRow(item: FlatItem.ResultItem, isSelected: Boolean, onDismiss: () -> Unit) {
+  val colors = SharedTheme.globalColors
+  val bg =
+    if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+    else MaterialTheme.colorScheme.surface
+  Row(
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(bg)
+        .clickable {
+          item.result.onSelect()
+          onDismiss()
+        }
+        .padding(horizontal = 16.dp, vertical = 8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text(
+      text = item.result.label,
+      fontSize = 14.sp,
+      color = colors.text.normal,
+      modifier = Modifier.weight(1f),
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
+    Spacer(Modifier.width(12.dp))
+    Text(
+      text = item.result.preview,
+      fontSize = 12.sp,
+      color = colors.text.normal.copy(alpha = 0.4f),
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+      modifier = Modifier.widthIn(max = 200.dp),
+    )
+  }
 }

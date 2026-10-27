@@ -15,6 +15,7 @@ import {
   KillTrackingShutdownManager,
   RearmableShutdownManager,
   setup,
+  setupWith,
   setupPassiveRestart,
   flush,
 } from "../helpers/devicePoolRecoveryShutdownHarness";
@@ -137,7 +138,7 @@ test("same-AVD replacement is reserved while session tracking persistence stalls
       await super.setSessionTracking(daemonId, deviceId, startedAt);
     }
   }
-  const { sessions, manager, pool, captured, timer } = await setup(
+  const { sessions, manager, pool, captured, timer } = await setupWith(
     new KillTrackingShutdownManager(),
     undefined,
     undefined,
@@ -198,13 +199,7 @@ test("coalesced passive loss inherits the resolved primary awaiting-device settl
     expect(primary).toBeDefined();
     expect(joined).toBeDefined();
     await pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, primary, captured);
-    const internals = pool as unknown as {
-      joinSessionPreservingRecovery(
-        recovery: { incidentId?: string; promise: Promise<"released"> },
-        incidentId?: string,
-      ): Promise<string>;
-    };
-    await internals.joinSessionPreservingRecovery(
+    await pool.testHooks.joinSessionPreservingRecovery(
       { incidentId: primary, promise: Promise.resolve("released") },
       joined,
     );

@@ -4,27 +4,27 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import { DEVICE_OUTSIDE_BROKER_GRANT_CODE } from "../../src/daemon/sessionBroker/connectionRefusal";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { DEVICE_OUTSIDE_BOUND_SESSION_CODE } from "../../src/server/deviceOutsideBoundSessionRefusal";
+import { DEVICE_OUTSIDE_BOUND_SESSION_CODE } from "../../src/daemon/deviceOutsideBoundSessionRefusal";
 import {
   registerDirectSessionDevice,
   unregisterDirectSession,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { ExecutionTrackerPlanExecutionLock } from "../../src/server/PlanExecutionLock";
-import { executionTracker } from "../../src/server/executionTracker";
-import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
-import { SessionReleasedDuringCreationError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { ExecutionTrackerPlanExecutionLock } from "../../src/server/ExecutionTrackerPlanExecutionLock";
+import { executionTracker } from "../../src/daemon/executionTracker";
+import { routedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";
+import { SessionReleasedDuringCreationError } from "../../src/models/deviceAcquisitionRefusals";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
-import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
+import { isTypedToolRefusal, shapeToolCallError } from "../../src/daemon/shapeToolCallError";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 
 /**
@@ -134,10 +134,10 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
   });
 
   test.each([false, true])("ambiguous autolock read=%s has no session echo", async (readOnly) => {
-    const devices = new FakeDeviceSessionManager();
+    const devices = new FakeDeviceReadiness();
     devices.setConnectedDevices([iosDevice, { ...iosDevice, deviceId: "IOS-OTHER" }]);
     const originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: devices });
     const restore = ToolRegistry.setPipelineOverridesForTesting({
       env: { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" },
     });
@@ -198,7 +198,7 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
       });
       expect(routedSessionUuidFromResult(result)).toBeUndefined();
       expect(result).not.toHaveProperty("_meta");
-      expect(ends).toEqual([{ admitted: false }]);
+      expect(ends.map(({ admitted }) => admitted)).toEqual([false]);
       expect(wire(result)).toMatchObject({
         success: false,
         code: "session_released_during_creation",
@@ -273,7 +273,7 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
       });
       expect(routedSessionUuidFromResult(result)).toBeUndefined();
       expect(result).not.toHaveProperty("_meta");
-      expect(ends).toEqual([{ admitted: false }]);
+      expect(ends.map(({ admitted }) => admitted)).toEqual([false]);
     } finally {
       assign.mockRestore();
       admission.mockRestore();

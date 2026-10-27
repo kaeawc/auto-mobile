@@ -1,5 +1,5 @@
 import { fakeServerContext } from "../helpers/fakeServerContext";
-import { McpError } from "../../src/server/mcpError";
+import { McpError } from "../../src/daemon/mcpError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerFailuresResources } from "../../src/server/failuresResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";

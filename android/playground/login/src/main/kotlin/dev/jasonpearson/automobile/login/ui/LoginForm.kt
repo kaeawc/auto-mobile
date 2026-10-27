@@ -22,70 +22,85 @@ import dev.jasonpearson.automobile.design.system.theme.AutoMobileDimensions
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.login.R
 
+internal data class LoginFieldState(
+  val value: String,
+  val error: Int?,
+  val hadContent: Boolean,
+  val blurred: Boolean,
+) {
+  val showError: Boolean
+    get() {
+      val shortened = hadContent && value.length < 5
+      val invalidAfterBlur = blurred && error != null
+      return shortened || invalidAfterBlur
+    }
+}
+
+internal data class LoginFormActions(
+  val onUsernameChange: (String) -> Unit,
+  val onPasswordChange: (String) -> Unit,
+  val onPasswordDone: () -> Unit,
+)
+
 /** Form section containing username and password input fields. */
 @Composable
 internal fun LoginForm(
-  username: String,
-  password: String,
-  onUsernameChange: (String) -> Unit,
-  onPasswordChange: (String) -> Unit,
-  loginFormState: LoginFormState,
-  usernameHadContent: Boolean,
-  passwordHadContent: Boolean,
-  usernameBlurred: Boolean,
-  passwordBlurred: Boolean,
-  onPasswordDone: () -> Unit,
+  username: LoginFieldState,
+  password: LoginFieldState,
+  actions: LoginFormActions,
   modifier: Modifier = Modifier,
 ) {
   Column(modifier = modifier) {
-    OutlinedTextField(
-      value = username,
-      onValueChange = onUsernameChange,
-      label = { Text(stringResource(R.string.prompt_email)) },
-      keyboardOptions =
-        KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
-      isError =
-        (usernameHadContent && username.length < 5) ||
-          (usernameBlurred && loginFormState.usernameError != null),
-      supportingText = {
-        if (
-          (usernameHadContent && username.length < 5) ||
-            (usernameBlurred && loginFormState.usernameError != null)
-        ) {
-          loginFormState.usernameError?.let {
-            Text(text = stringResource(it), color = MaterialTheme.colorScheme.error)
-          }
-        }
-      },
-      modifier = Modifier.fillMaxWidth(),
-    )
-
+    UsernameField(username, actions.onUsernameChange)
     Spacer(modifier = Modifier.height(AutoMobileDimensions.spacing4))
-
-    OutlinedTextField(
-      value = password,
-      onValueChange = onPasswordChange,
-      label = { Text(stringResource(R.string.prompt_password)) },
-      visualTransformation = PasswordVisualTransformation(),
-      keyboardOptions =
-        KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-      keyboardActions = KeyboardActions(onDone = { onPasswordDone() }),
-      isError =
-        (passwordHadContent && password.length < 5) ||
-          (passwordBlurred && loginFormState.passwordError != null),
-      supportingText = {
-        if (
-          (passwordHadContent && password.length < 5) ||
-            (passwordBlurred && loginFormState.passwordError != null)
-        ) {
-          loginFormState.passwordError?.let {
-            Text(text = stringResource(it), color = MaterialTheme.colorScheme.error)
-          }
-        }
-      },
-      modifier = Modifier.fillMaxWidth(),
-    )
+    PasswordField(password, actions.onPasswordChange, actions.onPasswordDone)
   }
+}
+
+@Composable
+private fun UsernameField(field: LoginFieldState, onUsernameChange: (String) -> Unit) {
+  OutlinedTextField(
+    value = field.value,
+    onValueChange = onUsernameChange,
+    label = { Text(stringResource(R.string.prompt_email)) },
+    keyboardOptions =
+      KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
+    isError = field.showError,
+    supportingText = {
+      if (field.showError) {
+        field.error?.let {
+          Text(text = stringResource(it), color = MaterialTheme.colorScheme.error)
+        }
+      }
+    },
+    modifier = Modifier.fillMaxWidth(),
+  )
+}
+
+@Composable
+private fun PasswordField(
+  field: LoginFieldState,
+  onPasswordChange: (String) -> Unit,
+  onPasswordDone: () -> Unit,
+) {
+  OutlinedTextField(
+    value = field.value,
+    onValueChange = onPasswordChange,
+    label = { Text(stringResource(R.string.prompt_password)) },
+    visualTransformation = PasswordVisualTransformation(),
+    keyboardOptions =
+      KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+    keyboardActions = KeyboardActions(onDone = { onPasswordDone() }),
+    isError = field.showError,
+    supportingText = {
+      if (field.showError) {
+        field.error?.let {
+          Text(text = stringResource(it), color = MaterialTheme.colorScheme.error)
+        }
+      }
+    },
+    modifier = Modifier.fillMaxWidth(),
+  )
 }
 
 @Preview(name = "Login Form", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
@@ -99,16 +114,10 @@ fun LoginFormPreview() {
   AutoMobileTheme {
     Column(Modifier.background(MaterialTheme.colorScheme.background)) {
       LoginForm(
-        username = "user@example.com",
-        password = "password123",
-        onUsernameChange = {},
-        onPasswordChange = {},
-        loginFormState = LoginFormState(isDataValid = true),
-        usernameHadContent = true,
-        passwordHadContent = true,
-        usernameBlurred = false,
-        passwordBlurred = false,
-        onPasswordDone = {},
+        username = LoginFieldState("user@example.com", null, hadContent = true, blurred = false),
+        password = LoginFieldState("password123", null, hadContent = true, blurred = false),
+        actions =
+          LoginFormActions(onUsernameChange = {}, onPasswordChange = {}, onPasswordDone = {}),
       )
     }
   }

@@ -13,12 +13,9 @@ import {
   DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS,
   MAX_PROTOTYPE_ASSET_COUNT,
 } from "../features/prototype/prototypeAssets";
-import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "../server/observationResourceUris";
-import {
-  DEFAULT_WAIT_FOR_TIMEOUT_MS,
-  DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS,
-  WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
-} from "../features/observe/waitForTimeout";
+import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "./observationResourceUris";
+import { WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS } from "../features/observe/waitForTimeout";
+import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../features/prototype/protoViewer/protoViewerDevice";
 import {
   APP_FILE_PUSH_TIMEOUT_MS,
   FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
@@ -42,6 +39,18 @@ import { logger } from "../utils/logger";
 import { readEnvPositiveInteger } from "../utils/envNumbers";
 import type { DaemonRequest } from "./types";
 import {
+  asRecord,
+  MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+  positiveFiniteNumber,
+  resolveArgumentTimeoutBudgetMs,
+  resolveMediaSessionWaitBudgetMs,
+  resolveObserveWaitBudgetMs,
+} from "./mcpArgumentBudget";
+import {
+  isEnvTunableToolRequest,
+  resolveExplicitToolTimeoutOverrideMs,
+} from "./explicitToolTimeoutOverride";
+import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
   DEFAULT_START_DEVICE_TIMEOUT_MS,
@@ -62,21 +71,12 @@ import {
 } from "../features/action/TapAnyElement";
 import { MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
 import { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "../features/action/installAppTimeout";
+import { ENV } from "../config/env";
 
 export { START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS, MAX_SETTIMEOUT_DELAY_MS };
+export { MAX_CALLER_MCP_REQUEST_TIMEOUT_MS };
 
 export const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 30_000;
-
-/**
- * Upper bound on a caller-supplied `DaemonRequest.timeoutMs` (#6385). Clients
- * now send their own deadline, and the daemon honours it -- but a buggy or
- * hostile value (e.g. `Number.MAX_SAFE_INTEGER`) must not pin a request's
- * device lock and queue slot indefinitely, nor overflow `setTimeout` (which
- * fires immediately past `MAX_SETTIMEOUT_DELAY_MS`). Server-derived per-tool
- * floors are applied after this clamp, so a tool whose own floor is larger
- * still gets it.
- */
-export const MAX_CALLER_MCP_REQUEST_TIMEOUT_MS = 1_800_000;
 
 /**
  * Clamp a caller-supplied timeout into `(0, MAX_CALLER_MCP_REQUEST_TIMEOUT_MS]`.
@@ -152,6 +152,15 @@ export const MIN_LAUNCH_APP_MCP_TIMEOUT_MS = 90_000;
  * unsafe because the original crash may already have completed.
  */
 export const MIN_CRASH_APP_MCP_TIMEOUT_MS = 90_000;
+
+/**
+ * Floor for `performanceTrace`: an iOS `stop` waits for xctrace to finalise the
+ * `.trace` (up to 180 s: `DEFAULT_STOP_MAX_MS` in XctraceRecorder.ts) and then
+ * runs up to two `xctrace export` calls (120 s each) to summarise it. With only
+ * the 30 s standard deadline the daemon cut the call off before the typed
+ * stop-timeout error could reach the client (#15330).
+ */
+export const MIN_PERFORMANCE_TRACE_MCP_TIMEOUT_MS = 180_000 + 2 * 120_000 + 30_000;
 
 /**
  * Compatibility floor while video recording startup moves to a strict,
@@ -259,6 +268,7 @@ const TOOL_TIMEOUT_FLOORS: ReadonlyMap<string, number> = new Map(
       DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     uninstallApp: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
     crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
+    performanceTrace: MIN_PERFORMANCE_TRACE_MCP_TIMEOUT_MS,
     getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
     setPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
     setUIState: MIN_SET_UI_STATE_MCP_TIMEOUT_MS,
@@ -276,8 +286,8 @@ const TOOL_TIMEOUT_FLOORS: ReadonlyMap<string, number> = new Map(
  * without changing callers.
  */
 export const DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS = 90_000;
-export const OPEN_LINK_MCP_TIMEOUT_ENV_VAR = "AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS";
-export const LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR = "AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS";
+export const OPEN_LINK_MCP_TIMEOUT_ENV_VAR = ENV.OPEN_LINK_MCP_TIMEOUT_MS.name;
+export const LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR = ENV.OPEN_LINK_MCP_TIMEOUT_MS.legacyName;
 
 /**
  * Floor for `observe` — on iOS the first observe after a device becomes active
@@ -290,8 +300,8 @@ export const LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR = "AUTO_MOBILE_OPEN_LINK_MCP_T
  * raise it in lockstep without a code change.
  */
 export const DEFAULT_OBSERVE_MCP_TIMEOUT_MS = 90_000;
-export const OBSERVE_MCP_TIMEOUT_ENV_VAR = "AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS";
-export const LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR = "AUTO_MOBILE_OBSERVE_MCP_TIMEOUT_MS";
+export const OBSERVE_MCP_TIMEOUT_ENV_VAR = ENV.OBSERVE_MCP_TIMEOUT_MS.name;
+export const LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR = ENV.OBSERVE_MCP_TIMEOUT_MS.legacyName;
 
 export function resolveEnvTimeoutFloorMs(
   primaryEnvVar: string,
@@ -306,7 +316,10 @@ function resolveFixedToolTimeoutFloorMs(toolName: unknown): number | undefined {
   return typeof toolName === "string" ? TOOL_TIMEOUT_FLOORS.get(toolName) : undefined;
 }
 
-function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
+function resolveToolTimeoutFloorMs(
+  toolName: string | undefined,
+  env?: NodeJS.ProcessEnv,
+): number | undefined {
   switch (toolName) {
     case "executePlan":
       return MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS;
@@ -329,59 +342,18 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
         OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
         LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
         DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS,
+        env,
       );
     case "observe":
       return resolveEnvTimeoutFloorMs(
         OBSERVE_MCP_TIMEOUT_ENV_VAR,
         LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
         DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
+        env,
       );
     default:
       return resolveFixedToolTimeoutFloorMs(toolName);
   }
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function positiveFiniteNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
-}
-
-/**
- * Invalid/non-positive/non-finite budgets use the tool default, matching device
- * preparation. Oversized finite values (including budget + headroom) saturate at
- * the caller cap; no transport headroom can be guaranteed at that ceiling.
- */
-function resolveArgumentTimeoutBudgetMs(
-  raw: unknown,
-  defaultMs: number,
-  headroomMs: number,
-): number {
-  return Math.min(
-    (positiveFiniteNumber(raw) ?? defaultMs) + headroomMs,
-    MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
-    MAX_SETTIMEOUT_DELAY_MS,
-  );
-}
-
-function resolveObserveWaitBudgetMs(args: Record<string, unknown>): number {
-  const waitFor = asRecord(args.waitFor);
-  if (!waitFor) {
-    return 0;
-  }
-  const defaultMs =
-    waitFor.for === "stable" ? DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS : DEFAULT_WAIT_FOR_TIMEOUT_MS;
-  // Both legacy predicates and the `for` DSL read these nested aliases in this
-  // order. Top-level timeoutMs is not a wait budget; schema validation owns it.
-  return resolveArgumentTimeoutBudgetMs(
-    waitFor.timeout ?? waitFor.timeoutMs,
-    defaultMs,
-    WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
-  );
 }
 
 function resolveFileTransferBudgetMs(args: Record<string, unknown>, pushMs: number): number {
@@ -446,11 +418,22 @@ function resolvePrototypeAssetUploadBudgetMs(args: Record<string, unknown>): num
 }
 
 function resolvePrototypeAwaitBudgetMs(args: Record<string, unknown>): number {
-  // Only `awaitEvent` waits, and only `show` with `assets` uploads; every other prototype action
-  // keeps the default deadline. The tool's own maximum bounds the wait, so a larger value
+  // `awaitEvent` waits, `save` and `open` may wait on ProtoViewer, and only `show` with `assets`
+  // uploads; every other prototype action keeps the default deadline. The tool's own maximum bounds the wait, so a larger value
   // (rejected by its schema anyway) cannot inflate the deadline past that maximum plus headroom.
   if (args.action === "show") {
     return resolvePrototypeAssetUploadBudgetMs(args);
+  }
+  if (args.action === "save" || args.action === "open") {
+    // On Android with ProtoViewer installed these wait for the app's result file (#13621).
+    return resolveArgumentTimeoutBudgetMs(
+      Math.min(
+        positiveFiniteNumber(args.timeoutMs) ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS,
+        MAX_PROTOTYPE_EVENT_TIMEOUT_MS,
+      ),
+      PROTOVIEWER_DEFAULT_TIMEOUT_MS,
+      WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+    );
   }
   if (args.action !== "awaitEvent") {
     return 0;
@@ -480,6 +463,7 @@ const ARGUMENT_BUDGET_RESOLVERS: ReadonlyMap<string, (args: Record<string, unkno
         ),
     ],
     ["observe", resolveObserveWaitBudgetMs],
+    ["mediaSession", resolveMediaSessionWaitBudgetMs],
     [
       "barrier",
       (args) =>
@@ -903,41 +887,72 @@ function resolveExecutePlanBudgetMs(request: DaemonRequest): number {
   return resolveExecutePlanStepsBudgetMs(asRecord(request.params?.arguments)?.planContent);
 }
 
-export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
+export function resolveMcpRequestTimeoutMs(
+  request: DaemonRequest,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
   const base = clampCallerMcpRequestTimeoutMs(request.timeoutMs) ?? DEFAULT_MCP_REQUEST_TIMEOUT_MS;
   const floor =
-    request.method === "tools/call" ? resolveToolTimeoutFloorMs(request.params?.name) : undefined;
-  const devicePreparationBudget = resolveDevicePreparationToolBudgetMs(request);
-  const tapOnLongPressBudget = resolveTapOnLongPressBudgetMs(request);
-  const tapAnyLongPressBudget = resolveTapAnyLongPressBudgetMs(request);
-  const tapAnyOrdinaryTapBudget = resolveTapAnyOrdinaryTapBudgetMs(request);
+    request.method === "tools/call"
+      ? resolveToolTimeoutFloorMs(request.params?.name, env)
+      : undefined;
+  return resolveMcpRequestTimeoutWithBounds(request, base, floor);
+}
+
+/** Share every argument-derived minimum between the client and daemon budget policies. */
+function resolveMcpRequestTimeoutWithBounds(
+  request: DaemonRequest,
+  base: number,
+  floor: number | undefined,
+): number {
   return Math.max(
     base,
     resolveArgumentBudgetToolBudgetMs(request),
     resolveExecutePlanBudgetMs(request),
     resolveTextToolBudgetMs(request, floor),
     floor ?? 0,
-    devicePreparationBudget ?? 0,
-    tapOnLongPressBudget ?? 0,
-    tapAnyLongPressBudget ?? 0,
-    tapAnyOrdinaryTapBudget ?? 0,
+    resolveDevicePreparationToolBudgetMs(request) ?? 0,
+    resolveTapOnLongPressBudgetMs(request) ?? 0,
+    resolveTapAnyLongPressBudgetMs(request) ?? 0,
+    resolveTapAnyOrdinaryTapBudgetMs(request) ?? 0,
   );
+}
+
+/**
+ * The daemon owns explicit openLink/observe budgets (#13797). Its explicit override wins;
+ * otherwise a client's explicit override replaces the daemon's default floor. Generic client
+ * timeouts cannot floor either choice, but argument-derived correctness budgets still apply.
+ */
+export function resolveDaemonMcpRequestTimeoutMs(
+  request: DaemonRequest,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  if (!isEnvTunableToolRequest(request)) {
+    return resolveMcpRequestTimeoutMs(request, env);
+  }
+  const chosen =
+    clampCallerMcpRequestTimeoutMs(resolveExplicitToolTimeoutOverrideMs(request, env)) ??
+    clampCallerMcpRequestTimeoutMs(request.requestedTimeoutMs);
+  return chosen === undefined
+    ? resolveMcpRequestTimeoutMs(request, env)
+    : resolveMcpRequestTimeoutWithBounds(request, DEFAULT_MCP_REQUEST_TIMEOUT_MS, chosen);
 }
 
 const resolvedTimeouts = new WeakMap<DaemonRequest, number>();
 
 /**
- * {@link resolveMcpRequestTimeoutMs} once per request object (#11817). The control socket asks for
- * the budget at frame parse, at admission and again inside each input handler; for `executePlan`
- * that is a YAML parse of the plan each time. The frame is immutable once parsed, so the first
- * answer holds for every later reader of the same request.
+ * Cache the daemon budget once per immutable request (#11817), including its environment.
+ * Frame parse, admission and input handlers share the answer; executePlan's YAML is parsed once.
  */
-export function resolveMcpRequestTimeoutMsOnce(request: DaemonRequest): number {
+export function resolveMcpRequestTimeoutMsOnce(
+  request: DaemonRequest,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
   const known = resolvedTimeouts.get(request);
   if (known !== undefined) {
     return known;
   }
-  const resolved = resolveMcpRequestTimeoutMs(request);
+  const resolved = resolveDaemonMcpRequestTimeoutMs(request, env);
   resolvedTimeouts.set(request, resolved);
   return resolved;
 }

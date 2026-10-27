@@ -130,4 +130,160 @@ class TypedResultWireTest {
     assertEquals(true, text.contains(""""perfTiming":"not json {""""), text)
     assertEquals(frame, json.decodeFromString<WebSocketResponse>(text))
   }
+
+  @Test
+  fun `clipboard ca cert device owner ime action and select all keep the hand-built field order`() {
+    val ordered = orderedJson()
+    fun text(response: WebSocketResponse) = ordered.encodeToString<WebSocketResponse>(response)
+    assertEquals(
+      """{"type":"clipboard_result","timestamp":1,"requestId":"r","action":"get","success":true,"totalTimeMs":2,"text":"t","perfTiming":{"a":1}}""",
+      text(
+        ClipboardResult(
+          timestamp = 1,
+          requestId = "r",
+          action = "get",
+          success = true,
+          totalTimeMs = 2,
+          text = "t",
+          perfTiming = """{"a":1}""",
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"ca_cert_result","timestamp":1,"action":"install","success":false,"totalTimeMs":2,"alias":"a","error":"e"}""",
+      text(
+        CaCertResult(
+          timestamp = 1,
+          action = "install",
+          success = false,
+          totalTimeMs = 2,
+          alias = "a",
+          error = "e",
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"device_owner_status_result","timestamp":1,"success":true,"totalTimeMs":2,"packageName":"p","isDeviceOwner":true,"isAdminActive":false}""",
+      text(
+        DeviceOwnerStatusResult(
+          timestamp = 1,
+          success = true,
+          totalTimeMs = 2,
+          packageName = "p",
+          isDeviceOwner = true,
+          isAdminActive = false,
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"ime_action_result","timestamp":1,"approximated":true,"action":"next","success":true,"totalTimeMs":2}""",
+      text(
+        ImeActionResult(
+          timestamp = 1,
+          approximated = true,
+          action = "next",
+          success = true,
+          totalTimeMs = 2,
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"select_all_result","timestamp":1,"success":true,"totalTimeMs":2}""",
+      text(SelectAllResult(timestamp = 1, success = true, totalTimeMs = 2)),
+    )
+  }
+
+  @Test
+  fun `text, ime and event frames keep the hand-built field order`() {
+    val ordered = orderedJson()
+    fun text(response: WebSocketResponse) = ordered.encodeToString<WebSocketResponse>(response)
+    assertEquals(
+      """{"type":"commit_text_result","timestamp":1,"requestId":"r","success":false,"totalTimeMs":2,"partialApplication":true,"committedUnits":3,"insertedText":"t","editorConsumed":true,"trace":["a"],"error":"e","perfTiming":{"a":1}}""",
+      text(
+        CommitTextResult(
+          timestamp = 1,
+          requestId = "r",
+          success = false,
+          totalTimeMs = 2,
+          partialApplication = true,
+          committedUnits = 3,
+          insertedText = "t",
+          editorConsumed = true,
+          trace = listOf("a"),
+          error = "e",
+          perfTiming = """{"a":1}""",
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"commit_text_result","timestamp":1,"success":true,"totalTimeMs":2}""",
+      text(CommitTextResult(timestamp = 1, success = true, totalTimeMs = 2)),
+    )
+    assertEquals(
+      """{"type":"insert_text_result","timestamp":1,"success":true,"totalTimeMs":2,"warning":"w","caretPlaced":false,"resultingTextLength":4,"partialApplication":true}""",
+      text(
+        InsertTextResult(
+          timestamp = 1,
+          success = true,
+          totalTimeMs = 2,
+          warning = "w",
+          caretPlaced = false,
+          resultingTextLength = 4,
+          partialApplication = true,
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"cancel_ime_commit_result","timestamp":1,"success":true,"targetRequestId":"t","partialApplication":false}""",
+      text(CancelImeCommitResult(timestamp = 1, targetRequestId = "t", partialApplication = false)),
+    )
+    assertEventFieldOrder(::text)
+  }
+
+  private fun orderedJson(): Json = Json {
+    classDiscriminator = "type"
+    encodeDefaults = true
+    explicitNulls = false
+  }
+
+  private fun assertEventFieldOrder(text: (WebSocketResponse) -> String) {
+    assertEquals(
+      """{"type":"screenshot_error","timestamp":1,"requestId":"r","error":"e","displayId":2,"panelUniqueId":"p"}""",
+      text(
+        ScreenshotErrorResult(
+          timestamp = 1,
+          requestId = "r",
+          error = "e",
+          displayId = 2,
+          panelUniqueId = "p",
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"display_transition","timestamp":1,"change":"rotation","displayId":0,"panelFingerprint":{"width":1,"height":2},"width":3,"rotation":1}""",
+      text(
+        DisplayTransitionEvent(
+          timestamp = 1,
+          change = "rotation",
+          displayId = 0,
+          panelFingerprint = DisplayPanelFingerprint(1, 2),
+          width = 3,
+          rotation = 1,
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"package_event","timestamp":1,"event":{"action":"added","packageName":"p","userId":10,"uid":5,"removedForAllUsers":true}}""",
+      text(
+        PackageEvent(
+          timestamp = 1,
+          event = PackageEventData("added", "p", 10, uid = 5, removedForAllUsers = true),
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"interaction_event","timestamp":1,"event":{"type":"tap","packageName":null}}""",
+      text(InteractionEvent(timestamp = 1, event = """{"type":"tap","packageName":null}""")),
+    )
+  }
 }

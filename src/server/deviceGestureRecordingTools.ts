@@ -4,7 +4,7 @@ import { ToolRegistry } from "./toolRegistry";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
-import { addSessionUuidToSchema } from "./toolSchemaHelpers";
+import { addSessionUuidToSchema } from "../utils/schemaHelpers";
 import {
   startDeviceGestureRecording,
   getStoppedDeviceGestureRecording,
@@ -13,7 +13,7 @@ import {
   getDeviceGestureRecordingStatus,
   type DeviceGestureRecordingStatus,
   NoUserInputCapturedError,
-} from "./deviceGestureRecordingManager";
+} from "../daemon/deviceGestureRecordingManager";
 import {
   assertLifecycleCallerHoldsDevice,
   assertLifecycleCallerNotOnForeignBinding,

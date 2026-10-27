@@ -17,7 +17,8 @@ export type FeatureFlagKey =
   | "tool-results-no-structured-content"
   | "actions-diff-observe"
   | "actions-no-observe"
-  | "actions-compact-metadata";
+  | "actions-compact-metadata"
+  | "device-condition";
 
 export type FeatureFlagConfig = Record<string, unknown>;
 
@@ -186,5 +187,12 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     description:
       "Omit unchanged device metadata after its first inline action response in a session and omit identical duplicate matched elements.",
     defaultValue: true,
+  },
+  {
+    key: "device-condition",
+    label: "Device condition fixtures",
+    description:
+      "Opt-in: expose the session-scoped deviceCondition surface on setDeviceState for root/integrity/fault test fixtures (epic #14047). Off by default while the individual injectors land; conditions always restore to a clean state on release.",
+    defaultValue: false,
   },
 ];

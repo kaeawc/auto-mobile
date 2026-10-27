@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+  <!-- Keep every shape inside the adaptive-icon safe zone: the central 66 x 66 of the 108 canvas (21..87). -->
+  <!-- The text lines are holes (evenodd), so the themed monochrome layer keeps them. -->
+  <path fill="#FFFFFF" fill-rule="evenodd" d="M33 24h42v60H33zM40 34h28v6H40zM40 46h18v6H40zM40 58h28v14H40z"/>
+</svg>

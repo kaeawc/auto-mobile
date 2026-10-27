@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
-import {
-  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
-  SessionManager,
-  type SessionDeviceAssigner,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
 import {
   DeviceSessionRepository,
   deviceRestartReleaseReason,

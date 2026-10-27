@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { createHash, type KeyObject } from "node:crypto";
+import { signEnvelopeEd25519 } from "./envelopeSigning";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalInputEntries } from "./inputCanonical";
@@ -98,6 +99,16 @@ export class TreeEntriesInputHasher implements InputHasher {
 }
 export interface Signer {
   sign(canonicalPayload: string): Promise<AttestationSignature | null>;
+}
+/** Signs with a producer's Ed25519 key; the key itself is provisioned by the producer registry. */
+export class Ed25519Signer implements Signer {
+  constructor(
+    private readonly keyId: string,
+    private readonly privateKey: KeyObject,
+  ) {}
+  async sign(canonicalPayload: string): Promise<AttestationSignature> {
+    return signEnvelopeEd25519(this.keyId, canonicalPayload, this.privateKey);
+  }
 }
 export class UnsignedSigner implements Signer {
   async sign(_canonicalPayload: string): Promise<null> {

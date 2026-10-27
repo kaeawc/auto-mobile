@@ -2861,8 +2861,8 @@ node-level motion-v2 `animate`) and `phase` 0-1.
   (`Effect limit exceeded`, `Animated effect limit exceeded`); a template inside a `repeat` is
   reported at the `repeat` with the `Expanded` forms of those two messages.
 - **Capability.** Any `effects` list needs `prototype_effects_v1`, checked on `show` and on the full
-  patch result. CtrlProxy and the embedded renderer advertise it (#15129); the iOS agent does not yet
-  (#15130), so the host still refuses these specs on iOS.
+  patch result. CtrlProxy, the embedded renderer and the iOS agent (#15130) advertise it; the host
+  refuses `effects` for a device that does not.
 
 ### Android rendering (#15129)
 

@@ -128,6 +128,19 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     children: [{ type: "spacer" }],
   }),
   prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
+  prototype_keyframes_v1: fixture({
+    ...label,
+    keyframes: {
+      trigger: { key: "liked" },
+      durationMs: 600,
+      tracks: {
+        scale: [
+          [0, 1],
+          [1, 1],
+        ],
+      },
+    },
+  }),
   prototype_effects_v1: fixture({ ...label, style: { effects: [{ type: "noise" }] } }),
   prototype_reduced_motion_v1: { minimalSpec: { ...base, motion: "reduced" }, ops: [] },
   prototype_shared_element_v1: fixture({

@@ -19,6 +19,7 @@ internal object PrototypeBundleCapabilities {
     )
       caps.add("prototype_theme_modes_v1")
     for (node in PrototypeBundleSpec.nodes(spec)) {
+      if ("keyframes" in node) caps.add("prototype_keyframes_v1")
       caps.addAll(PrototypeBundleNodeCapabilities.collect(node))
       fields(node, caps)
     }

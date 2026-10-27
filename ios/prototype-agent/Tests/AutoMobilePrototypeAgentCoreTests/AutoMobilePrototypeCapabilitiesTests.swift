@@ -18,18 +18,22 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // motion v2 (#14208) is Android-only until the SwiftUI side lands (#14684), and so is
         // transition choreography (#15247). Style effects (#15128) have a validated contract and
         // no renderer yet.
-        let exclusions: Set<String> = [
+        var exclusions: Set<String> = [
             "prototype_platform_test_v1",
             "prototype_chat_scroll_v1", "prototype_motion_v2", "prototype_choreography_v1",
             "prototype_effects_v1",
         ]
+        // Core tests also run on macOS 15/16, where the injected OS-version gate excludes iOS 17 keyframes.
+        if !PrototypeAgentProtocol.advertisedCapabilities().contains("prototype_keyframes_v1") {
+            exclusions.insert("prototype_keyframes_v1")
+        }
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")
         XCTAssertTrue(exclusions.isDisjoint(with: supported), "Remove exclusions once supported")
         XCTAssertEqual(required.subtracting(supported).subtracting(exclusions).sorted(), [])
     }
 
     func testSupportedCapabilitiesComeFromAgentAdvertisement() {
-        let advertised = PrototypeAgentProtocol.capabilities
+        let advertised = PrototypeAgentProtocol.advertisedCapabilities()
         XCTAssertTrue(Set(AutoMobilePrototypeCapabilities.supported).isSubset(of: Set(advertised)))
         XCTAssertEqual(
             AutoMobilePrototypeCapabilities.supported,

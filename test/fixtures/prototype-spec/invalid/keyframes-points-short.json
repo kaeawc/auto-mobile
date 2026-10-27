@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "keyframes",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "liked": false
+    },
+    "root": {
+      "type": "icon",
+      "name": "favorite",
+      "keyframes": {
+        "trigger": {
+          "key": "liked"
+        },
+        "durationMs": 600,
+        "tracks": {
+          "scale": [
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    }
+  },
+  "expectedPath": "root.keyframes.tracks.scale",
+  "expectedMessage": "Array length out of range"
+}

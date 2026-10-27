@@ -1,0 +1,41 @@
+{
+  "id": "keyframes",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "liked": false
+  },
+  "root": {
+    "type": "icon",
+    "name": "favorite",
+    "keyframes": {
+      "trigger": {
+        "key": "liked"
+      },
+      "durationMs": 600,
+      "tracks": {
+        "offsetX": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            -8
+          ],
+          [
+            0.75,
+            8
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      }
+    }
+  }
+}

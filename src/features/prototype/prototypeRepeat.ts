@@ -443,6 +443,7 @@ interface Budget {
   images: number;
   effects: number;
   animatedEffects: number;
+  keyframeNodes: number;
 }
 
 /**
@@ -487,6 +488,12 @@ function expandedErrors(
   if (budget.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(at, "Expanded image limit exceeded");
   }
+  if (
+    node.keyframes !== undefined &&
+    ++budget.keyframeNodes > contract.limits.MAX_PROTOTYPE_KEYFRAME_NODES
+  ) {
+    return fail(`${path}.keyframes`, "Keyframe node limit exceeded");
+  }
   const effects = effectUses(node);
   budget.effects += effects.total;
   budget.animatedEffects += effects.animated;
@@ -524,7 +531,7 @@ export function repeatErrors(
     expandedErrors(
       root,
       "root",
-      { nodes: 0, images: 0, effects: 0, animatedEffects: 0 },
+      { nodes: 0, images: 0, effects: 0, animatedEffects: 0, keyframeNodes: 0 },
       data,
       undefined,
     )

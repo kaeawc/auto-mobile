@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { prototypeKeyframesSchema } from "./prototypeKeyframes";
 import { prototypeTransitionSchema } from "./prototypeChoreographySchema";
 import { imageAssetSchema } from "./prototypePresentationSchemas";
 
 /** Every node's `transition` and `animate` (#14208), spread into the common node shape. */
 export const prototypeMotionNodeShape = {
+  keyframes: prototypeKeyframesSchema.optional(),
   transition: prototypeTransitionSchema.optional(),
   // Animates styleWhen-driven alpha, offset, scale, rotation, background and color.
   animate: z

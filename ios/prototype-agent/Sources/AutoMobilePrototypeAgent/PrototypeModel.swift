@@ -25,6 +25,7 @@
         }
 
         var menuBounds: [ObjectIdentifier: CGRect] = [:]
+        @ObservationIgnored private(set) lazy var keyframeActivity = PrototypeKeyframeActivity(clock: clock)
         private(set) var state: [String: JSONValue] = [:]
         /// Which swipe-actions row is open; opening one closes the others. Presentation only.
         private(set) var swipe = PrototypeSwipeCoordinator()
@@ -557,6 +558,7 @@
                 "assets": assets.keys.sorted(),
                 "lastSequence": session.lastSequence,
             ]
+            status["motion"] = ["active": keyframeActivity.active, "loops": 0]
             let timerSnapshots = timers.snapshot()
             if !timerSnapshots.isEmpty { status["timers"] = timerSnapshots.map(\.wireObject) }
             if !fontFaces.isEmpty { status["fonts"] = fontFaces.keys.sorted() }

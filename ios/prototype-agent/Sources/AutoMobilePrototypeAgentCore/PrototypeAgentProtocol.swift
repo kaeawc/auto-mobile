@@ -43,6 +43,7 @@ enum PrototypeAgentProtocol {
         textFieldActionsCapability,
         carouselCapability,
         chartCapability,
+        keyframesCapability,
         loadingStatesCapability,
         stylePolishV2Capability,
         textFieldLeadingIconCapability,
@@ -148,6 +149,7 @@ enum PrototypeAgentProtocol {
     /// The `chart` node (line, area, bar and ring over `/data` arrays) drawn with Swift Charts (#14679).
     static let chartCapability = "prototype_chart_v1"
     /// `{data, empty}` conditions and style `shimmer` on box, row, column and card (#14207, #14689).
+    static let keyframesCapability = "prototype_keyframes_v1"
     static let loadingStatesCapability = "prototype_loading_states_v1"
     /// Text field `leadingIcon` drawn as an SF Symbol (#12066).
     static let textFieldLeadingIconCapability = "prototype_text_field_leading_icon_v1"

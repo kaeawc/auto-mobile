@@ -53,7 +53,8 @@
     "MAX_PROTOTYPE_CHECK_QUANTIFIER_BOUND": 100,
     "MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS": 2,
     "MAX_PROTOTYPE_EFFECTS": 64,
-    "MAX_PROTOTYPE_ANIMATED_EFFECTS": 8
+    "MAX_PROTOTYPE_ANIMATED_EFFECTS": 8,
+    "MAX_PROTOTYPE_KEYFRAME_NODES": 16
   },
   "definitions": {
     "offset": {
@@ -2497,6 +2498,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -2712,6 +2717,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -2920,6 +2929,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -3100,6 +3113,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -3283,6 +3300,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -3485,6 +3506,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -3711,6 +3736,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -3919,6 +3948,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -4131,6 +4164,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -4301,6 +4338,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -4455,6 +4496,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -4751,6 +4796,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -4943,6 +4992,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -5139,6 +5192,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -5320,6 +5377,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -5523,6 +5584,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -5702,6 +5767,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -5898,6 +5967,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -6115,6 +6188,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -6323,6 +6400,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -6496,6 +6577,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -6673,6 +6758,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -6858,6 +6947,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -7031,6 +7124,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -7222,6 +7319,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -7385,6 +7486,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -7545,6 +7650,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -7721,6 +7830,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -7926,6 +8039,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -8100,6 +8217,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -8285,6 +8406,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -8487,6 +8612,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -8673,6 +8802,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -8887,6 +9020,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -9107,6 +9244,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -9295,6 +9436,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -9475,6 +9620,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -9679,6 +9828,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -9857,6 +10010,10 @@
               },
               "optional": true
             },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -10029,6 +10186,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -10227,6 +10388,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -10430,6 +10595,10 @@
                 "kind": "ref",
                 "name": "animate"
               },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": { "kind": "ref", "name": "keyframes" },
               "optional": true
             },
             "anchor": {
@@ -13964,6 +14133,151 @@
             "values": ["standard", "emphasized", "linear", "spring"]
           },
           "optional": true
+        }
+      }
+    },
+    "keyframePoints": {
+      "kind": "array",
+      "min": 2,
+      "max": 8,
+      "item": {
+        "kind": "array",
+        "min": 2,
+        "max": 2,
+        "item": {
+          "kind": "number",
+          "integer": false
+        }
+      }
+    },
+    "keyframeTrack": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "array",
+          "min": 2,
+          "max": 8,
+          "item": {
+            "kind": "array",
+            "min": 2,
+            "max": 2,
+            "item": {
+              "kind": "number",
+              "integer": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "points": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframePoints"
+              },
+              "optional": false
+            },
+            "curve": {
+              "rule": {
+                "kind": "enum",
+                "values": ["linear", "standard", "spring"]
+              },
+              "optional": true
+            }
+          }
+        }
+      ]
+    },
+    "keyframes": {
+      "kind": "object",
+      "fields": {
+        "trigger": {
+          "rule": {
+            "kind": "object",
+            "exactlyOne": ["key", "data"],
+            "fields": {
+              "key": {
+                "rule": {
+                  "kind": "key"
+                },
+                "optional": true
+              },
+              "data": {
+                "rule": {
+                  "kind": "pointer"
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": false
+        },
+        "durationMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 100,
+            "max": 3000
+          },
+          "optional": false
+        },
+        "tracks": {
+          "rule": {
+            "kind": "object",
+            "atLeastOne": true,
+            "fields": {
+              "scale": {
+                "rule": {
+                  "kind": "ref",
+                  "name": "keyframeTrack"
+                },
+                "optional": true
+              },
+              "scaleX": {
+                "rule": {
+                  "kind": "ref",
+                  "name": "keyframeTrack"
+                },
+                "optional": true
+              },
+              "scaleY": {
+                "rule": {
+                  "kind": "ref",
+                  "name": "keyframeTrack"
+                },
+                "optional": true
+              },
+              "rotation": {
+                "rule": {
+                  "kind": "ref",
+                  "name": "keyframeTrack"
+                },
+                "optional": true
+              },
+              "offsetX": {
+                "rule": {
+                  "kind": "ref",
+                  "name": "keyframeTrack"
+                },
+                "optional": true
+              },
+              "offsetY": {
+                "rule": {
+                  "kind": "ref",
+                  "name": "keyframeTrack"
+                },
+                "optional": true
+              },
+              "alpha": {
+                "rule": {
+                  "kind": "ref",
+                  "name": "keyframeTrack"
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": false
         }
       }
     },

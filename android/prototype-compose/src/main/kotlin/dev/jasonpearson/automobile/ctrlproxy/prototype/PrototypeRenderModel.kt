@@ -14,8 +14,10 @@ import dev.jasonpearson.automobile.protocol.*
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.encodeToJsonElement
 
 /** Immutable, device-free inputs for the Compose adapter. All numeric sizes remain dp. */
 @Immutable
@@ -83,6 +85,7 @@ data class PrototypeRenderNode(
    * rank times `ms` plus its own `transition.delayMs`, at most 600 ms.
    */
   val enterDelayMs: Int = 0,
+  val keyframeTrigger: kotlinx.serialization.json.JsonElement? = null,
 )
 
 @Immutable
@@ -279,6 +282,15 @@ internal class PrototypeNodeMapping(
         spans =
           (node as? PrototypeTextNode)?.let { mapPrototypeTextSpans(it, localState, inPager) },
         chart = chart,
+        keyframeTrigger =
+          node.keyframes?.let { frames ->
+            val trigger = frames["trigger"] as? JsonObject
+            val key = (trigger?.get("key") as? JsonPrimitive)?.content
+            val pointer = (trigger?.get("data") as? JsonPrimitive)?.content
+            if (key != null)
+              state[key]?.let { Json.encodeToJsonElement(PrototypeScalar.serializer(), it) }
+            else pointer?.let { PrototypeDataPointer.resolve(data, it) }
+          },
         enterDelayMs =
           (staggerDelayMs + (node.transition?.delayMs ?: 0)).coerceAtMost(
             PrototypeChoreographyRules.MAX_DELAY_MS,

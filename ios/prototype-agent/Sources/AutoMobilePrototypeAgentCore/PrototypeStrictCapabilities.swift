@@ -102,6 +102,7 @@ enum PrototypeStrictCapabilities {
                 if key == "linkify" { need("linkify") }
                 if key == "empty" || key == "shimmer" { need("loading_states") }
                 if key == "effects" { need("effects") }
+                if key == "keyframes" { need("keyframes") }
                 let transitionType = child.objectFields?["type"]?.stringValue ?? child.stringValue ?? ""
                 if ["animate", "scale", "rotation", "zoomable"]
                     .contains(key) ||
@@ -122,7 +123,7 @@ enum PrototypeStrictCapabilities {
                 // An effect's own `animate`, colours and params are not spec features of their own.
                 if key == "linkify" {
                     if let actions = child.objectFields?["onTap"] { scan(actions, field: "onTap") }
-                } else if key != "series", key != "effects" { scan(child, field: key) }
+                } else if key != "series", key != "effects", key != "keyframes" { scan(child, field: key) }
             }
         }
         if let root = spec["root"] { scan(root) }

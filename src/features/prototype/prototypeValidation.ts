@@ -22,6 +22,7 @@ import { prototypeLinkifyError } from "./prototypeLinkify";
 import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
+import { prototypeKeyframesError, prototypeKeyframeTracksError } from "./prototypeKeyframes";
 import { effectUses } from "./prototypeEffects";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 import {
@@ -49,6 +50,7 @@ interface Context {
   images: number;
   effects: number;
   animatedEffects: number;
+  keyframeNodes: number;
   /** Current nesting per bounded reference (see `nestedReferences`). */
   nesting: Record<string, number>;
 }
@@ -134,6 +136,12 @@ function chargeNodeBudgets(
   }
   if (context.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(path, "Image limit exceeded");
+  }
+  if (
+    node.keyframes !== undefined &&
+    ++context.keyframeNodes > contract.limits.MAX_PROTOTYPE_KEYFRAME_NODES
+  ) {
+    return fail(`${path}.keyframes`, "Keyframe node limit exceeded");
   }
   const uses = effectUses(node);
   context.effects += uses.total;
@@ -266,7 +274,11 @@ function visitObject(
       return error;
     }
   }
-  return objectConstraint(data, rule, path);
+  return (
+    (rule === definitions.keyframes
+      ? prototypeKeyframeTracksError(data.tracks, `${path}.tracks`)
+      : undefined) ?? objectConstraint(data, rule, path)
+  );
 }
 function objectConstraint(
   data: Record<string, unknown>,
@@ -797,6 +809,7 @@ function platformArgumentError(
     images: 0,
     effects: 0,
     animatedEffects: 0,
+    keyframeNodes: 0,
     nesting: { container: 0, condition: 0, action: 0 },
   };
   return walk(value, rule, path, context, 0);
@@ -835,6 +848,7 @@ function behaviourErrors(
     prototypeTimersError([...context.actions, ...componentTimers]) ??
     prototypeLoadingStatesError(context.nodes) ??
     motionErrors(context.nodes) ??
+    prototypeKeyframesError(context.nodes, data) ??
     prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??
     nodeReferenceErrors(context, repeats) ??
@@ -853,6 +867,7 @@ function validateValue(
     images: 0,
     effects: 0,
     animatedEffects: 0,
+    keyframeNodes: 0,
     nesting: { container: 0, condition: 0, action: 0 },
   };
   const data = object(value) ?? {};

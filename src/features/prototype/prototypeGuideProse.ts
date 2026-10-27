@@ -202,6 +202,19 @@ inside its template may carry a sharedKey. Authors choose visibility conditions 
 not visible together. Full motion morphs the pair's bounds between different content; reduced
 uses ordinary visibility fades and off swaps instantly.
 
+## One-shot keyframes
+
+Every node supports \`keyframes: {trigger: {key: "liked"}, durationMs: 600,
+tracks: {scale: [[0,1],[0.35,1.3],[1,1]]}}\` with \`prototype_keyframes_v1\`
+(iOS 17+). Alternatively trigger with \`{data: "/liked"}\`, relative to data.
+It plays once on each value change, never on first show; another change restarts it.
+Use 100–3000 ms and 1–7 tracks: scale, scaleX, scaleY, rotation (degrees), offsetX,
+offsetY (dp), alpha. Each track has 2–8 [fraction,value] points, strictly increasing
+from 0 to 1, or \`{points, curve: "linear" | "standard" | "spring"}\` (default standard).
+Start and end at rest (scale/alpha 1, rotation/offsets 0); scales must be positive,
+alpha 0–1. At most 16 expanded nodes may carry keyframes. These are draw transforms:
+layout and observed semantics stay unchanged. Reduced keeps alpha only; none disables playback.
+
 ## Motion v2
 
 (needs \`prototype_motion_v2\`) A node's \`animate: {durationMs?, easing?}\` (0-2000 ms, default

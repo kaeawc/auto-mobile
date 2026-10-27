@@ -799,6 +799,28 @@ A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
 motion on it animates with a short spring; with `motion: "none"` or animator
 scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
 
+### One-shot keyframes
+
+Every node may carry `keyframes: {trigger, durationMs, tracks}`, gated by
+`prototype_keyframes_v1`. The trigger is exactly one declared state `{key: "liked"}`
+or a data pointer `{data: "/liked"}` relative to the data object. A value change plays
+once; mounting does not play, and a change during playback restarts from zero.
+
+`durationMs` is an integer from 100 to 3000. Tracks contain one to seven of `scale`,
+`scaleX`, `scaleY`, `rotation` (degrees), `offsetX`, `offsetY` (dp), and `alpha`.
+Each is 2–8 `[fraction, value]` points or `{points, curve?}`; fractions increase strictly
+from 0 to 1. Curves are `linear`, `standard` (default, cubic Bezier 0.2,0,0,1), and
+`spring`. Scale values are positive and alpha stays in 0–1. Both ends equal rest:
+1 for scale and alpha, 0 for rotation and offsets. The first node beyond the expanded
+16-node budget fails at its `.keyframes`, including component and repeat instances.
+
+One Compose `Animatable` drives draw-time layers, composing scale/alpha multiplicatively
+and rotation/offsets additively with style motion. Tracks do not change layout or authored
+semantics. Reduced motion drops spatial tracks and retains alpha; off disables playback.
+Finite playback contributes to the motion-active signal. The pure spring sampler uses a
+normalized damped ease derived from damping ratio 0.8 and stiffness 380, with exact endpoints.
+iOS uses native spring keyframes with duration 0.35 and bounce 0.15.
+
 ### Motion profiles (#15115, `prototype_reduced_motion_v1`)
 
 Motion runs in one of three profiles, decided identically on both platforms from the spec's

@@ -127,6 +127,7 @@ internal object PrototypeSpecInput {
     val repeats = PrototypeRepeatData((value as? JsonObject)?.get("data") as? JsonObject)
     val error =
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
+        ?: PrototypeKeyframesRules.validate(context)
         ?: PrototypeSharedElementRules.error(context)
         ?: gridSpanErrors(context)
         ?: PrototypeRepeatValidator.validate(value, repeats)

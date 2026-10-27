@@ -1373,7 +1373,7 @@ private fun prototypeNodeModifier(
     modifier = modifier.prototypeAnchor(anchor, currentPrototypeWindowGeometry(), windowRoot)
   }
   // Draw-time offset, scale and rotation, animated with the node's `animate` (#14208).
-  modifier = modifier.prototypeStyleTransform(node)
+  modifier = modifier.prototypeKeyframes(node) { it.prototypeStyleTransform(node) }
   // Outside the touch target and drawing, so the whole node (shadow included) shrinks as one.
   val pressScale = style.pressScale
   if (tappable && pressScale != null) {

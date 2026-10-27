@@ -1,0 +1,37 @@
+{
+  "spec": {
+    "id": "keyframes",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "liked": false
+    },
+    "root": {
+      "type": "icon",
+      "name": "favorite",
+      "keyframes": {
+        "trigger": {
+          "key": "liked"
+        },
+        "durationMs": 600,
+        "tracks": {
+          "offsetY": [
+            [
+              0,
+              0
+            ],
+            [
+              1,
+              0.1
+            ]
+          ]
+        }
+      }
+    }
+  },
+  "expectedPath": "root.keyframes.tracks.offsetY",
+  "expectedMessage": "First and last values must equal rest value 0"
+}

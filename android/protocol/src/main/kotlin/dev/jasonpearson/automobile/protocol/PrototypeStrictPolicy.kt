@@ -209,6 +209,7 @@ internal object PrototypeStrictPolicy {
       "empty" to "loading_states",
       "shimmer" to "loading_states",
       "effects" to "effects",
+      "keyframes" to "keyframes",
       "sharedKey" to "shared_element",
     )
 
@@ -284,7 +285,7 @@ internal object PrototypeStrictPolicy {
     private fun descend(key: String, child: JsonElement) {
       when {
         key == "linkify" -> (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap") }
-        key != "series" && key != "effects" -> scan(child, key)
+        key != "series" && key != "effects" && key != "keyframes" -> scan(child, key)
       }
     }
 

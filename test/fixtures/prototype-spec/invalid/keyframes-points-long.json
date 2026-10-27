@@ -1,0 +1,65 @@
+{
+  "spec": {
+    "id": "keyframes",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "liked": false
+    },
+    "root": {
+      "type": "icon",
+      "name": "favorite",
+      "keyframes": {
+        "trigger": {
+          "key": "liked"
+        },
+        "durationMs": 600,
+        "tracks": {
+          "scale": [
+            [
+              0.0,
+              1
+            ],
+            [
+              0.125,
+              1
+            ],
+            [
+              0.25,
+              1
+            ],
+            [
+              0.375,
+              1
+            ],
+            [
+              0.5,
+              1
+            ],
+            [
+              0.625,
+              1
+            ],
+            [
+              0.75,
+              1
+            ],
+            [
+              0.875,
+              1
+            ],
+            [
+              1.0,
+              1
+            ]
+          ]
+        }
+      }
+    }
+  },
+  "expectedPath": "root.keyframes.tracks.scale",
+  "expectedMessage": "Array length out of range"
+}

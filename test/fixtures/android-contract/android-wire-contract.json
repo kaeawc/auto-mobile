@@ -11361,6 +11361,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,

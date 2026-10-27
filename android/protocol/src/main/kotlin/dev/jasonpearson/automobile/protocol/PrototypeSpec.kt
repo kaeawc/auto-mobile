@@ -451,6 +451,7 @@ data class PrototypePasteButtonNode(
   override val span: Int? = null,
   override val semantics: PrototypeSemantics? = null,
   override val onAppear: List<PrototypeAction>? = null,
+  override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val scrollTransition: PrototypeScrollTransition? = null,
   override val scrollLinked: PrototypeScrollLinked? = null,

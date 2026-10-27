@@ -46,3 +46,12 @@ retry response map ends the question flow, and a valid selection runs the backen
 
 Extending to confirmations needs data on which clients declare elicitation and how asks end
 (accept, decline, timeout). This spike does not record either; add that counter before building more.
+
+### MRTR limits (modern era)
+
+- A tool call that runs as a task (the client declared the Tasks extension and the tool is
+  task-eligible) returns its task handle immediately, so the device question is not asked on that
+  call; the ambiguity refusal appears in the task's result.
+- The answer is not bound to the call that asked (there is no `requestState`). An answer attached
+  to a different ambiguous call is accepted only when it names a device that call's own refusal
+  offers, so it cannot select a device the caller could not already see.

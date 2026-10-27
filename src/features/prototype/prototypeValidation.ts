@@ -458,6 +458,7 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
     (rule.empty === true || value.length > 0) &&
     (!rule.nonblank || !prototypeContractPatterns.blankText.test(value)) &&
     value.length <= (rule.max ?? Infinity) &&
+    Buffer.byteLength(value, "utf8") <= (rule.maxBytes ?? Infinity) &&
     (!rule.pattern ||
       new RegExp(contract.patterns[rule.pattern as keyof typeof contract.patterns]).test(value)),
   pointer: isPrototypeDataPointer,

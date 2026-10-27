@@ -1358,6 +1358,23 @@ extension PrototypeSession {
         return platformLifecycleEvents
     }
 
+    /// SwiftUI's system paste control supplies already authorized text; never read UIPasteboard again.
+    mutating func pasteClipboard(_ text: String, into: String) -> [PrototypeEvent] {
+        guard isShown else { return [] }
+        let action = PrototypeAction(
+            type: "platform", name: nil, payload: nil, context: nil, pager: nil, page: nil,
+            stack: nil, screen: nil, path: nil, key: nil, value: nil, by: nil, requireValid: nil,
+            into: into, call: "clipboard.paste"
+        )
+        let events = runPlatform(action)
+        let id = "p-\(platformIssued)"
+        platformCommands.removeAll { command in
+            if case let .start(job) = command { return job.call.callId == id }
+            return false
+        }
+        return events + completePlatformCall(id, .success(PrototypeClipboardModule.pasteValue(text)), durationMs: 0)
+    }
+
     private mutating func runPlatform(_ action: PrototypeAction) -> [PrototypeEvent] {
         guard let spec else { return [] }
         var events: [PrototypeEvent] = []
@@ -1456,6 +1473,14 @@ extension PrototypeSession {
         -> [PrototypeEvent]
     {
         var fields = platformMeta(result, durationMs: durationMs).objectFields ?? [:]
+        if pending.job.call.call.hasPrefix("clipboard.") {
+            fields["op"] = .string(String(pending.job.call.call.dropFirst("clipboard.".count)))
+            let copied = pending.job.call.args["text"]?.stringValue
+            let pasted: String?
+            if case let .success(value) = result { pasted = value.objectFields?["text"]?.stringValue }
+            else { pasted = nil }
+            fields["bytes"] = .number(Double((copied ?? pasted ?? "").utf8.count))
+        }
         fields["callId"] = .string(pending.job.call.callId)
         fields["call"] = .string(pending.job.call.call)
         fields["outcome"] = .string(fields["error"] == nil ? "success" : "error")

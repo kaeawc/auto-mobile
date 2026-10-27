@@ -429,3 +429,30 @@ object PrototypeValidityKeysSerializer :
       is PrototypeValidityKeys.Multiple -> JsonArray(value.keys.map(::JsonPrimitive))
     }
 }
+
+@SerialName("pasteButton")
+@Serializable
+data class PrototypePasteButtonNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: PrototypeTransition? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
+  override val semantics: PrototypeSemantics? = null,
+  override val onAppear: List<PrototypeAction>? = null,
+  override val sharedKey: String? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
+  val into: String,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
+) : PrototypeNode() {
+  override val onTap: List<PrototypeAction>
+    get() = listOf(PrototypePlatformAction(call = "clipboard.paste", into = into))
+}

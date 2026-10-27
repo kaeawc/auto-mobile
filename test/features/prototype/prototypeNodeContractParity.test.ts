@@ -95,7 +95,12 @@ describe("prototype node contract parity", () => {
   test.each([...PROTOTYPE_NODE_TYPES])("%s has the same fields in Zod and the contract", (type) => {
     const contractFields = Object.keys(contractNodes[type].fields).sort();
     expect(zodNodeShapes().get(type)).toEqual(contractFields);
-    expect(contractFields).toEqual(expect.arrayContaining(COMMON_NODE_FIELDS));
+    // The system paste control owns its tap; authored actions cannot replace the paste gesture.
+    const common =
+      type === "pasteButton"
+        ? COMMON_NODE_FIELDS.filter((field) => field !== "onTap")
+        : COMMON_NODE_FIELDS;
+    expect(contractFields).toEqual(expect.arrayContaining(common));
     for (const field of GESTURE_NODE_FIELDS) {
       const supported = GESTURE_NODE_TYPES.includes(type);
       expect(contractFields.includes(field)).toBe(supported);

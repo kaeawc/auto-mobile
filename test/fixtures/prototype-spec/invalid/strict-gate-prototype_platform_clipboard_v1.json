@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "clipboard",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["clipboard"]
+    },
+    "root": {
+      "type": "pasteButton",
+      "into": "/data/code"
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1"]
+  },
+  "expectedPath": "$"
+}

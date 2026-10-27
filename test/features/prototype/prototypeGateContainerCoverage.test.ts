@@ -154,6 +154,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
   prototype_platform_device_v1: deviceRead,
+  prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.

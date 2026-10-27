@@ -928,5 +928,9 @@
   "actionCancelTimer": {
     "type": "cancelTimer",
     "id": "tick"
+  },
+  "nodePasteButton": {
+    "type": "pasteButton",
+    "into": "/data/pasted"
   }
 }

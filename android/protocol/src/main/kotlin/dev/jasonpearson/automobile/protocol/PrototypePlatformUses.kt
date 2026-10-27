@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.keyPath
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -62,6 +63,19 @@ internal object PrototypePlatformUses {
     found: MutableList<Use>,
   ) {
     if (value.size == 1 && value.containsKey("value")) return
+    if (value.text("type") == "pasteButton") {
+      found.add(
+        Use.Call(
+          path,
+          JsonObject(
+            mapOf(
+              "call" to JsonPrimitive("clipboard.paste"),
+              "into" to (value["into"] ?: JsonNull),
+            ),
+          ),
+        ),
+      )
+    }
     if (value.text("type") == "platform" && value.text("call") != null) {
       found.add(Use.Call(path, value))
     }

@@ -371,8 +371,9 @@ class WebSocketServer(
     // The device runs a via "device" request with its own HTTP stack (Retrofit over OkHttp), to any
     // http or https host. Without it a host refuses a spec that asks for via "device".
     add("prototype_network_device_v1")
-    add("prototype_platform_v1")
+    add("prototype_platform_clipboard_v1")
     add("prototype_platform_device_v1")
+    add("prototype_platform_v1")
     addAll(platform.registry.capabilities)
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.

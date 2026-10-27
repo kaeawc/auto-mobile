@@ -237,7 +237,9 @@ sealed class PrototypeNode {
   abstract val contentDescription: String?
   abstract val semantics: PrototypeSemantics?
   abstract val onAppear: List<PrototypeAction>?
-  abstract val onTap: List<PrototypeAction>?
+  open val onTap: List<PrototypeAction>?
+    get() = null
+
   open val onLongPress: List<PrototypeAction>?
     get() = null
 

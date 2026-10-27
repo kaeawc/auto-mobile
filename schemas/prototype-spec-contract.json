@@ -63,7 +63,8 @@
     "MAX_PROTOTYPE_STRING_LOCALES": 16,
     "MAX_PROTOTYPE_STRING_KEYS": 512,
     "MAX_PROTOTYPE_STRING_LENGTH": 2048,
-    "MAX_PROTOTYPE_LIST_ITEMS": 2000
+    "MAX_PROTOTYPE_LIST_ITEMS": 2000,
+    "MAX_PROTOTYPE_CLIPBOARD_TEXT_BYTES": 65536
   },
   "definitions": {
     "offset": {
@@ -12999,6 +13000,202 @@
               "optional": true
             }
           }
+        },
+        "pasteButton": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["pasteButton"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "into": {
+              "rule": {
+                "kind": "pointer"
+              },
+              "optional": false
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": [
+                      "none",
+                      "fade",
+                      "expand",
+                      "slide",
+                      "slideStart",
+                      "slideEnd",
+                      "scale",
+                      "blurReplace"
+                    ]
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [
+                            "none",
+                            "fade",
+                            "expand",
+                            "slide",
+                            "slideStart",
+                            "slideEnd",
+                            "scale",
+                            "blurReplace"
+                          ]
+                        },
+                        "optional": false
+                      },
+                      "delayMs": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 600
+                        },
+                        "optional": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            }
+          }
         }
       }
     },
@@ -18226,6 +18423,53 @@
           }
         }
       }
+    },
+    "clipboard": {
+      "capability": "prototype_platform_clipboard_v1",
+      "calls": {
+        "copy": {
+          "args": {
+            "text": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "empty": true,
+                "maxBytes": 65536
+              }
+            },
+            "sensitive": {
+              "optional": true,
+              "value": {
+                "kind": "boolean"
+              }
+            },
+            "label": {
+              "optional": true,
+              "value": {
+                "kind": "string",
+                "empty": true
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": true
+        },
+        "paste": {
+          "args": {},
+          "permissions": [],
+          "background": [],
+          "sensitive": true
+        },
+        "hasText": {
+          "args": {},
+          "permissions": [],
+          "background": [],
+          "sensitive": true
+        }
+      },
+      "events": {},
+      "state": {}
     }
   },
   "platformNamespaces": {
@@ -18441,6 +18685,10 @@
     },
     "list": {
       "ios": "material",
+      "android": "material"
+    },
+    "pasteButton": {
+      "ios": "native",
       "android": "material"
     }
   },

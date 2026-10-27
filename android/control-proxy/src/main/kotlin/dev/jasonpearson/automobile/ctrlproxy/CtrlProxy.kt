@@ -945,8 +945,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  private val prototypePlatform =
-    dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeRuntimePlatform()
+  private val prototypePlatform by lazy {
+    dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeRuntimePlatform(
+      dev.jasonpearson.automobile.prototype.AndroidPrototypeClipboard(
+        this,
+        object : dev.jasonpearson.automobile.prototype.PrototypeClipboardFocus {
+          override suspend fun <T> read(block: () -> T): T =
+            prototypeController.readClipboard(block)
+        },
+      ),
+    )
+  }
 
   /**
    * Emits a `type:"error"` frame when a `serviceScope.launch { … }` throws uncaught. Correlation is

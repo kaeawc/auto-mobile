@@ -435,6 +435,7 @@ internal fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeSearchBarNode -> "searchBar"
     is PrototypeSwitchNode -> "switch"
     is PrototypeCheckboxNode -> "checkbox"
+    is PrototypePasteButtonNode -> "pasteButton"
     is PrototypeButtonNode -> "button"
     is PrototypeRadioGroupNode -> "radioGroup"
     is PrototypeSelectNode -> "select"
@@ -479,6 +480,7 @@ private fun prototypeNodeText(
     is PrototypeSearchBarNode -> (state[node.stateKey] as? PrototypeScalar.Text)?.value.orEmpty()
     is PrototypeSwitchNode -> node.label.orEmpty()
     is PrototypeCheckboxNode -> node.label.orEmpty()
+    is PrototypePasteButtonNode -> "Paste"
     is PrototypeButtonNode ->
       interpolatePrototypeText(node.label, localState, inPager, derivedOnly = true)
     is PrototypeListItemNode -> node.headline

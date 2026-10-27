@@ -43,6 +43,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeMenuEntry
 import dev.jasonpearson.automobile.protocol.PrototypeMenuNode
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePagerNode
+import dev.jasonpearson.automobile.protocol.PrototypePasteButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypePrependDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
 import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
@@ -466,6 +467,14 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
+      )
+    is PrototypePasteButtonNode ->
+      copy(
+        into = instance.dataPath(into),
+        semantics = semantics,
+        onAppear = onAppear,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
       )
     is PrototypeButtonNode ->
       copy(

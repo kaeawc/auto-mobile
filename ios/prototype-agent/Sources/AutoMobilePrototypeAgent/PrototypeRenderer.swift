@@ -422,6 +422,10 @@
                 switchView
             case "checkbox":
                 checkboxView
+            case "pasteButton":
+                PasteButton(payloadType: String.self) { values in
+                    if let into = node.into { model.paste(values.first ?? "", into: into) }
+                }
             case "button":
                 buttonView
             case "list":

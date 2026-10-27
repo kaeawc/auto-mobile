@@ -309,6 +309,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | listItem        | material | material | —     |
 | menu            | material | material | —     |
 | pager           | neutral  | neutral  | —     |
+| pasteButton     | native   | material | —     |
 | progress        | material | material | —     |
 | radioGroup      | material | material | —     |
 | row             | neutral  | neutral  | —     |

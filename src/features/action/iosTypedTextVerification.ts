@@ -9,6 +9,11 @@ import {
 import type { ObserveScreenExecuteOptions } from "../observe/interfaces/ObserveScreen";
 import type { Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import {
+  compareIosTokenField,
+  describeIosTokenFieldCommitted,
+  isIosTokenField,
+} from "./iosTokenFieldVerification";
 import { isTextIndeterminateMessage } from "./TextIndeterminateError";
 import { getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { combineAbortSignals, combineWithAmbientAbort } from "../../utils/AbortContext";
@@ -58,6 +63,11 @@ export function compareIosTypedText(
   if (nativeComparison === "changed") {
     return { success: true };
   }
+  // A recipient/token field is judged by its trailing text and tokens, not its full value.
+  const tokenComparison = compareIosTokenField(text, before, after);
+  if (tokenComparison !== undefined) {
+    return tokenComparison;
+  }
   // Native inputs prove typing only by changing; unchanged native inputs cannot prove nothing was
   // typed (the target may be web content whose value is unreadable).
   if (before.value === undefined || after.value === undefined) {
@@ -96,21 +106,33 @@ export function describeIosCommittedText(
   if (before?.secure || after.secure) {
     return "the focused field is secure; its content was not inspected.";
   }
+  const tokenDescription = describeIosTokenFieldCommitted(text, before, after);
+  if (tokenDescription !== undefined) {
+    return tokenDescription;
+  }
   if (
     compareNativeEditableValues(before?.nativeEditableValues, after.nativeEditableValues) ===
     "changed"
   ) {
     return "another editable on screen changed (a recipient or token entry may hold the text), so the focused field's value does not show what was committed.";
   }
-  if (before?.value === undefined || after.value === undefined) {
+  return describeFocusedValueChange(text, before?.value, after.value);
+}
+
+function describeFocusedValueChange(
+  text: string,
+  before: string | undefined,
+  after: string | undefined,
+): string {
+  if (before === undefined || after === undefined) {
     return "the focused field's value could not be read, so what was committed is unknown.";
   }
-  if (before.value === after.value) {
+  if (before === after) {
     return "the focused field's value is unchanged from before typing; entries held as separate tokens would not show in it.";
   }
-  return containsTypedCharacters(after.value, text)
+  return containsTypedCharacters(after, text)
     ? "the focused field now contains the typed characters."
-    : `the focused field's value changed to ${JSON.stringify(after.value)} (partial or altered input).`;
+    : `the focused field's value changed to ${JSON.stringify(after)} (partial or altered input).`;
 }
 
 function compareNativeEditableValues(
@@ -197,6 +219,10 @@ export async function readIosTypedTextField(
   }
 }
 
+/** A recipient field commits a token with an animation; how long and how often to re-read. */
+export const IOS_TOKEN_SETTLE_MAX_MS = 1000;
+export const IOS_TOKEN_SETTLE_POLL_MS = 250;
+
 export async function verifyIosTypedText(
   text: string,
   before: FocusedTextField | undefined,
@@ -208,11 +234,25 @@ export async function verifyIosTypedText(
   if (before?.secure) {
     return compareIosTypedText(text, before, undefined);
   }
-  return compareIosTypedText(
-    text,
-    before,
-    await readIosTypedTextField(observer, timer, signal, display),
-  );
+  let after = await readIosTypedTextField(observer, timer, signal, display);
+  let result = compareIosTypedText(text, before, after);
+  // A recipient/token field can settle after the keystrokes land; re-read it, bounded, before
+  // reporting that nothing was typed.
+  const settleDeadline = timer.now() + IOS_TOKEN_SETTLE_MAX_MS;
+  while (!result.success && isIosTokenField(before, after) && timer.now() < settleDeadline) {
+    signal?.throwIfAborted();
+    await timer.sleep(IOS_TOKEN_SETTLE_POLL_MS);
+    after = await readIosTypedTextField(
+      observer,
+      timer,
+      signal,
+      display,
+      {},
+      Math.max(0, settleDeadline - timer.now()),
+    );
+    result = compareIosTypedText(text, before, after);
+  }
+  return result;
 }
 
 /** Upper bound for the read that explains an unconfirmed typeText. */

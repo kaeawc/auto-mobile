@@ -32,6 +32,10 @@ import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { observationFromRunnerCapture } from "../helpers/iosRunnerCapture";
+import afterAcceptCapture from "../fixtures/ios-system-alert/runner-after-accept-en.json";
+import openAlertEnCapture from "../fixtures/ios-system-alert/runner-open-in-alert-en.json";
+import openAlertEsCapture from "../fixtures/ios-system-alert/runner-open-in-alert-es.json";
 
 const interactionDeps: InteractionToolDependencies = {};
 isolateToolRegistry();
@@ -158,15 +162,14 @@ const treeOf = (root: ViewHierarchyNode, packageName?: string): ViewHierarchyRes
   ...(packageName && { packageName }),
 });
 
-const appOpenAlertObservation: ObserveResult = {
-  ...makeObservation("system-alert"),
-  viewHierarchy: treeOf(
-    treeNode({ text: 'Open in "Slack Debug"?' }, [
-      treeNode({ text: "Cancel" }),
-      treeNode({ text: "Open", clickable: true }),
-    ]),
-  ),
-};
+// Real iOS 27.0 runner captures (iPhone 18 Pro, 2026-10-26) of the SpringBoard confirmation after
+// `simctl openurl` of an installed app's custom scheme, in English and Spanish, and the frame right
+// after tapping its accept button (the app in front, no alert). They take the daemon's production
+// path (convert, normalize, project), so the tests read what a live observe returns.
+const appOpenAlertObservation: ObserveResult = observationFromRunnerCapture(openAlertEnCapture);
+const spanishAppOpenAlertObservation: ObserveResult =
+  observationFromRunnerCapture(openAlertEsCapture);
+const afterAcceptObservation: ObserveResult = observationFromRunnerCapture(afterAcceptCapture);
 const noAlertHierarchy = treeOf(treeNode({ text: "Home" }));
 
 describe("openLinkSchema waitFor / settled", () => {
@@ -493,26 +496,46 @@ describe("openLink iOS app-open alert acceptance", () => {
     expect(timer.now()).toBe(12_000);
   });
 
-  test("taps the alert's last button by role when its label is not Open", async () => {
+  test("taps the captured alert's last button by role when its label is not Open", async () => {
     const taps: unknown[] = [];
-    const localized = treeOf(
-      treeNode({ className: "UIAlertController", text: "In „Slack Debug“ öffnen?" }, [
-        treeNode({ className: "UIButton", role: "button", text: "Abbrechen" }),
-        treeNode({ className: "UIButton", role: "button", text: "Öffnen" }),
-      ]),
-      "com.apple.springboard",
-    );
 
     const result = await acceptIosAppOpenAlert(
       iosDevice,
-      { ...makeObservation("de"), viewHierarchy: localized },
+      spanishAppOpenAlertObservation,
       undefined,
       undefined,
       { tapOnElementFactory: okTap(taps) },
     );
 
     expect(result?.success).toBe(true);
-    expect(taps).toEqual([{ text: "Öffnen", action: "tap" }]);
+    expect(taps).toEqual([{ text: "Abrir", action: "tap" }]);
+  });
+
+  test("accepts the captured alert and verifies on the captured post-accept frame", async () => {
+    const taps: unknown[] = [];
+    const frames = framesOf([
+      appOpenAlertObservation.viewHierarchy ?? null,
+      afterAcceptObservation.viewHierarchy ?? null,
+    ]);
+
+    const result = await acceptIosAppOpenAlert(
+      iosDevice,
+      makeObservation("home"),
+      undefined,
+      undefined,
+      { tapOnElementFactory: okTap(taps), refreshHierarchy: frames.refresh, timer: autoTimer() },
+    );
+
+    expect(result?.success).toBe(true);
+    expect(taps).toEqual([{ text: "Open", action: "tap" }]);
+    expect(frames.calls()).toBe(2);
+  });
+
+  test("the captured post-accept frame is not an app-open alert", () => {
+    expect(afterAcceptObservation.viewHierarchy?.packageName).toBe(
+      "dev.jasonpearson.automobile.protoviewer",
+    );
+    expect(isIosAppOpenAlert(afterAcceptObservation)).toBe(false);
   });
 
   test("resolves a SpringBoard-only dialog with no prompt text by its button identifier", async () => {
@@ -593,7 +616,7 @@ describe("openLink iOS app-open alert acceptance", () => {
 
     expect(failure).toBeInstanceOf(IosOpenAlertError);
     expect((failure as IosOpenAlertError).phase).toBe("verify");
-    expect((failure as IosOpenAlertError).candidates).toEqual(["Open"]);
+    expect((failure as IosOpenAlertError).candidates).toEqual(["Cancel", "Open"]);
   });
 
   test("reports the detect phase when the alert offers no accept button", async () => {
@@ -804,16 +827,7 @@ describe("openLink iOS app-open alert acceptance", () => {
   test("uses the locale-independent live system action for localized alerts", async () => {
     let refreshCalls = 0;
     let systemTapCalls = 0;
-    const localizedObservation: ObserveResult = {
-      ...makeObservation("localized-system-alert"),
-      viewHierarchy: treeOf(
-        treeNode({ className: "UIAlertController", text: "In „Slack Debug“ öffnen?" }, [
-          treeNode({ className: "UIButton", role: "button", text: "Abbrechen" }),
-          treeNode({ className: "UIButton", role: "button", text: "Öffnen", clickable: true }),
-        ]),
-        "com.apple.springboard",
-      ),
-    };
+    const localizedObservation = spanishAppOpenAlertObservation;
 
     const result = await acceptIosAppOpenAlert(
       iosDevice,

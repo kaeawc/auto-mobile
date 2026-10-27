@@ -3,14 +3,11 @@
  * destination and redirect is checked before connecting to a validated, pinned IP address.
  * Local destinations and daemon ports on private addresses are restricted. Failures are typed outcomes.
  */
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { prototypeDaemonPorts } from "./prototypeDaemonPorts";
 import { pinnedPrototypeFetch, PrototypeResponseTooLargeError } from "./prototypePinnedTransport";
+import { pinPrototypeDestination, systemHostResolver } from "./prototypeDestinationPinning";
 import {
-  checkUrl,
-  destinationPort,
   forbiddenHeaderOf,
   StrictEgressPolicy,
   type EgressPolicy,
@@ -152,7 +149,7 @@ const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const FORBIDDEN_HEADER_VALUE = /[\0\r\n]/;
 
 /** RFC 9110 field syntax, checked before fetch so the outcome is `invalid_request`, not `network`. */
-function headerProblemOf(headers: Record<string, string> | undefined): string | undefined {
+export function headerProblemOf(headers: Record<string, string> | undefined): string | undefined {
   if (forbiddenHeaderOf(headers) !== undefined) {
     return "A request header is not permitted.";
   }
@@ -260,8 +257,7 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
     this.fetchImpl = options.fetch ?? pinnedPrototypeFetch;
     this.maxBytes = options.maxResponseBytes ?? MAX_PROTOTYPE_RESPONSE_BYTES;
     this.policy = options.policy ?? new StrictEgressPolicy(prototypeDaemonPorts);
-    this.resolver =
-      options.resolver ?? ((hostname) => lookup(hostname, { all: true, verbatim: true }));
+    this.resolver = options.resolver ?? systemHostResolver;
   }
 
   async execute(request: PrototypeHttpRequest, signal: AbortSignal): Promise<PrototypeHttpOutcome> {
@@ -374,41 +370,12 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
     }
   }
 
-  private async pinDestination(
-    url: URL,
-    signal: AbortSignal,
-  ): Promise<ResolvedHostAddress | { code: PrototypeRequestErrorCode; message: string }> {
-    if (url.username || url.password) {
-      return { code: "invalid_request", message: "URL credentials are not permitted." };
-    }
-    const blocked = checkUrl(url, this.policy);
-    if (blocked !== undefined) {
-      return { code: "blocked_destination", message: blocked };
-    }
-    const hostname = url.hostname.replace(/^\[|\]$/g, "");
-    const literalFamily = isIP(hostname);
-    const addresses = literalFamily
-      ? [{ address: hostname, family: literalFamily }]
-      : await raceWithDeadline(() => this.resolver(hostname), {
-          timer: this.options.timer,
-          signal,
-          label: "Prototype destination resolution",
-        });
-    signal.throwIfAborted();
-    if (addresses.length === 0) {
-      return { code: "network", message: "The destination did not resolve to an address." };
-    }
-    if (
-      addresses.some(
-        ({ address, family }) =>
-          !isIP(address) ||
-          isIP(address) !== family ||
-          !this.policy.permitsAddress(address, destinationPort(url)),
-      )
-    ) {
-      return { code: "blocked_destination", message: "The destination is not permitted." };
-    }
-    return addresses[0]!;
+  private pinDestination(url: URL, signal: AbortSignal) {
+    return pinPrototypeDestination(
+      url,
+      { policy: this.policy, resolver: this.resolver, timer: this.options.timer },
+      signal,
+    );
   }
 
   /** The outcome of an answered request: the status decides before any body is consumed. */

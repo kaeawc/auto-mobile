@@ -65,7 +65,14 @@ test("fixtures cover every action and node variant and every filled field", () =
   ] as const) {
     // Cross-node constraints (a shared pair, a scroll source) cannot hold on one lone filled node,
     // and platform namespaces are stripped before the typed Kotlin decode (#15257).
-    const crossNode = new Set(["sharedKey", "scrollLinked", "scrollTransition", "ios", "android"]);
+    const crossNode = new Set([
+      "shared",
+      "sharedKey",
+      "scrollLinked",
+      "scrollTransition",
+      "ios",
+      "android",
+    ]);
     expect(Object.keys(value).sort()).toEqual(
       Object.keys(rule.fields)
         .filter((field) => !crossNode.has(field))

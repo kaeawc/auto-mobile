@@ -582,8 +582,15 @@ internal object PrototypeBindableFields {
         ?: visitor.actions(node, path)
         ?: refreshActions(node, path)
         ?: swipeParts(node, path)
-        ?: keys(node, path)
+        ?: sharedAndKeys(node, path)
     }
+
+    private fun sharedAndKeys(node: JsonObject, path: String): T? =
+      visitor.visit(
+        (node["shared"] as? JsonObject)?.get("key"),
+        "$path.shared.key",
+        PrototypeBindableKind.OPERAND,
+      ) ?: keys(node, path)
   }
 }
 

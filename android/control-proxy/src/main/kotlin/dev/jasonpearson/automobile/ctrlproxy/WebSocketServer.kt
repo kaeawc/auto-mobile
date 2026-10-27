@@ -413,6 +413,7 @@ class WebSocketServer(
     add("prototype_stack_transitions_v1")
     add("prototype_reduced_motion_v1")
     add("prototype_shared_element_v1")
+    add("prototype_shared_element_v2")
     // Line, area, bar and ring charts over /data arrays (#14209).
     add("prototype_chart_v1")
     add("prototype_lazy_list_v1")

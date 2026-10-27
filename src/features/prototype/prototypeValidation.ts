@@ -875,7 +875,7 @@ function validateValue(
   const error =
     prototypeLazyListLimitError(value) ??
     walk(value, definitions.spec, "", context, 0) ??
-    prototypeSharedElementError(context.nodes) ??
+    prototypeSharedElementError(context.nodes, repeats) ??
     layoutErrors(value, context, repeats) ??
     prototypeScrollMotionError(value, context.nodes) ??
     behaviourErrors(value, context, data, repeats, componentTimers);

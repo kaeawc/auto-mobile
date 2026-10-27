@@ -2617,6 +2617,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -2869,6 +2876,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -3134,6 +3148,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -3360,6 +3381,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -3590,6 +3618,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -3839,6 +3874,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -4113,6 +4155,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -4367,6 +4416,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -4627,6 +4683,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -4844,6 +4907,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -5044,6 +5114,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -5405,6 +5482,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -5643,6 +5727,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -5887,6 +5978,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -6114,6 +6212,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -6365,6 +6470,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -6516,6 +6628,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
             }
           }
         },
@@ -6590,6 +6709,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -6833,6 +6959,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -7098,6 +7231,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -7353,6 +7493,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -7572,6 +7719,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -7796,6 +7950,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -8029,6 +8190,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -8248,6 +8416,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -8500,6 +8675,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -8710,6 +8892,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -8916,6 +9105,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -9139,6 +9335,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -9392,6 +9595,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -9538,6 +9748,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
             }
           }
         },
@@ -9612,6 +9829,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -9844,6 +10068,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -10094,6 +10325,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -10326,6 +10564,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -10587,6 +10832,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -10861,6 +11113,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -11109,6 +11368,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -11348,6 +11614,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -11600,6 +11873,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -11792,6 +12072,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
             }
           }
         },
@@ -11866,6 +12153,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -11969,6 +12263,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
             }
           }
         },
@@ -12043,6 +12344,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -12288,6 +12596,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -12541,6 +12856,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -12775,6 +13097,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -13196,6 +13525,26 @@
               "optional": true
             }
           }
+        }
+      }
+    },
+    "shared": {
+      "kind": "object",
+      "fields": {
+        "key": {
+          "rule": {
+            "kind": "string",
+            "min": 1,
+            "max": 256
+          },
+          "optional": false
+        },
+        "as": {
+          "rule": {
+            "kind": "enum",
+            "values": ["element", "bounds"]
+          },
+          "optional": false
         }
       }
     },

@@ -47,13 +47,13 @@ internal object PrototypeStringsRules {
     return null
   }
 
+  private fun isStringOrPluralObject(entry: JsonElement, plural: JsonObject?): Boolean =
+    (entry is JsonPrimitive && entry.isString) ||
+      (plural != null && "other" in plural && plural.keys.all { it in categories })
+
   private fun entryError(entry: JsonElement, path: String): PrototypeSpecError? {
     val plural = entry as? JsonObject
-    if (
-      !(entry is JsonPrimitive && entry.isString) &&
-        (plural == null || "other" !in plural || plural.keys.any { it !in categories })
-    )
-      return fail(path, "Invalid plural object")
+    if (!isStringOrPluralObject(entry, plural)) return fail(path, "Invalid plural object")
     for (value in plural?.values ?: listOf(entry)) {
       val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
       if (text == null || text.isEmpty() || text.length > limit("MAX_PROTOTYPE_STRING_LENGTH"))

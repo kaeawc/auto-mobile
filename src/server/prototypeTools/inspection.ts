@@ -1,3 +1,7 @@
+import {
+  parsePrototypeDegradedEffects,
+  prototypeDegradedEffectsOutput,
+} from "../../features/prototype/prototypeDegradedEffects";
 import { performPrototypeSimulate } from "../prototypeSimulateAction";
 import { PROTOTYPE_TIMERS_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
 import { parsePrototypeFeedbackLog } from "../../features/prototype/prototypeFeedbackLog";
@@ -58,6 +62,7 @@ const devicePrototypeEntrySchema = z.object({
   timers: z.unknown().optional(),
   feedbackLog: z.unknown().optional().transform(parsePrototypeFeedbackLog),
   shaderFailures: z.record(z.string(), z.string()).optional().catch(undefined),
+  degradedEffects: z.unknown().optional().transform(parsePrototypeDegradedEffects),
 });
 
 function parseReportedPrototypes(
@@ -245,6 +250,7 @@ const iosAgentStatusSchema = z.object({
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
   timers: z.unknown().optional(),
   feedbackLog: z.unknown().optional().transform(parsePrototypeFeedbackLog),
+  degradedEffects: z.unknown().optional().transform(parsePrototypeDegradedEffects),
 });
 
 /**
@@ -299,6 +305,7 @@ async function inspectIosAgent(
     storage,
     timers,
     feedbackLog,
+    degradedEffects,
   } = status.data;
   const reported =
     shown && id !== null
@@ -315,6 +322,7 @@ async function inspectIosAgent(
             storage,
             timers,
             feedbackLog,
+            degradedEffects,
           },
         ]
       : [];
@@ -340,7 +348,8 @@ export function statusOutput(
   return {
     ...status,
     prototypes: status.prototypes.map((shown) => {
-      const entry = options.deviceDark === "fresh" ? shown : withoutCachedDeviceDark(shown);
+      const cached = options.deviceDark === "fresh" ? shown : withoutCachedDeviceDark(shown);
+      const entry = { ...cached, ...prototypeDegradedEffectsOutput(cached.degradedEffects) };
       const counts = entry.id ? events.counts(scope, entry.id) : undefined;
       return counts?.lastSequence === undefined ? entry : { ...entry, ...counts };
     }),

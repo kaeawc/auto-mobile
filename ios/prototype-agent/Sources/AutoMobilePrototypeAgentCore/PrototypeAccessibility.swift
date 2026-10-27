@@ -93,7 +93,9 @@ extension PrototypeNode {
         }
         let authored = [label, title, headline, supporting, supportingText].compactMap { $0 }
             .map { interpolatePrototypeText($0, state: state, pager: pager) }
-        let own = ([plainText(state: state, pager: pager)] + authored)
+        // A button's or fab's plain text is its derived-only label; the fully resolved label is in `authored`.
+        let shown = type == "button" || type == "fab" ? [] : [plainText(state: state, pager: pager)]
+        let own = (shown + authored)
             .filter { !$0.isEmpty }.joined(separator: " ")
         let descendants = (children ?? []) + [child].compactMap { $0 }
         return ([own] + descendants.map { $0.announcementText(state: state, pager: pager) })

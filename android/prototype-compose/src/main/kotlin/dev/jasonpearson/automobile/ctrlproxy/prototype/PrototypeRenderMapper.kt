@@ -61,6 +61,7 @@ internal class PrototypeRenderMapper(
   internal val lastResolvedSpec: PrototypeSpec?
     get() = synchronized(lock) { resolvedSpec }
 
+  @Suppress("LongParameterList") // Mirrors the runtime snapshot the model is derived from.
   fun map(
     spec: PrototypeSpec,
     pages: Map<String, Int>,
@@ -124,7 +125,21 @@ internal class PrototypeRenderMapper(
       }
     }
 
-  /** Called only under [lock]; state writes preserve authored root, data, locale and platform identities. */
+  private fun resolvedFromSameSources(
+    spec: PrototypeSpec,
+    platform: JsonObject?,
+    locales: List<String>,
+  ): Boolean =
+    sourceRoot === spec.root &&
+      sourceData === spec.data &&
+      sourceStrings === spec.strings &&
+      sourceLocales == locales &&
+      sourcePlatform == platform
+
+  /**
+   * Called only under [lock]; state writes preserve authored root, data, locale and platform
+   * identities.
+   */
   private fun resolveLocked(
     spec: PrototypeSpec,
     platform: JsonObject?,
@@ -133,14 +148,7 @@ internal class PrototypeRenderMapper(
     if (authoredSpec === spec && authoredLocales == locales && sourcePlatform == platform)
       return checkNotNull(resolvedSpec)
     val root =
-      if (
-        sourceRoot === spec.root &&
-          sourceData === spec.data &&
-          sourceLocales == locales &&
-          sourceStrings === spec.strings &&
-          sourcePlatform == platform
-      )
-        checkNotNull(resolvedRoot)
+      if (resolvedFromSameSources(spec, platform, locales)) checkNotNull(resolvedRoot)
       else {
         PrototypeStrings.resolve(PrototypeDataResolver.resolve(spec, platform), locales).root.also {
           sourceLocales = locales.toList()

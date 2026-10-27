@@ -8,16 +8,36 @@ internal object PrototypeBundleCapabilities {
   fun required(refs: PrototypeBundleReferences): List<String> {
     val spec = refs.spec
     val caps = linkedSetOf<String>()
+    specContent(spec, caps)
+    specPresentation(spec, caps)
+    for (node in PrototypeBundleSpec.nodes(spec)) {
+      if (node["type"] == JsonPrimitive("pager") && "stateKey" in node)
+        caps.add("prototype_pager_state_key_v1")
+      caps.addAll(PrototypeBundleNodeCapabilities.collect(node))
+      if (PrototypeStringConditions.uses(node)) caps.add("prototype_string_conditions_v1")
+      fields(node, caps)
+    }
+    for (action in refs.context.actions) actions(action.value, caps)
+    platform(refs, caps)
+    return caps.sorted()
+  }
+
+  /** Strings, data, storage and formatting: what the spec carries rather than how it looks. */
+  private fun specContent(spec: JsonObject, caps: MutableSet<String>) {
     if ("strings" in spec || PrototypeStrings.fields(spec).any { "{t:" in it.text })
       caps.add("prototype_strings_v1")
+    if ("data" in spec) caps.add("prototype_data_model_v1")
+    if ("storage" in spec) caps.add("prototype_storage_v1")
+    if ("derive" in spec) caps.add("prototype_format_v1")
+  }
+
+  /** Window and theme level presentation: namespaces, motion, backdrop, design and mode colours. */
+  private fun specPresentation(spec: JsonObject, caps: MutableSet<String>) {
     for (key in listOf("window", "theme")) {
       val block = spec[key] as? JsonObject ?: continue
       if ("ios" in block || "android" in block) caps.add("prototype_platform_namespace_v1")
     }
     if (text(spec["motion"]) == "reduced") caps.add("prototype_reduced_motion_v1")
-    if ("data" in spec) caps.add("prototype_data_model_v1")
-    if ("storage" in spec) caps.add("prototype_storage_v1")
-    if ("derive" in spec) caps.add("prototype_format_v1")
     if (((spec["window"] as? JsonObject)?.get("backdrop")) != null)
       caps.add("prototype_backdrop_v1")
     if (text((spec["theme"] as? JsonObject)?.get("design")) == "platform") {
@@ -30,19 +50,6 @@ internal object PrototypeBundleCapabilities {
         PrototypeBundleNodeCapabilities.themed(scrim)
     )
       caps.add("prototype_theme_modes_v1")
-    for (node in PrototypeBundleSpec.nodes(spec)) {
-      if (node["type"] == JsonPrimitive("pager") && "stateKey" in node)
-        caps.add("prototype_pager_state_key_v1")
-      caps.addAll(PrototypeBundleNodeCapabilities.collect(node))
-      if (PrototypeStringConditions.uses(node)) caps.add("prototype_string_conditions_v1")
-      fields(node, caps)
-    }
-    for (action in refs.context.actions) actions(
-      action.value,
-      caps,
-    )
-    platform(refs, caps)
-    return caps.sorted()
   }
 
   private fun actions(action: JsonObject, caps: MutableSet<String>) {

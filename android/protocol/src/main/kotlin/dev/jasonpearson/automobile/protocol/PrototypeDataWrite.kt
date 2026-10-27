@@ -100,7 +100,7 @@ object PrototypeDataWriter {
         is PrototypeDataWrite.Prepend,
         is PrototypeDataWrite.Extend ->
           update(current, tokens) { target ->
-            val window = arrayWindow(write, target as JsonArray)
+            val window = PrototypeDataArrayWindow.window(write, target as JsonArray)
             trimmed = window.second
             window.first
           }
@@ -117,31 +117,6 @@ object PrototypeDataWriter {
     return PrototypeDataWriteResult.Success(next, trimmed)
   }
 
-  private fun arrayWindow(write: PrototypeDataWrite, target: JsonArray): Pair<JsonArray, Int> {
-    val incoming =
-      when (write) {
-        is PrototypeDataWrite.Extend -> write.value as JsonArray
-        is PrototypeDataWrite.Prepend -> write.value as JsonArray
-        else -> listOf((write as PrototypeDataWrite.Append).value)
-      }
-    val combined = if (write is PrototypeDataWrite.Prepend) incoming + target else target + incoming
-    val maximum = maximum(write)
-    val trimmed =
-      if (maximum == null) 0 else (combined.size.toLong() - maximum).coerceAtLeast(0.0).toInt()
-    val rows =
-      if (write is PrototypeDataWrite.Prepend) combined.dropLast(trimmed)
-      else combined.drop(trimmed)
-    return JsonArray(rows) to trimmed
-  }
-
-  private fun maximum(write: PrototypeDataWrite): Double? =
-    when (write) {
-      is PrototypeDataWrite.Append -> write.maxItems?.toDouble()
-      is PrototypeDataWrite.Extend -> write.maxItems?.toDouble()
-      is PrototypeDataWrite.Prepend -> write.maxItems?.toDouble()
-      else -> null
-    }
-
   private fun valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult? {
     val invalidArray =
       when (write) {
@@ -155,7 +130,7 @@ object PrototypeDataWriter {
         PrototypeDataWriteErrorCode.INVALID_VALUE,
         "$name needs an array value",
       )
-    val maxItems = maximum(write) ?: return null
+    val maxItems = PrototypeDataArrayWindow.maximum(write) ?: return null
     return if (!positiveSafeInteger(maxItems))
       refused(
         PrototypeDataWriteErrorCode.INVALID_VALUE,
@@ -315,4 +290,32 @@ sealed interface PrototypeDataValue {
   data class Resolved(val value: JsonElement) : PrototypeDataValue
 
   data class Failure(val error: PrototypeDataWriteError) : PrototypeDataValue
+}
+
+/** The row window an append, prepend or extend leaves behind once `maxItems` trims it. */
+internal object PrototypeDataArrayWindow {
+  fun window(write: PrototypeDataWrite, target: JsonArray): Pair<JsonArray, Int> {
+    val incoming =
+      when (write) {
+        is PrototypeDataWrite.Extend -> write.value as JsonArray
+        is PrototypeDataWrite.Prepend -> write.value as JsonArray
+        else -> listOf((write as PrototypeDataWrite.Append).value)
+      }
+    val combined = if (write is PrototypeDataWrite.Prepend) incoming + target else target + incoming
+    val maximum = maximum(write)
+    val trimmed =
+      if (maximum == null) 0 else (combined.size.toLong() - maximum).coerceAtLeast(0.0).toInt()
+    val rows =
+      if (write is PrototypeDataWrite.Prepend) combined.dropLast(trimmed)
+      else combined.drop(trimmed)
+    return JsonArray(rows) to trimmed
+  }
+
+  fun maximum(write: PrototypeDataWrite): Double? =
+    when (write) {
+      is PrototypeDataWrite.Append -> write.maxItems?.toDouble()
+      is PrototypeDataWrite.Extend -> write.maxItems?.toDouble()
+      is PrototypeDataWrite.Prepend -> write.maxItems?.toDouble()
+      else -> null
+    }
 }

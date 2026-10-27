@@ -1,5 +1,6 @@
 import type { PrototypeFeedbackEntry } from "./prototypeFeedbackLog";
 import { shownBackdrop, type PrototypeBackdropOutcome } from "./prototypeBackdrop";
+import { prototypeDegradedEffectsField, type DegradedEffect } from "./prototypeDegradedEffects";
 import type { PrototypeTimerReport } from "./prototypeTimerSchema";
 import type { PrototypeHiddenReason } from "./prototypeHidden";
 import { PrototypeShownSpecs } from "./PrototypeShownSpecs";
@@ -64,6 +65,7 @@ export interface PrototypeLastResult {
   /** The device's last haptic and sound calls for this prototype, from an `inspect` (#14329). */
   feedbackLog?: PrototypeFeedbackEntry[];
   shaderFailures?: Record<string, string>;
+  degradedEffects?: DegradedEffect[];
   success: boolean;
   error?: string;
   totalTimeMs?: number;
@@ -93,6 +95,7 @@ export interface AdoptedPrototype {
   timers?: PrototypeTimerReport[];
   feedbackLog?: PrototypeFeedbackEntry[];
   shaderFailures?: Record<string, string>;
+  degradedEffects?: DegradedEffect[];
   pages: PrototypeEvent["pages"];
   stacks?: PrototypeEvent["stacks"];
   state: PrototypeEvent["state"];
@@ -282,6 +285,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...(prototype.hiddenReason ? { hiddenReason: prototype.hiddenReason } : {}),
       ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
       ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
+      ...prototypeDegradedEffectsField(prototype.degradedEffects),
       ...(prototype.timers ? { timers: structuredClone(prototype.timers) } : {}),
       ...adoptedFeedbackLog(prototype),
       shaderFailures: structuredClone(prototype.shaderFailures),

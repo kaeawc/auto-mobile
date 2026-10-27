@@ -123,4 +123,11 @@
 
   </application>
 
+  <!-- Stylus and hover injection through UiAutomation (#13097). Started by the host with
+       `am instrument`; it declares no component other than this entry. -->
+  <instrumentation
+      android:name=".pointer.PointerInstrumentation"
+      android:targetPackage="dev.jasonpearson.automobile.ctrlproxy"
+      android:label="AutoMobile pointer injection" />
+
 </manifest>

@@ -358,12 +358,6 @@
     "scale": 1.2,
     "rotation": 15,
     "cornerStyle": "continuous",
-    "shadows": [
-      {
-        "color": "#000000",
-        "radius": 4
-      }
-    ],
     "effects": [
       {
         "type": "noise"
@@ -577,7 +571,7 @@
     "type": "list",
     "repeat": {
       "items": {
-        "path": "/feed/items"
+        "path": "/items"
       },
       "as": "post",
       "key": "id"
@@ -852,7 +846,16 @@
     "stagger": {
       "ms": 20,
       "order": "forward"
-    }
+    },
+    "semantics": {
+      "heading": true
+    },
+    "onAppear": [
+      {
+        "type": "emit",
+        "name": "appear"
+      }
+    ]
   },
   "actionRequestFilled": {
     "type": "request",
@@ -886,7 +889,11 @@
         "type": "emit",
         "name": "error"
       }
-    ]
+    ],
+    "append": {
+      "from": "/items",
+      "to": "/data/items"
+    }
   },
   "actionEmitFilled": {
     "type": "emit",

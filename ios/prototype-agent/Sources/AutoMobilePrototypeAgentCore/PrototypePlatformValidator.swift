@@ -204,6 +204,7 @@ enum PrototypePlatformValidator {
             }
             guard let owner = eventModule(event) else { throw fail(path, "Unknown platform event") }
             guard declared.modules.contains(owner) else { throw notDeclared(path, owner) }
+            try PrototypeRequestValidator.validateList(actions, path: path, depth: 1, state: state)
             try scan(.array(actions), path: path, inHandler: true, declared: declared, state: state)
         }
     }
@@ -345,7 +346,7 @@ enum PrototypePlatformValidator {
         return fields
     }
 
-    private static func check(_ literal: JSONValue, _ rule: Rule, path: String) throws {
+    static func check(_ literal: JSONValue, _ rule: Rule, path: String) throws {
         switch rule {
         case let .json(maxBytes):
             let encoder = JSONEncoder()

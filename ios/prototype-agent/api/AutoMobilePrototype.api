@@ -1,4 +1,4 @@
-AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public init(spec: Data, assets: PrototypeAssets = .none, storage: PrototypeStorageOption = .none, network: PrototypeNetworkConfiguration = .default, onEvent: @escaping @MainActor (PrototypeEvent) -> Void = { _ in }, onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void = { _ in }, onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void = { _ in })
+AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public init(spec: Data, assets: PrototypeAssets = .none, storage: PrototypeStorageOption = .none, network: PrototypeNetworkConfiguration = .default, registry: PrototypePlatformRegistry = .empty, onEvent: @escaping @MainActor (PrototypeEvent) -> Void = { _ in }, onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void = { _ in }, onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void = { _ in })
 AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public struct AutoMobilePrototypeView: View
 AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public var body: some View
 AutoMobilePrototypeAgent/PrototypeAgent.swift: public func amPrototypeAgentStart()
@@ -57,11 +57,59 @@ AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public protoco
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public static let key = "allowImportedPrototypeNetwork"
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public struct PrototypeLibraryUserDefaultsSettingStore: PrototypeLibraryNetworkSettingStore
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public var enabled: Bool
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformAvailability] case needsPermission([String])
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformAvailability] case ready
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformAvailability] case unavailable(String)
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformCallResult] case failure(PlatformErrorCode, String)
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformCallResult] case success(JSONValue)
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformErrorCode] case invalidArgs = "invalid_args"
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformErrorCode] case permissionDenied = "permission_denied"
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformErrorCode] case platformError = "platform_error"
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformErrorCode] case tooManyInFlight = "too_many_in_flight"
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformErrorCode] case unsupported, unavailable, cancelled, timeout
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypeBundleReader] func containsInfoPlistKey(_ key: String) -> Bool
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func availability() -> PlatformAvailability
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func call(_ call: PlatformCall) async -> PlatformCallResult
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var capability: String
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var events: AsyncStream<PlatformEvent>
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var name: String
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var requiredInfoPlistKeys: [String]
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var state: [String: JSONValue]
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public enum PlatformAvailability: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public enum PlatformCallResult: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public enum PlatformErrorCode: String, Sendable
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public final class PrototypePlatformRegistry
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func containsInfoPlistKey(_ key: String) -> Bool
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public init()
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public init(event: String, data: JSONValue)
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public init(modules: [any PrototypePlatformModule] = [], bundle: any PrototypeBundleReader = PrototypeMainBundleReader())
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public let args: [String: JSONValue]
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public let call: String
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public let callId: String
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public let data: JSONValue
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public let event: String
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public protocol PrototypeBundleReader
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public protocol PrototypePlatformModule: Sendable
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public static let empty = PrototypePlatformRegistry()
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public struct PlatformCall: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public struct PlatformEvent: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public struct PrototypeMainBundleReader: PrototypeBundleReader
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public var capabilities: [String]
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public var requiredInfoPlistKeys: [String]
 AutoMobilePrototypeAgentCore/PrototypeSession.swift: [PrototypeDismissReason] case user
 AutoMobilePrototypeAgentCore/PrototypeSession.swift: public enum PrototypeDismissReason: String, Sendable
 AutoMobilePrototypeAgentCore/PrototypeSession.swift: public let id: String
 AutoMobilePrototypeAgentCore/PrototypeSession.swift: public let name: String?
 AutoMobilePrototypeAgentCore/PrototypeSession.swift: public let sequence: Int
 AutoMobilePrototypeAgentCore/PrototypeSession.swift: public struct PrototypeEvent: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: [JSONValue] case array([JSONValue])
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: [JSONValue] case bool(Bool)
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: [JSONValue] case null
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: [JSONValue] case number(Double)
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: [JSONValue] case object([String: JSONValue])
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: [JSONValue] case string(String)
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: public enum JSONValue: Codable, Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: public func encode(to encoder: Encoder) throws
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: public init(from decoder: Decoder) throws
 AutoMobilePrototypeAgentCore/PrototypeSpecStrictValidator.swift: public enum PrototypeSpecStrictValidator
 AutoMobilePrototypeAgentCore/PrototypeSpecStrictValidator.swift: public static func validate(data: Data, supportedCapabilities: Set<String>? = nil, library: Bool = false) throws

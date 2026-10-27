@@ -101,6 +101,16 @@ final class PrototypePlatformTests: XCTestCase {
         }
     }
 
+    func testStrictValidatorRejectsUnknownRepeatPlatformArgument() throws {
+        let file = PrototypeSpecFixtures.directory.appendingPathComponent("invalid/platform-repeat-unknown-item.json")
+        let raw = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: file))
+        let spec = try XCTUnwrap(raw.objectFields?["spec"])
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: JSONEncoder().encode(spec))) { error in
+            guard case let PrototypeLoadError.invalidSpec(path, _) = error else { return XCTFail("\(error)") }
+            XCTAssertEqual(path, "root.children[0].onTap[0].args.message")
+        }
+    }
+
     func testPlatformPlaceholdersScanLikeDataPlaceholders() {
         XCTAssertEqual(PrototypePlatformValidator.placeholders("a {platform:/test/n} b"), ["/test/n"])
         XCTAssertEqual(PrototypePlatformValidator.placeholders("{platform:x} {platform:/a}{data:/b}"), ["/a"])

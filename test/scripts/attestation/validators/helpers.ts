@@ -1,3 +1,4 @@
+import { expectedInputHashAlgorithm } from "../../../../scripts/ci/attestation/tier1InputHash";
 import type {
   AttestationEnvelope,
   AttestationTier,
@@ -58,7 +59,9 @@ export function fixture(tier: AttestationTier = 1) {
       tier,
       lane: ({ 1: "node", 2: "android", 3: "ios" } as const)[tier],
       inputHash: HASH,
-      inputHashAlgorithm: "tree-entries-sha256-v0-placeholder",
+      inputHashAlgorithm: expectedInputHashAlgorithm(
+        ({ 1: "node", 2: "android", 3: "ios" } as const)[tier],
+      ),
       commitId: "commit",
       scope: "full",
       scopeNote: "",

@@ -19,13 +19,11 @@ export interface UpsertActiveSessionOptions {
    */
   unlessTerminal?: boolean;
   /**
-   * Rewrite only a non-terminal row or this superseded release's row, and never a live peer's
-   * row (#11557). Both guards run in the conflict-update statement; a missing row is inserted.
-   * Empty reasons behave like `unlessTerminal`; empty peers add no owner guard. Not combined
-   * with `claimedRow`. A refusal rejects with {@link DeviceSessionRowNotRewritableError}.
+   * Rewrite only a non-terminal row, never a live peer's row (#11557). Both guards run in the
+   * conflict-update statement; a missing row is inserted. Empty peers add no owner guard. Not
+   * combined with `claimedRow`. A refusal rejects with {@link DeviceSessionRowNotRewritableError}.
    */
   rewriteOverSupersededRelease?: {
-    supersededReasons: readonly string[];
     livePeerDaemonSessionIds: readonly string[];
     /** First attempt needs no discovery: only an unowned row or this daemon's row is writable. */
     ownDaemonSessionId?: string;

@@ -56,7 +56,7 @@ fi
 lane_for_path() {
   local path="$1"
   if [[ "$path" == package.json || "$path" == bun.lock ]]; then printf '%s\n' runtime-pins node integration; fi
-  if [[ "$path" == src/* || ( "$path" == test/* && "$path" != test/bats/* ) || "$path" == schemas/* || "$path" == tsconfig*.json || "$path" == .oxlintrc.json || "$path" == oxlint-plugins/* || "$path" == turbo.json || "$path" == scripts/*.ts ]]; then printf '%s\n' node; fi
+  if [[ "$path" == src/* || ( "$path" == test/* && "$path" != test/bats/* ) || "$path" == schemas/* || "$path" == tsconfig*.json || "$path" == .oxlintrc.json || "$path" == oxlint-plugins/* || "$path" == turbo.json || "$path" == scripts/*.ts || "$path" == benchmark/agent/* ]]; then printf '%s\n' node; fi
   if [[ "$path" == scripts/*.sh || "$path" == scripts/lib/* || "$path" == test/bats/* ]]; then printf '%s\n' shell; fi
   if [[ "$path" == android/* ]]; then printf '%s\n' android; fi
   if [[ "$path" == ios/* ]]; then printf '%s\n' ios; fi

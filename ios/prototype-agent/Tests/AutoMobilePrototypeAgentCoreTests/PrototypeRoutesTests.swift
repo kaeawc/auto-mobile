@@ -41,9 +41,13 @@ final class PrototypeRoutesTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("test/fixtures/prototype-spec/invalid")
-        return (try! FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil))
+        let files = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+        return files
             .filter { $0.lastPathComponent.hasPrefix("routes-") }.sorted { $0.path < $1.path }
-            .map { ($0.lastPathComponent, try! JSONDecoder().decode(Invalid.self, from: Data(contentsOf: $0))) }
+            .compactMap { url in
+                (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(Invalid.self, from: $0) }
+                    .map { (url.lastPathComponent, $0) }
+            }
     }()
 
     override class func setUp() {
@@ -52,6 +56,7 @@ final class PrototypeRoutesTests: XCTestCase {
     }
 
     func testRouteDiagnosticParity() throws {
+        XCTAssertGreaterThan(Self.invalid.count, 20, "route invalid fixtures must load")
         for (name, fixture) in Self.invalid {
             guard let message = fixture.expectedMessage else { continue }
             let data = try JSONEncoder().encode(fixture.spec)

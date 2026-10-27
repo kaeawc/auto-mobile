@@ -80,7 +80,7 @@ enum PrototypeRouteFields {
         mutating func entries(_ value: Fields, _ key: String, _ path: String) {
             let entries = value[key]?.objectFields ?? [:]
             for name in PrototypeContractValidator.sorted(entries.keys) {
-                let raw = entries[name]!
+                guard let raw = entries[name] else { continue }
                 let at = PrototypeContractValidator.keyPath("\(path).\(key)", name)
                 if let text = raw.stringValue { result.append(.init(text: text, path: at, pointer: false)) }
                 else { binding(raw, at) }
@@ -96,11 +96,10 @@ enum PrototypeRouteFields {
             case "toggle", "increment", "decrement": field(value, "key", path)
             case "emit":
                 field(value, "name", path)
-                for name in PrototypeContractValidator.sorted((value["context"]?.objectFields ?? [:]).keys) {
-                    binding(
-                        value["context"]!.objectFields![name]!,
-                        PrototypeContractValidator.keyPath("\(path).context", name)
-                    )
+                let context = value["context"]?.objectFields ?? [:]
+                for name in PrototypeContractValidator.sorted(context.keys) {
+                    guard let item = context[name] else { continue }
+                    binding(item, PrototypeContractValidator.keyPath("\(path).context", name))
                 }
                 keys(value, "requireValid", path)
             case "setData", "appendData", "prependData", "removeData":
@@ -112,11 +111,10 @@ enum PrototypeRouteFields {
                     for key in ["headers", "query"] { entries(value, key, path) }
                     if let raw = value["body"] { binding(raw, "\(path).body") }
                 } else {
-                    for name in PrototypeContractValidator.sorted((value["args"]?.objectFields ?? [:]).keys) {
-                        binding(
-                            value["args"]!.objectFields![name]!,
-                            PrototypeContractValidator.keyPath("\(path).args", name)
-                        )
+                    let args = value["args"]?.objectFields ?? [:]
+                    for name in PrototypeContractValidator.sorted(args.keys) {
+                        guard let item = args[name] else { continue }
+                        binding(item, PrototypeContractValidator.keyPath("\(path).args", name))
                     }
                 }
                 field(value, "into", path, pointer: true)

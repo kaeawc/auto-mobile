@@ -15,13 +15,13 @@ enum PrototypeRoutes {
                 let route = stack.value["routes"]?.objectFields?[name]?.objectFields ?? [:]
                 let at = PrototypeContractValidator.keyPath("\(stack.path).routes", name)
                 if screens[name] == nil { throw PrototypeContractValidator.invalid(at, "Unknown route screen") }
-                for key in PrototypeContractValidator.sorted((route["params"]?.objectFields ?? [:]).keys) {
-                    if !PrototypeContractValidator.matches("pathKey", key) {
-                        throw PrototypeContractValidator.invalid(
-                            PrototypeContractValidator.keyPath("\(at).params", key),
-                            "Invalid route param name"
-                        )
-                    }
+                let badParams = PrototypeContractValidator.sorted((route["params"]?.objectFields ?? [:]).keys)
+                    .filter { !PrototypeContractValidator.matches("pathKey", $0) }
+                if let key = badParams.first {
+                    throw PrototypeContractValidator.invalid(
+                        PrototypeContractValidator.keyPath("\(at).params", key),
+                        "Invalid route param name"
+                    )
                 }
                 if stack.value["start"] == .string(name), !(route["params"]?.objectFields ?? [:]).isEmpty {
                     throw PrototypeContractValidator.invalid("\(at).params", "Start screen cannot declare route params")

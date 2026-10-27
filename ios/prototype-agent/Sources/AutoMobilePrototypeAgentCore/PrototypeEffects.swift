@@ -89,11 +89,13 @@ enum PrototypeEffects {
     /// The reason a `degradedEffects` entry carries when SwiftUI cannot sample the node's pixels.
     static let platformReason = "platform"
 
-    /// Node types SwiftUI backs with a platform view (UIKit controls and scroll views), where a
-    /// `layerEffect` or `distortionEffect` renders a placeholder instead of the content.
+    /// Node types SwiftUI backs with a platform view (UIKit controls, scroll views and the stack's
+    /// marker view), where a `layerEffect` or `distortionEffect` renders a placeholder instead of the
+    /// content. A descendant with an `id` counts too: the renderer reports its menu bounds through a
+    /// UIKit-backed marker view behind it (`PrototypeMenuBoundsReporter`).
     static let platformBackedTypes: Set<String> = [
-        "textField", "searchBar", "switch", "slider", "select", "datePicker", "timePicker",
-        "scroll", "pager", "carousel",
+        "textField", "searchBar", "slider", "select", "datePicker", "timePicker",
+        "scroll", "pager", "carousel", "stack", "dialog",
     ]
 
     // MARK: Parsing
@@ -121,46 +123,52 @@ enum PrototypeEffects {
     }
 
     private static func look(_ type: String, _ f: [String: JSONValue]) -> PrototypeEffect.Look? {
-        let d = defaults
+        let fallback = defaults
         func number(_ key: String, _ fallback: Double) -> Double { f[key]?.numberValue ?? fallback }
         switch type {
         case "noise":
             return .noise(
-                amount: number("amount", d.noiseAmount), grain: number("grain", d.grain),
+                amount: number("amount", fallback.noiseAmount), grain: number("grain", fallback.grain),
                 seed: f["seed"]?.numberValue.map { Int($0) } ?? 0, monochrome: f["monochrome"]?.boolValue ?? true
             )
         case "gradientMesh":
             guard case let .array(items)? = f["colors"] else { return nil }
             let colors = items.compactMap { mode($0) }
-            return colors.count == 4 ? .gradientMesh(colors: colors, softness: number("softness", d.softness)) : nil
+            return colors
+                .count == 4 ? .gradientMesh(colors: colors, softness: number("softness", fallback.softness)) : nil
         case "shimmer":
             return .shimmer(
-                color: mode(f["color"]), angle: number("angle", d.shimmerAngle), width: number("width", d.shimmerWidth)
+                color: mode(f["color"]), angle: number("angle", fallback.shimmerAngle),
+                width: number("width", fallback.shimmerWidth)
             )
         case "glow":
             guard let color = mode(f["color"]) else { return nil }
             return .glow(
-                color: color, radius: number("radius", d.glowRadius), intensity: number("intensity", d.glowIntensity)
+                color: color, radius: number("radius", fallback.glowRadius),
+                intensity: number("intensity", fallback.glowIntensity)
             )
         case "vignette":
             return .vignette(
-                color: mode(f["color"]), intensity: number("intensity", d.vignetteIntensity),
-                radius: number("radius", d.vignetteRadius)
+                color: mode(f["color"]), intensity: number("intensity", fallback.vignetteIntensity),
+                radius: number("radius", fallback.vignetteRadius)
             )
         case "blur": return .blur(radius: number("radius", 0))
         case "pixelate": return .pixelate(cell: number("cell", 1))
         case "chromaticAberration":
-            return .chromaticAberration(offset: number("offset", d.aberrationOffset), angle: number("angle", 0))
+            return .chromaticAberration(offset: number("offset", fallback.aberrationOffset), angle: number("angle", 0))
         case "wave":
             return .wave(
-                amplitude: number("amplitude", d.amplitude), wavelength: number("wavelength", d.wavelength),
+                amplitude: number("amplitude", fallback.amplitude),
+                wavelength: number("wavelength", fallback.wavelength),
                 angle: number("angle", 0)
             )
         case "ripple":
             let center = f["center"]?.objectFields
             return .ripple(
-                amplitude: number("amplitude", d.amplitude), wavelength: number("wavelength", d.wavelength),
-                centerX: center?["x"]?.numberValue ?? d.center, centerY: center?["y"]?.numberValue ?? d.center
+                amplitude: number("amplitude", fallback.amplitude),
+                wavelength: number("wavelength", fallback.wavelength),
+                centerX: center?["x"]?.numberValue ?? fallback.center,
+                centerY: center?["y"]?.numberValue ?? fallback.center
             )
         default: return nil
         }
@@ -170,7 +178,7 @@ enum PrototypeEffects {
 
     /// Where an effect's cycle is: the authored `phase` advanced by `elapsed` seconds of a loop that
     /// lasts `periodMs`. Without `animate`, or when the effect does not cycle, it is the authored phase,
-    /// which is also what a paused clock shows (`motion: "none"`, Reduce Motion, a hidden prototype).
+    /// which is also what a paused clock shows (`motion: "none"`, Reduce Motion).
     static func phase(of effect: PrototypeEffect, elapsed: TimeInterval) -> Double {
         guard effect.cycles, let period = effect.periodMs, period > 0 else { return effect.phase }
         let cycles = effect.phase + elapsed * 1000 / Double(period)
@@ -213,32 +221,52 @@ enum PrototypeEffects {
         var animated: Bool { drawn.contains { $0.effect.animated } }
     }
 
-    static func plan(_ raw: [JSONValue]?, platformBackedSubtree: Bool) -> Plan {
+    /// `platformBackedSubtree` is evaluated only when an effect samples the node's pixels, because it
+    /// walks the node's whole subtree.
+    static func plan(_ raw: [JSONValue]?, platformBackedSubtree: @autoclosure () -> Bool) -> Plan {
         let parsed = parse(raw)
         guard !parsed.isEmpty else { return .empty }
-        let omitted = platformBackedSubtree ? parsed.filter { $0.effect.needsLayerSampling } : []
+        let omitted = parsed.contains { $0.effect.needsLayerSampling } && platformBackedSubtree()
+            ? parsed.filter { $0.effect.needsLayerSampling } : []
         let omittedIndexes = Set(omitted.map(\.index))
         return Plan(drawn: parsed.filter { !omittedIndexes.contains($0.index) }, omitted: omitted)
     }
 
-    /// Whether `node` or any descendant is a node SwiftUI backs with a platform view.
+    /// Whether `node` is, or holds, a node SwiftUI backs with a platform view.
     static func hasPlatformBackedSubtree(_ node: PrototypeNode) -> Bool {
         if platformBackedTypes.contains(node.type) { return true }
-        let nested = (node.children ?? []) + [node.child].compactMap { $0 } + Array((node.screens ?? [:]).values)
-        return nested.contains(where: hasPlatformBackedSubtree)
+        return nestedNodes(node).contains { $0.id != nil || hasPlatformBackedSubtree($0) }
+    }
+
+    private static func nestedNodes(_ node: PrototypeNode) -> [PrototypeNode] {
+        (node.children ?? []) + [node.child].compactMap { $0 } + Array((node.screens ?? [:]).values)
+    }
+
+    /// Whether any style of `node` (its own or a `styleWhen` entry) authors effects, which is stable
+    /// across state changes so the view keeps its identity when a `styleWhen` toggles them.
+    static func authorsEffects(_ node: PrototypeNode) -> Bool {
+        ([node.style] + (node.styleWhen ?? []).map(\.style)).contains { !($0?.effects ?? []).isEmpty }
     }
 
     /// `<node path>.style.effects[<authored index>]`, one form for every reason.
     static func path(_ nodePath: String, index: Int) -> String { "\(nodePath).style.effects[\(index)]" }
 
-    /// Every effect on a node of the shown tree that this device cannot draw, shaped like Android's
-    /// `degradedEffects` entries `{path, type, reason}`. A path is the node's structural path (`root`,
-    /// `root.children[1]`, `root.child`, `root.screens["home"]`) plus the authored effect index, and
-    /// follows the `styleWhen` style in force for `state`. A `repeat` template is reported once, under
-    /// its template path. Entries are in tree order.
-    static func degraded(root: PrototypeNode, state: [String: JSONValue]) -> [[String: String]] {
+    /// Every effect on a visible node of the shown tree that this device cannot draw, shaped like
+    /// Android's `degradedEffects` entries `{path, type, reason}`. A path is the node's position in the
+    /// shown tree (`root`, `root.children[1]`, `root.child`, `root.screens["home"]`) plus the authored
+    /// effect index, and follows the `styleWhen` style in force for `state`. `repeat` rows are already
+    /// expanded in that tree, so a row has a plain `children[k]` path (Android's carries
+    /// `repeat[<key>]`). Nodes whose `visibleWhen` fails and inactive stack screens are skipped, as on
+    /// Android. `activeScreen` names a stack's top screen; a stack not in it shows its `start`. Entries
+    /// are in tree order.
+    static func degraded(
+        root: PrototypeNode, state: [String: JSONValue], activeScreen: [String: String] = [:]
+    )
+        -> [[String: String]]
+    {
         var found: [[String: String]] = []
         func visit(_ node: PrototypeNode, _ path: String) {
+            if let visible = node.visibleWhen, !visible.holds(state) { return }
             let style = node.resolvedStyle(state: state)
             let plan = plan(style?.effects, platformBackedSubtree: hasPlatformBackedSubtree(node))
             for entry in plan.omitted {
@@ -250,9 +278,9 @@ enum PrototypeEffects {
             for (index, child) in (node.children ?? []).enumerated() {
                 visit(child, "\(path).children[\(index)]")
             }
-            for (name, screen) in (node.screens ?? [:]).sorted(by: { $0.key < $1.key }) {
-                visit(screen, "\(path).screens[\(quoted(name))]")
-            }
+            guard let screens = node.screens else { return }
+            let top = node.id.flatMap { activeScreen[$0] } ?? node.start
+            if let top, let screen = screens[top] { visit(screen, "\(path).screens[\(quoted(top))]") }
         }
         visit(root, "root")
         return found

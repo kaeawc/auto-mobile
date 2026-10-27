@@ -856,7 +856,8 @@
                     effects: PrototypeEffects.plan(
                         style?.effects, platformBackedSubtree: PrototypeEffects.hasPlatformBackedSubtree(node)
                     ),
-                    motion: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+                    motion: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion),
+                    authorsEffects: PrototypeEffects.authorsEffects(node)
                 ))
                 .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
                 .opacity(style?.alpha ?? 1)

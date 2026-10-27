@@ -511,7 +511,9 @@
         /// like Android's `degradedEffects`: `[{path, type, reason}]`.
         func degradedEffects() -> [[String: String]] {
             guard let root = spec?.root else { return [] }
-            return PrototypeEffects.degraded(root: root, state: state)
+            return PrototypeEffects.degraded(
+                root: root, state: state, activeScreen: stacks.compactMapValues { $0.path.last }
+            )
         }
 
         func status() -> [String: Any] {

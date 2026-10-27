@@ -105,14 +105,47 @@ final class PrototypeEffectsTests: XCTestCase {
         {"id":"p","window":{"placement":{"type":"fullscreen"}},"root":{"type":"column","children":[
           {"type":"box","style":{"effects":[{"type":"blur","radius":4},{"type":"pixelate","cell":6}]},
            "children":[{"type":"textField","id":"name","stateKey":"name","label":"Name"}]},
-          {"type":"text","text":"plain","style":{"effects":[{"type":"wave"}]}}
-        ]},"state":{"name":""}}
+          {"type":"text","text":"plain","style":{"effects":[{"type":"wave"}]}},
+          {"type":"box","visibleWhen":{"key":"name","equals":"never"},
+           "style":{"effects":[{"type":"wave"}]},"children":[{"type":"slider","stateKey":"v","min":0,"max":1}]}
+        ]},"state":{"name":"","v":0}}
         """#.utf8))
         let report = PrototypeEffects.degraded(root: spec.root, state: [:])
         XCTAssertEqual(report, [[
             "path": "root.children[0].style.effects[1]", "type": "pixelate",
             "reason": PrototypeEffects.platformReason,
         ]])
+    }
+
+    func testADescendantWithAnIdAndAStackAreTreatedAsPlatformBacked() throws {
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(#"""
+        {"id":"p","window":{"placement":{"type":"fullscreen"}},"root":{"type":"column","children":[
+          {"type":"box","children":[{"type":"text","id":"label","text":"x"}]},
+          {"type":"box","children":[{"type":"text","text":"y"}]}
+        ]}}
+        """#.utf8))
+        XCTAssertTrue(try PrototypeEffects.hasPlatformBackedSubtree(XCTUnwrap(spec.root.children?[0])))
+        XCTAssertFalse(try PrototypeEffects.hasPlatformBackedSubtree(XCTUnwrap(spec.root.children?[1])))
+        XCTAssertTrue(PrototypeEffects.platformBackedTypes.isSuperset(of: ["stack", "dialog"]))
+        XCTAssertFalse(PrototypeEffects.platformBackedTypes.contains("switch"))
+    }
+
+    func testPlatformBackedSubtreeIsOnlyWalkedWhenAnEffectSamplesPixels() throws {
+        var walked = 0
+        let blurOnly = try JSONDecoder().decode([JSONValue].self, from: Data(#"[{"type":"blur","radius":2}]"#.utf8))
+        _ = PrototypeEffects.plan(blurOnly, platformBackedSubtree: {
+            walked += 1
+            return true
+        }())
+        XCTAssertEqual(walked, 0)
+    }
+
+    func testAuthoredEffectsAreStableAcrossStyleWhen() throws {
+        let node = try JSONDecoder().decode(PrototypeNode.self, from: Data(
+            #"{"type":"box","styleWhen":[{"when":{"key":"a","equals":true},"style":{"effects":[{"type":"blur","radius":2}]}}]}"#
+                .utf8
+        ))
+        XCTAssertTrue(PrototypeEffects.authorsEffects(node))
     }
 
     func testTheFixtureDegradesNothingWithoutPlatformViews() throws {

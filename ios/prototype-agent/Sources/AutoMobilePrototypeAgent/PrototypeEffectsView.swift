@@ -19,23 +19,33 @@
         let palette: PrototypePalette
         let shape: PrototypeStyleShape
         let motion: PrototypeMotion
+        /// Whether any style of the node authors effects: stable across `styleWhen` changes, so the
+        /// subtree keeps its identity (and its focus and scroll state) when a state toggles them.
+        let authored: Bool
+
+        /// When the animation began; an animated effect starts at its authored `phase` each time the
+        /// clock starts running.
+        @State private var started: Date?
 
         func body(content: Content) -> some View {
-            if plan.drawn.isEmpty {
+            if !authored {
                 content
             } else {
+                let running = plan.animated && PrototypeEffects.runs(motion)
                 // `paused` holds the authored `phase` under `motion: "none"`, Reduce Motion and while
                 // nothing animates, so screenshots and observe are deterministic.
-                TimelineView(.animation(paused: !(plan.animated && PrototypeEffects.runs(motion)))) { timeline in
-                    let running = plan.animated && PrototypeEffects.runs(motion)
-                    let clock = running ? timeline.date.timeIntervalSinceReferenceDate : 0
+                TimelineView(.animation(paused: !running)) { timeline in
+                    let clock = running ? timeline.date.timeIntervalSince(started ?? timeline.date) : 0
                     layered(content, clock: clock)
                 }
+                .onChange(of: running, initial: true) { _, isRunning in started = isRunning ? Date() : nil }
             }
         }
 
         private func layered(_ content: Content, clock: TimeInterval) -> some View {
             distorted(AnyView(content), clock: clock)
+                // A blur or displacement must not bleed past the node.
+                .clipped()
                 .overlay {
                     ZStack {
                         ForEach(painted, id: \.index) { entry in

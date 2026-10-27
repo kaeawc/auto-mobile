@@ -26,6 +26,7 @@
         let shimmerAnimated: Bool
         var effects: PrototypeEffects.Plan = .empty
         var motion = PrototypeMotion(specMotion: nil, reduceMotion: false)
+        var authorsEffects = false
 
         private var layers: [PrototypeStyleShadowLayer] {
             PrototypeStyleShadowLayer.resolve(style?.shadows, palette: palette)
@@ -45,7 +46,9 @@
                     enabled: style?.shimmer == true, animated: shimmerAnimated, shape: shape
                 ))
                 .clipShape(shape)
-                .modifier(PrototypeEffectsModifier(plan: effects, palette: palette, shape: shape, motion: motion))
+                .modifier(PrototypeEffectsModifier(
+                    plan: effects, palette: palette, shape: shape, motion: motion, authored: authorsEffects
+                ))
                 .overlay { border }
                 .overlay { PrototypeStyleShadows(layers: layers, shape: shape, inner: true) }
                 .background { PrototypeStyleShadows(layers: layers, shape: shape, inner: false) }

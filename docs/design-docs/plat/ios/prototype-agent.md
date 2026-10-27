@@ -106,17 +106,23 @@ effects renders on any iOS 17 simulator (Android's API-floor table does not appl
   section): `phase` and `animate` move only `shimmer`, `wave` and `ripple`.
 - **Time.** `TimelineView(.animation(paused:))` drives the phase and is paused under `motion: "none"`,
   `motion: "reduced"` and Reduce Motion, so an animated effect keeps its authored `phase`. The phase
-  function (`PrototypeEffects.phase`) is unit-tested without a GPU. There is no frame-budget guard on
-  iOS, so `degradedEffects` never carries reason `budget`.
-- **Platform views.** SwiftUI draws a placeholder instead of a platform-backed view (text fields,
-  switches, sliders, pickers, scroll views and pagers) inside a `layerEffect` or `distortionEffect`.
-  Decision on the open question: the shader-sampled effects (`pixelate`, `chromaticAberration`,
-  `wave`, `ripple`) are omitted on a node whose subtree holds such a view, not on the whole spec;
-  `blur` and the over-the-content effects still draw. The show reply and `get_prototype_status` /
+  function (`PrototypeEffects.phase`) is unit-tested without a GPU. Differences from Android: iOS also
+  freezes under `motion: "reduced"`, and restarts an animation at its authored `phase` each time the
+  clock starts running (Android resumes where it stopped). There is no frame-budget guard on iOS, so
+  `degradedEffects` never carries reason `budget`.
+- **Platform views.** SwiftUI draws a placeholder instead of a platform-backed view inside a
+  `layerEffect` or `distortionEffect`. The platform-backed node types are text fields, search bars,
+  sliders, selects, date and time pickers, scrolls, pagers, carousels, stacks and dialogs, and any
+  descendant with an `id` (the renderer reports its menu bounds through a UIKit marker view behind
+  it). Decision on the open question: the shader-sampled effects (`pixelate`, `chromaticAberration`,
+  `wave`, `ripple`) are omitted on a node that is or holds such a view, not on the whole spec; `blur`
+  and the over-the-content effects still draw. The show reply and `get_prototype_status` /
   `inspect_prototypes` list each omitted effect in `degradedEffects` as `{path, type, reason:
-  "platform"}`, with the same `path` form as Android (`<node path>.style.effects[<authored index>]`;
-  paths are structural here: `root`, `root.children[1]`, `root.child`, `root.screens["home"]`, and a
-  `repeat` template is reported once).
+  "platform"}`. `path` is `<node position>.style.effects[<authored index>]` with the node's position in
+  the shown tree (`root`, `root.children[1]`, `root.child`, `root.screens["home"]`); `repeat` rows are
+  already expanded there, so a row has a plain `children[k]` path where Android's has
+  `repeat[<key>]`. Nodes whose `visibleWhen` fails and inactive stack screens are skipped, as on
+  Android. A `blur` or displacement is clipped to the node's bounds.
 - **Owed device checks.** Simulator goldens against Android within a tolerance (the simulator forwards
   Metal to the host GPU and is not pixel-exact), and which node types really draw the placeholder.
 

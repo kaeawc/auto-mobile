@@ -2,17 +2,20 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import {
   classifyInboundRequest,
   createMcpHandler,
+  InMemoryServerEventBus,
   McpServer,
   PROTOCOL_VERSION_META_KEY,
   type McpServerFactory,
   type CreateMcpHandlerOptions,
   type McpHttpHandler,
+  type ServerEventBus,
 } from "@modelcontextprotocol/server";
 import { ENV, readEnvBool } from "../config/env";
 import { ActionableError } from "../models/ActionableError";
 import { rootAsyncScope } from "./inProcessMcpDispatcher";
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import { readMcpSessionKey } from "./mcpSessionKey";
+import { ListChangedBroadcaster } from "./listChangedBroadcast";
 import type { ExecutionCancellationReason } from "./executionTracker";
 import { describeUnknownError, errorMessage } from "../utils/describeUnknownError";
 import type { IdGenerator } from "../utils/IdGenerator";
@@ -107,6 +110,8 @@ export interface StatelessMcpHttpEndpointDeps<
   readonly modern?: {
     enabled(): boolean;
     classify: typeof classifyInboundRequest;
+    /** Lazily constructed once per endpoint, shared by all modern request handlers. */
+    createEventBus?(): ServerEventBus;
     createHandler(
       factory: McpServerFactory,
       options: CreateMcpHandlerOptions,
@@ -243,6 +248,8 @@ export class StatelessMcpHttpEndpoint<
   // Scope ids per cancel key, oldest first: keyless requests may share a JSON-RPC id.
   private readonly byCancelKey = new Map<string, string[]>();
   private accepting = true;
+  private modernBus?: ServerEventBus;
+  private unsubscribeModernEvents?: () => void;
   /** Handed to the handler's factory once; cleared there so a long-lived task does not pin `req`. */
   private readonly modernScope = new AsyncLocalStorage<{
     req?: Req;
@@ -285,6 +292,7 @@ export class StatelessMcpHttpEndpoint<
    */
   stopAccepting(): void {
     this.accepting = false;
+    this.releaseModernEventsIfIdle();
   }
 
   /** Drop all tracking after shutdown closed the requests (or gave up on them). */
@@ -292,6 +300,7 @@ export class StatelessMcpHttpEndpoint<
     this.accepting = false;
     this.inFlight.clear();
     this.byCancelKey.clear();
+    this.releaseModernEventsIfIdle();
   }
 
   /**
@@ -411,7 +420,7 @@ export class StatelessMcpHttpEndpoint<
         }
         return server;
       },
-      { legacy: "reject", responseMode: "sse", keepAliveMs: 0 },
+      { legacy: "reject", responseMode: "sse", keepAliveMs: 0, bus: this.getModernBus() },
     );
     const request = this.track(scope, headerSessionKey, parsedBody, handler, {
       close: async () => {
@@ -443,6 +452,24 @@ export class StatelessMcpHttpEndpoint<
       clearKeepalive();
       socket?.off("close", close);
       await request.close();
+    }
+  }
+
+  private getModernBus(): ServerEventBus {
+    if (!this.modernBus) {
+      const bus = this.deps.modern?.createEventBus?.() ?? new InMemoryServerEventBus();
+      this.modernBus = bus;
+      this.unsubscribeModernEvents = ListChangedBroadcaster.subscribe((kind) => {
+        bus.publish({ kind: kind === "tools" ? "tools_list_changed" : "resources_list_changed" });
+      });
+    }
+    return this.modernBus;
+  }
+
+  private releaseModernEventsIfIdle(): void {
+    if (!this.accepting && this.inFlight.size === 0) {
+      this.unsubscribeModernEvents?.();
+      this.unsubscribeModernEvents = undefined;
     }
   }
 
@@ -529,6 +556,7 @@ export class StatelessMcpHttpEndpoint<
         this.byCancelKey.set(key, remaining);
       }
     }
+    this.releaseModernEventsIfIdle();
   }
 
   /**

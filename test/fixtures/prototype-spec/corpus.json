@@ -156,6 +156,11 @@
     "shared-v2-same-dialog.json",
     "sheet-bindings.json",
     "stack-navigation.json",
+    "stack-patterns-source-only.json",
+    "stack-patterns-zoom-idle.json",
+    "stack-patterns-zoom-shared-v2.json",
+    "stack-patterns-zoom.json",
+    "stack-patterns.json",
     "stack-transitions.json",
     "strict-action-depth-boundary.json",
     "strict-bom.json",
@@ -1005,6 +1010,11 @@
     "span-letter-spacing-over-max.json",
     "span-text-size-over-max.json",
     "spec-version.json",
+    "stack-patterns-zoom-ambiguous.json",
+    "stack-patterns-zoom-missing.json",
+    "stack-patterns-zoom-shared-v2-ambiguous.json",
+    "stack-patterns-zoom-shared-v2-template.json",
+    "stack-patterns-zoom-unresolved.json",
     "stack-repeat-non-object-children.json",
     "stack-substituted-text-data-limit.json",
     "stack-transitions-bad-push.json",
@@ -1135,6 +1145,7 @@
     "strict-gate-prototype_semantics_v1.json",
     "strict-gate-prototype_shared_element_v1.json",
     "strict-gate-prototype_shared_element_v2.json",
+    "strict-gate-prototype_stack_patterns_v1.json",
     "strict-gate-prototype_stack_transitions_v1.json",
     "strict-gate-prototype_stack_v1.json",
     "strict-gate-prototype_storage_v1.json",
@@ -2084,6 +2095,29 @@
     "routes-repeat-alias-backcompat.json": [],
     "routes-repeat-key-mixed-valid.json": ["prototype_routes_v1", "prototype_stack_v1"],
     "routes.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
-    "window-motion.json": ["prototype_window_motion_v1"]
+    "window-motion.json": ["prototype_window_motion_v1"],
+    "stack-patterns-source-only.json": ["prototype_stack_patterns_v1", "prototype_stack_v1"],
+    "stack-patterns-zoom-idle.json": [
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
+    "stack-patterns-zoom.json": [
+      "prototype_shared_element_v1",
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
+    "stack-patterns.json": [
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
+    "stack-patterns-zoom-shared-v2.json": [
+      "prototype_shared_element_v2",
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ]
   }
 }

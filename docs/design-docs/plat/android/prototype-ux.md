@@ -1211,15 +1211,18 @@ the second (a list row into a detail card, a thumbnail into a viewer):
 }
 ```
 
+A literal key referenced as a zoom source labels exactly one node and is exempt from the
+`visibleWhen` requirement and visibility-pair counting.
+
 Rules, enforced by every validator with exact paths: `sharedKey` retains the state-key grammar
 and aliases `shared: {key, as: "bounds"}`. The object form requires
 `prototype_shared_element_v2`; plain `sharedKey` requires `prototype_shared_element_v1`.
-A node cannot set both and must have `visibleWhen`. Literal v2 keys allow hyphens in addition
-to the state-key characters, with a 64-character resolved limit. Literal keys pair exactly two
+A node cannot set both. Visibility morph nodes must have `visibleWhen`. Literal v2 keys allow hyphens in addition
+to the state-key characters, with a 64-character resolved limit. Literal visibility morph keys pair exactly two
 nodes. Inside repeat children, a key template must reference the field named by `repeat.key`,
 without index or other-field placeholders. Each instance must resolve a distinct key; at most
 two nodes can use each resolved key. Unmatched repeat items remain ordinary cards. A spec has
-at most 16 resolved keys, including unmatched feed items. Pairs cannot nest, disagree on `as`, or cross a `dialog` or `bottomSheet`
+at most 16 resolved keys for visibility morphs, including unmatched feed items. Pairs cannot nest, disagree on `as`, or cross a `dialog` or `bottomSheet`
 boundary (including two separate modals). Shared elements across pager pages and `stack` screens
 are not supported.
 
@@ -1330,17 +1333,36 @@ are emitted by the current runtimes.
 `transition` override. Omission means `platform`; pop/popToRoot have no override. The contract
 is validated by both agents, and both advertise the capability.
 
-| Value      | Platform behaviour                         |
-| ---------- | ------------------------------------------ |
-| `platform` | Native navigation animation (default).     |
-| `slide`    | Directional screen slide, reversed on pop. |
-| `fade`     | Screen crossfade.                          |
-| `none`     | Instant screen change.                     |
+| Value         | Platform behaviour                                                             |
+| ------------- | ------------------------------------------------------------------------------ |
+| `platform`    | Native navigation animation (default).                                         |
+| `slide`       | Directional screen slide, reversed on pop.                                     |
+| `fade`        | Screen crossfade.                                                              |
+| `none`        | Instant screen change.                                                         |
+| `sharedAxisX` | Sibling steps along a horizontal flow; 30dp travel plus fade.                  |
+| `sharedAxisY` | Sibling steps along a vertical flow; 30dp travel plus fade.                    |
+| `fadeThrough` | Unrelated destinations; outgoing fade, then incoming fade and scale from 0.92. |
+| `zoom`        | Item-to-detail intent with a source key; currently uses the fallbacks below.   |
+
+The four named patterns and push/replace `source` require `prototype_stack_patterns_v1`.
+Zoom requires `source` on each push/replace using it, naming exactly one node's `sharedKey` or literal `shared.key`
+in the spec. A key referenced as a zoom source is exempt from the two-node visibility-pair rule;
+repeat templates remain disallowed.
+Android currently substitutes fadeThrough and iOS substitutes platform push; container transforms
+are follow-up work. iOS reports the fallback and non-interactive pattern pops in `platformNotes`.
+Platform, slide and zoom support interactive iOS edge pop; only the composed sharedAxisX/Y and
+fadeThrough patterns pop non-interactively. Android `platformNotes` are not currently supported.
+Android predictive back scrubs every pattern, including zoom's fallback, and restores the current
+screen on cancellation.
+Shared-axis pop reverses travel; only X also mirrors for RTL. iOS composes axis movement with
+opacity and fadeThrough removes the outgoing screen visually before revealing the scaled incoming
+screen. Fixed named timings are 300 ms for movement and 150 ms for fade effects (two sequential
+phases for fadeThrough); the motion-token table is not available.
 
 Android slides enter from the end edge with 30% outgoing parallax, mirrored in RTL; pop and
 popToRoot reverse that direction. Platform replace crossfades. Animations finish within 300 ms.
 `motion: "none"` and animator duration scale 0 snap immediately. The reduced profile (see Motion
-profiles) changes slides to crossfades.
+profiles) changes every pattern to a crossfade.
 
 Activity hosts scrub the pop with predictive back on API 34+, settle on commit, and restore the
 current screen on cancellation. Earlier APIs pop with the ordinary animation. Overlay windows

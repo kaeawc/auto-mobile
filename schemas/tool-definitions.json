@@ -4655,6 +4655,7 @@
               "highlight",
               "hitTest",
               "homeScreen",
+              "hoverAt",
               "identifyInteractions",
               "inspectPackageSigning",
               "installApp",
@@ -4811,6 +4812,7 @@
               "highlight",
               "hitTest",
               "homeScreen",
+              "hoverAt",
               "identifyInteractions",
               "inspectPackageSigning",
               "installApp",
@@ -7216,6 +7218,108 @@
         }
       },
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "hoverAt",
+    "title": "Hover Over Path",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Hover a stylus or mouse over a path with no contact: hover enter, move, exit (Android; needs hover_input_v1).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "points": {
+          "description": "Hover positions: the pointer enters at the first, moves through the rest and exits at the last. No contact is made",
+          "minItems": 1,
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "description": "x in the selected coordinateSpace (native by default)",
+                "type": "number"
+              },
+              "y": {
+                "description": "y in the selected coordinateSpace (native by default)",
+                "type": "number"
+              },
+              "durationMs": {
+                "description": "Milliseconds spent moving from the previous point to this one (default 200); ignored on the first point",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5000
+              },
+              "distance": {
+                "description": "Stylus hover distance from the surface: 0 touching, 1 farthest. Stylus only; a mouse has none",
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": ["x", "y"],
+            "additionalProperties": false
+          }
+        },
+        "toolType": {
+          "description": "Pointer that hovers (default stylus). Apps see a different tool type and source: a stylus hover reports TOOL_TYPE_STYLUS with a hover distance, a mouse hover reports TOOL_TYPE_MOUSE",
+          "type": "string",
+          "enum": ["stylus", "mouse"]
+        },
+        "coordinateSpace": {
+          "description": "Coordinate units: native absolute (default), normalized 0–1, or percent 0–100",
+          "type": "string",
+          "enum": ["absolute", "normalized", "percent"]
+        },
+        "display": {
+          "description": "Target panel key, role, or active",
+          "type": "string"
+        },
+        "snapshotId": {
+          "description": "Short-lived reference from observe.snapshotReference; reject stale geometry or frame context",
+          "type": "string",
+          "minLength": 1
+        },
+        "layer": {
+          "description": "app: exclude the AutoMobile prototype; prototype: prototype nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "prototype"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["points"],
+      "additionalProperties": false,
+      "description": "Hover a stylus or mouse over a path of points with no contact: hover enter, move and exit (Android, needs the hover_input_v1 capability; refused on iOS and on runners without it, never turned into a touch)."
     }
   },
   {
@@ -26971,6 +27075,7 @@
               "highlight",
               "hitTest",
               "homeScreen",
+              "hoverAt",
               "identifyInteractions",
               "inspectPackageSigning",
               "installApp",
@@ -35260,6 +35365,7 @@
             "highlight",
             "hitTest",
             "homeScreen",
+            "hoverAt",
             "identifyInteractions",
             "inspectPackageSigning",
             "installApp",
@@ -35378,6 +35484,7 @@
               "highlight",
               "hitTest",
               "homeScreen",
+              "hoverAt",
               "identifyInteractions",
               "inspectPackageSigning",
               "installApp",

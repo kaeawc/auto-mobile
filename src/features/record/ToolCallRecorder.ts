@@ -30,6 +30,7 @@ const SESSION_SCOPED_PARAMS: Readonly<Record<string, readonly string[]>> = {
   tapAt: ["snapshotId"],
   swipeAt: ["snapshotId"],
   dragPath: ["snapshotId"],
+  hoverAt: ["snapshotId"],
 };
 
 export function stripSessionScopedParams(

@@ -304,6 +304,7 @@ internal object PrototypeStrictPolicy {
     }
 
     private fun nodeFeatures(fields: JsonObject) {
+      if ("shared" in fields) result.add("prototype_shared_element_v2")
       val binding =
         PrototypeBindableFields.first<Boolean>(fields, "") { raw, _, kind ->
           if (usesData(raw, kind)) true else null

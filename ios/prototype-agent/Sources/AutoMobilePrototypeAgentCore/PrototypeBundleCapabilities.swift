@@ -41,6 +41,7 @@ enum PrototypeBundleCapabilities {
             if node["repeat"]?.objectFields?["stagger"] != nil { need("window_motion") }
             if node["sharedKey"] != nil { need("shared_element") }
             if PrototypeMediaItems.usedBy(node) { names.insert(PrototypeMediaItems.capability) }
+            if node["shared"] != nil { names.insert("prototype_shared_element_v2") }
             let type = node["type"]?.stringValue ?? ""
             if PrototypeStringConditions.uses(node) { need("string_conditions") }
             let featureTypes = [

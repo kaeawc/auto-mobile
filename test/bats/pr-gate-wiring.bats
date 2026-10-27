@@ -223,19 +223,14 @@ wiring_requires_yq() {
 @test "host :junit-runner:test runs in exactly one PR job (#10892)" {
   wiring_requires_yq
   # gradle-task-run invocations only; the emulator suites drive the same task
-  # against a booted device through the android-emulator action's script. The one
-  # host job's gradle-task-run lives in its shared composite action (#11872).
+  # against a booted device through the android-emulator action's script.
   run yq -r '
     .jobs[]
     | select([.steps[]? | select(.uses == "./.github/actions/gradle-task-run" and ((.with."gradle-tasks" // "") | test("(^| ):junit-runner:test( |$)")))] | length > 0)
     | key
   ' "$WF"
   [ "$status" -eq 0 ]
-  [ -z "$output" ]
-  run yq -r '.jobs[] | select([.steps[]? | select(.uses == "./.github/actions/ci-junit-runner-unit-tests")] | length > 0) | key' "$WF"
-  [ "$status" -eq 0 ]
   [ "$output" = "junit-runner-unit-tests" ]
-  [ "$(yq -r '.runs.steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' .github/actions/ci-junit-runner-unit-tests/action.yml)" = ":junit-runner:test" ]
   [[ "$(yq -r '.jobs."junit-runner-unit-tests".name' "$WF")" == "Run JUnit Runner Unit Tests" ]]
 }
 
@@ -244,10 +239,10 @@ wiring_requires_yq() {
   [[ -z "$(job_block android-emulator-compile-smoke)" ]]
   # Each module the removed compile smoke compiled still has a build job's
   # independent compile signal, concurrent with the emulator lane.
-  [[ "$(cat .github/actions/ci-build-android-control-proxy/action.yml)" == *":control-proxy:assembleDebug"* ]]
+  [[ "$(job_block build-android-control-proxy)" == *":control-proxy:assembleDebug"* ]]
   [[ "$(job_block build-playground-app)" == *":playground:app:assembleDebug"* ]]
   [[ "$(job_block build-playground-app)" == *":playground:app:compileDebugUnitTestKotlin"* ]]
-  [[ "$(cat .github/actions/ci-junit-runner-unit-tests/action.yml)" == *'gradle-tasks: ":junit-runner:test"'* ]]
+  [[ "$(job_block junit-runner-unit-tests)" == *'gradle-tasks: ":junit-runner:test"'* ]]
   [ "$(yq -r '.jobs."android-emulator-tests".needs | [.] | flatten | .[]' "$WF")" = "detect-changes" ]
   [ "$(yq -r '.jobs."android-emulator-tests".if' "$WF")" = "needs.detect-changes.outputs.android_should_run == 'true'" ]
   # The SDK Debug Inspector Consumer guard the smoke carried stays on PRs.

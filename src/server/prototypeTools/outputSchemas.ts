@@ -342,6 +342,7 @@ export const prototypeOutputSchema = z.object({
         platform: z.enum(["android", "ios", "all"]),
         construct: z.enum([
           "stack",
+          "stack.zoom",
           "carousel",
           "node.id",
           "bottomSheet.dismissOnSwipe",

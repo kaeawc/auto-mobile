@@ -163,6 +163,9 @@ export const PROTOTYPE_SHARED_ELEMENT_CAPABILITY = "prototype_shared_element_v1"
 export const PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY = "prototype_shared_element_v2";
 
 /** Screen stacks and push/pop/popToRoot/replace actions with screen_changed snapshots. */
+/** Native container zoom rendering; patterns v1 still gates authoring. */
+export const PROTOTYPE_ZOOM_TRANSITION_CAPABILITY = "prototype_zoom_transition_v1";
+
 export const PROTOTYPE_STACK_PATTERNS_CAPABILITY = "prototype_stack_patterns_v1";
 export const PROTOTYPE_STACK_TRANSITIONS_CAPABILITY = "prototype_stack_transitions_v1";
 export const PROTOTYPE_STACK_CAPABILITY = "prototype_stack_v1";

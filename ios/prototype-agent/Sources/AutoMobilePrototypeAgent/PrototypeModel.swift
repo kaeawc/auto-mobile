@@ -9,6 +9,7 @@
     @Observable
     final class PrototypeModel {
         @ObservationIgnored private(set) var session = PrototypeSession()
+        var nativeZoomStacks: Set<String> = []
         var design: PrototypeDesign { spec?.theme?.design ?? .platform }
         let iconMotionActivity = PrototypeIconMotionActivity()
         private(set) var spec: PrototypeSpec?

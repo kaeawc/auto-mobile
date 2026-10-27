@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import dev.jasonpearson.automobile.protocol.PrototypeStackNode
 import dev.jasonpearson.automobile.protocol.PrototypeStackTransition
+import dev.jasonpearson.automobile.protocol.stackTransition
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 
@@ -10,6 +12,7 @@ internal enum class StackTransitionKind {
   SharedAxisX,
   SharedAxisY,
   FadeThrough,
+  Zoom,
   None,
 }
 
@@ -19,6 +22,8 @@ data class PrototypeStackChange(
   val direction: String,
   val override: PrototypeStackTransition? = null,
   val sequence: Long = 0,
+  val source: String? = null,
+  val zoomTarget: Pair<Int, String>? = null,
 )
 
 internal fun resolveStackTransition(
@@ -26,21 +31,21 @@ internal fun resolveStackTransition(
   perAction: PrototypeStackTransition?,
   motionEnabled: Boolean,
   reducedMotion: Boolean,
-): StackTransitionKind =
-  when {
-    !motionEnabled -> StackTransitionKind.None
-    (perAction ?: declared) == PrototypeStackTransition.NONE -> StackTransitionKind.None
-    (perAction ?: declared) == PrototypeStackTransition.FADE || reducedMotion ->
-      StackTransitionKind.Fade
-    (perAction ?: declared) == PrototypeStackTransition.SHARED_AXIS_X ->
-      StackTransitionKind.SharedAxisX
-    (perAction ?: declared) == PrototypeStackTransition.SHARED_AXIS_Y ->
-      StackTransitionKind.SharedAxisY
-    (perAction ?: declared) in
-      setOf(PrototypeStackTransition.FADE_THROUGH, PrototypeStackTransition.ZOOM) ->
-      StackTransitionKind.FadeThrough
-    else -> StackTransitionKind.Slide
+): StackTransitionKind {
+  val chosen = perAction ?: declared ?: PrototypeStackTransition.PLATFORM
+  if (!motionEnabled || chosen == PrototypeStackTransition.NONE) return StackTransitionKind.None
+  if (reducedMotion) return StackTransitionKind.Fade
+  return when (chosen) {
+    PrototypeStackTransition.NONE -> StackTransitionKind.None
+    PrototypeStackTransition.FADE -> StackTransitionKind.Fade
+    PrototypeStackTransition.SHARED_AXIS_X -> StackTransitionKind.SharedAxisX
+    PrototypeStackTransition.SHARED_AXIS_Y -> StackTransitionKind.SharedAxisY
+    PrototypeStackTransition.ZOOM -> StackTransitionKind.Zoom
+    PrototypeStackTransition.FADE_THROUGH -> StackTransitionKind.FadeThrough
+    PrototypeStackTransition.PLATFORM,
+    PrototypeStackTransition.SLIDE -> StackTransitionKind.Slide
   }
+}
 
 internal data class StackAnimation(
   val kind: StackTransitionKind,
@@ -128,3 +133,17 @@ internal class PrototypeStackScrollStores {
   fun get(id: String): PrototypeStackScrollStore =
     stores.getOrPut(id) { PrototypeStackScrollStore() }
 }
+
+internal fun resolveStackSnapshotAnimation(
+  source: PrototypeStackNode,
+  snapshot: PrototypeRuntimeSnapshot?,
+  motion: Boolean,
+  reduced: Boolean,
+): StackTransitionKind =
+  resolveStackAnimation(
+      source.stackTransition,
+      snapshot?.stackChange?.takeIf { it.id == source.id },
+      motion,
+      reduced,
+    )
+    .kind

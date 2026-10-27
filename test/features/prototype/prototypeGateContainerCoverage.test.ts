@@ -476,3 +476,17 @@ for (const container of containers) {
     ]);
   });
 }
+
+// Native rendering is advisory; reuse the complete container matrix without adding an authoring refusal.
+import { PROTOTYPE_ZOOM_RENDERING_GATE } from "../../../src/features/prototype/prototypeZoomTransition";
+for (const container of containers) {
+  test(`zoom rendering capability covers ${container.name} ${container.field ?? ""}`, () => {
+    const spec = container.wrap({
+      ...label,
+      onTap: [{ type: "push", stack: "nav", screen: "detail", transition: "zoom", source: "hero" }],
+    });
+    expect(PROTOTYPE_ZOOM_RENDERING_GATE.fields(spec)).toContain(
+      `${container.prefix}.onTap[0].transition`,
+    );
+  });
+}

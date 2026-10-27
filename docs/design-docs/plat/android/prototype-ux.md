@@ -1399,27 +1399,29 @@ are emitted by the current runtimes.
 `transition` override. Omission means `platform`; pop/popToRoot have no override. The contract
 is validated by both agents, and both advertise the capability.
 
-| Value         | Platform behaviour                                                             |
-| ------------- | ------------------------------------------------------------------------------ |
-| `platform`    | Native navigation animation (default).                                         |
-| `slide`       | Directional screen slide, reversed on pop.                                     |
-| `fade`        | Screen crossfade.                                                              |
-| `none`        | Instant screen change.                                                         |
-| `sharedAxisX` | Sibling steps along a horizontal flow; 30dp travel plus fade.                  |
-| `sharedAxisY` | Sibling steps along a vertical flow; 30dp travel plus fade.                    |
-| `fadeThrough` | Unrelated destinations; outgoing fade, then incoming fade and scale from 0.92. |
-| `zoom`        | Item-to-detail intent with a source key; currently uses the fallbacks below.   |
+| Value         | Platform behaviour                                                                |
+| ------------- | --------------------------------------------------------------------------------- |
+| `platform`    | Native navigation animation (default).                                            |
+| `slide`       | Directional screen slide, reversed on pop.                                        |
+| `fade`        | Screen crossfade.                                                                 |
+| `none`        | Instant screen change.                                                            |
+| `sharedAxisX` | Sibling steps along a horizontal flow; 30dp travel plus fade.                     |
+| `sharedAxisY` | Sibling steps along a vertical flow; 30dp travel plus fade.                       |
+| `fadeThrough` | Unrelated destinations; outgoing fade, then incoming fade and scale from 0.92.    |
+| `zoom`        | Item-to-detail container transform from the source key into the destination root. |
 
 The four named patterns and push/replace `source` require `prototype_stack_patterns_v1`.
 Zoom requires `source` on each push/replace using it, naming exactly one node's `sharedKey` or literal `shared.key`
-in the spec. A key referenced as a zoom source is exempt from the two-node visibility-pair rule;
+inside the target stack's screens. A key referenced as a zoom source is exempt from the two-node visibility-pair rule;
 repeat templates remain disallowed.
-Android currently substitutes fadeThrough and iOS substitutes platform push; container transforms
-are follow-up work. iOS reports the fallback and non-interactive pattern pops in `platformNotes`.
+With `prototype_zoom_transition_v1`, Android shares bounds from the outgoing source to the incoming
+root and iOS 18+ uses native navigation zoom. Older agents use fadeThrough on Android or platform
+push on iOS 17, reported in `platformNotes`. The rendering capability does not add an authoring
+requirement: `prototype_stack_patterns_v1` still accepts zoom and source.
 Platform, slide and zoom support interactive iOS edge pop; only the composed sharedAxisX/Y and
-fadeThrough patterns pop non-interactively. Android `platformNotes` are not currently supported.
-Android predictive back scrubs every pattern, including zoom's fallback, and restores the current
-screen on cancellation.
+fadeThrough patterns pop non-interactively. Fallback notes are returned on both platforms.
+Android predictive back scrubs every pattern, including the zoom transform, and restores the current
+screen on cancellation. PopToRoot reverses the entry edge immediately above the returned screen, using that edge's zoom source rather than the topmost entry's source; without a zoom edge it uses the stack's declared pattern.
 Shared-axis pop reverses travel; only X also mirrors for RTL. iOS composes axis movement with
 opacity and fadeThrough removes the outgoing screen visually before revealing the scaled incoming
 screen. Fixed named timings are 300 ms for movement and 150 ms for fade effects (two sequential

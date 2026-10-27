@@ -1198,6 +1198,20 @@
             "max": 4
           },
           "optional": true
+        },
+        "surface": {
+          "rule": {
+            "kind": "enum",
+            "values": ["glass"]
+          },
+          "optional": true
+        },
+        "glass": {
+          "rule": {
+            "kind": "ref",
+            "name": "glass"
+          },
+          "optional": true
         }
       }
     },
@@ -11864,6 +11878,13 @@
               },
               "optional": true
             },
+            "edgeEffect": {
+              "rule": {
+                "kind": "enum",
+                "values": ["soft", "hard", "none"]
+              },
+              "optional": true
+            },
             "keyframes": {
               "rule": {
                 "kind": "ref",
@@ -20214,6 +20235,35 @@
             "values": ["large", "inline"]
           },
           "optional": true
+        },
+        "glassGroup": {
+          "rule": {
+            "kind": "ref",
+            "name": "glassGroup"
+          },
+          "optional": true
+        },
+        "glassUnion": {
+          "rule": {
+            "kind": "string",
+            "max": 64,
+            "pattern": "stateKey"
+          },
+          "optional": true
+        },
+        "glassTransition": {
+          "rule": {
+            "kind": "enum",
+            "values": ["matchedGeometry", "materialize", "identity"]
+          },
+          "optional": true
+        },
+        "backgroundExtension": {
+          "rule": {
+            "kind": "enum",
+            "values": [true]
+          },
+          "optional": true
         }
       }
     },
@@ -20272,6 +20322,35 @@
           "rule": {
             "kind": "enum",
             "values": ["large", "inline"]
+          },
+          "optional": true
+        },
+        "glassGroup": {
+          "rule": {
+            "kind": "ref",
+            "name": "glassGroup"
+          },
+          "optional": true
+        },
+        "glassUnion": {
+          "rule": {
+            "kind": "string",
+            "max": 64,
+            "pattern": "stateKey"
+          },
+          "optional": true
+        },
+        "glassTransition": {
+          "rule": {
+            "kind": "enum",
+            "values": ["matchedGeometry", "materialize", "identity"]
+          },
+          "optional": true
+        },
+        "backgroundExtension": {
+          "rule": {
+            "kind": "enum",
+            "values": [true]
           },
           "optional": true
         }
@@ -20893,6 +20972,45 @@
         }
       ]
     },
+    "glass": {
+      "kind": "object",
+      "fields": {
+        "variant": {
+          "rule": {
+            "kind": "enum",
+            "values": ["regular", "clear"]
+          },
+          "optional": true
+        },
+        "tint": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": true
+        },
+        "interactive": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        }
+      }
+    },
+    "glassGroup": {
+      "kind": "object",
+      "fields": {
+        "spacing": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 200
+          },
+          "optional": false
+        }
+      }
+    },
     "keyframePoints": {
       "kind": "array",
       "min": 2,
@@ -21498,6 +21616,22 @@
       "navigationTitle": {
         "why": "Large and inline navigation titles are iOS navigation chrome conventions.",
         "requires": "prototype_platform_namespace_v1"
+      },
+      "glassGroup": {
+        "why": "iOS Liquid Glass composition has no Android equivalent.",
+        "requires": "prototype_glass_v1"
+      },
+      "glassUnion": {
+        "why": "iOS Liquid Glass composition has no Android equivalent.",
+        "requires": "prototype_glass_v1"
+      },
+      "glassTransition": {
+        "why": "iOS Liquid Glass composition has no Android equivalent.",
+        "requires": "prototype_glass_v1"
+      },
+      "backgroundExtension": {
+        "why": "iOS Liquid Glass composition has no Android equivalent.",
+        "requires": "prototype_glass_v1"
       }
     },
     "android": {

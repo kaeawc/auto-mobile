@@ -6,6 +6,7 @@ import kotlinx.serialization.json.*
 internal object PrototypeBundleNodeCapabilities {
   fun collect(n: JsonObject): Set<String> {
     val caps = linkedSetOf<String>()
+    caps.addAll(PrototypeGlassRules.capabilities(n))
     if (PrototypeStylePolishV2Rules.required(n)) caps.add(PrototypeStylePolishV2Rules.CAPABILITY)
     val type = text(n["type"])
     val typed =
@@ -24,7 +25,7 @@ internal object PrototypeBundleNodeCapabilities {
         "grid" to "flow_grid_v1",
       )
     typed[type]?.let { caps.add("prototype_$it") }
-    if ("ios" in n || "android" in n) caps.add("prototype_platform_namespace_v1")
+    if (PrototypeGlassRules.needsNamespace(n)) caps.add("prototype_platform_namespace_v1")
     if (type == "icon" && "effect" in n) caps.add("prototype_icon_effects_v1")
     val trigger = (n["effect"] as? JsonObject)?.get("trigger") as? JsonObject
     if (type == "icon" && trigger?.containsKey("data") == true) caps.add("prototype_data_model_v1")
@@ -41,7 +42,7 @@ internal object PrototypeBundleNodeCapabilities {
     mark("motion_tokens_v1", (n["animate"] as? JsonObject)?.containsKey("tempo") == true)
     mark("keyframes_v1", "keyframes" in n)
     mark("semantics_v1", "semantics" in n)
-    mark("platform_namespace_v1", "ios" in n || "android" in n)
+    mark("platform_namespace_v1", PrototypeGlassRules.needsNamespace(n))
     mark("window_motion_v1", (n["repeat"] as? JsonObject)?.get("stagger") != null)
     mark("platform_media_items_v1", PrototypeMediaItemBindings.usedBy(n))
     mark("shared_element_v1", "sharedKey" in n)
@@ -143,6 +144,7 @@ internal object PrototypeBundleNodeCapabilities {
 
   private fun themedStyle(style: JsonObject): Boolean {
     val paired = listOf("background", "color", "shadowColor").any { style[it] is JsonObject }
+    val glass = (style["glass"] as? JsonObject)?.get("tint") is JsonObject
     val border = (style["border"] as? JsonObject)?.get("color") is JsonObject
     val stops = ((style["gradient"] as? JsonObject)?.get("stops") as? JsonArray).orEmpty()
     val shadows =
@@ -153,7 +155,8 @@ internal object PrototypeBundleNodeCapabilities {
       (((style["border"] as? JsonObject)?.get("gradient") as? JsonObject)?.get("stops")
           as? JsonArray)
         .orEmpty()
-    return shadows ||
+    return glass ||
+      shadows ||
       borderStops.any { themed((it as? JsonObject)?.get("color")) } ||
       paired ||
       border ||

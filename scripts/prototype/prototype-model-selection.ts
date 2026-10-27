@@ -54,6 +54,11 @@ export const prototypeModelSelection = {
   shared: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shadow: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   fadeEdges: {},
+  glass: {
+    swiftName: "PrototypeGlassOptions",
+    swiftConformances: ["Decodable", "Equatable", "Sendable"],
+  },
+  glassGroup: {},
   backdrop: { languages: ["kotlin"] },
   semantics: { languages: ["kotlin"] },
   imageFilter: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
@@ -75,10 +80,15 @@ export const prototypeModelSelection = {
   scrollEdge: {},
   scrollTransition: {},
   scrollLinked: {},
-  iosPresentationNamespace: {},
+  iosPresentationNamespace: {
+    fieldTypes: { backgroundExtension: { kotlin: "Boolean", swift: "Bool" } },
+  },
   iosNamespace: {
     swiftConformances: ["Decodable"],
-    fieldTypes: { bottomAccessory: { swift: "PrototypeNode" } },
+    fieldTypes: {
+      bottomAccessory: { swift: "PrototypeNode" },
+      backgroundExtension: { kotlin: "Boolean", swift: "Bool" },
+    },
   },
   androidNamespace: {},
   offset: {},

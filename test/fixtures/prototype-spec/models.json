@@ -368,6 +368,12 @@
       "uniforms": {
         "strength": 1
       }
+    },
+    "surface": "glass",
+    "glass": {
+      "variant": "regular",
+      "tint": "primary",
+      "interactive": true
     }
   },
   "nodeBox": {

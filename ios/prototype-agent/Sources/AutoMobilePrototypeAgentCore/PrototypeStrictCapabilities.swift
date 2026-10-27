@@ -48,6 +48,7 @@ enum PrototypeStrictCapabilities {
                 .contains(where: { !PrototypeRoutes.fields($0.text).isEmpty }) { need("routes") }
             var own = fields
             PrototypeRepeat.bindTextFields(&own) { text in textBinding(text); return text }
+            result.formUnion(PrototypeGlass.capabilities(fields))
             if PrototypeStylePolishV2.themedBorder(fields) { need("theme_modes") }
             if PrototypeStylePolishV2.required(fields) { result.insert(PrototypeStylePolishV2.capability) }
             if fields["semantics"] != nil { need("semantics") }
@@ -79,7 +80,7 @@ enum PrototypeStrictCapabilities {
             if (type == "stack" && fields["routes"] != nil) ||
                 (["push", "replace"].contains(type) && fields["params"] != nil) ||
                 (type == "pop" && fields["force"] != nil) || type == "setStack" { need("routes") }
-            if fields["ios"] != nil || fields["android"] != nil { need("platform_namespace") }
+            if PrototypeGlass.needsNamespace(fields) { need("platform_namespace") }
             if type == "icon", fields["effect"] != nil { need("icon_effects") }
             if type == "icon",
                fields["effect"]?.objectFields?["trigger"]?.objectFields?["data"] != nil { need("data_model") }

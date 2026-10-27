@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "on": true,
+      "t": "a"
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "box",
+      "children": [],
+      "style": {
+        "glass": {},
+        "shadows": [
+          {
+            "color": "#000000",
+            "radius": 1
+          }
+        ],
+        "elevation": 2
+      }
+    }
+  },
+  "expectedPath": "root.style.glass",
+  "expectedMessage": "glass requires surface: \"glass\""
+}

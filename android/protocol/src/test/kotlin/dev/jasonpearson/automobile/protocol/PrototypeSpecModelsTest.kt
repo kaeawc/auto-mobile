@@ -298,15 +298,7 @@ class PrototypeSpecModelsTest {
       border = PrototypeBorder(width = 2.5, color = "#112233"),
       elevation = 2.0,
       shadowColor = modes,
-      gradient =
-        PrototypeLinearGradient(
-          angle = 45.0,
-          stops =
-            listOf(
-              PrototypeGradientStop(color = "#112233", position = 0.0),
-              PrototypeGradientStop(color = modes, position = 1.0),
-            ),
-        ),
+      gradient = fullStyleGradient(modes),
       aspectRatio = 1.5,
       offset = PrototypeOffset(x = -12.5, y = 24.25),
       alpha = 0.8,
@@ -332,9 +324,26 @@ class PrototypeSpecModelsTest {
       rotation = 15.0,
       shader = PrototypeShader("effect", mapOf("strength" to 1.0)),
       cornerStyle = "continuous",
+      surface = "glass",
+      glass =
+        PrototypeGlass(
+          variant = "regular",
+          tint = PrototypeModeValue.Single("primary"),
+          interactive = true,
+        ),
       effects = listOf(buildJsonObject { put("type", "noise") }),
     )
   }
+
+  private fun fullStyleGradient(modes: PrototypeModeValue) =
+    PrototypeLinearGradient(
+      angle = 45.0,
+      stops =
+        listOf(
+          PrototypeGradientStop(color = "#112233", position = 0.0),
+          PrototypeGradientStop(color = modes, position = 1.0),
+        ),
+    )
 
   @Test
   fun `generated node fixtures retain variant classes and round trip`() {

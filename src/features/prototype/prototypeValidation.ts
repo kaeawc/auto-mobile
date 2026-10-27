@@ -1,3 +1,4 @@
+import { prototypeGlassObjectError } from "./prototypeGlass";
 import { excludeAccessoryReferences } from "./prototypeBindingValidation";
 import { prototypeMotionObjectError } from "./prototypeMotionTokens";
 import { prototypeRoutesError } from "./prototypeRoutes";
@@ -45,6 +46,7 @@ import {
   numberValid,
   listItemBindingErrors,
   bindingErrors,
+  emptyConditionConstraint,
   sheetBindingErrors,
   stateActionErrors,
   Checked,
@@ -248,16 +250,6 @@ function searchBarConstraint(
   }
   return undefined;
 }
-/** `empty` tests a `/data` value (#14207); state key and `/platform` conditions have no emptiness. */
-function emptyConditionConstraint(
-  data: Record<string, unknown>,
-  path: string,
-): PrototypeValidationError | undefined {
-  return Object.hasOwn(data, "empty") &&
-    (Object.hasOwn(data, "key") || Object.hasOwn(data, "platform"))
-    ? fail(keyPath(path, "empty"), "empty applies only to data conditions")
-    : undefined;
-}
 function visitObject(
   value: unknown,
   rule: Rule,
@@ -296,14 +288,20 @@ function visitObject(
       return error;
     }
   }
-  return objectRuleError(rule, data, path);
+  return objectSemanticConstraint(data, rule, path);
 }
-function objectRuleError(
-  rule: Rule,
+function objectSemanticConstraint(
   data: Record<string, unknown>,
+  rule: Rule,
   path: string,
 ): PrototypeValidationError | undefined {
-  return prototypeMotionObjectError(rule, data, path) ?? objectConstraint(data, rule, path);
+  const kind = ["style", "fadeEdges", "imageFilter"].find((name) => rule === definitions[name]);
+  return (
+    prototypeGlassObjectError(data, kind ?? "", path) ??
+    prototypeStylePolishV2ObjectError(data, kind ?? "", path) ??
+    prototypeMotionObjectError(rule, data, path) ??
+    objectConstraint(data, rule, path)
+  );
 }
 function objectConstraint(
   data: Record<string, unknown>,
@@ -334,8 +332,7 @@ function objectConstraint(
         : "At least one selector field is required",
     );
   }
-  const kind = ["style", "fadeEdges", "imageFilter"].find((name) => rule === definitions[name]);
-  return prototypeStylePolishV2ObjectError(data, kind ?? "", path);
+  return undefined;
 }
 /** Single-trigger dependents are optional; a pipe-separated trigger group requires exactly one. */
 function formConstraint(

@@ -57,6 +57,14 @@ private fun stripNamespaceKeysAtNode(value: JsonElement, tokens: List<String>): 
         else -> return current
       }
   }
-  return (current as? JsonObject)?.let { JsonObject(it.filterKeys { key -> key != "ios" }) }
-    ?: current
+  val node = current as? JsonObject ?: return current
+  val glass = setOf("glassGroup", "glassUnion", "glassTransition", "backgroundExtension")
+  val ios = node["ios"] as? JsonObject
+  // Keep only foreign glass metadata for group-scoped shared IDs during typed round trips.
+  // Android's own namespace reaches the renderer; other iOS fields remain ignored.
+  val glassMetadata = ios?.filterKeys { it in glass }?.takeIf { it.isNotEmpty() }
+  return JsonObject(
+    node.filterKeys { it != "ios" } +
+      (glassMetadata?.let { mapOf("ios" to JsonObject(it)) } ?: emptyMap()),
+  )
 }

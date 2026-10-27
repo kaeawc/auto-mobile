@@ -460,6 +460,7 @@ data class PrototypePasteButtonNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val keyframes: JsonObject? = null,
   val into: String,
+  override val ios: PrototypeIosNamespace? = null,
   override val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode() {
   override val onTap: List<PrototypeAction>

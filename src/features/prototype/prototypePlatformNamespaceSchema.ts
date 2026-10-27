@@ -4,6 +4,10 @@ import { prototypeNodeSchema, type PrototypeNode } from "./prototypeSpec";
 export type PrototypeIosNamespace = {
   buttonStyle?: "glass" | "glassProminent";
   bottomAccessory?: PrototypeNode;
+  glassGroup?: { spacing: number };
+  glassUnion?: string;
+  glassTransition?: "matchedGeometry" | "materialize" | "identity";
+  backgroundExtension?: true;
   tab?: { role: "search" };
   sheet?: { sizing: "form" | "page" | "fitted" };
   hover?: "lift" | "highlight";
@@ -12,6 +16,17 @@ export type PrototypeIosNamespace = {
 
 export const iosPresentationNamespaceSchema = z
   .object({
+    glassGroup: z
+      .object({ spacing: z.number().finite().min(0).max(200) })
+      .strict()
+      .optional(),
+    glassUnion: z
+      .string()
+      .max(64)
+      .regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\s\S])/)
+      .optional(),
+    glassTransition: z.enum(["matchedGeometry", "materialize", "identity"]).optional(),
+    backgroundExtension: z.literal(true).optional(),
     buttonStyle: z.enum(["glass", "glassProminent"]).optional(),
     tab: z
       .object({ role: z.enum(["search"]) })

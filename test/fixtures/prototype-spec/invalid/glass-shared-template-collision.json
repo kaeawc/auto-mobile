@@ -1,0 +1,65 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "on": true,
+      "t": "a"
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "row",
+      "ios": {
+        "glassGroup": {
+          "spacing": 8
+        }
+      },
+      "children": [
+        {
+          "type": "row",
+          "repeat": {
+            "items": [
+              {
+                "id": "x"
+              },
+              {
+                "id": "y"
+              }
+            ],
+            "key": "id",
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "Glass",
+              "style": {
+                "surface": "glass"
+              },
+              "shared": {
+                "key": "g-{item.id}",
+                "as": "bounds"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "Glass",
+          "style": {
+            "surface": "glass"
+          },
+          "shared": {
+            "key": "g-x",
+            "as": "bounds"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].shared.key",
+  "expectedMessage": "shared key \"g-x\" must be unique within its glassGroup"
+}

@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "on": true,
+      "t": "a"
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer"
+    },
+    "theme": {
+      "ios": {
+        "glassUnion": "u"
+      }
+    }
+  },
+  "expectedPath": "theme.ios.glassUnion",
+  "expectedMessage": "glassUnion is only valid on a node"
+}

@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "on": true,
+      "t": "a"
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "ios": {
+        "glassGroup": {
+          "spacing": 1
+        }
+      }
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "window.ios.glassGroup",
+  "expectedMessage": "glassGroup is only valid on a node"
+}

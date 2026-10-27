@@ -1,3 +1,4 @@
+import { prototypeGlassFields, prototypeScrollEdgeEffectFields } from "./prototypeGlass";
 import {
   PROTOTYPE_ADAPTIVE_CAPABILITY,
   prototypeAdaptiveFields,
@@ -232,6 +233,18 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: "prototype_glass_v1",
+    fields: prototypeGlassFields,
+    unsupportedMessage: (fields, platform) =>
+      `The device does not advertise prototype_glass_v1, required by ${fields[0]}. Nothing was shown.${platform === "android" ? " Glass needs an Android renderer with real backdrop blur." : ""}`,
+  },
+  {
+    capability: "prototype_scroll_edge_effect_v1",
+    fields: prototypeScrollEdgeEffectFields,
+    unsupportedMessage: (fields) =>
+      `The device does not advertise prototype_scroll_edge_effect_v1, required by ${fields[0]}. Nothing was shown.`,
+  },
   {
     capability: PROTOTYPE_MOTION_TOKENS_CAPABILITY,
     fields: prototypeMotionTokenFields,

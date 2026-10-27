@@ -176,6 +176,7 @@
         /// The main axis of the row or column laying this node out, so a `weight` knows what it fills.
         var stackAxis: PrototypeAxis?
         @Environment(\.prototypeSharedNamespace) private var sharedNamespace
+        @Environment(\.prototypeGlassNamespace) private var glassNamespace
         @FocusState private var controlFocused: Bool
         @Environment(\.pagerContext) private var pager
         @Environment(\.locale) private var deviceLocale
@@ -247,7 +248,9 @@
 
         @ViewBuilder private var sharedContent: some View {
             let plan = sharedPlan
-            if plan.apply, let key = plan.key, let sharedNamespace {
+            if plan.apply, !(style?.surface == "glass" && glassNamespace != nil), let key = plan.key,
+               let sharedNamespace
+            {
                 barContent.matchedGeometryEffect(
                     id: key,
                     in: sharedNamespace,
@@ -383,7 +386,13 @@
             return nil
         }
 
-        @ViewBuilder private var content: some View {
+        private var content: some View {
+            PrototypeGlassGroupView(spacing: node.ios?.glassGroup?.spacing) {
+                ungroupedContent
+            }
+        }
+
+        @ViewBuilder private var ungroupedContent: some View {
             switch node.type {
             case "box":
                 // Layered like a ZStack, but a row inside keeps the width it measured (#10899).
@@ -981,6 +990,8 @@
                     motion: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion),
                     authorsEffects: PrototypeEffects.authorsEffects(node)
                 ))
+                .modifier(PrototypeGlassModifier(node: node, style: style, shape: shape, palette: palette))
+                .modifier(PrototypeBackgroundExtensionModifier(enabled: node.ios?.backgroundExtension == true))
                 .modifier(PrototypeAnimatedTransform(style: style, animation: styleAnimation))
                 .modifier(PrototypeKeyframesModifier(
                     frames: node.keyframes,

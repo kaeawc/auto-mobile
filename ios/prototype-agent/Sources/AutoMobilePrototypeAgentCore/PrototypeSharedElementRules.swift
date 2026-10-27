@@ -21,6 +21,7 @@ enum PrototypeSharedElementRules {
         let sources = try PrototypeStackPatterns.sources(nodes, actions: actions)
         var pairs: [String: [Occurrence]] = [:]
         var order: [String] = []
+        var glassKeys: [String: Set<String>] = [:]
         for node in nodes {
             let shared = node.value["shared"]?.objectFields
             guard let key = shared?["key"]?.stringValue ?? node.value["sharedKey"]?.stringValue else { continue }
@@ -31,14 +32,41 @@ enum PrototypeSharedElementRules {
                     "shared and sharedKey cannot both be set"
                 )
             }
-            let source = sources.contains(key)
+            let group = PrototypeGlass.sharedGroup(node, nodes: nodes)
+            let source = sources.contains(key) || group != nil
             guard node.value["visibleWhen"] != nil || source else {
                 throw PrototypeContractValidator.invalid(at, "sharedKey requires visibleWhen on the same node")
             }
             let parent = nodes.last { $0.value["repeat"] != nil &&
                 (node.path == $0.path || node.path.hasPrefix("\($0.path)."))
             }
-            let keys = try resolvedKeys(key, shared: shared != nil, parent: parent, path: node.path, at: at, data: data)
+            let keys = try resolvedKeys(
+                key,
+                shared: shared != nil,
+                parent: parent,
+                path: node.path,
+                at: at,
+                data: data,
+                glass: group != nil
+            )
+            for resolved in keys {
+                let scopes = glassKeys[resolved]
+                if (group != nil && pairs[resolved] != nil) || (group == nil && scopes != nil) {
+                    throw PrototypeContractValidator.invalid(
+                        at,
+                        "glass shared key \"\(resolved)\" cannot also be used by a visibility pair"
+                    )
+                }
+                if let group {
+                    if scopes?.contains(group) == true {
+                        throw PrototypeContractValidator.invalid(
+                            at,
+                            "shared key \"\(resolved)\" must be unique within its glassGroup"
+                        )
+                    }
+                    glassKeys[resolved, default: []].insert(group)
+                }
+            }
             if source { continue }
             let boundary = nodes.filter {
                 ["dialog", "bottomSheet"].contains($0.value["type"]?.stringValue ?? "") &&
@@ -71,7 +99,8 @@ enum PrototypeSharedElementRules {
         parent: PrototypeLocatedValue?,
         path: String,
         at: String,
-        data: [String: JSONValue]?
+        data: [String: JSONValue]?,
+        glass: Bool
     )
         throws -> [String]
     {
@@ -80,10 +109,11 @@ enum PrototypeSharedElementRules {
         if !shared, parent != nil { throw fail("sharedKey is not allowed inside repeat templates") }
         if !key.contains("{") {
             if shared, !validKey(key) { throw fail("Invalid shared key value") }
-            if parent != nil, path != parent?.path { throw fail("shared key inside repeat requires a key template") }
+            if parent != nil,
+               glass || path != parent?.path { throw fail("shared key inside repeat requires a key template") }
             return [key]
         }
-        guard let repeatFields, let field = repeatFields["key"]?.stringValue, path != parent?.path else {
+        guard let repeatFields, let field = repeatFields["key"]?.stringValue, (glass || path != parent?.path) else {
             throw fail("shared key template requires repeat.key")
         }
         let alias = repeatFields["as"]?.stringValue ?? ""

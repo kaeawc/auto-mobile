@@ -612,6 +612,7 @@ const scrollBaseSchema = z
     axis: z.enum(["vertical", "horizontal"]).default("vertical"),
     refresh: scrollRefreshSchema.optional(),
     fadeEdges: fadeEdgesSchema.optional(),
+    edgeEffect: z.enum(["soft", "hard", "none"]).optional(),
     // Chat lists (#14232): anchored at the end, following new rows, reporting the end position.
     reverse: z.boolean().optional(),
     stickToEnd: z.boolean().optional(),

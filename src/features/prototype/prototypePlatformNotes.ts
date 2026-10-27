@@ -1,8 +1,9 @@
+import { prototypeGlassEdgeNotes } from "./prototypeGlassNotes";
 import { prototypeAdaptiveNotes } from "./prototypeAdaptive";
 import { prototypeNamespaceNotes } from "./prototypeNamespaceNotes";
 import { designFallbackPaths } from "./prototypeDesign";
 import { prototypeStringsFallbackKeys } from "./prototypeStrings";
-import { prototypePlatformNamespaceFields } from "./prototypePlatformNamespace";
+import { prototypeIgnoredNamespaceFields } from "./prototypePlatformNamespace";
 import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
@@ -21,6 +22,7 @@ export type PrototypePlatformNoteConstruct =
   | "adaptive"
   | "design.fallback"
   | "platformNamespace"
+  | "scroll.edgeEffect"
   | "rich-text-links"
   | "stack.zoom"
   | "stack"
@@ -393,9 +395,13 @@ export function prototypePlatformNotes(
   supports: (capability: string) => boolean,
   osMajor?: number,
 ): PrototypePlatformNote[] {
-  const zoomNotes = prototypeZoomTransitionNotes(spec, platform, supports, osMajor);
+  const edgeNotes = prototypeGlassEdgeNotes(spec, platform, osMajor);
+  const zoomNotes = [
+    ...edgeNotes,
+    ...prototypeZoomTransitionNotes(spec, platform, supports, osMajor),
+  ];
   const foreign = platform === "android" ? "ios" : "android";
-  const paths = prototypePlatformNamespaceFields(spec, foreign);
+  const paths = prototypeIgnoredNamespaceFields(spec, foreign);
   const foreignNotes: PrototypePlatformNote[] = paths.length
     ? [
         {

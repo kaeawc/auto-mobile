@@ -594,6 +594,17 @@ function dynamicStateValue(value: unknown): boolean {
   return object(value)?.event !== undefined || object(value)?.platform !== undefined;
 }
 
+/** `empty` tests a `/data` value (#14207); state key and `/platform` conditions have no emptiness. */
+export function emptyConditionConstraint(
+  data: Record<string, unknown>,
+  path: string,
+): PrototypeValidationError | undefined {
+  return Object.hasOwn(data, "empty") &&
+    (Object.hasOwn(data, "key") || Object.hasOwn(data, "platform"))
+    ? fail(path ? `${path}.empty` : "empty", "empty applies only to data conditions")
+    : undefined;
+}
+
 /** Structural-only accessory nodes cannot provide renderer targets or executable actions. */
 export function excludeAccessoryReferences(context: {
   nodes: Located[];

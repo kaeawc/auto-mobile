@@ -1,4 +1,5 @@
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
+import { prototypeGlassNamespaceFields } from "./prototypeGlass";
 import { record } from "./prototypeTemplate";
 import type { PrototypePlatformNote } from "./prototypePlatformNotes";
 
@@ -40,6 +41,9 @@ function namespaceFieldEffect(
 ): "ignored" | "substituted" | undefined {
   if (platform === "android") {
     return androidIgnored(node, key) ? "ignored" : undefined;
+  }
+  if (prototypeGlassNamespaceFields.includes(key)) {
+    return undefined;
   }
   if (key === "hover") {
     return undefined;

@@ -534,6 +534,8 @@ struct Style: Decodable {
     let shadowColor: PrototypeModeValue?
     var shadows: [Shadow]? = nil
     var cornerStyle: String? = nil
+    var surface: String? = nil
+    var glass: PrototypeGlassOptions? = nil
     var scale: Double?
     var rotation: Double?
     let offset: Offset?
@@ -583,6 +585,8 @@ struct Style: Decodable {
             shadowColor: prototype.shadowColor ?? shadowColor,
             shadows: prototype.shadows ?? shadows,
             cornerStyle: prototype.cornerStyle ?? cornerStyle,
+            surface: prototype.surface ?? surface,
+            glass: prototype.glass ?? glass,
             scale: prototype.scale ?? scale,
             rotation: prototype.rotation ?? rotation,
             offset: prototype.offset ?? offset,
@@ -600,7 +604,7 @@ struct Style: Decodable {
     /// Whether the author painted the node, so a component's default container must not cover it
     /// (Android's `authoredFill`).
     var hasAuthoredFill: Bool {
-        background != nil || gradient != nil
+        background != nil || gradient != nil || surface == "glass"
     }
 
     /// Only authored press feedback installs a gesture; motion settings control its animation.
@@ -734,7 +738,6 @@ struct PrototypeOption: Decodable, Equatable {
 /// One spec node. A class so `child` can recurse; the renderer reads only the fields its type uses.
 final class PrototypeNode: Decodable {
     let into: String?
-    let ios: IosNamespace?
     /// Structural identity retained across data-driven tree rebuilds.
     let nodePath: String
     let type: String
@@ -788,6 +791,8 @@ final class PrototypeNode: Decodable {
     let asset: PrototypeModeValue?
     let filter: ImageFilter?
     let fadeEdges: FadeEdges?
+    let edgeEffect: String?
+    let ios: IosNamespace?
     let contentScale: String?
     let effect: IconEffect?
     let name: String?
@@ -915,7 +920,7 @@ final class PrototypeNode: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case scrollTransition, scrollLinked
-        case ios, into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey,
+        case into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey,
              transition, keyframes, animate
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
         case kind, selectionKey, openKey, list, detail, content, main
@@ -937,7 +942,7 @@ final class PrototypeNode: Decodable {
              dismissOnSwipe, supportingText, errorWhen, errorText, keyboardType, secure, multiline, minLines, maxLength,
              trailingIcon,
              imeAction, yRange, xLabels, goal
-        case filter, fadeEdges
+        case filter, fadeEdges, edgeEffect, ios
         case chartSeries = "series"
     }
 
@@ -958,7 +963,6 @@ final class PrototypeNode: Decodable {
         press = try container.decodeIfPresent(PrototypePress.self, forKey: .press)
         styleWhen = try container.decodeIfPresent([StyleWhen].self, forKey: .styleWhen)
         visibleWhen = try container.decodeIfPresent(Condition.self, forKey: .visibleWhen)
-        ios = try container.decodeIfPresent(IosNamespace.self, forKey: .ios)
         shared = try container.decodeIfPresent(Shared.self, forKey: .shared)
         sharedKey = try container.decodeIfPresent(String.self, forKey: .sharedKey)
         animate = try container.decodeIfPresent(Animate.self, forKey: .animate)
@@ -976,6 +980,8 @@ final class PrototypeNode: Decodable {
         asset = try container.decodeIfPresent(PrototypeModeValue.self, forKey: .asset)
         filter = try container.decodeIfPresent(ImageFilter.self, forKey: .filter)
         fadeEdges = try container.decodeIfPresent(FadeEdges.self, forKey: .fadeEdges)
+        edgeEffect = try container.decodeIfPresent(String.self, forKey: .edgeEffect)
+        ios = try container.decodeIfPresent(IosNamespace.self, forKey: .ios)
         contentScale = try container.decodeIfPresent(String.self, forKey: .contentScale)
         effect = try container.decodeIfPresent(IconEffect.self, forKey: .effect)
         name = try container.decodeIfPresent(String.self, forKey: .name)

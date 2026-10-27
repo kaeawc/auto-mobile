@@ -54,6 +54,16 @@ struct FadeEdges: Codable, Equatable, Sendable {
     let end: Double?
 }
 
+struct PrototypeGlassOptions: Decodable, Equatable, Sendable {
+    let variant: String?
+    let tint: PrototypeModeValue?
+    let interactive: Bool?
+}
+
+struct GlassGroup: Codable, Equatable, Sendable {
+    let spacing: Double
+}
+
 struct ImageFilter: Decodable, Equatable, Sendable {
     let saturation: Double?
     let tint: PrototypeModeValue?
@@ -100,6 +110,10 @@ struct IosPresentationNamespace: Codable, Equatable, Sendable {
     let sheet: IosPresentationNamespaceSheet?
     let hover: String?
     let navigationTitle: String?
+    let glassGroup: GlassGroup?
+    let glassUnion: String?
+    let glassTransition: String?
+    let backgroundExtension: Bool?
 }
 
 struct IosNamespaceTab: Codable, Equatable, Sendable {
@@ -117,6 +131,10 @@ struct IosNamespace: Decodable {
     let sheet: IosNamespaceSheet?
     let hover: String?
     let navigationTitle: String?
+    let glassGroup: GlassGroup?
+    let glassUnion: String?
+    let glassTransition: String?
+    let backgroundExtension: Bool?
 }
 
 struct AndroidNamespacePredictiveBack: Codable, Equatable, Sendable {

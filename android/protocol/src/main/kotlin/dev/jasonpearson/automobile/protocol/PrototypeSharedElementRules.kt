@@ -21,8 +21,9 @@ internal object PrototypeSharedElementRules {
     }
     val sources = PrototypeStackPatternRules.sources(context)
     val pairs = linkedMapOf<String, MutableList<Occurrence>>()
+    val glassKeys = mutableMapOf<String, MutableSet<String>>()
     for (located in context.nodes) {
-      addNode(context, located, pairs, sources)?.let {
+      addNode(context, located, pairs, sources, glassKeys)?.let {
         return it
       }
     }
@@ -38,6 +39,7 @@ internal object PrototypeSharedElementRules {
     located: PrototypeStateChecks.Located,
     pairs: MutableMap<String, MutableList<Occurrence>>,
     sources: Set<String>,
+    glassKeys: MutableMap<String, MutableSet<String>>,
   ): PrototypeSpecError? {
     val (node, path) = located
     val shared = node["shared"] as? JsonObject
@@ -45,11 +47,15 @@ internal object PrototypeSharedElementRules {
     val at = "$path.${if (shared != null) "shared.key" else "sharedKey"}"
     if (shared != null && "sharedKey" in node)
       return fail("$path.shared", "shared and sharedKey cannot both be set")
-    val source = key in sources
+    val group = PrototypeGlassRules.sharedGroup(node, path, context.nodes)
+    val source = isSource(key, group, sources)
     if ("visibleWhen" !in node && !source)
       return fail(at, "sharedKey requires visibleWhen on the same node")
-    val resolvedKeys = keys(context, path, key, shared != null, at)
+    val resolvedKeys = keys(context, located, key, at, group != null)
     resolvedKeys.error?.let {
+      return it
+    }
+    glassKeyError(resolvedKeys.values, group, at, pairs, glassKeys)?.let {
       return it
     }
     if (source) return null
@@ -72,6 +78,30 @@ internal object PrototypeSharedElementRules {
     return null
   }
 
+  private fun isSource(key: String, group: String?, sources: Set<String>): Boolean =
+    group != null || key in sources
+
+  private fun glassKeyError(
+    keys: List<String>,
+    group: String?,
+    at: String,
+    pairs: Map<String, List<Occurrence>>,
+    glassKeys: MutableMap<String, MutableSet<String>>,
+  ): PrototypeSpecError? {
+    for (resolved in keys) {
+      val scopes = glassKeys[resolved]
+      val collision = if (group != null) resolved in pairs else scopes != null
+      if (collision)
+        return fail(at, "glass shared key \"$resolved\" cannot also be used by a visibility pair")
+      if (group != null) {
+        if (scopes?.contains(group) == true)
+          return fail(at, "shared key \"$resolved\" must be unique within its glassGroup")
+        glassKeys.getOrPut(resolved) { mutableSetOf() }.add(group)
+      }
+    }
+    return null
+  }
+
   private data class Keys(
     val values: List<String> = emptyList(),
     val error: PrototypeSpecError? = null,
@@ -80,11 +110,13 @@ internal object PrototypeSharedElementRules {
 
   private fun keys(
     context: PrototypeStateChecks.Context,
-    path: String,
+    located: PrototypeStateChecks.Located,
     key: String,
-    shared: Boolean,
     at: String,
+    glass: Boolean,
   ): Keys {
+    val path = located.path
+    val shared = "shared" in located.value
     val parent =
       context.nodes.lastOrNull { (ancestor, ancestorPath) ->
         "repeat" in ancestor && (path == ancestorPath || path.startsWith("$ancestorPath."))
@@ -97,7 +129,7 @@ internal object PrototypeSharedElementRules {
         PrototypeRepeatData((context.root as? JsonObject)?.get("data") as? JsonObject),
       )
     }
-    val templateError = templateError(key, shared, path == parent?.path, repeat, at)
+    val templateError = templateError(key, shared, glass || path != parent?.path, repeat, at)
     if (templateError != null) return Keys(error = templateError)
     val keys =
       if (scope != null && '{' in key)
@@ -121,18 +153,19 @@ internal object PrototypeSharedElementRules {
   private fun templateError(
     key: String,
     shared: Boolean,
-    carrier: Boolean,
+    templateRequired: Boolean,
     repeat: JsonObject?,
     at: String,
   ): PrototypeSpecError? {
     if (!shared && repeat != null)
       return fail(at, "sharedKey is not allowed inside repeat templates")
     if ('{' !in key)
-      return if (repeat != null && !carrier)
+      return if (repeat != null && templateRequired)
         fail(at, "shared key inside repeat requires a key template")
       else null
     val field = repeat?.text("key")
-    if (field == null || carrier) return fail(at, "shared key template requires repeat.key")
+    if (field == null || !templateRequired)
+      return fail(at, "shared key template requires repeat.key")
     val segments = PrototypeRepeatTemplate.segments(key, repeat.text("as") ?: "")
     val fields = segments.filterIsInstance<PrototypeRepeatSegment.Field>()
     val valid = segments.all { matchesField(it, field) }

@@ -1,0 +1,54 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "on": true,
+      "t": "a"
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "row",
+      "ios": {
+        "glassGroup": {
+          "spacing": 8
+        }
+      },
+      "children": [
+        {
+          "type": "row",
+          "repeat": {
+            "items": [
+              {
+                "id": "x"
+              },
+              {
+                "id": "y"
+              }
+            ],
+            "key": "id",
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "Glass",
+              "style": {
+                "surface": "glass"
+              },
+              "shared": {
+                "key": "a",
+                "as": "bounds"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].children[0].shared.key",
+  "expectedMessage": "shared key inside repeat requires a key template"
+}

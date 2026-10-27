@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "active": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "box",
+      "style": {
+        "glass": {}
+      },
+      "children": []
+    }
+  },
+  "expectedPath": "root.style.glass",
+  "expectedMessage": "glass requires surface: \"glass\""
+}

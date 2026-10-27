@@ -1,0 +1,19 @@
+{
+  "id": "glass",
+  "state": {
+    "active": true
+  },
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "image",
+    "asset": "hero",
+    "contentDescription": "Hero",
+    "ios": {
+      "backgroundExtension": true
+    }
+  }
+}

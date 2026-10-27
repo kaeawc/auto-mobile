@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "active": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Leaf",
+      "ios": {
+        "glassTransition": "identity"
+      }
+    }
+  },
+  "expectedPath": "root.ios.glassTransition",
+  "expectedMessage": "glassTransition requires a glass surface"
+}

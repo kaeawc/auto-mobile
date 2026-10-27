@@ -37,8 +37,17 @@ internal object PrototypeObjectRules {
     walkFields(data, fields, path, context, depth)?.let {
       return it
     }
+    return objectSemanticConstraint(data, rule, path)
+  }
+
+  private fun objectSemanticConstraint(
+    data: JsonObject,
+    rule: JsonObject,
+    path: String,
+  ): PrototypeSpecError? {
     val kind = listOf("style", "fadeEdges", "imageFilter").firstOrNull { rule === definitions[it] }
-    return PrototypeStylePolishV2Rules.objectError(data, kind ?: "", path)
+    return PrototypeGlassRules.objectError(data, kind ?: "", path)
+      ?: PrototypeStylePolishV2Rules.objectError(data, kind ?: "", path)
       ?: (if (rule === definitions["animate"]) PrototypeMotionTokens.animateError(data, path)
       else null)
       ?: objectConstraint(data, rule, path)

@@ -8,6 +8,19 @@ import org.junit.jupiter.api.Test
 
 class PrototypePlatformNamespacesTest {
   @Test
+  fun `list slot namespaces retain native Android fields and only foreign glass metadata`() {
+    val input =
+      Json.parseToJsonElement(
+        """{"root":{"type":"list","header":{"type":"box","android":{"indication":"none"},"ios":{"hover":"lift","glassGroup":{"spacing":12}}},"footer":{"type":"text","ios":{"hover":"lift"},"text":"Bye"}}}""",
+      )
+    val expected =
+      Json.parseToJsonElement(
+        """{"root":{"type":"list","header":{"type":"box","android":{"indication":"none"},"ios":{"glassGroup":{"spacing":12}}},"footer":{"type":"text","text":"Bye"}}}""",
+      )
+    assertEquals(expected, stripPlatformNamespaces(input))
+  }
+
+  @Test
   fun `retain Android node fields and strip foreign window and theme namespaces`() {
     val input =
       Json.parseToJsonElement(

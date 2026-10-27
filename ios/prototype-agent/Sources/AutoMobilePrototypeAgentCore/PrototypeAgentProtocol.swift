@@ -52,6 +52,8 @@ enum PrototypeAgentProtocol {
         loadingStatesCapability,
         effectsCapability,
         stylePolishV2Capability,
+        glassCapability,
+        scrollEdgeEffectCapability,
         stringsCapability,
         semanticsCapability,
         stringConditionsCapability,
@@ -139,6 +141,8 @@ enum PrototypeAgentProtocol {
     /// spec that uses one on an agent that does not advertise it. Same name as the CtrlProxy
     /// capability.
     static let themeModesCapability = "prototype_theme_modes_v1"
+    static let glassCapability = "prototype_glass_v1"
+    static let scrollEdgeEffectCapability = "prototype_scroll_edge_effect_v1"
     static let stylePolishV2Capability = "prototype_style_polish_v2"
     /// Eager wrapping flow and equal-width spanning grid containers (#12070).
     static let flowGridCapability = "prototype_flow_grid_v1"

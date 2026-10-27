@@ -1,3 +1,4 @@
+import { prototypeGlassObjectError } from "./prototypeGlass";
 import { PROTOTYPE_STYLE_POLISH_V2_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { record } from "./prototypeTemplate";
@@ -51,6 +52,14 @@ export function prototypeStylePolishV2UnsupportedMessage(
 
 /** Cross-field rules supplement the shared structural contract. */
 export function prototypeStylePolishV2ObjectError(
+  data: Record<string, unknown>,
+  kind: string,
+  path: string,
+): { path: string; message: string } | undefined {
+  return prototypeGlassObjectError(data, kind, path) ?? stylePolishObjectError(data, kind, path);
+}
+
+function stylePolishObjectError(
   data: Record<string, unknown>,
   kind: string,
   path: string,

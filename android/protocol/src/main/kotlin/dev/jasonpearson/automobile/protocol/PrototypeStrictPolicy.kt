@@ -568,6 +568,7 @@ private fun polishFeatures(
   need: (String) -> Unit,
 ) {
   if (PrototypeRouteRules.nodeUses(fields, routeAlias)) need("routes")
+  result.addAll(PrototypeGlassRules.capabilities(fields))
   if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
   if (PrototypeStylePolishV2Rules.required(fields))
     result.add(PrototypeStylePolishV2Rules.CAPABILITY)
@@ -594,5 +595,5 @@ private fun typeNamespaceFeatures(type: String, fields: JsonObject, need: (Strin
     need("content_transition")
   val nodeTypes =
     PrototypeSpecContract.definitions.getValue("node").jsonObject.getValue("variants").jsonObject
-  if (type in nodeTypes && ("ios" in fields || "android" in fields)) need("platform_namespace")
+  if (type in nodeTypes && PrototypeGlassRules.needsNamespace(fields)) need("platform_namespace")
 }

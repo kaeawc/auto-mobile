@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "on": true,
+      "t": "a"
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "row",
+      "ios": {
+        "glassGroup": {
+          "spacing": 8
+        },
+        "hover": "lift"
+      },
+      "children": []
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_glass_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_namespace_v1"
+}

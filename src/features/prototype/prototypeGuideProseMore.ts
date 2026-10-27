@@ -232,7 +232,9 @@ Choose styling in this order:
    \`ios: {buttonStyle: "glass"}\` or \`android: {predictiveBack: {style: "none"}}\` on a stack.
 
 Namespaces are closed objects on nodes, window and theme; each field has a contract \`why\`.
-Own-platform blocks require \`prototype_platform_namespace_v1\`. Foreign blocks are accepted and
+Own-platform blocks require \`prototype_platform_namespace_v1\`, except the four node glass fields,
+which require only \`prototype_glass_v1\` on iOS; mixing another iOS key requires both.
+Foreign blocks are accepted and
 ignored with paths in \`platformNotes\`; unknown fields are rejected even in foreign blocks.
 iOS glass buttons need 26 and otherwise use bordered buttons; hover needs 17 and is render-only
 (no pointer input). Custom tab bars, app bars and sheets cannot apply \`tab.role\`,

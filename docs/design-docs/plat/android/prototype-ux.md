@@ -9,6 +9,8 @@ expressions, URLs, image bytes or migration instructions.
 
 ## Owner decisions
 
+- 2026-10-27: `style.surface: "glass"` requires real glass and `prototype_glass_v1`: iOS 26+ Liquid Glass, and Android API 31+ real backdrop blur when its renderer is implemented. iOS 17–25 and Android below API 31 refuse glass through missing capability advertisement. There is no simulated translucent fill, ultraThinMaterial substitute, or fallback capability. Android rendering and device verification remain owed by the Android renderer slice.
+
 - 2026-10-26: Android-only custom AGSL shaders require `prototype_custom_shaders_v1` and the host opt-in `AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1` (off by default). Source assets use `application/vnd.automobile.agsl`, valid UTF-8, at most 16 KiB (16384 bytes), and at most 16 scalar `uniform float name;` declarations. The only other permitted uniform is one optional `uniform shader content;`: only the node's own rendered content may be sampled. Comments (`//` and `/* */`) are stripped to separators before token scanning. Code tokens must be ASCII; no preprocessor directives, strings, escapes, qualifiers, arrays, initializers, comma declarations, duplicate names, or other uniform types/samplers are accepted. `content`, `main`, GLSL/AGSL reserved words and names starting with `sk_` or `gl_` are reserved uniform names. A leading UTF-8 BOM is rejected. `style.shader: {asset, uniforms?}` supplies at most 16 declared float names matching `[A-Za-z_][A-Za-z0-9_]*`, with finite values in [-1000000, 1000000]; the host cross-checks available source assets. The Android runtime must compile on `put_prototype_asset` before retaining source and cap returned errors at 2 KiB of UTF-8. Execution fails closed under the preset frame-budget guard. iOS agents and ProtoViewer bundle import/export explicitly refuse both this MIME type and `style.shader`.
 
 The 2026-10-04 decisions supersede the issue's earlier proposals:
@@ -39,7 +41,7 @@ The 2026-10-26 decisions (#15244) fix the native-look and motion-profile work:
 4. **Native controls without per-item identifiers** (segmented `Picker`, `TabView`, `Menu`) keep the
    custom-drawn fallback. Each control is revisited after #15462.
 5. **`surface: "glass"` on Android** waits for real backdrop blur (API 31+ `RenderEffect`, after the
-   #15126 spike). Below API 31 it uses only a tonal fallback.
+   #15126 spike). Below API 31 glass is refused (2026-10-27 owner decision).
 6. **Width classes** are native per platform. Android reports the Material window size classes
    (compact, medium, expanded); iOS reports only its horizontal size class (compact, regular). Specs
    branch per platform.
@@ -3898,7 +3900,10 @@ Prefer portable fields, portable theme tokens, then `theme.design`; reserve `ios
 for native semantics. Each closed contract field has a `why`. Both renderers advertise
 `prototype_platform_namespace_v1` (iOS 17+). Foreign blocks are accepted and ignored with
 paths in `platformNotes`; unknown fields are rejected on either platform. Window/theme
-namespace blocks have no applicable node and are reported as ignored.
+namespace blocks have no applicable node and are reported as ignored. The four node glass fields
+require only `prototype_glass_v1` on iOS; mixing any other iOS key requires
+`prototype_platform_namespace_v1` as well. Android ignores foreign glass fields
+with their individual paths in `platformNotes`.
 
 Android `indication` controls node clickable feedback (`ripple` or `none`); motion-off
 still disables feedback. Stack `predictiveBack.style` preserves the normal pop for
@@ -3911,6 +3916,46 @@ The renderer's tab bars, app bars and sheets are custom drawn to retain per-item
 `tab.role`, `bottomAccessory`, `navigationTitle` and `sheet.sizing` are reported as ignored.
 `bottomAccessory` is node-only and structurally validated; its descendants provide no targets,
 references or capabilities on either renderer. iOS ignores all Android fields.
+
+## Glass surfaces and scroll edges
+
+`style.surface` is a closed enum containing only `"glass"`. Optional strict
+`style.glass: {variant?, tint?, interactive?}` takes `regular|clear` (default
+regular), an existing hex/role/light-dark colour slot, and a boolean (default
+false). `glass` without `surface: "glass"` in the same style is invalid, including
+`styleWhen` entries; conditional glass options must repeat the surface. `cornerRadius` chooses the
+shape; omission uses a capsule. Base and conditional styles require
+`prototype_glass_v1`; bundles must list every required capability.
+
+`scroll.edgeEffect: "soft"|"hard"|"none"` requires
+`prototype_scroll_edge_effect_v1`. iOS 26 uses the native scroll edge style;
+iOS 17–25 reuse the scrollability-aware `fadeEdges` mask, 24 dp for soft and
+8 dp for hard. Authored `fadeEdges` lengths override those defaults; `none`
+disables only the default fallback mask or native effect. Explicit `fadeEdges`
+remain applied on every supported iOS version. Android accepts the contract but does not advertise or
+render edgeEffect until its renderer slice; Android below API 31 refuses glass.
+
+In `ios`, `glassGroup: {spacing}` accepts finite 0–200 dp on column, row, box,
+flow, grid, list and listItem containers. Descendant glass nodes with `shared`
+keys use group-scoped glassEffectID, independently of visibility-pair matching;
+nested groups establish a new namespace. Keys must be unique within the nearest
+group and cannot also belong to visibility pairs. Under repeat, including on the
+repeated node, a glass shared key must be a template referencing repeat.key.
+Existing capability rules still apply. `glassUnion` is a 1–64 character ASCII id token
+(`[A-Za-z_][A-Za-z0-9_]*`); `glassTransition` is matchedGeometry, materialize or
+identity. Both require a base glass surface on the same node.
+`backgroundExtension: true` is image-only and does not require the image itself
+to be glass. All four fields are node-only (invalid in window.ios/theme.ios) and
+require only the glass capability on iOS; Android ignores them with field paths
+in platformNotes.
+
+Reduce Transparency and Increase Contrast are handled by the system's Liquid
+Glass implementation. Verification pins accessibility settings and checks
+structure and bounds, rather than glass pixels. Group merging, morphs, unions,
+image extension and accessibility appearance still require iOS 26 simulator
+verification. Android real blur, clear-variant approximation and ignored
+interactive semantics belong to its renderer slice and must report any
+approximation in platformNotes on devices advertising glass.
 
 ### Motion tokens
 

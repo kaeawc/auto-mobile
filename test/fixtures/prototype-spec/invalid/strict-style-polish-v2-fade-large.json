@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "scroll",
+      "fadeEdges": {
+        "end": 1001
+      },
+      "child": {
+        "type": "text",
+        "text": "x"
+      }
+    }
+  },
+  "expectedPath": "root.fadeEdges.end",
+  "expectedMessage": "Invalid number value"
+}

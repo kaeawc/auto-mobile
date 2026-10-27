@@ -6,6 +6,9 @@ import type { ModelSelection, TypeRefs } from "./generate-prototype-spec-models"
  * preserve each native API. Type refs below bridge definitions that remain hand-written.
  */
 export const prototypeModelSelection = {
+  shadow: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
+  fadeEdges: {},
+  imageFilter: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   offset: {},
   padding: {},
   bounds: { languages: ["kotlin"] },
@@ -82,4 +85,5 @@ export const prototypeTypeRefs = {
   condition: { kotlin: "PrototypeCondition" },
   style: { kotlin: "PrototypeStyle" },
   gradientStop: { kotlin: "PrototypeGradientStop" },
+  gradient: { kotlin: "PrototypeGradient", swift: "PrototypeGradient" },
 } as const satisfies TypeRefs;

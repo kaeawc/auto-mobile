@@ -6,6 +6,35 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class PrototypeShadowOffset(
+  val x: Double,
+  val y: Double,
+)
+
+@Serializable
+data class PrototypeShadow(
+  val color: PrototypeModeValue,
+  val radius: Double,
+  val spread: Double? = null,
+  val offset: PrototypeShadowOffset? = null,
+  val inner: Boolean? = null,
+)
+
+@Serializable
+data class PrototypeFadeEdges(
+  val top: Double? = null,
+  val bottom: Double? = null,
+  val start: Double? = null,
+  val end: Double? = null,
+)
+
+@Serializable
+data class PrototypeImageFilter(
+  val saturation: Double? = null,
+  val tint: PrototypeModeValue? = null,
+)
+
+@Serializable
 data class PrototypeOffset(
   val x: Double,
   val y: Double,

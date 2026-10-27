@@ -795,15 +795,20 @@ private fun RenderPrototypeNodeContent(
       val viewport = Modifier.onGloballyPositioned { anchors.viewport = it }
       val scrolling =
         if (source?.axis == "horizontal")
-          modifier.boundedScrollViewport(vertical = false).horizontalScroll(scroll)
+          modifier
+            .boundedScrollViewport(vertical = false)
+            .prototypeFadeEdges(scroll, true, source.fadeEdges)
+            .horizontalScroll(scroll)
         else if (refresh != null)
           viewport
             .boundedScrollViewport(vertical = true)
+            .prototypeFadeEdges(scroll, false, source.fadeEdges, reverse)
             .verticalScroll(scroll, reverseScrolling = reverse)
         else
           modifier
             .then(viewport)
             .boundedScrollViewport(vertical = true)
+            .prototypeFadeEdges(scroll, false, source?.fadeEdges, reverse)
             .verticalScroll(scroll, reverseScrolling = reverse)
       if (chat != null) PrototypeChatScrollEffects(chat, scroll, anchors, interact)
       val content: @Composable BoxScope.() -> Unit = {
@@ -1363,28 +1368,44 @@ private fun prototypeNodeModifier(
   if (anchor == null || !prototypeAnchorCovers(anchor))
     modifier = authoredSizeModifier(modifier, style, weightAxis)
   modifier = modifier.alpha(prototypeAnimatedAlpha(node))
-  val shape =
+  val roundedShape =
     prototypeCornerShape(MaterialTheme.shapes, style.cornerRadius ?: PrototypeCornerRadius.Dp(0.0))
+  val shape =
+    if (style.cornerStyle == "continuous") PrototypeContinuousShape(roundedShape) else roundedShape
   // Before clip/background/border so the shadow is drawn outside the clipped content.
-  style.elevation?.let {
-    val shadowColor =
-      prototypeThemedColor(node.style.shadowColor, style.shadowColor) ?: DefaultShadowColor
-    modifier =
-      modifier.shadow(it.toFloat().dp, shape, ambientColor = shadowColor, spotColor = shadowColor)
-  }
-  if (style.cornerRadius != null) modifier = modifier.clip(shape)
+  style.elevation
+    ?.takeIf { style.shadows == null }
+    ?.let {
+      val shadowColor =
+        prototypeThemedColor(node.style.shadowColor, style.shadowColor) ?: DefaultShadowColor
+      modifier =
+        modifier.shadow(it.toFloat().dp, shape, ambientColor = shadowColor, spotColor = shadowColor)
+    }
+  modifier = modifier.prototypeShadows(style.shadows, shape, inner = false)
+  if (style.cornerRadius != null || style.cornerStyle != null) modifier = modifier.clip(shape)
   prototypeThemedColor(node.style.background, style.background)?.let {
     modifier = modifier.background(prototypeAnimatedColor(node, it), shape)
   }
   style.gradient?.let {
     modifier = modifier.background(prototypeGradientBrush(it, prototypePalette()), shape)
   }
-  // A loading placeholder's highlight sweep, over the background and inside the clip (#14207).
-  modifier = modifier.prototypeShimmer(style.shimmer == true)
+  // Post-content modifiers nest in reverse painting order: shimmer, border, then inner shadows.
+  modifier = modifier.prototypeShadows(style.shadows, shape, inner = true)
   style.border?.let {
-    val borderColor = prototypeThemedColor(node.style.borderColor, it.color)
-    modifier = modifier.border(it.width.toFloat().dp, checkNotNull(borderColor), shape)
+    val gradient = it.gradient
+    modifier =
+      if (gradient != null) {
+        modifier.border(
+          it.width.toFloat().dp,
+          prototypeGradientBrush(gradient, prototypePalette()),
+          shape,
+        )
+      } else {
+        val borderColor = prototypeThemedColor(node.style.borderColor, it.color)
+        modifier.border(it.width.toFloat().dp, checkNotNull(borderColor), shape)
+      }
   }
+  modifier = modifier.prototypeShimmer(style.shimmer == true)
   // Click handling and semantics go before the inset and authored padding, so the whole drawn node
   // is tappable, its ripple covers it, and its accessibility bounds are its drawn bounds (#10435).
   val longPress = node.source?.onLongPress?.takeIf { it.isNotEmpty() }

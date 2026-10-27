@@ -26,6 +26,26 @@ The 2026-10-04 decisions supersede the issue's earlier proposals:
 - A `sheet` window and a modal `bottomSheet` node are separate concepts.
 - Built-in icons come from a closed list (the bundled Material icon set); other artwork uses image assets.
 
+The 2026-10-26 decisions (#15244) fix the native-look and motion-profile work:
+
+1. **Default look.** `theme.design` defaults to `platform`. iOS prototypes look native by default
+   and the iOS screenshot baselines are re-recorded with it. On Android `platform` is still Material.
+   `material` stays available to force today's drawing on both platforms.
+2. **Other-platform namespaces.** A renderer ignores the other platform's namespace block (`ios: {...}`
+   on Android, `android: {...}` on iOS) and adds a `platformNotes` entry; it does not refuse the spec,
+   so one spec runs on both. This matches iOS ignoring `window.layer: "app"`.
+3. **iOS Reduce Motion** maps to the _reduced_ profile (crossfades), not to _off_. The system
+   setting `UIAccessibility.prefersCrossFadeTransitions` maps to _reduced_ as well.
+4. **Native controls without per-item identifiers** (segmented `Picker`, `TabView`, `Menu`) keep the
+   custom-drawn fallback. Each control is revisited after #15462.
+5. **`surface: "glass"` on Android** waits for real backdrop blur (API 31+ `RenderEffect`, after the
+   #15126 spike). Below API 31 it uses only a tonal fallback.
+6. **Width classes** are native per platform. Android reports the Material window size classes
+   (compact, medium, expanded); iOS reports only its horizontal size class (compact, regular). Specs
+   branch per platform.
+7. **Xcode 27.** An advisory (non-required) Xcode 27 iOS build runs on the self-hosted Macs now. The
+   required jobs switch after a green week. #15261 proceeds behind `#available`.
+
 Earlier decisions still apply: the renderer is Compose; sizes and positions use
 dp; prototype opacity is a percentage; app-element anchoring is supported; observe
 includes prototype nodes by default; existing tap/text tools target prototype nodes;
@@ -550,6 +570,38 @@ this slice does not redact it.
 
 ## Style
 
+`prototype_style_polish_v2` gates layered `style.shadows`, `style.cornerStyle`,
+`style.border.gradient`, `scroll.fadeEdges` and `image.filter`. A renderer must advertise
+this capability before a host sends these fields.
+
+- `shadows` is 1–3 strict `{color, radius, spread?, offset?, inner?}` entries. Radius is
+  0–1000 dp, spread and each offset axis are -1000–1000 dp. Omitted spread is 0,
+  omitted offset is `{x:0,y:0}`, and omitted inner is false. Layers paint in array
+  order within the outer and inner groups: first is bottom-most, later layers sit on top.
+  Blur radius `b` uses Gaussian sigma `b/2` (CSS-like blur). Android adapts this to
+  the platform blur filter, whose minimum nonzero sigma is approximately 0.5 px.
+  `color` takes the same hex, role or `{light,dark}` forms as `shadowColor`. `shadows` excludes both
+  `elevation` and `shadowColor`, including explicit zero elevation.
+- `cornerStyle` is `circular` (default) or `continuous`, including with `cornerRadius: "full"`.
+  Continuous corners use dependency-free cubic smoothing (approximately 0.6), tapering
+  to circular at half the short side so full radii remain valid pills/circles.
+- A border is strict `{width, color?, gradient?}`, with exactly one of `color` or
+  `gradient`. Gradient reuses the linear/radial background-gradient contract.
+- A scroll node's `fadeEdges` is strict `{top?, bottom?, start?, end?}`, with at least
+  one edge, each 0–1000 dp. Fades draw only on edges that can still scroll; start/end
+  mirror in RTL. Top/bottom apply only to vertical scrolling, start/end only to horizontal
+  scrolling. Each fade is capped to its viewport dimension.
+- An image node's `filter` is strict `{saturation?, tint?}`, with at least one field.
+  Saturation is 0–2 and tint is a colour value. Saturation applies first, then tint
+  multiplies the image channels (including alpha). Other node types cannot set filter.
+
+Pairs in shadows and image tint, and pairs or role names in border gradient stops,
+also require `prototype_theme_modes_v1`.
+
+Rendering order: transform, press scale, size, alpha, drop shadows (`shadows`/`elevation`
+draw before the clip), clip (`cornerRadius` + `cornerStyle`), background, gradient,
+shimmer, border (color or gradient), inner shadows.
+
 All properties are optional. Sizes, padding, offsets, radii, and spacing use dp.
 Numeric lengths are capped at 10000, including fixed dimensions, bounds x/y/width/height,
 size constraints, padding, corner radii, border width, spacing, sheet height and fixed detents.
@@ -569,7 +621,7 @@ height which must be positive. Positive values use a minimum of 0.000001.
 | `padding`                                        | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `background`, `color`                            | Strict hex color, or a Material 3 color role name (see below).                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `cornerRadius`                                   | Nonnegative dp, a Shapes token (`none`, `extraSmall`, `small`, `medium`, `large`, `extraLarge`, `full`), or strict per-corner `{topStart?, topEnd?, bottomEnd?, bottomStart?}` of nonnegative dp where an omitted corner is square. Start and end follow the layout direction.                                                                                                                                                                                                                                     |
-| `border`                                         | `{width, color}`; nonnegative dp width; `color` takes hex or a color role name.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `border`                                         | `{width, color?, gradient?}`; nonnegative dp width; exactly one paint source, a colour value or a linear/radial gradient.                                                                                                                                                                                                                                                                                                                                                                                          |
 | `elevation`                                      | Nonnegative dp. Draws a shadow in the node's corner shape, behind its clip, background and border.                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `shadowColor`                                    | Hex color or color role name tinting the `elevation` shadow (ambient and spot). Without `elevation` it draws nothing; absent, the platform shadow color applies.                                                                                                                                                                                                                                                                                                                                                   |
 | `gradient`                                       | `{type: "linear", angle, stops}` or `{type: "radial", stops}`. `angle` is a finite number of degrees clockwise from left-to-right (0 = left to right, 90 = top to bottom). `stops` is 2–4 `{color, position?}` with a hex color and an optional 0–1 `position`; positions apply only when every stop has one (a position below the previous stop's is raised to it), otherwise stops are evenly spaced. Radial gradients are centered and reach the corners. Painted over `background` in the node's corner shape. |
@@ -1326,6 +1378,15 @@ a `_v2` gate that checks the fields that version introduced. The gates are gener
 `platformModules` and join `PROTOTYPE_SPEC_CAPABILITY_GATES`, so show, patch and `replaceNode`
 refuse uniformly. Because every module use must be declared in the root `requires`, which a patch
 cannot add, a patch never introduces a module the shown spec did not already require.
+
+Android's renderer accepts an identity-stable `PrototypePlatform` containing an immutable module
+registry. The host supplies modules; it retains ownership and closes them after all surfaces detach.
+The built-in device module projects the host's measured window state. Each surface subscribes to
+module state and events, and the controller shares a four-call limiter across its surfaces. Calls
+resolve arguments at invocation, wait outside the interaction lock, and commit result, metadata,
+status, outcome event and follow-ups under that lock. Replacement, reset and dismissal cancel calls;
+cancellation reports an outcome without running follow-ups. CtrlProxy registers only the device
+module in release; debug additionally registers the permission-free test module.
 
 The shared fixtures `test/fixtures/prototype-spec/valid/platform-*.json` and
 `invalid/platform-*.json` are replayed by the TypeScript, Kotlin and Swift validators.
@@ -2352,8 +2413,10 @@ a hashtag is `#` and up to 100 letters, marks, digits or `_`, not all digits; a 
 `https://` up to the next whitespace with trailing `.,;:!?'")]}` removed. Inside `onTap` only,
 `{match: "text"}` reads the tapped match (`@ana`) and `{match: "kind"}` its kind: as a `setState`
 value, a `setData` / `appendData` value or an emit context entry, for example
-`setState profileHandle {match: "text"}` then `push profile`. `{match}` anywhere else is refused, as
-are repeat bindings inside `onTap`. A URL tap never opens a browser; that is the `links.open`
+`setState profileHandle {match: "text"}` then `push profile`. `{match}` anywhere else is refused.
+Inside a repeat, `onTap` also binds `{item: "field"}`, `{index: true}`, `{alias.field}` and `{index}`
+per row, including state keys such as `liked_{item.id}`. Repeat binding preserves `{match}` for
+tap-time resolution; emit payloads and `{value: ...}` literals remain opaque. A URL tap never opens a browser; that is the `links.open`
 platform call. Matches are links like tappable spans (Android `tapOn {accessibilityLink}`, iOS
 `tapAt`) and require `prototype_linkify_v1`.
 

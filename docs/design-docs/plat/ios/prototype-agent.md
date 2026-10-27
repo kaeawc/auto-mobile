@@ -178,6 +178,12 @@ AutoMobile does not launch these, so edit the scheme (Run > Arguments > Environm
   each pager's page; `reset: true` starts fresh (`prototype_show_in_place_v1`; host refuses `reset` on
   older agents). For a variant carousel, compose the spec yourself.
 - No `display`, no `persistence: "device"`; `layer: "app"` ignored.
+- Owner decisions of 2026-10-26 (#15244, full list in `prototype-ux.md`, Owner decisions): `theme.design`
+  defaults to `platform` (native SwiftUI controls where covered; segmented `Picker`, `TabView` and `Menu`
+  keep the custom drawing because they lose per-item identifiers); an `android: {...}` namespace block is
+  ignored with a `platformNotes` entry; system Reduce Motion and `prefersCrossFadeTransitions` map to the
+  reduced motion profile (crossfades), superseding the "instant" wording in Motion; iOS reports only the
+  horizontal size class (compact, regular).
 - `inspect` reports the single prototype, with no `suspended` and no `deviceDroppedEvents`.
 - SwiftUI in the app's process rather than Compose in CtrlProxy; no accessibility service.
 - Android reaches any app through CtrlProxy; iOS only apps launched with the agent.
@@ -232,7 +238,7 @@ Advertised as `prototype_theme_modes_v1` (#11220). Rules are Core's (`PrototypeM
 device-verified. One mode is resolved per shown prototype ([Appearance](#appearance)).
 
 - **Colours.** Every slot takes a hex, a role name, or `{light, dark}` (each side hex or role):
-  `style.background`, `style.color`, `style.shadowColor`, `style.border.color`, a `styleWhen` style,
+  `style.background`, `style.color`, `style.shadowColor`, `style.shadows[].color`, `style.border.color`, `style.border.gradient` stops, `image.filter.tint`, a `styleWhen` style,
   gradient stops, `window.placement.scrim`, bottomSheet `scrim`. A pair picks its side then resolves
   like a single value (a role comes from the resolved mode's scheme).
 - **Theme role maps.** Scheme order: baseline Material scheme for the mode, seed scheme, flat
@@ -413,6 +419,18 @@ cutout, follows the spec's theme) and the spec is laid out below it, so `safeAre
 inset.
 
 See the [`prototype` tool reference](../../../tools.md#prototype).
+
+Style contract fields `style.shadows`, `style.cornerStyle`, `style.border.gradient`,
+`scroll.fadeEdges` and `image.filter` require `prototype_style_polish_v2`. The strict
+validator accepts these fields and the agent advertises this capability. A shared corner
+path clips content and paints backgrounds, gradients, shimmer, borders and shadows;
+continuous full radii clamp to half the short side. Shadow layers paint in authored
+order within the outer and inner groups, with inner shadows above the border. The
+Canvas shadow-only filter avoids painting the spread source itself; its Gaussian
+radius is half the authored CSS-like blur. Positive spread expands outer sources
+and contracts inner holes. Scroll fades use iOS 17 geometry preferences to mask only
+edges with remaining content, mirroring horizontal start/end in RTL; opposing fades
+are capped at half the viewport. Image saturation precedes the palette-resolved tint.
 
 ## Data model capability
 

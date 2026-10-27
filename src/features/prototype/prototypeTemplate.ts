@@ -443,6 +443,10 @@ export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor):
   const copy = { ...node };
   if (copy.type === "text") {
     mapField(copy, "text", path, "text", visit);
+    mapObject(copy, "linkify", path, (options, optionsPath) => {
+      mapActions(options, optionsPath, visit);
+      return options;
+    });
     mapList(copy, "spans", path, (span, spanPath) => {
       mapField(span, "text", spanPath, "text", visit);
       mapActions(span, spanPath, visit);

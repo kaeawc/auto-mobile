@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "box",
+      "children": [],
+      "styleWhen": [
+        {
+          "when": {
+            "key": "active",
+            "equals": true
+          },
+          "style": {
+            "shadows": [
+              {
+                "color": "#000000",
+                "radius": 20
+              }
+            ],
+            "elevation": 1
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.styleWhen[0].style.shadows",
+  "expectedMessage": "shadows cannot be combined with elevation or shadowColor"
+}

@@ -6873,8 +6873,14 @@
       {
         "name": "color",
         "type": "object:PrototypeModeValue",
-        "nullable": false,
-        "hasDefault": false
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "gradient",
+        "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeBounds": [
@@ -7069,6 +7075,32 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeFadeEdges": [
+      {
+        "name": "top",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "bottom",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "start",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "end",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeGradientStop": [
       {
         "name": "color",
@@ -7079,6 +7111,20 @@
       {
         "name": "position",
         "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeImageFilter": [
+      {
+        "name": "saturation",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "tint",
+        "type": "object:PrototypeModeValue",
         "nullable": true,
         "hasDefault": true
       }
@@ -7313,6 +7359,52 @@
         "type": "map",
         "nullable": true,
         "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeShadow": [
+      {
+        "name": "color",
+        "type": "object:PrototypeModeValue",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "radius",
+        "type": "double",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "spread",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "offset",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShadowOffset",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "inner",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeShadowOffset": [
+      {
+        "name": "x",
+        "type": "double",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "y",
+        "type": "double",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeSheetCondition": [
@@ -7913,6 +8005,18 @@
       {
         "name": "shadowColor",
         "type": "object:PrototypeModeValue",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shadows",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "cornerStyle",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -9305,6 +9409,12 @@
         "hasDefault": false
       },
       {
+        "name": "filter",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeImageFilter",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentScale",
         "type": "string",
         "nullable": false,
@@ -10223,6 +10333,12 @@
       {
         "name": "refresh",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollRefresh",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "fadeEdges",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeFadeEdges",
         "nullable": true,
         "hasDefault": true
       },

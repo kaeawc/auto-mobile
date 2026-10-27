@@ -44,6 +44,7 @@ enum PrototypeAgentProtocol {
         carouselCapability,
         chartCapability,
         loadingStatesCapability,
+        stylePolishV2Capability,
         textFieldLeadingIconCapability,
         refreshCapability,
         searchBarCapability,
@@ -93,6 +94,7 @@ enum PrototypeAgentProtocol {
     /// spec that uses one on an agent that does not advertise it. Same name as the CtrlProxy
     /// capability.
     static let themeModesCapability = "prototype_theme_modes_v1"
+    static let stylePolishV2Capability = "prototype_style_polish_v2"
     /// Eager wrapping flow and equal-width spanning grid containers (#12070).
     static let flowGridCapability = "prototype_flow_grid_v1"
     /// Draws pager axis, pageSpacing, peek and pageSize natively. The host refuses a spec that

@@ -12,7 +12,7 @@ internal data class PrototypeListAnchor(
   val headerVisible: Boolean = false,
 ) {
   fun restore(newKeys: List<String>, hasHeader: Boolean): PrototypeListAnchorTarget {
-    if (headerVisible && hasHeader && key != null && newKeys.firstOrNull() == key) {
+    if (headerAnchored(newKeys, hasHeader)) {
       return PrototypeListAnchorTarget(0, offset)
     }
     resolve(key, offset, newKeys, hasHeader)?.let {
@@ -24,6 +24,9 @@ internal data class PrototypeListAnchor(
       offset,
     )
   }
+
+  private fun headerAnchored(newKeys: List<String>, hasHeader: Boolean): Boolean =
+    headerVisible && hasHeader && key != null && newKeys.firstOrNull() == key
 
   companion object {
     fun resolve(

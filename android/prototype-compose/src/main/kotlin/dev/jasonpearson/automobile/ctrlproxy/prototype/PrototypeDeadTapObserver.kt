@@ -3,8 +3,11 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntSize
 
 /**
  * Final observes descendant consumption without consuming any event. Gesture-only nodes mark their
@@ -20,36 +23,18 @@ internal fun Modifier.prototypeDeadTapObserver(
   pointerInput(taps, density) {
     awaitEachGesture {
       val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
+      val ignoredDown = down.isConsumed || taps.wasHandled(down)
       var rejected =
-        down.isConsumed ||
-          currentEvent.changes.size != 1 ||
-          taps.wasHandled(down) ||
-          down.position.x < 0 ||
-          down.position.y < 0 ||
-          down.position.x >= size.width ||
-          down.position.y >= size.height
+        ignoredDown || currentEvent.changes.size != 1 || !size.containsPoint(down.position)
       while (true) {
         val event = awaitPointerEvent(PointerEventPass.Final)
         val change = event.changes.singleOrNull()
         if (change == null || change.id != down.id) {
           rejected = true
         } else {
-          rejected =
-            rejected ||
-              change.isConsumed ||
-              (change.position - down.position).getDistance() >= viewConfiguration.touchSlop ||
-              change.position.x < 0 ||
-              change.position.y < 0 ||
-              change.position.x >= size.width ||
-              change.position.y >= size.height
+          rejected = rejected || strayed(change, down, size, viewConfiguration.touchSlop)
           if (!change.pressed) {
-            if (!rejected)
-              interact(
-                PrototypeInteraction.DeadTap(
-                  change.position.x / density,
-                  change.position.y / density,
-                ),
-              )
+            if (!rejected) interact(PrototypeInteraction.DeadTap(change.position.x / density, change.position.y / density))
             break
           }
         }
@@ -57,3 +42,12 @@ internal fun Modifier.prototypeDeadTapObserver(
       }
     }
   }
+
+private fun IntSize.containsPoint(position: Offset): Boolean =
+  position.x >= 0 && position.y >= 0 && position.x < width && position.y < height
+
+/** A consumed, dragged-past-slop or out-of-bounds change cannot end in a dead tap. */
+private fun strayed(change: PointerInputChange, down: PointerInputChange, size: IntSize, slop: Float) =
+  change.isConsumed ||
+    (change.position - down.position).getDistance() >= slop ||
+    !size.containsPoint(change.position)

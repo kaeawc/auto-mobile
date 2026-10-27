@@ -855,13 +855,7 @@
         "type": "emit",
         "name": "appear"
       }
-    ],
-    "ios": {
-      "hover": "lift"
-    },
-    "android": {
-      "indication": "ripple"
-    }
+    ]
   },
   "actionRequestFilled": {
     "type": "request",

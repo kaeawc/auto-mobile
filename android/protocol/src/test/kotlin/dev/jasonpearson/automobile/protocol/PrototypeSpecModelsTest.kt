@@ -7,11 +7,13 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeAll
@@ -224,6 +226,10 @@ class PrototypeSpecModelsTest {
         data = "/items",
         valid = PrototypeValidityKeys.Multiple(listOf("name", "email")),
         platform = "/os",
+        contains = PrototypeScalar.Text("a"),
+        startsWith = PrototypeScalar.Text("b"),
+        lengthGt = 1,
+        lengthLt = 9,
       ),
     )
     assertRoundTrip(
@@ -251,11 +257,12 @@ class PrototypeSpecModelsTest {
   }
 
   @Test
-  fun `generated style round trips every field including nested values`() {
+  fun `generated style round trips every field including nested values`() =
+    assertRoundTrip("style", fullStyle())
+
+  private fun fullStyle(): PrototypeStyle {
     val modes = PrototypeModeValue.Modes("#112233", "#445566")
-    assertRoundTrip(
-      "style",
-      PrototypeStyle(
+    return PrototypeStyle(
         width = PrototypeDimension.Dp(240.0),
         height = PrototypeDimension.Wrap,
         weight = 1.0,
@@ -307,8 +314,10 @@ class PrototypeSpecModelsTest {
         textStyle = "bodyLarge",
         scale = 1.2,
         rotation = 15.0,
-      ),
-    )
+        shader = PrototypeShader("effect", mapOf("strength" to 1.0)),
+        cornerStyle = "continuous",
+        effects = listOf(buildJsonObject { put("type", "noise") }),
+      )
   }
 
   @Test

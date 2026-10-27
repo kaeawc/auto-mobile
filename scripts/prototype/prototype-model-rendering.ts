@@ -205,7 +205,10 @@ export function renderFields(
   options: ModelOptions = {},
   variant?: string,
 ): RenderField[] {
-  const fields = Object.entries(rule.fields ?? {});
+  const fields = Object.entries(rule.fields ?? {}).filter(
+    ([fieldName]) =>
+      !(context.language === "kotlin" && options.omitKotlinFields?.includes(fieldName)),
+  );
   if (!fields.length) {
     throw new Error(`Definition ${name}: empty objects are unsupported`);
   }

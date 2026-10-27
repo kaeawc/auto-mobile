@@ -9,9 +9,10 @@ enum PrototypeStackAnimation: Equatable {
     case slide, fade, none, sharedAxisX, sharedAxisY, fadeThrough
 }
 
-struct PrototypeStackEntry: Equatable, Identifiable {
+struct PrototypeStackEntry: Equatable, Hashable, Identifiable {
     let id: Int
     let screen: String
+    var zoomSource: String? = nil
 }
 
 struct PrototypeStackChange: Equatable {
@@ -128,6 +129,15 @@ enum PrototypeStackPatterns {
                 throw PrototypeContractValidator.invalid(
                     "\(action.path).source",
                     "zoom requires source to resolve to exactly one sharedKey node"
+                )
+            }
+            let stack = nodes.first { $0.value["type"] == .string("stack") && $0.value["id"] == action.value["stack"] }
+            guard let stack, nodes.contains(where: {
+                ($0.value["shared"]?.objectFields?["key"] ?? $0.value["sharedKey"]) == .string(source) &&
+                    $0.path.hasPrefix("\(stack.path).screens[")
+            }) else {
+                throw PrototypeContractValidator.invalid(
+                    "\(action.path).source", "zoom source must be inside the target stack's screens"
                 )
             }
         }

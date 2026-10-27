@@ -126,6 +126,27 @@ describe("stack transitions", () => {
 });
 
 describe("stack patterns", () => {
+  for (const type of ["push", "replace"]) {
+    test(`${type} zoom source must belong to the target stack screens`, () => {
+      const target = stack({
+        transition: "zoom",
+        onTap: [{ ...action(type), source: "hero" }],
+      });
+      const outside = { type: "text", text: "Outside", shared: { key: "hero", as: "bounds" } };
+      expect(
+        validatePrototypeSpec(spec({ type: "column", children: [outside, target] })),
+      ).toMatchObject({
+        success: false,
+        error: {
+          path: "root.children[1].onTap[0].source",
+          message: "zoom source must be inside the target stack's screens",
+        },
+      });
+      expect(
+        validatePrototypeSpec(spec(stack({ ...target, screens: { home: outside } }))).success,
+      ).toBe(true);
+    });
+  }
   test("source requires the new gate even with a classic override", () => {
     expect(
       prototypeStackPatternFields(

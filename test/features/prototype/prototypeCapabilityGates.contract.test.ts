@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
+  PROTOTYPE_ZOOM_TRANSITION_CAPABILITY,
   PROTOTYPE_ANCHOR_CAPABILITY,
   PROTOTYPE_NETWORK_CAPABILITY,
   PROTOTYPE_NETWORK_DEVICE_CAPABILITY,
@@ -113,6 +114,7 @@ test("shared capability fixture matches the sorted gate capability set", () => {
   );
   const expected = [
     ...new Set(PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.capability)),
+    PROTOTYPE_ZOOM_TRANSITION_CAPABILITY,
   ].sort();
   expect(fixture).toEqual(expected);
 });

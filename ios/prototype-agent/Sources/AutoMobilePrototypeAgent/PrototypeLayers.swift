@@ -301,6 +301,7 @@
 
         private func edgeSwipeChanged(_ value: DragGesture.Value) {
             guard model.stackDrag?.settling != true, let target = model.stackPopTarget,
+                  !model.nativeZoomStacks.contains(target),
                   let revision = model.stackChanges[target]?.revision else { return }
             swipe.update(
                 target: target, revision: revision, start: value.startLocation.x,
@@ -327,7 +328,7 @@
         }
 
         private func edgeSwipeEnded(_ value: DragGesture.Value) {
-            guard let ended = swipe.end() else { return }
+            guard let ended = swipe.end(), !model.nativeZoomStacks.contains(ended.target) else { return }
             let (target, revision) = ended
             guard model.stackPopTarget == target, model.stackChanges[target]?.revision == revision else {
                 cancelEdgeSwipe()

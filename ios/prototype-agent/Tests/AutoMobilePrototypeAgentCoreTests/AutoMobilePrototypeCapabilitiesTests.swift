@@ -11,7 +11,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "test/fixtures/prototype-capabilities/spec-capabilities.json"
         ))
         let required = try Set(JSONDecoder().decode([String].self, from: data))
-        let supported = Set(AutoMobilePrototypeCapabilities.supported)
+        struct OS: OSVersionProvider { let majorVersion = 18 }
+        let supported = Set(PrototypeAgentProtocol.advertisedCapabilities(os: OS()))
         // #13722: Intentional gaps in the iOS advertisement, each with its reason; remove them
         // when supported. The platform vocabulary (#14294) runs on the module registry (#14296),
         // and the `test` module is a placeholder no production runtime ever advertises.
@@ -44,7 +45,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
     }
 
     func testSupportedCapabilitiesComeFromAgentAdvertisement() {
-        let advertised = PrototypeAgentProtocol.capabilities
+        let advertised = PrototypeAgentProtocol.advertisedCapabilities()
         XCTAssertTrue(Set(AutoMobilePrototypeCapabilities.supported).isSubset(of: Set(advertised)))
         XCTAssertEqual(
             AutoMobilePrototypeCapabilities.supported,

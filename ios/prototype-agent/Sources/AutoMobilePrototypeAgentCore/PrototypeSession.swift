@@ -791,34 +791,9 @@ struct PrototypeSession {
         return changeStack(id, direction: .pop) { _, path in Array(path.dropLast()) }
     }
 
-    private mutating func runStack(_ action: PrototypeAction) -> [PrototypeEvent] {
-        guard let id = action.stack else { return [] }
-        let direction: PrototypeStackChange.Direction = switch action.type {
-        case "push": .push
-        case "replace": .replace
-        default: .pop
-        }
-        return changeStack(id, direction: direction, override: action.transition) { node, path in
-            switch action.type {
-            case "push":
-                guard path.count < PrototypeLimits.maxStackDepth, let screen = action.screen,
-                      node.screens?[screen] != nil else { return path }
-                return path + [screen]
-            case "pop":
-                return path.count > 1 ? Array(path.dropLast()) : path
-            case "popToRoot":
-                return [node.start ?? ""]
-            case "replace":
-                guard let screen = action.screen, node.screens?[screen] != nil else { return path }
-                return Array(path.dropLast()) + [screen]
-            default:
-                return path
-            }
-        }
-    }
-
-    private mutating func changeStack(
+    mutating func changeStack(
         _ id: String, direction: PrototypeStackChange.Direction, override: PrototypeStackTransition? = nil,
+        source: String? = nil,
         transform: (PrototypeNode, [String]) -> [String]
     )
         -> [PrototypeEvent]
@@ -838,11 +813,15 @@ struct PrototypeSession {
         var entries = Array((stackEntries[id] ?? []).prefix(retained))
         for screen in path.dropFirst(entries.count) {
             nextStackEntry += 1
-            entries.append(PrototypeStackEntry(id: nextStackEntry, screen: screen))
+            entries.append(PrototypeStackEntry(
+                id: nextStackEntry,
+                screen: screen,
+                zoomSource:
+                stackChanges[id]?.transition == .zoom ? source : nil
+            ))
         }
         stackEntries[id] = entries
-        // popToRoot can change a depth-one replacement back to start; repeated pushes of the
-        // same screen change depth. Both are real changes, just as on Android.
+        // Changed screen or depth emits once, including popToRoot and repeated pushes.
         guard before.path.last != screen || before.depth != next.depth else { return [] }
         return emit(kind: "screen_changed", name: id, payload: .object([
             "screen": .string(screen), "depth": .number(Double(next.depth)),

@@ -37,8 +37,8 @@ class PrototypeStackTransitionTest {
         chosen == PrototypeStackTransition.FADE || reduced -> StackTransitionKind.Fade
         chosen == PrototypeStackTransition.SHARED_AXIS_X -> StackTransitionKind.SharedAxisX
         chosen == PrototypeStackTransition.SHARED_AXIS_Y -> StackTransitionKind.SharedAxisY
-        chosen in setOf(PrototypeStackTransition.FADE_THROUGH, PrototypeStackTransition.ZOOM) ->
-          StackTransitionKind.FadeThrough
+        chosen == PrototypeStackTransition.ZOOM -> StackTransitionKind.Zoom
+        chosen == PrototypeStackTransition.FADE_THROUGH -> StackTransitionKind.FadeThrough
         else -> StackTransitionKind.Slide
       }
     }

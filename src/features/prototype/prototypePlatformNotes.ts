@@ -11,6 +11,7 @@ import {
   PROTOTYPE_ICON_VARIANT_CAPABILITY,
   PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
+import { prototypeZoomTransitionNotes } from "./prototypeZoomTransition";
 import { prototypeIconEffectNotes } from "./prototypeIconEffectNotes";
 import type { PrototypeSpec } from "./prototypeSpec";
 
@@ -18,6 +19,7 @@ export type PrototypePlatformNoteConstruct =
   | "design.fallback"
   | "platformNamespace"
   | "rich-text-links"
+  | "stack.zoom"
   | "stack"
   | "carousel"
   | "node.id"
@@ -226,7 +228,7 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly (PlatformDifference & {
     platform: "ios",
     effect: "substituted",
     detail:
-      "iOS zoom currently falls back to platform push (container zoom is follow-up work). Platform, slide and zoom support interactive edge pop; only the composed sharedAxisX/Y and fadeThrough patterns pop non-interactively. Pattern values and source require prototype_stack_patterns_v1. iOS pops a stack with the left-edge swipe (no system back button chrome); Android uses system Back above depth 1. Explicit stack or push/replace transitions require prototype_stack_transitions_v1. iOS Reduce Motion uses fades; Android animator or transition scale 0 makes transitions instant.",
+      "Platform, slide and zoom support interactive edge pop; only the composed sharedAxisX/Y and fadeThrough patterns pop non-interactively. Pattern values and source require prototype_stack_patterns_v1. iOS pops a stack with the left-edge swipe (no system back button chrome); Android uses system Back above depth 1. Explicit stack or push/replace transitions require prototype_stack_transitions_v1. iOS Reduce Motion uses fades; Android animator or transition scale 0 makes transitions instant.",
     occurrencePath: ({ node, path }) => (node?.type === "stack" ? path : undefined),
   },
   {
@@ -379,6 +381,7 @@ export function prototypePlatformNotes(
   supports: (capability: string) => boolean,
   osMajor?: number,
 ): PrototypePlatformNote[] {
+  const zoomNotes = prototypeZoomTransitionNotes(spec, platform, supports, osMajor);
   const foreign = platform === "android" ? "ios" : "android";
   const paths = prototypePlatformNamespaceFields(spec, foreign);
   const namespaceNotes: PrototypePlatformNote[] = paths.length
@@ -394,7 +397,7 @@ export function prototypePlatformNotes(
       ]
     : [];
   if (platform === "android") {
-    return [...namespaceNotes, ...prototypeIconEffectNotes(spec, platform)];
+    return [...namespaceNotes, ...zoomNotes, ...prototypeIconEffectNotes(spec, platform)];
   }
   const found: Occurrence[] = [];
   occurrences(spec.root, { kind: "ref", name: "node" }, "root", found);
@@ -479,6 +482,7 @@ export function prototypePlatformNotes(
   }
   return [
     ...notes,
+    ...zoomNotes,
     ...menus,
     ...namespaceNotes,
     ...prototypeIconEffectNotes(spec, platform, osMajor),

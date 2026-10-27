@@ -122,24 +122,27 @@ export function prototypeZoomError(
   actions: Located[],
 ): PrototypeValidationError | undefined {
   const stacks = new Map(
-    nodes
-      .filter(({ value }) => value.type === "stack")
-      .map(({ value }) => [value.id, value.transition]),
+    nodes.filter(({ value }) => value.type === "stack").map((stack) => [stack.value.id, stack]),
   );
   for (const { value, path } of actions) {
+    const stack = stacks.get(value.stack);
     if (
-      ["push", "replace"].includes(String(value.type)) &&
-      (value.transition ?? stacks.get(value.stack)) === "zoom" &&
-      (typeof value.source !== "string" ||
-        value.source.includes("{") ||
-        nodes.filter(
-          ({ value: node }) => (record(node.shared)?.key ?? node.sharedKey) === value.source,
-        ).length !== 1)
+      !["push", "replace"].includes(String(value.type)) ||
+      (value.transition ?? stack?.value.transition) !== "zoom"
     ) {
+      continue;
+    }
+    const sources = nodes.filter(
+      ({ value: node }) => (record(node.shared)?.key ?? node.sharedKey) === value.source,
+    );
+    if (typeof value.source !== "string" || value.source.includes("{") || sources.length !== 1) {
       return fail(
         `${path}.source`,
         "zoom requires source to resolve to exactly one sharedKey node",
       );
+    }
+    if (!sources[0]?.path.startsWith(`${stack?.path}.screens[`)) {
+      return fail(`${path}.source`, "zoom source must be inside the target stack's screens");
     }
   }
   return undefined;

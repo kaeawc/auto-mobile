@@ -255,7 +255,7 @@
                     isSource: isVisible
                 )
             } else {
-                barContent
+                barContent.modifier(PrototypeZoomSourceModifier(key: node.resolvedSharedKey))
             }
         }
 
@@ -448,7 +448,7 @@
                     PrototypeChatScrollView(node: node, model: model)
                 }
             case "stack":
-                PrototypeStackView(node: node, model: model)
+                PrototypeZoomStackHost(node: node, model: model)
             case "pager":
                 PagerView(node: node, model: model)
             case "tabBar", "bottomNav":

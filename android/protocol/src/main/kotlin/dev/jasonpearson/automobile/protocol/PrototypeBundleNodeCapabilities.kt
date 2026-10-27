@@ -37,6 +37,7 @@ internal object PrototypeBundleNodeCapabilities {
     fun mark(name: String, used: Boolean) {
       if (used) caps.add("prototype_$name")
     }
+    mark("keyframes_v1", "keyframes" in n)
     mark("semantics_v1", "semantics" in n)
     mark("platform_namespace_v1", "ios" in n || "android" in n)
     mark("window_motion_v1", (n["repeat"] as? JsonObject)?.get("stagger") != null)

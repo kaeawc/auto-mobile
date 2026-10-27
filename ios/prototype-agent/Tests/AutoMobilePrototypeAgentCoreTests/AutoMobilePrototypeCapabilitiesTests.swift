@@ -23,7 +23,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // not through the static list this test reads.
         // no renderer yet, and so do device media items (#14192).
         // Routes are contract-only until navigation and restore semantics ship.
-        let exclusions: Set<String> = [
+        var exclusions: Set<String> = [
             "prototype_network_upload_v1", // Contract only until upload execution ships.
             // Realtime transport, routing and lifecycle remain owed by the runtime slices.
             "prototype_platform_realtime_v1", "prototype_platform_realtime_device_v1",
@@ -38,6 +38,10 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_haptics_v1", "prototype_platform_sound_v1",
             "prototype_platform_media_items_v1",
         ]
+        // Core tests also run on macOS 15/16, where the injected OS-version gate excludes iOS 17 keyframes.
+        if !PrototypeAgentProtocol.advertisedCapabilities().contains("prototype_keyframes_v1") {
+            exclusions.insert("prototype_keyframes_v1")
+        }
         XCTAssertTrue(supported.contains("prototype_lazy_list_v1"))
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")
         XCTAssertTrue(exclusions.isDisjoint(with: supported), "Remove exclusions once supported")

@@ -1,4 +1,5 @@
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
+import { chargeKeyframeNode } from "./prototypeKeyframes";
 import { effectUses } from "./prototypeEffects";
 import { prototypeNodeChildren } from "./prototypeNodeChildren";
 import { PrototypeRepeatData } from "./prototypeData";
@@ -475,6 +476,7 @@ interface Budget {
   images: number;
   effects: number;
   animatedEffects: number;
+  keyframeNodes: number;
 }
 
 /**
@@ -506,15 +508,13 @@ function imageUses(node: Raw): number {
   return items.reduce<number>((sum, item) => sum + imageSlotUses(record(item)?.image), 0);
 }
 
-/** Walks the expanded tree; an overflow inside a template is reported at its `repeat`. */
-function expandedErrors(
+/** Charges one expanded node against every budget; returns the first limit it breaks. */
+function chargeExpandedNode(
   node: Raw,
   path: string,
   budget: Budget,
-  data: PrototypeRepeatData,
-  repeatPath?: string,
+  at: string,
 ): RepeatError | undefined {
-  const at = repeatPath ?? path;
   budget.nodes++;
   if (budget.nodes > contract.limits.MAX_PROTOTYPE_NODES) {
     return fail(at, "Expanded node limit exceeded");
@@ -522,6 +522,10 @@ function expandedErrors(
   budget.images += imageUses(node);
   if (budget.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(at, "Expanded image limit exceeded");
+  }
+  const keyframeLimit = chargeKeyframeNode(node, budget, contract.limits, path);
+  if (keyframeLimit) {
+    return fail(keyframeLimit.path, keyframeLimit.message);
   }
   const effects = effectUses(node);
   budget.effects += effects.total;
@@ -531,6 +535,21 @@ function expandedErrors(
   }
   if (budget.animatedEffects > contract.limits.MAX_PROTOTYPE_ANIMATED_EFFECTS) {
     return fail(at, "Expanded animated effect limit exceeded");
+  }
+  return undefined;
+}
+
+/** Walks the expanded tree; an overflow inside a template is reported at its `repeat`. */
+function expandedErrors(
+  node: Raw,
+  path: string,
+  budget: Budget,
+  data: PrototypeRepeatData,
+  repeatPath?: string,
+): RepeatError | undefined {
+  const overflow = chargeExpandedNode(node, path, budget, repeatPath ?? path);
+  if (overflow) {
+    return overflow;
   }
   const scope = scopeOf(node, path, data);
   const instances = scope && node.type !== "list" ? scope.items.length : 1;
@@ -560,7 +579,7 @@ export function repeatErrors(
     expandedErrors(
       root,
       "root",
-      { nodes: 0, images: 0, effects: 0, animatedEffects: 0 },
+      { nodes: 0, images: 0, effects: 0, animatedEffects: 0, keyframeNodes: 0 },
       data,
       undefined,
     )

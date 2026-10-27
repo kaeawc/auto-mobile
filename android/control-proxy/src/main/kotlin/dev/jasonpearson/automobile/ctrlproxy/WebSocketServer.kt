@@ -396,6 +396,7 @@ class WebSocketServer(
     // In-tree search fields support query edits, search actions and active-key result subtrees.
     add("prototype_search_bar_v1")
     add("prototype_rich_text_v1")
+    add("prototype_keyframes_v1")
     // {data, empty} conditions and style shimmer for loading placeholders (#14207).
     addAll(listOf("prototype_loading_states_v1", "prototype_style_polish_v2"))
     add("prototype_strings_v1")

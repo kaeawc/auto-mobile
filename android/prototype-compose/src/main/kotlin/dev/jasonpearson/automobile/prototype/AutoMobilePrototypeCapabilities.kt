@@ -36,6 +36,7 @@ object AutoMobilePrototype {
       "prototype_flow_grid_v1",
       "prototype_format_v1",
       "prototype_gestures_v1",
+      "prototype_keyframes_v1",
       "prototype_lazy_list_v1",
       "prototype_icon_effects_v1",
       "prototype_linkify_v1",

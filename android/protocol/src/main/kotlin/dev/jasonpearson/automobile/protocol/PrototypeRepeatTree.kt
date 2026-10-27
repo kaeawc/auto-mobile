@@ -20,6 +20,7 @@ internal object PrototypeRepeatTree {
     var images: Int = 0,
     var effects: Int = 0,
     var animatedEffects: Int = 0,
+    var keyframeNodes: Int = 0,
   )
 
   fun childrenOf(node: JsonObject, path: String): List<Child> = buildList {
@@ -164,6 +165,11 @@ internal object PrototypeRepeatTree {
     budget.images += imageUses(node)
     if (budget.images > PrototypeSpecValidator.MAX_PROTOTYPE_IMAGES)
       return fail(at, "Expanded image limit exceeded")
+    if (
+      "keyframes" in node &&
+        ++budget.keyframeNodes > PrototypeSpecValidator.MAX_PROTOTYPE_KEYFRAME_NODES
+    )
+      return fail("$path.keyframes", "Keyframe node limit exceeded")
     PrototypeEffectRules.chargeExpanded(node, at, budget)?.let {
       return it
     }

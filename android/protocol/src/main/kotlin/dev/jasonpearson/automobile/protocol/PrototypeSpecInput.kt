@@ -130,6 +130,7 @@ internal object PrototypeSpecInput {
     val repeats = PrototypeRepeatData((value as? JsonObject)?.get("data") as? JsonObject)
     val error =
       structuralError(value, context)
+        ?: PrototypeKeyframesRules.validate(context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: PrototypeStorageValidation.error(value.jsonObject)
         ?: dataActionErrors(context, value)

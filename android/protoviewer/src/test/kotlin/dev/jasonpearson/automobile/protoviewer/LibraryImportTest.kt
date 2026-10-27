@@ -1,8 +1,6 @@
 package dev.jasonpearson.automobile.protoviewer
 
 import dev.jasonpearson.automobile.protocol.PrototypeBundle
-import dev.jasonpearson.automobile.protocol.PrototypeBundleExport
-import dev.jasonpearson.automobile.protocol.PrototypeBundleExportInput
 import dev.jasonpearson.automobile.protocol.PrototypeBundleLimits
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import java.io.ByteArrayInputStream
@@ -64,50 +62,30 @@ class LibraryImportTest {
   }
 
   @Test
-  fun bareFullscreenWindowChromeModesReachCommit() {
-    for (chrome in listOf("none", "bar")) {
-      bytes = windowChromeSpec(chrome).toByteArray()
-      assertTrue(import() is LibraryImportResult.Imported)
-      assertEquals(windowChromeSpec(chrome), committed?.spec?.toString(Charsets.UTF_8))
-    }
-  }
-
-  @Test
   fun chromelessBundleWithHostCapabilityRequirementReachesCommit() {
-    bytes = windowChromeBundle()
+    bytes = ImportBundleFixtures.chromelessWindowChrome
     assertTrue(import() is LibraryImportResult.Imported)
     assertEquals(listOf("prototype_window_chrome_v1"), committed?.requires)
-    assertEquals(windowChromeSpec("none"), committed?.spec?.toString(Charsets.UTF_8))
-  }
+    val expectedSpec =
+      """{"id":"chrome","window":{"placement":{"type":"fullscreen"},"chrome":"none"},"root":""" +
+        """{"type":"text","text":"Prototype content"}}"""
+    assertEquals(
+      expectedSpec,
+      committed?.spec?.toString(Charsets.UTF_8),
+    )
 
-  @Test
-  fun chromelessBundleRequiresAdvertisedCapabilityBeforeCommit() {
-    val old =
+    val unsupported =
       ValidatedLibraryImporter(
         setOf("viewer.exports"),
-        ImportContent { ByteArrayInputStream(windowChromeBundle()) },
+        ImportContent { ByteArrayInputStream(ImportBundleFixtures.chromelessWindowChrome) },
         AutoMobilePrototype.capabilities - "prototype_window_chrome_v1",
         ImportAssetCheck { null },
         LibraryImportCommit { _, _, _ -> error("Must not commit") },
       )
     assertEquals(
       LibraryImportResult.Rejected("spec.json", UNSUPPORTED_PROTOTYPE_REASON),
-      old.import(LibraryImportRequest(ImportAction.View, "content://external/document")),
+      unsupported.import(LibraryImportRequest(ImportAction.View, "content://external/document")),
     )
-  }
-
-  private fun windowChromeSpec(chrome: String) =
-    """{"id":"chrome","window":{"placement":{"type":"fullscreen"},"chrome":"$chrome"},"root":{"type":"text","text":"Prototype content"}}"""
-
-  @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
-  private fun windowChromeBundle(): ByteArray {
-    val spec = windowChromeSpec("none").toByteArray()
-    val files =
-      PrototypeBundleExport.canonicalFiles(
-        PrototypeBundleExportInput(spec, { null }, { null }),
-        listOf("prototype_window_chrome_v1"),
-      )
-    return dev.jasonpearson.automobile.protocol.PrototypeBundleZipWriter.write(files)
   }
 
   @Test

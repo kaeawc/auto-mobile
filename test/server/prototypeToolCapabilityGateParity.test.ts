@@ -363,6 +363,15 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     asset: { data: "/photo" },
     contentDescription: "Photo",
   }),
+  prototype_platform_media_items_v1: {
+    ...fixture({
+      type: "image",
+      id: "label",
+      asset: { data: "/photo" },
+      contentDescription: "Photo",
+    }),
+    with: ["prototype_data_model_v1"],
+  },
   prototype_platform_test_v1: {
     minimalSpec: {
       ...base,

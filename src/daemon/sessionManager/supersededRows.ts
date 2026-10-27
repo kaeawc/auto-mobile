@@ -23,15 +23,7 @@ export interface SupersededSessionRowsHost {
   readSessionRow(sessionId: string): Promise<DeviceSession | undefined>;
   readonly superseded: Pick<
     SupersededRowReasserts,
-    | "remember"
-    | "expectReassert"
-    | "settle"
-    | "remembered"
-    | "noteRowUnderPendingRelease"
-    | "owe"
-    | "owed"
-    | "drop"
-    | "defer"
+    "remember" | "expectReassert" | "settle" | "remembered" | "owe" | "owed" | "drop" | "defer"
   >;
   isCurrentSession(session: Session): boolean;
   persistSession(
@@ -127,10 +119,6 @@ export class SupersededSessionRows {
       // A session that ended during the write is owed nothing, nor is one revived under its UUID.
       if (this.host.sessions.get(session.sessionId) === session) {
         this.oweSupersededRowReassert(session, supersededReasons);
-      } else {
-        // Unless a non-terminal release ended it: the superseded release's terminal row is then
-        // still in place of that release's.
-        this.restoreNonTerminalRowOverSupersededReleaseLater(session, supersededReasons);
       }
       return false;
     } finally {
@@ -331,8 +319,6 @@ export class SupersededSessionRows {
       this.host.trackReleaseDrainWrite(this.retryTerminalRowAfterRelease(sessionId));
       return;
     }
-    // That release was superseded in turn, and its own rewrite may have landed before this row.
-    await this.reassertSupersededLiveRow(session, [fence.releaseReason]);
   }
 
   /**
@@ -406,116 +392,12 @@ export class SupersededSessionRows {
     }
   }
 
-  /** Not awaited by a release: the restore waits for the release under way to end. */
-  restoreNonTerminalRowOverSupersededReleaseLater(
-    session: Session,
-    supersededReasons: readonly string[],
-  ): void {
-    if (supersededReasons.length > 0) {
-      this.host.trackReleaseDrainWrite(
-        this.restoreNonTerminalRowOverSupersededRelease(session, supersededReasons),
-      );
-    }
-  }
-
   /** The release that removed `session`: the one that finalized, or the one forced in its place. */
   private releaseThatEnded(session: Session): SessionReleaseSnapshot | undefined {
     return (
       this.host.finalizedSessionReleases.get(session)?.finalizedSnapshot ??
       this.host.sessionSlots.getForcedNonTerminal(session)
     );
-  }
-
-  /**
-   * A non-terminal release ended `session` under the terminal row of its own superseded release:
-   * that row landed after the release's (the write was parked, #11206), or its rewrite was still
-   * owed when the session ended (#11557). No terminal release ended the UUID, yet the row would
-   * refuse the name for good and keep a restart from recovering a handed-off session. Only a
-   * live-row write replaces a terminal row, so the row is written as the session held it and then
-   * released again, for the generation that write produced. Never rejects.
-   */
-  async restoreNonTerminalRowOverSupersededRelease(
-    superseded: Session,
-    supersededReasons: readonly string[],
-  ): Promise<void> {
-    supersededReasons = this.host.superseded.remember(superseded, supersededReasons);
-    const sessionId = superseded.sessionId;
-    let session = superseded;
-    const settle = this.host.superseded.expectReassert(sessionId, supersededReasons);
-    try {
-      await this.waitOutReleaseOf(sessionId);
-      await this.waitOutRecreationOf(sessionId);
-      // The name may have been issued and released again since: the row is then written as its
-      // last incarnation held it.
-      session = this.host.sessionSlots.getFinalizedIdentity(sessionId)?.deref() ?? superseded;
-      supersededReasons = [
-        ...new Set([...supersededReasons, ...(this.host.superseded.remembered(session) ?? [])]),
-      ];
-      const ended = this.releaseThatEnded(session);
-      if (
-        !ended ||
-        ended.terminal ||
-        this.host.sessionSlots.hasTerminalSnapshot(sessionId) ||
-        this.host.sessions.has(sessionId)
-      ) {
-        // A terminal release ended the UUID after all, or the name was issued again: that
-        // incarnation's row replaced the terminal one, or the late write's own rewrite does.
-        return;
-      }
-      try {
-        if (!(await this.replaceSupersededReleaseRow(session, supersededReasons))) {
-          return;
-        }
-      } catch (error) {
-        logger.warn(
-          `[SessionManager] Failed to replace the superseded release's terminal row of session ` +
-            `${sessionId}, which a non-terminal release ended: ${errorMessage(error)}`,
-          error,
-        );
-        // Retried with the release's own row, which is written once this one is replaced.
-        const pending: SessionReleaseSnapshot = { ...ended };
-        this.host.captureReleaseRowGeneration(pending, this.host.releaseRowGenerations.get(ended));
-        this.host.superseded.noteRowUnderPendingRelease({
-          session,
-          reasons: supersededReasons,
-          release: pending,
-        });
-        this.host.recordPendingNonTerminalRelease(pending);
-        this.host.scheduleTerminalReleaseRetry(pending);
-        return;
-      }
-    } finally {
-      settle();
-    }
-    await this.restoreNonTerminalRowAfterReassert(session);
-  }
-
-  /**
-   * Write the row of the ended `session` as it held it, over the terminal row of its superseded
-   * release. Resolves false, writing nothing, when the row is no longer that release's, or is
-   * another daemon's session by now. Rejects when the read or the write fails.
-   */
-  async replaceSupersededReleaseRow(
-    session: Session,
-    supersededReasons: readonly string[],
-  ): Promise<boolean> {
-    supersededReasons = [
-      ...new Set([...supersededReasons, ...(this.host.superseded.remembered(session) ?? [])]),
-    ];
-    const row = await this.host.readSessionRow(session.sessionId);
-    if (
-      !row?.release_reason ||
-      !supersededReasons.includes(row.release_reason) ||
-      this.host.isRowOwnedByLivePeer(row)
-    ) {
-      return false;
-    }
-    await this.host.persistSession(
-      session,
-      session,
-      this.supersededRowRewriteOptions(supersededReasons),
-    );
-    return true;
   }
 
   /**

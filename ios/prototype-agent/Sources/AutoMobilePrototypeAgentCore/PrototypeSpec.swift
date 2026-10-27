@@ -89,7 +89,7 @@ struct PrototypeSpec: Decodable {
     let data: [String: JSONValue]?
     let theme: PrototypeTheme?
     /// `none` keeps every visibility and page change instant; `standard` (the default) animates them
-    /// unless the system reduces motion (#10442). See `PrototypeMotion`.
+    /// with spatial effects reduced by the spec or system setting (#10442). See `PrototypeMotion`.
     let motion: String?
     /// The keys the device keeps across shows of this id (#12522); nil without a usable block.
     let storage: PrototypeStorageBlock?
@@ -734,6 +734,7 @@ final class PrototypeNode: Decodable {
     let style: Style?
     let styleWhen: [StyleWhen]?
     let visibleWhen: Condition?
+    let sharedKey: String?
     let enabledWhen: Condition?
     let checks: [PrototypeCheck]?
     let validateOn: PrototypeValidateOn?
@@ -862,7 +863,7 @@ final class PrototypeNode: Decodable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case type, id, testTag, onTap, style, styleWhen, visibleWhen, transition
+        case type, id, testTag, onTap, style, styleWhen, visibleWhen, sharedKey, transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale
         case name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
@@ -890,6 +891,7 @@ final class PrototypeNode: Decodable {
         style = try container.decodeIfPresent(Style.self, forKey: .style)
         styleWhen = try container.decodeIfPresent([StyleWhen].self, forKey: .styleWhen)
         visibleWhen = try container.decodeIfPresent(Condition.self, forKey: .visibleWhen)
+        sharedKey = try container.decodeIfPresent(String.self, forKey: .sharedKey)
         transition = try container.decodeIfPresent(PrototypeTransitionForm.self, forKey: .transition)?.type
         safeAreaPadding = try container.decodeIfPresent(SafeAreaPadding.self, forKey: .safeAreaPadding)
         anchor = try container.decodeIfPresent(PrototypeAnchor.self, forKey: .anchor)

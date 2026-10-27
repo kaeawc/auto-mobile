@@ -149,6 +149,17 @@
         }
     }
 
+    private struct PrototypeSharedNamespaceKey: EnvironmentKey {
+        static let defaultValue: Namespace.ID? = nil
+    }
+
+    extension EnvironmentValues {
+        var prototypeSharedNamespace: Namespace.ID? {
+            get { self[PrototypeSharedNamespaceKey.self] }
+            set { self[PrototypeSharedNamespaceKey.self] = newValue }
+        }
+    }
+
     @MainActor
     struct NodeView: View {
         let node: PrototypeNode
@@ -163,6 +174,7 @@
         var inStackSlot = false
         /// The main axis of the row or column laying this node out, so a `weight` knows what it fills.
         var stackAxis: PrototypeAxis?
+        @Environment(\.prototypeSharedNamespace) private var sharedNamespace
         @FocusState private var controlFocused: Bool
         @Environment(\.pagerContext) private var pager
         @Environment(\.prototypePalette) private var palette
@@ -182,7 +194,7 @@
                 // on the node and the parent drives the animation. No wrapping ZStack: a ZStack places
                 // its child at the size it measured, and a row re-laid out at exactly its ideal width
                 // shares that width out evenly, cutting "Edit"/"Save" short (#10899).
-                validatedContent.transition(transition.swiftUITransition)
+                sharedContent.transition(visibilityTransition)
             } else {
                 // Parents without that filter (a root, a scroll child, a pager page): the conditional
                 // lives in a stable container so the insertion/removal has one whose animation is
@@ -191,11 +203,38 @@
                 // The container passes its parent's proposal through, unlike a ZStack (see above).
                 PrototypeLayeredLayout(alignment: .topLeading) {
                     if isVisible {
-                        validatedContent.transition(transition.swiftUITransition)
+                        sharedContent.transition(visibilityTransition)
                     }
                 }
                 .animation(transition == .instant ? nil : .easeInOut(duration: 0.25), value: isVisible)
             }
+        }
+
+        @ViewBuilder private var sharedContent: some View {
+            let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            let plan = PrototypeSharedElementPlan(
+                node: node,
+                profile: motion.profile,
+                conflictingKeys: node.sharedKey == nil || !motion.spatial ? [] : sharedConflicts
+            )
+            if plan.apply, let key = plan.key, let sharedNamespace {
+                validatedContent.matchedGeometryEffect(id: key, in: sharedNamespace, isSource: isVisible)
+            } else {
+                validatedContent
+            }
+        }
+
+        private var sharedConflicts: Set<String> {
+            guard let root = model.spec?.root else { return [] }
+            return PrototypeSharedElementPlan.conflictingKeys(in: root, holds: model.holds)
+        }
+
+        private var visibilityTransition: AnyTransition {
+            let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            // Explicit transition animation fades filtered children even when parent layout snaps.
+            return motion.fadeOnly && transition != .instant
+                ? transition.swiftUITransition.animation(.easeInOut(duration: 0.25))
+                : transition.swiftUITransition
         }
 
         @ViewBuilder private var validatedContent: some View {
@@ -233,12 +272,13 @@
         }
 
         /// `visibleWhen` uses the node's `transition` (the default for stacks); instant when motion is
-        /// off (spec `motion: "none"` or the system's Reduce Motion), as on Android (#10442).
+        /// off for spec `motion: "none"`; reduced motion preserves fades (#10442).
         private var transition: PrototypeVisibilityTransition {
             let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
             return node.visibleWhen == nil ? .instant : motion.visibility(
                 transition: node.transition,
-                nodeType: node.type
+                nodeType: node.type,
+                shared: node.sharedKey != nil
             )
         }
 
@@ -811,7 +851,7 @@
                 ))
                 .modifier(PrototypeStylePaintModifier(
                     style: style, shape: shape, palette: palette,
-                    shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled
+                    shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial
                 ))
                 .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
                 .opacity(style?.alpha ?? 1)
@@ -1172,7 +1212,7 @@
 
         /// Page changes animate unless spec `motion: "none"` or Reduce Motion is on (#10442).
         private var pageAnimation: Animation? {
-            PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled
+            PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial
                 ? .easeInOut(duration: 0.25) : nil
         }
 

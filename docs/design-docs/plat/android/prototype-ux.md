@@ -60,7 +60,7 @@ blanket focusability proposal).
 | `window`  | Required window configuration below.                                                                                   |
 | `data`    | Optional agent-owned read-only nested JSON object; see Data model.                                                     |
 | `state`   | Optional flat object of string, finite number, or boolean values.                                                      |
-| `motion`  | Optional `none` or `standard` (default). See Motion below.                                                             |
+| `motion`  | Optional `none`, `reduced` or `standard` (default). See Motion below.                                                  |
 | `storage` | Optional `{version, keys}` naming state keys and `/data` pointers the device keeps across shows. See Storage (#12522). |
 | `root`    | Required single node.                                                                                                  |
 
@@ -371,6 +371,7 @@ Every node has required `type`. All other common properties are optional:
 | `styleWhen`          | Conditional style overrides (see Conditional style below). One to 8 entries.                                                                 |
 | `visibleWhen`        | Condition (see Conditions below). A false condition, or a missing key, means hidden.                                                         |
 | `transition`         | Except on stacks (see Stack transitions), optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.            |
+| `sharedKey`          | Optional opaque key naming this `visibleWhen` node as the same element as one other node. See Shared element morphs.                         |
 | `anchor`             | Bounds or app-element anchor below.                                                                                                          |
 | `safeAreaPadding`    | Explicit inset selection below.                                                                                                              |
 
@@ -798,6 +799,66 @@ A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
 motion on it animates with a short spring; with `motion: "none"` or animator
 scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
 
+### Motion profiles (#15115, `prototype_reduced_motion_v1`)
+
+Motion runs in one of three profiles, decided identically on both platforms from the spec's
+`motion` and the system setting:
+
+| Profile   | Chosen when                                                                                                            | Behaviour                                                                                                                                                                                                                                     |
+| --------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `full`    | Neither of the rows below applies.                                                                                     | Every animation described in this section.                                                                                                                                                                                                    |
+| `reduced` | `motion: "reduced"`, or on iOS system Reduce Motion.                                                                   | Spatial animations (slide, expand and shrink, scale, container size, `pressScale`, swipe-row and stack slides, shared element morphs) become crossfades or snap. Loops (shimmer, indeterminate progress) rest. Color and alpha still animate. |
+| `off`     | `motion: "none"`, or on Android animator duration scale 0 or transition animation scale 0 (read from Settings.Global). | Everything is instant.                                                                                                                                                                                                                        |
+
+`none` wins over `reduced`, and a system `off` wins over both. Android has no system reduced
+setting, so there `reduced` comes from the spec alone; both scales are observed while the prototype
+is shown. On iOS the system Reduce Motion setting selects `reduced` rather than `off`, so a Reduce
+Motion run shows crossfades; `motion: "none"` is still fully instant. `motion: "reduced"` needs
+`prototype_reduced_motion_v1`, which the host checks before showing.
+
+### Shared element morphs (#15115, `prototype_shared_element_v1`)
+
+`sharedKey` names two `visibleWhen` nodes as one element, so swapping them morphs the first into
+the second (a list row into a detail card, a thumbnail into a viewer):
+
+```json
+{
+  "state": { "open": false },
+  "root": {
+    "type": "box",
+    "children": [
+      {
+        "type": "row",
+        "sharedKey": "album",
+        "visibleWhen": { "key": "open", "equals": false },
+        "onTap": [{ "type": "setState", "key": "open", "value": true }],
+        "children": [{ "type": "text", "text": "Album" }]
+      },
+      {
+        "type": "card",
+        "sharedKey": "album",
+        "visibleWhen": { "key": "open", "equals": true },
+        "onTap": [{ "type": "setState", "key": "open", "value": false }],
+        "children": [{ "type": "text", "text": "Album" }]
+      }
+    ]
+  }
+}
+```
+
+Rules, enforced by every validator with exact paths: `sharedKey` is a key (same grammar as state
+keys) and is allowed only on a node that also has `visibleWhen`; each key is used by exactly two
+nodes, neither inside the other; a spec has at most 16 distinct keys; keys are rejected on a
+`repeat` node and anywhere inside its template. Shared elements across pager pages and `stack`
+screens are not supported.
+
+Under `full`, bounds, size and crossfaded content animate from one node to the other. Android wraps
+the prototype in a `SharedTransitionLayout` only when a spec has a key and applies `sharedBounds`
+(not `sharedElement`: the two nodes differ in content); the morph runs on the `visibleWhen`
+transition, so it counts in the motion-active signal. Under `reduced` the pair crossfades in place
+and under `off` it swaps instantly. A pair that is visible at the same time does not morph.
+`sharedKey` needs `prototype_shared_element_v1`, which the host checks before showing.
+
 ### Motion-active signal (#15114)
 
 Fades and scales change no node, so two identical hierarchy reads do not prove a
@@ -839,8 +900,8 @@ is validated by both agents, and both advertise the capability.
 
 Android slides enter from the end edge with 30% outgoing parallax, mirrored in RTL; pop and
 popToRoot reverse that direction. Platform replace crossfades. Animations finish within 300 ms.
-`motion: "none"` and animator duration scale 0 snap immediately. The reduced-motion composition
-hook changes slides to crossfades; system preference wiring is deferred to #15115.
+`motion: "none"` and animator duration scale 0 snap immediately. The reduced profile (see Motion
+profiles) changes slides to crossfades.
 
 Activity hosts scrub the pop with predictive back on API 34+, settle on commit, and restore the
 current screen on cancellation. Earlier APIs pop with the ordinary animation. Overlay windows
@@ -2353,7 +2414,7 @@ sweeps the same band (1.2 s, 35% white, clipped to the node's corner shape) over
 "Loading" to VoiceOver with the updates-frequently trait, draws no band under `motion: "none"` or
 Reduce Motion, and rejects shimmer on other node types at the same path.
 
-## Effects (#15128, `prototype_effects_v1`, contract only)
+## Effects (#15128, #15129, `prototype_effects_v1`, not device-verified)
 
 `style.effects` is an array of 1-4 effects drawn in order. The list is closed and data-only: a
 `source` key, `type: "shader"`, a fifth effect, an unknown type and an out-of-range param are each
@@ -2391,13 +2452,54 @@ node-level motion-v2 `animate`) and `phase` 0-1.
   (`Effect limit exceeded`, `Animated effect limit exceeded`); a template inside a `repeat` is
   reported at the `repeat` with the `Expanded` forms of those two messages.
 - **Capability.** Any `effects` list needs `prototype_effects_v1`, checked on `show` and on the full
-  patch result. No CtrlProxy or iOS agent advertises it yet: rendering is tracked by the Android
-  (#15129) and iOS (#15130) render issues, so the host refuses these specs today.
+  patch result. CtrlProxy and the embedded renderer advertise it (#15129); the iOS agent does not yet
+  (#15130), so the host still refuses these specs on iOS.
 
-Decisions left to the renderers, to settle in those issues: what `phase` means for an effect
-without a natural cycle (`noise`, `blur`, `pixelate`, `vignette`, `glow`, `gradientMesh`; the
-contract accepts it everywhere), and the colour-role and `{light, dark}` resolution inside effects
-(they use the same resolver as `style.color`; advertising the capability implies supporting it).
+### Android rendering (#15129)
+
+Compose plus bundled AGSL, in `android/prototype-compose` (`PrototypeEffects*.kt`); the same module
+renders in CtrlProxy and ProtoViewer. No spec carries shader source: the AGSL programs are constants
+in `PrototypeEffectShaders`.
+
+- **Layers.** Distortions (`blur`, `pixelate`, `chromaticAberration`, `wave`, `ripple`) are one
+  chained layer `RenderEffect` around the node's background and content, in authored order, clipped
+  to the node's bounds. `gradientMesh` paints between the background and the content. `shimmer`,
+  `glow`, `vignette` and `noise` paint over the content, clipped to the node's shape, undistorted.
+  Effects sit inside the node, so the host dismiss controls and the node's observe bounds are untouched.
+  A node with a distortion clips anything that overflows its bounds, as the effect itself must not.
+- **API floors and fallback.** Brush-based looks (`shimmer`, `glow`, `vignette`) draw on any API,
+  `blur` needs 31, the AGSL ones 33. Below its floor an effect is omitted and the node renders
+  unshaded. The device reports every omitted effect as `degradedEffects: [{path, type, reason:
+  "api"}]` on the show result and on `inspect_prototypes` (omitted when empty; older hosts see the
+  same frame). `path` is the node's render identity (the `root.child...` key the renderer and
+  `observe` use) plus the authored effect index, `<identity>.style.effects[<i>]`, and follows the
+  `styleWhen` style in force when the reply is built. `reason: "budget"` entries use the same form.
+- **Settled by the renderer (conservative choices).**
+  - `phase` and `animate` move only `shimmer`, `wave` and `ripple`; `noise`, `gradientMesh`,
+    `glow`, `vignette`, `blur`, `pixelate` and `chromaticAberration` are static looks and ignore
+    both (they still count against the limits).
+  - Colours resolve like `style.color`: hex keeps its own alpha, a role comes from the active
+    scheme, a `{light, dark}` pair picks the shown mode; `scrim` is its plain scheme colour.
+  - A `shimmer` band never exceeds 0.5 alpha; with no colour it is white at 0.35. `glow` is an
+    inward edge glow (it never leaves the node), `vignette` defaults to black.
+  - Defaults when omitted: `noise` amount 0.1, grain 1 dp, seed 0, monochrome; `gradientMesh`
+    softness 0.5; `shimmer` angle 20, width 0.3; `glow` radius 12 dp, intensity 0.6; `vignette`
+    intensity 0.4, radius 0.7; `chromaticAberration` offset 2 dp; `wave` and `ripple` amplitude 4 dp,
+    wavelength 48 dp, `ripple` centre `{0.5, 0.5}`.
+- **Time.** An animated effect reads one per-node frame clock (`withFrameNanos`). It does not
+  advance under `motion: "none"`, animator duration scale 0, while the window is not shown, or in
+  direct `PrototypeSpecContent` callers (previews and screenshots), so those keep the authored
+  `phase`. `noise` is seeded from `seed` alone.
+- **Frame budget.** If a node's frame interval stays above 32 ms for 30 frames in a row the node
+  freezes its phase and `inspect_prototypes` lists its animated effects with reason `budget`. The
+  guard times the window's frames, not the effect's own cost, so a slow GPU (the `-gpu swiftshader`
+  CI emulators) freezes animated effects; the entry clears when a patch or show replaces the node.
+  Decision on the open question: no new `prototype_event` kind (that closed list is a contract change
+  shared with the TS host and iOS), so a frozen effect is visible on the next `inspect`, not pushed.
+  ProtoViewer shows no note when it degrades an effect; that stays an open follow-up.
+- **Owed device checks.** Goldens on API 30, 33 and 36 (`effects_all_types`, pending in
+  `PrototypeSpecContentScreenshotTest`), and a real-GPU look at the AGSL effects. Robolectric covers
+  decoding, API planning, the clock and budget on fakes, and bounds stability.
 
 ## Charts (#14209, not device-verified)
 

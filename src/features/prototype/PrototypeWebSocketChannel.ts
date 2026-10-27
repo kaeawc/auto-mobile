@@ -115,6 +115,8 @@ export class PrototypeWebSocketChannel implements PrototypeChannelHandle {
   private isOpen = false;
   private awaitingPong = false;
   private handshakeTimer: NodeJS.Timeout | undefined;
+  /** Aborted when the handshake deadline passes, which also ends a stalled resolution. */
+  private readonly deadline = new AbortController();
   private pingTimer: NodeJS.Timeout | undefined;
   private readonly sink: PrototypeChannelSink;
 
@@ -136,11 +138,16 @@ export class PrototypeWebSocketChannel implements PrototypeChannelHandle {
       this.fail(problem);
       return;
     }
+    // The deadline covers resolution as well as the upgrade, so a stalled lookup cannot hold the slot.
+    this.handshakeTimer = this.timer.setTimeout(() => {
+      this.deadline.abort();
+      this.fail({ code: "timeout", message: "The WebSocket handshake timed out." });
+    }, DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS);
     try {
       const pinned = await pinPrototypeDestination(
         new URL(this.request.url),
         this.pinning,
-        this.signal,
+        AbortSignal.any([this.signal, this.deadline.signal]),
       );
       if (this.signal.aborted || this.guarded.isClosed()) {
         return;
@@ -151,7 +158,7 @@ export class PrototypeWebSocketChannel implements PrototypeChannelHandle {
       }
       this.connect(pinned);
     } catch (error) {
-      if (!this.signal.aborted) {
+      if (!this.signal.aborted && !this.deadline.signal.aborted) {
         logger.warn(`[PrototypeChannel] websocket could not start: ${errorMessage(error)}`, error);
         this.fail({ code: "network", message: "The connection could not be started." });
       }
@@ -179,9 +186,6 @@ export class PrototypeWebSocketChannel implements PrototypeChannelHandle {
   }
 
   private connect(pinned: ResolvedHostAddress): void {
-    this.handshakeTimer = this.timer.setTimeout(() => {
-      this.fail({ code: "timeout", message: "The WebSocket handshake timed out." });
-    }, DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS);
     this.socket = this.socketFactory(
       {
         url: this.request.url,

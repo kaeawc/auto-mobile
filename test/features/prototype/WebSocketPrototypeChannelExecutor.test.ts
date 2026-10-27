@@ -141,6 +141,24 @@ describe("WebSocketPrototypeChannelExecutor", () => {
     expect(sockets.last.terminated).toBe(true);
   });
 
+  test("a resolver that never answers times out and frees the channel without a socket", async () => {
+    const { timer, sockets, sink, controller } = setup();
+    const executor = new WebSocketPrototypeChannelExecutor({
+      timer,
+      socketFactory: sockets.factory,
+      resolver: () => new Promise(() => {}),
+    });
+    executor.open(request, sink, controller.signal);
+    await settle();
+    expect(sink.closes).toEqual([]);
+    timer.advanceTime(DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS);
+    await settle();
+    expect(sink.closes).toHaveLength(1);
+    expect(sink.closes[0]?.error?.code).toBe("timeout");
+    expect(sockets.sockets).toEqual([]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("opening disarms the handshake timeout", async () => {
     const { timer, sockets, sink, open } = setup();
     await open();

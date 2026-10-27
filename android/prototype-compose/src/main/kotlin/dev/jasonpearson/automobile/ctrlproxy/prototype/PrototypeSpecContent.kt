@@ -244,21 +244,21 @@ private fun prototypeContentLocals(
   gestureTaps: PrototypeGestureTaps,
 ): Array<ProvidedValue<*>> =
   arrayOf(
-      LocalPrototypeListEndTriggers provides
-        (LocalPrototypeListEndTriggers.current
-          ?: remember(LocalPrototypeShowEpoch.current) { PrototypeListEndTriggers() }),
-      LocalPrototypeScrollOffsets provides scrollOffsets,
-      LocalPrototypeBarScroll provides rememberPrototypeBarScroll(root),
-      LocalPrototypeAnchorLocals provides anchorLocals,
-      LocalPrototypeShaderSession provides
-        (LocalPrototypeShaderSession.current ?: remember { PrototypeShaderSession() }),
-      LocalPrototypeGestureTaps provides gestureTaps,
-      LocalPrototypeMenuLayers provides menuLayers,
-      LocalPrototypeDrawerLayers provides remember { PrototypeDrawerLayers() },
-      LocalPrototypeTooltipTargets provides remember(root) { prototypeTooltipTargets(root) },
-      LocalPrototypeTargetFocus provides remember { mutableMapOf() },
-      LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
-      LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
+    LocalPrototypeListEndTriggers provides
+      (LocalPrototypeListEndTriggers.current
+        ?: remember(LocalPrototypeShowEpoch.current) { PrototypeListEndTriggers() }),
+    LocalPrototypeScrollOffsets provides scrollOffsets,
+    LocalPrototypeBarScroll provides rememberPrototypeBarScroll(root),
+    LocalPrototypeAnchorLocals provides anchorLocals,
+    LocalPrototypeShaderSession provides
+      (LocalPrototypeShaderSession.current ?: remember { PrototypeShaderSession() }),
+    LocalPrototypeGestureTaps provides gestureTaps,
+    LocalPrototypeMenuLayers provides menuLayers,
+    LocalPrototypeDrawerLayers provides remember { PrototypeDrawerLayers() },
+    LocalPrototypeTooltipTargets provides remember(root) { prototypeTooltipTargets(root) },
+    LocalPrototypeTargetFocus provides remember { mutableMapOf() },
+    LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
+    LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
   )
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -272,54 +272,54 @@ fun PrototypeSpecContent(
 ) {
   PrototypeTheme(root, theme) {
     PrototypeSharedRoot(root) {
-    val gestureTaps = remember { PrototypeGestureTaps() }
-    val density = LocalDensity.current.density
-    val currentInteract = rememberUpdatedState(interact)
-    val scrollOffsets = remember { PrototypeScrollOffsets() }
-    scrollOffsets.targets = remember(root) { prototypeScrollTargets(root) }
-    val anchorLocals = remember { PrototypeAnchorLocals() }
-    val menuLayers = remember { PrototypeMenuLayers() }
-    val menuParents = remember(root) { prototypeMenuParents(root) }
-    CompositionLocalProvider(
-      *prototypeContentLocals(root, scrollOffsets, anchorLocals, menuLayers, gestureTaps)
-    ) {
-      PrototypeShaderFrameSampling(checkNotNull(LocalPrototypeShaderSession.current))
-      Box(
-        Modifier.then(
-            if (deadTaps)
-              Modifier.prototypeDeadTapObserver(gestureTaps, density) {
-                currentInteract.value(it)
-              }
-            else Modifier,
-          )
-          .onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
-          .semantics { testTagsAsResourceId = true },
+      val gestureTaps = remember { PrototypeGestureTaps() }
+      val density = LocalDensity.current.density
+      val currentInteract = rememberUpdatedState(interact)
+      val scrollOffsets = remember { PrototypeScrollOffsets() }
+      scrollOffsets.targets = remember(root) { prototypeScrollTargets(root) }
+      val anchorLocals = remember { PrototypeAnchorLocals() }
+      val menuLayers = remember { PrototypeMenuLayers() }
+      val menuParents = remember(root) { prototypeMenuParents(root) }
+      CompositionLocalProvider(
+        *prototypeContentLocals(root, scrollOffsets, anchorLocals, menuLayers, gestureTaps),
       ) {
-        val modals = prototypeModalLayers(root)
-        PrototypeModalPage(modals) {
-          RenderPrototypeNode(root, interact, windowRoot = true)
-          PrototypeAnchorLayer(remember(root) { layeredPrototypeAnchors(root) }, interact)
-        }
-        modals.forEach { node ->
-          key(node.identity) {
-            if (node.role == "menu") {
-              val parent = menuParents[node.identity]
-              RenderPrototypeMenu(
-                node,
-                Modifier.prototypeShader(node).then(prototypeNodeModifier(node, interact)),
-                parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
+        PrototypeShaderFrameSampling(checkNotNull(LocalPrototypeShaderSession.current))
+        Box(
+          Modifier.then(
+              if (deadTaps)
+                Modifier.prototypeDeadTapObserver(gestureTaps, density) {
+                  currentInteract.value(it)
+                }
+              else Modifier,
+            )
+            .onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
+            .semantics { testTagsAsResourceId = true },
+        ) {
+          val modals = prototypeModalLayers(root)
+          PrototypeModalPage(modals) {
+            RenderPrototypeNode(root, interact, windowRoot = true)
+            PrototypeAnchorLayer(remember(root) { layeredPrototypeAnchors(root) }, interact)
+          }
+          modals.forEach { node ->
+            key(node.identity) {
+              if (node.role == "menu") {
+                val parent = menuParents[node.identity]
+                RenderPrototypeMenu(
+                  node,
+                  Modifier.prototypeShader(node).then(prototypeNodeModifier(node, interact)),
+                  parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
+                  interact,
+                )
+              } else RenderPrototypeModal(node, interact)
+              PrototypeAnchorLayer(
+                remember(node) { layeredPrototypeAnchorsIn(node.children) },
                 interact,
               )
-            } else RenderPrototypeModal(node, interact)
-            PrototypeAnchorLayer(
-              remember(node) { layeredPrototypeAnchorsIn(node.children) },
-              interact,
-            )
+            }
           }
+          PrototypeExpandedSelect(root, modals, menuLayers, interact)
         }
-        PrototypeExpandedSelect(root, modals, menuLayers, interact)
       }
-    }
     }
   }
 }

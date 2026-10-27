@@ -292,14 +292,14 @@ internal object PrototypeStrictPolicy {
     }
 
     private fun skipsScan(key: String, type: String): Boolean =
-      key == "payload" || (key == "value" && type !in listOf("setData", "appendData", "prependData"))
+      key == "payload" ||
+        (key == "value" && type !in listOf("setData", "appendData", "prependData"))
 
     // An effect's own `animate`, colours and params are not spec features of their own.
     private fun descend(key: String, child: JsonElement) {
       when {
         key == "linkify" -> (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap") }
-        key !in listOf("series", "effects", "scrollLinked", "scrollTransition") ->
-          scan(child, key)
+        key !in listOf("series", "effects", "scrollLinked", "scrollTransition") -> scan(child, key)
       }
     }
 
@@ -377,7 +377,9 @@ private object PrototypeMotionFeatures {
     ((child as? JsonObject)?.get("type") ?: child).let { (it as? JsonPrimitive)?.content }
 }
 
-/** The feature names a spec envelope (not its nodes) asks for, in the strict policy's vocabulary. */
+/**
+ * The feature names a spec envelope (not its nodes) asks for, in the strict policy's vocabulary.
+ */
 internal object PrototypeEnvelopeFeatures {
   fun collect(spec: JsonObject): List<String> = buildList {
     content(spec)

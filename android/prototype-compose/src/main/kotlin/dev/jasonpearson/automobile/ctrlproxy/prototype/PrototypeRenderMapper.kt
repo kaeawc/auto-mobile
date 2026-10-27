@@ -136,7 +136,10 @@ internal class PrototypeRenderMapper(
       sourceLocales == locales &&
       sourcePlatform == platform
 
-  /** Called only under [lock]; state writes preserve authored root, data, locale and platform identities. */
+  /**
+   * Called only under [lock]; state writes preserve authored root, data, locale and platform
+   * identities.
+   */
   private fun resolveLocked(
     spec: PrototypeSpec,
     platform: JsonObject?,

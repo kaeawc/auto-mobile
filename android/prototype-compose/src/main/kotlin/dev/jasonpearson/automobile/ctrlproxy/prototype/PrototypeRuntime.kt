@@ -150,6 +150,7 @@ class PrototypeRuntime(
   private val clock: () -> Long = System::currentTimeMillis,
   private val nextSequence: () -> Long,
   private val requestDismiss: suspend () -> Boolean = { true },
+  private val beforeDismiss: (PrototypeDismissReason) -> Unit = {},
   previousPages: Map<String, Int> = emptyMap(),
   initialRevision: Long = 0L,
   private val nextRevision: (() -> Long)? = null,
@@ -978,6 +979,7 @@ class PrototypeRuntime(
   suspend fun dismiss(reason: PrototypeDismissReason = PrototypeDismissReason.USER) =
     withContext(NonCancellable) {
       if (!current.active) return@withContext
+      beforeDismiss(reason)
       check(requestDismiss()) { "Prototype host failed to dismiss window" }
       finishDismissal(reason)
     }

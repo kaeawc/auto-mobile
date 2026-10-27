@@ -73,6 +73,11 @@ export interface PrototypeEventState {
   context?: PrototypeEvent["context"];
   contextTruncated?: true;
 }
+/** The device-reported feedback log of an adopted prototype, copied so the report stays untouched. */
+function adoptedFeedbackLog(prototype: AdoptedPrototype): Pick<PrototypeLastResult, "feedbackLog"> {
+  return prototype.feedbackLog ? { feedbackLog: structuredClone(prototype.feedbackLog) } : {};
+}
+
 export interface AdoptedPrototype {
   data?: PrototypeData;
   id: string;
@@ -273,7 +278,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
       ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
       ...(prototype.timers ? { timers: structuredClone(prototype.timers) } : {}),
-      ...(prototype.feedbackLog ? { feedbackLog: structuredClone(prototype.feedbackLog) } : {}),
+      ...adoptedFeedbackLog(prototype),
       success: true,
       timestamp: this.clock.now(),
     };

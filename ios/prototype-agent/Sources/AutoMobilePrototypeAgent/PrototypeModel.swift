@@ -145,7 +145,12 @@
         @ObservationIgnored private lazy var platformDriver: PrototypePlatformDriver = {
             let driver = PrototypePlatformDriver(registry: platformRegistry, clock: clock)
             driver.onComplete = { [weak self] id, result, duration in
-                self?.apply(activity: false) { $0.completePlatformCall(id, result, durationMs: duration, atMs: self?.clock.nowMilliseconds ?? 0) }
+                self?.apply(activity: false) { $0.completePlatformCall(
+                    id,
+                    result,
+                    durationMs: duration,
+                    atMs: self?.clock.nowMilliseconds ?? 0
+                ) }
             }
             driver.onState = { [weak self] snapshot in self?.updatePlatformState(snapshot) }
             driver.onEvent = { [weak self] event in

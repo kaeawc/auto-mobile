@@ -20,6 +20,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // modal motion (#15113) is Android-only (iOS is #14684). The haptics and sound platform
         // modules (#14329) are advertised through the platform registry the agent builds at launch,
         // not through the static list this test reads.
+        // no renderer yet, and so do device media items (#14192).
         let exclusions: Set<String> = [
             "prototype_platform_test_v1", "prototype_platform_namespace_v1",
             // #15131: custom AGSL shaders are Android-only by owner decision.
@@ -27,6 +28,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_motion_v2", "prototype_choreography_v1",
             "prototype_window_motion_v1",
             "prototype_platform_haptics_v1", "prototype_platform_sound_v1",
+            "prototype_platform_media_items_v1",
         ]
         XCTAssertTrue(supported.contains("prototype_lazy_list_v1"))
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")

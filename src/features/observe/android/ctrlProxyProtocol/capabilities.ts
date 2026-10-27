@@ -113,6 +113,12 @@ export const PROTOTYPE_STRING_CONDITIONS_CAPABILITY = "prototype_string_conditio
  * field and draw a plain window, so the host refuses the show.
  */
 export const PROTOTYPE_BACKDROP_CAPABILITY = "prototype_backdrop_v1";
+/**
+ * Spec-language gate (#14192): an `image` `asset` (or tab item `image`) of the form
+ * `{data: "/pointer"}` resolving to a device media item id. Not a platform module, so it needs no
+ * `requires.platform` entry.
+ */
+export const PROTOTYPE_MEDIA_ITEMS_CAPABILITY = "prototype_platform_media_items_v1";
 /** Node `animate`, style `scale`/`rotation`, horizontal and scale transitions, zoomable images (#14208). */
 export const PROTOTYPE_WINDOW_MOTION_CAPABILITY = "prototype_window_motion_v1";
 export const PROTOTYPE_MOTION_V2_CAPABILITY = "prototype_motion_v2";

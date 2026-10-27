@@ -16,7 +16,7 @@ import { rootAsyncScope } from "./inProcessMcpDispatcher";
 import { parseMcpTrace, withMcpTrace } from "./mcpTraceContext";
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import { readMcpSessionKey } from "./mcpSessionKey";
-import { ListChangedBroadcaster } from "./listChangedBroadcast";
+import { ModernMcpEventBridge } from "./ModernMcpEventBridge";
 import type { ExecutionCancellationReason } from "./executionTracker";
 import { describeUnknownError, errorMessage } from "../utils/describeUnknownError";
 import type { IdGenerator } from "../utils/IdGenerator";
@@ -255,7 +255,7 @@ export class StatelessMcpHttpEndpoint<
   private readonly byCancelKey = new Map<string, string[]>();
   private accepting = true;
   private modernBus?: ServerEventBus;
-  private unsubscribeModernEvents?: () => void;
+  private modernEvents?: ModernMcpEventBridge;
   /** Handed to the handler's factory once; cleared there so a long-lived task does not pin `req`. */
   private modernListenStreams = 0;
   private readonly modernScope = new AsyncLocalStorage<{
@@ -402,21 +402,8 @@ export class StatelessMcpHttpEndpoint<
     );
   }
 
-  /** The SDK owns modern protocol serving; this endpoint still owns request lifetime. */
-  private async handleModern(
-    req: Req,
-    res: Res,
-    parsedBody: unknown,
-    scope: StatelessMcpRequestScope,
-    headerSessionKey: string | undefined,
-    sendJsonRpcError: (message: string, error?: unknown) => void,
-  ): Promise<void> {
-    const slot = this.openListenSlot(parsedBody, res);
-    if (!slot) {
-      return;
-    }
-    const controller = new AbortController();
-    const handler = (this.deps.modern?.createHandler ?? createMcpHandler)(
+  private createModernHandler(bus: ServerEventBus): Pick<McpHttpHandler, "fetch" | "close"> {
+    return (this.deps.modern?.createHandler ?? createMcpHandler)(
       (ctx) => {
         const current = this.modernScope.getStore();
         const { req: scopedReq, scope: scopedScope } = current ?? {};
@@ -431,11 +418,37 @@ export class StatelessMcpHttpEndpoint<
         }
         return server;
       },
-      { legacy: "reject", responseMode: "sse", keepAliveMs: 0, bus: this.getModernBus() },
+      { legacy: "reject", responseMode: "sse", keepAliveMs: 0, bus },
     );
+  }
+
+  /** The SDK owns modern protocol serving; this endpoint still owns request lifetime. */
+  private async handleModern(
+    req: Req,
+    res: Res,
+    parsedBody: unknown,
+    scope: StatelessMcpRequestScope,
+    headerSessionKey: string | undefined,
+    sendJsonRpcError: (message: string, error?: unknown) => void,
+  ): Promise<void> {
+    const bus = this.getModernBus();
+    const slot = this.openListenSlot(parsedBody, res);
+    if (!slot) {
+      return;
+    }
+    const controller = new AbortController();
+    let handler: ReturnType<typeof this.createModernHandler>;
+    try {
+      handler = this.createModernHandler(bus);
+    } catch (error) {
+      // The slot was reserved before the handler existed; nothing else would release it.
+      slot.release();
+      throw error;
+    }
     const request = this.track(scope, headerSessionKey, parsedBody, handler, {
       close: async () => {
         controller.abort();
+        slot.release();
       },
     });
     const socket = req.socket ?? undefined;
@@ -465,7 +478,6 @@ export class StatelessMcpHttpEndpoint<
       logger.error("Modern MCP HTTP request handling failed:", error);
       sendJsonRpcError("Server error", error);
     } finally {
-      slot.release();
       clearKeepalive();
       socket?.off("close", close);
       await request.close();
@@ -483,15 +495,22 @@ export class StatelessMcpHttpEndpoint<
     if (!listening) {
       return { release: () => {} };
     }
-    if (
-      this.modernListenStreams >= (this.deps.modern?.maxListenStreams ?? MAX_MODERN_LISTEN_STREAMS)
-    ) {
+    const releaseResources =
+      this.modernListenStreams < (this.deps.modern?.maxListenStreams ?? MAX_MODERN_LISTEN_STREAMS)
+        ? this.modernEvents?.track(parsedBody)
+        : undefined;
+    if (!releaseResources) {
       res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "5" });
-      res.end(JSON.stringify({ error: "Too many open subscription streams" }));
+      res.end(JSON.stringify({ error: "Subscription stream or resource URI limit reached" }));
       return null;
     }
     this.modernListenStreams++;
-    return { release: () => void this.modernListenStreams-- };
+    return {
+      release: () => {
+        releaseResources();
+        this.modernListenStreams--;
+      },
+    };
   }
 
   private getModernBus(): ServerEventBus {
@@ -502,17 +521,15 @@ export class StatelessMcpHttpEndpoint<
           logger.warn(`Modern MCP event listener failed: ${errorMessage(error)}`, error),
         );
       this.modernBus = bus;
-      this.unsubscribeModernEvents = ListChangedBroadcaster.subscribe((kind) => {
-        bus.publish({ kind: kind === "tools" ? "tools_list_changed" : "resources_list_changed" });
-      });
+      this.modernEvents = new ModernMcpEventBridge(bus);
     }
     return this.modernBus;
   }
 
   private releaseModernEventsIfIdle(): void {
     if (!this.accepting && this.inFlight.size === 0) {
-      this.unsubscribeModernEvents?.();
-      this.unsubscribeModernEvents = undefined;
+      this.modernEvents?.close();
+      this.modernEvents = undefined;
       this.modernBus = undefined;
     }
   }

@@ -177,6 +177,8 @@ export const nodeModelOptions = {
       "anchor",
       "safeAreaPadding",
       "span",
+      "scrollTransition",
+      "scrollLinked",
     ],
     docs: {
       contentDescription:

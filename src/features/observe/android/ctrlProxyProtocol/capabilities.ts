@@ -117,6 +117,7 @@ export const PROTOTYPE_CHART_CAPABILITY = "prototype_chart_v1";
 export const PROTOTYPE_CHAT_SCROLL_CAPABILITY = "prototype_chat_scroll_v1";
 
 /** Runs long-press and double-tap action lists on generic prototype gesture nodes. */
+export const PROTOTYPE_SCROLL_MOTION_CAPABILITY = "prototype_scroll_motion_v1";
 export const PROTOTYPE_GESTURES_CAPABILITY = "prototype_gestures_v1";
 
 /** Draws `swipeActions` on a row or listItem and exposes them as accessibility actions. */

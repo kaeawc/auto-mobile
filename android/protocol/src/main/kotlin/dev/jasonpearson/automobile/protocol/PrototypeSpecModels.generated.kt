@@ -255,6 +255,11 @@ sealed class PrototypeNode {
   abstract val anchor: PrototypeAnchor?
   abstract val safeAreaPadding: PrototypeSafeAreaPadding?
   abstract val span: Int?
+  open val scrollTransition: PrototypeScrollTransition?
+    get() = null
+
+  open val scrollLinked: PrototypeScrollLinked?
+    get() = null
 }
 
 @SerialName("box")
@@ -276,6 +281,8 @@ data class PrototypeBoxNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
   /** Spaces the enters of `visibleWhen` children apart (#15247). */
@@ -301,6 +308,8 @@ data class PrototypeRowNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val swipeActions: PrototypeSwipeActions? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
@@ -327,6 +336,8 @@ data class PrototypeColumnNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
   /** Spaces the enters of `visibleWhen` children apart (#15247). */
@@ -350,6 +361,8 @@ data class PrototypeFlowNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
   val maxLines: Int? = null,
@@ -372,6 +385,8 @@ data class PrototypeGridNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
   val columns: PrototypeGridColumns,
@@ -399,6 +414,8 @@ data class PrototypeCarouselNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
   val variant: String? = null,
@@ -425,6 +442,8 @@ data class PrototypeTextNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val text: String? = null,
   val spans: List<PrototypeTextSpan>? = null,
   /** Mentions, hashtags and URLs in [text] as links (`prototype_linkify_v1`, #14233). */
@@ -450,6 +469,8 @@ data class PrototypeImageNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   /** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
   val asset: PrototypeModeValue,
   val contentScale: String = "fit",
@@ -477,6 +498,8 @@ data class PrototypeIconNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val name: String,
   /** One of filled (default), outlined, rounded, sharp, twoTone; closed by the contract. */
   val variant: String? = null,
@@ -499,6 +522,8 @@ data class PrototypeSpacerNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
 ) : PrototypeNode()
 
 @SerialName("textField")
@@ -518,6 +543,8 @@ data class PrototypeTextFieldNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val stateKey: String,
   val placeholder: String? = null,
   val label: String? = null,
@@ -557,6 +584,8 @@ data class PrototypeSwitchNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val stateKey: String,
   val label: String? = null,
   val checks: List<PrototypeCheck>? = null,
@@ -581,6 +610,8 @@ data class PrototypeCheckboxNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val stateKey: String,
   val label: String? = null,
   val checks: List<PrototypeCheck>? = null,
@@ -605,6 +636,8 @@ data class PrototypeButtonNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val label: String,
   val variant: String = "filled",
   val icon: String? = null,
@@ -628,6 +661,8 @@ data class PrototypeRadioGroupNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
   val checks: List<PrototypeCheck>? = null,
@@ -652,6 +687,8 @@ data class PrototypeSelectNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
   val label: String? = null,
@@ -674,6 +711,8 @@ data class PrototypeListItemNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val headline: String,
   val supporting: String? = null,
   val leadingIcon: String? = null,
@@ -699,6 +738,8 @@ data class PrototypeSliderNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val stateKey: String,
   val label: String? = null,
   val min: Double,
@@ -726,6 +767,8 @@ data class PrototypeChipNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val label: String,
   val variant: String? = null,
   val stateKey: String? = null,
@@ -751,6 +794,8 @@ data class PrototypeCardNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val variant: String = "filled",
   val children: List<PrototypeNode>,
 ) : PrototypeNode()
@@ -773,6 +818,8 @@ data class PrototypeIconButtonNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val icon: String,
   val variant: String = "standard",
   val enabledWhen: PrototypeCondition? = null,
@@ -796,6 +843,8 @@ data class PrototypeFabNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val icon: String,
   val label: String? = null,
   val size: String = "regular",
@@ -820,6 +869,8 @@ data class PrototypeSegmentedButtonNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
 ) : PrototypeNode()
@@ -842,6 +893,8 @@ data class PrototypeTopAppBarNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val title: String,
   val variant: String = "small",
   val navigationIcon: PrototypeAppBarAction? = null,
@@ -866,6 +919,8 @@ data class PrototypeDividerNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val orientation: String = "horizontal",
 ) : PrototypeNode()
 
@@ -887,6 +942,8 @@ data class PrototypeBadgeNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val text: String? = null,
 ) : PrototypeNode()
 
@@ -911,6 +968,8 @@ data class PrototypeProgressNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val variant: String = "linear",
   val stateKey: String? = null,
   val max: Double? = null,
@@ -937,6 +996,8 @@ data class PrototypeDialogNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val openWhen: PrototypeSheetCondition,
   val title: String? = null,
   val text: String? = null,
@@ -963,6 +1024,8 @@ data class PrototypeMenuNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val openWhen: PrototypeSheetCondition,
   val items: List<PrototypeMenuItem>,
 ) : PrototypeNode()
@@ -989,6 +1052,8 @@ data class PrototypeSnackbarNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val openWhen: PrototypeSheetCondition,
   val text: String,
   val action: PrototypeDialogButton? = null,
@@ -1013,6 +1078,8 @@ data class PrototypeTimePickerNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val hourKey: String,
   val minuteKey: String,
   val is24Hour: Boolean? = null,
@@ -1039,6 +1106,8 @@ data class PrototypeDatePickerNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val stateKey: String,
   val checks: List<PrototypeCheck>? = null,
   val validateOn: PrototypeValidateOn? = null,
@@ -1062,6 +1131,8 @@ data class PrototypeScrollNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val axis: String = "vertical",
   val refresh: PrototypeScrollRefresh? = null,
   /** Chat lists (`prototype_chat_scroll_v1`, #14232): anchored at the end of its content. */
@@ -1093,6 +1164,8 @@ data class PrototypePagerNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val children: List<PrototypeNode>,
   val axis: String? = null,
   val pageSpacing: Double? = null,
@@ -1119,6 +1192,8 @@ data class PrototypeTabBarNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val items: List<PrototypeItem>,
   val pager: String? = null,
   val stateKey: String? = null,
@@ -1142,6 +1217,8 @@ data class PrototypeBottomNavNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val items: List<PrototypeItem>,
   val pager: String? = null,
   val stateKey: String? = null,
@@ -1164,6 +1241,8 @@ data class PrototypeBottomSheetNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val child: PrototypeNode,
   val openWhen: PrototypeSheetCondition,
   val detents: List<PrototypeDetent>,
@@ -1189,6 +1268,8 @@ data class PrototypeSearchBarNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val stateKey: String,
   val placeholder: String? = null,
   val leadingIcon: String? = null,
@@ -1216,6 +1297,8 @@ data class PrototypeStackNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val start: String,
   val screens: Map<String, PrototypeNode>,
 ) : PrototypeNode()
@@ -1242,6 +1325,8 @@ data class PrototypeChartNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
   val variant: String,
   val series: List<PrototypeChartSeries>,
   val yRange: PrototypeChartRange? = null,
@@ -1321,6 +1406,30 @@ data class PrototypeListNode(
   val endThreshold: Int = 3,
   val maxItems: Int? = null,
 ) : PrototypeNode()
+
+@Serializable
+data class PrototypeScrollEdge(
+  val scale: Double? = null,
+  val alpha: Double? = null,
+  val rotation: Double? = null,
+)
+
+@Serializable
+data class PrototypeScrollTransition(
+  val axis: String,
+  val edge: PrototypeScrollEdge,
+)
+
+@Serializable
+data class PrototypeScrollLinked(
+  val source: String,
+  val range: List<Double>,
+  val alpha: List<Double>? = null,
+  val scale: List<Double>? = null,
+  val offsetY: List<Double>? = null,
+  val offsetX: List<Double>? = null,
+  val blur: List<Double>? = null,
+)
 
 @Serializable
 data class PrototypeOffset(

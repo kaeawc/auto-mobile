@@ -4,6 +4,7 @@ import {
   prototypeStylePolishV2UnsupportedMessage,
 } from "./prototypeStylePolishV2";
 import { PROTOTYPE_STYLE_POLISH_V2_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { prototypeScrollMotionFields } from "./prototypeScrollMotion";
 import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
 import {
   prototypeFormatFields,
@@ -24,6 +25,7 @@ import {
   PROTOTYPE_DATA_MODEL_CAPABILITY,
   PROTOTYPE_FLOW_GRID_CAPABILITY,
   PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
+  PROTOTYPE_SCROLL_MOTION_CAPABILITY,
   PROTOTYPE_GESTURES_CAPABILITY,
   PROTOTYPE_SWIPE_ACTIONS_CAPABILITY,
   PROTOTYPE_TEXT_FIELD_ACTIONS_CAPABILITY,
@@ -191,6 +193,12 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_STRING_CONDITIONS_CAPABILITY,
     fields: prototypeStringConditionsFields,
     unsupportedMessage: prototypeStringConditionsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_SCROLL_MOTION_CAPABILITY,
+    fields: prototypeScrollMotionFields,
+    unsupportedMessage: (fields, platform) =>
+      `The connected ${platform} renderer does not advertise prototype_scroll_motion_v1 required by ${fields[0]}. Nothing was shown. Update the renderer or remove scroll motion.`,
   },
   {
     capability: PROTOTYPE_THEME_MODES_CAPABILITY,

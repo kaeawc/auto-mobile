@@ -4813,6 +4813,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -4901,6 +4913,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -5005,6 +5029,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -5163,6 +5199,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -5263,6 +5311,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -5397,6 +5457,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -5491,6 +5563,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -5611,6 +5695,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -5727,6 +5823,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -5839,6 +5947,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -5965,6 +6085,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -6065,6 +6197,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -7521,6 +7665,70 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeScrollEdge": [
+      {
+        "name": "scale",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "alpha",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "rotation",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeScrollLinked": [
+      {
+        "name": "source",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "range",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "alpha",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scale",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "offsetY",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "offsetX",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "blur",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeScrollRefresh": [
       {
         "name": "stateKey",
@@ -7531,6 +7739,20 @@
       {
         "name": "onRefresh",
         "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeScrollTransition": [
+      {
+        "name": "axis",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "edge",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollEdge",
         "nullable": false,
         "hasDefault": false
       }
@@ -8919,6 +9141,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -9133,6 +9367,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -9289,6 +9535,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -9413,6 +9671,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -9521,6 +9791,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -9641,6 +9923,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -9735,6 +10029,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -9851,6 +10157,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -10133,6 +10451,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -10261,6 +10591,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -10349,6 +10691,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -10549,6 +10903,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -10677,6 +11043,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -10911,6 +11289,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -11017,6 +11407,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -11181,6 +11583,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -11309,6 +11723,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -11409,6 +11835,18 @@
       {
         "name": "span",
         "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -11567,6 +12005,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -11701,6 +12151,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -11811,6 +12273,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -11893,6 +12367,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -12035,6 +12521,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -12157,6 +12655,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -12257,6 +12767,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -12463,6 +12985,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -12703,6 +13237,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },

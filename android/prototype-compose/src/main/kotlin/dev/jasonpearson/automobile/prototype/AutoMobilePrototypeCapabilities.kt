@@ -36,6 +36,7 @@ object AutoMobilePrototype {
       "prototype_pager_state_key_v1",
       "prototype_refresh_v1",
       "prototype_rich_text_v1",
+      "prototype_scroll_motion_v1",
       "prototype_search_bar_v1",
       "prototype_semantics_v1",
       "prototype_stack_transitions_v1",

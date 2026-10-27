@@ -2,6 +2,7 @@ export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { themeSchema } from "./prototypeThemeSchema";
 import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
 import { prototypeDeriveSchema, prototypeRepeatDeriveSchema } from "./prototypeFormatSchema";
+import { prototypeScrollMotionShape } from "./prototypeScrollMotionSchema";
 import * as timers from "./prototypeTimerSchema";
 import { prototypeStringsSchema } from "./prototypeStrings";
 import { prototypeSemanticsSchema } from "./prototypeSemanticsSchema";
@@ -180,6 +181,7 @@ const checksShape = {
 export const commonNodeShape = {
   semantics: prototypeSemanticsSchema.optional(),
   onAppear: z.array(actionSchema).min(1).max(32).optional(),
+  ...prototypeScrollMotionShape,
   span: z.number().finite().int().min(1).optional(),
   id: z.string().min(1).optional(),
   testTag: z.string().min(1).optional(),
@@ -866,7 +868,7 @@ const specSchema = z
             .safeParse(value).success,
       )
       .optional(),
-    motion: z.enum(["none", "standard"]).optional(),
+    motion: z.enum(["none", "standard", "reduced"]).optional(),
     storage: prototypeStorageSchema.optional(),
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),

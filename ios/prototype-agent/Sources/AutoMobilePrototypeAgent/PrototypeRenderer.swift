@@ -184,7 +184,8 @@
                 // on the node and the parent drives the animation. No wrapping ZStack: a ZStack places
                 // its child at the size it measured, and a row re-laid out at exactly its ideal width
                 // shares that width out evenly, cutting "Edit"/"Save" short (#10899).
-                validatedContent.transition(transition.swiftUITransition)
+                validatedContent.modifier(PrototypeScrollMotionModifier(node: node, model: model))
+                    .transition(transition.swiftUITransition)
             } else {
                 // Parents without that filter (a root, a scroll child, a pager page): the conditional
                 // lives in a stable container so the insertion/removal has one whose animation is
@@ -193,7 +194,8 @@
                 // The container passes its parent's proposal through, unlike a ZStack (see above).
                 PrototypeLayeredLayout(alignment: .topLeading) {
                     if isVisible {
-                        validatedContent.transition(transition.swiftUITransition)
+                        validatedContent.modifier(PrototypeScrollMotionModifier(node: node, model: model))
+                            .transition(transition.swiftUITransition)
                     }
                 }
                 .animation(transition == .instant ? nil : .easeInOut(duration: 0.25), value: isVisible)
@@ -358,9 +360,7 @@
                 if node.axis != "horizontal", let refresh = node.refresh {
                     PrototypeRefreshableScroll(node: node, refresh: refresh, model: model)
                 } else {
-                    PrototypeFadingScroll(axis: node.axis, spec: node.fadeEdges) {
-                        if let child = node.child { NodeView(node: child, model: model) }
-                    }
+                    PrototypeMotionScroll(node: node, model: model)
                 }
             case "stack":
                 PrototypeStackView(node: node, model: model)
@@ -1608,25 +1608,23 @@
         private var refreshing: Bool { model.state[refresh.stateKey]?.boolValue == true }
 
         var body: some View {
-            PrototypeFadingScroll(axis: "vertical", spec: node.fadeEdges) {
-                if let child = node.child { NodeView(node: child, model: model) }
-            }
-            .refreshable {
-                guard !refreshing else { return }
-                pulling = true
-                model.run(PrototypeRefresh.actions(for: refresh))
-                await PrototypeRefresh.awaitCompletion(
-                    isRefreshing: { model.state[refresh.stateKey]?.boolValue == true },
-                    isCancelled: { Task.isCancelled },
-                    sleep: { try? await Task.sleep(for: .milliseconds(100)) }
-                )
-                pulling = false
-            }
-            .overlay(alignment: .top) {
-                if refreshing, !pulling {
-                    ProgressView().padding(.top, 8)
+            PrototypeMotionScroll(node: node, model: model)
+                .refreshable {
+                    guard !refreshing else { return }
+                    pulling = true
+                    model.run(PrototypeRefresh.actions(for: refresh))
+                    await PrototypeRefresh.awaitCompletion(
+                        isRefreshing: { model.state[refresh.stateKey]?.boolValue == true },
+                        isCancelled: { Task.isCancelled },
+                        sleep: { try? await Task.sleep(for: .milliseconds(100)) }
+                    )
+                    pulling = false
                 }
-            }
+                .overlay(alignment: .top) {
+                    if refreshing, !pulling {
+                        ProgressView().padding(.top, 8)
+                    }
+                }
         }
     }
 #endif

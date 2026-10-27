@@ -11,9 +11,37 @@
         @ObservationIgnored private(set) var session = PrototypeSession()
         private(set) var spec: PrototypeSpec?
         /// Ends surviving text drafts even when a replacing show leaves their stored value unchanged.
-        private(set) var showRevision = 0
         @ObservationIgnored private var listAnchors = PrototypeStackListAnchorStore()
+        private(set) var showRevision = 0 { didSet { scrollOffsets = [:] } }
         /// Transient presentation only; never written to or reported as spec state.
+        var scrollOffsets: [ObjectIdentifier: Double] = [:]
+        func scrollOffset(for target: PrototypeNode) -> Double {
+            guard let root = spec?.root, let source = target.scrollLinked?.source else { return 0 }
+            func locate(_ node: PrototypeNode, scope: PrototypeNode) -> PrototypeNode? {
+                if node === target { return scope }
+                if let screens = node.screens {
+                    for screen in screens.values {
+                        if let found = locate(screen, scope: screen) { return found }
+                    }
+                }
+                if let child = node.child, let found = locate(child, scope: scope) { return found }
+                for child in node.children ?? [] {
+                    if let found = locate(child, scope: scope) { return found }
+                }
+                return nil
+            }
+            let scope = locate(root, scope: root) ?? root
+            func find(_ node: PrototypeNode) -> PrototypeNode? {
+                if node.type == "scroll", node.id == source { return node }
+                if let child = node.child, let found = find(child) { return found }
+                for child in node.children ?? [] {
+                    if let found = find(child) { return found }
+                }
+                return nil
+            }
+            return find(scope).flatMap { scrollOffsets[ObjectIdentifier($0)] } ?? 0
+        }
+
         var expandedSelect: PrototypeNode?
         @ObservationIgnored private var nodeFocusAnchors: [ObjectIdentifier: PrototypeOverlayFocusAnchor] = [:]
 

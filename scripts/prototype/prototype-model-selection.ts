@@ -47,6 +47,9 @@ export const prototypeModelSelection = {
   // Swift Action is a flat struct and Node a final class with different shapes; both stay hand-written.
   action: actionModelOptions,
   node: nodeModelOptions,
+  scrollEdge: {},
+  scrollTransition: {},
+  scrollLinked: {},
   offset: {},
   padding: {},
   bounds: { languages: ["kotlin"] },

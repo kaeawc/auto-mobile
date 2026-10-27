@@ -57,6 +57,7 @@
     "MAX_PROTOTYPE_PLATFORM_ARGS": 16,
     "MAX_PROTOTYPE_CHECK_QUANTIFIER_BOUND": 100,
     "MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS": 2,
+    "MAX_PROTOTYPE_SCROLL_BINDINGS": 16,
     "MAX_PROTOTYPE_EFFECTS": 64,
     "MAX_PROTOTYPE_ANIMATED_EFFECTS": 8,
     "MAX_PROTOTYPE_STRING_LOCALES": 16,
@@ -2708,6 +2709,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -2936,6 +2951,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -3157,6 +3186,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -3350,6 +3393,20 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -3568,6 +3625,20 @@
               },
               "optional": false
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -3776,6 +3847,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "pagerDp"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -4001,6 +4086,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -4215,6 +4314,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "zoomable"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -4434,6 +4547,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -4600,6 +4727,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -4910,6 +5051,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -5134,6 +5289,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -5341,6 +5510,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -5534,6 +5717,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -5751,6 +5948,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -5942,6 +6153,20 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -6151,6 +6376,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -6382,6 +6621,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -6574,6 +6827,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -6791,6 +7058,20 @@
               },
               "optional": false
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -6978,6 +7259,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -7177,6 +7472,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -7364,6 +7673,20 @@
                 "unique": false
               },
               "optional": false
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
             },
             "onAppear": {
               "optional": true,
@@ -7567,6 +7890,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -7743,6 +8080,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -7915,6 +8266,20 @@
             "text": {
               "rule": {
                 "kind": "string"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -8104,6 +8469,20 @@
               "rule": {
                 "kind": "number",
                 "integer": false
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -8323,6 +8702,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -8509,6 +8902,20 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -8707,6 +9114,20 @@
                 "integer": true,
                 "min": 1,
                 "max": 600000
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -8923,6 +9344,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -9121,6 +9556,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -9343,6 +9792,20 @@
                 "name": "node"
               },
               "optional": false
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
             },
             "onAppear": {
               "optional": true,
@@ -9582,6 +10045,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "stateKey": {
               "rule": {
                 "kind": "key"
@@ -9788,6 +10265,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -9980,6 +10471,20 @@
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -10196,6 +10701,20 @@
             "dismissOnSwipe": {
               "rule": {
                 "kind": "boolean"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -10434,6 +10953,20 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -10574,6 +11107,20 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -10784,6 +11331,20 @@
               "rule": {
                 "kind": "number",
                 "integer": false
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
               },
               "optional": true
             },
@@ -11519,7 +12080,7 @@
         "motion": {
           "rule": {
             "kind": "enum",
-            "values": ["none", "standard"]
+            "values": ["none", "standard", "reduced"]
           },
           "optional": true
         },
@@ -15516,6 +16077,140 @@
     "stackTransition": {
       "kind": "enum",
       "values": ["platform", "slide", "fade", "none"]
+    },
+    "scrollEdge": {
+      "kind": "object",
+      "fields": {
+        "scale": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        },
+        "alpha": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        },
+        "rotation": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        }
+      }
+    },
+    "scrollTransition": {
+      "kind": "object",
+      "fields": {
+        "axis": {
+          "rule": {
+            "kind": "enum",
+            "values": ["horizontal", "vertical"]
+          },
+          "optional": false
+        },
+        "edge": {
+          "rule": {
+            "kind": "ref",
+            "name": "scrollEdge"
+          },
+          "optional": false
+        }
+      }
+    },
+    "scrollLinked": {
+      "kind": "object",
+      "fields": {
+        "source": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "range": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "number",
+              "integer": false
+            },
+            "min": 2,
+            "max": 2,
+            "unique": false
+          },
+          "optional": false
+        },
+        "alpha": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "number",
+              "integer": false
+            },
+            "min": 2,
+            "max": 2,
+            "unique": false
+          },
+          "optional": true
+        },
+        "scale": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "number",
+              "integer": false
+            },
+            "min": 2,
+            "max": 2,
+            "unique": false
+          },
+          "optional": true
+        },
+        "offsetY": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "number",
+              "integer": false
+            },
+            "min": 2,
+            "max": 2,
+            "unique": false
+          },
+          "optional": true
+        },
+        "offsetX": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "number",
+              "integer": false
+            },
+            "min": 2,
+            "max": 2,
+            "unique": false
+          },
+          "optional": true
+        },
+        "blur": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "number",
+              "integer": false
+            },
+            "min": 2,
+            "max": 2,
+            "unique": false
+          },
+          "optional": true
+        }
+      }
     },
     "effectAnimate": {
       "kind": "object",

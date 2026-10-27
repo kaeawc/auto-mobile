@@ -185,6 +185,7 @@ fun PrototypeRuntimeContent(
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
         LocalPrototypeMotion provides motion,
+        LocalPrototypeScrollReduced provides (snapshot.spec.motion == "reduced"),
         LocalPrototypeMotionActivity provides runtime.motionActivity,
         LocalPrototypeStackRuntime provides runtime,
         LocalPrototypeStackSnapshot provides snapshot,
@@ -220,6 +221,8 @@ fun PrototypeSpecContent(
     val gestureTaps = remember { PrototypeGestureTaps() }
     val density = LocalDensity.current.density
     val currentInteract = rememberUpdatedState(interact)
+    val scrollOffsets = remember { PrototypeScrollOffsets() }
+    scrollOffsets.targets = remember(root) { prototypeScrollTargets(root) }
     val anchorLocals = remember { PrototypeAnchorLocals() }
     val menuLayers = remember { PrototypeMenuLayers() }
     val menuParents = remember(root) { prototypeMenuParents(root) }
@@ -227,6 +230,7 @@ fun PrototypeSpecContent(
       LocalPrototypeListEndTriggers provides
         (LocalPrototypeListEndTriggers.current
           ?: remember(LocalPrototypeShowEpoch.current) { PrototypeListEndTriggers() }),
+      LocalPrototypeScrollOffsets provides scrollOffsets,
       LocalPrototypeAnchorLocals provides anchorLocals,
       LocalPrototypeGestureTaps provides gestureTaps,
       LocalPrototypeMenuLayers provides menuLayers,
@@ -496,7 +500,7 @@ internal fun RenderPrototypeNode(
         none = visibilityTransition == "none",
         enterDelayMs = node.enterDelayMs,
       ) {
-        RenderPrototypeNodeContent(
+        RenderPrototypeNodeContentWithViewport(
           node,
           interact,
           Modifier.prototypeBlurReplace(this, visibilityTransition, node.enterDelayMs),
@@ -506,7 +510,7 @@ internal fun RenderPrototypeNode(
       }
     }
   } else if (node.visible) {
-    RenderPrototypeNodeContent(node, interact, parentModifier, weightAxis, windowRoot)
+    RenderPrototypeNodeContentWithViewport(node, interact, parentModifier, weightAxis, windowRoot)
   }
 }
 
@@ -533,7 +537,7 @@ private fun RenderPrototypeVisibility(
       m,
       axis,
       root ->
-      RenderPrototypeNodeContent(n, currentInteract, m, axis, root)
+      RenderPrototypeNodeContentWithViewport(n, currentInteract, m, axis, root)
     }
   }
   val history = remember { RetainedVisibilityHistory() }
@@ -584,6 +588,43 @@ private fun RenderPrototypeVisibility(
 }
 
 @Composable
+private fun RenderPrototypeNodeContentWithViewport(
+  node: PrototypeRenderNode,
+  interact: (PrototypeInteraction) -> Unit,
+  parentModifier: Modifier = Modifier,
+  weightAxis: PrototypeWeightAxis? = null,
+  windowRoot: Boolean = false,
+) {
+  val repeated =
+    when (val source = node.source) {
+      is PrototypeBoxNode -> source.repeat != null
+      is PrototypeRowNode -> source.repeat != null
+      is PrototypeColumnNode -> source.repeat != null
+      is PrototypeGridNode -> source.repeat != null
+      else -> false
+    }
+  val ownViewport =
+    node.role in listOf("pager", "carousel") ||
+      (repeated && LocalPrototypeScrollViewport.current == null)
+  if (ownViewport) {
+    val parentViewport = LocalPrototypeScrollViewport.current
+    val viewport =
+      remember(node.identity, parentViewport) {
+        PrototypeScrollViewport(node.identity, parentViewport)
+      }
+    CompositionLocalProvider(LocalPrototypeScrollViewport provides viewport) {
+      RenderPrototypeNodeContent(
+        node,
+        interact,
+        parentModifier.onGloballyPositioned { viewport.bounds = it.boundsInRoot() },
+        weightAxis,
+        windowRoot,
+      )
+    }
+  } else RenderPrototypeNodeContent(node, interact, parentModifier, weightAxis, windowRoot)
+}
+
+@Composable
 private fun RenderPrototypeNodeContent(
   node: PrototypeRenderNode,
   interact: (PrototypeInteraction) -> Unit,
@@ -595,7 +636,7 @@ private fun RenderPrototypeNodeContent(
     // The row keeps its own layout modifier; the foreground renders as an ordinary node.
     val plain = remember(node) { node.copy(source = prototypeWithoutSwipe(node.source)) }
     PrototypeSwipeRow(node, swipe, interact, parentModifier) {
-      RenderPrototypeNodeContent(plain, interact, Modifier, weightAxis, windowRoot)
+      RenderPrototypeNodeContentWithViewport(plain, interact, Modifier, weightAxis, windowRoot)
     }
     return
   }
@@ -801,16 +842,22 @@ private fun RenderPrototypeNodeContent(
     "image" -> PrototypeImageContent(node, modifier)
     "scroll" -> {
       val scroll = key(LocalPrototypeShowEpoch.current) { rememberStackScrollState(node.identity) }
+      RegisterPrototypeScroll(node.identity, scroll)
+      val motionViewport = remember { PrototypeScrollViewport() }
       val source = node.source as? PrototypeScrollNode
       val refresh = source?.refresh?.takeIf { source.axis != "horizontal" }
       // A vertical scroll may be a chat list (#14232); reverse anchors it at its end.
       val chat = source?.takeIf { it.axis != "horizontal" }
       val reverse = chat?.reverse == true
       val anchors = remember { PrototypeScrollAnchors() }
-      val viewport = Modifier.onGloballyPositioned { anchors.viewport = it }
+      val viewport = Modifier.onGloballyPositioned {
+        anchors.viewport = it
+        motionViewport.bounds = it.boundsInRoot()
+      }
       val scrolling =
         if (source?.axis == "horizontal")
           modifier
+            .then(viewport)
             .boundedScrollViewport(vertical = false)
             .prototypeFadeEdges(scroll, true, source.fadeEdges)
             .horizontalScroll(scroll)
@@ -827,7 +874,10 @@ private fun RenderPrototypeNodeContent(
             .verticalScroll(scroll, reverseScrolling = reverse)
       if (chat != null) PrototypeChatScrollEffects(chat, scroll, anchors, interact)
       val content: @Composable BoxScope.() -> Unit = {
-        CompositionLocalProvider(LocalPrototypeScrollAnchors provides chat?.let { anchors }) {
+        CompositionLocalProvider(
+          LocalPrototypeScrollViewport provides motionViewport,
+          LocalPrototypeScrollAnchors provides chat?.let { anchors },
+        ) {
           node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
         }
       }
@@ -1378,7 +1428,7 @@ private fun prototypeNodeModifier(
     modifier = modifier.prototypeAnchor(anchor, currentPrototypeWindowGeometry(), windowRoot)
   }
   // Draw-time offset, scale and rotation, animated with the node's `animate` (#14208).
-  modifier = modifier.prototypeStyleTransform(node)
+  modifier = modifier.prototypeStyleTransform(node).prototypeScrollMotion(node)
   // Outside the touch target and drawing, so the whole node (shadow included) shrinks as one.
   val pressScale = style.pressScale
   if (tappable && pressScale != null) {
@@ -1862,12 +1912,12 @@ internal fun PrototypeErrorCaption(node: PrototypeRenderNode) {
 @Composable
 private fun PrototypeCheckedControl(
   node: PrototypeRenderNode,
-  parentModifier: Modifier,
+  modifier: Modifier,
   content: @Composable () -> Unit,
 ) {
   if (node.errorMessage == null) content()
   else
-    Column(parentModifier) {
+    Column(modifier) {
       content()
       PrototypeErrorCaption(node)
     }

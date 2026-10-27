@@ -295,7 +295,8 @@ internal object PrototypeStrictPolicy {
     private fun descend(key: String, child: JsonElement) {
       when {
         key == "linkify" -> (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap") }
-        key != "series" && key != "effects" -> scan(child, key)
+        key !in listOf("series", "effects", "scrollLinked", "scrollTransition") ->
+          scan(child, key)
       }
     }
 
@@ -331,6 +332,7 @@ internal object PrototypeStrictPolicy {
     private fun fieldFeatures(key: String, child: JsonElement, field: String) {
       fieldFeatures[key]?.let(::need)
       if (PrototypeMotionFeatures.usesMotion(key, child)) result.add("prototype_motion_v2")
+      if (key == "scrollLinked" || key == "scrollTransition") need("scroll_motion")
       if (PrototypeMotionFeatures.usesChoreography(key, child)) need("choreography")
       if (key == "data" && child is JsonPrimitive && child.isString) need("data_model")
       if (key in listOf("light", "dark") && field.isNotEmpty()) need("theme_modes")

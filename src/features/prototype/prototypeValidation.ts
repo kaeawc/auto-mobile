@@ -1,5 +1,6 @@
 import { prototypeStylePolishV2ObjectError } from "./prototypeStylePolishV2";
 import { prototypeDerivedError } from "./prototypeDerivedValidation";
+import { prototypeScrollMotionError } from "./prototypeScrollMotion";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeStrictPolicyError, type PrototypeStrictOptions } from "./prototypeStrictPolicy";
 import { prototypeStrictJson } from "./prototypeStrictJson";
@@ -923,6 +924,7 @@ function validateValue(
     prototypeLazyListLimitError(value) ??
     walk(value, definitions.spec, "", context, 0) ??
     layoutErrors(value, context, repeats) ??
+    prototypeScrollMotionError(value, context.nodes) ??
     behaviourErrors(value, context, data, repeats, componentTimers);
   if (error) {
     return { success: false, error };

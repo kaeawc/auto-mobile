@@ -32,6 +32,7 @@ enum PrototypeStrictCapabilities {
             if PrototypeStylePolishV2.required(fields) { result.insert(PrototypeStylePolishV2.capability) }
             if fields["semantics"] != nil { need("semantics") }
             if fields["onAppear"] != nil { need("timers") }
+            if fields["scrollLinked"] != nil || fields["scrollTransition"] != nil { need("scroll_motion") }
             let type = fields["type"]?.stringValue ?? ""
             if PrototypeStringConditions.uses(fields) { need("string_conditions") }
             let types = [
@@ -132,7 +133,7 @@ enum PrototypeStrictCapabilities {
                 // An effect's own `animate`, colours and params are not spec features of their own.
                 if key == "linkify" {
                     if let actions = child.objectFields?["onTap"] { scan(actions, field: "onTap") }
-                } else if key != "series", key != "effects" { scan(child, field: key) }
+                } else if !["series", "effects", "scrollLinked", "scrollTransition"].contains(key) { scan(child, field: key) }
             }
         }
         if let root = spec["root"] { scan(root) }

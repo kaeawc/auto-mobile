@@ -195,21 +195,30 @@ object PrototypeSpecValidator {
         try {
           val stored = json.parseToJsonElement(PrototypeStrictJson.prepare(encodedState))
           if (!validNumberTokens(stored)) fail("", "Invalid JSON")
-          else
-            walk(stored, stateRule, "state", Context(), 0)
-              ?: PrototypeKeyframesRules.unknownTriggerKey(keyframeKeys, stored as? JsonObject)
-              ?: PrototypeStorageValidation.error(
-                JsonObject(value + ("state" to stored)),
-                enforceBytes = false,
-              )
-              ?: PrototypeChannels.error(JsonObject(value + ("state" to stored)))
-              ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
+          else storedStateError(stored, stateRule, value, checked, keyframeKeys)
         } catch (_: IllegalArgumentException) {
           fail("", "Invalid JSON")
         }
       }
     }
   }
+
+  /** The verdict for a decoded state write against the spec it replaces the state of. */
+  private fun storedStateError(
+    stored: JsonElement,
+    stateRule: JsonObject,
+    value: JsonObject,
+    checked: Context,
+    keyframeKeys: List<Pair<String, String>>,
+  ): PrototypeSpecError? =
+    walk(stored, stateRule, "state", Context(), 0)
+      ?: PrototypeKeyframesRules.unknownTriggerKey(keyframeKeys, stored as? JsonObject)
+      ?: PrototypeStorageValidation.error(
+        JsonObject(value + ("state" to stored)),
+        enforceBytes = false,
+      )
+      ?: PrototypeChannels.error(JsonObject(value + ("state" to stored)))
+      ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
 
   private val stateWriteActionTypes =
     setOf("setState", "toggle", "increment", "decrement", "request", "platform")

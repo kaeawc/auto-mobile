@@ -305,6 +305,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | icon            | neutral  | neutral  | —     |
 | iconButton      | material | material | —     |
 | image           | neutral  | neutral  | —     |
+| list            | material | material | —     |
 | listItem        | material | material | —     |
 | menu            | material | material | —     |
 | pager           | neutral  | neutral  | —     |

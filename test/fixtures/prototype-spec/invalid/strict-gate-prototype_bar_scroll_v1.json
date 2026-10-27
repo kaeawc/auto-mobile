@@ -6,10 +6,42 @@
         "type": "fullscreen"
       }
     },
+    "state": {
+      "tab": 0
+    },
     "root": {
-      "type": "topAppBar",
-      "title": "Feed",
-      "onScroll": "pinned"
+      "type": "column",
+      "children": [
+        {
+          "type": "topAppBar",
+          "title": "Feed",
+          "onScroll": "pinned"
+        },
+        {
+          "type": "bottomNav",
+          "items": [
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Search",
+              "icon": "search"
+            }
+          ],
+          "stateKey": "tab",
+          "onScroll": "none",
+          "scroll": "feed"
+        },
+        {
+          "type": "scroll",
+          "id": "feed",
+          "child": {
+            "type": "text",
+            "text": "Feed"
+          }
+        }
+      ]
     }
   },
   "options": {

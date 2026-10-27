@@ -1,46 +1,47 @@
 {
   "spec": {
-    "id": "bounds-anchor-aligned",
+    "id": "bars",
     "window": {
       "placement": {
         "type": "fullscreen"
       },
       "opacity": 100
     },
+    "state": {
+      "tab": 0
+    },
     "root": {
       "type": "column",
       "children": [
         {
-          "anchor": {
-            "type": "bounds",
-            "bounds": {
-              "x": 209.52380952380952,
-              "y": 605.3333333333334,
-              "width": 169.9047619047619,
-              "height": 48
-            },
-            "alignment": "cover"
-          },
-          "type": "box",
-          "children": []
+          "type": "topAppBar",
+          "onScroll": "pinned",
+          "title": "Feed"
         },
         {
-          "anchor": {
-            "type": "bounds",
-            "bounds": {
-              "x": 16,
-              "y": 556,
-              "width": 379,
-              "height": 224
+          "type": "bottomNav",
+          "onScroll": "none",
+          "scroll": "feed",
+          "items": [
+            {
+              "label": "Home",
+              "icon": "home"
             },
-            "alignment": "bottom",
-            "offset": {
-              "x": 0,
-              "y": 8
+            {
+              "label": "Search",
+              "icon": "search"
             }
-          },
-          "type": "text",
-          "text": "Below"
+          ],
+          "stateKey": "tab"
+        },
+        {
+          "id": "feed",
+          "type": "scroll",
+          "axis": "vertical",
+          "child": {
+            "type": "text",
+            "text": "Feed"
+          }
         }
       ],
       "zzzUnknown": true

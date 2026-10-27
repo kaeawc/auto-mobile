@@ -274,7 +274,11 @@
     },
     "data": "/items",
     "valid": ["name", "email"],
-    "platform": "/os"
+    "platform": "/os",
+    "contains": "a",
+    "startsWith": "b",
+    "lengthGt": 1,
+    "lengthLt": 9
   },
   "style": {
     "width": {
@@ -352,7 +356,25 @@
     },
     "textStyle": "bodyLarge",
     "scale": 1.2,
-    "rotation": 15
+    "rotation": 15,
+    "cornerStyle": "continuous",
+    "shadows": [
+      {
+        "color": "#000000",
+        "radius": 4
+      }
+    ],
+    "effects": [
+      {
+        "type": "noise"
+      }
+    ],
+    "shader": {
+      "asset": "effect",
+      "uniforms": {
+        "strength": 1
+      }
+    }
   },
   "nodeBox": {
     "type": "box",
@@ -551,6 +573,50 @@
       "type": "spacer"
     }
   },
+  "nodeList": {
+    "type": "list",
+    "repeat": {
+      "items": {
+        "path": "/feed/items"
+      },
+      "as": "post",
+      "key": "id"
+    },
+    "children": [
+      {
+        "type": "spacer"
+      }
+    ]
+  },
+  "nodeTooltip": {
+    "type": "tooltip",
+    "text": "Hint",
+    "openWhen": {
+      "key": "enabled",
+      "equals": true
+    },
+    "anchor": {
+      "type": "element",
+      "selector": {
+        "testTag": "buy"
+      },
+      "alignment": "cover"
+    },
+    "caret": "bottom",
+    "spotlight": {}
+  },
+  "nodeDrawer": {
+    "type": "drawer",
+    "edge": "end",
+    "openWhen": {
+      "key": "enabled",
+      "equals": true
+    },
+    "child": {
+      "type": "spacer"
+    },
+    "dismissOnSwipe": false
+  },
   "nodePager": {
     "type": "pager",
     "id": "page",
@@ -673,6 +739,13 @@
   },
   "actionAppendData": {
     "type": "appendData",
+    "path": "/data/items",
+    "value": {
+      "value": 1
+    }
+  },
+  "actionPrependData": {
+    "type": "prependData",
     "path": "/data/items",
     "value": {
       "value": 1

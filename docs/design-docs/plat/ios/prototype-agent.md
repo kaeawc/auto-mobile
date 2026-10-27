@@ -52,7 +52,7 @@ the Viewer/file loader keeps its existing behavior.
 | Appearance override/inference/live re-theme (#11222)                   | `prototype_appearance_v1`; [Appearance](#appearance)                                                                                                               |
 | Bottom sheet above the keyboard                                        | [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)                                                                                                    |
 | Style `weight`, min/max sizes, `aspectRatio` (#11543)                  | `PrototypeSizing`, Android's order (bounds, `width`/`height`, aspect ratio); see below                                                                             |
-| Style `effects` (#15128)                                               | Contract only; not advertised (`prototype_effects_v1`), so the host refuses it                                                                                     |
+| Style `effects` (#15130, not device-verified)                          | `prototype_effects_v1`; [Style effects](#style-effects)                                                                                                            |
 | Data model (#11673)                                                    | `prototype_data_model_v1`; [Data model capability](#data-model-capability)                                                                                         |
 | Data actions (#12519)                                                  | `prototype_data_actions_v1`; [Data actions capability](#data-actions-capability)                                                                                   |
 | Storage (#12522)                                                       | `prototype_storage_v1`; [Storage capability](#storage-capability)                                                                                                  |
@@ -70,6 +70,55 @@ and beats that axis's size and bounds (ignored outside a row/column); `min` wins
 content on an axis with no authored size (or `wrap`) is centred in the box a min bound grew
 (`wrapContentWidth()`/`wrapContentHeight()`), while explicit `width`/`height`/`fill` keeps alignment;
 weighted stacks mirror under RTL via SwiftUI Layout; sizes are fractional points.
+
+## Style effects
+
+`style.effects` (#15128 contract, #15130 renderer) is not device-verified. Every one of the ten
+effects renders on any iOS 17 simulator (Android's API-floor table does not apply), through
+`PrototypeEffectsView.swift`:
+
+| `type`                | SwiftUI                                                                          |
+| --------------------- | -------------------------------------------------------------------------------- |
+| `noise`               | `Rectangle().fill(ShaderLibrary.noise(...))`, over the content                   |
+| `gradientMesh`        | `Rectangle().fill(ShaderLibrary.gradientMesh(...))`, behind the content          |
+| `shimmer`             | a `LinearGradient` band, over the content                                        |
+| `glow`                | a blurred inward `strokeBorder`, over the content                                |
+| `vignette`            | a `RadialGradient`, over the content                                             |
+| `blur`                | `.blur(radius:)` on the node's own background and content                        |
+| `pixelate`            | `layerEffect`                                                                    |
+| `chromaticAberration` | `layerEffect`                                                                    |
+| `wave`                | `distortionEffect`                                                               |
+| `ripple`              | `distortionEffect`                                                               |
+
+- **Metal presets.** `ios/prototype-agent/Shaders/PrototypeEffects.metal` holds the shaders. SwiftPM
+  does not compile `.metal`, and `ShaderLibrary` loads only precompiled libraries from a bundle or from
+  bytes, so `scripts/ios/prototype-effects-metallib.sh` compiles a metallib on every build and emits
+  `PrototypeEffectsMetallib.swift` (base64, never committed). `prototype-agent-build.sh`,
+  `prototype-viewer-build.sh` and `protoviewer-build.sh` compile it with the other sources and the
+  agent loads it with `ShaderLibrary(data:)`. The script installs the Metal Toolchain
+  (`xcodebuild -downloadComponent metalToolchain`) when Xcode 26 lacks it.
+- **Layers.** As on Android: distortions wrap the node's background and content after its corner
+  clip, in authored order; `shimmer`, `glow`, `vignette` and `noise` paint over the content inside the
+  corner shape and are not distorted; `gradientMesh` sits between the background and the content.
+  Effects never change layout, hit testing or accessibility.
+- **Shared decisions** (same defaults, colour resolution and `phase`/`animate` rules as Android; see
+  its [Effects](../android/prototype-ux.md#effects-15128-15129-prototype_effects_v1-not-device-verified)
+  section): `phase` and `animate` move only `shimmer`, `wave` and `ripple`.
+- **Time.** `TimelineView(.animation(paused:))` drives the phase and is paused under `motion: "none"`,
+  `motion: "reduced"` and Reduce Motion, so an animated effect keeps its authored `phase`. The phase
+  function (`PrototypeEffects.phase`) is unit-tested without a GPU. There is no frame-budget guard on
+  iOS, so `degradedEffects` never carries reason `budget`.
+- **Platform views.** SwiftUI draws a placeholder instead of a platform-backed view (text fields,
+  switches, sliders, pickers, scroll views and pagers) inside a `layerEffect` or `distortionEffect`.
+  Decision on the open question: the shader-sampled effects (`pixelate`, `chromaticAberration`,
+  `wave`, `ripple`) are omitted on a node whose subtree holds such a view, not on the whole spec;
+  `blur` and the over-the-content effects still draw. The show reply and `get_prototype_status` /
+  `inspect_prototypes` list each omitted effect in `degradedEffects` as `{path, type, reason:
+  "platform"}`, with the same `path` form as Android (`<node path>.style.effects[<authored index>]`;
+  paths are structural here: `root`, `root.children[1]`, `root.child`, `root.screens["home"]`, and a
+  `repeat` template is reported once).
+- **Owed device checks.** Simulator goldens against Android within a tolerance (the simulator forwards
+  Metal to the host GPU and is not pixel-exact), and which node types really draw the placeholder.
 
 ## Open decisions
 

@@ -851,7 +851,11 @@
                 ))
                 .modifier(PrototypeStylePaintModifier(
                     style: style, shape: shape, palette: palette,
-                    shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial
+                    shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial,
+                    effects: PrototypeEffects.plan(
+                        style?.effects, platformBackedSubtree: PrototypeEffects.hasPlatformBackedSubtree(node)
+                    ),
+                    motion: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
                 ))
                 .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
                 .opacity(style?.alpha ?? 1)

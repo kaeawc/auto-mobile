@@ -24,6 +24,8 @@
         let shape: PrototypeStyleShape
         let palette: PrototypePalette
         let shimmerAnimated: Bool
+        var effects: PrototypeEffects.Plan = .empty
+        var motion = PrototypeMotion(specMotion: nil, reduceMotion: false)
 
         private var layers: [PrototypeStyleShadowLayer] {
             PrototypeStyleShadowLayer.resolve(style?.shadows, palette: palette)
@@ -31,6 +33,8 @@
 
         func body(content: Content) -> some View {
             content
+                // First, so it paints over the background and gradient below it and under the content.
+                .background { PrototypeEffectMeshBackground(plan: effects, palette: palette) }
                 .background {
                     if let gradient = style?.gradient {
                         PrototypeGradientFill(gradient: gradient, palette: palette)
@@ -41,6 +45,7 @@
                     enabled: style?.shimmer == true, animated: shimmerAnimated, shape: shape
                 ))
                 .clipShape(shape)
+                .modifier(PrototypeEffectsModifier(plan: effects, palette: palette, shape: shape, motion: motion))
                 .overlay { border }
                 .overlay { PrototypeStyleShadows(layers: layers, shape: shape, inner: true) }
                 .background { PrototypeStyleShadows(layers: layers, shape: shape, inner: false) }

@@ -624,6 +624,8 @@ final class PrototypeAgent: NSObject {
         warnAboutFontAssets(for: spec)
         warnAboutUnknownThemeColors(for: spec)
         var extra = missingAssetsExtra()
+        let degraded = model.degradedEffects()
+        if !degraded.isEmpty { extra["degradedEffects"] = degraded }
         extra.merge(model.session.navigationSnapshot) { _, navigation in navigation }
         if let appearance = model.session.appearance { extra["appearance"] = appearance.wireObject }
         // The host can leave before this queued show runs; nothing would remove it later.

@@ -33,10 +33,7 @@ export interface SessionReleasePersistenceHost {
   dropReleaseRetry(snapshot: SessionReleaseSnapshot): void;
   readSessionRow(sessionId: string): Promise<DeviceSession | undefined>;
   readonly sessions: Pick<Map<string, Session>, "get" | "has">;
-  readonly superseded: Pick<
-    SupersededRowReasserts,
-    "remembered" | "predecessors" | "noteRefused" | "expectReassert"
-  >;
+  readonly superseded: Pick<SupersededRowReasserts, "remembered" | "predecessors" | "noteRefused">;
   readonly daemonSessionId: string | undefined;
   retryRefusedRowWrite<T>(
     error: DeviceSessionRowNotRewritableError | DeviceSessionRowNotReleasableError,
@@ -70,10 +67,6 @@ export interface SessionReleasePersistenceHost {
   >;
   readonly deviceSessionRepository: Pick<DeviceSessionPersistence, "markReleased">;
   retryNonTerminalRowAfterRelease(snapshot: SessionReleaseSnapshot): Promise<void>;
-  reassertSupersededLiveRow(
-    session: Session,
-    supersededReasons: readonly string[],
-  ): Promise<boolean>;
   retryTerminalRowAfterRelease(sessionId: string): Promise<void>;
   readonly forcedStuckRelease: ForcedStuckRelease;
   readonly restartReleasePersistence: WeakMap<SessionReleaseSnapshot, PromiseWithResolvers<void>>;

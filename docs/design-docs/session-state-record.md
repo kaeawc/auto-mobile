@@ -661,7 +661,9 @@ and the three call sites that reasserted a live row when a late terminal write l
 rewritten. What remains is the rebind/activity overlap repair (`oweSupersededRowReassert(session,
 [])`, its retries, drain and activity hook). The superseded-reason plumbing that the overlap repair
 still carries (`remember`, `expectReassert`'s reasons, the statement guard's `supersededReasons`)
-is always empty from production callers now; removing it is W5c.
+is always empty from production callers now; removing it is W5c. W5c should also settle one gap the W5b review found: `restoreReleasedRowAfterReassert`
+writes whatever terminal fence is present, which includes a durable release's fence raised before
+its final check if the supersede-revocation loop awaits and the release then declines.
 
 ## 7. Risks
 

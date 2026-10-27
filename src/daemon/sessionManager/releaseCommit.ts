@@ -115,10 +115,6 @@ export interface SessionReleaseCommitHost {
     retainFence?: boolean,
     afterDelete?: () => void,
   ): void;
-  reassertSupersededLiveRow(
-    session: Session,
-    supersededReasons: readonly string[],
-  ): Promise<boolean>;
   upgradeReleaseReason(reason: ReleaseReasonState, candidate: string): void;
   readonly releaseRowGenerations: WeakMap<SessionReleaseSnapshot, number>;
   persistSessionRelease(

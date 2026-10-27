@@ -371,8 +371,6 @@ export class SessionManagerWiring {
       retryRefusedRowWrite: (...args) => this.supersededRows.retryRefusedRowWrite(...args),
       retryNonTerminalRowAfterRelease: (...args) =>
         this.supersededRows.retryNonTerminalRowAfterRelease(...args),
-      reassertSupersededLiveRow: (...args) =>
-        this.supersededRows.reassertSupersededLiveRow(...args),
       retryTerminalRowAfterRelease: (...args) =>
         this.supersededRows.retryTerminalRowAfterRelease(...args),
       waitOutRecreationOf: (...args) => this.supersededRows.waitOutRecreationOf(...args),

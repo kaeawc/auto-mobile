@@ -338,6 +338,7 @@ internal object PrototypeStrictPolicy {
         need("data_model")
       }
       if (type == "request" && fields.text("via") == "device") need("network_device")
+      if (PrototypeMediaItemBindings.usedBy(fields)) need("platform_media_items")
     }
 
     private fun repeatFeatures(child: JsonElement) {

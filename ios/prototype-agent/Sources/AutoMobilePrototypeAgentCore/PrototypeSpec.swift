@@ -328,6 +328,9 @@ struct PrototypeSpec: Decodable {
 enum PrototypeModeValue: Decodable, Equatable, Sendable, ExpressibleByStringLiteral {
     case single(String)
     case modes(light: String, dark: String)
+    /// `{data: "/pointer"}` on an image slot (#14192): the id of a device media item held in `/data`.
+    /// The shared contract accepts it only there, and it names no uploaded asset.
+    case data(String)
 
     init(stringLiteral value: String) {
         self = .single(value)
@@ -342,6 +345,10 @@ enum PrototypeModeValue: Decodable, Equatable, Sendable, ExpressibleByStringLite
             return
         }
         let fields = try container.decode([String: String].self)
+        if fields.count == 1, let pointer = fields["data"] {
+            self = .data(pointer)
+            return
+        }
         guard fields.count == 2, let light = fields["light"], let dark = fields["dark"] else {
             throw DecodingError.dataCorruptedError(
                 in: container,
@@ -357,6 +364,8 @@ enum PrototypeModeValue: Decodable, Equatable, Sendable, ExpressibleByStringLite
         switch self {
         case let .single(value): value
         case let .modes(light, darkValue): dark ? darkValue : light
+        // Resolved by the media runtime; until then the slot is empty and draws the placeholder.
+        case .data: ""
         }
     }
 
@@ -365,6 +374,7 @@ enum PrototypeModeValue: Decodable, Equatable, Sendable, ExpressibleByStringLite
         switch self {
         case let .single(value): [value]
         case let .modes(light, dark): light == dark ? [light] : [light, dark]
+        case .data: []
         }
     }
 }

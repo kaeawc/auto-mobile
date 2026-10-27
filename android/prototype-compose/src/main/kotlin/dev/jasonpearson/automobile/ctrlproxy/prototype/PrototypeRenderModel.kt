@@ -632,6 +632,10 @@ internal fun prototypeModeValue(value: PrototypeModeValue, dark: Boolean): Strin
   when (value) {
     is PrototypeModeValue.Single -> value.value
     is PrototypeModeValue.Modes -> if (dark) value.dark else value.light
+    // A media item binding (#14192) names no uploaded asset; the media runtime resolves the
+    // pointer,
+    // and until then the slot is empty, which draws the broken-image placeholder.
+    is PrototypeModeValue.Data -> ""
   }
 
 /**

@@ -67,6 +67,7 @@ enum PrototypeStrictCapabilities {
             if let feature = types[type] { need(feature) }
             if fields["ios"] != nil || fields["android"] != nil { need("platform_namespace") }
             if fields["sharedKey"] != nil { need("shared_element") }
+            if PrototypeMediaItems.usedBy(fields) { result.insert(PrototypeMediaItems.capability) }
             if fields["shared"] != nil { result.insert("prototype_shared_element_v2") }
             let navigation = ["stack", "push", "replace"].contains(type)
             if navigation, fields["transition"] != nil { need("stack_transitions") }

@@ -26,8 +26,13 @@ struct PrototypeBundleReferences {
     }
 
     private mutating func image(_ value: JSONValue?) {
-        if let id = value?.stringValue { images.append(PrototypeBundleID(id)) }
-        else if let fields = value?.objectFields {
+        // A `media:` id is minted on the device and a placeholder is a template (#14192): neither is an
+        // asset the bundle carries.
+        if let id = value?.stringValue {
+            if !PrototypeMediaItems.isMediaId(id), id.range(of: #"\{[^{}]+\}"#, options: .regularExpression) == nil {
+                images.append(PrototypeBundleID(id))
+            }
+        } else if let fields = value?.objectFields {
             image(fields["light"])
             image(fields["dark"])
         }

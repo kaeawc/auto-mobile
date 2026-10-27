@@ -28,6 +28,7 @@
   "prototype_pager_state_key_v1",
   "prototype_platform_device_v1",
   "prototype_platform_haptics_v1",
+  "prototype_platform_media_items_v1",
   "prototype_platform_namespace_v1",
   "prototype_platform_sound_v1",
   "prototype_platform_test_v1",

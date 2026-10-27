@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "prepend",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "rows": []
+    },
+    "root": {
+      "type": "text",
+      "text": "Add",
+      "onTap": [
+        {
+          "type": "prependData",
+          "path": "/data/rows",
+          "value": {
+            "value": {
+              "id": 2
+            }
+          }
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_data_model_v1", "prototype_data_actions_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_lazy_list_v1"
+}

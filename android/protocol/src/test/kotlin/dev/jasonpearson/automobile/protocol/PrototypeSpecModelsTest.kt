@@ -7,11 +7,13 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeAll
@@ -224,6 +226,10 @@ class PrototypeSpecModelsTest {
         data = "/items",
         valid = PrototypeValidityKeys.Multiple(listOf("name", "email")),
         platform = "/os",
+        contains = PrototypeScalar.Text("a"),
+        startsWith = PrototypeScalar.Text("b"),
+        lengthGt = 1,
+        lengthLt = 9,
       ),
     )
     assertRoundTrip(
@@ -251,63 +257,66 @@ class PrototypeSpecModelsTest {
   }
 
   @Test
-  fun `generated style round trips every field including nested values`() {
+  fun `generated style round trips every field including nested values`() =
+    assertRoundTrip("style", fullStyle())
+
+  private fun fullStyle(): PrototypeStyle {
     val modes = PrototypeModeValue.Modes("#112233", "#445566")
-    assertRoundTrip(
-      "style",
-      PrototypeStyle(
-        width = PrototypeDimension.Dp(240.0),
-        height = PrototypeDimension.Wrap,
-        weight = 1.0,
-        minWidth = 10.0,
-        maxWidth = 300.0,
-        minHeight = 20.0,
-        maxHeight = 400.0,
-        padding = PrototypePadding(top = 1.5, bottom = 2.5, start = 3.5, end = 4.5),
-        background = PrototypeModeValue.Single("#112233"),
-        cornerRadius =
-          PrototypeCornerRadius.Corners(
-            topStart = 1.0,
-            topEnd = 2.0,
-            bottomStart = 3.0,
-            bottomEnd = 4.0,
-          ),
-        border = PrototypeBorder(width = 2.5, color = "#112233"),
-        elevation = 2.0,
-        shadowColor = modes,
-        gradient =
-          PrototypeLinearGradient(
-            angle = 45.0,
-            stops =
-              listOf(
-                PrototypeGradientStop(color = "#112233", position = 0.0),
-                PrototypeGradientStop(color = modes, position = 1.0),
-              ),
-          ),
-        aspectRatio = 1.5,
-        offset = PrototypeOffset(x = -12.5, y = 24.25),
-        alpha = 0.8,
-        pressScale = 0.9,
-        shimmer = true,
-        alignment = "center",
-        arrangement = "spaceBetween",
-        spacing = 4.0,
-        runSpacing = 5.0,
-        textSize = 16.0,
-        fontWeight = 500,
-        color = PrototypeModeValue.Single("#112233"),
-        textAlign = "start",
-        maxLines = 2,
-        lineHeight = 22.0,
-        letterSpacing = 0.5,
-        textDecoration = "underline",
-        fontStyle = "italic",
-        overflow = "ellipsis",
-        fontFamily = PrototypeFontFamily.Asset("body-font"),
-        textStyle = "bodyLarge",
-        scale = 1.2,
-        rotation = 15.0,
-      ),
+    return PrototypeStyle(
+      width = PrototypeDimension.Dp(240.0),
+      height = PrototypeDimension.Wrap,
+      weight = 1.0,
+      minWidth = 10.0,
+      maxWidth = 300.0,
+      minHeight = 20.0,
+      maxHeight = 400.0,
+      padding = PrototypePadding(top = 1.5, bottom = 2.5, start = 3.5, end = 4.5),
+      background = PrototypeModeValue.Single("#112233"),
+      cornerRadius =
+        PrototypeCornerRadius.Corners(
+          topStart = 1.0,
+          topEnd = 2.0,
+          bottomStart = 3.0,
+          bottomEnd = 4.0,
+        ),
+      border = PrototypeBorder(width = 2.5, color = "#112233"),
+      elevation = 2.0,
+      shadowColor = modes,
+      gradient =
+        PrototypeLinearGradient(
+          angle = 45.0,
+          stops =
+            listOf(
+              PrototypeGradientStop(color = "#112233", position = 0.0),
+              PrototypeGradientStop(color = modes, position = 1.0),
+            ),
+        ),
+      aspectRatio = 1.5,
+      offset = PrototypeOffset(x = -12.5, y = 24.25),
+      alpha = 0.8,
+      pressScale = 0.9,
+      shimmer = true,
+      alignment = "center",
+      arrangement = "spaceBetween",
+      spacing = 4.0,
+      runSpacing = 5.0,
+      textSize = 16.0,
+      fontWeight = 500,
+      color = PrototypeModeValue.Single("#112233"),
+      textAlign = "start",
+      maxLines = 2,
+      lineHeight = 22.0,
+      letterSpacing = 0.5,
+      textDecoration = "underline",
+      fontStyle = "italic",
+      overflow = "ellipsis",
+      fontFamily = PrototypeFontFamily.Asset("body-font"),
+      textStyle = "bodyLarge",
+      scale = 1.2,
+      rotation = 15.0,
+      shader = PrototypeShader("effect", mapOf("strength" to 1.0)),
+      cornerStyle = "continuous",
+      effects = listOf(buildJsonObject { put("type", "noise") }),
     )
   }
 

@@ -3,6 +3,7 @@ import {
   STYLUS_INPUT_CAPABILITY,
 } from "../../observe/android/ctrlProxyProtocol/capabilities";
 import type { PointerEnvironment, PointerFeatures, PointerSupport } from "./PointerInjector";
+import { POINTER_INSTRUMENTATION_MIN_SDK } from "./instrumentationDispatch";
 import { DispatchingRoute, SUPPORTED, unsupported } from "./DispatchingRoute";
 
 /**
@@ -21,8 +22,13 @@ export class InstrumentationRoute extends DispatchingRoute {
       return unsupported("finger touches use the accessibility route");
     }
     const needed = features.hover ? HOVER_INPUT_CAPABILITY : STYLUS_INPUT_CAPABILITY;
-    return device.capabilities.has(needed)
-      ? SUPPORTED
-      : unsupported(`the connected runner does not advertise ${needed}`, needed);
+    if (device.capabilities.has(needed)) {
+      return SUPPORTED;
+    }
+    const old =
+      device.apiLevel !== undefined && device.apiLevel < POINTER_INSTRUMENTATION_MIN_SDK
+        ? `: this device runs Android API ${device.apiLevel} and the route needs Android 13 (API ${POINTER_INSTRUMENTATION_MIN_SDK})`
+        : "";
+    return unsupported(`the connected runner does not advertise ${needed}${old}`, needed);
   }
 }

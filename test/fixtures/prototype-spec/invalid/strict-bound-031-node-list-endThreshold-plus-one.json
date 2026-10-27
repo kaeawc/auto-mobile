@@ -88,5 +88,6 @@
       }
     }
   },
-  "expectedPath": "root.endThreshold"
+  "expectedPath": "root.endThreshold",
+  "expectedMessage": "Invalid number value"
 }

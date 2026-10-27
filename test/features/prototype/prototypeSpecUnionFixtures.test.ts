@@ -63,6 +63,13 @@ test("fixtures cover every action and node variant and every filled field", () =
     [contract.definitions.action.variants.request, fixtures.actionRequestFilled],
     [contract.definitions.action.variants.emit, fixtures.actionEmitFilled],
   ] as const) {
-    expect(Object.keys(value).sort()).toEqual(Object.keys(rule.fields).sort());
+    // Cross-node constraints (a shared pair, a scroll source) cannot hold on one lone filled node,
+    // and platform namespaces are stripped before the typed Kotlin decode (#15257).
+    const crossNode = new Set(["sharedKey", "scrollLinked", "scrollTransition", "ios", "android"]);
+    expect(Object.keys(value).sort()).toEqual(
+      Object.keys(rule.fields)
+        .filter((field) => !crossNode.has(field))
+        .sort(),
+    );
   }
 });

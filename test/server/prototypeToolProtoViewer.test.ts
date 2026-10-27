@@ -17,7 +17,6 @@ import { FakePrototypeAssetFileReader } from "../fakes/FakePrototypeAssetFileRea
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
-import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { pinDialogTree } from "../helpers/pinDialogTree";
 import { toolStructured } from "../helpers/toolResponse";

@@ -406,8 +406,7 @@ class PrototypeController(
           preservePages = inPlace,
           displayId =
             if (inPlace) previous.request.displayId else displayId ?: Display.DEFAULT_DISPLAY,
-          appearance = appearance,
-          locale = locale,
+          preferences = ShowPreferences(appearance, locale),
         )
       if (surfaceOf(shown.runtime) == null) Outcome()
       else
@@ -576,14 +575,21 @@ class PrototypeController(
     }
   }
 
+  /** What a show asks of presentation beyond the spec: an appearance pin and a locale override. */
+  private class ShowPreferences(
+    val appearance: PrototypeAppearanceOverride? = null,
+    val locale: String? = null,
+  )
+
   private suspend fun display(
     spec: PrototypeSpec,
     replaceOthers: Boolean,
     preservePages: Boolean = false,
     displayId: Int = Display.DEFAULT_DISPLAY,
-    appearance: PrototypeAppearanceOverride? = null,
-    locale: String? = null,
+    preferences: ShowPreferences = ShowPreferences(),
   ): Surface {
+    val appearance = preferences.appearance
+    val locale = preferences.locale
     val authored = validate(spec)
     // A same-id show reads the document the shown prototype is about to have written.
     surfaces[spec.id]?.runtime?.flushStorage()
@@ -966,27 +972,37 @@ class PrototypeController(
       sink.sendPatched(requestId, error == null, error, revision, outcome.conflict)
     } else if (error == null && appearance != null) {
       outcome.backdrop?.let { sink.noteShownBackdrop(requestId, it) }
-      if (outcome.degradedEffects.isNotEmpty())
-        sink.sendShownDegraded(
-          requestId,
-          missing,
-          appearance,
-          outcome.pages.orEmpty(),
-          outcome.stacks.orEmpty(),
-          outcome.hiddenReason,
-          outcome.degradedEffects,
-        )
-      else
-        sink.sendShownNavigation(
-          requestId,
-          missing,
-          appearance,
-          outcome.pages.orEmpty(),
-          outcome.stacks.orEmpty(),
-          outcome.hiddenReason,
-        )
+      sendShown(requestId, outcome, missing, appearance)
     } else if (missing.isEmpty()) sink.send(requestId, error == null, error)
     else sink.sendWithMissingAssets(requestId, error == null, error, missing)
+  }
+
+  private suspend fun sendShown(
+    requestId: String?,
+    outcome: Outcome,
+    missing: List<String>,
+    appearance: PrototypeAppearance,
+  ) {
+    if (outcome.degradedEffects.isNotEmpty()) {
+      sink.sendShownDegraded(
+        requestId,
+        missing,
+        appearance,
+        outcome.pages.orEmpty(),
+        outcome.stacks.orEmpty(),
+        outcome.hiddenReason,
+        outcome.degradedEffects,
+      )
+    } else {
+      sink.sendShownNavigation(
+        requestId,
+        missing,
+        appearance,
+        outcome.pages.orEmpty(),
+        outcome.stacks.orEmpty(),
+        outcome.hiddenReason,
+      )
+    }
   }
 
   private fun armIdle(

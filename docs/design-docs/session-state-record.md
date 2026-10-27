@@ -643,12 +643,31 @@ is refused: the release already won) and deleting `supersededRows.ts`' release-d
 rebind and activity overlap repair stays and is re-modelled as the writer replacing an unwritten
 `live` desire.
 
-W5 trial (not landed): dropping the volatile final fence is a behaviour change, not a dead-code
-removal. It ends a live session on a device-loss observation that a newer confirmation would have
-overruled, and 50 tests across `supersededRowReassertRetry`, `releaseRowRetry`,
-`rowWritesRemainingCases`, `terminalReleaseReasonOnNotFoundWires` and the fault matrix encode the
-old order. W5 should be taken only with an owner decision to accept that change for volatile
-(Windows/no-journal) daemons, then rewrite those tests around rebind/activity overlap triggers.
+W5a (decided by the owner, 2026-10-26, #11799): no supersede fence is evaluated once a row
+statement is issued, for any intent: the volatile one included. This is a behaviour change, not a dead-code removal: a volatile release
+whose row statement was issued has won, so a newer identity confirmation that arrives during that
+write is too late, where before it ended with the live session rewritten over the terminal row. A
+durable release still declines at the one fence before its row exists. A faulted journal write
+reports `volatile`, so this reaches durable-journal daemons too whenever that write fails, not only
+Windows. `abandonReleaseSupersededAfterPersist`
+is deleted. The release-driven rewrite chain (`reassertSupersededLiveRow` and the owed-retry
+machinery) is now unreachable from a release; it stays until the next slice, whose tests drive it
+directly, and the rebind/activity overlap repair keeps using it.
+
+W5b: the release-driven half of that chain is deleted: `restoreNonTerminalRowOverSupersededRelease`
+and its `Later` form, `replaceSupersededReleaseRow`, the ledger's row-under-pending-release record,
+and the three call sites that reasserted a live row when a late terminal write landed
+(`trackLateReleaseWrite`), when a non-terminal commit settled, or after a fence's row was
+rewritten. What remains is the rebind/activity overlap repair (`oweSupersededRowReassert(session,
+[])`, its retries, drain and activity hook). The superseded-reason plumbing that the overlap repair
+still carries (`remember`, `expectReassert`'s reasons, the statement guard's `supersededReasons`)
+was always empty from production callers, and W5c removes it: the ledger no longer remembers reasons
+(`remember`, `isOwedFor`, `isBeingRewritten`, the owed entry's reasons), `reassertSupersededLiveRow`
+takes only the session, and the live-row rewrite's statement guard refuses every terminal row. What
+stays is the release write's `supersededReasons`, which carries only a terminal upgrade's own earlier
+reasons (`predecessors`). W5c also closes the gap the W5b review found: a finishing rewrite restores
+a terminal fence's row only for a volatile release (whose row was written first) or one that has
+committed, never for a durable release that has not committed and may still decline.
 
 ## 7. Risks
 

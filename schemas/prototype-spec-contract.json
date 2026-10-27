@@ -4890,6 +4890,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "contentTransition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["numeric", "crossfade", "none"]
+              },
+              "optional": true
             }
           },
           "exactlyOne": ["text", "spans"]

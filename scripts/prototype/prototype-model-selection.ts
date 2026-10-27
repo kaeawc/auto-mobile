@@ -55,7 +55,7 @@ export const prototypeModelSelection = {
   backdrop: { languages: ["kotlin"] },
   semantics: { languages: ["kotlin"] },
   imageFilter: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
-  // tooltipCaret/drawerEdge are enum rules: native node fields use strings, as for existing enums.
+  // tooltipCaret/drawerEdge and text.contentTransition are enum rules: native node fields use strings.
   tooltipSpotlight: {
     doc: "Tooltip spotlight hole: padding 0..64 dp (default 8), cornerRadius 0..64 dp (default 12).",
   },

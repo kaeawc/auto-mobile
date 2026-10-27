@@ -648,6 +648,8 @@ transition as a real tap, including on part identifiers.
   Navigation posts a screen-changed accessibility notification targeting the new native screen
   container after layout; accessibility escape uses the same animated pop path. Wrap a stack in a box
   to animate its own visibility.
+- **Text content transitions.** Text nodes accept `contentTransition: "numeric" | "crossfade" | "none"` (default `none`). Non-`none` requires `prototype_content_transition_v1`. Numeric changes roll only changed characters up for an increase and down for a decrease; formatting is stripped to digits, the first decimal point and a leading minus. Missing or equal numeric values crossfade; identical text stays still. Spans crossfade as a whole. Roll uses a spring (Android damping 0.8, stiffness 380; iOS duration 0.35 s, bounce 0.15); fades take 200 ms. Accessibility and observe expose the new text immediately. Android reduced motion uses fades and motion off snaps; iOS content transitions snap under reduced motion or motion off.
+
 - **Motion** matches Android (#10442, #10439): `visibleWhen` nodes fade/expand, `transition`
   (`none`, `fade`, `expand`, `slide`) picks the animation, pager changes animate. `box`/`row`/`column`
   animate size (`animateContentSize`) when a direct child appears, disappears or resolves a new

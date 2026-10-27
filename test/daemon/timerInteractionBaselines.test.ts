@@ -228,11 +228,18 @@ describe("cell 2: a held device in a transitional platform state (T3 x T1)", () 
 });
 
 describe("cell 3: a device-restart handoff whose device stays away (T3 x restart recovery)", () => {
+  // The claim here (handoff, 45 s wait, re-bind) is independent of heartbeat cadence, so the owner's
+  // keeper runs at half a long lease instead of every 2 s: 45 s of waiting is then a couple of
+  // keeper frames rather than dozens. The lease still outlasts the whole 165 s timeline.
+  const OWNER_LEASE_MS = 600_000;
   const HANDOFF_REASON = `device-restart:Pixel_${DEVICE_A}`;
 
   /** A held device absent for three whole sweeps: its session is handed off recoverably. */
   async function handOff() {
-    scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });
+    scenario = await LivenessScenario.start({
+      devices: [DEVICE_A, DEVICE_B],
+      ownerLeaseMs: OWNER_LEASE_MS,
+    });
     const listing = startDisconnectMonitor(scenario);
     const session = await scenario.acquire();
     await scenario.toolCall(session);

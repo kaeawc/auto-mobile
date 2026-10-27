@@ -32,6 +32,7 @@ export interface CapabilityManifest {
  * artifact's parser reads their concatenation, so a capability advertised from a second file is
  * not missed (#15347).
  */
+// Both prototype artifacts advertise prototype_content_transition_v1 from the sources below.
 export const ADVERTISING_SOURCES: Record<ArtifactId, string[]> = {
   "android-ctrlproxy-apk": [
     "android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/WebSocketServer.kt",

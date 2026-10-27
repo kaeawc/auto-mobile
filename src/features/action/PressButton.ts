@@ -3,7 +3,7 @@ import type { IosLockStateInvalidator } from "../observe/ios/CachedIosLockStateP
 import type { DispatchedRequestHold } from "../../daemon/dispatchedRequestHold";
 import type { IOSDispatchResult } from "../observe/ios/CtrlProxyDispatch";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
-import { unsupportedPlatformError } from "../../models/ActionableError";
+import { ActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { typedRefusalFields } from "../../models/typedRefusalFields";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -31,6 +31,8 @@ import { HomeScreen } from "./HomeScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { isRotaryButton, RotaryInput } from "./RotaryInput";
+import type { DeviceTraits } from "../../utils/android-cmdline-tools/deviceTraits";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 /** iOS hardware buttons that only some devices have, pressed via XCUIDevice.Button (#14100). */
@@ -57,6 +59,13 @@ export interface PressButtonCtrlProxyOverrides {
   frameContextClient?: Pick<AndroidCtrlProxyClient, "validateFrameContext">;
   /** Capability check plus global-action dispatch for the Android system actions (#14095). */
   systemActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction" | "supportsCommand">;
+  /** Build-characteristics read the rotary gate uses (#14920). */
+  deviceTraits?: DeviceTraits;
+}
+
+/** `ActionCall` for pressButton: also carries the rotary step count (#14920). */
+export interface PressButtonCall extends ActionCall {
+  steps?: number;
 }
 
 /** A dispatched press whose outcome was never confirmed: replaying it could apply it twice. */
@@ -153,6 +162,7 @@ export class PressButton extends BaseVisualChange {
   private readonly globalActionClient?: PressButtonCtrlProxyOverrides["globalActionClient"];
   private readonly frameContextClient?: PressButtonCtrlProxyOverrides["frameContextClient"];
   private readonly systemActionClient?: PressButtonCtrlProxyOverrides["systemActionClient"];
+  private readonly deviceTraits?: DeviceTraits;
 
   constructor(
     device: BootedDevice,
@@ -168,6 +178,7 @@ export class PressButton extends BaseVisualChange {
     this.globalActionClient = collaborators.globalActionClient;
     this.frameContextClient = collaborators.frameContextClient;
     this.systemActionClient = collaborators.systemActionClient;
+    this.deviceTraits = collaborators.deviceTraits;
   }
 
   private iosLockStateInvalidator?: IosLockStateInvalidator;
@@ -225,7 +236,7 @@ export class PressButton extends BaseVisualChange {
     return liveWait ? awaitWhileRequestIsLive(request, signal) : request;
   }
 
-  async execute(button: string, call?: ActionCall): Promise<PressButtonResult>;
+  async execute(button: string, call?: PressButtonCall): Promise<PressButtonResult>;
   /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     button: string,
@@ -234,10 +245,11 @@ export class PressButton extends BaseVisualChange {
   ): Promise<PressButtonResult>;
   async execute(
     button: string,
-    progressOrCall?: ProgressCallback | ActionCall,
+    progressOrCall?: ProgressCallback | PressButtonCall,
     signalArg?: AbortSignal,
   ): Promise<PressButtonResult> {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
+    const steps = typeof progressOrCall === "object" ? progressOrCall?.steps : undefined;
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("pressButton");
@@ -269,7 +281,9 @@ export class PressButton extends BaseVisualChange {
         previousObservation,
       );
       const pressed = await perf.track("buttonPress", () =>
-        this.press(button, undefined, undefined, signal),
+        isRotaryButton(button)
+          ? this.pressRotary(button, steps, signal)
+          : this.press(button, undefined, undefined, signal),
       );
       pressSucceeded = pressed.success;
       return pressed;
@@ -281,6 +295,17 @@ export class PressButton extends BaseVisualChange {
       pressSucceeded,
     });
     return result;
+  }
+
+  private pressRotary(
+    button: Parameters<RotaryInput["press"]>[0],
+    steps: number | undefined,
+    signal?: AbortSignal,
+  ): Promise<PressButtonResult> {
+    if (this.device.platform !== "android") {
+      throw new ActionableError(`${button} is Android Automotive only; this is an iOS device.`);
+    }
+    return new RotaryInput(this.device, this.adb, this.deviceTraits).press(button, steps, signal);
   }
 
   /**

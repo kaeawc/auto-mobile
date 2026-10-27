@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import dev.jasonpearson.automobile.protocol.PrototypeAssetContract
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import java.io.File
@@ -208,7 +209,11 @@ class SavedPrototypeDirectoryStore(
     val ids = mutableSetOf<String>()
     var total = 0L
     for (asset in request.assets) {
-      if (asset.id.isEmpty() || asset.id.length > limits.assets.maxIdLength)
+      if (
+        asset.id.isEmpty() ||
+          asset.id.length > limits.assets.maxIdLength ||
+          PrototypeAssetContract.isMediaId(asset.id)
+      )
         return refusal(SavedPrototypeRejection.INVALID_ASSET_ID)
       if (!ids.add(asset.id)) return refusal(SavedPrototypeRejection.DUPLICATE_ASSET_ID)
       if (asset.mediaType !in limits.assets.mimeTypes || asset.mediaType !in extensions)
@@ -259,6 +264,7 @@ class SavedPrototypeDirectoryStore(
         if (
           asset.id.isEmpty() ||
             asset.id.length > limits.assets.maxIdLength ||
+            PrototypeAssetContract.isMediaId(asset.id) ||
             asset.mediaType !in limits.assets.mimeTypes
         )
           throw IOException("Invalid asset metadata")

@@ -81,6 +81,7 @@
     "material-app-bar-dialog-pickers.json",
     "material-controls.json",
     "material-slider-chip-card.json",
+    "media-image-data-no-root-data.json",
     "media-image-data.json",
     "media-literal-id.json",
     "media-repeat-asset.json",
@@ -1613,6 +1614,10 @@
     "material-app-bar-dialog-pickers.json": [],
     "material-controls.json": [],
     "material-slider-chip-card.json": [],
+    "media-image-data-no-root-data.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_media_items_v1"
+    ],
     "media-image-data.json": ["prototype_data_model_v1", "prototype_platform_media_items_v1"],
     "media-literal-id.json": ["prototype_data_model_v1"],
     "media-repeat-asset.json": ["prototype_data_model_v1", "prototype_flow_grid_v1"],

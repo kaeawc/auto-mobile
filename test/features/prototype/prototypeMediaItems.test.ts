@@ -85,6 +85,19 @@ describe("device media items (#14192)", () => {
     expect(prototypeAssetIdProblem("uploaded")).toBeNull();
   });
 
+  test("a repeat placeholder is a template, not an asset reference, and a data binding needs the data model", () => {
+    const references = collectPrototypeAssetReferences(spec(image("{item.thumbnail}")));
+    expect([...references.images]).toEqual([]);
+    const noRoot = {
+      id: "m",
+      window: { placement: { type: "fullscreen" } },
+      root: image({ data: "/photo" }),
+    };
+    expect(prototypeRequiredCapabilities(noRoot).map((gate) => gate.capability)).toContain(
+      "prototype_data_model_v1",
+    );
+  });
+
   test("a repeat placeholder in a string asset binds the row's media id", () => {
     const result = validatePrototypeSpec(
       spec({

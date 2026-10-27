@@ -444,6 +444,8 @@ internal object PrototypeBindableFields {
         "button",
         "fab" -> visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
         "tooltip" -> visitor.field(node, "text", path, PrototypeBindableKind.TEXT)
+        // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
+        "image" -> visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
         "menu" ->
           objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
             visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)

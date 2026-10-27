@@ -681,6 +681,11 @@ capture(
     children: [mediaImage("{item.thumbnail}")],
   }),
 );
+capture("media-image-data-no-root-data", {
+  id: "media",
+  window: { placement: { type: "fullscreen" } },
+  root: mediaImage({ data: "/photo" }),
+});
 capture("media-literal-id", mediaSpec(mediaImage("media:5b1f")));
 capture("media-data-not-pointer", mediaSpec(mediaImage({ data: "photo" })));
 capture("media-data-not-string", mediaSpec(mediaImage({ data: 1 })));

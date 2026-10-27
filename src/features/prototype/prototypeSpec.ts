@@ -1,3 +1,4 @@
+import { prototypePressSchema } from "./prototypePressSchema";
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { themeSchema } from "./prototypeThemeSchema";
 import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
@@ -195,17 +196,7 @@ export const commonNodeShape = {
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
   sharedKey: keySchema.optional(),
-  press: z
-    .object({
-      scale: z.number().finite().min(0.85).max(1).optional(),
-      alpha: z.number().finite().min(0.5).max(1).optional(),
-    })
-    .strict()
-    .refine(
-      (value) => value.scale !== undefined || value.alpha !== undefined,
-      "press needs scale or alpha",
-    )
-    .optional(),
+  press: prototypePressSchema.optional(),
   shared: z
     .object({ key: z.string().min(1).max(256), as: z.enum(["element", "bounds"]) })
     .strict()

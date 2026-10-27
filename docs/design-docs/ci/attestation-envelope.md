@@ -69,8 +69,17 @@ and a deterministic signature under a fixed key) that the service's tests should
 Not chosen: ECDSA P-256 (nondeterministic unless hedged, malleable signatures), RSA (large keys, padding
 choices), HMAC (the verifier would hold the signing secret).
 
-**Not enabled yet.** `SUPPORTED_SIGNATURE_ALGORITHMS` stays empty until the owner approves the scheme,
-so every attestation is still ignored (fail closed). Enabling it is adding `ed25519-v1` to that list.
+**Enabled** (owner decision on #11972). `SUPPORTED_SIGNATURE_ALGORITHMS` lists `ed25519-v1` and nothing
+else; an envelope naming any other algorithm, or none, is ignored and the job runs for real.
+`Ed25519EnvelopeVerifier` (`scripts/ci/attestation/validators/ed25519Verifier.ts`) is the verification
+path: it parses the envelope, requires the supported algorithm, looks the key id up in a key
+directory, and verifies the signature over the signed bytes. Every failure (unparseable, unsigned,
+other algorithm, unknown key, wrong key, tampered payload) leaves the envelope unverified. It does not
+decide anything by itself: base SHA and task come from the caller's claims, never from the envelope.
+
+Enabling the algorithm does not by itself make a tier skip a job. That still needs the producer key
+directory (#11980), the decision service (#11979) and the GitHub App transport (#11981), none of which
+exist yet; until then the gate stays shadow-only.
 
 ## Payload type registry
 

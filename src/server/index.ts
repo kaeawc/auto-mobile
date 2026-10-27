@@ -1,7 +1,8 @@
 import { clientAdvertisesMcpApps } from "./mcpAppsSupport";
 import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
-import type { ListToolsResult, McpServer } from "@modelcontextprotocol/server";
+import type { ListToolsResult, McpServer, ServerCapabilities } from "@modelcontextprotocol/server";
 import { createSdkMcpServer } from "./sdkMcpServer";
+import { MODERN_CACHE_HINTS } from "./modernCacheHints";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 
 import { installToolCallDispatcher, type ToolCallRequest } from "./toolCallDispatch";
@@ -334,6 +335,19 @@ function installDeviceReadiness(options: McpServerOptions): void {
   }
 }
 
+/**
+ * The capabilities one request's server advertises. A modern request has no notification stream
+ * until subscriptions/listen is wired (#13947), so it claims no resource subscriptions.
+ */
+function sdkServerCapabilities(era: McpServerOptions["era"]): ServerCapabilities {
+  return {
+    resources: era === "modern" ? {} : { subscribe: true, listChanged: true },
+    tools: {},
+    prompts: {},
+    ...(era === "modern" && { extensions: { [TASKS_EXTENSION_ID]: {} } }),
+  };
+}
+
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   ToolRegistry.setMutationRecording(
     createRecording(defaultDaemonContext, {
@@ -386,13 +400,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       name: "AutoMobile",
       version: getMcpServerVersion(),
     },
-    {
-      // A modern request has no notification stream until subscriptions/listen is wired (#13947).
-      resources: options.era === "modern" ? {} : { subscribe: true, listChanged: true },
-      tools: {},
-      prompts: {},
-      ...(options.era === "modern" && { extensions: { [TASKS_EXTENSION_ID]: {} } }),
-    },
+    sdkServerCapabilities(options.era),
+    options.era === "modern" ? MODERN_CACHE_HINTS : undefined,
   );
   startupBenchmark.endPhase("sdkInitialization");
 

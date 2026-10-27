@@ -412,6 +412,7 @@ very top of the screen, including under the status bar. A \`topAppBar\` or top c
 A host-owned two-finger long press (about 1 s) anywhere on the window reveals a dismiss pill for
 5 s; tapping it dismisses with reason \`user\`. Agent dismiss, a replacing show, authored dismiss,
 the session's five-minute idle TTL and last-client disconnect still work.
+\`window.transition\` (auto|none|fade|slide|scale) and \`repeat.stagger\` (0-100 ms per instance, capped at 600 ms) require \`prototype_window_motion_v1\` on Android.
 \`window.persistence: "device"\` defaults to \`bar\` and keeps its existing persistence behaviour.
 The device implementations ship separately: without the capability a device keeps the bar,
 explicit \`none\` is refused, and omitted chrome or \`bar\` succeeds. A successful fullscreen

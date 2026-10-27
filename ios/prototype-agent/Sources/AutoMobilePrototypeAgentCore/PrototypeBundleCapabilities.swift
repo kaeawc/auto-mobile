@@ -11,6 +11,7 @@ enum PrototypeBundleCapabilities {
         if spec["strings"] != nil { need("strings") }
         if spec["theme"]?.objectFields?["design"]?.stringValue == "platform" { need("design_platform") }
         if spec["motion"] == .string("reduced") { need("reduced_motion") }
+        if spec["window"]?.objectFields?["transition"] != nil { need("window_motion") }
         if spec["data"] != nil { need("data_model") }
         if spec["derive"] != nil { need("format") }
         if spec["theme"] != nil { need("theme_modes") }
@@ -37,6 +38,7 @@ enum PrototypeBundleCapabilities {
             if node["semantics"] != nil { need("semantics") }
             if PrototypeStrings.textFields(.object(node))
                 .contains(where: { $0.text.contains("{t:") }) { need("strings") }
+            if node["repeat"]?.objectFields?["stagger"] != nil { need("window_motion") }
             if node["sharedKey"] != nil { need("shared_element") }
             if node["shared"] != nil { names.insert("prototype_shared_element_v2") }
             let type = node["type"]?.stringValue ?? ""

@@ -36,6 +36,7 @@ internal object PrototypeBundleNodeCapabilities {
     }
     mark("semantics_v1", "semantics" in n)
     mark("platform_namespace_v1", "ios" in n || "android" in n)
+    mark("window_motion_v1", (n["repeat"] as? JsonObject)?.get("stagger") != null)
     mark("shared_element_v1", "sharedKey" in n)
     mark("shared_element_v2", "shared" in n)
     mark("flow_grid_v1", "span" in n)

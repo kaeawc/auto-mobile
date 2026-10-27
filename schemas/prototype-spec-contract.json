@@ -13417,6 +13417,13 @@
             "kind": "boolean"
           },
           "optional": true
+        },
+        "transition": {
+          "rule": {
+            "kind": "enum",
+            "values": ["auto", "none", "fade", "slide", "scale"]
+          },
+          "optional": true
         }
       }
     },
@@ -16359,6 +16366,15 @@
             }
           },
           "optional": true
+        },
+        "stagger": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100
+          },
+          "optional": true
         }
       }
     },
@@ -16690,6 +16706,15 @@
           "rule": {
             "kind": "ref",
             "name": "colorValue"
+          },
+          "optional": true
+        },
+        "stagger": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100
           },
           "optional": true
         }

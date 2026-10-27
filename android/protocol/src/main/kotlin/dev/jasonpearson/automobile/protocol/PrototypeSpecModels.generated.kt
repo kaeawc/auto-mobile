@@ -1745,6 +1745,42 @@ data class PrototypeListNode(
   val maxItems: Int? = null,
 ) : PrototypeNode()
 
+@SerialName("adaptive")
+@Serializable
+data class PrototypeAdaptiveNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val shared: PrototypeShared? = null,
+  override val sharedKey: String? = null,
+  override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
+  override val onAppear: List<PrototypeAction>? = null,
+  override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
+  override val keyframes: JsonObject? = null,
+  val kind: String,
+  val list: PrototypeNode? = null,
+  val detail: PrototypeNode? = null,
+  val content: PrototypeNode? = null,
+  val main: PrototypeNode? = null,
+  val supporting: PrototypeNode? = null,
+  val selectionKey: String? = null,
+  val stateKey: String? = null,
+  val openKey: String? = null,
+  val items: List<PrototypeRadioOption>? = null,
+) : PrototypeNode()
+
 @Serializable
 data class PrototypeRouteEntry(
   val screen: String,

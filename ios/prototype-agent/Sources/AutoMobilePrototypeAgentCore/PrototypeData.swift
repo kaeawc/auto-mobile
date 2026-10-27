@@ -275,6 +275,15 @@ enum PrototypeDataResolver {
         }
         if let child = fields["child"] {
             fields["child"] = resolveRoot(child, data: data, platform: platform, repeats: &repeats)
+        } else if fields["type"] == .string("adaptive") {
+            for slot in PrototypeAdaptive.slots {
+                if let child = fields[slot] { fields[slot] = resolveRoot(
+                    child,
+                    data: data,
+                    platform: platform,
+                    repeats: &repeats
+                ) }
+            }
         } else if case let .array(children)? = fields["children"] {
             fields["children"] = .array(children
                 .map { resolveRoot($0, data: data, platform: platform, repeats: &repeats) })

@@ -11,6 +11,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import dev.jasonpearson.automobile.protocol.*
+import dev.jasonpearson.automobile.protocol.PrototypeAdaptiveNode
 import dev.jasonpearson.automobile.protocol.PrototypeSemantics
 import kotlin.math.abs
 import kotlin.math.cos
@@ -326,6 +327,7 @@ internal class PrototypeNodeMapping(
         checked =
           (prototypeToggleKey(node)
               ?: prototypeListItemToggleKey(node)
+              ?: (node as? PrototypeAdaptiveNode)?.openKey
               ?: (node as? PrototypeScrollNode)?.refresh?.stateKey
               ?: (node as? PrototypeListNode)?.refresh?.stateKey)
             ?.let {
@@ -491,6 +493,7 @@ internal fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeBottomNavNode -> "bottomNav"
     is PrototypeBottomSheetNode -> "bottomSheet"
     is PrototypeTooltipNode -> "tooltip"
+    is PrototypeAdaptiveNode -> "adaptive"
     is PrototypeDrawerNode -> "drawer"
   }
 
@@ -551,6 +554,7 @@ internal fun prototypeOpenWhen(node: PrototypeNode?): PrototypeSheetCondition? =
 /** The string key a `radioGroup`, `segmentedButton` or `datePicker` is bound to. */
 private fun prototypeSelectionKey(node: PrototypeNode): String? =
   when (node) {
+    is PrototypeAdaptiveNode -> node.selectionKey ?: node.stateKey
     is PrototypeRadioGroupNode -> node.stateKey
     is PrototypeSelectNode -> node.stateKey
     is PrototypeSegmentedButtonNode -> node.stateKey

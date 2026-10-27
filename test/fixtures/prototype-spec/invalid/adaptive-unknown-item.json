@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "id": "adaptive",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "selection": "",
+      "tab": "missing",
+      "open": true
+    },
+    "root": {
+      "type": "adaptive",
+      "kind": "navigationSuite",
+      "items": [
+        {
+          "value": "home",
+          "label": "Home"
+        },
+        {
+          "value": "settings",
+          "label": "Settings"
+        }
+      ],
+      "stateKey": "tab",
+      "content": {
+        "type": "text",
+        "text": "Pane"
+      }
+    }
+  },
+  "expectedPath": "root.stateKey"
+}

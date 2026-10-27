@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.*
+import dev.jasonpearson.automobile.protocol.PrototypeAdaptiveNode
 import dev.jasonpearson.automobile.prototype.PlatformCallResult
 import dev.jasonpearson.automobile.prototype.PlatformError
 import dev.jasonpearson.automobile.prototype.PlatformErrorCode
@@ -875,6 +876,10 @@ class PrototypeRuntime(
       control(closing((drawer.source as PrototypeDrawerNode).openWhen), emptyList())
       return true
     }
+    runtimeAdaptiveBack(root)?.let {
+      handle(it)
+      return true
+    }
     val id = stackPopTarget(root, current.stacks) ?: return false
     changeStack(id) { _, path -> path.dropLast(1) }
     return true
@@ -883,10 +888,21 @@ class PrototypeRuntime(
   /** Focus and Back dispatch use exactly the same visible target selection. */
   fun hasPoppableStack(model: PrototypeRenderModel = renderModel()): Boolean =
     current.active &&
-      (modalPrototypeSheets(model.root).any { it.role == "drawer" } ||
+      (runtimeAdaptiveBack(model.root) != null ||
+        modalPrototypeSheets(model.root).any { it.role == "drawer" } ||
         stackPopTarget(model.root, current.stacks) != null)
 
+  private fun runtimeAdaptiveBack(root: PrototypeRenderNode): PrototypeInteraction? {
+    val device = current.platformState["device"] as? JsonObject
+    return adaptiveBackTarget(
+      root,
+      (device?.get("widthClass") as? JsonPrimitive)?.content == "expanded",
+      current.stacks,
+    )
+  }
+
   internal fun backPreview(): PrototypeRuntimeSnapshot? {
+    if (runtimeAdaptiveBack(renderModel().root) != null) return null
     if (modalPrototypeSheets(renderModel().root).any { it.role == "drawer" }) return null
     val id = stackPopTarget(renderModel().root, current.stacks) ?: return null
     val stack = current.stacks.getValue(id)
@@ -1740,6 +1756,8 @@ private val runtimeJson = Json { classDiscriminator = "type" }
 
 internal fun prototypeDescendants(node: PrototypeNode): List<PrototypeNode> =
   when (node) {
+    is PrototypeAdaptiveNode ->
+      listOfNotNull(node.list, node.detail, node.content, node.main, node.supporting)
     is PrototypeBoxNode -> node.children
     is PrototypeRowNode -> node.children
     is PrototypeColumnNode -> node.children

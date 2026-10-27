@@ -756,6 +756,7 @@ private fun RenderPrototypeNodeContent(
   if (animatesSize)
     LocalPrototypeRenderWorkProbe.current?.invoke(PrototypeRenderWork.SIZE_ANIMATION, node.identity)
   when (node.role) {
+    "adaptive" -> RenderPrototypeAdaptive(node, modifier, interact)
     "box" ->
       Box(containerModifier, contentAlignment = node.style.alignment) {
         node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }

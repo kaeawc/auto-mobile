@@ -43,5 +43,6 @@ export const PROTOTYPE_NODE_TYPES = [
   "bottomNav",
   "bottomSheet",
   "tooltip",
+  "adaptive",
   "drawer",
 ] as const;

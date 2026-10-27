@@ -84,7 +84,8 @@ enum PrototypeRepeat {
             fields["children"] = .array(expanded.map { expand($0, formatter: formatter, environment: environment) })
         }
         if !lazy { fields["repeat"] = nil }
-        for name in ["child", "header", "footer"] {
+        let slots = fields["type"] == .string("adaptive") ? PrototypeAdaptive.slots : ["child", "header", "footer"]
+        for name in slots {
             if let child = fields[name] { fields[name] = expand(child, formatter: formatter, environment: environment) }
         }
         if case let .object(screens)? = fields["screens"] {

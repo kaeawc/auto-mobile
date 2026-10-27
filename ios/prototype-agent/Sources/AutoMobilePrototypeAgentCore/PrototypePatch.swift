@@ -297,6 +297,16 @@ enum PrototypePatch {
     {
         var result = [Entry(node: node, tokens: tokens, path: path, insideRepeat: insideRepeat)]
         let repeated = insideRepeat || get(node, "repeat") != nil
+        if node["type"] == .string("adaptive") {
+            for key in PrototypeAdaptive.slots {
+                if let child = node[key]?.objectFields { result += tree(
+                    child,
+                    tokens: tokens + [key],
+                    path: "\(path).\(key)",
+                    insideRepeat: repeated
+                ) }
+            }
+        }
         if case let .object(child)? = get(node, "child") {
             result += tree(child, tokens: tokens + ["child"], path: "\(path).child", insideRepeat: repeated)
         }
@@ -342,6 +352,11 @@ enum PrototypePatch {
 
     private static func checkSubtree(_ node: [String: JSONValue], path: String) throws(Failure) {
         try checkReplacement(Entry(node: node, tokens: [], path: path, insideRepeat: false))
+        if node["type"] == .string("adaptive") {
+            for key in PrototypeAdaptive.slots {
+                if let child = node[key]?.objectFields { try checkSubtree(child, path: "\(path).\(key)") }
+            }
+        }
         if case let .object(child)? = get(node, "child") {
             try checkSubtree(child, path: "\(path).child")
         }

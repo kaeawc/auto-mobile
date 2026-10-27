@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "adaptive",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "selection": "",
+      "tab": "home",
+      "open": 42
+    },
+    "root": {
+      "type": "adaptive",
+      "kind": "supporting",
+      "main": {
+        "type": "text",
+        "text": "Pane"
+      },
+      "supporting": {
+        "type": "text",
+        "text": "Pane"
+      },
+      "openKey": "open"
+    }
+  },
+  "expectedPath": "root.openKey"
+}

@@ -27,6 +27,7 @@ internal object PrototypeNodeBindings {
   ): PrototypeSpecError? {
     val stored = value.text("stateKey")?.let { state[it] as? JsonPrimitive }
     return when (value.text("type")) {
+      "adaptive" -> PrototypeAdaptiveRules.error(value, path, state)
       "textField" -> textFieldErrors(value, path, stored)
       "slider" -> sliderErrors(value, path, stored)
       "chip" -> chipErrors(value, path, stored)

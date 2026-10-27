@@ -18,6 +18,12 @@ struct PrototypeStrictRepeats {
     var keyframeNodes = 0
 
     static func children(_ node: [String: JSONValue], path: String) -> [PrototypeLocatedValue] {
+        if node["type"] == .string("adaptive") {
+            return PrototypeAdaptive.slots.compactMap { key in node[key]?.objectFields.map { PrototypeLocatedValue(
+                value: $0,
+                path: "\(path).\(key)"
+            ) } }
+        }
         var result: [PrototypeLocatedValue] = []
         for name in ["header", "footer"] {
             if let child = node[name]?.objectFields { result.append(.init(value: child, path: "\(path).\(name)")) }

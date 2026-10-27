@@ -30,6 +30,7 @@ import {
   GUIDE_STRINGS_SEMANTICS,
   GUIDE_TEST_SESSIONS,
   GUIDE_TIMERS,
+  adaptiveGuideProse,
 } from "./prototypeGuideProseMore";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
 import { PROTOTYPE_NATIVE_ASSET_URI, PROTOTYPE_NATIVE_URI } from "./nativePrototypeUris";
@@ -274,6 +275,7 @@ export function renderPrototypeGuide(): string {
     GUIDE_DATA_ACTIONS,
     GUIDE_STORAGE,
     GUIDE_TIMERS,
+    adaptiveGuideProse,
     GUIDE_TEST_SESSIONS,
     GUIDE_REQUEST,
     GUIDE_EMIT_CONTEXT,

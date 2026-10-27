@@ -10,6 +10,7 @@ internal object PrototypeBundleNodeCapabilities {
     val type = text(n["type"])
     val typed =
       mapOf(
+        "adaptive" to "adaptive_v1",
         "carousel" to "carousel_v1",
         "searchBar" to "search_bar_v1",
         "chart" to "chart_v1",

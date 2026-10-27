@@ -36,7 +36,7 @@ enum PrototypeRefresh {
                 try visit(child, path: "\(path).children[\(index)]")
             }
         }
-        for name in ["child", "header", "footer"] {
+        for name in node["type"] == .string("adaptive") ? PrototypeAdaptive.slots : ["child", "header", "footer"] {
             if let child = node[name] { try visit(child, path: "\(path).\(name)") }
         }
         for (screen, screenPath) in PrototypeStacks.screenChildren(in: node, path: path) {

@@ -1,3 +1,4 @@
+import { prototypeAdaptiveNotes } from "./prototypeAdaptive";
 import { prototypeNamespaceNotes } from "./prototypeNamespaceNotes";
 import { designFallbackPaths } from "./prototypeDesign";
 import { prototypeStringsFallbackKeys } from "./prototypeStrings";
@@ -17,6 +18,7 @@ import { prototypeIconEffectNotes } from "./prototypeIconEffectNotes";
 import type { PrototypeSpec } from "./prototypeSpec";
 
 export type PrototypePlatformNoteConstruct =
+  | "adaptive"
   | "design.fallback"
   | "platformNamespace"
   | "rich-text-links"
@@ -408,7 +410,12 @@ export function prototypePlatformNotes(
     : [];
   const namespaceNotes = [...foreignNotes, ...prototypeNamespaceNotes(spec, platform, osMajor)];
   if (platform === "android") {
-    return [...namespaceNotes, ...zoomNotes, ...prototypeIconEffectNotes(spec, platform)];
+    return [
+      ...prototypeAdaptiveNotes(spec, platform),
+      ...namespaceNotes,
+      ...zoomNotes,
+      ...prototypeIconEffectNotes(spec, platform),
+    ];
   }
   const found: Occurrence[] = [];
   occurrences(spec.root, { kind: "ref", name: "node" }, "root", found);
@@ -495,6 +502,7 @@ export function prototypePlatformNotes(
     ...notes,
     ...zoomNotes,
     ...menus,
+    ...prototypeAdaptiveNotes(spec, platform),
     ...namespaceNotes,
     ...prototypeIconEffectNotes(spec, platform, osMajor),
   ];

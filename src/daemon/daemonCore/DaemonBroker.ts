@@ -390,6 +390,16 @@ export class DaemonBroker {
     const registry = this.host.bindingRegistry();
     this.host.setBindingRegistry(undefined);
     try {
+      // The device allocation claims are released after this stage, when the table is gone: this
+      // daemon's rows leave with its registry so a clean stop strands none (#11811 b).
+      await (await registry)?.deviceClaims().releaseOwnedBy(process.pid);
+    } catch (error) {
+      logger.warn(
+        `[Daemon] Withdrawing this daemon's device claims failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    try {
       await (await registry)?.close();
     } catch (error) {
       logger.warn(`[Daemon] Closing the binding registry failed: ${errorMessage(error)}`, error);

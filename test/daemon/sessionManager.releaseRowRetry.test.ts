@@ -61,26 +61,31 @@ describe("the row of a released session (#11557)", () => {
   }
 
   /**
-   * A device-loss release is superseded at its deadline while its terminal write is parked. The
-   * session lives on, its live row rewritten; the returned function lands (or fails) that write.
+   * The live session of a device-loss release whose terminal write is parked: the returned
+   * function lands that write (its terminal row) and runs the rewrite of the live row over it.
+   * A release no longer produces this since #11799 W5 (a volatile row that landed has won, and a
+   * durable release declines before it writes), so the late landing is driven directly; the rewrite
+   * machinery behind it is exercised unchanged until the release-driven half is deleted.
    */
   async function supersededReleaseWithParkedWrite(): Promise<() => void> {
-    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
-    let landReleaseWrite!: () => void;
-    store.park = new Promise<void>((resolve) => {
-      landReleaseWrite = resolve;
+    const session = await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: IDLE_WINDOW_MS,
     });
-    let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
-      commitFence: () => !superseded,
-    });
-    await settleMicrotasks(100);
-    superseded = true;
-    await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
-    expect(await release).toEqual({ superseded: true });
-    store.park = undefined;
-    expect(manager.getSession(SESSION)).not.toBeNull();
-    return landReleaseWrite;
+    const settleExpected = manager.testHooks.wiring.host.superseded.expectReassert(SESSION);
+    manager.testHooks.wiring.host.superseded.remember(session, [DEVICE_LOSS]);
+    return () => {
+      void (async () => {
+        const current = (await row())!;
+        store.seed({ ...current, status: "released", release_reason: DEVICE_LOSS });
+        const rows = manager.testHooks.wiring.supersededRows;
+        if (manager.getSession(SESSION)) {
+          await rows.reassertSupersededLiveRow(session, [DEVICE_LOSS]);
+        } else {
+          // The session it spared has ended since, for a reason that is not terminal.
+          await rows.restoreNonTerminalRowOverSupersededRelease(session, [DEVICE_LOSS]);
+        }
+      })().finally(settleExpected);
+    };
   }
 
   test("a non-terminal release whose write fails is retried on the release backoff until it lands", async () => {
@@ -398,7 +403,20 @@ describe("the row of a released session (#11557)", () => {
   });
 
   test("a terminal row write waiting on a release stops waiting the moment that release is forced", async () => {
-    const failParkedWrite = await supersededReleaseWithParkedWrite();
+    await supersededReleaseWithParkedWrite();
+    // The device-loss release's terminal write is parked past its deadline and then fails.
+    const failParkedWrite = () =>
+      manager.testHooks.wiring.releasePersistence.trackLateReleaseWrite(
+        Promise.reject(new Error("SQLITE_BUSY: database is locked")),
+        {
+          sessionId: SESSION,
+          deviceId: DEVICE,
+          releaseReason: DEVICE_LOSS,
+          releasedAtMs: timer.now(),
+          terminal: true,
+          heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
+        },
+      );
     // A second release of the session never starts: it waits on a rebind whose write never lands.
     store.duringPlainUpsert = () => new Promise<void>(() => {});
     const rebind = manager.rebindSession(SESSION, OTHER_DEVICE, "android");
@@ -406,10 +424,8 @@ describe("the row of a released session (#11557)", () => {
     const stuck = manager.releaseSession(SESSION, "heartbeat-timeout");
     await settleMicrotasks(100);
     // The first release's parked write fails now; its retry waits for the release in flight.
-    store.failReleaseWrites = 1;
     failParkedWrite();
     await settleMicrotasks();
-    expect(store.failReleaseWrites).toBe(0);
     expect(timer.getPendingTimeouts()).not.toContain(RELEASE_RETRY_DELAY_MS);
 
     expect(manager.forceStuckRelease(SESSION)?.stage).toBe("awaiting-rebind");

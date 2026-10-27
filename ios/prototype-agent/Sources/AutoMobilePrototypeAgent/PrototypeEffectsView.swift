@@ -168,7 +168,8 @@
         private func vignette(color: PrototypeModeValue?, intensity: Double, radius: Double) -> some View {
             let base = color.flatMap { palette.color($0) } ?? .black
             return GeometryReader { proxy in
-                let reach = (proxy.size.width * proxy.size.width + proxy.size.height * proxy.size.height).squareRoot() / 2
+                let reach = (proxy.size.width * proxy.size.width + proxy.size.height * proxy.size.height)
+                    .squareRoot() / 2
                 Rectangle().fill(RadialGradient(
                     stops: [
                         .init(color: .clear, location: CGFloat(min(max(radius, 0), 1))),

@@ -851,7 +851,8 @@
                 ))
                 .modifier(PrototypeStylePaintModifier(
                     style: style, shape: shape, palette: palette,
-                    shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial,
+                    shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+                        .spatial,
                     effects: PrototypeEffects.plan(
                         style?.effects, platformBackedSubtree: PrototypeEffects.hasPlatformBackedSubtree(node)
                     ),

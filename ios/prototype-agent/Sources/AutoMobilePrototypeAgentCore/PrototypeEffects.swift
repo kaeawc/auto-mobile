@@ -247,7 +247,9 @@ enum PrototypeEffects {
                 ])
             }
             if let child = node.child { visit(child, "\(path).child") }
-            for (index, child) in (node.children ?? []).enumerated() { visit(child, "\(path).children[\(index)]") }
+            for (index, child) in (node.children ?? []).enumerated() {
+                visit(child, "\(path).children[\(index)]")
+            }
             for (name, screen) in (node.screens ?? [:]).sorted(by: { $0.key < $1.key }) {
                 visit(screen, "\(path).screens[\(quoted(name))]")
             }

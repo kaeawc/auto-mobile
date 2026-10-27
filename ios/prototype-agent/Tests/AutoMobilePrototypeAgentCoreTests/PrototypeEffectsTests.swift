@@ -57,7 +57,11 @@ final class PrototypeEffectsTests: XCTestCase {
         XCTAssertEqual(PrototypeEffects.phase(of: still, elapsed: 9), 0.25, accuracy: 1e-9)
         let loop = PrototypeEffect(look: .wave(amplitude: 4, wavelength: 48, angle: 0), periodMs: 1000, phase: 0)
         XCTAssertEqual(PrototypeEffects.phase(of: loop, elapsed: 0.5), 0.5, accuracy: 1e-9)
-        let shifted = PrototypeEffect(look: .ripple(amplitude: 4, wavelength: 48, centerX: 0.5, centerY: 0.5), periodMs: 1000, phase: 0.25)
+        let shifted = PrototypeEffect(
+            look: .ripple(amplitude: 4, wavelength: 48, centerX: 0.5, centerY: 0.5),
+            periodMs: 1000,
+            phase: 0.25
+        )
         XCTAssertEqual(PrototypeEffects.phase(of: shifted, elapsed: 1.5), 0.75, accuracy: 1e-9)
         // A static look ignores animate entirely.
         let blur = PrototypeEffect(look: .blur(radius: 4), periodMs: 1000, phase: 0.3)

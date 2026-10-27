@@ -57,8 +57,14 @@
             PrototypeZoomNavigation.destinations(entries)
         }
 
+        // An explicit closure, not a method reference: the reabstraction thunk of a method
+        // reference crashes the Swift 6 compiler's IR generation.
+        private var pathBinding: Binding<[PrototypeStackEntry]> {
+            Binding(get: { destinations }, set: { next in navigateBack(next) })
+        }
+
         var body: some View {
-            NavigationStack(path: Binding(get: { destinations }, set: navigateBack)) {
+            NavigationStack(path: pathBinding) {
                 if let root {
                     screen(root)
                         .navigationDestination(for: PrototypeStackEntry.self) { entry in

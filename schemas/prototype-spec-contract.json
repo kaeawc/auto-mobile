@@ -12492,6 +12492,13 @@
               },
               "optional": true
             },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -12504,13 +12511,6 @@
                 }
               }
             },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -12518,10 +12518,10 @@
               },
               "optional": true
             },
-            "semantics": {
+            "scrollLinked": {
               "rule": {
                 "kind": "ref",
-                "name": "semantics"
+                "name": "scrollLinked"
               },
               "optional": true
             }
@@ -12729,6 +12729,13 @@
               },
               "optional": true
             },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {
@@ -12741,13 +12748,6 @@
                 }
               }
             },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -12755,10 +12755,10 @@
               },
               "optional": true
             },
-            "semantics": {
+            "scrollLinked": {
               "rule": {
                 "kind": "ref",
-                "name": "semantics"
+                "name": "scrollLinked"
               },
               "optional": true
             }
@@ -13006,17 +13006,10 @@
               },
               "optional": true
             },
-            "android": {
+            "semantics": {
               "rule": {
                 "kind": "ref",
-                "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "ios": {
-              "rule": {
-                "kind": "ref",
-                "name": "iosNamespace"
+                "name": "semantics"
               },
               "optional": true
             },
@@ -13032,13 +13025,6 @@
                 }
               }
             },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -13046,16 +13032,30 @@
               },
               "optional": true
             },
-            "semantics": {
+            "scrollLinked": {
               "rule": {
                 "kind": "ref",
-                "name": "semantics"
+                "name": "scrollLinked"
               },
               "optional": true
             },
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -18616,8 +18616,8 @@
       "android": "material"
     },
     "list": {
-      "ios": "neutral",
-      "android": "neutral"
+      "ios": "material",
+      "android": "material"
     }
   },
   "stringFields": [

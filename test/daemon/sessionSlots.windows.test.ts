@@ -59,9 +59,11 @@ test("forced release leaves an orphan rebind only until its pending write settle
   rig.timer.reset();
 });
 
+// A volatile journal keeps the write-first order, where the terminal row can land before the
+// final fence declines. A durable one writes the row after the commit (#11799).
 test("declined terminal commit agrees across fence lifting and live-row rewrite", async () => {
   const persistence = new GatedPersistence();
-  const rig = slotAgreementRig(persistence);
+  const rig = slotAgreementRig(persistence, undefined, undefined, undefined, false);
   const session = await rig.manager.createSession("id", "fake-id", "android");
   const releaseGate = Promise.withResolvers<void>();
   persistence.releaseGate = releaseGate.promise;
@@ -90,7 +92,7 @@ test("declined terminal commit agrees across fence lifting and live-row rewrite"
 
 test("failed terminal write leaves a published fence without an op, including a later declined release", async () => {
   const persistence = new FakeDeviceSessionPersistence();
-  const rig = slotAgreementRig(persistence);
+  const rig = slotAgreementRig(persistence, undefined, undefined, undefined, false);
   const session = await rig.manager.createSession("id", "fake-id", "android");
   persistence.failure = "release";
   await expect(rig.manager.releaseSession("id", "explicit-release")).rejects.toThrow();

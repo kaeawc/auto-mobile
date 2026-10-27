@@ -1564,8 +1564,8 @@ data class PrototypeListNode(
   val onEndReached: List<PrototypeAction>? = null,
   val endThreshold: Int = 3,
   val maxItems: Int? = null,
-  val android: PrototypeAndroidNamespace? = null,
   val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @Serializable

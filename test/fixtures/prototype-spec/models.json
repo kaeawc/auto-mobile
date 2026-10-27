@@ -307,11 +307,6 @@
       "width": 2.5,
       "color": "#112233"
     },
-    "elevation": 2,
-    "shadowColor": {
-      "light": "#112233",
-      "dark": "#445566"
-    },
     "gradient": {
       "type": "linear",
       "angle": 45,
@@ -356,7 +351,25 @@
     },
     "textStyle": "bodyLarge",
     "scale": 1.2,
-    "rotation": 15
+    "rotation": 15,
+    "cornerStyle": "continuous",
+    "shadows": [
+      {
+        "color": "#000000",
+        "radius": 4
+      }
+    ],
+    "effects": [
+      {
+        "type": "noise"
+      }
+    ],
+    "shader": {
+      "asset": "effect",
+      "uniforms": {
+        "strength": 1
+      }
+    }
   },
   "nodeBox": {
     "type": "box",
@@ -555,6 +568,42 @@
       "type": "spacer"
     }
   },
+  "nodeList": {
+    "type": "list",
+    "repeat": {
+      "items": {
+        "path": "/items"
+      },
+      "as": "row",
+      "key": "id"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "{row.id}"
+      }
+    ]
+  },
+  "nodeTooltip": {
+    "type": "tooltip",
+    "openWhen": {
+      "key": "enabled",
+      "equals": true
+    },
+    "text": "Help",
+    "anchorTo": "targetPager"
+  },
+  "nodeDrawer": {
+    "type": "drawer",
+    "edge": "start",
+    "openWhen": {
+      "key": "enabled",
+      "equals": true
+    },
+    "child": {
+      "type": "spacer"
+    }
+  },
   "nodePager": {
     "type": "pager",
     "id": "page",
@@ -677,6 +726,13 @@
   },
   "actionAppendData": {
     "type": "appendData",
+    "path": "/data/items",
+    "value": {
+      "value": 1
+    }
+  },
+  "actionPrependData": {
+    "type": "prependData",
     "path": "/data/items",
     "value": {
       "value": 1
@@ -878,13 +934,6 @@
     "type": "cancelTimer",
     "id": "tick"
   },
-  "actionPrependData": {
-    "type": "prependData",
-    "path": "/data/items",
-    "value": {
-      "value": 1
-    }
-  },
   "actionSetStack": {
     "type": "setStack",
     "stack": "targetStack",
@@ -893,42 +942,6 @@
         "screen": "home"
       }
     ]
-  },
-  "nodeList": {
-    "type": "list",
-    "repeat": {
-      "items": {
-        "path": "/items"
-      },
-      "as": "row",
-      "key": "id"
-    },
-    "children": [
-      {
-        "type": "text",
-        "text": "{row.id}"
-      }
-    ]
-  },
-  "nodeTooltip": {
-    "type": "tooltip",
-    "openWhen": {
-      "key": "enabled",
-      "equals": true
-    },
-    "text": "Help",
-    "anchorTo": "targetPager"
-  },
-  "nodeDrawer": {
-    "type": "drawer",
-    "edge": "start",
-    "openWhen": {
-      "key": "enabled",
-      "equals": true
-    },
-    "child": {
-      "type": "spacer"
-    }
   },
   "styleFilled": {
     "width": {

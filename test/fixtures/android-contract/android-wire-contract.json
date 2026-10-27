@@ -11027,14 +11027,14 @@
         "hasDefault": true
       },
       {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "name": "ios",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       }

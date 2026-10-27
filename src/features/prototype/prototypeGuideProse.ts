@@ -82,9 +82,15 @@ Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optiona
 \`transition: "platform" | "slide" | "fade" | "none"\` selects screen navigation animation
 (default \`platform\`); \`push\` and \`replace\` can override it with their own \`transition\`.
 Any explicit value needs \`prototype_stack_transitions_v1\`; pop/popToRoot take no override.
+The additional \`sharedAxisX\`, \`sharedAxisY\`, \`fadeThrough\`, \`zoom\` values and push/replace
+\`source\` require \`prototype_stack_patterns_v1\`. Zoom requires source naming exactly one
+node sharedKey (that source is exempt from the visibility-pair rule). Android currently falls back
+to fadeThrough; iOS falls back to platform push, without interactive pop. Only platform has iOS
+interactive pop; composed patterns pop non-interactively. Fixed movement timing is 300 ms and fade
+timing is 150 ms; motion tokens are not yet available.
 Transitions snap under \`motion: "none"\` or Android animator/transition scale 0, and fade under
 \`motion: "reduced"\` or iOS Reduce Motion. A stack's
-\`transition\` accepts only those four values and no longer animates the stack's own visibility
+\`transition\` accepts only those navigation values and no longer animates the stack's own visibility
 (earlier specs using \`expand\`, \`scale\`, \`slideStart\`, \`slideEnd\` or \`blurReplace\` on a stack
 are now refused): wrap the stack in a \`box\` with \`visibleWhen\` and a visibility transition for
 that. Each entry's scroll position is restored on pop. A stack cannot appear inside a repeat template.
@@ -195,8 +201,9 @@ settling, pager scrolling and shared morphs) with a crossfade or snap with fade.
 other ambient/attention loops stop at rest and report no loop; color, alpha and fades still animate.
 Off makes every change instant.
 
-\`sharedKey\` requires \`prototype_shared_element_v1\` and \`visibleWhen\` on the same node.
-Keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`; each key labels exactly two nodes, at most 16 distinct
+\`sharedKey\` requires \`prototype_shared_element_v1\`. Visibility morphs require \`visibleWhen\`
+on the same node; a key referenced as a zoom source instead labels exactly one node without that requirement.
+Keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`; each visibility morph key labels exactly two nodes, at most 16 distinct
 keys per spec. A pair cannot be ancestor/descendant, and neither a repeat carrier nor any node
 inside its template may carry a sharedKey. Authors choose visibility conditions so the pair is
 not visible together. Full motion morphs the pair's bounds between different content; reduced

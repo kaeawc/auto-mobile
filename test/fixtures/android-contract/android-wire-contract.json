@@ -10217,6 +10217,12 @@
         "type": "enum",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "source",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "radial": [
@@ -10361,6 +10367,12 @@
       {
         "name": "transition",
         "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "source",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       }

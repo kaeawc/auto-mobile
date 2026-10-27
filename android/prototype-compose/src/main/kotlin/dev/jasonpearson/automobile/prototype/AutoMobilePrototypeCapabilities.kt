@@ -37,6 +37,7 @@ object AutoMobilePrototype {
       "prototype_rich_text_v1",
       "prototype_search_bar_v1",
       "prototype_shared_element_v1",
+      "prototype_stack_patterns_v1",
       "prototype_stack_transitions_v1",
       "prototype_stack_v1",
       "prototype_storage_v1",

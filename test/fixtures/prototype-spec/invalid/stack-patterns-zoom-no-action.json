@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "stack-patterns",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "transition": "zoom",
+      "screens": {
+        "home": {
+          "type": "text",
+          "text": "Home"
+        },
+        "detail": {
+          "type": "text",
+          "text": "Detail"
+        }
+      }
+    }
+  },
+  "expectedPath": "root.transition"
+}

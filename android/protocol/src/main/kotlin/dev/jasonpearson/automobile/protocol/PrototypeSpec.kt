@@ -200,6 +200,7 @@ data class PrototypePushAction(
   val stack: String,
   val screen: String,
   val transition: PrototypeStackTransition? = null,
+  val source: String? = null,
 ) : PrototypeAction()
 
 @SerialName("pop")
@@ -216,6 +217,7 @@ data class PrototypeReplaceAction(
   val stack: String,
   val screen: String,
   val transition: PrototypeStackTransition? = null,
+  val source: String? = null,
 ) : PrototypeAction()
 
 @SerialName("setState")

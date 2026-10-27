@@ -27,7 +27,8 @@ struct PrototypeSharedElementPlan: Equatable {
     }
 
     /// Located nodes come from the structural validator's pre-order, sorted-field traversal.
-    static func validate(_ nodes: [PrototypeLocatedValue]) throws {
+    static func validate(_ nodes: [PrototypeLocatedValue], actions: [PrototypeLocatedValue] = []) throws {
+        let sources = try PrototypeStackPatterns.sources(nodes, actions: actions)
         var repeats: [String] = []
         var pairs: [String: [String]] = [:]
         var order: [String] = []
@@ -38,7 +39,7 @@ struct PrototypeSharedElementPlan: Equatable {
             func fail(_ message: String) -> PrototypeLoadError {
                 PrototypeContractValidator.invalid(path, message)
             }
-            guard node.value["visibleWhen"] != nil else {
+            guard node.value["visibleWhen"] != nil || sources.contains(key) else {
                 throw fail("sharedKey requires visibleWhen on the same node")
             }
             if repeats.contains(where: { node.path == $0 || node.path.hasPrefix("\($0).") }) {
@@ -53,7 +54,9 @@ struct PrototypeSharedElementPlan: Equatable {
             }
             pairs[key, default: []].append(node.path)
         }
-        if let key = order.first(where: { pairs[$0]?.count == 1 }), let first = pairs[key]?.first {
+        if let key = order.first(where: { pairs[$0]?.count == 1 && !sources.contains($0) }),
+           let first = pairs[key]?.first
+        {
             throw PrototypeContractValidator.invalid(
                 "\(first).sharedKey", "sharedKey \"\(key)\" must be used by exactly two nodes"
             )

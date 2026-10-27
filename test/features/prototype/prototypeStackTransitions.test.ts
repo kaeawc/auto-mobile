@@ -5,6 +5,7 @@ import { prototypeGateCapabilities } from "../../../src/features/prototype/proto
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 import {
   PROTOTYPE_STACK_TRANSITIONS,
+  prototypeStackPatternFields,
   prototypeStackTransitionFields,
   prototypeStackTransitionsUnsupportedMessage,
 } from "../../../src/features/prototype/prototypeStackTransitions";
@@ -33,7 +34,7 @@ describe("stack transitions", () => {
     expect(contract.definitions.stackTransition.values).toEqual([...PROTOTYPE_STACK_TRANSITIONS]);
   });
   test("all shared values validate on stacks and push/replace", () => {
-    for (const transition of PROTOTYPE_STACK_TRANSITIONS) {
+    for (const transition of PROTOTYPE_STACK_TRANSITIONS.filter((value) => value !== "zoom")) {
       expect(prototypeSpecSchema.safeParse(spec(stack({ transition }))).success).toBe(true);
       expect(
         validatePrototypeSpec(
@@ -76,7 +77,7 @@ describe("stack transitions", () => {
     ).toBe(true);
   });
   test("invalid enums, choreography objects and pop overrides are rejected", () => {
-    for (const transition of ["scale", "sharedAxisX", { type: "fade" }, null]) {
+    for (const transition of ["scale", "futurePattern", { type: "fade" }, null]) {
       expect(prototypeSpecSchema.safeParse(spec(stack({ transition }))).success).toBe(false);
       expect(validatePrototypeSpec(spec(stack({ transition }))).success).toBe(false);
       expect(
@@ -120,5 +121,21 @@ describe("stack transitions", () => {
     expect(prototypeStackTransitionsUnsupportedMessage(["root.transition"], "android")).toContain(
       "CtrlProxy",
     );
+  });
+});
+
+describe("stack patterns", () => {
+  test("source requires the new gate even with a classic override", () => {
+    expect(
+      prototypeStackPatternFields(
+        spec(stack({ onTap: [{ ...action("push", "slide"), source: "hero" }] })),
+      ),
+    ).toEqual(["root.onTap[0].source"]);
+  });
+  test("only pattern values use the new gate", () => {
+    expect(prototypeStackPatternFields(spec(stack({ transition: "platform" })))).toEqual([]);
+    expect(prototypeStackPatternFields(spec(stack({ transition: "sharedAxisY" })))).toEqual([
+      "root.transition",
+    ]);
   });
 });

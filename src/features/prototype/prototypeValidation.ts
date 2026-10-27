@@ -859,7 +859,7 @@ function validateValue(
   const repeats = new PrototypeRepeatData(data.data);
   const error =
     walk(value, definitions.spec, "", context, 0) ??
-    prototypeSharedElementError(context.nodes) ??
+    prototypeSharedElementError(context.nodes, context.actions) ??
     layoutErrors(value, context, repeats) ??
     behaviourErrors(value, context, data, repeats, componentTimers);
   if (error) {

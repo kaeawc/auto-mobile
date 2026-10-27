@@ -48,6 +48,9 @@ enum PrototypeStrictCapabilities {
             if fields["sharedKey"] != nil { need("shared_element") }
             let navigation = ["stack", "push", "replace"].contains(type)
             if navigation, fields["transition"] != nil { need("stack_transitions") }
+            if navigation,
+               fields["source"] != nil || ["sharedAxisX", "sharedAxisY", "fadeThrough", "zoom"]
+               .contains(fields["transition"]?.stringValue ?? "") { need("stack_patterns") }
             if includeAgentGates, type == "icon",
                ["rounded", "sharp", "twoTone"].contains(fields["variant"]?.stringValue ?? "") { need("icon_variant") }
             if type == "text", fields["spans"] != nil { need("rich_text") }

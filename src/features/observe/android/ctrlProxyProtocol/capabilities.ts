@@ -127,6 +127,7 @@ export const PROTOTYPE_REDUCED_MOTION_CAPABILITY = "prototype_reduced_motion_v1"
 export const PROTOTYPE_SHARED_ELEMENT_CAPABILITY = "prototype_shared_element_v1";
 
 /** Screen stacks and push/pop/popToRoot/replace actions with screen_changed snapshots. */
+export const PROTOTYPE_STACK_PATTERNS_CAPABILITY = "prototype_stack_patterns_v1";
 export const PROTOTYPE_STACK_TRANSITIONS_CAPABILITY = "prototype_stack_transitions_v1";
 export const PROTOTYPE_STACK_CAPABILITY = "prototype_stack_v1";
 

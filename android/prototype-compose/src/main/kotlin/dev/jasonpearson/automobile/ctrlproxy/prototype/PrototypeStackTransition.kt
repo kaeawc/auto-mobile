@@ -7,6 +7,9 @@ import kotlinx.coroutines.flow.Flow
 internal enum class StackTransitionKind {
   Slide,
   Fade,
+  SharedAxisX,
+  SharedAxisY,
+  FadeThrough,
   None,
 }
 
@@ -29,6 +32,13 @@ internal fun resolveStackTransition(
     (perAction ?: declared) == PrototypeStackTransition.NONE -> StackTransitionKind.None
     (perAction ?: declared) == PrototypeStackTransition.FADE || reducedMotion ->
       StackTransitionKind.Fade
+    (perAction ?: declared) == PrototypeStackTransition.SHARED_AXIS_X ->
+      StackTransitionKind.SharedAxisX
+    (perAction ?: declared) == PrototypeStackTransition.SHARED_AXIS_Y ->
+      StackTransitionKind.SharedAxisY
+    (perAction ?: declared) in
+      setOf(PrototypeStackTransition.FADE_THROUGH, PrototypeStackTransition.ZOOM) ->
+      StackTransitionKind.FadeThrough
     else -> StackTransitionKind.Slide
   }
 

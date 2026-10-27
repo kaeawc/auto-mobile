@@ -59,6 +59,7 @@ final class PrototypeThemeModesTests: XCTestCase {
             "prototype_tooltip_v1",
             "prototype_drawer_v1",
             "prototype_stack_v1",
+            "prototype_stack_patterns_v1",
             "prototype_stack_transitions_v1",
             "prototype_reduced_motion_v1",
             "prototype_shared_element_v1",

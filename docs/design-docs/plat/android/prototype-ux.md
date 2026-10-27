@@ -847,8 +847,8 @@ the second (a list row into a detail card, a thumbnail into a viewer):
 ```
 
 Rules, enforced by every validator with exact paths: `sharedKey` is a key (same grammar as state
-keys) and is allowed only on a node that also has `visibleWhen`; each key is used by exactly two
-nodes, neither inside the other; a spec has at most 16 distinct keys; keys are rejected on a
+keys). Visibility morph keys require `visibleWhen` and exactly two nodes, neither inside the other.
+A key referenced by a zoom action source instead labels exactly one node and needs no `visibleWhen`; a spec has at most 16 distinct keys; keys are rejected on a
 `repeat` node and anywhere inside its template. Shared elements across pager pages and `stack`
 screens are not supported.
 
@@ -891,17 +891,34 @@ state are not resolved. The dynamic cross-check and the diff against `getNavigat
 `transition` override. Omission means `platform`; pop/popToRoot have no override. The contract
 is validated by both agents, and both advertise the capability.
 
-| Value      | Platform behaviour                         |
-| ---------- | ------------------------------------------ |
-| `platform` | Native navigation animation (default).     |
-| `slide`    | Directional screen slide, reversed on pop. |
-| `fade`     | Screen crossfade.                          |
-| `none`     | Instant screen change.                     |
+| Value         | Platform behaviour                                                             |
+| ------------- | ------------------------------------------------------------------------------ |
+| `platform`    | Native navigation animation (default).                                         |
+| `slide`       | Directional screen slide, reversed on pop.                                     |
+| `fade`        | Screen crossfade.                                                              |
+| `none`        | Instant screen change.                                                         |
+| `sharedAxisX` | Sibling steps along a horizontal flow; 30dp travel plus fade.                  |
+| `sharedAxisY` | Sibling steps along a vertical flow; 30dp travel plus fade.                    |
+| `fadeThrough` | Unrelated destinations; outgoing fade, then incoming fade and scale from 0.92. |
+| `zoom`        | Item-to-detail intent with a source key; currently uses the fallbacks below.   |
+
+The four named patterns and push/replace `source` require `prototype_stack_patterns_v1`.
+Zoom requires `source` on each push/replace using it, naming exactly one node's `sharedKey`
+in the spec. A key referenced as a zoom source is exempt from the two-node visibility-pair rule;
+repeat templates remain disallowed. A zoom stack must have a push/replace action using zoom.
+Android currently substitutes fadeThrough and iOS substitutes platform push; container transforms
+are follow-up work. iOS reports the fallback and non-interactive pattern pops in `platformNotes`.
+Only platform supports interactive iOS edge pop. Android predictive back scrubs every pattern,
+including zoom's fallback, and restores the current screen on cancellation.
+Shared-axis pop reverses travel; only X also mirrors for RTL. iOS composes axis movement with
+opacity and fadeThrough removes the outgoing screen visually before revealing the scaled incoming
+screen. Fixed named timings are 300 ms for movement and 150 ms for fade effects (two sequential
+phases for fadeThrough); the motion-token table is not available.
 
 Android slides enter from the end edge with 30% outgoing parallax, mirrored in RTL; pop and
 popToRoot reverse that direction. Platform replace crossfades. Animations finish within 300 ms.
 `motion: "none"` and animator duration scale 0 snap immediately. The reduced profile (see Motion
-profiles) changes slides to crossfades.
+profiles) changes every pattern to a crossfade.
 
 Activity hosts scrub the pop with predictive back on API 34+, settle on commit, and restore the
 current screen on cancellation. Earlier APIs pop with the ordinary animation. Overlay windows

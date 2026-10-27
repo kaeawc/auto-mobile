@@ -76,6 +76,10 @@ const fixtures: Record<string, Node> = {
   prototype_effects_v1: { ...label, style: { effects: [{ type: "noise" }] } },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
   prototype_shared_element_v1: { ...label, sharedKey: "hero" },
+  prototype_stack_patterns_v1: {
+    ...label,
+    onTap: [{ type: "push", stack: "nav", screen: "home", transition: "sharedAxisX" }],
+  },
   prototype_stack_transitions_v1: {
     ...label,
     onTap: [{ type: "push", stack: "nav", screen: "home", transition: "slide" }],

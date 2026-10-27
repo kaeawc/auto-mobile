@@ -4,6 +4,7 @@ import {
 } from "../observe/android/ctrlProxyProtocol";
 import { fail, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
+import { prototypeZoomError, prototypeZoomSources } from "./prototypeStackTransitions";
 import { record } from "./prototypeTemplate";
 
 export function prototypeReducedMotionFields(spec: unknown): string[] {
@@ -27,7 +28,13 @@ export function prototypeSharedElementFields(spec: unknown): string[] {
  */
 export function prototypeSharedElementError(
   nodes: Located[],
+  actions: Located[] = [],
 ): PrototypeValidationError | undefined {
+  const sources = prototypeZoomSources(nodes, actions);
+  const zoomError = prototypeZoomError(nodes, actions);
+  if (zoomError) {
+    return zoomError;
+  }
   const repeats: string[] = [];
   const pairs = new Map<string, string[]>();
   for (const { value: node, path } of nodes) {
@@ -38,11 +45,9 @@ export function prototypeSharedElementError(
       continue;
     }
     const at = `${path}.sharedKey`;
-    if (node.visibleWhen === undefined) {
-      return fail(at, "sharedKey requires visibleWhen on the same node");
-    }
-    if (repeats.some((parent) => path === parent || path.startsWith(`${parent}.`))) {
-      return fail(at, "sharedKey is not allowed inside repeat templates");
+    const visibilityError = sharedSourceVisibilityError(node, path, repeats, sources);
+    if (visibilityError) {
+      return visibilityError;
     }
     const prior = pairs.get(node.sharedKey) ?? [];
     pairs.set(node.sharedKey, prior);
@@ -57,8 +62,30 @@ export function prototypeSharedElementError(
     }
     prior.push(path);
   }
+  return unpairedSharedKeyError(pairs, sources);
+}
+
+function sharedSourceVisibilityError(
+  node: Record<string, unknown>,
+  path: string,
+  repeats: string[],
+  sources: Set<string>,
+): PrototypeValidationError | undefined {
+  if (node.visibleWhen === undefined && !sources.has(String(node.sharedKey))) {
+    return fail(`${path}.sharedKey`, "sharedKey requires visibleWhen on the same node");
+  }
+  if (repeats.some((parent) => path === parent || path.startsWith(`${parent}.`))) {
+    return fail(`${path}.sharedKey`, "sharedKey is not allowed inside repeat templates");
+  }
+  return undefined;
+}
+
+function unpairedSharedKeyError(
+  pairs: Map<string, string[]>,
+  sources: Set<string>,
+): PrototypeValidationError | undefined {
   for (const [key, paths] of pairs) {
-    if (paths.length !== 2) {
+    if (paths.length !== 2 && !sources.has(key)) {
       return fail(`${paths[0]}.sharedKey`, `sharedKey "${key}" must be used by exactly two nodes`);
     }
   }

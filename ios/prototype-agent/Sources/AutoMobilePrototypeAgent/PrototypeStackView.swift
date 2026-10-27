@@ -114,7 +114,14 @@
                         NodeView(node: screen, model: model)
                             .background(PrototypeStackFocusMarker(anchor: focusAnchor, active: active))
                             .overlay { Color.black.opacity(dim(entry)).allowsHitTesting(false) }
-                            .offset(x: offset(entry, width: model.windowSize.width))
+                            .offset(
+                                x: offset(entry, width: model.windowSize.width),
+                                y: axisOffset(entry, vertical: true)
+                            )
+                            .scaleEffect(kind == .fadeThrough && entry == destination ? 0.92 + 0.08 * max(
+                                0,
+                                (progress - 0.5) * 2
+                            ) : 1)
                             .opacity(opacity(entry))
                             .zIndex(zIndex(entry))
                             .allowsHitTesting(active && drag?.settling != true)
@@ -130,6 +137,7 @@
         }
 
         private func offset(_ entry: PrototypeStackEntry, width: Double) -> Double {
+            if kind == .sharedAxisX { return axisOffset(entry, vertical: false) }
             let sign = rtl ? -1.0 : 1.0
             if let drag {
                 if entry.id == current.last?.id { return sign * width * drag.progress }
@@ -147,11 +155,23 @@
             return 0
         }
 
+        private func axisOffset(_ entry: PrototypeStackEntry, vertical: Bool) -> Double {
+            guard kind == (vertical ? .sharedAxisY : .sharedAxisX) else { return 0 }
+            let sign = (direction == .pop ? -1.0 : 1.0) * (!vertical && rtl ? -1.0 : 1.0)
+            if entry == destination { return sign * 30 * (1 - progress) }
+            if entry == previous { return -sign * 30 * progress }
+            return 0
+        }
+
         private func opacity(_ entry: PrototypeStackEntry) -> Double {
             if drag != nil {
                 return entry.id == current.last?.id || entry.id == current.dropLast().last?.id ? 1 : 0
             }
-            if kind == .fade {
+            if kind == .fadeThrough {
+                if entry == destination { return max(0, (progress - 0.5) * 2) }
+                if entry == previous { return max(0, 1 - progress * 2) }
+            }
+            if kind == .fade || kind == .sharedAxisX || kind == .sharedAxisY {
                 if entry == destination { return progress }
                 if entry == previous { return 1 - progress }
             }
@@ -203,7 +223,10 @@
             }
             FrameWaiter.nextFrame {
                 guard token == generation else { return }
-                withAnimation(.easeOut(duration: 0.35), completionCriteria: .removed) {
+                withAnimation(
+                    .linear(duration: kind == .fade ? PrototypeStackTiming.effects : PrototypeStackTiming.spatial),
+                    completionCriteria: .removed
+                ) {
                     progress = 1
                 } completion: {
                     guard token == generation else { return }

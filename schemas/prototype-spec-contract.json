@@ -1555,6 +1555,10 @@
               },
               "optional": false
             },
+            "source": {
+              "rule": { "kind": "string", "min": 1 },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "ref",
@@ -1621,6 +1625,10 @@
                 "kind": "string"
               },
               "optional": false
+            },
+            "source": {
+              "rule": { "kind": "string", "min": 1 },
+              "optional": true
             },
             "transition": {
               "rule": {
@@ -14195,7 +14203,16 @@
     },
     "stackTransition": {
       "kind": "enum",
-      "values": ["platform", "slide", "fade", "none"]
+      "values": [
+        "platform",
+        "slide",
+        "fade",
+        "none",
+        "sharedAxisX",
+        "sharedAxisY",
+        "fadeThrough",
+        "zoom"
+      ]
     },
     "effectAnimate": {
       "kind": "object",

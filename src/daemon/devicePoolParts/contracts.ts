@@ -7,6 +7,7 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { type ForeignDeviceOwnership } from "../foreignDeviceOwnership";
+import type { DeviceClaimMirror } from "../deviceClaims";
 import { InMemoryDeviceHealthMarkers, type DeviceHealthMarkers } from "../deviceHealthMarkers";
 import { type BackoffPolicy } from "../../utils/Backoff";
 import type { AmbientExecutionIdReader } from "../../utils/interfaces/AmbientExecutionIdReader";
@@ -398,6 +399,8 @@ export interface DevicePoolDependencies {
   foreignDeviceOwnership?: ForeignDeviceOwnership;
   /** The same for iOS simulators, claimed by UDID (#10980). */
   iosForeignDeviceOwnership?: ForeignDeviceOwnership;
+  /** Mirrors the claims `DevicePool.create` builds into the host-wide claims table (#11811 b). */
+  deviceClaimMirrors?: { android?: DeviceClaimMirror; ios?: DeviceClaimMirror };
   /**
    * Devices broker bindings hold (#11174, #11178). Generic allocation, auto-start and explicit binds
    * never lend one, even while it is idle. A directly built pool has none.

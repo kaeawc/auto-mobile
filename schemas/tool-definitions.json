@@ -3675,7 +3675,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android and iOS).",
+    "description": "Drag a finger (or, with pointer, a stylus on Android 13+) along a polyline with segment timing, an initial hold and a release hold.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -3701,6 +3701,18 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 5000
+              },
+              "pressure": {
+                "description": "Stylus pressure 0-1 at this point (needs pointer); interpolated between points",
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "tilt": {
+                "description": "Stylus tilt in radians at this point (needs pointer)",
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1.5707963267948966
               }
             },
             "required": ["x", "y"],
@@ -3738,6 +3750,47 @@
           "type": "string",
           "enum": ["app", "prototype"]
         },
+        "pointer": {
+          "description": "Pointer for this gesture; omit for a finger. Fails with a capability error instead of falling back to a finger.",
+          "type": "object",
+          "properties": {
+            "toolType": {
+              "description": "Inject a stylus instead of a finger. A plain tap or swipe needs Android 12+ (API 31); pressure other than 1, tilt, orientation, buttons and any dragPath need Android 13+ (stylus_input_v1)",
+              "type": "string",
+              "enum": ["stylus"]
+            },
+            "pressure": {
+              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 13+) and is refused before input without it",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "tilt": {
+              "description": "Stylus tilt in radians from the surface normal, 0 to PI/2 (Android 13+)",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1.5707963267948966
+            },
+            "orientation": {
+              "description": "Stylus orientation in radians, -PI to PI (Android 13+)",
+              "type": "number",
+              "minimum": -3.141592653589793,
+              "maximum": 3.141592653589793
+            },
+            "buttons": {
+              "description": "Barrel buttons held for the gesture (Android 13+)",
+              "minItems": 1,
+              "maxItems": 2,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["primary", "secondary"]
+              }
+            }
+          },
+          "required": ["toolType"],
+          "additionalProperties": false
+        },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
           "type": "boolean"
@@ -3769,7 +3822,7 @@
       },
       "required": ["points"],
       "additionalProperties": false,
-      "description": "Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android and iOS). Use for drawing, unlock patterns, sliders, and long press then drag."
+      "description": "Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android and iOS). Use for drawing, unlock patterns, sliders, and long press then drag. With pointer: { toolType: \"stylus\" } it draws with a stylus (Android 13+) with per-point pressure and tilt, and is refused instead of using a finger if the device cannot."
     }
   },
   {
@@ -4655,6 +4708,7 @@
               "highlight",
               "hitTest",
               "homeScreen",
+              "hoverAt",
               "identifyInteractions",
               "inspectPackageSigning",
               "installApp",
@@ -4811,6 +4865,7 @@
               "highlight",
               "hitTest",
               "homeScreen",
+              "hoverAt",
               "identifyInteractions",
               "inspectPackageSigning",
               "installApp",
@@ -7216,6 +7271,108 @@
         }
       },
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "hoverAt",
+    "title": "Hover Over Path",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Hover a stylus or mouse over a path with no contact: hover enter, move, exit (Android; needs hover_input_v1).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "points": {
+          "description": "Hover positions: the pointer enters at the first, moves through the rest and exits at the last. No contact is made",
+          "minItems": 1,
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "description": "x in the selected coordinateSpace (native by default)",
+                "type": "number"
+              },
+              "y": {
+                "description": "y in the selected coordinateSpace (native by default)",
+                "type": "number"
+              },
+              "durationMs": {
+                "description": "Milliseconds spent moving from the previous point to this one (default 200); ignored on the first point",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5000
+              },
+              "distance": {
+                "description": "Stylus hover distance from the surface: 0 touching, 1 farthest. Stylus only; a mouse has none",
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": ["x", "y"],
+            "additionalProperties": false
+          }
+        },
+        "toolType": {
+          "description": "Pointer that hovers (default stylus). Apps see a different tool type and source: a stylus hover reports TOOL_TYPE_STYLUS with a hover distance, a mouse hover reports TOOL_TYPE_MOUSE",
+          "type": "string",
+          "enum": ["stylus", "mouse"]
+        },
+        "coordinateSpace": {
+          "description": "Coordinate units: native absolute (default), normalized 0–1, or percent 0–100",
+          "type": "string",
+          "enum": ["absolute", "normalized", "percent"]
+        },
+        "display": {
+          "description": "Target panel key, role, or active",
+          "type": "string"
+        },
+        "snapshotId": {
+          "description": "Short-lived reference from observe.snapshotReference; reject stale geometry or frame context",
+          "type": "string",
+          "minLength": 1
+        },
+        "layer": {
+          "description": "app: exclude the AutoMobile prototype; prototype: prototype nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "prototype"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["points"],
+      "additionalProperties": false,
+      "description": "Hover a stylus or mouse over a path of points with no contact: hover enter, move and exit (Android, needs the hover_input_v1 capability; refused on iOS and on runners without it, never turned into a touch)."
     }
   },
   {
@@ -27076,35 +27233,41 @@
               "appearance": {
                 "$ref": "#/$defs/__schema11"
               },
-              "storage": {
+              "degradedEffects": {
                 "$ref": "#/$defs/__schema12"
               },
-              "shaderFailures": {
-                "$ref": "#/$defs/__schema13"
-              },
-              "timers": {
+              "warning": {
                 "$ref": "#/$defs/__schema14"
               },
-              "success": {
+              "storage": {
                 "$ref": "#/$defs/__schema15"
               },
-              "error": {
+              "shaderFailures": {
                 "$ref": "#/$defs/__schema16"
               },
-              "totalTimeMs": {
+              "timers": {
                 "$ref": "#/$defs/__schema17"
               },
-              "timestamp": {
+              "success": {
                 "$ref": "#/$defs/__schema18"
               },
-              "pendingCount": {
+              "error": {
                 "$ref": "#/$defs/__schema19"
               },
-              "lastSequence": {
+              "totalTimeMs": {
                 "$ref": "#/$defs/__schema20"
               },
-              "droppedCount": {
+              "timestamp": {
                 "$ref": "#/$defs/__schema21"
+              },
+              "pendingCount": {
+                "$ref": "#/$defs/__schema22"
+              },
+              "lastSequence": {
+                "$ref": "#/$defs/__schema23"
+              },
+              "droppedCount": {
+                "$ref": "#/$defs/__schema24"
               },
               "pages": {
                 "type": "object",
@@ -27170,14 +27333,14 @@
                   "type": "string"
                 },
                 "additionalProperties": {
-                  "$ref": "#/$defs/__schema22"
+                  "$ref": "#/$defs/__schema25"
                 }
               },
               "context": {
-                "$ref": "#/$defs/__schema23"
+                "$ref": "#/$defs/__schema26"
               },
               "contextTruncated": {
-                "$ref": "#/$defs/__schema25"
+                "$ref": "#/$defs/__schema28"
               },
               "lastKnown": {
                 "description": "Pages, stacks and state are the last reported device snapshot, not a live device query",
@@ -27225,26 +27388,32 @@
             "appearance": {
               "$ref": "#/$defs/__schema11"
             },
-            "storage": {
+            "degradedEffects": {
               "$ref": "#/$defs/__schema12"
             },
-            "shaderFailures": {
-              "$ref": "#/$defs/__schema13"
-            },
-            "timers": {
+            "warning": {
               "$ref": "#/$defs/__schema14"
             },
-            "success": {
+            "storage": {
               "$ref": "#/$defs/__schema15"
             },
-            "error": {
+            "shaderFailures": {
               "$ref": "#/$defs/__schema16"
             },
-            "totalTimeMs": {
+            "timers": {
               "$ref": "#/$defs/__schema17"
             },
-            "timestamp": {
+            "success": {
               "$ref": "#/$defs/__schema18"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema19"
+            },
+            "totalTimeMs": {
+              "$ref": "#/$defs/__schema20"
+            },
+            "timestamp": {
+              "$ref": "#/$defs/__schema21"
             }
           },
           "required": ["lastAction", "success", "timestamp"],
@@ -27422,13 +27591,13 @@
               ]
             },
             "payload": {
-              "$ref": "#/$defs/__schema26"
+              "$ref": "#/$defs/__schema29"
             },
             "context": {
-              "$ref": "#/$defs/__schema23"
+              "$ref": "#/$defs/__schema26"
             },
             "contextTruncated": {
-              "$ref": "#/$defs/__schema25"
+              "$ref": "#/$defs/__schema28"
             },
             "state": {
               "type": "object",
@@ -27543,6 +27712,12 @@
             "additionalProperties": false
           }
         },
+        "degradedEffects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema13"
+          }
+        },
         "missingAssets": {
           "description": "show: asset ids the prototype references that the device has no copy of; the prototype is shown with placeholders. Absent when none. Upload them with assets on a show.",
           "type": "array",
@@ -27561,7 +27736,7 @@
           "enum": ["no_prototype_window_on_screen", "app_layer_window_hidden", "device_blocked"]
         },
         "warning": {
-          "description": "show succeeded or awaitEvent timed out, and it needs attention: names what to do about missingAssets, that display was ignored by a same-id show, that an Android app-layer prototype is not on screen, or (awaitEvent timeout) that the prototype is hidden because its app is not in front",
+          "description": "show or patch succeeded or awaitEvent timed out, and it needs attention: reports degraded effects with paths and api/budget reasons, names what to do about missingAssets, that display was ignored by a same-id show, that an Android app-layer prototype is not on screen, or (awaitEvent timeout) that the prototype is hidden because its app is not in front",
           "type": "string"
         },
         "anchors": {
@@ -27673,13 +27848,13 @@
           "maximum": 9007199254740991
         },
         "pendingCount": {
-          "$ref": "#/$defs/__schema19"
+          "$ref": "#/$defs/__schema22"
         },
         "lastSequence": {
-          "$ref": "#/$defs/__schema20"
+          "$ref": "#/$defs/__schema23"
         },
         "droppedCount": {
-          "$ref": "#/$defs/__schema21"
+          "$ref": "#/$defs/__schema24"
         },
         "artifact": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -27814,6 +27989,35 @@
           "additionalProperties": false
         },
         "__schema12": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema13"
+          }
+        },
+        "__schema13": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "reason": {
+              "type": "string",
+              "enum": ["api", "budget"]
+            }
+          },
+          "required": ["path", "type", "reason"],
+          "additionalProperties": false
+        },
+        "__schema14": {
+          "description": "Effects omitted or frozen by the device, with their paths and reasons",
+          "type": "string"
+        },
+        "__schema15": {
           "description": "inspect only: what the device has stored for this prototype's storage block (prototype_storage_v1), as the device last reported it. Absent when the device does not report it or the prototype has no storage block",
           "type": "object",
           "properties": {
@@ -27858,7 +28062,7 @@
           "required": ["version", "keys", "totalBytes"],
           "additionalProperties": false
         },
-        "__schema13": {
+        "__schema16": {
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -27867,7 +28071,7 @@
             "type": "string"
           }
         },
-        "__schema14": {
+        "__schema17": {
           "maxItems": 8,
           "type": "array",
           "items": {
@@ -27893,38 +28097,38 @@
             "additionalProperties": false
           }
         },
-        "__schema15": {
+        "__schema18": {
           "type": "boolean"
         },
-        "__schema16": {
+        "__schema19": {
           "type": "string"
         },
-        "__schema17": {
+        "__schema20": {
           "type": "number"
         },
-        "__schema18": {
+        "__schema21": {
           "description": "Host clock milliseconds when the request completed",
           "type": "number"
         },
-        "__schema19": {
+        "__schema22": {
           "description": "Unconsumed events, including events excluded by filters or cursor",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema20": {
+        "__schema23": {
           "description": "Highest sequence accepted for this prototype",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema21": {
+        "__schema24": {
           "description": "Cumulative events dropped by buffer overflow in this scope",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema22": {
+        "__schema25": {
           "anyOf": [
             {
               "type": "string"
@@ -27941,7 +28145,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema22"
+                "$ref": "#/$defs/__schema25"
               }
             },
             {
@@ -27950,12 +28154,12 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema22"
+                "$ref": "#/$defs/__schema25"
               }
             }
           ]
         },
-        "__schema23": {
+        "__schema26": {
           "allOf": [
             {
               "type": "object",
@@ -27963,13 +28167,13 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema24"
+                "$ref": "#/$defs/__schema27"
               }
             },
             {}
           ]
         },
-        "__schema24": {
+        "__schema27": {
           "anyOf": [
             {
               "type": "string"
@@ -27986,7 +28190,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema24"
+                "$ref": "#/$defs/__schema27"
               }
             },
             {
@@ -27995,16 +28199,16 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema24"
+                "$ref": "#/$defs/__schema27"
               }
             }
           ]
         },
-        "__schema25": {
+        "__schema28": {
           "type": "boolean",
           "const": true
         },
-        "__schema26": {
+        "__schema29": {
           "anyOf": [
             {
               "type": "string"
@@ -28021,7 +28225,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema26"
+                "$ref": "#/$defs/__schema29"
               }
             },
             {
@@ -28030,7 +28234,7 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema26"
+                "$ref": "#/$defs/__schema29"
               }
             }
           ]
@@ -28629,6 +28833,7 @@
               "highlight",
               "hitTest",
               "homeScreen",
+              "hoverAt",
               "identifyInteractions",
               "inspectPackageSigning",
               "installApp",
@@ -35369,6 +35574,23 @@
               "additionalProperties": false,
               "description": "Power and lifecycle fault injectors (Android only, behind the feature flag)."
             },
+            "vehicle": {
+              "type": "object",
+              "properties": {
+                "motion": {
+                  "type": "string",
+                  "enum": ["parked", "driving", "unset"],
+                  "description": "Vehicle motion on an Android Automotive emulator: 'parked' (gear park, speed 0, parking brake on) or 'driving' (gear drive, moving, brake off), set together so the state is consistent. Restored to the values read before the first change; or unset."
+                },
+                "nightMode": {
+                  "type": "string",
+                  "enum": ["on", "off", "unset"],
+                  "description": "Vehicle night-mode signal on an Android Automotive emulator, restored to its prior value; or unset."
+                }
+              },
+              "additionalProperties": false,
+              "description": "Vehicle state (Android Automotive emulators only; 'unsupported' elsewhere), via `cmd car_service inject-vhal-event`."
+            },
             "expiresInSeconds": {
               "type": "integer",
               "minimum": 1,
@@ -36918,6 +37140,7 @@
             "highlight",
             "hitTest",
             "homeScreen",
+            "hoverAt",
             "identifyInteractions",
             "inspectPackageSigning",
             "installApp",
@@ -37036,6 +37259,7 @@
               "highlight",
               "hitTest",
               "homeScreen",
+              "hoverAt",
               "identifyInteractions",
               "inspectPackageSigning",
               "installApp",
@@ -38295,15 +38519,37 @@
           "type": "object",
           "properties": {
             "toolType": {
-              "description": "Inject a stylus instead of a finger (Android 12+, API 31+)",
+              "description": "Inject a stylus instead of a finger. A plain tap or swipe needs Android 12+ (API 31); pressure other than 1, tilt, orientation, buttons and any dragPath need Android 13+ (stylus_input_v1)",
               "type": "string",
               "enum": ["stylus"]
             },
             "pressure": {
-              "description": "Stylus pressure 0-1; the Android backend injects 1.0 only and refuses other values",
+              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 13+) and is refused before input without it",
               "type": "number",
               "minimum": 0,
               "maximum": 1
+            },
+            "tilt": {
+              "description": "Stylus tilt in radians from the surface normal, 0 to PI/2 (Android 13+)",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1.5707963267948966
+            },
+            "orientation": {
+              "description": "Stylus orientation in radians, -PI to PI (Android 13+)",
+              "type": "number",
+              "minimum": -3.141592653589793,
+              "maximum": 3.141592653589793
+            },
+            "buttons": {
+              "description": "Barrel buttons held for the gesture (Android 13+)",
+              "minItems": 1,
+              "maxItems": 2,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["primary", "secondary"]
+              }
             }
           },
           "required": ["toolType"],
@@ -39410,15 +39656,37 @@
           "type": "object",
           "properties": {
             "toolType": {
-              "description": "Inject a stylus instead of a finger (Android 12+, API 31+)",
+              "description": "Inject a stylus instead of a finger. A plain tap or swipe needs Android 12+ (API 31); pressure other than 1, tilt, orientation, buttons and any dragPath need Android 13+ (stylus_input_v1)",
               "type": "string",
               "enum": ["stylus"]
             },
             "pressure": {
-              "description": "Stylus pressure 0-1; the Android backend injects 1.0 only and refuses other values",
+              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 13+) and is refused before input without it",
               "type": "number",
               "minimum": 0,
               "maximum": 1
+            },
+            "tilt": {
+              "description": "Stylus tilt in radians from the surface normal, 0 to PI/2 (Android 13+)",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1.5707963267948966
+            },
+            "orientation": {
+              "description": "Stylus orientation in radians, -PI to PI (Android 13+)",
+              "type": "number",
+              "minimum": -3.141592653589793,
+              "maximum": 3.141592653589793
+            },
+            "buttons": {
+              "description": "Barrel buttons held for the gesture (Android 13+)",
+              "minItems": 1,
+              "maxItems": 2,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["primary", "secondary"]
+              }
             }
           },
           "required": ["toolType"],

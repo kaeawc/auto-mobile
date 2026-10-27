@@ -25,7 +25,9 @@ test("iOS refuses shader specs and assets before agent dispatch even if a peer c
   expect(
     await transport.patch({
       id: shaderSpec.id,
-      ops: [{ op: "replaceNode", id: "node", node: prototypeSpecSchema.parse(shaderSpec).root }],
+      ops: [
+        { op: "replaceNode", id: "node", node: { ...prototypeSpecSchema.parse(shaderSpec).root } },
+      ],
     }),
   ).toMatchObject({
     success: false,

@@ -118,6 +118,7 @@ describe("MCP tool annotations", () => {
       "swipeAt",
       "dragAndDrop",
       "dragPath",
+      "hoverAt",
       "multiTouch",
       "pinchOn",
       "pressButton",

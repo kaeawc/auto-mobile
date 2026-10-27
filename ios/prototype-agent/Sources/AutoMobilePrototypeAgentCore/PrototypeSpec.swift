@@ -252,7 +252,10 @@ struct PrototypeSpec: Decodable {
         else {
             throw PrototypeLimits.violation("platform", "Platform state exceeds limit")
         }
-        let rebuilt = try Self.buildRoot(authoredRoot, data: data, menuState: state ?? [:], platform: platform)
+        let rebuilt = try Self.buildRoot(
+            authoredRoot, data: data, menuState: state ?? [:], strings: strings, locales: locales,
+            platform: platform, derive: derive
+        )
         var next = PrototypeSpec(replacing: self, data: data, root: rebuilt)
         next.platformState = platform
         return next
@@ -290,7 +293,9 @@ struct PrototypeSpec: Decodable {
             data: data,
             menuState: state ?? [:],
             strings: strings,
-            locales: locales
+            locales: locales,
+            platform: platformState,
+            derive: derive
         )
         var result = PrototypeSpec(replacing: self, data: data, root: root)
         result.locales = locales
@@ -1012,7 +1017,7 @@ final class PrototypeNode: Decodable {
         case leadingIcon, trailing, swipeActions
         case refresh, header, footer, spacing, contentPadding, onEndReached, endThreshold, maxItems
         case listRepeat = "repeat"
-        case refresh, reverse, stickToEnd, atEndKey, onStartReached
+        case reverse, stickToEnd, atEndKey, onStartReached
         case repeatKey = "_repeatKey"
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
              linkify,

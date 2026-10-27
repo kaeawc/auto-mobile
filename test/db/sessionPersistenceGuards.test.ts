@@ -1,18 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
-import {
-  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
-  SessionManager,
-  type SessionDeviceAssigner,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
 import {
   DeviceSessionRepository,
   deviceRestartReleaseReason,
-  type DeviceSessionRecord,
-  type MarkReleasedOptions,
-  type UpsertActiveSessionOptions,
 } from "../../src/db/deviceSessionRepository";
-import type { Database, DeviceSessionStatus } from "../../src/db/types";
+import type { Database } from "../../src/db/types";
 import { createTestDatabase } from "./testDbHelper";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -52,52 +45,6 @@ class RacingRepository extends DeviceSessionRepository {
     this.beforeUpsert = undefined;
     await peerWrite?.();
     return await super.upsertActiveSession(...args);
-  }
-}
-
-/**
- * A store whose release write can be parked past the release deadline, and whose plain upserts
- * (the rewrite of a live row, #11206) land a few turns after they are issued, as a statement
- * queued behind its retention prune does.
- */
-class LateReleaseWritePersistence extends FakeDeviceSessionPersistence {
-  park: Promise<void> | undefined;
-  afterReleaseWrite: (() => void) | undefined;
-  failPlainUpserts = 0;
-
-  override async markReleased(
-    sessionUuid: string,
-    status: DeviceSessionStatus,
-    releasedAtMs: number,
-    reason: string,
-    options?: MarkReleasedOptions,
-  ): Promise<void> {
-    await this.park;
-    await super.markReleased(sessionUuid, status, releasedAtMs, reason, options);
-    const hook = this.afterReleaseWrite;
-    this.afterReleaseWrite = undefined;
-    hook?.();
-  }
-
-  override async upsertActiveSession(
-    record: DeviceSessionRecord,
-    nowMs?: number,
-    options: UpsertActiveSessionOptions = {},
-  ): Promise<number> {
-    if (!options.unlessTerminal) {
-      if (this.failPlainUpserts > 0) {
-        this.failPlainUpserts--;
-        throw new Error("SQLITE_BUSY: eager live rewrite failed");
-      }
-      await settleMicrotasks(20);
-    }
-    return await super.upsertActiveSession(record, nowMs, options);
-  }
-}
-
-async function settleMicrotasks(turns: number): Promise<void> {
-  for (let turn = 0; turn < turns; turn++) {
-    await Promise.resolve();
   }
 }
 
@@ -408,59 +355,6 @@ describe("session persistence guards live in the statement, not in a prior read"
       expect(manager.getSession(SESSION)).toBeNull();
       // Released once, by the release that was already under way.
       expect(releases.map((release) => release.reason)).toEqual(["explicit-release"]);
-    });
-
-    // #11206: a late superseded terminal write is rewritten live, rather than ending its UUID.
-    test("a late terminal write of this daemon's superseded release does not end the session it left alive", async () => {
-      const store = new LateReleaseWritePersistence();
-      const manager = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
-      managers.push(manager);
-      manager.stopCleanupTimer();
-      const releases: string[] = [];
-      manager.onSessionRelease((_sessionId, _deviceId, reason) => releases.push(reason));
-      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
-      let landReleaseWrite!: () => void;
-      store.park = new Promise<void>((resolve) => {
-        landReleaseWrite = resolve;
-      });
-      let superseded = false;
-      const release = manager.releaseSessionUnlessSuperseded(
-        SESSION,
-        `device-disconnected:${DEVICE}`,
-        { commitFence: () => !superseded },
-      );
-      await settleMicrotasks(100);
-      // Fail the eager rewrite so the late terminal write drives the original activity race.
-      store.failPlainUpserts = 1;
-      // The serial is re-observed with a newer identity; the terminal write is still parked.
-      superseded = true;
-      await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
-      expect(await release).toEqual({ superseded: true });
-      expect(manager.getSession(SESSION)).not.toBeNull();
-      // A tool call's activity write runs right behind the late terminal write, before the
-      // rewrite of the live row has landed.
-      let outcome = "pending";
-      store.afterReleaseWrite = () => {
-        void refresh(manager).then((result) => {
-          outcome = result;
-        });
-      };
-      store.park = undefined;
-
-      landReleaseWrite();
-      await settleMicrotasks(200);
-
-      // The activity write found the late terminal row before its live rewrite landed.
-      expect(outcome).toBe("SessionActivityPersistenceError");
-      expect(store.afterReleaseWrite).toBeUndefined();
-      // The session the supersede kept is still held, and its row is live again.
-      expect(manager.getSession(SESSION)).not.toBeNull();
-      expect(releases).toEqual([]);
-      expect(await store.getSession(SESSION)).toMatchObject({
-        status: "active",
-        release_reason: null,
-      });
-      expect(await refresh(manager)).toBe("refreshed");
     });
 
     test("a manager on the fake persistence is refused like one on SQLite", async () => {

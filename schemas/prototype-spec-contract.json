@@ -2697,6 +2697,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "children": {
               "rule": {
                 "kind": "array",
@@ -2734,39 +2767,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -2836,13 +2836,6 @@
                 "min": 1,
                 "unique": false,
                 "max": 32
-              },
-              "optional": true
-            },
-            "swipeActions": {
-              "rule": {
-                "kind": "ref",
-                "name": "swipeActions"
               },
               "optional": true
             },
@@ -2959,6 +2952,46 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
+            "swipeActions": {
+              "rule": {
+                "kind": "ref",
+                "name": "swipeActions"
+              },
+              "optional": true
+            },
             "children": {
               "rule": {
                 "kind": "array",
@@ -2996,39 +3029,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -3214,6 +3214,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "children": {
               "rule": {
                 "kind": "array",
@@ -3251,39 +3284,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -3443,6 +3443,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "children": {
               "rule": {
                 "kind": "array",
@@ -3481,39 +3514,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -3673,6 +3673,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "children": {
               "rule": {
                 "kind": "array",
@@ -3730,39 +3763,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -3922,6 +3922,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "children": {
               "rule": {
                 "kind": "array",
@@ -3975,39 +4008,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -4193,6 +4193,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "text": {
               "rule": {
                 "kind": "string",
@@ -4231,39 +4264,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -4450,27 +4450,6 @@
               },
               "optional": true
             },
-            "asset": {
-              "rule": {
-                "kind": "ref",
-                "name": "imageAsset"
-              },
-              "optional": false
-            },
-            "contentScale": {
-              "rule": {
-                "kind": "enum",
-                "values": ["fit", "crop", "fill"]
-              },
-              "optional": true
-            },
-            "zoomable": {
-              "rule": {
-                "kind": "ref",
-                "name": "zoomable"
-              },
-              "optional": true
-            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -4497,6 +4476,34 @@
                 }
               }
             },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
+            "asset": {
+              "rule": {
+                "kind": "ref",
+                "name": "imageAsset"
+              },
+              "optional": false
+            },
+            "contentScale": {
+              "rule": {
+                "kind": "enum",
+                "values": ["fit", "crop", "fill"]
+              },
+              "optional": true
+            },
+            "zoomable": {
+              "rule": {
+                "kind": "ref",
+                "name": "zoomable"
+              },
+              "optional": true
+            },
             "filter": {
               "rule": {
                 "kind": "ref",
@@ -4515,13 +4522,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -4707,34 +4707,6 @@
               },
               "optional": true
             },
-            "name": {
-              "rule": {
-                "kind": "ref",
-                "name": "iconName"
-              },
-              "optional": false
-            },
-            "variant": {
-              "rule": {
-                "kind": "ref",
-                "name": "iconVariant"
-              },
-              "optional": true
-            },
-            "ios": {
-              "rule": {
-                "kind": "ref",
-                "name": "iosNamespace"
-              },
-              "optional": true
-            },
-            "android": {
-              "rule": {
-                "kind": "ref",
-                "name": "androidNamespace"
-              },
-              "optional": true
-            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -4765,6 +4737,34 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "name": {
+              "rule": {
+                "kind": "ref",
+                "name": "iconName"
+              },
+              "optional": false
+            },
+            "variant": {
+              "rule": {
+                "kind": "ref",
+                "name": "iconVariant"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -4924,20 +4924,6 @@
               },
               "optional": true
             },
-            "ios": {
-              "rule": {
-                "kind": "ref",
-                "name": "iosNamespace"
-              },
-              "optional": true
-            },
-            "android": {
-              "rule": {
-                "kind": "ref",
-                "name": "androidNamespace"
-              },
-              "optional": true
-            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -4968,6 +4954,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -5127,6 +5127,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
@@ -5265,46 +5298,6 @@
               },
               "optional": true
             },
-            "ios": {
-              "rule": {
-                "kind": "ref",
-                "name": "iosNamespace"
-              },
-              "optional": true
-            },
-            "android": {
-              "rule": {
-                "kind": "ref",
-                "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
             "errorWhen": {
               "rule": {
                 "kind": "ref",
@@ -5319,10 +5312,17 @@
               },
               "optional": true
             },
-            "semantics": {
+            "ios": {
               "rule": {
                 "kind": "ref",
-                "name": "semantics"
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -5485,6 +5485,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
@@ -5534,39 +5567,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -5726,6 +5726,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
@@ -5775,39 +5808,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -5967,6 +5967,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "label": {
               "rule": {
                 "kind": "string"
@@ -6005,39 +6038,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -6197,6 +6197,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
@@ -6253,39 +6286,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -6430,38 +6430,6 @@
               },
               "optional": true
             },
-            "safeAreaPadding": {
-              "rule": {
-                "kind": "ref",
-                "name": "safeAreaPadding"
-              },
-              "optional": true
-            },
-            "stateKey": {
-              "rule": {
-                "kind": "boundKey"
-              },
-              "optional": false
-            },
-            "options": {
-              "rule": {
-                "kind": "array",
-                "item": {
-                  "kind": "ref",
-                  "name": "radioOption"
-                },
-                "min": 2,
-                "max": 32,
-                "unique": false
-              },
-              "optional": false
-            },
-            "label": {
-              "rule": {
-                "kind": "string"
-              },
-              "optional": true
-            },
             "span": {
               "rule": {
                 "kind": "number",
@@ -6470,17 +6438,10 @@
               },
               "optional": true
             },
-            "ios": {
+            "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
-                "name": "iosNamespace"
-              },
-              "optional": true
-            },
-            "android": {
-              "rule": {
-                "kind": "ref",
-                "name": "androidNamespace"
+                "name": "safeAreaPadding"
               },
               "optional": true
             },
@@ -6514,6 +6475,45 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "stateKey": {
+              "rule": {
+                "kind": "boundKey"
+              },
+              "optional": false
+            },
+            "options": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "radioOption"
+                },
+                "min": 2,
+                "max": 32,
+                "unique": false
+              },
+              "optional": false
+            },
+            "label": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -6673,6 +6673,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "headline": {
               "rule": {
                 "kind": "string"
@@ -6724,39 +6757,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -6916,6 +6916,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
@@ -6986,39 +7019,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -7178,6 +7178,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "label": {
               "rule": {
                 "kind": "string"
@@ -7215,39 +7248,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -7433,39 +7433,6 @@
               },
               "optional": true
             },
-            "variant": {
-              "rule": {
-                "kind": "enum",
-                "values": ["filled", "elevated", "outlined"]
-              },
-              "optional": true
-            },
-            "children": {
-              "rule": {
-                "kind": "array",
-                "item": {
-                  "kind": "ref",
-                  "name": "node"
-                },
-                "min": 0,
-                "unique": false
-              },
-              "optional": false
-            },
-            "ios": {
-              "rule": {
-                "kind": "ref",
-                "name": "iosNamespace"
-              },
-              "optional": true
-            },
-            "android": {
-              "rule": {
-                "kind": "ref",
-                "name": "androidNamespace"
-              },
-              "optional": true
-            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -7496,6 +7463,39 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "variant": {
+              "rule": {
+                "kind": "enum",
+                "values": ["filled", "elevated", "outlined"]
+              },
+              "optional": true
+            },
+            "children": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "node"
+                },
+                "min": 0,
+                "unique": false
+              },
+              "optional": false
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -7655,6 +7655,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "icon": {
               "rule": {
                 "kind": "ref",
@@ -7687,39 +7720,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -7879,6 +7879,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "icon": {
               "rule": {
                 "kind": "ref",
@@ -7917,39 +7950,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -8109,39 +8109,6 @@
               },
               "optional": true
             },
-            "stateKey": {
-              "rule": {
-                "kind": "boundKey"
-              },
-              "optional": false
-            },
-            "options": {
-              "rule": {
-                "kind": "array",
-                "item": {
-                  "kind": "ref",
-                  "name": "radioOption"
-                },
-                "min": 2,
-                "max": 5,
-                "unique": false
-              },
-              "optional": false
-            },
-            "ios": {
-              "rule": {
-                "kind": "ref",
-                "name": "iosNamespace"
-              },
-              "optional": true
-            },
-            "android": {
-              "rule": {
-                "kind": "ref",
-                "name": "androidNamespace"
-              },
-              "optional": true
-            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -8172,6 +8139,39 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "stateKey": {
+              "rule": {
+                "kind": "boundKey"
+              },
+              "optional": false
+            },
+            "options": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "radioOption"
+                },
+                "min": 2,
+                "max": 5,
+                "unique": false
+              },
+              "optional": false
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -8331,6 +8331,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "title": {
               "rule": {
                 "kind": "string"
@@ -8364,20 +8397,6 @@
               },
               "optional": true
             },
-            "ios": {
-              "rule": {
-                "kind": "ref",
-                "name": "iosNamespace"
-              },
-              "optional": true
-            },
-            "android": {
-              "rule": {
-                "kind": "ref",
-                "name": "androidNamespace"
-              },
-              "optional": true
-            },
             "onScroll": {
               "rule": {
                 "kind": "enum",
@@ -8391,36 +8410,17 @@
               },
               "optional": true
             },
-            "scrollTransition": {
+            "ios": {
               "rule": {
                 "kind": "ref",
-                "name": "scrollTransition"
+                "name": "iosNamespace"
               },
               "optional": true
             },
-            "scrollLinked": {
+            "android": {
               "rule": {
                 "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -8580,27 +8580,6 @@
               },
               "optional": true
             },
-            "orientation": {
-              "rule": {
-                "kind": "enum",
-                "values": ["horizontal", "vertical"]
-              },
-              "optional": true
-            },
-            "ios": {
-              "rule": {
-                "kind": "ref",
-                "name": "iosNamespace"
-              },
-              "optional": true
-            },
-            "android": {
-              "rule": {
-                "kind": "ref",
-                "name": "androidNamespace"
-              },
-              "optional": true
-            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -8631,6 +8610,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "orientation": {
+              "rule": {
+                "kind": "enum",
+                "values": ["horizontal", "vertical"]
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -8790,26 +8790,6 @@
               },
               "optional": true
             },
-            "text": {
-              "rule": {
-                "kind": "string"
-              },
-              "optional": true
-            },
-            "ios": {
-              "rule": {
-                "kind": "ref",
-                "name": "iosNamespace"
-              },
-              "optional": true
-            },
-            "android": {
-              "rule": {
-                "kind": "ref",
-                "name": "androidNamespace"
-              },
-              "optional": true
-            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -8840,6 +8820,26 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "text": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -8999,6 +8999,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "variant": {
               "rule": {
                 "kind": "enum",
@@ -9030,39 +9063,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -9222,6 +9222,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "openWhen": {
               "rule": {
                 "kind": "ref",
@@ -9280,39 +9313,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -9457,33 +9457,6 @@
               },
               "optional": true
             },
-            "safeAreaPadding": {
-              "rule": {
-                "kind": "ref",
-                "name": "safeAreaPadding"
-              },
-              "optional": true
-            },
-            "openWhen": {
-              "rule": {
-                "kind": "ref",
-                "name": "sheetCondition"
-              },
-              "optional": false
-            },
-            "items": {
-              "rule": {
-                "kind": "array",
-                "item": {
-                  "kind": "ref",
-                  "name": "menuItem"
-                },
-                "min": 1,
-                "max": 16,
-                "unique": false
-              },
-              "optional": false
-            },
             "span": {
               "rule": {
                 "kind": "number",
@@ -9492,17 +9465,10 @@
               },
               "optional": true
             },
-            "ios": {
+            "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
-                "name": "iosNamespace"
-              },
-              "optional": true
-            },
-            "android": {
-              "rule": {
-                "kind": "ref",
-                "name": "androidNamespace"
+                "name": "safeAreaPadding"
               },
               "optional": true
             },
@@ -9536,6 +9502,40 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "openWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "sheetCondition"
+              },
+              "optional": false
+            },
+            "items": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "menuItem"
+                },
+                "min": 1,
+                "max": 16,
+                "unique": false
+              },
+              "optional": false
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -9695,6 +9695,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "openWhen": {
               "rule": {
                 "kind": "ref",
@@ -9735,39 +9768,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -9927,6 +9927,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "hourKey": {
               "rule": {
                 "kind": "boundKey"
@@ -9982,39 +10015,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -10174,6 +10174,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
@@ -10217,39 +10250,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -10409,6 +10409,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "axis": {
               "rule": {
                 "kind": "enum",
@@ -10460,32 +10493,6 @@
               },
               "optional": false
             },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
             "fadeEdges": {
               "rule": {
                 "kind": "ref",
@@ -10504,13 +10511,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -10670,6 +10670,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "children": {
               "rule": {
                 "kind": "array",
@@ -10732,6 +10765,12 @@
               },
               "optional": true
             },
+            "stateKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "ios": {
               "rule": {
                 "kind": "ref",
@@ -10743,45 +10782,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "stateKey": {
-              "rule": {
-                "kind": "key"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -10941,6 +10941,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "items": {
               "rule": {
                 "kind": "array",
@@ -10972,20 +11005,6 @@
               },
               "optional": true
             },
-            "ios": {
-              "rule": {
-                "kind": "ref",
-                "name": "iosNamespace"
-              },
-              "optional": true
-            },
-            "android": {
-              "rule": {
-                "kind": "ref",
-                "name": "androidNamespace"
-              },
-              "optional": true
-            },
             "onScroll": {
               "rule": {
                 "kind": "enum",
@@ -10999,36 +11018,17 @@
               },
               "optional": true
             },
-            "scrollTransition": {
+            "ios": {
               "rule": {
                 "kind": "ref",
-                "name": "scrollTransition"
+                "name": "iosNamespace"
               },
               "optional": true
             },
-            "scrollLinked": {
+            "android": {
               "rule": {
                 "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -11189,58 +11189,6 @@
               },
               "optional": true
             },
-            "items": {
-              "rule": {
-                "kind": "array",
-                "item": {
-                  "kind": "ref",
-                  "name": "item"
-                },
-                "min": 2,
-                "unique": false,
-                "max": 5
-              },
-              "optional": false
-            },
-            "pager": {
-              "rule": {
-                "kind": "string"
-              },
-              "optional": true
-            },
-            "stateKey": {
-              "rule": {
-                "kind": "boundKey"
-              },
-              "optional": true
-            },
-            "ios": {
-              "rule": {
-                "kind": "ref",
-                "name": "iosNamespace"
-              },
-              "optional": true
-            },
-            "android": {
-              "rule": {
-                "kind": "ref",
-                "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "onScroll": {
-              "rule": {
-                "kind": "enum",
-                "values": ["none", "hide", "minimize"]
-              },
-              "optional": true
-            },
-            "scroll": {
-              "rule": {
-                "kind": "string"
-              },
-              "optional": true
-            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -11271,6 +11219,58 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "items": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "item"
+                },
+                "min": 2,
+                "unique": false,
+                "max": 5
+              },
+              "optional": false
+            },
+            "pager": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "stateKey": {
+              "rule": {
+                "kind": "boundKey"
+              },
+              "optional": true
+            },
+            "onScroll": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "hide", "minimize"]
+              },
+              "optional": true
+            },
+            "scroll": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -11431,6 +11431,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "child": {
               "rule": {
                 "kind": "ref",
@@ -11488,39 +11521,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -11665,10 +11665,51 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
                 "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             },
@@ -11738,14 +11779,6 @@
               },
               "optional": true
             },
-            "span": {
-              "rule": {
-                "kind": "number",
-                "integer": true,
-                "min": 1
-              },
-              "optional": true
-            },
             "ios": {
               "rule": {
                 "kind": "ref",
@@ -11757,39 +11790,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -11890,31 +11890,6 @@
               },
               "optional": true
             },
-            "safeAreaPadding": {
-              "rule": {
-                "kind": "ref",
-                "name": "safeAreaPadding"
-              },
-              "optional": true
-            },
-            "start": {
-              "rule": {
-                "kind": "string"
-              },
-              "optional": false
-            },
-            "screens": {
-              "rule": {
-                "kind": "screenMap",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "node"
-                }
-              },
-              "optional": false
-            },
             "span": {
               "rule": {
                 "kind": "number",
@@ -11923,17 +11898,10 @@
               },
               "optional": true
             },
-            "ios": {
+            "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
-                "name": "iosNamespace"
-              },
-              "optional": true
-            },
-            "android": {
-              "rule": {
-                "kind": "ref",
-                "name": "androidNamespace"
+                "name": "safeAreaPadding"
               },
               "optional": true
             },
@@ -11967,6 +11935,38 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "start": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "screens": {
+              "rule": {
+                "kind": "screenMap",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "node"
+                }
+              },
+              "optional": false
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -12126,6 +12126,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "variant": {
               "rule": {
                 "kind": "enum",
@@ -12178,39 +12211,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
               },
               "optional": true
             }
@@ -12371,6 +12371,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "openWhen": {
               "rule": {
                 "kind": "ref",
@@ -12429,39 +12462,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
               },
               "optional": true
             }
@@ -12621,6 +12621,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "child": {
               "rule": {
                 "kind": "ref",
@@ -12666,39 +12699,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
               },
               "optional": true
             }
@@ -12769,6 +12769,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -12849,6 +12855,39 @@
               "rule": {
                 "kind": "ref",
                 "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             },
@@ -12943,45 +12982,6 @@
                 "integer": true,
                 "min": 1,
                 "max": 2000
-              },
-              "optional": true
-            },
-            "semantics": {
-              "rule": {
-                "kind": "ref",
-                "name": "semantics"
-              },
-              "optional": true
-            },
-            "onAppear": {
-              "optional": true,
-              "rule": {
-                "kind": "array",
-                "min": 1,
-                "max": 32,
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                }
-              }
-            },
-            "scrollTransition": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollTransition"
-              },
-              "optional": true
-            },
-            "scrollLinked": {
-              "rule": {
-                "kind": "ref",
-                "name": "scrollLinked"
-              },
-              "optional": true
-            },
-            "sharedKey": {
-              "rule": {
-                "kind": "key"
               },
               "optional": true
             },

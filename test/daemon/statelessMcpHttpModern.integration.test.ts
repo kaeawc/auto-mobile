@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
+import { z } from "zod/v4";
 import {
   classifyInboundRequest,
   createMcpHandler,
@@ -28,6 +29,7 @@ import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagS
 import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
 import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
 import * as database from "../../src/db/database";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 
 class CapturedResponse extends EventEmitter {
   headersSent = false;
@@ -91,7 +93,7 @@ const TASK = {
   pollIntervalMs: 1000,
 } satisfies CreateTaskResult;
 
-function endpoint() {
+function endpoint(deviceChoice = false) {
   return new StatelessMcpHttpEndpoint<
     McpHttpRequestLike,
     CapturedResponse,
@@ -115,10 +117,12 @@ function endpoint() {
         scope,
       );
       // Fake feature execution, keeping the production SDK result wrapper and factory intact.
-      installToolCallDispatcher(server, {
-        progressFailureMessage: "fake progress failed",
-        execute: async () => TASK,
-      });
+      if (!deviceChoice) {
+        installToolCallDispatcher(server, {
+          progressFailureMessage: "fake progress failed",
+          execute: async () => TASK,
+        });
+      }
       return server;
     },
     cancelScopeExecutions: async () => 0,
@@ -127,8 +131,12 @@ function endpoint() {
   });
 }
 
-async function exchange(method: string, params: Record<string, unknown> = {}) {
-  const server = endpoint();
+async function exchange(
+  method: string,
+  params: Record<string, unknown> = {},
+  deviceChoice = false,
+) {
+  const server = endpoint(deviceChoice);
   const res = new CapturedResponse();
   await server
     .handle(
@@ -155,6 +163,7 @@ async function exchange(method: string, params: Record<string, unknown> = {}) {
             "io.modelcontextprotocol/clientInfo": { name: "modern-test", version: "1" },
             "io.modelcontextprotocol/clientCapabilities": {
               extensions: { [TASKS_EXTENSION_ID]: {} },
+              ...(deviceChoice && { elicitation: { form: {} } }),
             },
           },
         },
@@ -277,6 +286,78 @@ test("real modern tools/call preserves resultType task without content coercion"
   expect(frame.error).toBeUndefined();
   expect(frame.result).toMatchObject(TASK);
   expect(frame.result.content).toBeUndefined();
+});
+
+test("real modern handler asks for a device via MRTR and retries on the accepted device", async () => {
+  const calls: Array<string | undefined> = [];
+  const candidates = [
+    { deviceId: "device-a", platform: "android" },
+    { deviceId: "device-b", platform: "ios" },
+  ];
+  ToolRegistry.register(
+    "modernDeviceChoiceProbe",
+    "Hermetic device-choice probe",
+    z.object({ deviceId: z.string().optional() }),
+    async ({ deviceId }) => {
+      calls.push(deviceId);
+      return deviceId
+        ? { content: [{ type: "text", text: `used ${deviceId}` }] }
+        : {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ code: "ambiguous_device_target", candidates }),
+              },
+            ],
+          };
+    },
+  );
+  try {
+    const params = { name: "modernDeviceChoiceProbe", arguments: {} };
+    const question = await exchange("tools/call", params, true);
+    expect(question.error).toBeUndefined();
+    expect(question.result).toMatchObject({
+      resultType: "input_required",
+      inputRequests: {
+        deviceChoice: {
+          method: "elicitation/create",
+          params: {
+            mode: "form",
+            message: "modernDeviceChoiceProbe matched 2 devices. Which device should it use?",
+            requestedSchema: {
+              required: ["deviceId"],
+              properties: {
+                deviceId: {
+                  oneOf: candidates.map(({ deviceId, platform }) => ({
+                    const: deviceId,
+                    title: `${deviceId} (${platform})`,
+                  })),
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(question.result.requestState).toBeUndefined();
+    expect(question.result.content).toBeUndefined();
+
+    const result = await exchange(
+      "tools/call",
+      {
+        ...params,
+        inputResponses: { deviceChoice: { action: "accept", content: { deviceId: "device-b" } } },
+      },
+      true,
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.result.content).toEqual([{ type: "text", text: "used device-b" }]);
+    expect(result.result.isError).toBeFalsy();
+    expect(calls).toEqual([undefined, undefined, "device-b"]);
+  } finally {
+    ToolRegistry.unregister("modernDeviceChoiceProbe");
+  }
 });
 
 test("preparsed modern bodies above the SDK default body limit remain admitted", async () => {

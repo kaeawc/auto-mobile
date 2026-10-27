@@ -259,7 +259,10 @@ class PrototypeEffectsTest {
   @Test
   fun `the health report lists a frozen effect once and drops it when cleared`() {
     val health = PrototypeEffectHealth()
+    val reports = health.reports
+    assertTrue(reports.value.isEmpty())
     health.markBudget("root.child.style.effects[0]", "wave")
+    assertEquals(health.snapshot(), reports.value)
     health.markBudget("root.child.style.effects[0]", "wave")
     assertEquals(
       listOf("root.child.style.effects[0]" to "budget"),
@@ -267,6 +270,7 @@ class PrototypeEffectsTest {
     )
     health.clear("root.child.style.effects[0]")
     assertTrue(health.snapshot().isEmpty())
+    assertTrue(reports.value.isEmpty())
   }
 
   @Test

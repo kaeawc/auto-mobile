@@ -419,13 +419,13 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
           });
           if (!claimedRow) {
             if (rewriteOverSupersededRelease) {
-              const { supersededReasons, livePeerDaemonSessionIds, expectedRowGeneration } =
+              const { livePeerDaemonSessionIds, expectedRowGeneration } =
                 rewriteOverSupersededRelease;
               return update.where((eb) =>
                 eb.and([
                   rowRewriteGuard(
                     eb,
-                    supersededReasons,
+                    [],
                     livePeerDaemonSessionIds,
                     rewriteOverSupersededRelease.ownDaemonSessionId,
                   ),

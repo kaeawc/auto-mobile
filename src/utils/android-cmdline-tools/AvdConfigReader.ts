@@ -1,6 +1,6 @@
 import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../logger";
-import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
+import { AMBIENT_ENV, ENV, readEnvRaw } from "../../config/env";
 import {
   androidAvdConfigurationSchema,
   androidAvdConfigurationKeys,
@@ -8,6 +8,7 @@ import {
 } from "../../models/AndroidAvdConfiguration";
 import { dirname, join } from "node:path";
 import { buildAndroidAvdCapabilityInventory } from "../virtualDeviceCapabilities";
+import { hostAudioSnapshot } from "../audio/defaultHostAudioProbe";
 import type { VirtualDeviceCapabilityInventory } from "../../models/virtualDeviceCapabilities";
 
 /** Minimum guest memory required by modern Play Store system images. */
@@ -399,7 +400,10 @@ export function parseAvdConfig(content: string): AvdConfig {
     ...parseApiMetadata(props),
     ...parseSystemImageMetadata(props),
     ...parseArchitecture(props),
-    capabilityInventory: buildAndroidAvdCapabilityInventory(Object.fromEntries(props)),
+    capabilityInventory: buildAndroidAvdCapabilityInventory(Object.fromEntries(props), {
+      launchWithoutAudio: readEnvRaw(ENV.EMULATOR_AUDIO) === "false",
+      hostAudio: hostAudioSnapshot(),
+    }),
   };
 }
 

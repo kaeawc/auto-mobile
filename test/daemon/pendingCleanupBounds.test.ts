@@ -1,3 +1,5 @@
+import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
+import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import * as releaseBudgets from "../../src/daemon/sessionManager";
 import { SESSION_RELEASE_DRAIN_TIMEOUT_MS } from "../../src/daemon/wire/constants";
@@ -1521,56 +1523,74 @@ test("late screen-reader setup grows the stuck budget before its first restore",
   expect(h.manager.getReleaseStuckAtMs("late")).toBeUndefined();
 });
 
-test("declined final commit fence cannot force a parked live-row rewrite", async () => {
-  const persistence = new FakeDeviceSessionPersistence();
-  const h = harness(persistence);
-  const session = await h.manager.createSession("kept", android.deviceId, "android", {
-    timeoutMs: 600_000,
-    heartbeatTimeoutMs: 600_000,
-  });
-  const rewrite = Promise.withResolvers<void>();
-  const upsert = spyOn(persistence, "upsertActiveSession").mockImplementation(async () => {
-    await rewrite.promise;
-    return 0;
-  });
-  const force = spyOn(h.manager, "forceStuckRelease");
-  dispose.push(() => {
-    upsert.mockRestore();
-    force.mockRestore();
-  });
-  const monitor = new SessionHeartbeatMonitor(
-    h.manager,
-    () => false,
-    async () => {},
-    h.timer,
-    {
-      forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id),
-    },
-  );
-  monitor.start();
-  dispose.push(() => void monitor.stop());
-  let checks = 0;
-  const release = h.manager.releaseSessionUnlessSuperseded(
-    "kept",
-    `device-disconnected:${android.deviceId}`,
-    { commitFence: () => ++checks < 2 },
-  );
-  await flush();
-  expect(checks).toBe(2);
-  expect(upsert).toHaveBeenCalledTimes(1);
-  expect(h.manager.getTerminalReleasesInProgress()).toEqual([]);
-  expect(h.manager.getReleaseStuckAtMs("kept")).toBeUndefined();
-  expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(1_000);
-  expect(h.manager.isReleaseInProgress("kept", h.timer.now())).toBe(true);
-  await h.timer.advanceTimeAsync(25_000, flush);
-  expect(force).not.toHaveBeenCalled();
-  expect(h.manager.forceStuckRelease("kept")).toBeUndefined();
-  expect(h.manager.getSession("kept")).toBe(session);
-  expect(h.manager.getSessionForDevice(android.deviceId)).toBe("kept");
-  rewrite.resolve();
-  expect(await release).toEqual({ superseded: true });
-  expect(h.manager.getTerminalReleaseSnapshot("kept")).toBeUndefined();
-});
+// #11799 W5: a volatile release never evaluates a final fence after its row was written, and a
+// durable one evaluates it before any row exists. Neither can leave a live-row rewrite parked for
+// the stuck-release monitor to force.
+test.each(["volatile", "durable"] as const)(
+  "a %s release's final commit fence never leaves a parked live-row rewrite to force",
+  async (intent) => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const h = harness(persistence);
+    if (intent === "durable") {
+      h.manager.attachTerminalReleaseJournal(
+        new FileTerminalReleaseJournal(
+          "/data/pending.jsonl",
+          new FakeTerminalReleaseJournalFileSystem(),
+        ),
+      );
+    }
+    const session = await h.manager.createSession("kept", android.deviceId, "android", {
+      timeoutMs: 600_000,
+      heartbeatTimeoutMs: 600_000,
+    });
+    const rewrite = Promise.withResolvers<void>();
+    const upsert = spyOn(persistence, "upsertActiveSession").mockImplementation(async () => {
+      await rewrite.promise;
+      return 0;
+    });
+    const force = spyOn(h.manager, "forceStuckRelease");
+    dispose.push(() => {
+      rewrite.resolve();
+      upsert.mockRestore();
+      force.mockRestore();
+    });
+    const monitor = new SessionHeartbeatMonitor(
+      h.manager,
+      () => false,
+      async () => {},
+      h.timer,
+      {
+        forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id),
+      },
+    );
+    monitor.start();
+    dispose.push(() => void monitor.stop());
+    let checks = 0;
+    const release = h.manager.releaseSessionUnlessSuperseded(
+      "kept",
+      `device-disconnected:${android.deviceId}`,
+      { commitFence: () => ++checks < 2 },
+    );
+    await flush();
+    await h.timer.advanceTimeAsync(25_000, flush);
+    expect(upsert).not.toHaveBeenCalled();
+    expect(force).not.toHaveBeenCalled();
+    expect(h.manager.getTerminalReleasesInProgress()).toEqual([]);
+    if (intent === "volatile") {
+      // The row was written first, and the second check is never made: the release has won.
+      expect(checks).toBe(1);
+      expect(await release).toEqual({ superseded: false, deviceId: android.deviceId });
+      expect(h.manager.getSession("kept")).toBeNull();
+    } else {
+      // The second check declines before any row is written, so the session stays as it was.
+      expect(checks).toBe(2);
+      expect(await release).toEqual({ superseded: true });
+      expect(h.manager.getSession("kept")).toBe(session);
+      expect(h.manager.getSessionForDevice(android.deviceId)).toBe("kept");
+      expect(h.manager.getTerminalReleaseSnapshot("kept")).toBeUndefined();
+    }
+  },
+);
 
 test("an undecided commit fence still forces wedged teardown at its deadline", async () => {
   const gate = Promise.withResolvers<void>();

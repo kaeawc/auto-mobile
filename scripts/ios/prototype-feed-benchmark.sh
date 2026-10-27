@@ -19,7 +19,9 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$device" ]] || $dry || die "--device is required"
 # Bound scripted work and avoid shell integer overflow on untrusted values.
-[[ "$swipes" =~ ^[1-9][0-9]{0,2}$ ]] && [[ "$swipes" -le 100 ]] || die "--swipes must be an integer in 1..100"
+if ! [[ "$swipes" =~ ^[1-9][0-9]{0,2}$ ]] || [[ "$swipes" -gt 100 ]]; then
+  die "--swipes must be an integer in 1..100"
+fi
 work_dir=$(mktemp -d)
 if [[ -n "${PROTOTYPE_BENCH_CLI:-}" ]]; then cli=("$PROTOTYPE_BENCH_CLI"); else cli=(bun "${ROOT}/src/index.ts" --cli); fi
 session=()

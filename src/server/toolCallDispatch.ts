@@ -4,6 +4,11 @@ import type { CreateTaskResult } from "../daemon/tasks/mcpTasksExtension";
 import { logger } from "../utils/logger";
 import { withAmbiguousDeviceMrtr } from "./ambiguousDeviceMrtr";
 import {
+  daemonDeviceChoiceRequestState,
+  type DeviceChoiceRequestState,
+  type DeviceChoiceRequestStateCodec,
+} from "./deviceChoiceRequestState";
+import {
   deviceChoicePeerFor,
   withAmbiguousDeviceElicitation,
   type AmbiguousDeviceElicitationOptions,
@@ -136,6 +141,11 @@ export interface McpToolCallExtra extends ToolCallExtra {
   readonly envelope?: Readonly<Record<string, unknown>>;
   /** Client answers lifted by the SDK on a modern multi-round-trip retry. */
   readonly inputResponses?: Readonly<Record<string, unknown>>;
+  /** Verified by the SDK hook before dispatch; minting retains this request's session binding. */
+  readonly deviceChoiceState?: {
+    readonly verified: unknown;
+    mint(payload: DeviceChoiceRequestState): Promise<string>;
+  };
   /**
    * Overrides the transport scope the call's execution registers under. Set only for work
    * running as an MCP task, which must not be cancelled when its request closes (#4668).
@@ -146,12 +156,21 @@ export interface McpToolCallExtra extends ToolCallExtra {
 export type McpToolCallResult = CallToolResult;
 
 /** Adapts an SDK v2 request context to {@link McpToolCallExtra}. */
-export function toolCallExtraFromContext(ctx: ServerContext): McpToolCallExtra {
+export function toolCallExtraFromContext(
+  ctx: ServerContext,
+  requestState?: DeviceChoiceRequestStateCodec,
+): McpToolCallExtra {
   return {
     signal: ctx.mcpReq.signal,
     _meta: ctx.mcpReq._meta,
     ...(ctx.mcpReq.envelope !== undefined && { envelope: ctx.mcpReq.envelope }),
     ...(ctx.mcpReq.inputResponses !== undefined && { inputResponses: ctx.mcpReq.inputResponses }),
+    ...(requestState && {
+      deviceChoiceState: {
+        verified: ctx.mcpReq.requestState<unknown>(),
+        mint: (payload: DeviceChoiceRequestState) => requestState.mint(payload, ctx),
+      },
+    }),
     sendNotification: (notification) => ctx.mcpReq.notify(notification),
   };
 }
@@ -170,9 +189,14 @@ export function installToolCallDispatcher(
   options: {
     era?: "legacy" | "modern";
     ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions;
+    deviceChoiceRequestState?: DeviceChoiceRequestStateCodec;
   } = {},
 ): void {
   const dispatchBackend = options.era === "modern" ? withAmbiguousDeviceMrtr(backend) : backend;
+  const requestState =
+    options.era === "modern"
+      ? (options.deviceChoiceRequestState ?? daemonDeviceChoiceRequestState)
+      : undefined;
   server.server.setRequestHandler(
     "tools/call",
     // The SDK serves InputRequiredResult natively; createSdkMcpServer also passes our
@@ -180,7 +204,7 @@ export function installToolCallDispatcher(
     async (request, ctx) =>
       (await dispatchToolCall(
         request,
-        toolCallExtraFromContext(ctx),
+        toolCallExtraFromContext(ctx, requestState),
         options.era !== "modern" && options.ambiguousDeviceElicitation
           ? withAmbiguousDeviceElicitation(
               backend,

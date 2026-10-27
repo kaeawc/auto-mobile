@@ -30,6 +30,13 @@ import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
 import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
 import * as database from "../../src/db/database";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { createDeviceChoiceRequestStateCodec } from "../../src/server/deviceChoiceRequestState";
+
+const requestStateTimer = new FakeTimer();
+const requestStateCodec = createDeviceChoiceRequestStateCodec({
+  timer: requestStateTimer,
+  secretProvider: { createSecret: () => new Uint8Array(32).fill(7) },
+});
 
 class CapturedResponse extends EventEmitter {
   headersSent = false;
@@ -112,7 +119,7 @@ function endpoint(deviceChoice = false) {
     },
     createServer: (req: McpHttpRequestLike, scope) => {
       const server = createStatelessMcpServer(
-        {},
+        { deviceChoiceRequestState: requestStateCodec },
         buildMcpRequestContext({ headers: req.headers }),
         scope,
       );
@@ -135,6 +142,7 @@ async function exchange(
   method: string,
   params: Record<string, unknown> = {},
   deviceChoice = false,
+  sessionKey = "modern-client",
 ) {
   const server = endpoint(deviceChoice);
   const res = new CapturedResponse();
@@ -148,7 +156,7 @@ async function exchange(
           ...(typeof params.name === "string" && { "mcp-name": params.name }),
           accept: "text/event-stream, application/json",
           "content-type": "application/json",
-          [MCP_SESSION_KEY_HEADER]: "modern-client",
+          [MCP_SESSION_KEY_HEADER]: sessionKey,
         },
       },
       res,
@@ -340,13 +348,14 @@ test("real modern handler asks for a device via MRTR and retries on the accepted
         },
       },
     });
-    expect(question.result.requestState).toBeUndefined();
+    expect(question.result.requestState).toBeString();
     expect(question.result.content).toBeUndefined();
 
     const result = await exchange(
       "tools/call",
       {
         ...params,
+        requestState: question.result.requestState,
         inputResponses: { deviceChoice: { action: "accept", content: { deviceId: "device-b" } } },
       },
       true,
@@ -359,6 +368,65 @@ test("real modern handler asks for a device via MRTR and retries on the accepted
     ToolRegistry.unregister("modernDeviceChoiceProbe");
   }
 });
+
+for (const reason of ["tampered", "expired", "different session", "malformed"] as const) {
+  test(`real modern handler rejects ${reason} request state before tool execution`, async () => {
+    const calls: Array<string | undefined> = [];
+    const toolName = "modernInvalidStateProbe";
+    ToolRegistry.register(
+      toolName,
+      "Hermetic invalid-state probe",
+      z.object({ deviceId: z.string().optional() }),
+      async ({ deviceId }) => {
+        calls.push(deviceId);
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                code: "ambiguous_device_target",
+                candidates: [
+                  { deviceId: "device-a", platform: "android" },
+                  { deviceId: "device-b", platform: "ios" },
+                ],
+              }),
+            },
+          ],
+        };
+      },
+    );
+    try {
+      const params = { name: toolName, arguments: {} };
+      const question = await exchange("tools/call", params, true);
+      const state: string = question.result.requestState;
+      expect(state).toBeString();
+      if (reason === "expired") {
+        requestStateTimer.advanceTime(600_000);
+      }
+      const result = await exchange(
+        "tools/call",
+        {
+          ...params,
+          requestState:
+            reason === "malformed" ? "invalid" : reason === "tampered" ? `${state}tampered` : state,
+          inputResponses: { deviceChoice: { action: "accept", content: { deviceId: "device-b" } } },
+        },
+        true,
+        reason === "different session" ? "other-client" : "modern-client",
+      );
+      expect(result.error).toEqual({
+        code: -32602,
+        message: "Invalid or expired requestState",
+        data: { reason: "invalid_request_state" },
+      });
+      expect(result.result).toBeUndefined();
+      expect(calls).toEqual([undefined]);
+    } finally {
+      ToolRegistry.unregister(toolName);
+    }
+  });
+}
 
 test("preparsed modern bodies above the SDK default body limit remain admitted", async () => {
   const frame = await exchange("tools/call", {

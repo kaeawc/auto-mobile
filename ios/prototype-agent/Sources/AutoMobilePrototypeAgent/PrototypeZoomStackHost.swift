@@ -85,9 +85,9 @@
         }
 
         private func navigateBack(_ next: [PrototypeStackEntry]) {
-            let count = PrototypeZoomNavigation.popCount(entries, keeping: next)
-            guard count > 0 else { return }
-            model.run((0 ..< count).map { _ in PrototypeAction(
+            let pops = PrototypeZoomNavigation.popCount(entries, keeping: next)
+            guard pops > 0 else { return }
+            model.run((0 ..< pops).map { _ in PrototypeAction(
                 type: "pop",
                 name: nil,
                 payload: nil,

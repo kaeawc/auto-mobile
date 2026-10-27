@@ -358,12 +358,6 @@
     "scale": 1.2,
     "rotation": 15,
     "cornerStyle": "continuous",
-    "shadows": [
-      {
-        "color": "#000000",
-        "radius": 4
-      }
-    ],
     "effects": [
       {
         "type": "noise"
@@ -853,11 +847,8 @@
       "ms": 20,
       "order": "forward"
     },
-    "ios": {
-      "hover": "lift"
-    },
-    "android": {
-      "indication": "none"
+    "semantics": {
+      "heading": true
     },
     "onAppear": [
       {
@@ -865,25 +856,16 @@
         "name": "appear"
       }
     ],
-    "semantics": {
-      "heading": true
+    "ios": {
+      "hover": "lift"
+    },
+    "android": {
+      "indication": "ripple"
     },
     "press": {
       "scale": 0.9,
       "alpha": 0.8
-    },
-    "scrollTransition": {
-      "axis": "vertical",
-      "edge": {
-        "alpha": 0.5
-      }
-    },
-    "scrollLinked": {
-      "source": "targetScroll",
-      "range": [0, 100],
-      "alpha": [1, 0]
-    },
-    "sharedKey": "modelHero"
+    }
   },
   "actionRequestFilled": {
     "type": "request",

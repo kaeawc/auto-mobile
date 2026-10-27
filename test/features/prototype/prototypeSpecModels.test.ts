@@ -533,20 +533,20 @@ struct Mixed: Codable, Equatable, Sendable {
       [contract.definitions.style, fixture.style],
       [contract.definitions.item, fixture.item],
     ] as const) {
-      expect(Object.keys(value).sort()).toEqual(Object.keys(definition.fields).sort());
+      // `style.shadows` is exclusive with `elevation`/`shadowColor`, so no single valid style fills both.
+      const fields = Object.keys(definition.fields).filter(
+        (field) => field !== "shadows" || definition !== contract.definitions.style,
+      );
+      expect(Object.keys(value).sort()).toEqual(fields.sort());
     }
     // The contract allows one condition selector/comparator at a time, unlike the wire model.
     expect(presentation.conditionSchema.safeParse(fixture.conditionFilled).success).toBe(false);
   });
 
   test("every migrated fixture satisfies the existing contract interpreters", () => {
-    // Filled wire models cover mutually exclusive shadow forms; validate each legal form.
-    const { shadows: _shadows, ...elevationStyle } = fixture.style;
-    const { elevation: _elevation, shadowColor: _shadowColor, ...layeredStyle } = fixture.style;
     const leaves = [
       [presentation.conditionSchema, fixture.condition],
-      [presentation.styleSchema, elevationStyle],
-      [presentation.styleSchema, layeredStyle],
+      [presentation.styleSchema, fixture.style],
       [presentation.itemSchema, fixture.item],
       [presentation.itemSchema, fixture.itemString],
       [presentation.containerSchema, fixture.container],

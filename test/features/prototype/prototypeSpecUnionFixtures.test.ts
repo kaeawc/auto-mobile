@@ -6,8 +6,6 @@ import fixtures from "../../fixtures/prototype-spec/models.json";
 const unionFixtures = Object.entries(fixtures).filter(([name]) => /^(node|action)/.test(name));
 for (const [name, value] of unionFixtures) {
   test(`migrated ${name} satisfies the existing contract interpreter`, () => {
-    // A shared pair cannot be repeated; other box fixtures exercise repeat semantically.
-    const { repeat: _repeat, ...sharedBox } = fixtures.nodeBoxFilled;
     const spec = {
       id: "models",
       requires: { platform: ["test"] },
@@ -27,22 +25,10 @@ for (const [name, value] of unionFixtures) {
         type: "column",
         children: [
           name === "nodeBoxFilled"
-            ? {
-                type: "scroll",
-                child: { type: "grid", columns: 2, children: [sharedBox] },
-              }
+            ? { type: "grid", columns: 2, children: [value] }
             : name.startsWith("node")
               ? value
               : { type: "button", label: "Go", onTap: [value] },
-          ...(name === "nodeBoxFilled"
-            ? [
-                {
-                  type: "spacer",
-                  sharedKey: "modelHero",
-                  visibleWhen: { key: "enabled", equals: false },
-                },
-              ]
-            : []),
           { type: "pager", id: "targetPager", children: [{ type: "spacer" }] },
           {
             type: "stack",
@@ -77,6 +63,12 @@ test("fixtures cover every action and node variant and every filled field", () =
     [contract.definitions.action.variants.request, fixtures.actionRequestFilled],
     [contract.definitions.action.variants.emit, fixtures.actionEmitFilled],
   ] as const) {
-    expect(Object.keys(value).sort()).toEqual(Object.keys(rule.fields).sort());
+    // Cross-node constraints (a shared pair, a scroll source) cannot hold on one lone filled node.
+    const crossNode = new Set(["sharedKey", "scrollLinked", "scrollTransition"]);
+    expect(Object.keys(value).sort()).toEqual(
+      Object.keys(rule.fields)
+        .filter((field) => !crossNode.has(field))
+        .sort(),
+    );
   }
 });

@@ -122,7 +122,9 @@
   wiring_requires_yq
   local workflow=".github/workflows/pull_request.yml"
 
-  run yq -r '.jobs."build-android-control-proxy".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
+  # The job's steps live in its shared composite action (#11872).
+  [ "$(yq -r '.jobs."build-android-control-proxy".steps[1].uses' "$workflow")" = "./.github/actions/ci-build-android-control-proxy" ]
+  run yq -r '.runs.steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' .github/actions/ci-build-android-control-proxy/action.yml
   [ "$status" -eq 0 ]
   [[ "$output" == *":control-proxy:assembleDebug"* ]]
   [[ "$output" != *":control-proxy:assembleRelease"* ]]

@@ -29,7 +29,13 @@ struct PrototypeSharedElementPlan: Equatable {
     }
 
     /// Located nodes come from the structural validator's pre-order traversal.
-    static func validate(_ nodes: [PrototypeLocatedValue], data: [String: JSONValue]? = nil) throws {
-        try PrototypeSharedElementRules.validate(nodes, data: data)
+    static func validate(
+        _ nodes: [PrototypeLocatedValue],
+        data: [String: JSONValue]? = nil,
+        actions: [PrototypeLocatedValue] = []
+    )
+        throws
+    {
+        try PrototypeSharedElementRules.validate(nodes, data: data, actions: actions)
     }
 }

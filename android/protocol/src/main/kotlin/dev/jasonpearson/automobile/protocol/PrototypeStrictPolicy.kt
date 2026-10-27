@@ -286,6 +286,7 @@ internal object PrototypeStrictPolicy {
 
     private fun scanFields(fields: JsonObject, field: String, routeAlias: Boolean) {
       val type = fields.text("type") ?: ""
+      if (PrototypeStackPatternRules.required(fields)) need("stack_patterns")
       for ((key, child) in fields) {
         if (skipsScan(key, type)) continue
         if (key == "repeat") {

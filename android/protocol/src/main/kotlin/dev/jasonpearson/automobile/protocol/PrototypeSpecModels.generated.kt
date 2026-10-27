@@ -123,6 +123,7 @@ data class PrototypePushAction(
   val stack: String,
   val screen: String,
   val transition: String? = null,
+  val source: String? = null,
   val params: Map<String, JsonElement>? = null,
 ) : PrototypeAction()
 
@@ -143,6 +144,7 @@ data class PrototypeReplaceAction(
   val stack: String,
   val screen: String,
   val transition: String? = null,
+  val source: String? = null,
   val params: Map<String, JsonElement>? = null,
 ) : PrototypeAction()
 

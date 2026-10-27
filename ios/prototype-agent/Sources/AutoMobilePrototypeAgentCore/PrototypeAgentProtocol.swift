@@ -66,6 +66,7 @@ enum PrototypeAgentProtocol {
         stackCapability,
         stackTransitionsCapability,
         designPlatformCapability,
+        stackPatternsCapability,
         reducedMotionCapability,
         sharedElementCapability,
         sharedElementV2Capability,
@@ -97,6 +98,7 @@ enum PrototypeAgentProtocol {
     /// Stack paths, four navigation actions, screen_changed and left-edge Back (#12068).
     static let stackCapability = "prototype_stack_v1"
     static let designPlatformCapability = "prototype_design_platform_v1"
+    static let stackPatternsCapability = "prototype_stack_patterns_v1"
     static let stackTransitionsCapability = "prototype_stack_transitions_v1"
     /// Reduced-motion profile: crossfades, loops at rest, no springs (#15115).
     static let reducedMotionCapability = "prototype_reduced_motion_v1"

@@ -49,6 +49,7 @@ internal object PrototypeBundleNodeCapabilities {
       type == "text" && text(n["contentTransition"])?.let { it != "none" } == true,
     )
     mark("linkify_v1", type == "text" && "linkify" in n)
+    mark("stack_patterns_v1", PrototypeStackPatternRules.required(n))
     mark("stack_transitions_v1", type == "stack" && "transition" in n)
     motion(n, type, caps)
   }

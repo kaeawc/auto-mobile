@@ -101,6 +101,9 @@ enum PrototypeBundleCapabilities {
                 if node["indicator"] != nil { need("carousel") }
             }
             if type == "stack", node["transition"] != nil { need("stack_transitions") }
+            if type == "stack",
+               ["sharedAxisX", "sharedAxisY", "fadeThrough", "zoom"]
+               .contains(node["transition"]?.stringValue ?? "") { need("stack_patterns") }
             let transition = type == "stack" ? nil : node["transition"]
             let transitionType = transition?.objectFields?["type"]?.stringValue
                 ?? transition?.stringValue ?? ""
@@ -143,6 +146,12 @@ enum PrototypeBundleCapabilities {
         if type == "scrollTo" { names.insert("prototype_chat_scroll_v1") }
         if ["push", "replace"].contains(type ?? ""), fields["transition"] != nil {
             names.insert("prototype_stack_transitions_v1")
+        }
+        if ["push", "replace"].contains(type ?? ""),
+           fields["source"] != nil || ["sharedAxisX", "sharedAxisY", "fadeThrough", "zoom"]
+           .contains(fields["transition"]?.stringValue ?? "")
+        {
+            names.insert("prototype_stack_patterns_v1")
         }
         if type == nil, fields["data"]?.stringValue != nil { names.insert("prototype_data_model_v1") }
         if type == nil, let pointer = fields["platform"]?.stringValue {

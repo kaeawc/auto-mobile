@@ -33,6 +33,8 @@ import {
   prototypeFormatUnsupportedMessage,
 } from "./prototypeFormatCapability";
 import {
+  prototypeStackPatternFields,
+  prototypeStackPatternsUnsupportedMessage,
   prototypeStackTransitionFields,
   prototypeStackTransitionsUnsupportedMessage,
 } from "./prototypeStackTransitions";
@@ -45,6 +47,7 @@ import {
   PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_FORMAT_CAPABILITY,
+  PROTOTYPE_STACK_PATTERNS_CAPABILITY,
   PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
   PROTOTYPE_DATA_MODEL_CAPABILITY,
@@ -442,6 +445,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_SHARED_ELEMENT_CAPABILITY,
     fields: prototypeSharedElementFields,
     unsupportedMessage: prototypeSharedElementUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_STACK_PATTERNS_CAPABILITY,
+    fields: prototypeStackPatternFields,
+    unsupportedMessage: prototypeStackPatternsUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,

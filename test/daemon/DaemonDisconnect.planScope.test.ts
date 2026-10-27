@@ -3,6 +3,7 @@ import { PlanExecutionOrchestrator } from "../../src/server/planExecutionOrchest
 import * as planUtils from "../../src/server/planExecutorFactory";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { executionTracker } from "../../src/daemon/executionTracker";
+import { DaemonState } from "../../src/daemon/daemonState";
 import {
   DEVICE_DISCONNECT_MISS_THRESHOLD,
   PLAN_DEVICE_DISCONNECT_MISS_CAP,
@@ -26,6 +27,7 @@ afterEach(() => {
     executionTracker.endExecution(id);
   }
   serverConfig.setPlanExecutionActive(previousPlanActive);
+  DaemonState.getInstance().reset();
 });
 
 function startPlan(deviceId: string, sessionUuid: string) {

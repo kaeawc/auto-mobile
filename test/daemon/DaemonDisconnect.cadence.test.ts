@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { executionTracker } from "../../src/daemon/executionTracker";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { deviceHold, genericAvailabilityOf } from "../../src/daemon/deviceHold";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/models/VideoRecordingConfigParsing";
@@ -177,7 +178,10 @@ describe("DaemonDisconnect adaptive discovery cadence", () => {
     previousPlanActive = serverConfig.isPlanExecutionActive();
     serverConfig.setPlanExecutionActive(false);
   });
-  afterEach(() => serverConfig.setPlanExecutionActive(previousPlanActive));
+  afterEach(() => {
+    serverConfig.setPlanExecutionActive(previousPlanActive);
+    DaemonState.getInstance().reset();
+  });
 
   test("unchanged idle pool makes exactly seven reads in ten minutes", async () => {
     const rig = monitor();

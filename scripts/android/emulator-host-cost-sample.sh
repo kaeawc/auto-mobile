@@ -72,12 +72,17 @@ main() {
   mkdir -p "$output_dir"
   printf '%s\n' "$command_line" > "$output_dir/host-command.txt"
   printf 'epoch_seconds,cpu_seconds,unique_kib\n' > "$output_dir/cost-samples.csv"
-  local sample ps_time cpu unique
+  local sample ps_time cpu unique status
   for ((sample = 0; sample < samples; sample++)); do
     ps_time=$(ps -p "$emulator_pid" -o time= | tr -d '[:space:]' || true)
     [[ -n $ps_time ]] || { echo "Emulator process exited" >&2; return 1; }
     cpu=$(cpu_seconds_from_ps_time "$ps_time")
-    unique=$(unique_kib "$emulator_pid") || { echo "Could not read unique memory" >&2; return 1; }
+    # Not `cmd || handler`: that would disable set -e inside the memory readers.
+    set +e
+    unique=$(unique_kib "$emulator_pid")
+    status=$?
+    set -e
+    [[ $status -eq 0 ]] || { echo "Could not read unique memory" >&2; return 1; }
     printf '%s,%s,%s\n' "$(date +%s)" "$cpu" "$unique" >> "$output_dir/cost-samples.csv"
     if ((sample + 1 < samples)); then sleep "$interval"; fi
   done

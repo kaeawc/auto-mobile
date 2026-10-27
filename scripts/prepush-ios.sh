@@ -102,10 +102,10 @@ fi
 protoviewer_changed=false
 while IFS= read -r -d '' relative_path; do
   case "${relative_path}" in
-    ios/prototype-agent/*|scripts/ios/protoviewer-build.sh) protoviewer_changed=true ;;
+    ios/prototype-agent/*|scripts/ios/protoviewer-build.sh|scripts/ios/prototype-effects-metallib.sh) protoviewer_changed=true ;;
   esac
 done < <(
-  git -C "${repo_root}" diff --name-only -z "${base_ref}...HEAD" -- ios/prototype-agent/ scripts/ios/protoviewer-build.sh \
+  git -C "${repo_root}" diff --name-only -z "${base_ref}...HEAD" -- ios/prototype-agent/ scripts/ios/protoviewer-build.sh scripts/ios/prototype-effects-metallib.sh \
     || printf '%s' "$?" > "${git_diff_status_file}"
 )
 if [[ -s "${git_diff_status_file}" ]]; then

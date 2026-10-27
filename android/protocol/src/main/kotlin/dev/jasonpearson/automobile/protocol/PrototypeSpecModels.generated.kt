@@ -569,6 +569,7 @@ data class PrototypeTextNode(
   val spans: List<PrototypeTextSpan>? = null,
   /** Mentions, hashtags and URLs in [text] as links (`prototype_linkify_v1`, #14233). */
   val linkify: PrototypeLinkifyOptions? = null,
+  val contentTransition: String? = null,
 ) : PrototypeNode()
 
 @SerialName("image")

@@ -82,6 +82,8 @@ enum PrototypeBundleCapabilities {
             if node["swipeActions"] != nil { need("swipe_actions") }
             if node["refresh"] != nil { need("refresh") }
             if type == "text", node["spans"] != nil { need("rich_text") }
+            if type == "text", let mode = node["contentTransition"]?.stringValue,
+               mode != "none" { need("content_transition") }
             if node["linkify"] != nil { need("linkify") }
             if type == "scroll", ["reverse", "stickToEnd", "atEndKey", "onStartReached"]
                 .contains(where: { node[$0] != nil }) { need("chat_scroll") }

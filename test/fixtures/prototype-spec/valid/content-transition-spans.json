@@ -1,0 +1,20 @@
+{
+  "id": "content-transition",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "text",
+    "spans": [
+      {
+        "text": "Total "
+      },
+      {
+        "text": "$1,200"
+      }
+    ],
+    "contentTransition": "numeric"
+  }
+}

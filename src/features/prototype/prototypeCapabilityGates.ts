@@ -1,4 +1,9 @@
 import { prototypeFieldsOfKind } from "./prototypeEmitContext";
+import { PROTOTYPE_CONTENT_TRANSITION_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeContentTransitionFields,
+  prototypeContentTransitionUnsupportedMessage,
+} from "./prototypeContentTransition";
 import { prototypeRouteFields, PROTOTYPE_ROUTES_CAPABILITY } from "./prototypeRoutes";
 import { prototypeWindowMotionFields } from "./prototypeWindowMotion";
 import { PROTOTYPE_WINDOW_MOTION_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -210,6 +215,11 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: PROTOTYPE_CONTENT_TRANSITION_CAPABILITY,
+    fields: prototypeContentTransitionFields,
+    unsupportedMessage: prototypeContentTransitionUnsupportedMessage,
+  },
   {
     capability: PROTOTYPE_ROUTES_CAPABILITY,
     fields: prototypeRouteFields,

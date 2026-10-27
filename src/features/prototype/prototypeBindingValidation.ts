@@ -1,3 +1,4 @@
+import { prototypeAdaptiveError } from "./prototypeAdaptive";
 import { z } from "zod";
 import { type KeyInstance } from "./prototypeRepeat";
 import { prototypeRequestStatusKeyError } from "./prototypeRequest";
@@ -359,7 +360,10 @@ export function bindingErrors(
 ): PrototypeValidationError | undefined {
   const state = object(data.state) ?? {};
   for (const { value, path, item } of checked.nodes) {
-    const error = componentBindingErrors(value, path, state) ?? selectionErrors(value, path, state);
+    const error =
+      prototypeAdaptiveError(value, path, state) ??
+      componentBindingErrors(value, path, state) ??
+      selectionErrors(value, path, state);
     if (error) {
       return forItem(error, item);
     }
@@ -461,6 +465,8 @@ const stateActionTypes: Record<string, { check: (stored: unknown) => boolean; me
 function boundKeys(value: Record<string, unknown>): string[] {
   const keys = [
     value.stateKey,
+    value.type === "adaptive" ? value.selectionKey : undefined,
+    value.type === "adaptive" ? value.openKey : undefined,
     value.activeKey,
     value.hourKey,
     value.minuteKey,
@@ -481,6 +487,7 @@ function controlErrors(
   state: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   return (
+    prototypeAdaptiveError(value, path, state) ??
     componentBindingErrors(value, path, state) ??
     selectionErrors(value, path, state) ??
     trailingErrors(value, path, state) ??

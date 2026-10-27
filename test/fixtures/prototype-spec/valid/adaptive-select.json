@@ -1,0 +1,33 @@
+{
+  "id": "adaptive",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "selection": "",
+    "tab": "home",
+    "open": true
+  },
+  "root": {
+    "type": "adaptive",
+    "kind": "listDetail",
+    "list": {
+      "type": "button",
+      "label": "Select",
+      "onTap": [
+        {
+          "type": "setState",
+          "key": "selection",
+          "value": "item"
+        }
+      ]
+    },
+    "detail": {
+      "type": "text",
+      "text": "Pane"
+    },
+    "selectionKey": "selection"
+  }
+}

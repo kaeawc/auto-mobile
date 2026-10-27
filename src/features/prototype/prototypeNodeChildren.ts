@@ -11,7 +11,12 @@ export function prototypeNodeChildren(
     }
   };
   for (const [key, value] of Object.entries(node)) {
-    if (key === "child" || (node.type === "list" && ["header", "footer"].includes(key))) {
+    if (
+      (node.type === "adaptive" &&
+        ["list", "detail", "content", "main", "supporting"].includes(key)) ||
+      key === "child" ||
+      (node.type === "list" && ["header", "footer"].includes(key))
+    ) {
       add(value, `.${key}`);
     }
     if (key === "children" && Array.isArray(value)) {

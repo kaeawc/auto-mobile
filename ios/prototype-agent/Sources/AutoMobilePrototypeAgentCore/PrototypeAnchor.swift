@@ -194,6 +194,17 @@ private let prototypeInlineContainerTypes: Set<String> = [
 extension PrototypeNode {
     /// Child nodes in tree order with their paths: `child`, else `children` (the spec contract).
     func childEntries(path: String) -> [(node: PrototypeNode, path: String)] {
+        if type == "adaptive" {
+            return [
+                ("list", list),
+                ("detail", detail),
+                ("content", content),
+                ("main", main),
+                ("supporting", adaptiveSupporting),
+            ].compactMap { name, node in
+                node.map { ($0, "\(path).\(name)") }
+            }
+        }
         if type == "stack" {
             return (screens ?? [:]).keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) })
                 .compactMap { name in

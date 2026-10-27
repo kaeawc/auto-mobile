@@ -1,3 +1,4 @@
+import { buildAdaptiveSchema, adaptiveChildren, type AdaptiveSlots } from "./prototypeAdaptive";
 import { prototypeChannelsSchema } from "./prototypeChannelSchema";
 import { prototypePressSchema } from "./prototypePressSchema";
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
@@ -699,7 +700,9 @@ const stackBaseSchema = z
     routes: z.record(routeSchema).and(z.unknown()).optional(),
   })
   .strict();
+const adaptiveBaseSchema = buildAdaptiveSchema(commonNodeShape);
 export type PrototypeNode =
+  | (z.infer<typeof adaptiveBaseSchema> & AdaptiveSlots<PrototypeNode>)
   | (z.infer<typeof stackBaseSchema> & { screens: Record<string, PrototypeNode> })
   | (z.infer<typeof boxBaseSchema> & { children: PrototypeNode[] })
   | (z.infer<typeof rowBaseSchema> & { children: PrototypeNode[] })
@@ -788,6 +791,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       flowBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(0) }),
       gridBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(0) }),
       carouselBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(1) }),
+      adaptiveBaseSchema.extend(adaptiveChildren(z.lazy(() => prototypeNodeSchema))),
       textBaseSchema,
       imageBaseSchema,
       iconBaseSchema,

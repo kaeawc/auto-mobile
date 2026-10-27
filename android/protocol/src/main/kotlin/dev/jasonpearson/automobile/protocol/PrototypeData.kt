@@ -405,6 +405,15 @@ object PrototypeDataResolver {
       }
 
   private fun mapChildren(node: JsonObject, transform: (JsonObject) -> JsonObject): JsonObject {
+    if (node["type"] == JsonPrimitive("adaptive")) {
+      val slots =
+        listOf("list", "detail", "content", "main", "supporting")
+          .mapNotNull { key ->
+            (node[key] as? JsonObject)?.let { key to transform(it) }
+          }
+          .toMap()
+      return JsonObject(node + slots)
+    }
     val extras =
       listOf("header", "footer")
         .mapNotNull { key ->
@@ -492,6 +501,10 @@ private object PrototypeBindingScan {
     return hasOwnBindings(node) ||
       nested ||
       screensBound ||
-      listOf("header", "footer").any { (node[it] as? JsonObject)?.let(::hasBindings) == true }
+      listOf("header", "footer").any { (node[it] as? JsonObject)?.let(::hasBindings) == true } ||
+      (node["type"] == JsonPrimitive("adaptive") &&
+        listOf("list", "detail", "content", "main", "supporting").any {
+          (node[it] as? JsonObject)?.let(::hasBindings) == true
+        })
   }
 }

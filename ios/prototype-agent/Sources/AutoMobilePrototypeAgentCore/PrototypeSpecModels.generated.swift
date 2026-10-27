@@ -128,6 +128,11 @@ struct SafeAreaPadding: Codable, Equatable, Sendable {
     let types: [String]
 }
 
+struct RadioOption: Codable, Equatable, Sendable {
+    let value: String
+    let label: String
+}
+
 /// A fixed y axis for a chart; `max` is above `min`.
 struct PrototypeChartRange: Codable, Equatable, Sendable {
     let min: Double

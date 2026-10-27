@@ -52,6 +52,13 @@ const fixtures: Record<string, Node> = {
     anchorTo: "target",
     openWhen: { key: "liked", equals: true },
   },
+  prototype_adaptive_v1: {
+    type: "adaptive",
+    kind: "listDetail",
+    selectionKey: "selection",
+    list: label,
+    detail: label,
+  },
   prototype_drawer_v1: {
     type: "drawer",
     edge: "start",
@@ -230,6 +237,12 @@ const containers: {
   wrap: (node: Node) => Node;
 }[] = [
   { name: "root", prefix: "root", wrap: (root) => ({ root }) },
+  ...["list", "detail", "content", "main", "supporting"].map((field) => ({
+    name: "adaptive",
+    field,
+    prefix: `root.${field}`,
+    wrap: (node: Node) => ({ root: { type: "adaptive", [field]: node } }),
+  })),
   ...["scroll", "dialog", "bottomSheet", "searchBar", "drawer"].map((type) => ({
     name: type,
     field: "child",
@@ -363,7 +376,15 @@ test("contract node-reference fields are covered by both the iterator and contai
     header: node,
     footer: node,
   });
-  const suffixes = actual.map(({ suffix }) => suffix);
+  const adaptive = prototypeNodeChildren({
+    type: "adaptive",
+    list: node,
+    detail: node,
+    content: node,
+    main: node,
+    supporting: node,
+  });
+  const suffixes = [...actual, ...adaptive].map(({ suffix }) => suffix);
   for (const [variant, definition] of Object.entries(contract.definitions.node.variants)) {
     for (const [field, definitionField] of Object.entries(definition.fields)) {
       if (!referencesNode(definitionField.rule)) {

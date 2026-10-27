@@ -20,6 +20,7 @@ object AutoMobilePrototype {
 
   private val baseCapabilities: Set<String> =
     setOf(
+      "prototype_adaptive_v1",
       "prototype_bar_scroll_v1",
       "prototype_carousel_v1",
       "prototype_chart_v1",

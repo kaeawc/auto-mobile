@@ -69,6 +69,7 @@ enum PrototypeStrictCapabilities {
                 "menu": "menus",
                 "tooltip": "tooltip",
                 "drawer": "drawer",
+                "adaptive": "adaptive",
                 "select": "menus",
                 "scrollTo": "chat_scroll",
             ]

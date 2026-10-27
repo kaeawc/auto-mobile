@@ -822,6 +822,15 @@ final class PrototypeNode: Decodable {
     /// filled, tonal or outlined; `topAppBar` small, centerAligned, medium or large; `progress`
     /// linear or circular.
     let variant: String?
+    let kind: String?
+    let selectionKey: String?
+    let openKey: String?
+    let list: PrototypeNode?
+    let detail: PrototypeNode?
+    let content: PrototypeNode?
+    let main: PrototypeNode?
+    let adaptiveSupporting: PrototypeNode?
+    let adaptiveItems: [RadioOption]?
     let stateKey: String?
     let placeholder: String?
     /// Search results are shown only while this boolean state key is true.
@@ -934,6 +943,7 @@ final class PrototypeNode: Decodable {
         case into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey,
              transition, keyframes
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
+        case kind, selectionKey, openKey, list, detail, content, main
         case effect, name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
         case onScroll, scroll
@@ -994,6 +1004,16 @@ final class PrototypeNode: Decodable {
         name = try container.decodeIfPresent(String.self, forKey: .name)
         label = try container.decodeIfPresent(String.self, forKey: .label)
         variant = try container.decodeIfPresent(String.self, forKey: .variant)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind)
+        selectionKey = try container.decodeIfPresent(String.self, forKey: .selectionKey)
+        openKey = try container.decodeIfPresent(String.self, forKey: .openKey)
+        list = try container.decodeIfPresent(PrototypeNode.self, forKey: .list)
+        detail = try container.decodeIfPresent(PrototypeNode.self, forKey: .detail)
+        content = try container.decodeIfPresent(PrototypeNode.self, forKey: .content)
+        main = try container.decodeIfPresent(PrototypeNode.self, forKey: .main)
+        adaptiveSupporting = type == "adaptive" ? try container
+            .decodeIfPresent(PrototypeNode.self, forKey: .supporting) : nil
+        adaptiveItems = type == "adaptive" ? try container.decodeIfPresent([RadioOption].self, forKey: .items) : nil
         stateKey = try container.decodeIfPresent(String.self, forKey: .stateKey)
         placeholder = try container.decodeIfPresent(String.self, forKey: .placeholder)
         reverse = try container.decodeIfPresent(Bool.self, forKey: .reverse)
@@ -1006,7 +1026,7 @@ final class PrototypeNode: Decodable {
             items = nil
             menuItems = try container.decode([PrototypeMenuItem].self, forKey: .items)
         } else {
-            items = try container.decodeIfPresent([NavItem].self, forKey: .items)
+            items = type == "adaptive" ? nil : try container.decodeIfPresent([NavItem].self, forKey: .items)
             menuItems = nil
         }
         pager = try container.decodeIfPresent(String.self, forKey: .pager)
@@ -1052,7 +1072,7 @@ final class PrototypeNode: Decodable {
         minuteKey = try container.decodeIfPresent(String.self, forKey: .minuteKey)
         is24Hour = try container.decodeIfPresent(Bool.self, forKey: .is24Hour)
         headline = try container.decodeIfPresent(String.self, forKey: .headline)
-        supporting = try container.decodeIfPresent(String.self, forKey: .supporting)
+        supporting = type == "adaptive" ? nil : try container.decodeIfPresent(String.self, forKey: .supporting)
         leadingIcon = try container.decodeIfPresent(String.self, forKey: .leadingIcon)
         trailing = try container.decodeIfPresent(PrototypeListItemTrailing.self, forKey: .trailing)
         swipeActions = try container.decodeIfPresent(PrototypeSwipeActions.self, forKey: .swipeActions)

@@ -98,6 +98,7 @@ enum PrototypeStateValidator {
     // MARK: Binding rules
 
     static func bindingRejection(_ node: PrototypeNode, _ state: [String: JSONValue]) -> BindingRejection? {
+        if let error = PrototypeAdaptive.binding(node, state: state) { return error }
         if let message = componentError(node, state) { return message }
         guard let key = node.stateKey else {
             return node

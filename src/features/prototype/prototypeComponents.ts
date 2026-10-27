@@ -156,8 +156,12 @@ function bindProps(node: Raw, instance: Instance): Raw {
       return child ? bindProps(child, instance) : entry;
     });
   }
-  if (bound.type === "list") {
-    for (const field of ["header", "footer"]) {
+  if (bound.type === "list" || bound.type === "adaptive") {
+    const slots =
+      node.type === "adaptive"
+        ? ["list", "detail", "content", "main", "supporting"]
+        : ["header", "footer"];
+    for (const field of slots) {
       const child = record(bound[field]);
       if (child) {
         bound[field] = bindProps(child, instance);
@@ -259,7 +263,11 @@ function expandUse(use: Raw, path: string, stack: string[], context: Context): E
 /** Expand list chrome outside the row template, preserving component locations. */
 function expandListChildren(node: Raw, path: string, stack: string[], context: Context): Expanded {
   const copy = { ...node };
-  for (const field of ["header", "footer"]) {
+  const slots =
+    node.type === "adaptive"
+      ? ["list", "detail", "content", "main", "supporting"]
+      : ["header", "footer"];
+  for (const field of slots) {
     const child = record(copy[field]);
     if (!child) {
       continue;
@@ -318,7 +326,7 @@ function expandNode(node: Raw, path: string, stack: string[], context: Context):
   if (context.nodes > contract.limits.MAX_PROTOTYPE_NODES) {
     return { error: fail(context, path, "Expanded node limit exceeded") };
   }
-  return node.type === "list"
+  return node.type === "list" || node.type === "adaptive"
     ? expandListChildren(node, path, stack, context)
     : expandChildren(node, path, stack, context);
 }

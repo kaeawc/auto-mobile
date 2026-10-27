@@ -280,6 +280,18 @@ interface TreeNode {
   insideRepeat: boolean;
 }
 
+function adaptiveTreeEntries(current: TreeNode, insideRepeat: boolean): TreeNode[] {
+  if (current.node.type !== "adaptive") {
+    return [];
+  }
+  return ["list", "detail", "content", "main", "supporting"].flatMap((key) => {
+    const node = record(own(current.node, key));
+    return node
+      ? [{ node, path: `${current.path}.${key}`, parent: current.node, key, insideRepeat }]
+      : [];
+  });
+}
+
 function* tree(entry: TreeNode): Generator<TreeNode> {
   const stack = [entry];
   while (stack.length) {
@@ -313,6 +325,7 @@ function* tree(entry: TreeNode): Generator<TreeNode> {
         });
       }
     }
+    stack.push(...adaptiveTreeEntries(current, insideRepeat));
     const child = record(own(current.node, "child"));
     if (child) {
       stack.push({

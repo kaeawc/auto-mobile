@@ -70,6 +70,14 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
       },
     ],
   }),
+  prototype_adaptive_v1: fixture({
+    type: "adaptive",
+    id: "label",
+    kind: "listDetail",
+    selectionKey: "query",
+    list: { type: "text", text: "List" },
+    detail: { type: "text", text: "Detail" },
+  }),
   prototype_drawer_v1: fixture({
     ...{
       type: "drawer",

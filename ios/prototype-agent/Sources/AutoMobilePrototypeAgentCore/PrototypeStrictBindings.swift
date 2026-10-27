@@ -16,6 +16,7 @@ enum PrototypeStrictBindings {
         var own = fields.filter { [
             "type",
             "stateKey",
+            "kind", "selectionKey", "openKey",
             "activeKey",
             "hourKey",
             "minuteKey",
@@ -36,6 +37,7 @@ enum PrototypeStrictBindings {
             "keyboardType",
             "imeAction",
         ].contains($0.key) }
+        if fields["type"] == .string("adaptive") { own["items"] = fields["items"] }
         if fields["type"] == .string("menu") { own["items"] = .array([]) }
         if fields["onSubmit"] != nil { own["onSubmit"] = .array([]) }
         if let refresh = fields["refresh"]?
@@ -70,6 +72,7 @@ enum PrototypeStrictBindings {
     static func boundKeys(_ node: Fields) -> [String] {
         [
             node["stateKey"],
+            node["selectionKey"], node["openKey"],
             node["activeKey"],
             node["hourKey"],
             node["minuteKey"],
@@ -82,6 +85,7 @@ enum PrototypeStrictBindings {
 
     static func validate(nodes: [PrototypeLocatedValue], actions: [PrototypeLocatedValue], state: Fields) throws {
         for node in nodes {
+            try PrototypeAdaptive.validate(node.value, path: node.path, state: state)
             if let field = try field(node.value, state: state) { throw PrototypeContractValidator.invalid(
                 "\(node.path).\(field)",
                 "Invalid control binding"

@@ -94,6 +94,7 @@ class CommandAdvertisementTest {
       "prototype_linkify_v1",
       "prototype_format_v1",
       "prototype_chat_scroll_v1",
+      "prototype_adaptive_v1",
       "prototype_drawer_v1",
       "prototype_emit_context_v1",
       "prototype_checks_v1",

@@ -207,3 +207,14 @@ Frame/send budgets are 65536/16384 bytes, with eight open channels per device an
 Transport, lifecycle and routing execution remain unavailable. Flush-window coalescing is an open
 decision; no coalescing behavior is implemented.
 `;
+
+export const adaptiveGuideProse = `
+### Adaptive panes and navigation
+
+\`adaptive\` needs \`prototype_adaptive_v1\` and a closed \`kind\`:
+- \`listDetail\`: \`list\` and \`detail\` node slots, \`selectionKey\` naming a declared string state key. Empty string means no selection; selecting pushes detail in compact layout and Back clears the key.
+- \`navigationSuite\`: 1–8 unique \`items: [{value,label}]\`, \`stateKey\` naming a declared string whose value matches an item, and a \`content\` node slot. Item taps write that value. Use conditions on the key to choose content.
+- \`supporting\`: \`main\` and \`supporting\` node slots, \`openKey\` naming a declared boolean. Close clears the key.
+
+Widths are native per platform. Android Material adaptive scaffolds split panes at expanded and use bar/rail/drawer at compact/medium/expanded. iOS horizontalSizeClass regular uses split/sidebar/inspector, compact uses stack/bottom bar/sheet. There is no shared breakpoint or \`minWidth\`; \`platformNotes\` reports the different rules on show. iOS draws Material-styled containers under every design until native platform containers are available.
+`;

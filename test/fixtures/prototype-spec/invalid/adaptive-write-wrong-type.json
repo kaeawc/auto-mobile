@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "id": "adaptive",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "selection": "",
+      "tab": "home",
+      "open": true
+    },
+    "root": {
+      "type": "adaptive",
+      "kind": "listDetail",
+      "list": {
+        "type": "button",
+        "label": "Bad",
+        "onTap": [
+          {
+            "type": "setState",
+            "key": "selection",
+            "value": true
+          }
+        ]
+      },
+      "detail": {
+        "type": "text",
+        "text": "Pane"
+      },
+      "selectionKey": "selection"
+    }
+  },
+  "expectedPath": "root.list.onTap[0].value"
+}

@@ -182,7 +182,7 @@ enum PrototypeLimits {
             guard depth < maxDepth else { return }
             try guardObjectChildren(value, path: childPath, depth: depth + 1)
         }
-        for name in ["child", "header", "footer"] {
+        for name in fields["type"] == .string("adaptive") ? PrototypeAdaptive.slots : ["child", "header", "footer"] {
             if let value = fields[name] { try child(value, at: "\(path).\(name)") }
         }
         if case let .array(children)? = fields["children"] {
@@ -248,7 +248,7 @@ enum PrototypeLimits {
                 }
             }
         }
-        for name in ["child", "header", "footer"] {
+        for name in fields["type"] == .string("adaptive") ? PrototypeAdaptive.slots : ["child", "header", "footer"] {
             if let child = fields[name] { try visit(
                 child,
                 path: "\(path).\(name)",

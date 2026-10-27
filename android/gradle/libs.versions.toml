@@ -33,6 +33,7 @@ androidx-core = "1.19.1"
 androidx-window = "1.5.0"
 androidx-activity-compose = "1.13.0"
 androidx-compose-bom = "2026.09.00"
+androidx-compose-adaptive = "1.3.0" # Independently versioned; aligned with the 2026.09.00 BOM
 androidx-lifecycle = "2.11.0"
 androidx-startup = "1.2.0"
 
@@ -101,6 +102,10 @@ conveyor = { id = "dev.hydraulic.conveyor", version.ref = "conveyor" }
 aboutlibraries = { id = "com.mikepenz.aboutlibraries.plugin.android", version.ref = "aboutlibraries" }
 
 [libraries]
+compose-adaptive-core = { module = "androidx.compose.material3.adaptive:adaptive", version.ref = "androidx-compose-adaptive" }
+compose-adaptive-layout = { module = "androidx.compose.material3.adaptive:adaptive-layout", version.ref = "androidx-compose-adaptive" }
+compose-adaptive-navigation = { module = "androidx.compose.material3.adaptive:adaptive-navigation", version.ref = "androidx-compose-adaptive" }
+compose-adaptive-navigation-suite = { module = "androidx.compose.material3:material3-adaptive-navigation-suite" }
 # H.264 decoding for the live device view. Deliberately org.bytedeco:ffmpeg and NOT
 # ffmpeg-platform (which pulls every platform's natives, ~150-200MB) nor javacv-platform
 # (which drags in OpenCV). The non-gpl artifact is LGPL and sufficient: only the x264/x265

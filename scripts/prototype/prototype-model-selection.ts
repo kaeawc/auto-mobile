@@ -94,7 +94,7 @@ export const prototypeModelSelection = {
     languages: ["kotlin"],
     doc: "An image's zoom range: 1 up to `maxScale` (1..8).",
   },
-  radioOption: { languages: ["kotlin"] },
+  radioOption: {},
   chartRange: {
     swiftName: "PrototypeChartRange",
     doc: "A fixed y axis for a chart; `max` is above `min`.",

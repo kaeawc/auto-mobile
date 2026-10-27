@@ -20,4 +20,9 @@ export class DeviceClaimMirrorHub {
       mirror.dispose();
     }
   }
+
+  /** Resolves once every write already sent has settled. */
+  async idle(): Promise<void> {
+    await Promise.all(this.mirrors.map((mirror) => mirror.idle()));
+  }
 }

@@ -47,7 +47,15 @@ export interface DeviceClaims {
  * never block or fail the claim: the files stay authoritative until a later step (#11811 c).
  */
 export interface DeviceClaimMirror {
-  claimed(deviceId: string, owner: { pid: number; ownerToken: string }): void;
+  /**
+   * `stillHeld` re-checks the claim file before any later write of this claim (a retry, a backfill):
+   * a daemon whose claim another daemon took over is never told, and must not write it back.
+   */
+  claimed(
+    deviceId: string,
+    owner: { pid: number; ownerToken: string },
+    stillHeld?: () => boolean,
+  ): void;
   released(deviceId: string, owner: { pid: number; ownerToken: string }): void;
 }
 
@@ -73,6 +81,7 @@ interface MirrorIntent {
   kind: "claim" | "release";
   owner: MirrorOwner;
   claimedAtMs: number;
+  stillHeld?: () => boolean;
   /** Changes with every new intent, so a write that finished for an older one is not final. */
   version: number;
   /** The table holds what this intent says. */
@@ -101,7 +110,7 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     this.retryDelays = options.retryDelaysMs ?? DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS;
   }
 
-  claimed(deviceId: string, owner: MirrorOwner): void {
+  claimed(deviceId: string, owner: MirrorOwner, stillHeld?: () => boolean): void {
     const held = this.intents.get(deviceId);
     const sameOwner =
       held?.kind === "claim" &&
@@ -111,6 +120,7 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
       kind: "claim",
       owner,
       claimedAtMs: sameOwner ? held.claimedAtMs : this.options.timer.now(),
+      ...(stillHeld === undefined ? {} : { stillHeld }),
     });
   }
 
@@ -126,6 +136,8 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     for (const [deviceId, intent] of this.intents) {
       intent.synced = false;
       intent.attempts = 0;
+      // A write in flight may have gone to the registry that closed: it is not this one's.
+      intent.version = ++this.versions;
       this.clearRetry(intent);
       this.write(deviceId, store);
     }
@@ -146,7 +158,10 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     }
   }
 
-  private record(deviceId: string, intent: Pick<MirrorIntent, "kind" | "owner" | "claimedAtMs">) {
+  private record(
+    deviceId: string,
+    intent: Pick<MirrorIntent, "kind" | "owner" | "claimedAtMs" | "stillHeld">,
+  ) {
     if (this.disposed) {
       return;
     }
@@ -167,6 +182,12 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     const intent = this.intents.get(deviceId);
     if (!intent || this.disposed || this.inFlight.has(deviceId)) {
       // An in-flight write looks again when it settles, so a newer intent is never dropped.
+      return;
+    }
+    if (intent.kind === "claim" && this.isGone(intent)) {
+      // The claim file moved on without telling us: the table is that owner's to write.
+      this.clearRetry(intent);
+      this.intents.delete(deviceId);
       return;
     }
     const store = given ?? this.options.store();
@@ -203,6 +224,16 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
         }
       });
     this.inFlight.set(deviceId, settled);
+  }
+
+  private isGone(intent: MirrorIntent): boolean {
+    try {
+      return intent.stillHeld?.() === false;
+    } catch (error) {
+      // An unreadable claim file proves nothing: keep the intent and write it.
+      logger.debug(`[DeviceClaims] Cannot re-check a claim file: ${errorMessage(error)}`);
+      return false;
+    }
   }
 
   private issue(store: DeviceClaims, deviceId: string, intent: MirrorIntent): Promise<void> {

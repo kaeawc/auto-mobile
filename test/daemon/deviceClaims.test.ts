@@ -357,6 +357,48 @@ describe("the claims mirror: backfill, retries and shutdown (#11811 c)", () => {
     expect((await store.get("android", "emulator-5554"))?.updatedAtMs).toBe(900);
   });
 
+  test("a claim the file no longer names is dropped, not written over its new owner's row", async () => {
+    let held = true;
+    available = undefined;
+    mirror.claimed("emulator-5554", OWNER, () => held);
+    await settle();
+    held = false;
+    await store.upsert({ ...CLAIM, pid: 200, ownerToken: "token-b", updatedAtMs: 5 });
+    available = store;
+    await timer.advanceTimeAsync(RETRIES[0]!);
+    await settle();
+    mirror.reconcile(store);
+    await settle();
+    expect((await store.get("android", "emulator-5554"))?.pid).toBe(200);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a claim file that cannot be re-read keeps the claim and writes it", async () => {
+    mirror.claimed("emulator-5554", OWNER, () => {
+      throw new Error("EACCES");
+    });
+    await settle();
+    expect(store.rows.size).toBe(1);
+  });
+
+  test("a reconcile while a write is in flight writes again to the registry it names", async () => {
+    const gate = Promise.withResolvers<void>();
+    const stale = new FakeDeviceClaims();
+    const upsert = stale.upsert.bind(stale);
+    stale.upsert = async (claim) => {
+      await gate.promise;
+      await upsert(claim);
+    };
+    available = stale;
+    mirror.claimed("emulator-5554", OWNER);
+    await Promise.resolve();
+    available = store;
+    mirror.reconcile(store);
+    gate.resolve();
+    await settle();
+    expect(store.rows.size).toBe(1);
+  });
+
   test("after dispose nothing is written or retried", async () => {
     store.failWrites = 1;
     mirror.claimed("emulator-5554", OWNER);

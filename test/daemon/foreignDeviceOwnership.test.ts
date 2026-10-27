@@ -863,6 +863,32 @@ describe("the host-wide claims mirror (#11811 b)", () => {
     expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
   });
 
+  test("a daemon whose claim another took over never writes it back over the new owner's row", async () => {
+    const files = new FakeOwnershipFiles();
+    const store = new FakeDeviceClaims();
+    const peer = mirroredDaemon(files, store, PEER_PID);
+    const self = mirroredDaemon(files, store, SELF_PID);
+    store.failWrites = 1;
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await peer.ownership.claim(DEVICE)).toBe(true);
+      await peer.mirror.idle();
+      // Its table write failed and is waiting to be retried when the claim is taken over.
+      files.alive.delete(PEER_PID);
+      expect(await self.ownership.claim(DEVICE)).toBe(true);
+      await self.mirror.idle();
+      files.alive.add(PEER_PID);
+
+      peer.mirror.reconcile(store);
+      await peer.mirror.idle();
+
+      expect(await tableOwner(store)).toBe(fileOwner(files));
+      expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("a busy table never changes the claim's outcome", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {

@@ -478,9 +478,19 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     const owner = this.claimOwner();
     const outcome = await this.claimFile(deviceId, owner);
     if (outcome === "claimed") {
-      this.claimMirror?.claimed(deviceId, owner);
+      this.claimMirror?.claimed(deviceId, owner, () => this.claimFileIsOurs(deviceId, owner));
     }
     return outcome !== "refused";
+  }
+
+  /** Whether the claim file for `deviceId` still names this owner. */
+  private claimFileIsOurs(deviceId: string, owner: { pid: number; ownerToken: string }): boolean {
+    const path = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
+    if (path === undefined) {
+      return false;
+    }
+    const held = this.source.read(path);
+    return held?.pid === owner.pid && held.token === owner.ownerToken;
   }
 
   /** Take the claim file: "unpublished" when no claim could be written and allocation proceeds. */

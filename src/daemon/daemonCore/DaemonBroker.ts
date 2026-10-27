@@ -393,7 +393,9 @@ export class DaemonBroker {
     this.host.setBrokerDeviceAcquisition(undefined);
     const registry = this.host.bindingRegistry();
     this.host.setBindingRegistry(undefined);
+    // A write already sent must settle before this daemon's rows are removed below.
     this.host.deviceClaimMirrors().dispose();
+    await this.host.deviceClaimMirrors().idle();
     try {
       // The device allocation claims are released after this stage, when the table is gone: this
       // daemon's rows leave with its registry so a clean stop strands none (#11811 b).

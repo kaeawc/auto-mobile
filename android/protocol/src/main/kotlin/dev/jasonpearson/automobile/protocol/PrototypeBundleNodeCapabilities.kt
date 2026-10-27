@@ -34,9 +34,9 @@ internal object PrototypeBundleNodeCapabilities {
     fun mark(name: String, used: Boolean) {
       if (used) caps.add("prototype_$name")
     }
-    mark("window_motion_v1", (n["repeat"] as? JsonObject)?.get("stagger") != null)
     mark("semantics_v1", "semantics" in n)
     mark("platform_namespace_v1", "ios" in n || "android" in n)
+    mark("window_motion_v1", (n["repeat"] as? JsonObject)?.get("stagger") != null)
     mark("shared_element_v1", "sharedKey" in n)
     mark("flow_grid_v1", "span" in n)
     mark("gestures_v1", n.keys.any { it in setOf("onLongPress", "onDoubleTap") })

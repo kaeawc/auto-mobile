@@ -115,8 +115,8 @@ enum PrototypeStrictCapabilities {
                 if key == "payload" ||
                     (key == "value" && !["setData", "appendData", "prependData"].contains(type)) { continue }
                 if key == "repeat" {
-                    if child.objectFields?["stagger"] != nil { need("window_motion") }
                     if child.objectFields?["derive"] != nil { need("format") }
+                    if child.objectFields?["stagger"] != nil { need("window_motion") }
                     if let repeatSpec = child.objectFields,
                        repeatSpec["items"]?
                        .objectFields != nil || repeatSpec["key"] != nil { need("data_model") }; continue

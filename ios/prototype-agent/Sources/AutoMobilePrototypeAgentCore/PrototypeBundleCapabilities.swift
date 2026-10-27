@@ -35,10 +35,10 @@ enum PrototypeBundleCapabilities {
         while let node = pending.popLast()?.objectFields {
             if PrototypeStylePolishV2.themedColors(node) { need("theme_modes") }
             if PrototypeStylePolishV2.required(node) { names.insert(PrototypeStylePolishV2.capability) }
-            if node["repeat"]?.objectFields?["stagger"] != nil { need("window_motion") }
             if node["semantics"] != nil { need("semantics") }
             if PrototypeStrings.textFields(.object(node))
                 .contains(where: { $0.text.contains("{t:") }) { need("strings") }
+            if node["repeat"]?.objectFields?["stagger"] != nil { need("window_motion") }
             if node["sharedKey"] != nil { need("shared_element") }
             let type = node["type"]?.stringValue ?? ""
             if PrototypeStringConditions.uses(node) { need("string_conditions") }

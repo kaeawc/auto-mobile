@@ -9019,12 +9019,6 @@
         "hasDefault": true
       },
       {
-        "name": "transition",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "deadTaps",
         "type": "boolean",
         "nullable": true,
@@ -9033,6 +9027,12 @@
       {
         "name": "backdrop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeBackdrop",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "transition",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       }

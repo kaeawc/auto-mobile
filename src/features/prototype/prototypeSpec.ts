@@ -835,8 +835,8 @@ const windowSchema = z
   .object({
     ...prototypePlatformNamespaceShape,
     placement: placementSchema,
-    transition: z.enum(["auto", "none", "fade", "slide", "scale"]).optional(),
     backdrop: prototypeBackdropSchema.optional(),
+    transition: z.enum(["auto", "none", "fade", "slide", "scale"]).optional(),
     chrome: z
       .enum(["none", "bar"])
       .optional()

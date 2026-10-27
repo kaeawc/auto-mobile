@@ -222,11 +222,11 @@ data class PrototypeWindow(
   val persistence: String? = null,
   /** Fullscreen host chrome: `none` by default, or `bar`; device persistence defaults to `bar`. */
   val chrome: String? = null,
-  val transition: String? = null,
   /** Opt-in window-local dead-tap events; coordinates never include field contents. */
   val deadTaps: Boolean? = null,
   /** Blur or tonal fill behind the window (`prototype_backdrop_v1`, #15126). */
   val backdrop: PrototypeBackdrop? = null,
+  val transition: String? = null,
 )
 
 /**

@@ -577,24 +577,6 @@ test.each(["android", "ios"] as const)(
 );
 
 test.each(["android", "ios"] as const)(
-  "%s refuses every authored window transition without window motion capability",
-  async (platform) => {
-    const device: BootedDevice = { platform, deviceId: `window-${platform}`, name: "Fake" };
-    for (const transition of ["auto", "none", "fade", "slide", "scale"]) {
-      const result = await show(device, { ...base, window: { ...base.window, transition } });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("prototype_window_motion_v1");
-    }
-    expect(proxy.getPrototypeHistory()).toEqual([]);
-    expect(agent.requests).toEqual([]);
-    advertise("prototype_window_motion_v1");
-    expect(
-      (await show(device, { ...base, window: { ...base.window, transition: "scale" } })).success,
-    ).toBe(true);
-  },
-);
-
-test.each(["android", "ios"] as const)(
   "%s rechecks strings capability on a state-only patch of an existing string spec",
   async (platform) => {
     const device: BootedDevice = { platform, deviceId: `parity-${platform}`, name: "Fake" };
@@ -695,3 +677,21 @@ test("Android shader asset repair retains the injected opt-in environment", asyn
   expect(proxy.getPrototypeAssetHistory()).toHaveLength(2);
   expect(proxy.getPrototypeHistory()).toHaveLength(2);
 });
+
+test.each(["android", "ios"] as const)(
+  "%s refuses every authored window transition without window motion capability",
+  async (platform) => {
+    const device: BootedDevice = { platform, deviceId: `window-${platform}`, name: "Fake" };
+    for (const transition of ["auto", "none", "fade", "slide", "scale"]) {
+      const result = await show(device, { ...base, window: { ...base.window, transition } });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("prototype_window_motion_v1");
+    }
+    expect(proxy.getPrototypeHistory()).toEqual([]);
+    expect(agent.requests).toEqual([]);
+    advertise("prototype_window_motion_v1");
+    expect(
+      (await show(device, { ...base, window: { ...base.window, transition: "scale" } })).success,
+    ).toBe(true);
+  },
+);

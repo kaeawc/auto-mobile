@@ -180,7 +180,7 @@ Two `tsgo --noEmit` passes run in CI (`scripts/typecheck-baseline.sh`):
 
 ```bash
 bun run typecheck             # src (tsconfig.json): NO baseline, any error fails
-bun run typecheck:test        # every test/**/*.ts (tsconfig.test.json): NO baseline, any error fails
+bun run typecheck:test        # every test/**/*.ts (tsconfig.test-*.json shards): NO baseline, any error fails
 ```
 
 Both baselines reached zero and were deleted (issues #3001, #11787): there is no

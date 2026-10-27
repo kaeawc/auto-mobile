@@ -46,8 +46,8 @@ describe("ToolRegistry.getToolDefinitions", () => {
       const initialChoices = choices();
       expect(initialChoices).toEqual(["optionalTool"]);
       expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).toEqual([
-        "setToolEnabled",
         "optionalTool",
+        "setToolEnabled",
       ]);
       for (const tool of ToolRegistry.getToolDefinitions()) {
         expect(ToolRegistry.getTool(tool.name)).toBeDefined();

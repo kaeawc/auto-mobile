@@ -55,13 +55,20 @@ export const ADVERTISING_SOURCES: Record<ArtifactId, string[]> = {
  * check (see {@link findStaleExemptions}) so it cannot hide a later regression.
  */
 export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string>> = {
-  "android-ctrlproxy-apk": {},
+  "android-ctrlproxy-apk": {
+    stylus_input_v1:
+      "no instrumentation injection route exists yet (#13097); the host refuses stylus pressure requests against it",
+    hover_input_v1:
+      "no instrumentation injection route exists yet (#13097); the host refuses hover requests against it",
+  },
   "ios-runner": {},
   "prototype-agent-dylib": {
     prototype_chat_scroll_v1:
       "iOS agent only derives the bundle requirement; it does not implement chat scroll options or scrollTo",
     prototype_choreography_v1:
       "iOS agent keeps the transition type only; the host refuses delays, stagger and blurReplace (#15247)",
+    prototype_effects_v1:
+      "style.effects has a validated contract only; no renderer yet, so the host refuses it (#15128)",
     prototype_motion_v2:
       "iOS agent does not advertise it; the host refuses motion v2 features against it",
     prototype_platform_v1:

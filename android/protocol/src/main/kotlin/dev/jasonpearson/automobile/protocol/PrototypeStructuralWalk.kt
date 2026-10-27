@@ -75,6 +75,9 @@ internal object PrototypeStructuralWalk {
     if (node.text("type") == "image")
       context.images += maxOf(1, prototypeImageSlotUses(node["asset"]))
     if (context.images > MAX_PROTOTYPE_IMAGES) return fail(path, "Image limit exceeded")
+    PrototypeEffectRules.charge(node, path, context)?.let {
+      return it
+    }
     return walk(value, target, path, context, depth + 1)
   }
 

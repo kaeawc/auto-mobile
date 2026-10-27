@@ -156,6 +156,7 @@ nav:
       - "iOS simulator load reduction": design-docs/plat/ios/simulator-load-reduction.md
       - "iOS keep-booted reset": design-docs/ios-keep-booted-reset.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
+      - "Android emulator host cost": design-docs/android-emulator-host-cost.md
       - "Android prototype specification": design-docs/plat/android/prototype-ux.md
       - "Prototype performance measurement": design-docs/plat/android/prototype-performance-measurement.md
       - "Prototype Compose compiler report": design-docs/plat/android/prototype-compose-compiler-report.md
@@ -179,6 +180,7 @@ nav:
       - "Push-stream backpressure": push-stream-backpressure.md
       - "MCP SDK v2 and stateless daemon": design-docs/mcp/sdk-v2-stateless-migration.md
       - "Elicitation for an ambiguous device": design-docs/mcp/elicitation-ambiguous-device.md
+      - "Live observe App shell": design-docs/mcp/observe-app-shell.md
       - "Session state record": design-docs/session-state-record.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "InputConnection trace comparison": design-docs/plat/android/ime-trace-conformance.md

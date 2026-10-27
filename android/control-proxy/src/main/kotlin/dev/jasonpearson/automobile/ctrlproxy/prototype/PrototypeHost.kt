@@ -143,6 +143,11 @@ data class PrototypeRequest(
  * window behaves as show. Read state is a snapshot, not a cross-thread compound transaction.
  */
 interface PrototypeHost {
+  /** Best synchronous baseline; the Compose window size corrects it after attachment. */
+  @InternalAutoMobilePrototypeApi
+  fun initialDeviceState(request: PrototypeRequest): kotlinx.serialization.json.JsonObject =
+    kotlinx.serialization.json.JsonObject(emptyMap())
+
   /** True only during a temporary screenshot hide. */
   val isHiddenForCapture: Boolean
     get() = false
@@ -327,6 +332,12 @@ class DefaultPrototypeHost(
         else "Unknown or disconnected display: $displayId"
       }
     }
+
+  @InternalAutoMobilePrototypeApi
+  override fun initialDeviceState(
+    request: PrototypeRequest,
+  ): kotlinx.serialization.json.JsonObject =
+    prototypeInitialDeviceState(windowFor(request.displayId, request.layer).context)
 
   private fun showOnMain(request: PrototypeRequest): Boolean =
     PrototypeTrace.section(PrototypeTrace.HOST_SHOW) {

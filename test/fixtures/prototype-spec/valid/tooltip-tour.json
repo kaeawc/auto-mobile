@@ -1,0 +1,59 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "step1": true,
+    "step2": false
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "button",
+        "id": "target",
+        "label": "Help"
+      },
+      {
+        "type": "tooltip",
+        "text": "Helpful hint",
+        "openWhen": {
+          "key": "step1",
+          "equals": true
+        },
+        "anchorTo": "target",
+        "onTap": [
+          {
+            "type": "setState",
+            "key": "step1",
+            "value": false
+          },
+          {
+            "type": "setState",
+            "key": "step2",
+            "value": true
+          }
+        ]
+      },
+      {
+        "type": "tooltip",
+        "text": "Next step",
+        "openWhen": {
+          "key": "step2",
+          "equals": true
+        },
+        "anchorTo": "target",
+        "caret": "end",
+        "onDismiss": [
+          {
+            "type": "emit",
+            "name": "tourDone"
+          }
+        ]
+      }
+    ]
+  }
+}

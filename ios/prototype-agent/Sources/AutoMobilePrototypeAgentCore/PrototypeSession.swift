@@ -115,6 +115,11 @@ struct PrototypeSession {
     /// `request` actions in flight (#12529) and the commands for the driver that runs them; see
     /// `takeRequestCommands`.
     private(set) var requests = PrototypeRequestLedger()
+    private var platformEventData: JSONValue?
+    private var platformIssued = 0
+    private var platformCalls: [String: PrototypeInFlightPlatformCall] = [:]
+    private var platformCommands: [PrototypePlatformCommand] = []
+    private var platformLifecycleEvents: [PrototypeEvent] = []
     private var timerCommands: [PrototypeTimerCommand] = []
 
     mutating func takeTimerCommands() -> [PrototypeTimerCommand] {
@@ -168,6 +173,7 @@ struct PrototypeSession {
         specBytes: Int? = nil,
         restoredState: [String: JSONValue]? = nil
     ) {
+        platformLifecycleEvents += cancelPlatformCalls()
         timerCommands.append(.cancelAll)
         appearanceOverride = appearance
         // The agent keeps no raw spec, so the request's own size (when the caller has it) less the
@@ -295,6 +301,32 @@ struct PrototypeSession {
 
     // MARK: Interactions
 
+    mutating func setPlatformState(_ snapshot: [String: JSONValue]) throws {
+        guard let spec, spec.platformState != snapshot else { return }
+        let limit = PrototypeContractValidator.limit("MAX_PROTOTYPE_PLATFORM_STATE_BYTES")
+        guard try JSONEncoder().encode(snapshot).count <= limit else {
+            throw PrototypeLimits.violation("platform", "Platform state exceeds limit")
+        }
+        let rebuilt = try spec.replacingPlatform(snapshot)
+        self.spec = rebuilt
+        structureRevision += 1
+        rebuildNavigation(for: rebuilt.root, keepingPages: pages, keepingStacks: stacks)
+    }
+
+    mutating func deliverPlatformEvent(_ name: String, data: JSONValue) throws -> [PrototypeEvent] {
+        guard let spec else { return [] }
+        var payload = JSONValue.object(["event": .string(name), "data": data])
+        if try JSONEncoder().encode(payload).count > PrototypeLimits.maxEmitPayloadBytes {
+            payload = .object(["event": .string(name), "data": .null, "truncated": .bool(true)])
+        }
+        let actions = spec.platformHandlers[name] ?? .array([])
+        let decoded = try JSONDecoder().decode([PrototypeAction].self, from: JSONEncoder().encode(actions))
+        let delivered = emit(kind: "emit", name: "prototype_platform_event", payload: payload)
+        platformEventData = data
+        defer { platformEventData = nil }
+        return delivered + run(decoded)
+    }
+
     /// A tap's actions in order; a `dismiss` ends the prototype and drops the remaining actions.
     /// Android's `PrototypeRuntime.tap` (#10622): if any `setState`/`toggle`/`increment`/`decrement`
     /// changed state, exactly one `change` event carrying the final state follows the last action;
@@ -383,7 +415,13 @@ struct PrototypeSession {
     }
 
     private mutating func runEmit(_ action: PrototypeAction) -> [PrototypeEvent] {
-        let context = action.context?.resolve(EmitContextInputs(state: state, pages: pages, dataModel: data))
+        let context = action.context?.resolve(EmitContextInputs(
+            state: state,
+            pages: pages,
+            dataModel: data,
+            platformModel: spec?.platformState,
+            eventData: platformEventData
+        ))
         return emit(kind: "emit", name: action.name, payload: action.payload ?? .null, context: context)
     }
 
@@ -407,6 +445,8 @@ struct PrototypeSession {
                 timerCommands.append(.start(action))
             case "cancelTimer":
                 if let id = action.id { timerCommands.append(.cancel(id)) }
+            case "platform":
+                events += runPlatform(action)
             case "request":
                 events += runRequest(action)
             case "dismiss":
@@ -431,7 +471,13 @@ struct PrototypeSession {
         else {
             return []
         }
-        let inputs = EmitContextInputs(state: state, pages: pages, dataModel: spec.data)
+        let inputs = EmitContextInputs(
+            state: state,
+            pages: pages,
+            dataModel: spec.data,
+            platformModel: spec.platformState,
+            eventData: platformEventData
+        )
         var value: JSONValue?
         if operation != .remove {
             guard case let .success(resolved) = PrototypeDataWrite.resolveValue(action.value, inputs: inputs) else {
@@ -626,6 +672,8 @@ struct PrototypeSession {
     }
 
     mutating func popTopmostStack() -> [PrototypeEvent] {
+        if let drawer = spec?.root.openModals(state: state, pages: pages, stacks: stacks)
+            .last(where: { $0.type == "drawer" }) { return closeModal(drawer) }
         guard let id = stackPopTarget else { return [] }
         return changeStack(id, direction: .pop) { _, path in Array(path.dropLast()) }
     }
@@ -725,7 +773,12 @@ struct PrototypeSession {
     /// The terminal event: every dismissal emits exactly one `dismissed`, carrying its reason.
     mutating func dismiss(reason: PrototypeSessionDismissReason) -> [PrototypeEvent] {
         guard isShown else { return [] }
-        let events = emit(kind: "dismissed", name: nil, payload: .object(["reason": .string(reason.rawValue)]))
+        let cancelled = cancelPlatformCalls()
+        let events = cancelled + emit(
+            kind: "dismissed",
+            name: nil,
+            payload: .object(["reason": .string(reason.rawValue)])
+        )
         requests.cancelAll()
         timerCommands.append(.cancelAll)
         spec = nil
@@ -850,8 +903,8 @@ enum PrototypeTestHooks {
 
     /// Capabilities to advertise in `hello_result`: the test hooks are listed only when enabled,
     /// because the host client refuses to send a request type the agent does not advertise.
-    static func capabilities(enabled: Bool) -> [String] {
-        let advertised = PrototypeAgentProtocol.advertisedCapabilities()
+    static func capabilities(enabled: Bool, registryCapabilities: [String] = []) -> [String] {
+        let advertised = PrototypeAgentProtocol.advertisedCapabilities(registryCapabilities: registryCapabilities)
         return enabled ? advertised + gatedRequestTypes.sorted() : advertised
     }
 
@@ -878,7 +931,13 @@ extension PrototypeSession {
     /// the older (the latest wins).
     private mutating func runRequest(_ action: PrototypeAction) -> [PrototypeEvent] {
         guard let spec else { return [] }
-        let inputs = EmitContextInputs(state: state, pages: pages, dataModel: spec.data)
+        let inputs = EmitContextInputs(
+            state: state,
+            pages: pages,
+            dataModel: spec.data,
+            platformModel: spec.platformState,
+            eventData: platformEventData
+        )
         var events: [PrototypeEvent] = []
         let into = action.into
         if let into, let older = requests.inFlight(into: into) {
@@ -1048,8 +1107,145 @@ private struct EmitContextInputs: PrototypeEmitContextInputs {
     let state: [String: JSONValue]
     let pages: [String: Int]
     let dataModel: [String: JSONValue]?
+    var platformModel: [String: JSONValue]?
+    var eventData: JSONValue?
+
+    func platform(_ pointer: String) -> JSONValue? { PrototypeDataPointer.resolve(platformModel, pointer: pointer) }
+    func event(_ pointer: String) -> JSONValue? {
+        eventData.flatMap { PrototypeDataPointer.resolve($0, tokens: PrototypeDataPointer.tokens(pointer)[...]) }
+    }
 
     func state(_ key: String) -> JSONValue? { state[key] }
     func page(_ id: String) -> Int? { pages[id] }
     func data(_ pointer: String) -> JSONValue? { PrototypeDataPointer.resolve(dataModel, pointer: pointer) }
+}
+
+// MARK: Platform calls
+
+extension PrototypeSession {
+    mutating func takePlatformCommands() -> [PrototypePlatformCommand] {
+        defer { platformCommands = [] }
+        return platformCommands
+    }
+
+    /// A show has no return value; its owner forwards these old-presentation cancellation events.
+    mutating func takePlatformLifecycleEvents() -> [PrototypeEvent] {
+        defer { platformLifecycleEvents = [] }
+        return platformLifecycleEvents
+    }
+
+    private mutating func runPlatform(_ action: PrototypeAction) -> [PrototypeEvent] {
+        guard let spec else { return [] }
+        var events: [PrototypeEvent] = []
+        if let into = action.into {
+            for id in platformCalls.keys.sorted() where platformCalls[id]?.action.into == into {
+                events += cancelPlatformCall(id)
+            }
+        }
+        platformIssued += 1
+        let inputs = EmitContextInputs(
+            state: state, pages: pages, dataModel: spec.data,
+            platformModel: spec.platformState, eventData: platformEventData
+        )
+        var args: [String: JSONValue] = [:]
+        var failure: PlatformCallResult?
+        for (name, binding) in action.args ?? [:] {
+            switch PrototypeDataWrite.resolveValue(binding, inputs: inputs) {
+            case let .success(value): args[name] = value
+            case let .failure(error): failure = .failure(.invalidArgs, error.message)
+            }
+        }
+        let call = PlatformCall(callId: "p-\(platformIssued)", call: action.call ?? "", args: args)
+        let job = PrototypePlatformJob(
+            call: call,
+            timeoutMs: action.timeoutMs.flatMap { Int(exactly: $0) }
+                ?? PrototypeContractValidator.limit("DEFAULT_PROTOTYPE_PLATFORM_TIMEOUT_MS")
+        )
+        let pending = PrototypeInFlightPlatformCall(job: job, action: action, eventData: platformEventData)
+        if platformCalls.count >= PrototypeContractValidator.limit("MAX_PROTOTYPE_PLATFORM_CALLS_IN_FLIGHT") {
+            failure = .failure(.tooManyInFlight, "Too many platform calls in flight")
+        }
+        if let failure { return events + finishPlatform(pending, failure, durationMs: 0) }
+        platformCalls[call.callId] = pending
+        platformCommands.append(.start(job))
+        return events + writeRequestStatus(action.statusKey, "loading")
+    }
+
+    mutating func completePlatformCall(
+        _ id: String, _ result: PlatformCallResult, durationMs: Int
+    )
+        -> [PrototypeEvent]
+    {
+        guard isShown, let pending = platformCalls.removeValue(forKey: id) else { return [] }
+        return finishPlatform(pending, result, durationMs: durationMs)
+    }
+
+    private mutating func finishPlatform(
+        _ pending: PrototypeInFlightPlatformCall, _ result: PlatformCallResult, durationMs: Int
+    )
+        -> [PrototypeEvent]
+    {
+        let saved = self
+        var result = result
+        var events: [PrototypeEvent] = []
+        if case let .success(value) = result, let into = pending.action.into {
+            // Both the data limit and rebuilding the rendered tree must accept body plus metadata.
+            if case let .success(written) = commitDataWrite(.set, path: into, value: value),
+               case let .success(metaEvents) = commitDataWrite(
+                   .set, path: into + "__meta", value: platformMeta(result, durationMs: durationMs)
+               )
+            {
+                events += written + metaEvents
+            } else {
+                self = saved
+                result = .failure(.platformError, "Platform result and metadata could not be stored")
+            }
+        }
+        if case .failure = result, let into = pending.action.into,
+           case let .success(written) = commitDataWrite(
+               .set, path: into + "__meta", value: platformMeta(result, durationMs: durationMs)
+           ) { events += written }
+        let failed: Bool
+        if case .failure = result { failed = true } else { failed = false }
+        events += writeRequestStatus(pending.action.statusKey, failed ? "error" : "success")
+        events += platformCompletionEvent(pending, result, durationMs: durationMs)
+        let previous = platformEventData
+        platformEventData = pending.eventData
+        defer { platformEventData = previous }
+        return events + run((failed ? pending.action.onError : pending.action.onSuccess) ?? [])
+    }
+
+    private func platformMeta(_ result: PlatformCallResult, durationMs: Int) -> JSONValue {
+        var fields: [String: JSONValue] = ["durationMs": .number(Double(max(0, durationMs)))]
+        if case let .failure(code, message) = result {
+            fields["error"] = .object([
+                "code": .string(code.rawValue),
+                "message": .string(PrototypeRequestEvent.cut(message, to: PrototypeLimits.maxRequestMessageLength)),
+            ])
+        }
+        return .object(fields)
+    }
+
+    private mutating func platformCompletionEvent(
+        _ pending: PrototypeInFlightPlatformCall, _ result: PlatformCallResult, durationMs: Int
+    )
+        -> [PrototypeEvent]
+    {
+        var fields = platformMeta(result, durationMs: durationMs).objectFields ?? [:]
+        fields["callId"] = .string(pending.job.call.callId)
+        fields["call"] = .string(pending.job.call.call)
+        fields["outcome"] = .string(fields["error"] == nil ? "success" : "error")
+        return emit(kind: "emit", name: "prototype_platform", payload: .object(fields))
+    }
+
+    private mutating func cancelPlatformCall(_ id: String) -> [PrototypeEvent] {
+        guard let pending = platformCalls.removeValue(forKey: id) else { return [] }
+        platformCommands.append(.cancel(id))
+        // Like request supersession: cancellation reports an event, without obsolete writes/follow-ups.
+        return platformCompletionEvent(pending, .failure(.cancelled, "Platform call cancelled"), durationMs: 0)
+    }
+
+    private mutating func cancelPlatformCalls() -> [PrototypeEvent] {
+        platformCalls.keys.sorted().flatMap { cancelPlatformCall($0) }
+    }
 }

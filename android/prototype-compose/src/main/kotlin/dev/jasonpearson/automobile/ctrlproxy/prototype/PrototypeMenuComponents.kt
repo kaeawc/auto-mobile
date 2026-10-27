@@ -77,8 +77,24 @@ private fun PrototypeMenuSurface(
       (end - layers.windowBounds.left)
         .toInt()
         .coerceIn(0, (constraints.maxWidth - surface.width).coerceAtLeast(0))
+    val placement =
+      placePrototypeBubble(
+        PrototypeTargetRect(anchor.left, anchor.top, anchor.right, anchor.bottom),
+        PrototypeBubbleSize(surface.width.toFloat(), surface.height.toFloat()),
+        PrototypeTargetRect(
+          layers.windowBounds.left,
+          layers.windowBounds.top,
+          layers.windowBounds.right,
+          layers.windowBounds.bottom,
+        ),
+        PrototypeBubbleOptions(direction == LayoutDirection.Rtl, "top", 0f, 0f, 0f),
+      )
+    val menuTop =
+      if (placement.caret == "bottom" && anchor.top - layers.windowBounds.top >= surface.height)
+        placement.y
+      else anchor.bottom
     val y =
-      (anchor.bottom - layers.windowBounds.top)
+      (menuTop - layers.windowBounds.top)
         .toInt()
         .coerceIn(0, (constraints.maxHeight - surface.height).coerceAtLeast(0))
     layout(constraints.maxWidth, constraints.maxHeight) { surface.place(x, y) }

@@ -1,0 +1,63 @@
+name: "ProtoViewer Release Smoke (advisory)"
+
+# Device checks for the ProtoViewer release artifacts (#15387), the half of #14154 the static
+# artifact policy gate cannot cover: installing a release over the previous one keeps the saved
+# library, and the R8-minified release opens a bundled and an imported prototype and shows the
+# Settings and Open-source licenses screens. Advisory and manual only: it is not a required check,
+# it is never called by the release workflows, and it needs a person to start it.
+#
+# The previous release's APK must be signed with the same key as the candidate, or `adb install -r`
+# refuses the upgrade; this workflow takes it from a published release asset, so it only runs once a
+# release carries a ProtoViewer APK (#15301). Settings persistence and the iOS screens are not
+# automated; see docs/design-docs/protoviewer.md.
+on:
+  workflow_dispatch:
+    inputs:
+      previous-release-tag:
+        description: "Release tag whose ProtoViewer APK asset is the version to upgrade from"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: "ProtoViewer Android release smoke"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    continue-on-error: true
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Download the previous ProtoViewer APK"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_TAG: ${{ inputs.previous-release-tag }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous"
+          gh release download "$PREVIOUS_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'protoviewer*.apk' --dir "$RUNNER_TEMP/previous"
+          ls -l "$RUNNER_TEMP/previous"
+
+      - uses: ./.github/actions/android-emulator
+        with:
+          api_level: "37"
+          target: google_apis
+          avd-name: api37
+          script: >-
+            bash ../scripts/release/protoviewer-release-smoke.sh android
+            --device emulator-5554 --build --mode all
+            --previous "$(ls "$RUNNER_TEMP"/previous/protoviewer*.apk | head -n 1)"
+          working-directory: "./android/"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
+          release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}

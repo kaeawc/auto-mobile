@@ -8,6 +8,41 @@ import org.junit.Test
 
 class PrototypeMotionTest {
   @Test
+  fun `profiles respect spec and both system scales`() {
+    for (motion in listOf(null, "standard", "none", "reduced")) {
+      for (animator in listOf(0f, 0.5f, 1f)) {
+        for (transition in listOf(0f, 0.5f, 1f)) {
+          val expected =
+            when {
+              motion == "none" || animator == 0f || transition == 0f -> PrototypeMotionProfile.OFF
+              motion == "reduced" -> PrototypeMotionProfile.REDUCED
+              else -> PrototypeMotionProfile.FULL
+            }
+          assertEquals(
+            "$motion / $animator / $transition",
+            expected,
+            prototypeMotionProfile(motion, animator, transition),
+          )
+        }
+      }
+    }
+  }
+
+  @Test
+  fun `reduced visibility replaces spatial transitions with fades`() {
+    for (type in
+      listOf(null, "slide", "slideStart", "slideEnd", "expand", "scale", "blurReplace", "fade")) {
+      assertEquals("fade", prototypeVisibilityTransition(type, PrototypeMotionProfile.REDUCED))
+      assertEquals(type, prototypeVisibilityTransition(type, PrototypeMotionProfile.FULL))
+    }
+    assertEquals("none", prototypeVisibilityTransition("none", PrototypeMotionProfile.REDUCED))
+    assertEquals(
+      "fade",
+      prototypeVisibilityTransition("none", PrototypeMotionProfile.REDUCED, shared = true),
+    )
+  }
+
+  @Test
   fun `motion is on by default and with standard`() {
     assertTrue(prototypeMotionEnabled(null, 1f))
     assertTrue(prototypeMotionEnabled("standard", 0.5f))

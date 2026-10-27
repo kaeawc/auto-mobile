@@ -1,6 +1,8 @@
+import { clientAdvertisesMcpApps } from "./mcpAppsSupport";
 import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
-import type { ListToolsResult, McpServer } from "@modelcontextprotocol/server";
+import type { ListToolsResult, McpServer, ServerCapabilities } from "@modelcontextprotocol/server";
 import { createSdkMcpServer } from "./sdkMcpServer";
+import { MODERN_CACHE_HINTS } from "./modernCacheHints";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 
 import { installToolCallDispatcher, type ToolCallRequest } from "./toolCallDispatch";
@@ -26,6 +28,7 @@ export { enrichAcquisitionResult } from "./pipeline/ingress/acquisition";
 import { createListSessionTools } from "./pipeline/ingress/listSessionTools";
 import { createToolCallExecutor } from "./pipeline/ingress/executeToolCall";
 import { daemonTaskManager } from "../daemon/tasks/daemonTaskManager";
+import { TASKS_EXTENSION_ID } from "../daemon/tasks/mcpTasksExtension";
 import { installTasksProtocol } from "./tasks/installTasksProtocol";
 import type { TaskManager } from "../daemon/tasks/TaskManager";
 import type { TaskLeaseKeepalive } from "../daemon/tasks/taskLeaseKeepalive";
@@ -100,6 +103,7 @@ import {
 } from "../daemon/toolSelectionProfileRegistry";
 
 export interface McpServerOptions {
+  era?: "legacy" | "modern";
   deviceReadiness?: DeviceReadiness;
   iosDependencies?: IosDoctorDependencies;
   debug?: boolean;
@@ -334,6 +338,19 @@ function installDeviceReadiness(options: McpServerOptions): void {
   }
 }
 
+/**
+ * The capabilities one request's server advertises. A modern request has no notification stream
+ * until subscriptions/listen is wired (#13947), so it claims no resource subscriptions.
+ */
+function sdkServerCapabilities(era: McpServerOptions["era"]): ServerCapabilities {
+  return {
+    resources: era === "modern" ? { listChanged: true } : { subscribe: true, listChanged: true },
+    tools: era === "modern" ? { listChanged: true } : {},
+    prompts: {},
+    ...(era === "modern" && { extensions: { [TASKS_EXTENSION_ID]: {} } }),
+  };
+}
+
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   ToolRegistry.setMutationRecording(
     createRecording(defaultDaemonContext, {
@@ -386,11 +403,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       name: "AutoMobile",
       version: getMcpServerVersion(),
     },
-    {
-      resources: { subscribe: true, listChanged: true },
-      tools: {},
-      prompts: {},
-    },
+    sdkServerCapabilities(options.era),
+    options.era === "modern" ? MODERN_CACHE_HINTS : undefined,
   );
   startupBenchmark.endPhase("sdkInitialization");
 
@@ -426,6 +440,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       ownsSession: (sessionUuid) => sessionToolBinding.ownsSession(bindingKey, sessionUuid),
       releasedSessionUuid: sessionToolBinding.releasedResourceSessionUuid(bindingKey),
       signal,
+      clientSupportsApps: clientAdvertisesMcpApps(server.server.getClientCapabilities()),
     }),
     registration,
   );

@@ -38,6 +38,8 @@ class WebSocketServer(
   private val scope: CoroutineScope,
   private val perfProvider: PerfProvider = PerfProvider.instance,
   private val options: WebSocketServerOptions = WebSocketServerOptions(),
+  private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
+    dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -276,6 +278,8 @@ class WebSocketServer(
     addPrototypeRuntimeFlags()
     addPrototypeWindowFlags()
     add("prototype_menus_v1")
+    add("prototype_tooltip_v1")
+    add("prototype_drawer_v1")
     // request_action honours the semantic actions (expand, collapse, dismiss, select, scroll and
     // page directions, press_and_hold, set_progress with progress, custom with customAction) and
     // lists the node's available actions in a refusal (#14077). Older APKs refuse them as
@@ -360,25 +364,32 @@ class WebSocketServer(
     // The device runs a via "device" request with its own HTTP stack (Retrofit over OkHttp), to any
     // http or https host. Without it a host refuses a spec that asks for via "device".
     add("prototype_network_device_v1")
+    add("prototype_platform_v1")
+    add("prototype_platform_device_v1")
+    addAll(platform.registry.capabilities)
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
     add("prototype_text_field_options_v1")
-    add("prototype_gestures_v1")
-    add("prototype_swipe_actions_v1")
-    add("prototype_text_field_actions_v1")
-    add("prototype_carousel_v1")
+    addAll(listOf("prototype_gestures_v1", "prototype_swipe_actions_v1"))
+    addAll(listOf("prototype_text_field_actions_v1", "prototype_carousel_v1"))
     add("prototype_text_field_leading_icon_v1")
     add("prototype_refresh_v1")
     // In-tree search fields support query edits, search actions and active-key result subtrees.
     add("prototype_search_bar_v1")
     add("prototype_rich_text_v1")
     // {data, empty} conditions and style shimmer for loading placeholders (#14207).
-    add("prototype_loading_states_v1")
+    addAll(listOf("prototype_loading_states_v1", "prototype_style_polish_v2"))
     // Node animate, style scale/rotation, slideStart/slideEnd/scale transitions, zoomable images.
     add("prototype_motion_v2")
+    // style.effects (#15129): noise, gradientMesh, shimmer, glow, vignette, blur, pixelate,
+    // chromaticAberration, wave and ripple. Every effect renders on its API floor or is omitted and
+    // reported in degradedEffects, so a host may send the list to any APK that advertises this.
+    add("prototype_effects_v1")
     // Transition delayMs, container stagger and the blurReplace transition (#15247).
     add("prototype_choreography_v1")
     add("prototype_stack_transitions_v1")
+    add("prototype_reduced_motion_v1")
+    add("prototype_shared_element_v1")
     // Line, area, bar and ring charts over /data arrays (#14209).
     add("prototype_chart_v1")
     // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).

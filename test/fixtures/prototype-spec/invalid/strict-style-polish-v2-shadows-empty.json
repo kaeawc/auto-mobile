@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "box",
+      "children": [],
+      "style": {
+        "shadows": []
+      }
+    }
+  },
+  "expectedPath": "root.style.shadows",
+  "expectedMessage": "Array length out of range"
+}

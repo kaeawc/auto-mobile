@@ -120,12 +120,14 @@ internal object PrototypeSpecInput {
       ?: chartErrors(value, context)
       ?: linkifyErrors(value, context)
       ?: chatScrollErrors(context)
+      ?: PrototypeTooltipRules.tooltipErrors(value, context)
 
   fun validateElement(value: JsonElement, context: Context): PrototypeSpecValidation {
     context.root = value
     val repeats = PrototypeRepeatData((value as? JsonObject)?.get("data") as? JsonObject)
     val error =
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
+        ?: PrototypeSharedElementRules.error(context)
         ?: gridSpanErrors(context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: PrototypeStorageValidation.error(value.jsonObject)

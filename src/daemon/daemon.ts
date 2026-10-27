@@ -1,3 +1,4 @@
+import { SessionDeviceReboundBroadcaster } from "./sessionDeviceReboundBroadcast";
 import { registerPrototypeDaemonPort } from "../features/prototype/prototypeDaemonPorts";
 import { daemonToolRegistry } from "./toolRegistryPort";
 import {} from "./networkStateSessionCleanup";
@@ -343,7 +344,9 @@ export class Daemon {
       configureDeviceDataStreamServer: () => this.streams.configureDeviceDataStreamServer(),
     });
     this.deviceSessionRepository = deviceSessionRepository;
-    this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
+    this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository, {
+      sessionDeviceReboundEmitter: SessionDeviceReboundBroadcaster,
+    });
     this.sessionManager.attachDaemonSessionId(this.daemonSessionId);
     // Read when a recovery claims its row, so a peer that started after this daemon is seen. A
     // restart incumbent whose pid file this daemon replaced is not listed, so it is added while

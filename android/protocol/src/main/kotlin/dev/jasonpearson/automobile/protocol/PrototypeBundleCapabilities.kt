@@ -8,6 +8,7 @@ internal object PrototypeBundleCapabilities {
   fun required(refs: PrototypeBundleReferences): List<String> {
     val spec = refs.spec
     val caps = linkedSetOf<String>()
+    if (text(spec["motion"]) == "reduced") caps.add("prototype_reduced_motion_v1")
     if ("data" in spec) caps.add("prototype_data_model_v1")
     if ("storage" in spec) caps.add("prototype_storage_v1")
     val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
@@ -90,6 +91,13 @@ internal object PrototypeBundleCapabilities {
     }
 
   private fun platform(refs: PrototypeBundleReferences, caps: MutableSet<String>) {
+    val declared = ((refs.spec["requires"] as? JsonObject)?.get("platform") as? JsonArray).orEmpty()
+    if (declared.isNotEmpty() || "platform" in refs.spec) caps.add("prototype_platform_v1")
+    for (name in declared) {
+      text(name)
+        ?.let { text(PrototypePlatformModules.module(it)?.get("capability")) }
+        ?.let(caps::add)
+    }
     val uses = PrototypePlatformUses.uses(refs.spec, refs.context)
     if (uses.isNotEmpty()) caps.add("prototype_platform_v1")
     for (use in uses) {

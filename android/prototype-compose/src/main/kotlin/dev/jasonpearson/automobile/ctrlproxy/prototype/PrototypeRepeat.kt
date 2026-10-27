@@ -24,6 +24,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeDecrementAction
 import dev.jasonpearson.automobile.protocol.PrototypeDialogButton
 import dev.jasonpearson.automobile.protocol.PrototypeDialogNode
 import dev.jasonpearson.automobile.protocol.PrototypeDividerNode
+import dev.jasonpearson.automobile.protocol.PrototypeDrawerNode
 import dev.jasonpearson.automobile.protocol.PrototypeEmitAction
 import dev.jasonpearson.automobile.protocol.PrototypeFabNode
 import dev.jasonpearson.automobile.protocol.PrototypeFlowNode
@@ -44,6 +45,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
 import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
 import dev.jasonpearson.automobile.protocol.PrototypeRemoveDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeRepeat
+import dev.jasonpearson.automobile.protocol.PrototypeRepeatNodeBinding
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatSegment
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatTemplate
 import dev.jasonpearson.automobile.protocol.PrototypeRequestAction
@@ -69,8 +71,10 @@ import dev.jasonpearson.automobile.protocol.PrototypeTextFieldNode
 import dev.jasonpearson.automobile.protocol.PrototypeTextNode
 import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
+import dev.jasonpearson.automobile.protocol.PrototypeTooltipNode
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeValidityKeys
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -120,6 +124,7 @@ internal fun prototypeChildEntries(
     val single =
       node is PrototypeScrollNode ||
         node is PrototypeBottomSheetNode ||
+        node is PrototypeDrawerNode ||
         node is PrototypeDialogNode ||
         node is PrototypeSearchBarNode
     return children.mapIndexed { index, child ->
@@ -228,6 +233,26 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         text = text?.let(instance::interpolate),
+        linkify =
+          linkify?.let { options ->
+            val node =
+              JsonObject(
+                mapOf(
+                  "type" to JsonPrimitive("text"),
+                  "linkify" to JsonObject(mapOf("onTap" to options.onTap)),
+                ),
+              )
+            val bound =
+              PrototypeRepeatNodeBinding.bindNodeFields(
+                node,
+                instance.alias,
+                instance.item.mapValues { (_, value) -> EmitContextResolver.scalar(value) },
+                instance.index,
+              )
+            options.copy(
+              onTap = (bound.getValue("linkify") as JsonObject).getValue("onTap") as JsonArray,
+            )
+          },
         spans =
           spans?.map { span ->
             span.copy(
@@ -248,6 +273,23 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
               onRefresh = it.onRefresh.map { action -> action.bound(instance) },
             )
           },
+        child = child.bound(instance),
+      )
+    is PrototypeTooltipNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        text = instance.interpolate(text),
+        openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
+        onDismiss = onDismiss?.map { it.bound(instance) },
+      )
+    is PrototypeDrawerNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
         child = child.bound(instance),
       )
     is PrototypeBottomSheetNode ->

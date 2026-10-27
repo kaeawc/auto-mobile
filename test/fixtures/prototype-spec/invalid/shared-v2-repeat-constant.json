@@ -1,0 +1,71 @@
+{
+  "spec": {
+    "id": "shared",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "column",
+          "repeat": {
+            "items": [
+              {
+                "id": "one"
+              },
+              {
+                "id": "two"
+              }
+            ],
+            "as": "item",
+            "key": "id"
+          },
+          "children": [
+            {
+              "type": "card",
+              "visibleWhen": {
+                "key": "open",
+                "equals": true
+              },
+              "shared": {
+                "key": "story-one",
+                "as": "bounds"
+              },
+              "children": [
+                {
+                  "type": "text",
+                  "text": "{item.id}"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "column",
+          "visibleWhen": {
+            "key": "open",
+            "equals": false
+          },
+          "shared": {
+            "key": "story-one",
+            "as": "bounds"
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "Story one"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].children[0].shared.key",
+  "expectedMessage": "shared key inside repeat requires a key template"
+}

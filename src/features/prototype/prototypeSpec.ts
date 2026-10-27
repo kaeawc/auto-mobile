@@ -206,6 +206,10 @@ export const commonNodeShape = {
       "press needs scale or alpha",
     )
     .optional(),
+  shared: z
+    .object({ key: z.string().min(1).max(256), as: z.enum(["element", "bounds"]) })
+    .strict()
+    .optional(),
   ...prototypeMotionNodeShape,
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),

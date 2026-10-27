@@ -4,11 +4,13 @@ import Foundation
 struct PrototypeSharedElementPlan: Equatable {
     let key: String?
     let apply: Bool
+    let crossfade: Bool
 
     /// `conflictingKeys` are keys with more than one node shown right now (see `conflictingKeys`): a
     /// pair visible together has no source to match, so it keeps the ordinary visibility animation.
     init(node: PrototypeNode, profile: PrototypeMotionProfile, conflictingKeys: Set<String> = []) {
-        key = node.sharedKey
+        key = node.resolvedSharedKey
+        crossfade = profile != .off && (profile == .reduced || node.shared?.as != "element")
         apply = profile == .full && node.visibleWhen != nil && key.map { !conflictingKeys.contains($0) } == true
     }
 
@@ -18,7 +20,7 @@ struct PrototypeSharedElementPlan: Equatable {
         var shown: [String: Int] = [:]
         func visit(_ node: PrototypeNode) {
             if let condition = node.visibleWhen, !holds(condition) { return }
-            if let key = node.sharedKey { shown[key, default: 0] += 1 }
+            if let key = node.resolvedSharedKey { shown[key, default: 0] += 1 }
             node.children?.forEach(visit)
             if let child = node.child { visit(child) }
         }
@@ -26,37 +28,8 @@ struct PrototypeSharedElementPlan: Equatable {
         return Set(shown.filter { $0.value > 1 }.keys)
     }
 
-    /// Located nodes come from the structural validator's pre-order, sorted-field traversal.
-    static func validate(_ nodes: [PrototypeLocatedValue]) throws {
-        var repeats: [String] = []
-        var pairs: [String: [String]] = [:]
-        var order: [String] = []
-        for node in nodes {
-            if node.value["repeat"] != nil { repeats.append(node.path) }
-            guard let key = node.value["sharedKey"]?.stringValue else { continue }
-            let path = "\(node.path).sharedKey"
-            func fail(_ message: String) -> PrototypeLoadError {
-                PrototypeContractValidator.invalid(path, message)
-            }
-            guard node.value["visibleWhen"] != nil else {
-                throw fail("sharedKey requires visibleWhen on the same node")
-            }
-            if repeats.contains(where: { node.path == $0 || node.path.hasPrefix("\($0).") }) {
-                throw fail("sharedKey is not allowed inside repeat templates")
-            }
-            if pairs[key] == nil { pairs[key] = []; order.append(key) }
-            guard pairs.count <= 16 else { throw fail("a spec allows at most 16 sharedKey values") }
-            let prior = pairs[key] ?? []
-            guard prior.count < 2 else { throw fail("sharedKey \"\(key)\" must be used by exactly two nodes") }
-            if prior.contains(where: { node.path.hasPrefix("\($0).") }) {
-                throw fail("sharedKey nodes cannot be nested in each other")
-            }
-            pairs[key, default: []].append(node.path)
-        }
-        if let key = order.first(where: { pairs[$0]?.count == 1 }), let first = pairs[key]?.first {
-            throw PrototypeContractValidator.invalid(
-                "\(first).sharedKey", "sharedKey \"\(key)\" must be used by exactly two nodes"
-            )
-        }
+    /// Located nodes come from the structural validator's pre-order traversal.
+    static func validate(_ nodes: [PrototypeLocatedValue], data: [String: JSONValue]? = nil) throws {
+        try PrototypeSharedElementRules.validate(nodes, data: data)
     }
 }

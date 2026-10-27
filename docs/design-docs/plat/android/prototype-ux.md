@@ -1170,18 +1170,63 @@ the second (a list row into a detail card, a thumbnail into a viewer):
 }
 ```
 
-Rules, enforced by every validator with exact paths: `sharedKey` is a key (same grammar as state
-keys) and is allowed only on a node that also has `visibleWhen`; each key is used by exactly two
-nodes, neither inside the other; a spec has at most 16 distinct keys; keys are rejected on a
-`repeat` node and anywhere inside its template. Shared elements across pager pages and `stack`
-screens are not supported.
+Rules, enforced by every validator with exact paths: `sharedKey` retains the state-key grammar
+and aliases `shared: {key, as: "bounds"}`. The object form requires
+`prototype_shared_element_v2`; plain `sharedKey` requires `prototype_shared_element_v1`.
+A node cannot set both and must have `visibleWhen`. Literal v2 keys allow hyphens in addition
+to the state-key characters, with a 64-character resolved limit. Literal keys pair exactly two
+nodes. Inside repeat children, a key template must reference the field named by `repeat.key`,
+without index or other-field placeholders. Each instance must resolve a distinct key; at most
+two nodes can use each resolved key. Unmatched repeat items remain ordinary cards. A spec has
+at most 16 resolved keys, including unmatched feed items. Pairs cannot nest, disagree on `as`, or cross a `dialog` or `bottomSheet`
+boundary (including two separate modals). Shared elements across pager pages and `stack` screens
+are not supported.
 
-Under `full`, bounds, size and crossfaded content animate from one node to the other. Android wraps
-the prototype in a `SharedTransitionLayout` only when a spec has a key and applies `sharedBounds`
-(not `sharedElement`: the two nodes differ in content); the morph runs on the `visibleWhen`
-transition, so it counts in the motion-active signal. Under `reduced` the pair crossfades in place
-and under `off` it swaps instantly. A pair that is visible at the same time does not morph.
-`sharedKey` needs `prototype_shared_element_v1`, which the host checks before showing.
+Under `full`, Android applies `sharedElement` for `as: "element"` (identical content, only the target
+draws) and `sharedBounds` for `as: "bounds"` (changing content, both sides crossfade), in one
+`SharedTransitionLayout`. iOS uses `matchedGeometryEffect(properties: .frame)` in one namespace;
+bounds also crossfades the two sides. The morph counts in the motion-active signal. Under
+`reduced` both kinds crossfade in place; under `off` they swap instantly. A pair visible at the
+same time keeps ordinary visibility behavior. Shape interpolation still needs `animate` on
+`cornerRadius`; image content scale snaps.
+
+A feed card expanding into a detail column uses the same spec on Android and iOS. Here the one
+feed item binds `story-{item.id}` to `story-one`; tapping it swaps the pair. More feed items may
+have unmatched keys until their corresponding detail is shown.
+
+```json
+{
+  "window": { "placement": { "type": "fullscreen" } },
+  "state": { "open": false },
+  "root": {
+    "type": "box",
+    "children": [
+      {
+        "type": "column",
+        "repeat": { "items": [{ "id": "one" }], "as": "item", "key": "id" },
+        "children": [
+          {
+            "type": "card",
+            "shared": { "key": "story-{item.id}", "as": "bounds" },
+            "visibleWhen": { "key": "open", "equals": false },
+            "onTap": [{ "type": "setState", "key": "open", "value": true }],
+            "style": { "width": { "dp": 160 }, "height": { "dp": 80 } },
+            "children": [{ "type": "text", "text": "Story {item.id}" }]
+          }
+        ]
+      },
+      {
+        "type": "column",
+        "shared": { "key": "story-one", "as": "bounds" },
+        "visibleWhen": { "key": "open", "equals": true },
+        "onTap": [{ "type": "setState", "key": "open", "value": false }],
+        "style": { "width": { "dp": 320 }, "height": { "dp": 400 } },
+        "children": [{ "type": "text", "text": "Story one: the full detail" }]
+      }
+    ]
+  }
+}
+```
 
 ### Motion-active signal (#15114)
 

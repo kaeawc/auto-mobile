@@ -547,6 +547,10 @@ struct PrototypeRepeatInstance {
             bindList("spans", in: &fields) { bindPartFields(&$0) }
             bindPart("linkify", in: &fields)
         }
+        if case var .object(shared)? = fields["shared"], let key = shared["key"]?.stringValue {
+            shared["key"] = .string(interpolate(key))
+            fields["shared"] = .object(shared)
+        }
         bindStateKeys(&fields)
         bindPartFields(&fields)
         if case var .object(refresh)? = fields["refresh"], case let .array(actions)? = refresh["onRefresh"] {

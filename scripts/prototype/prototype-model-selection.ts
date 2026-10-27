@@ -39,6 +39,7 @@ export type ModelSelection = Readonly<Record<string, ModelOptions>>;
  */
 export const prototypeModelSelection = {
   press: { swiftName: "PrototypePress", swiftConformances: ["Decodable", "Equatable", "Sendable"] },
+  shared: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shadow: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   fadeEdges: {},
   backdrop: { languages: ["kotlin"] },

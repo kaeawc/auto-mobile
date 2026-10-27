@@ -6,6 +6,11 @@ struct PrototypePress: Decodable, Equatable, Sendable {
     let alpha: Double?
 }
 
+struct Shared: Decodable, Equatable, Sendable {
+    let key: String
+    let `as`: String
+}
+
 struct ShadowOffset: Codable, Equatable, Sendable {
     let x: Double
     let y: Double

@@ -855,6 +855,8 @@ final class PrototypeNode: Decodable {
     let press: PrototypePress?
     let styleWhen: [StyleWhen]?
     let visibleWhen: Condition?
+    let shared: Shared?
+    var resolvedSharedKey: String? { shared?.key ?? sharedKey }
     let sharedKey: String?
     let enabledWhen: Condition?
     let checks: [PrototypeCheck]?
@@ -1007,7 +1009,7 @@ final class PrototypeNode: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case scrollTransition, scrollLinked
-        case type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, sharedKey, transition
+        case type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey, transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
         case name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
@@ -1046,6 +1048,7 @@ final class PrototypeNode: Decodable {
         press = try container.decodeIfPresent(PrototypePress.self, forKey: .press)
         styleWhen = try container.decodeIfPresent([StyleWhen].self, forKey: .styleWhen)
         visibleWhen = try container.decodeIfPresent(Condition.self, forKey: .visibleWhen)
+        shared = try container.decodeIfPresent(Shared.self, forKey: .shared)
         sharedKey = try container.decodeIfPresent(String.self, forKey: .sharedKey)
         transition = try container.decodeIfPresent(PrototypeTransitionForm.self, forKey: .transition)?.type
         scrollTransition = try container.decodeIfPresent(ScrollTransition.self, forKey: .scrollTransition)

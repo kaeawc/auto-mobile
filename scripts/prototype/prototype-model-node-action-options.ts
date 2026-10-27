@@ -171,6 +171,7 @@ export const nodeModelOptions = {
       "style",
       "styleWhen",
       "visibleWhen",
+      "shared",
       "sharedKey",
       "transition",
       "press",

@@ -66,6 +66,7 @@ enum PrototypeAgentProtocol {
         designPlatformCapability,
         reducedMotionCapability,
         sharedElementCapability,
+        sharedElementV2Capability,
         emitContextCapability,
         checksCapability,
         identifierTestTagOnlyCapability,
@@ -96,6 +97,7 @@ enum PrototypeAgentProtocol {
     static let reducedMotionCapability = "prototype_reduced_motion_v1"
     /// `sharedKey` morphs between `visibleWhen` swaps via matchedGeometryEffect (#15115).
     static let sharedElementCapability = "prototype_shared_element_v1"
+    static let sharedElementV2Capability = "prototype_shared_element_v2"
     /// Positions `{type: "bounds"}` node anchors (#9316). The host refuses anchors on an agent that
     /// does not advertise it, which would draw the node at its normal position. Same name as the
     /// CtrlProxy capability.

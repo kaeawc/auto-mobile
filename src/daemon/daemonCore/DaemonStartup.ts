@@ -7,7 +7,8 @@ import type {
 } from "./DaemonCoreState";
 import { sweepStaleAppearanceConfigs } from "../appearanceConfigStartupSweep";
 import { createServer as createHttpServer } from "node:http";
-import { logger, setLogContextProvider } from "../../utils/logger";
+import { logger } from "../../utils/logger";
+import { setLogContextProvider } from "../../utils/logContext";
 import { currentMcpTrace } from "../mcpTraceContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { UnixSocketServer } from "../socketServer";

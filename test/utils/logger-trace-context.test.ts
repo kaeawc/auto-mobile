@@ -6,6 +6,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { parseMcpTrace, currentMcpTrace, withMcpTrace } from "../../src/daemon/mcpTraceContext";
 import { formatLogRecord } from "../../src/utils/loggerValues";
+import { setLogContextProvider } from "../../src/utils/logContext";
 import { useRealLogSinks } from "../helpers/realLogSinks";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -66,7 +67,7 @@ describe("logger trace context provider", () => {
         const component = mod.resolveProcessLogPrefix(process.argv, process.pid);
         const expected = `${formatLogRecord(format, component, "INFO", "same message", [{ safe: 1 }])}\n`;
         withMcpTrace(ctx, () => mod.logger.info("same message", { safe: 1 }));
-        mod.setLogContextProvider(currentMcpTrace);
+        setLogContextProvider(currentMcpTrace);
         mod.logger.info("same message", { safe: 1 });
         await withMcpTrace(ctx, async () => {
           await Promise.resolve();
@@ -89,12 +90,12 @@ describe("logger trace context provider", () => {
           expect(line).not.toContain("baggage");
         }
         expect(lines[7]).toBe(expected);
-        mod.setLogContextProvider(undefined);
+        setLogContextProvider(undefined);
         withMcpTrace(ctx, () => mod.logger.info("same message", { safe: 1 }));
         await mod.logger.flush();
         expect(lines[8]).toBe(expected);
       } finally {
-        mod.setLogContextProvider(undefined);
+        setLogContextProvider(undefined);
         stderr.mockRestore();
         clock.mockRestore();
         await mod.logger.closeAfterFlush();

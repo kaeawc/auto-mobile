@@ -25439,32 +25439,38 @@
               "appearance": {
                 "$ref": "#/$defs/__schema9"
               },
-              "storage": {
+              "degradedEffects": {
                 "$ref": "#/$defs/__schema10"
               },
-              "timers": {
-                "$ref": "#/$defs/__schema11"
-              },
-              "success": {
+              "warning": {
                 "$ref": "#/$defs/__schema12"
               },
-              "error": {
+              "storage": {
                 "$ref": "#/$defs/__schema13"
               },
-              "totalTimeMs": {
+              "timers": {
                 "$ref": "#/$defs/__schema14"
               },
-              "timestamp": {
+              "success": {
                 "$ref": "#/$defs/__schema15"
               },
-              "pendingCount": {
+              "error": {
                 "$ref": "#/$defs/__schema16"
               },
-              "lastSequence": {
+              "totalTimeMs": {
                 "$ref": "#/$defs/__schema17"
               },
-              "droppedCount": {
+              "timestamp": {
                 "$ref": "#/$defs/__schema18"
+              },
+              "pendingCount": {
+                "$ref": "#/$defs/__schema19"
+              },
+              "lastSequence": {
+                "$ref": "#/$defs/__schema20"
+              },
+              "droppedCount": {
+                "$ref": "#/$defs/__schema21"
               },
               "pages": {
                 "type": "object",
@@ -25530,14 +25536,14 @@
                   "type": "string"
                 },
                 "additionalProperties": {
-                  "$ref": "#/$defs/__schema19"
+                  "$ref": "#/$defs/__schema22"
                 }
               },
               "context": {
-                "$ref": "#/$defs/__schema20"
+                "$ref": "#/$defs/__schema23"
               },
               "contextTruncated": {
-                "$ref": "#/$defs/__schema22"
+                "$ref": "#/$defs/__schema25"
               },
               "lastKnown": {
                 "description": "Pages, stacks and state are the last reported device snapshot, not a live device query",
@@ -25582,23 +25588,29 @@
             "appearance": {
               "$ref": "#/$defs/__schema9"
             },
-            "storage": {
+            "degradedEffects": {
               "$ref": "#/$defs/__schema10"
             },
-            "timers": {
-              "$ref": "#/$defs/__schema11"
-            },
-            "success": {
+            "warning": {
               "$ref": "#/$defs/__schema12"
             },
-            "error": {
+            "storage": {
               "$ref": "#/$defs/__schema13"
             },
-            "totalTimeMs": {
+            "timers": {
               "$ref": "#/$defs/__schema14"
             },
-            "timestamp": {
+            "success": {
               "$ref": "#/$defs/__schema15"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema16"
+            },
+            "totalTimeMs": {
+              "$ref": "#/$defs/__schema17"
+            },
+            "timestamp": {
+              "$ref": "#/$defs/__schema18"
             }
           },
           "required": ["lastAction", "success", "timestamp"],
@@ -25770,13 +25782,13 @@
               ]
             },
             "payload": {
-              "$ref": "#/$defs/__schema23"
+              "$ref": "#/$defs/__schema26"
             },
             "context": {
-              "$ref": "#/$defs/__schema20"
+              "$ref": "#/$defs/__schema23"
             },
             "contextTruncated": {
-              "$ref": "#/$defs/__schema22"
+              "$ref": "#/$defs/__schema25"
             },
             "state": {
               "type": "object",
@@ -25891,6 +25903,12 @@
             "additionalProperties": false
           }
         },
+        "degradedEffects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema11"
+          }
+        },
         "missingAssets": {
           "description": "show: asset ids the prototype references that the device has no copy of; the prototype is shown with placeholders. Absent when none. Upload them with assets on a show.",
           "type": "array",
@@ -25909,7 +25927,7 @@
           "enum": ["no_prototype_window_on_screen", "app_layer_window_hidden", "device_blocked"]
         },
         "warning": {
-          "description": "show succeeded or awaitEvent timed out, and it needs attention: names what to do about missingAssets, that display was ignored by a same-id show, that an Android app-layer prototype is not on screen, or (awaitEvent timeout) that the prototype is hidden because its app is not in front",
+          "description": "show or patch succeeded or awaitEvent timed out, and it needs attention: reports degraded effects with paths and api/budget reasons, names what to do about missingAssets, that display was ignored by a same-id show, that an Android app-layer prototype is not on screen, or (awaitEvent timeout) that the prototype is hidden because its app is not in front",
           "type": "string"
         },
         "anchors": {
@@ -26021,13 +26039,13 @@
           "maximum": 9007199254740991
         },
         "pendingCount": {
-          "$ref": "#/$defs/__schema16"
+          "$ref": "#/$defs/__schema19"
         },
         "lastSequence": {
-          "$ref": "#/$defs/__schema17"
+          "$ref": "#/$defs/__schema20"
         },
         "droppedCount": {
-          "$ref": "#/$defs/__schema18"
+          "$ref": "#/$defs/__schema21"
         },
         "artifact": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -26126,6 +26144,35 @@
           "additionalProperties": false
         },
         "__schema10": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema11"
+          }
+        },
+        "__schema11": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "reason": {
+              "type": "string",
+              "enum": ["api", "budget"]
+            }
+          },
+          "required": ["path", "type", "reason"],
+          "additionalProperties": false
+        },
+        "__schema12": {
+          "description": "Effects omitted or frozen by the device, with their paths and reasons",
+          "type": "string"
+        },
+        "__schema13": {
           "description": "inspect only: what the device has stored for this prototype's storage block (prototype_storage_v1), as the device last reported it. Absent when the device does not report it or the prototype has no storage block",
           "type": "object",
           "properties": {
@@ -26170,7 +26217,7 @@
           "required": ["version", "keys", "totalBytes"],
           "additionalProperties": false
         },
-        "__schema11": {
+        "__schema14": {
           "maxItems": 8,
           "type": "array",
           "items": {
@@ -26196,38 +26243,38 @@
             "additionalProperties": false
           }
         },
-        "__schema12": {
+        "__schema15": {
           "type": "boolean"
         },
-        "__schema13": {
+        "__schema16": {
           "type": "string"
         },
-        "__schema14": {
+        "__schema17": {
           "type": "number"
         },
-        "__schema15": {
+        "__schema18": {
           "description": "Host clock milliseconds when the request completed",
           "type": "number"
         },
-        "__schema16": {
+        "__schema19": {
           "description": "Unconsumed events, including events excluded by filters or cursor",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema17": {
+        "__schema20": {
           "description": "Highest sequence accepted for this prototype",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema18": {
+        "__schema21": {
           "description": "Cumulative events dropped by buffer overflow in this scope",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema19": {
+        "__schema22": {
           "anyOf": [
             {
               "type": "string"
@@ -26244,7 +26291,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema19"
+                "$ref": "#/$defs/__schema22"
               }
             },
             {
@@ -26253,12 +26300,12 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema19"
+                "$ref": "#/$defs/__schema22"
               }
             }
           ]
         },
-        "__schema20": {
+        "__schema23": {
           "allOf": [
             {
               "type": "object",
@@ -26266,13 +26313,13 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema21"
+                "$ref": "#/$defs/__schema24"
               }
             },
             {}
           ]
         },
-        "__schema21": {
+        "__schema24": {
           "anyOf": [
             {
               "type": "string"
@@ -26289,7 +26336,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema21"
+                "$ref": "#/$defs/__schema24"
               }
             },
             {
@@ -26298,16 +26345,16 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema21"
+                "$ref": "#/$defs/__schema24"
               }
             }
           ]
         },
-        "__schema22": {
+        "__schema25": {
           "type": "boolean",
           "const": true
         },
-        "__schema23": {
+        "__schema26": {
           "anyOf": [
             {
               "type": "string"
@@ -26324,7 +26371,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema23"
+                "$ref": "#/$defs/__schema26"
               }
             },
             {
@@ -26333,7 +26380,7 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema23"
+                "$ref": "#/$defs/__schema26"
               }
             }
           ]

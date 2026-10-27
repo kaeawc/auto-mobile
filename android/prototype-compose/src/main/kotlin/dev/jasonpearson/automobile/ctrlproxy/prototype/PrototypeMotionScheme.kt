@@ -28,17 +28,9 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.key
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import dev.jasonpearson.automobile.protocol.PrototypeMotionTokens
 
 internal val LocalPrototypeExpressive = compositionLocalOf { false }
-
-/**
- * Material 3's expressive motion scheme is internal in the pinned androidx.compose.material3, so
- * the two named springs below carry its published spatial and effects values (#15112).
- */
-private const val SPATIAL_DAMPING = 0.8f
-private const val SPATIAL_STIFFNESS = 380f
-private const val EFFECTS_DAMPING = 1f
-private const val EFFECTS_STIFFNESS = 1600f
 
 /**
  * Ripples are removed when motion is off; expressive springs come from [prototypeExpressiveSpec].
@@ -62,8 +54,7 @@ internal fun PrototypeMotionSharedRoot(root: PrototypeRenderNode, content: @Comp
 @Composable
 internal fun <T> prototypeExpressiveSpec(effects: Boolean = false): FiniteAnimationSpec<T> =
   if (!LocalPrototypeMotion.current) snap()
-  else if (effects) spring(EFFECTS_DAMPING, EFFECTS_STIFFNESS)
-  else spring(SPATIAL_DAMPING, SPATIAL_STIFFNESS)
+  else prototypeTokenSpec("expressive", if (effects) "effects" else "spatial")
 
 /** Explicit specs keep the standard transition functions unchanged. */
 @Composable
@@ -162,4 +153,14 @@ private data class PrototypeDelayedSpring<T>(val source: FiniteAnimationSpec<T>,
           )
     }
   }
+}
+
+/** Pure conversion; both authored tempo and legacy spring easing use the same contract values. */
+internal fun <T> prototypeTokenSpec(
+  scheme: String,
+  role: String,
+  tempo: String = "default",
+): FiniteAnimationSpec<T> {
+  val token = PrototypeMotionTokens.token(scheme, role, tempo)
+  return spring(dampingRatio = token.dampingRatio.toFloat(), stiffness = token.stiffness.toFloat())
 }

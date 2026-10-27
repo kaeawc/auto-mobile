@@ -1600,6 +1600,7 @@ private fun prototypeNodeModifier(
         prototypeAnimatedColor(
           node,
           prototypeThemedColor(node.style.shadowColor, style.shadowColor) ?: DefaultShadowColor,
+          property = "shadowColor",
         )
       modifier =
         modifier.shadow(it.toFloat().dp, shape, ambientColor = shadowColor, spotColor = shadowColor)

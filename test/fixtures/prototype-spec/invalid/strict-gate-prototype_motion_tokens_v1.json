@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "tokens",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Hello",
+      "animate": {
+        "tempo": "fast"
+      }
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_motion_v2"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_motion_tokens_v1"
+}

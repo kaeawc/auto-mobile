@@ -33,6 +33,7 @@ internal object PrototypeSpecContract {
     }
   val definitions = contract.getValue("definitions").jsonObject
   val limits = contract.getValue("limits").jsonObject
+  val motionTokens = contract.getValue("motionTokens").jsonObject
   val checkPatternMaxLength =
     definitions
       .getValue("check")

@@ -156,6 +156,7 @@ function harness(flag?: string, block = false) {
       classify,
       createHandler,
       createEventBus,
+      maxListenStreams: 1,
     },
     cancelScopeExecutions: cancel,
     forgetScopeBindings: forget,
@@ -365,6 +366,23 @@ describe("opt-in modern HTTP routing", () => {
     await h.endpoint.handle(h.request(), later, modernBody, h.error);
     expect(later.status).toBe(503);
     expect(h.createHandler).toHaveBeenCalledTimes(1);
+  });
+
+  test("listen streams past the endpoint cap are refused, and the slot frees on close", async () => {
+    const h = harness("1", true);
+    const first = h.endpoint.handle(h.request(), new FakeResponse(), listenBody, h.error);
+    await h.fetched;
+    const refused = new FakeResponse();
+    await h.endpoint.handle(h.request(), refused, listenBody, h.error);
+    expect(refused.status).toBe(429);
+    expect(h.createHandler).toHaveBeenCalledTimes(1);
+    await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
+    await first;
+    const again = h.endpoint.handle(h.request(), new FakeResponse(), listenBody, h.error);
+    for (let turn = 0; turn < 10; turn++) await Promise.resolve();
+    expect(h.createHandler).toHaveBeenCalledTimes(2);
+    await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
+    await again;
   });
 
   test("a separate keyed cancellation POST reaches the modern in-flight index", async () => {

@@ -97,7 +97,7 @@ describe("RotaryInput", () => {
 
   test("a rejected command is reported, not assumed ok", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("inject-rotary", createExecResult("Unknown command: inject-rotary"));
+    adb.setCommandResponse("inject-rotary", createExecResult("Unknown command: inject-rotary", ""));
     const result = await new RotaryInput(device, adb, traitsOf("automotive")).press(
       "rotary_rotate_cw",
       1,

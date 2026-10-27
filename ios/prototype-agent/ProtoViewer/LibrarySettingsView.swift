@@ -38,6 +38,7 @@ struct LibrarySettingsView: View {
                         .accessibilityIdentifier("open-security-policy")
                 }
             }
+            .readableContentWidth()
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

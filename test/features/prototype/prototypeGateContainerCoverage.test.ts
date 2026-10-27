@@ -182,6 +182,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
   prototype_platform_device_v1: deviceRead,
+  prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
   prototype_platform_haptics_v1: hapticsCall,
   prototype_platform_sound_v1: soundCall,
   prototype_platform_media_items_v1: mediaImage,

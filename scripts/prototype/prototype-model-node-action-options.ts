@@ -54,6 +54,8 @@ export const actionModelOptions = {
 
 export const nodeModelOptions = {
   languages: ["kotlin"],
+  // The paste button computes its clipboard tap rather than accepting authored actions.
+  kotlinHandWrittenVariants: ["pasteButton"],
   fieldTypes: {
     validateOn: { kotlin: "PrototypeValidateOn" },
     transition: { kotlin: "PrototypeTransition" },

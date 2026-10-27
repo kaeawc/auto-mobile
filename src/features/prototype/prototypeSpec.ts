@@ -372,6 +372,13 @@ const checkboxBaseSchema = z
     label: z.string().min(1).optional(),
   })
   .strict();
+const pasteButtonBaseSchema = z
+  .object({
+    ...z.object(commonNodeShape).omit({ onTap: true }).shape,
+    type: z.enum(["pasteButton"]),
+    into: pointerSchema,
+  })
+  .strict();
 const buttonBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -717,6 +724,7 @@ export type PrototypeNode =
   | (z.infer<typeof searchBarBaseSchema> & { child?: PrototypeNode })
   | z.infer<typeof switchBaseSchema>
   | z.infer<typeof checkboxBaseSchema>
+  | z.infer<typeof pasteButtonBaseSchema>
   | z.infer<typeof buttonBaseSchema>
   | z.infer<typeof radioGroupBaseSchema>
   | z.infer<typeof selectBaseSchema>
@@ -797,6 +805,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       searchBarBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema).optional() }),
       switchBaseSchema,
       checkboxBaseSchema,
+      pasteButtonBaseSchema,
       buttonBaseSchema,
       radioGroupBaseSchema,
       selectBaseSchema,
@@ -905,51 +914,7 @@ const specSchema = z
   .strict();
 export const prototypeSpecSchema = specSchema;
 export type PrototypeSpec = z.infer<typeof prototypeSpecSchema>;
-export const PROTOTYPE_NODE_TYPES = [
-  "box",
-  "row",
-  "column",
-  "flow",
-  "grid",
-  "carousel",
-  "text",
-  "image",
-  "icon",
-  "spacer",
-  "textField",
-  "searchBar",
-  "switch",
-  "checkbox",
-  "button",
-  "radioGroup",
-  "select",
-  "listItem",
-  "slider",
-  "chip",
-  "card",
-  "iconButton",
-  "fab",
-  "segmentedButton",
-  "topAppBar",
-  "divider",
-  "badge",
-  "progress",
-  "chart",
-  "dialog",
-  "menu",
-  "snackbar",
-  "timePicker",
-  "datePicker",
-  "list",
-  "scroll",
-  "pager",
-  "stack",
-  "tabBar",
-  "bottomNav",
-  "bottomSheet",
-  "tooltip",
-  "drawer",
-] as const;
+export { PROTOTYPE_NODE_TYPES } from "./prototypeNodeTypes";
 export const PROTOTYPE_ACTION_TYPES = [
   "emit",
   "setPage",

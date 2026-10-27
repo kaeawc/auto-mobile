@@ -25,7 +25,7 @@ import {
   dataActionFields,
   pointerSchema,
   prototypeDataActionValueSchema,
-  prototypeMatchBindingSchema,
+  setStateValueSchema,
   stateKeySchema,
   type PrototypeDataActionValue,
 } from "./prototypeActionValues";
@@ -111,14 +111,7 @@ export const actionSchema = z.discriminatedUnion("type", [
     .object({
       type: z.enum(["setState"]),
       key: stateKeySchema,
-      value: z.union([
-        z.string(),
-        z.number().finite(),
-        z.boolean(),
-        prototypeMatchBindingSchema,
-        z.object({ event: z.union([z.literal(""), pointerSchema]) }).strict(),
-        z.object({ platform: pointerSchema }).strict(),
-      ]),
+      value: setStateValueSchema,
     })
     .strict(),
   z

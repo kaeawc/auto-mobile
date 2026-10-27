@@ -104,3 +104,13 @@ export function buildPrototypeActionListSchema<Action extends z.ZodTypeAny>(
 ): z.ZodType<z.output<Action>[], z.ZodTypeDef, unknown> {
   return z.array(actionSchema).min(1).max(32);
 }
+
+/** A `setState` value: a scalar, a match binding, or (with the realtime gate) an event or platform read. */
+export const setStateValueSchema = z.union([
+  z.string(),
+  z.number().finite(),
+  z.boolean(),
+  prototypeMatchBindingSchema,
+  z.object({ event: z.union([z.literal(""), pointerSchema]) }).strict(),
+  z.object({ platform: pointerSchema }).strict(),
+]);

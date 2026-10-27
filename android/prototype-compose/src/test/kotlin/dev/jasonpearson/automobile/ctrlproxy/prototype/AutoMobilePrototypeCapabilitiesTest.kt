@@ -31,12 +31,17 @@ class AutoMobilePrototypeCapabilitiesTest {
 
   /**
    * The test module is a placeholder no production runtime advertises. `style.effects` (#15128) has
-   * a validated contract and no renderer yet. `window.backdrop` (#15126) is a window-level blur only
-   * CtrlProxy's overlay window can draw (the embedded renderer has no window); iOS adds it with its
-   * own slice.
+   * a validated contract and no renderer yet, and neither does any platform-namespace field
+   * (#15257). `window.backdrop` (#15126) is a window-level blur only CtrlProxy's overlay window can
+   * draw (the embedded renderer has no window); iOS adds it with its own slice.
    */
   private val exclusions =
-    setOf("prototype_platform_test_v1", "prototype_effects_v1", "prototype_backdrop_v1")
+    setOf(
+      "prototype_platform_test_v1",
+      "prototype_effects_v1",
+      "prototype_backdrop_v1",
+      "prototype_platform_namespace_v1",
+    )
 
   @Test
   fun `shared spec capabilities are supported`() {

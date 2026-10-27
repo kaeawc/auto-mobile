@@ -249,6 +249,10 @@ internal object PrototypeStrictPolicy {
     fun envelope(spec: JsonObject) {
       if ("strings" in spec || PrototypeStrings.fields(spec).any { "{t:" in it.text })
         need("strings")
+      for (key in listOf("window", "theme")) {
+        val block = spec[key] as? JsonObject ?: continue
+        if ("ios" in block || "android" in block) need("platform_namespace")
+      }
       if (spec["data"] != null) need("data_model")
       if (spec["storage"] != null) need("storage")
       if ("derive" in spec) need("format")
@@ -319,6 +323,13 @@ internal object PrototypeStrictPolicy {
       if (PrototypeStylePolishV2Rules.required(fields))
         result.add(PrototypeStylePolishV2Rules.CAPABILITY)
       val type = fields.text("type") ?: ""
+      val nodeTypes =
+        PrototypeSpecContract.definitions
+          .getValue("node")
+          .jsonObject
+          .getValue("variants")
+          .jsonObject
+      if (type in nodeTypes && ("ios" in fields || "android" in fields)) need("platform_namespace")
       typeFeatures[type]?.let(::need)
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)

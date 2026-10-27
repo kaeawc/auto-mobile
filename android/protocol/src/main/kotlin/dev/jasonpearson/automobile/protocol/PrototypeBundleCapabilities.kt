@@ -10,6 +10,10 @@ internal object PrototypeBundleCapabilities {
     val caps = linkedSetOf<String>()
     if ("strings" in spec || PrototypeStrings.fields(spec).any { "{t:" in it.text })
       caps.add("prototype_strings_v1")
+    for (key in listOf("window", "theme")) {
+      val block = spec[key] as? JsonObject ?: continue
+      if ("ios" in block || "android" in block) caps.add("prototype_platform_namespace_v1")
+    }
     if ("data" in spec) caps.add("prototype_data_model_v1")
     if ("storage" in spec) caps.add("prototype_storage_v1")
     if ("derive" in spec) caps.add("prototype_format_v1")

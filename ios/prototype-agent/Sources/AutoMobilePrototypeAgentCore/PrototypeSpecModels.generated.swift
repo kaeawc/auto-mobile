@@ -53,6 +53,31 @@ struct ScrollLinked: Codable, Equatable, Sendable {
     let blur: [Double]?
 }
 
+struct IosNamespaceTab: Codable, Equatable, Sendable {
+    let role: String
+}
+
+struct IosNamespaceSheet: Codable, Equatable, Sendable {
+    let sizing: String
+}
+
+struct IosNamespace: Codable, Equatable, Sendable {
+    let buttonStyle: String?
+    let tab: IosNamespaceTab?
+    let sheet: IosNamespaceSheet?
+    let hover: String?
+    let navigationTitle: String?
+}
+
+struct AndroidNamespacePredictiveBack: Codable, Equatable, Sendable {
+    let style: String
+}
+
+struct AndroidNamespace: Codable, Equatable, Sendable {
+    let predictiveBack: AndroidNamespacePredictiveBack?
+    let indication: String?
+}
+
 struct Offset: Codable, Equatable, Sendable {
     let x: Double
     let y: Double

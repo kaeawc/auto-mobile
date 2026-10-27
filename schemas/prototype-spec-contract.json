@@ -2716,6 +2716,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -2958,6 +2972,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -3193,6 +3221,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -3400,6 +3442,20 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -3632,6 +3688,20 @@
               },
               "optional": false
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -3854,6 +3924,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "pagerDp"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -4090,6 +4174,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "linkify"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -4357,6 +4455,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -4554,6 +4666,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -4734,6 +4860,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -5058,6 +5198,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -5296,6 +5450,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -5517,6 +5685,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -5724,6 +5906,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -5955,6 +6151,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -6160,6 +6370,20 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -6383,6 +6607,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -6628,6 +6866,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -6834,6 +7086,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -7065,6 +7331,20 @@
               },
               "optional": false
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -7266,6 +7546,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -7479,6 +7773,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -7680,6 +7988,20 @@
                 "unique": false
               },
               "optional": false
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
             },
             "scrollTransition": {
               "rule": {
@@ -7897,6 +8219,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "onScroll": {
               "rule": {
                 "kind": "enum",
@@ -8100,6 +8436,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -8286,6 +8636,20 @@
             "text": {
               "rule": {
                 "kind": "string"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -8489,6 +8853,20 @@
               "rule": {
                 "kind": "number",
                 "integer": false
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -8722,6 +9100,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -8922,6 +9314,20 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -9134,6 +9540,20 @@
                 "integer": true,
                 "min": 1,
                 "max": 600000
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -9364,6 +9784,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -9576,6 +10010,20 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -9846,6 +10294,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -10062,6 +10524,20 @@
               "rule": {
                 "kind": "enum",
                 "values": ["none", "dots"]
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -10285,6 +10761,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "onScroll": {
               "rule": {
                 "kind": "enum",
@@ -10504,6 +10994,20 @@
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -10747,6 +11251,20 @@
             "dismissOnSwipe": {
               "rule": {
                 "kind": "boolean"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -10999,6 +11517,20 @@
               },
               "optional": true
             },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",
@@ -11153,6 +11685,20 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -11377,6 +11923,20 @@
               "rule": {
                 "kind": "number",
                 "integer": false
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             },
@@ -11610,6 +12170,20 @@
                 "max": 32
               },
               "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
             }
           }
         },
@@ -11792,6 +12366,20 @@
             "dismissOnSwipe": {
               "rule": {
                 "kind": "boolean"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -12080,6 +12668,20 @@
           "rule": {
             "kind": "enum",
             "values": ["bar", "none"]
+          },
+          "optional": true
+        },
+        "ios": {
+          "rule": {
+            "kind": "ref",
+            "name": "iosNamespace"
+          },
+          "optional": true
+        },
+        "android": {
+          "rule": {
+            "kind": "ref",
+            "name": "androidNamespace"
           },
           "optional": true
         },
@@ -14844,6 +15446,20 @@
             "name": "themeShapes"
           },
           "optional": true
+        },
+        "ios": {
+          "rule": {
+            "kind": "ref",
+            "name": "iosNamespace"
+          },
+          "optional": true
+        },
+        "android": {
+          "rule": {
+            "kind": "ref",
+            "name": "androidNamespace"
+          },
+          "optional": true
         }
       },
       "atLeastOne": true
@@ -17012,6 +17628,89 @@
     "drawerEdge": {
       "kind": "enum",
       "values": ["start", "end"]
+    },
+    "iosNamespace": {
+      "kind": "object",
+      "fields": {
+        "buttonStyle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["glass", "glassProminent"]
+          },
+          "optional": true
+        },
+        "tab": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "role": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["search"]
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "sheet": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "sizing": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["form", "page", "fitted"]
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "hover": {
+          "rule": {
+            "kind": "enum",
+            "values": ["lift", "highlight"]
+          },
+          "optional": true
+        },
+        "navigationTitle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["large", "inline"]
+          },
+          "optional": true
+        }
+      }
+    },
+    "androidNamespace": {
+      "kind": "object",
+      "fields": {
+        "predictiveBack": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "style": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["default", "crossActivity", "none"]
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "indication": {
+          "rule": {
+            "kind": "enum",
+            "values": ["ripple", "none"]
+          },
+          "optional": true
+        }
+      }
     }
   },
   "eventKinds": [
@@ -17148,6 +17847,40 @@
             "kind": "boolean"
           }
         }
+      }
+    }
+  },
+  "platformNamespaces": {
+    "ios": {
+      "buttonStyle": {
+        "why": "Native iOS glass button treatments have no portable renderer equivalent.",
+        "requires": "prototype_platform_namespace_v1"
+      },
+      "tab.role": {
+        "why": "The search tab role is an iOS tab navigation convention.",
+        "requires": "prototype_platform_namespace_v1"
+      },
+      "sheet.sizing": {
+        "why": "Native iOS sheet sizing modes have no matching Android presentation contract.",
+        "requires": "prototype_platform_namespace_v1"
+      },
+      "hover": {
+        "why": "Native iOS lift and highlight hover effects have no portable equivalent.",
+        "requires": "prototype_platform_namespace_v1"
+      },
+      "navigationTitle": {
+        "why": "Large and inline navigation titles are iOS navigation chrome conventions.",
+        "requires": "prototype_platform_namespace_v1"
+      }
+    },
+    "android": {
+      "predictiveBack.style": {
+        "why": "Android predictive back previews depend on the Android activity navigation model.",
+        "requires": "prototype_platform_namespace_v1"
+      },
+      "indication": {
+        "why": "Android ripple indication is a native interaction feedback treatment.",
+        "requires": "prototype_platform_namespace_v1"
       }
     }
   },

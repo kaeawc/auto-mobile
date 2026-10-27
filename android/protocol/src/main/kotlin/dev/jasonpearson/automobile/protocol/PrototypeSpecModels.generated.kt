@@ -294,6 +294,8 @@ data class PrototypeBoxNode(
   val repeat: PrototypeRepeat? = null,
   /** Spaces the enters of `visibleWhen` children apart (#15247). */
   val stagger: PrototypeStagger? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("row")
@@ -322,6 +324,8 @@ data class PrototypeRowNode(
   val repeat: PrototypeRepeat? = null,
   /** Spaces the enters of `visibleWhen` children apart (#15247). */
   val stagger: PrototypeStagger? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("column")
@@ -349,6 +353,8 @@ data class PrototypeColumnNode(
   val repeat: PrototypeRepeat? = null,
   /** Spaces the enters of `visibleWhen` children apart (#15247). */
   val stagger: PrototypeStagger? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("flow")
@@ -373,6 +379,8 @@ data class PrototypeFlowNode(
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
   val maxLines: Int? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("grid")
@@ -397,6 +405,8 @@ data class PrototypeGridNode(
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
   val columns: PrototypeGridColumns,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 /**
@@ -428,6 +438,8 @@ data class PrototypeCarouselNode(
   val variant: String? = null,
   val itemWidth: Double,
   val itemSpacing: Double? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("text")
@@ -455,6 +467,8 @@ data class PrototypeTextNode(
   val spans: List<PrototypeTextSpan>? = null,
   /** Mentions, hashtags and URLs in [text] as links (`prototype_linkify_v1`, #14233). */
   val linkify: PrototypeLinkifyOptions? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("image")
@@ -484,6 +498,8 @@ data class PrototypeImageNode(
   /** Pinch, double-tap and pan zoom up to `maxScale` (#14208). */
   val zoomable: PrototypeZoomable? = null,
   val filter: PrototypeImageFilter? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("icon")
@@ -510,6 +526,8 @@ data class PrototypeIconNode(
   val name: String,
   /** One of filled (default), outlined, rounded, sharp, twoTone; closed by the contract. */
   val variant: String? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("spacer")
@@ -531,6 +549,8 @@ data class PrototypeSpacerNode(
   override val span: Int? = null,
   override val scrollTransition: PrototypeScrollTransition? = null,
   override val scrollLinked: PrototypeScrollLinked? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("textField")
@@ -570,6 +590,8 @@ data class PrototypeTextFieldNode(
   val checks: List<PrototypeCheck>? = null,
   val validateOn: PrototypeValidateOn? = null,
   val enabledWhen: PrototypeCondition? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
   val errorWhen: PrototypeCondition? = null,
   val errorText: String? = null,
 ) : PrototypeNode()
@@ -598,6 +620,8 @@ data class PrototypeSwitchNode(
   val checks: List<PrototypeCheck>? = null,
   val validateOn: PrototypeValidateOn? = null,
   val enabledWhen: PrototypeCondition? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("checkbox")
@@ -624,6 +648,8 @@ data class PrototypeCheckboxNode(
   val checks: List<PrototypeCheck>? = null,
   val validateOn: PrototypeValidateOn? = null,
   val enabledWhen: PrototypeCondition? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("button")
@@ -649,6 +675,8 @@ data class PrototypeButtonNode(
   val variant: String = "filled",
   val icon: String? = null,
   val enabledWhen: PrototypeCondition? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("radioGroup")
@@ -675,6 +703,8 @@ data class PrototypeRadioGroupNode(
   val checks: List<PrototypeCheck>? = null,
   val validateOn: PrototypeValidateOn? = null,
   val enabledWhen: PrototypeCondition? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("select")
@@ -699,6 +729,8 @@ data class PrototypeSelectNode(
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
   val label: String? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("listItem")
@@ -726,6 +758,8 @@ data class PrototypeListItemNode(
   val trailing: PrototypeListItemTrailing? = null,
   val swipeActions: PrototypeSwipeActions? = null,
   val enabledWhen: PrototypeCondition? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("slider")
@@ -755,6 +789,8 @@ data class PrototypeSliderNode(
   val checks: List<PrototypeCheck>? = null,
   val validateOn: PrototypeValidateOn? = null,
   val enabledWhen: PrototypeCondition? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("chip")
@@ -780,6 +816,8 @@ data class PrototypeChipNode(
   val variant: String? = null,
   val stateKey: String? = null,
   val enabledWhen: PrototypeCondition? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("card")
@@ -805,6 +843,8 @@ data class PrototypeCardNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   val variant: String = "filled",
   val children: List<PrototypeNode>,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 /** An icon-only Material button; `variant` is standard (default), filled, tonal or outlined. */
@@ -830,6 +870,8 @@ data class PrototypeIconButtonNode(
   val icon: String,
   val variant: String = "standard",
   val enabledWhen: PrototypeCondition? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 /** A floating action button; a `label` makes it an extended FAB, which has no `size`. */
@@ -856,6 +898,8 @@ data class PrototypeFabNode(
   val label: String? = null,
   val size: String = "regular",
   val enabledWhen: PrototypeCondition? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 /** A single-select Material segmented button bound to a string state key, like a `radioGroup`. */
@@ -880,6 +924,8 @@ data class PrototypeSegmentedButtonNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 /** A Material top app bar with a title, an optional navigation icon and up to three actions. */
@@ -906,6 +952,8 @@ data class PrototypeTopAppBarNode(
   val variant: String = "small",
   val navigationIcon: PrototypeAppBarAction? = null,
   val actions: List<PrototypeAppBarAction>? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
   val onScroll: String? = null,
   val scroll: String? = null,
 ) : PrototypeNode()
@@ -931,6 +979,8 @@ data class PrototypeDividerNode(
   override val scrollTransition: PrototypeScrollTransition? = null,
   override val scrollLinked: PrototypeScrollLinked? = null,
   val orientation: String = "horizontal",
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 /** A Material badge: a small dot, or a short `text` such as a count. */
@@ -954,6 +1004,8 @@ data class PrototypeBadgeNode(
   override val scrollTransition: PrototypeScrollTransition? = null,
   override val scrollLinked: PrototypeScrollLinked? = null,
   val text: String? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 /**
@@ -982,6 +1034,8 @@ data class PrototypeProgressNode(
   val variant: String = "linear",
   val stateKey: String? = null,
   val max: Double? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 /**
@@ -1014,6 +1068,8 @@ data class PrototypeDialogNode(
   val confirm: PrototypeDialogButton,
   val dismiss: PrototypeDialogButton? = null,
   val child: PrototypeNode? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("menu")
@@ -1037,6 +1093,8 @@ data class PrototypeMenuNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   val openWhen: PrototypeSheetCondition,
   val items: List<PrototypeMenuItem>,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 /**
@@ -1067,6 +1125,8 @@ data class PrototypeSnackbarNode(
   val text: String,
   val action: PrototypeDialogButton? = null,
   val durationMs: Int? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 /** A Material time picker bound to integer hour (0..23) and minute (0..59) state keys. */
@@ -1095,6 +1155,8 @@ data class PrototypeTimePickerNode(
   val checks: List<PrototypeCheck>? = null,
   val validateOn: PrototypeValidateOn? = null,
   val enabledWhen: PrototypeCondition? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 /** A Material date picker bound to a `YYYY-MM-DD` string state key. */
@@ -1121,6 +1183,8 @@ data class PrototypeDatePickerNode(
   val checks: List<PrototypeCheck>? = null,
   val validateOn: PrototypeValidateOn? = null,
   val enabledWhen: PrototypeCondition? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("scroll")
@@ -1154,6 +1218,8 @@ data class PrototypeScrollNode(
   val onStartReached: List<PrototypeAction>? = null,
   val child: PrototypeNode,
   val fadeEdges: PrototypeFadeEdges? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("pager")
@@ -1181,6 +1247,8 @@ data class PrototypePagerNode(
   val peek: PrototypePagerPeek? = null,
   val pageSize: PrototypePagerPageSize? = null,
   val indicator: String? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
   val stateKey: String? = null,
 ) : PrototypeNode()
 
@@ -1207,6 +1275,8 @@ data class PrototypeTabBarNode(
   val pager: String? = null,
   val stateKey: String? = null,
   val scrollable: Boolean = false,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
   val onScroll: String? = null,
   val scroll: String? = null,
 ) : PrototypeNode()
@@ -1233,6 +1303,8 @@ data class PrototypeBottomNavNode(
   val items: List<PrototypeItem>,
   val pager: String? = null,
   val stateKey: String? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
   val onScroll: String? = null,
   val scroll: String? = null,
 ) : PrototypeNode()
@@ -1262,6 +1334,8 @@ data class PrototypeBottomSheetNode(
   val scrim: PrototypeModeValue? = null,
   val dragHandle: Boolean = true,
   val dismissOnSwipe: Boolean = true,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("searchBar")
@@ -1291,6 +1365,8 @@ data class PrototypeSearchBarNode(
   val variant: String? = null,
   val onSubmit: List<PrototypeAction>? = null,
   val child: PrototypeNode? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("stack")
@@ -1314,6 +1390,8 @@ data class PrototypeStackNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   val start: String,
   val screens: Map<String, PrototypeNode>,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 /**
@@ -1345,6 +1423,8 @@ data class PrototypeChartNode(
   val yRange: PrototypeChartRange? = null,
   val xLabels: String = "none",
   val goal: Double? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("tooltip")
@@ -1368,6 +1448,8 @@ data class PrototypeTooltipNode(
   val caret: String = "auto",
   val spotlight: PrototypeTooltipSpotlight? = null,
   val onDismiss: List<PrototypeAction>? = null,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("drawer")
@@ -1390,6 +1472,8 @@ data class PrototypeDrawerNode(
   val openWhen: PrototypeSheetCondition,
   val scrim: PrototypeModeValue? = null,
   val dismissOnSwipe: Boolean = true,
+  val ios: PrototypeIosNamespace? = null,
+  val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode()
 
 @SerialName("list")
@@ -1442,6 +1526,36 @@ data class PrototypeScrollLinked(
   val offsetY: List<Double>? = null,
   val offsetX: List<Double>? = null,
   val blur: List<Double>? = null,
+)
+
+@Serializable
+data class PrototypeIosNamespaceTab(
+  val role: String,
+)
+
+@Serializable
+data class PrototypeIosNamespaceSheet(
+  val sizing: String,
+)
+
+@Serializable
+data class PrototypeIosNamespace(
+  val buttonStyle: String? = null,
+  val tab: PrototypeIosNamespaceTab? = null,
+  val sheet: PrototypeIosNamespaceSheet? = null,
+  val hover: String? = null,
+  val navigationTitle: String? = null,
+)
+
+@Serializable
+data class PrototypeAndroidNamespacePredictiveBack(
+  val style: String,
+)
+
+@Serializable
+data class PrototypeAndroidNamespace(
+  val predictiveBack: PrototypeAndroidNamespacePredictiveBack? = null,
+  val indication: String? = null,
 )
 
 @Serializable

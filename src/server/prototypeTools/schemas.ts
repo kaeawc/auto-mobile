@@ -906,6 +906,7 @@ export const prototypeOutputSchema = z.object({
           "searchBar.icons",
           "rich-text-links",
           "strings.fallback",
+          "platformNamespace",
           "menu",
           "select",
         ]),
@@ -918,7 +919,7 @@ export const prototypeOutputSchema = z.object({
     )
     .optional()
     .describe(
-      "Successful show: strings.fallback applies to all platforms, lists locale and up to 20 referenced keys falling through to default (values), with paths strings.default.<key>; other notes describe platform differences: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
+      "Successful show on either platform (legacy renderer differences apply to iOS only): strings.fallback applies to all platforms, lists locale and up to 20 referenced keys falling through to default (values), with paths strings.default.<key>; other notes describe platform differences: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
     ),
   accessibilityFindings: z
     .array(

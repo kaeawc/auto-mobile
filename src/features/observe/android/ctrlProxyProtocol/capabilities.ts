@@ -48,6 +48,7 @@ export const PROTOTYPE_WINDOW_OPTIONS_CAPABILITY = "prototype_window_options_v1"
  * fullscreen prototype without the host dismiss bar by default and offers a two-finger long-press
  * escape. A device without it always draws the dismiss bar on a fullscreen prototype.
  */
+export const PROTOTYPE_PLATFORM_NAMESPACE_CAPABILITY = "prototype_platform_namespace_v1";
 export const PROTOTYPE_WINDOW_CHROME_CAPABILITY = "prototype_window_chrome_v1";
 
 /**

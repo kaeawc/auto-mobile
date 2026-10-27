@@ -51,6 +51,8 @@ export const prototypeModelSelection = {
   scrollEdge: {},
   scrollTransition: {},
   scrollLinked: {},
+  iosNamespace: {},
+  androidNamespace: {},
   offset: {},
   padding: {},
   bounds: { languages: ["kotlin"] },

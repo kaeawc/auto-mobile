@@ -23,6 +23,7 @@ internal object PrototypeBundleNodeCapabilities {
         "grid" to "flow_grid_v1",
       )
     typed[type]?.let { caps.add("prototype_$it") }
+    if ("ios" in n || "android" in n) caps.add("prototype_platform_namespace_v1")
     general(n, type, caps)
     controls(n, type, caps)
     appearance(n, type, caps)

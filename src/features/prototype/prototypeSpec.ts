@@ -3,6 +3,7 @@ import { themeSchema } from "./prototypeThemeSchema";
 import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
 import { prototypeDeriveSchema, prototypeRepeatDeriveSchema } from "./prototypeFormatSchema";
 import { prototypeScrollMotionShape } from "./prototypeScrollMotionSchema";
+import { prototypePlatformNamespaceShape } from "./prototypePlatformNamespaceSchema";
 import * as timers from "./prototypeTimerSchema";
 import { prototypeStringsSchema } from "./prototypeStrings";
 import { prototypeSemanticsSchema } from "./prototypeSemanticsSchema";
@@ -183,6 +184,7 @@ export const commonNodeShape = {
   semantics: prototypeSemanticsSchema.optional(),
   onAppear: z.array(actionSchema).min(1).max(32).optional(),
   ...prototypeScrollMotionShape,
+  ...prototypePlatformNamespaceShape,
   span: z.number().finite().int().min(1).optional(),
   id: z.string().min(1).optional(),
   testTag: z.string().min(1).optional(),
@@ -829,6 +831,7 @@ export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown
   });
 const windowSchema = z
   .object({
+    ...prototypePlatformNamespaceShape,
     placement: placementSchema,
     backdrop: prototypeBackdropSchema.optional(),
     chrome: z

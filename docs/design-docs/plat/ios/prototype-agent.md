@@ -975,3 +975,11 @@ reuses that artifact and publishes its checksum in the notes. Older registry ent
 resolve to "viewer unavailable". The host template provider resolves: explicit path,
 `AUTOMOBILE_IOS_PROTOTYPE_VIEWER`, configured local builds, then a checksum-pinned release cache/download
 (unless `AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD`).
+
+## Platform namespaces (#15257)
+
+Prefer portable fields, then `theme.design` when available, and reserve `ios`/`android`
+namespace objects on nodes, window and theme for native semantics. Each field has a
+`why` in the contract. Foreign blocks are ignored and reported in `platformNotes`.
+Own-platform blocks require `prototype_platform_namespace_v1`; current renderers
+ignore both blocks and do not advertise it.

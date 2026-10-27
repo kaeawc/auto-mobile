@@ -1,4 +1,5 @@
 import { prototypeStringsFallbackKeys } from "./prototypeStrings";
+import { prototypePlatformNamespaceFields } from "./prototypePlatformNamespace";
 import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
@@ -12,6 +13,7 @@ import {
 import type { PrototypeSpec } from "./prototypeSpec";
 
 export type PrototypePlatformNoteConstruct =
+  | "platformNamespace"
   | "rich-text-links"
   | "stack"
   | "carousel"
@@ -372,8 +374,22 @@ export function prototypePlatformNotes(
   platform: "android" | "ios",
   supports: (capability: string) => boolean,
 ): PrototypePlatformNote[] {
+  const foreign = platform === "android" ? "ios" : "android";
+  const paths = prototypePlatformNamespaceFields(spec, foreign);
+  const namespaceNotes: PrototypePlatformNote[] = paths.length
+    ? [
+        {
+          platform,
+          construct: "platformNamespace",
+          effect: "ignored",
+          paths: paths.slice(0, 20),
+          ...(paths.length > 20 ? { total: paths.length } : {}),
+          detail: `${foreign} namespace blocks are ignored on ${platform}.`,
+        },
+      ]
+    : [];
   if (platform === "android") {
-    return [];
+    return namespaceNotes;
   }
   const found: Occurrence[] = [];
   occurrences(spec.root, { kind: "ref", name: "node" }, "root", found);
@@ -444,7 +460,7 @@ export function prototypePlatformNotes(
           },
         ];
   });
-  return [...notes, ...menus];
+  return [...notes, ...menus, ...namespaceNotes];
 }
 
 export function prototypeStringsFallbackNotes(

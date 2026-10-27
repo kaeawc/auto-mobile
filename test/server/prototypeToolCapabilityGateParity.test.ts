@@ -297,6 +297,11 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_namespace_v1: fixture({
+    ...label,
+    ios: { hover: "lift" },
+    android: { indication: "none" },
+  }),
   prototype_platform_test_v1: {
     minimalSpec: {
       ...base,

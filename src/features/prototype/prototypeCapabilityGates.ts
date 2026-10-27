@@ -162,9 +162,15 @@ import { prototypeBackdropFields, prototypeBackdropUnsupportedMessage } from "./
 import { prototypeShaderFields, prototypeShadersUnsupportedMessage } from "./prototypeShaders";
 import { PROTOTYPE_CUSTOM_SHADERS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 
+import {
+  PROTOTYPE_PLATFORM_NAMESPACE_CAPABILITY,
+  prototypePlatformNamespaceFields,
+  prototypePlatformNamespaceUnsupportedMessage,
+} from "./prototypePlatformNamespace";
+
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
-  readonly fields: (spec: unknown) => string[];
+  readonly fields: (spec: unknown, platform?: "android" | "ios") => string[];
   readonly unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") => string;
 }
 
@@ -217,6 +223,17 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
       `The connected ${platform} renderer does not advertise prototype_scroll_motion_v1 required by ${fields[0]}. Nothing was shown. Update the renderer or remove scroll motion.`,
   },
   {
+    capability: PROTOTYPE_PLATFORM_NAMESPACE_CAPABILITY,
+    fields: (spec, platform) =>
+      platform
+        ? prototypePlatformNamespaceFields(spec, platform)
+        : [
+            ...prototypePlatformNamespaceFields(spec, "ios"),
+            ...prototypePlatformNamespaceFields(spec, "android"),
+          ],
+    unsupportedMessage: prototypePlatformNamespaceUnsupportedMessage,
+  },
+  {
     capability: PROTOTYPE_THEME_MODES_CAPABILITY,
     fields: prototypeThemeModeFields,
     unsupportedMessage: prototypeThemeModesUnsupportedMessage,
@@ -261,7 +278,7 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
   },
   {
     capability: PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
-    fields: prototypePagerOptionFields,
+    fields: (spec) => prototypePagerOptionFields(spec),
     unsupportedMessage: prototypePagerOptionsUnsupportedMessage,
   },
   {
@@ -397,13 +414,16 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
   ...PROTOTYPE_PLATFORM_MODULE_GATES,
 ];
 
-export function prototypeRequiredCapabilities(spec: unknown): {
+export function prototypeRequiredCapabilities(
+  spec: unknown,
+  platform?: "android" | "ios",
+): {
   capability: string;
   fields: string[];
   unsupportedMessage: PrototypeSpecCapabilityGate["unsupportedMessage"];
 }[] {
   return PROTOTYPE_SPEC_CAPABILITY_GATES.flatMap((gate) => {
-    const fields = gate.fields(spec);
+    const fields = gate.fields(spec, platform);
     return fields.length === 0
       ? []
       : [{ capability: gate.capability, fields, unsupportedMessage: gate.unsupportedMessage }];

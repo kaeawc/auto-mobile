@@ -3281,3 +3281,11 @@ difference; the fixture note records the divergence policy and unit thresholds.
 `dateTime`, `duration`, `plural`, and `fileSize` remain follow-ups and are invalid
 format kinds. No dependencies are needed: the host uses Intl.NumberFormat,
 Intl.DateTimeFormat and Intl.RelativeTimeFormat.
+
+## Platform namespaces (#15257)
+
+Prefer portable fields, then `theme.design` when available, and reserve `ios`/`android`
+namespace objects on nodes, window and theme for native semantics. Each field has a
+`why` in the contract. Foreign blocks are ignored and reported in `platformNotes`.
+Own-platform blocks require `prototype_platform_namespace_v1`; current renderers
+ignore both blocks and do not advertise it.

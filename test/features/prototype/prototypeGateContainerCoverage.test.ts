@@ -46,6 +46,7 @@ const fixtures: Record<string, Node> = {
     },
     children: [label],
   },
+  prototype_platform_namespace_v1: { ...label, ios: { hover: "lift" } },
   prototype_theme_modes_v1: {
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },

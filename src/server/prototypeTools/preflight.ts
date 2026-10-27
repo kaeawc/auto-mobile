@@ -207,7 +207,7 @@ export async function specCapabilityRefusal(
   if (optIn) {
     return { success: false, error: optIn };
   }
-  for (const gate of prototypeRequiredCapabilities(spec)) {
+  for (const gate of prototypeRequiredCapabilities(spec, target.android ? "android" : "ios")) {
     const supported = target.android
       ? await target.android.supportsCommand(gate.capability)
       : target.ios?.supportsCapability(gate.capability) === true;

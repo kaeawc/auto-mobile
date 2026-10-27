@@ -10801,14 +10801,14 @@
         "hasDefault": true
       },
       {
-        "name": "effect",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIconEffect",
+        "name": "keyframes",
+        "type": "json",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "keyframes",
-        "type": "json",
+        "name": "effect",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIconEffect",
         "nullable": true,
         "hasDefault": true
       },
@@ -11901,6 +11901,12 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "keyframes",
+        "type": "json",
         "nullable": true,
         "hasDefault": true
       },

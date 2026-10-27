@@ -1069,101 +1069,104 @@ class PrototypeRuntime(
     )
   }
 
+  private fun platformCallPayload(
+    call: PrototypePlatformDispatcher.Pending,
+    error: PlatformError?,
+    durationMs: Long,
+  ) = buildJsonObject {
+    put("callId", call.id)
+    put("call", call.action.call)
+    put("outcome", if (error == null) "success" else "error")
+    put("durationMs", durationMs)
+    error?.let { failure ->
+      put(
+        "error",
+        buildJsonObject {
+          put("code", failure.code.wireValue)
+          put("message", failure.message.take(512))
+        },
+      )
+    }
+  }
+
+  /** Writes a call's result and metadata under `into`; returns the error to report. */
+  private suspend fun writePlatformResult(
+    call: PrototypePlatformDispatcher.Pending,
+    result: PlatformCallResult,
+    error: PlatformError?,
+    duration: Long,
+  ): PlatformError? {
+    val into = call.action.into ?: return error
+    val writes = mutableListOf<PrototypeDataWrite>()
+    if (result is PlatformCallResult.Success) writes += PrototypeDataWrite.Set(into, result.value)
+    writes +=
+      PrototypeDataWrite.Set(
+        PrototypeRequests.metaPath(into),
+        platformCallPayload(call, error, duration).let { JsonObject(it - "callId" - "call") },
+      )
+    val refused = trialDataWrites(writes)
+    if (refused == null) {
+      writes.forEach { applyDataWrite(it) }
+      return error
+    }
+    val reported =
+      error ?: PlatformError(PlatformErrorCode.PLATFORM_ERROR, refused.message.take(512))
+    applyDataWrite(
+      PrototypeDataWrite.Set(
+        PrototypeRequests.metaPath(into),
+        JsonObject(platformCallPayload(call, reported, duration) - "callId" - "call"),
+      ),
+    )
+    return reported
+  }
+
+  private suspend fun runPlatformFollowUp(
+    call: PrototypePlatformDispatcher.Pending,
+    error: PlatformError?,
+  ) {
+    if (error?.code == PlatformErrorCode.CANCELLED) return
+    val action = call.action
+    val actions = (if (error == null) action.onSuccess else action.onError).orEmpty()
+    if (actions.isEmpty() || !current.active || !requireValid(actions)) return
+    val previousEvent = eventData
+    eventData = call.eventContext
+    try {
+      run(actions, plannedWrites(actions, current.spec))
+    } catch (refused: IllegalArgumentException) {
+      warn("Refused platform follow-up: ${refused.message}")
+    } finally {
+      eventData = previousEvent
+    }
+  }
+
   private suspend fun finishPlatformCall(
     call: PrototypePlatformDispatcher.Pending,
     result: PlatformCallResult,
   ) {
     try {
-      var error = (result as? PlatformCallResult.Failure)?.error
+      val initial = (result as? PlatformCallResult.Failure)?.error
+      val duration = (clock() - call.startedAt).coerceAtLeast(0)
       if (!current.active) {
-        if (error?.code == PlatformErrorCode.CANCELLED)
+        if (initial?.code == PlatformErrorCode.CANCELLED) {
+          val closed = PlatformError(PlatformErrorCode.CANCELLED, "Prototype closed")
           emit(
             PrototypeEventKind.EMIT,
             PrototypePlatform.CALL_EVENT_NAME,
-            buildJsonObject {
-              put("callId", call.id)
-              put("call", call.action.call)
-              put("outcome", "error")
-              put("durationMs", (clock() - call.startedAt).coerceAtLeast(0))
-              put(
-                "error",
-                buildJsonObject {
-                  put("code", "cancelled")
-                  put("message", "Prototype closed")
-                },
-              )
-            },
+            platformCallPayload(call, closed, duration),
           )
+        }
         return
       }
-      val action = call.action
-      val duration = (clock() - call.startedAt).coerceAtLeast(0)
-      fun metadata() = buildJsonObject {
-        put("outcome", if (error == null) "success" else "error")
-        put("durationMs", duration)
-        error?.let { failure ->
-          put(
-            "error",
-            buildJsonObject {
-              put("code", failure.code.wireValue)
-              put("message", failure.message.take(512))
-            },
-          )
-        }
-      }
-      action.into?.let { into ->
-        val writes = mutableListOf<PrototypeDataWrite>()
-        if (result is PlatformCallResult.Success)
-          writes += PrototypeDataWrite.Set(into, result.value)
-        writes += PrototypeDataWrite.Set(PrototypeRequests.metaPath(into), metadata())
-        val refused = trialDataWrites(writes)
-        if (refused == null) writes.forEach { applyDataWrite(it) }
-        else {
-          if (error == null)
-            error =
-              PlatformError(
-                PlatformErrorCode.PLATFORM_ERROR,
-                refused.message.take(512),
-              )
-          applyDataWrite(PrototypeDataWrite.Set(PrototypeRequests.metaPath(into), metadata()))
-        }
-      }
-      action.statusKey?.let {
+      val error = writePlatformResult(call, result, initial, duration)
+      call.action.statusKey?.let {
         if (writeStatus(it, if (error == null) "success" else "error")) emitStateChange(listOf(it))
       }
       emit(
         PrototypeEventKind.EMIT,
         PrototypePlatform.CALL_EVENT_NAME,
-        buildJsonObject {
-          put("callId", call.id)
-          put("call", action.call)
-          put("outcome", if (error == null) "success" else "error")
-          put("durationMs", duration)
-          error?.let { failure ->
-            put(
-              "error",
-              buildJsonObject {
-                put("code", failure.code.wireValue)
-                put("message", failure.message.take(512))
-              },
-            )
-          }
-        },
+        platformCallPayload(call, error, duration),
       )
-      if (error?.code != PlatformErrorCode.CANCELLED) {
-        val actions = (if (error == null) action.onSuccess else action.onError).orEmpty()
-        if (actions.isNotEmpty() && current.active && requireValid(actions)) {
-          val previousEvent = eventData
-          eventData = call.eventContext
-          try {
-            run(actions, plannedWrites(actions, current.spec))
-          } catch (refused: IllegalArgumentException) {
-            warn("Refused platform follow-up: ${refused.message}")
-          } finally {
-            eventData = previousEvent
-          }
-        }
-      }
+      runPlatformFollowUp(call, error)
     } finally {
       interactionRevision = null
       if (current.active) storage?.record(current.spec)

@@ -10,6 +10,7 @@ import kotlinx.serialization.json.*
 /**
  * Runtime-owned subscriptions and calls; all mutations and callbacks execute under the host lock.
  */
+@Suppress("LongParameterList") // Every collaborator is a seam the runtime and tests inject.
 internal class PrototypePlatformDispatcher(
   private val registry: PrototypePlatformRegistry,
   private val scope: CoroutineScope,
@@ -67,60 +68,13 @@ internal class PrototypePlatformDispatcher(
   ) {
     val call = Pending(newId(), action, clock(), eventContext)
     if (closed) return
-    if (invalid != null || args == null) {
-      complete(call, failure(PlatformErrorCode.INVALID_ARGS, invalid ?: "Invalid arguments"))
-      return
-    }
-    val invalidArgs = PrototypePlatformCalls.argumentsError(action.call, args)
-    if (invalidArgs != null) {
-      complete(call, failure(PlatformErrorCode.INVALID_ARGS, invalidArgs.message))
-      return
-    }
-    if (!limiter.tryAcquire()) {
-      complete(
-        call,
-        failure(
-          PlatformErrorCode.TOO_MANY_IN_FLIGHT,
-          "At most $MAX_IN_FLIGHT platform calls can be in flight",
-        ),
-      )
+    val refusal = refusal(action, args, invalid)
+    if (refusal != null) {
+      complete(call, refusal)
       return
     }
     call.job =
-      scope.launch(start = CoroutineStart.LAZY) {
-        val result =
-          try {
-            withTimeoutOrNull((action.timeoutMs ?: DEFAULT_TIMEOUT_MS).toLong()) {
-              val module =
-                registry.module(action.call)
-                  ?: return@withTimeoutOrNull failure(
-                    PlatformErrorCode.UNSUPPORTED,
-                    "No module registered for ${action.call}",
-                  )
-              when (val available = module.availability()) {
-                is PlatformAvailability.Unavailable ->
-                  failure(PlatformErrorCode.UNAVAILABLE, available.reason)
-                is PlatformAvailability.NeedsPermission ->
-                  failure(
-                    PlatformErrorCode.PERMISSION_DENIED,
-                    "Missing permissions: ${available.names.sorted().joinToString()}",
-                  )
-                PlatformAvailability.Ready -> module.call(PlatformCall(call.id, action.call, args))
-              }
-            } ?: failure(PlatformErrorCode.TIMEOUT, "Platform call timed out")
-          } catch (cancelled: CancellationException) {
-            withContext(NonCancellable) {
-              exclusively {
-                settle(call, failure(PlatformErrorCode.CANCELLED, "Platform call cancelled"))
-              }
-            }
-            throw cancelled
-          } catch (error: Exception) {
-            warn("Platform call ${action.call} failed: ${error.message}")
-            failure(PlatformErrorCode.PLATFORM_ERROR, error.message ?: "Platform call failed")
-          }
-        exclusively { settle(call, result) }
-      }
+      scope.launch(start = CoroutineStart.LAZY) { runCall(call, action, args ?: return@launch) }
     val registered =
       synchronized(pending) {
         if (closed) false
@@ -133,6 +87,65 @@ internal class PrototypePlatformDispatcher(
     else {
       limiter.release()
       call.job.cancel()
+    }
+  }
+
+  /** Why a call cannot start, or null once it holds a limiter slot. */
+  private fun refusal(
+    action: PrototypePlatformAction,
+    args: JsonObject?,
+    invalid: String?,
+  ): PlatformCallResult? {
+    if (invalid != null || args == null) {
+      return failure(PlatformErrorCode.INVALID_ARGS, invalid ?: "Invalid arguments")
+    }
+    val invalidArgs = PrototypePlatformCalls.argumentsError(action.call, args)
+    if (invalidArgs != null) return failure(PlatformErrorCode.INVALID_ARGS, invalidArgs.message)
+    if (limiter.tryAcquire()) return null
+    return failure(
+      PlatformErrorCode.TOO_MANY_IN_FLIGHT,
+      "At most $MAX_IN_FLIGHT platform calls can be in flight",
+    )
+  }
+
+  private suspend fun runCall(call: Pending, action: PrototypePlatformAction, args: JsonObject) {
+    val result =
+      try {
+        withTimeoutOrNull((action.timeoutMs ?: DEFAULT_TIMEOUT_MS).toLong()) {
+          invoke(call, action, args)
+        } ?: failure(PlatformErrorCode.TIMEOUT, "Platform call timed out")
+      } catch (cancelled: CancellationException) {
+        withContext(NonCancellable) {
+          exclusively {
+            settle(call, failure(PlatformErrorCode.CANCELLED, "Platform call cancelled"))
+          }
+        }
+        throw cancelled
+      } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+        // A module may throw anything; the call reports it as a platform error.
+        warn("Platform call ${action.call} failed: ${error.message}")
+        failure(PlatformErrorCode.PLATFORM_ERROR, error.message ?: "Platform call failed")
+      }
+    exclusively { settle(call, result) }
+  }
+
+  private suspend fun invoke(
+    call: Pending,
+    action: PrototypePlatformAction,
+    args: JsonObject,
+  ): PlatformCallResult {
+    val module =
+      registry.module(action.call)
+        ?: return failure(PlatformErrorCode.UNSUPPORTED, "No module registered for ${action.call}")
+    return when (val available = module.availability()) {
+      is PlatformAvailability.Unavailable ->
+        failure(PlatformErrorCode.UNAVAILABLE, available.reason)
+      is PlatformAvailability.NeedsPermission ->
+        failure(
+          PlatformErrorCode.PERMISSION_DENIED,
+          "Missing permissions: ${available.names.sorted().joinToString()}",
+        )
+      PlatformAvailability.Ready -> module.call(PlatformCall(call.id, action.call, args))
     }
   }
 

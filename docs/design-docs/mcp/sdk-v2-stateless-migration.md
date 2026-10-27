@@ -370,3 +370,7 @@ superseded by the decisions above. What still explains the design:
 - A serverless/edge redeployment: AutoMobile binds to local ADB/simctl and is
   intentionally stateful on its host; the stateless _protocol_ is served over a
   factory, but device state stays on the daemon.
+
+The trace id appears only in logger file/stream records written while the request's own async
+context is active; MCP logging notifications, sink-stall records and direct `console` output do not
+carry it, and the JSON format embeds it in `message` rather than as its own field (follow-up).

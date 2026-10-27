@@ -141,6 +141,10 @@ class AndroidSoundPlayer(private val gateway: AudioGateway) : SoundPlayer {
 
 /** The real vibrator. Vibrations from a service use the touch usage so they are not dropped. */
 class SystemVibratorGateway(private val context: Context) : VibratorGateway {
+  private companion object {
+    const val FALLBACK_PULSE_MS = 20L
+  }
+
   private val vibrator: Vibrator? by lazy {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       context.getSystemService(VibratorManager::class.java)?.defaultVibrator
@@ -158,13 +162,23 @@ class SystemVibratorGateway(private val context: Context) : VibratorGateway {
         0
 
   override fun vibrate(plan: HapticPlan) {
+    val target = vibrator ?: return
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+      vibrateLegacy(target, plan)
+      return
+    }
     val effect =
       when (plan) {
-        is HapticPlan.Predefined -> VibrationEffect.createPredefined(plan.effectId)
+        is HapticPlan.Predefined ->
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            VibrationEffect.createPredefined(plan.effectId)
+          } else {
+            // The planner only picks a predefined effect on API 29+; a short pulse is the floor.
+            VibrationEffect.createOneShot(FALLBACK_PULSE_MS, VibrationEffect.DEFAULT_AMPLITUDE)
+          }
         is HapticPlan.OneShot -> VibrationEffect.createOneShot(plan.durationMs, plan.amplitude)
         is HapticPlan.Waveform -> VibrationEffect.createWaveform(plan.timings, plan.amplitudes, -1)
       }
-    val target = vibrator ?: return
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       target.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_TOUCH))
     } else {
@@ -173,6 +187,16 @@ class SystemVibratorGateway(private val context: Context) : VibratorGateway {
         effect,
         AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION).build(),
       )
+    }
+  }
+
+  /** API 24-25 has no `VibrationEffect`: durations only, amplitudes are dropped. */
+  @Suppress("DEPRECATION")
+  private fun vibrateLegacy(target: Vibrator, plan: HapticPlan) {
+    when (plan) {
+      is HapticPlan.Predefined -> target.vibrate(FALLBACK_PULSE_MS)
+      is HapticPlan.OneShot -> target.vibrate(plan.durationMs)
+      is HapticPlan.Waveform -> target.vibrate(plan.timings, -1)
     }
   }
 }

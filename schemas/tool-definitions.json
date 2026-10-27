@@ -19170,7 +19170,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "style.shadows, style.cornerStyle, style.border.gradient, scroll.fadeEdges and image.filter require prototype_style_polish_v2. Show (always a full spec, inline as spec or from a local JSON file as specPath), patch (id and ops), dismiss (id or all:true), status (host-local, no device request), screenMap (host-only: spec or specPath in, {screenMap:{nodes,edges},mermaid} out; stack screens, pager pages, sheets and dialogs with the push/replace/pop/popToRoot/setPage actions between them), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, patch, dismiss, status, inspect, awaitEvent; sizes are points). save (spec/assets/label/icon), listSaved and deleteSaved (id) need prototype_saved_v1 on Android, or an iOS simulator (no agent needed) using the verified viewer template (or AUTOMOBILE_IOS_PROTOTYPE_VIEWER) for save; icon is an asset uploaded in the same call. On Android, save with pin:true then asks the launcher to pin a shortcut (pinned: pinned|pending|unsupported; pending until the launcher dialog is accepted (autoConfirm taps it), declining sends nothing). After a pin or shortcut update the host looks for the shortcut on the home screen and, if it is missing, restarts the default launcher once (launcherRestarted, shortcutVisible); restartLauncher:false opts out. deleteSaved disables the shortcut, and removeIcon:true clears it with adb only when no saved prototype remains. iOS installs an app icon on the home screen and ignores pin. iOS listSaved ids are bundle ids accepted by deleteSaved and omit savedAt. On Android or an iOS simulator with the ProtoViewer app installed, save without pin or icon imports the spec and its assets into the ProtoViewer library instead of the platform save path, and returns viewer {app, libraryId, label} plus a warning: ProtoViewer marks the entry imported, keeps its requests off until the user allows network in ProtoViewer, and does not attach it to this host (no awaitEvent, patch or inspect). If ProtoViewer is absent, older than this route, or its inbox is unusable, save keeps the platform save path. Each such save is a new library entry that listSaved and deleteSaved do not see. open with id set to that libraryId launches it on Android or an iOS simulator; open needs ProtoViewer installed. A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. patch changes the prototype already on screen without re-sending the spec: {action:\"patch\",id,ops:[...]} with ops add/replace/remove/test on /data (content, agent-owned) or /state/<key> (needs baseRevision; the device refuses with conflict if the user changed that key since), and replaceNode {id,node} for one node by id; use show for a new screen or a window, theme or root change. patch needs a device advertising prototype_patch_v1 and is refused otherwise: use show. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for severalBuffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. simulate with id and advanceTimeMs (integer 1..3600000) advances prototype timers without waiting and returns fired; it requires prototype_timers_v1. startTimer {id,afterMs,everyMs?,maxRuns?,actions} and cancelTimer {id} require that capability; inspect reports timers {id,nextFireInMs,runs}. Nodes: box/row/column/flow/grid/carousel, text/image/icon/spacer/textField/searchBar, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/chart/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/stack/tabBar/bottomNav/bottomSheet/tooltip/drawer; actions: emit/setPage/push/pop/popToRoot/replace/setState/toggle/increment/decrement/dismiss/setData/appendData/removeData/request. Stack {type:\"stack\",id,start,screens} needs prototype_stack_v1; only its top screen renders, and status/inspect report stacks {id:{path,depth}}. screen_changed has name = stack id and payload {screen,depth}. Reuse: a top-level components:{name:{root}} map placed with {type:\"use\",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. A successful show or patch also returns accessibilityFindings, an advisory host-side lint (unlabeled controls, images and text fields, low text contrast in light and dark, tap targets under 48dp) with spec paths; it never refuses a show. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer \"prototype\" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in the show result and per prototype in inspect; deviceDark (the device's own setting) appears only in those device answers. The host-local status reports mode and source only (kept current by appearance_changed events, which carry just mode and source), because the device can flip while a pinned mode stays put and then no event arrives; call inspect for the current deviceDark. It sends one appearance_changed event (match it with awaitEvent kind:\"appearance_changed\", not eventName: its name is null; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. If an appearance_changed event arrives while a show is in flight the host cannot order the two, so that status entry has no appearance until a later event or inspect states it. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. row/listItem swipeActions {start?,end?,fullSwipe?} (1-3 {label,icon?,role?,color?,onTap} per side; not inside a horizontal pager or carousel) require prototype_swipe_actions_v1; revealed buttons are tagged <rowTag>.swipe.<index>. Flow/grid require prototype_flow_grid_v1; grid is non-lazy and never scrolls itself (wrap it in scroll). scroll.refresh {stateKey,onRefresh} (pull-to-refresh on a vertical scroll; stateKey is a boolean that shows the indicator) requires prototype_refresh_v1. carousel {itemWidth,variant?,itemSpacing?,children} (horizontal snapping row) and pager indicator \"dots\" require prototype_carousel_v1. Per-mode {light, dark} forms need prototype_theme_modes_v1. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. setData {path,value}, appendData {path,value} and removeData {path} (path is /data/<pointer>, with a whole {index} segment inside a repeat; value is {value: json}, {state: key}, {data: pointer}, or {item: field}/{index: true} in a repeat) change /data from a tap and require prototype_data_actions_v1. Each device write is a change event (awaitEvent kind:\"change\") with name = the written /data path and payload {op, value?, revision}; once the device has written a prototype's data, a patch with /data ops needs baseRevision (the latest revision seen) and is refused with conflict {revision, state, data} if a newer write touched an overlapping path. request {url, method?, headers?, query?, body?, into?, statusKey?, via?, timeoutMs?, onSuccess?, onError?} calls any absolute http(s) URL from a tap (no host allowlist; url takes {key} and {data:/pointer} placeholders; headers/query values and body are literals or {state}/{data}/{value}/{item} bindings) and needs prototype_network_v1, plus prototype_network_device_v1 for via \"device\" (default via \"host\": the host makes the call). A 2xx body (JSON, else a string) is written to into (a /data path naming an object member) like setData, and {status, headers, durationMs, error?} to into + \"__meta\" (/data/feed -> /data/feed__meta); a non-2xx status or failure leaves into alone and sets meta.error. statusKey names a declared string state key that moves loading -> success|error, for visibleWhen; onSuccess/onError are action lists (nest up to 4 deep). A newer request to the same into cancels the older. Limits: timeoutMs max 30000 (default 10000), response 262144 bytes, 4 in flight per device. Each finished request is an emit event named prototype_request (payload {requestId, method, url, via, into?, outcome, status?, durationMs, error?}; await it with kind emit, eventName prototype_request). Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats. textField options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) require prototype_text_field_options_v1; a device without it refuses the show. textField trailingIcon {icon,label,onTap?}, imeAction (done|next|search|send|go) and onSubmit require prototype_text_field_actions_v1 (not allowed with multiline). textField leadingIcon (icon name) requires prototype_text_field_leading_icon_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. On Android, show replaceOthers:false retains other windows up to a limit of 4 (prototype_multi_surface_v1); a fifth is refused listing the shown ids. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>. Read automobile:prototype/native?id=<id> for the spec, assets and a Compose or SwiftUI host file that embed it in an app. tooltip requires prototype_tooltip_v1; drawer requires prototype_drawer_v1. searchBar requires prototype_search_bar_v1 for show and patch. {data, empty} conditions and style shimmer require prototype_loading_states_v1. animate, style scale/rotation, transition slideStart|slideEnd|scale and image zoomable require prototype_motion_v2. transition as {type, delayMs?} (0-600 ms) or blurReplace, and box/row/column stagger {ms 0-100, order? forward|reverse|center} (every child's total delay at most 600 ms), require prototype_choreography_v1. motion: \"reduced\" requires prototype_reduced_motion_v1; iOS Reduce Motion selects reduced, Android animator/transition scale 0 selects off. sharedKey requires prototype_shared_element_v1; visibility morphs require visibleWhen and exactly two non-nested nodes per key, while a zoom source key names exactly one node without visibleWhen. At most 16 keys, and no repeat templates. Full motion morphs shared bounds, reduced fades, none snaps. Stack transition platform|slide|fade|none (default platform) and optional push/replace transition overrides require prototype_stack_transitions_v1; sharedAxisX|sharedAxisY|fadeThrough|zoom and push/replace source require prototype_stack_patterns_v1. Zoom needs source naming exactly one sharedKey node; Android substitutes fadeThrough and iOS substitutes platform push; pop/popToRoot take no override. Stack transition controls screen navigation, not its own visibleWhen. chart (line/area/bar/ring over /data arrays) requires prototype_chart_v1; observe reports its summary. A root-level storage {version, keys:[\"state:<key>\",\"data:<pointer>\"]} block (up to 64 unique keys: each state key declared in state, each data pointer a member of /data, no overlapping pointers, at most 262144 stored bytes) makes the device save those values per prototype id after every write (user edit, device data action, request response) and requires prototype_storage_v1. Precedence on the next show of the same id: stored values replace the spec's for the listed keys; a changed storage.version discards them all; a stored key no longer listed (or a show without storage) is dropped; a stored value that no longer fits (state type changed, data of another JSON kind, unwritable pointer) is dropped and the spec's value stands. A host patch to a stored key wins under the usual baseRevision rules and the device then stores it. inspect reports storage {version, keys:[{key,bytes}], totalBytes, skippedKeys?} per prototype (absent if the device does not report it); {action:\"clearStorage\",id} wipes an id's stored values (result cleared = keys removed) and is refused without prototype_storage_v1; deleteSaved also clears them.",
+    "description": "style.shadows, style.cornerStyle, style.border.gradient, scroll.fadeEdges and image.filter require prototype_style_polish_v2. testSessionBegin (id, goal?, cohort?), testSessionEnd (id) and testSessionReport (id or testSessionId) record and report host-local user-testing sessions without a device request. Reports include screen funnels, time, validation failures and dead taps; text values are never stored. Show with window.deadTaps:true (prototype_dead_tap_v1) to enable dead taps. Show (always a full spec, inline as spec or from a local JSON file as specPath), patch (id and ops), dismiss (id or all:true), status (host-local, no device request), screenMap (host-only: spec or specPath in, {screenMap:{nodes,edges},mermaid} out; stack screens, pager pages, sheets and dialogs with the push/replace/pop/popToRoot/setPage actions between them), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, patch, dismiss, status, inspect, awaitEvent; sizes are points). save (spec/assets/label/icon), listSaved and deleteSaved (id) need prototype_saved_v1 on Android, or an iOS simulator (no agent needed) using the verified viewer template (or AUTOMOBILE_IOS_PROTOTYPE_VIEWER) for save; icon is an asset uploaded in the same call. On Android, save with pin:true then asks the launcher to pin a shortcut (pinned: pinned|pending|unsupported; pending until the launcher dialog is accepted (autoConfirm taps it), declining sends nothing). After a pin or shortcut update the host looks for the shortcut on the home screen and, if it is missing, restarts the default launcher once (launcherRestarted, shortcutVisible); restartLauncher:false opts out. deleteSaved disables the shortcut, and removeIcon:true clears it with adb only when no saved prototype remains. iOS installs an app icon on the home screen and ignores pin. iOS listSaved ids are bundle ids accepted by deleteSaved and omit savedAt. On Android or an iOS simulator with the ProtoViewer app installed, save without pin or icon imports the spec and its assets into the ProtoViewer library instead of the platform save path, and returns viewer {app, libraryId, label} plus a warning: ProtoViewer marks the entry imported, keeps its requests off until the user allows network in ProtoViewer, and does not attach it to this host (no awaitEvent, patch or inspect). If ProtoViewer is absent, older than this route, or its inbox is unusable, save keeps the platform save path. Each such save is a new library entry that listSaved and deleteSaved do not see. open with id set to that libraryId launches it on Android or an iOS simulator; open needs ProtoViewer installed. A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. patch changes the prototype already on screen without re-sending the spec: {action:\"patch\",id,ops:[...]} with ops add/replace/remove/test on /data (content, agent-owned) or /state/<key> (needs baseRevision; the device refuses with conflict if the user changed that key since), and replaceNode {id,node} for one node by id; use show for a new screen or a window, theme or root change. patch needs a device advertising prototype_patch_v1 and is refused otherwise: use show. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for severalBuffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. simulate with id and advanceTimeMs (integer 1..3600000) advances prototype timers without waiting and returns fired; it requires prototype_timers_v1. startTimer {id,afterMs,everyMs?,maxRuns?,actions} and cancelTimer {id} require that capability; inspect reports timers {id,nextFireInMs,runs}. Nodes: box/row/column/flow/grid/carousel, text/image/icon/spacer/textField/searchBar, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/chart/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/stack/tabBar/bottomNav/bottomSheet/tooltip/drawer; actions: emit/setPage/push/pop/popToRoot/replace/setState/toggle/increment/decrement/dismiss/setData/appendData/prependData/removeData/request. Stack {type:\"stack\",id,start,screens} needs prototype_stack_v1; only its top screen renders, and status/inspect report stacks {id:{path,depth}}. screen_changed has name = stack id and payload {screen,depth}. Reuse: a top-level components:{name:{root}} map placed with {type:\"use\",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. window.backdrop {material ultraThin|thin|regular|thick|glass, blur? 0-150 dp, tint? one hex or role} blurs what is behind the window and needs prototype_backdrop_v1 (refused without it); lastResult.backdrop is blur or fallback (a tonal fill where blur is unavailable). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}, or an Android-only .agsl source referenced from style.shader as {asset,uniforms?}; AGSL needs AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1 and prototype_custom_shaders_v1 and is refused by iOS and ProtoViewer bundles) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. A successful show or patch also returns accessibilityFindings, an advisory host-side lint (unlabeled controls, images and text fields, low text contrast in light and dark, tap targets under 48dp) with spec paths; it never refuses a show. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer \"prototype\" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in the show result and per prototype in inspect; deviceDark (the device's own setting) appears only in those device answers. The host-local status reports mode and source only (kept current by appearance_changed events, which carry just mode and source), because the device can flip while a pinned mode stays put and then no event arrives; call inspect for the current deviceDark. It sends one appearance_changed event (match it with awaitEvent kind:\"appearance_changed\", not eventName: its name is null; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. If an appearance_changed event arrives while a show is in flight the host cannot order the two, so that status entry has no appearance until a later event or inspect states it. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. row/listItem swipeActions {start?,end?,fullSwipe?} (1-3 {label,icon?,role?,color?,onTap} per side; not inside a horizontal pager or carousel) require prototype_swipe_actions_v1; revealed buttons are tagged <rowTag>.swipe.<index>. Flow/grid require prototype_flow_grid_v1; grid is non-lazy and never scrolls itself (wrap it in scroll). scroll.refresh {stateKey,onRefresh} (pull-to-refresh on a vertical scroll; stateKey is a boolean that shows the indicator) requires prototype_refresh_v1. carousel {itemWidth,variant?,itemSpacing?,children} (horizontal snapping row) and pager indicator \"dots\" require prototype_carousel_v1. Per-mode {light, dark} forms need prototype_theme_modes_v1. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. setData {path,value}, appendData {path,value}, prependData {path,value} and removeData {path} (path is /data/<pointer>, with a whole {index} segment inside a repeat; value is {value: json}, {state: key}, {data: pointer}, or {item: field}/{index: true} in a repeat) change /data from a tap and require prototype_data_actions_v1. Each device write is a change event (awaitEvent kind:\"change\") with name = the written /data path and payload {op, value?, revision}; once the device has written a prototype's data, a patch with /data ops needs baseRevision (the latest revision seen) and is refused with conflict {revision, state, data} if a newer write touched an overlapping path. request {url, method?, headers?, query?, body?, into?, statusKey?, via?, timeoutMs?, onSuccess?, onError?} calls any absolute http(s) URL from a tap (no host allowlist; url takes {key} and {data:/pointer} placeholders; headers/query values and body are literals or {state}/{data}/{value}/{item} bindings) and needs prototype_network_v1, plus prototype_network_device_v1 for via \"device\" (default via \"host\": the host makes the call). A 2xx body (JSON, else a string) is written to into (a /data path naming an object member) like setData, and {status, headers, durationMs, error?} to into + \"__meta\" (/data/feed -> /data/feed__meta); a non-2xx status or failure leaves into alone and sets meta.error. statusKey names a declared string state key that moves loading -> success|error, for visibleWhen; onSuccess/onError are action lists (nest up to 4 deep). A newer request to the same into cancels the older. Limits: timeoutMs max 30000 (default 10000), response 262144 bytes, 4 in flight per device. Each finished request is an emit event named prototype_request (payload {requestId, method, url, via, into?, outcome, status?, durationMs, error?}; await it with kind emit, eventName prototype_request). Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats. textField options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) require prototype_text_field_options_v1; a device without it refuses the show. textField trailingIcon {icon,label,onTap?}, imeAction (done|next|search|send|go) and onSubmit require prototype_text_field_actions_v1 (not allowed with multiline). textField leadingIcon (icon name) requires prototype_text_field_leading_icon_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. On Android, show replaceOthers:false retains other windows up to a limit of 4 (prototype_multi_surface_v1); a fifth is refused listing the shown ids. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>. Read automobile:prototype/native?id=<id> for the spec, assets and a Compose or SwiftUI host file that embed it in an app. tooltip requires prototype_tooltip_v1; drawer requires prototype_drawer_v1. searchBar requires prototype_search_bar_v1 for show and patch. State-key contains/startsWith/lengthGt/lengthLt conditions and textField errorWhen/errorText require prototype_string_conditions_v1. errorWhen forces error styling without changing checks-based validity. {data, empty} conditions and style shimmer require prototype_loading_states_v1. animate, style scale/rotation, transition slideStart|slideEnd|scale and image zoomable require prototype_motion_v2. transition as {type, delayMs?} (0-600 ms) or blurReplace, and box/row/column stagger {ms 0-100, order? forward|reverse|center} (every child's total delay at most 600 ms), require prototype_choreography_v1. String tables and {t:key|count} require prototype_strings_v1; show locale overrides device locales only for strings. Node semantics {heading,liveRegion,group,label,hint,traits} requires prototype_semantics_v1. list {repeat:{items:{path},as,key},children:[row],header?,footer?,axis?,spacing?,contentPadding?,onEndReached?,endThreshold?,refresh?,maxItems?} is a lazy scrolling collection requiring prototype_lazy_list_v1 and prototype_data_model_v1. Its row template counts once, supports up to 500 keyed data rows, and refresh needs a vertical list. prependData {path,value} inserts one row at the start and requires prototype_lazy_list_v1; maxItems trims from the end. request.append {from,to} extends an existing data array from a response array; maxItems trims oldest rows atomically. motion: \"reduced\" requires prototype_reduced_motion_v1; iOS Reduce Motion selects reduced, Android animator/transition scale 0 selects off. sharedKey requires prototype_shared_element_v1; visibility morphs require visibleWhen and exactly two non-nested nodes per key, while a zoom source key names exactly one node without visibleWhen. At most 16 keys, and no repeat templates. Full motion morphs shared bounds, reduced fades, none snaps. Stack transition platform|slide|fade|none (default platform) and optional push/replace transition overrides require prototype_stack_transitions_v1; sharedAxisX|sharedAxisY|fadeThrough|zoom and push/replace source require prototype_stack_patterns_v1. Zoom needs source naming exactly one sharedKey node; Android substitutes fadeThrough and iOS substitutes platform push; pop/popToRoot take no override. Stack transition controls screen navigation, not its own visibleWhen. chart (line/area/bar/ring over /data arrays) requires prototype_chart_v1; observe reports its summary. A root-level storage {version, keys:[\"state:<key>\",\"data:<pointer>\"]} block (up to 64 unique keys: each state key declared in state, each data pointer a member of /data, no overlapping pointers, at most 262144 stored bytes) makes the device save those values per prototype id after every write (user edit, device data action, request response) and requires prototype_storage_v1. Precedence on the next show of the same id: stored values replace the spec's for the listed keys; a changed storage.version discards them all; a stored key no longer listed (or a show without storage) is dropped; a stored value that no longer fits (state type changed, data of another JSON kind, unwritable pointer) is dropped and the spec's value stands. A host patch to a stored key wins under the usual baseRevision rules and the device then stores it. inspect reports storage {version, keys:[{key,bytes}], totalBytes, skippedKeys?} per prototype (absent if the device does not report it); {action:\"clearStorage\",id} wipes an id's stored values (result cleared = keys removed) and is refused without prototype_storage_v1; deleteSaved also clears them.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -19190,11 +19190,32 @@
             "open",
             "clearStorage",
             "simulate",
-            "screenMap"
+            "screenMap",
+            "testSessionBegin",
+            "testSessionEnd",
+            "testSessionReport"
           ]
         },
+        "goal": {
+          "description": "testSessionBegin only: screen label such as checkout/done; reaching it completes the session",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "cohort": {
+          "description": "testSessionBegin only: free label echoed in the report; no cross-session aggregation",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "testSessionId": {
+          "description": "testSessionReport: stored session id, instead of the latest session for id",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
         "spec": {
-          "description": "style.shadows, style.cornerStyle, style.border.gradient, scroll.fadeEdges and image.filter require prototype_style_polish_v2. Full prototype spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. show always renders the whole spec; spec.state is authoritative. Use show for a new screen or a window, theme or root change; patch for content (/data), state (/state) or one node by id (replaceNode), requiring prototype_patch_v1. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. searchBar requires prototype_search_bar_v1 for show and patch. {data: pointer, empty: true|false} conditions (missing, [], {} or \"\" is empty) and style shimmer on box/row/column/card require prototype_loading_states_v1. Node animate {durationMs?,easing?}, style scale (0-4)/rotation (degrees), transition slideStart|slideEnd|scale and image zoomable {maxScale 1-8} (not with onDoubleTap) require prototype_motion_v2. transition as {type, delayMs?} (0-600 ms) or blurReplace, and box/row/column stagger {ms 0-100, order? forward|reverse|center} (every child's total delay at most 600 ms), require prototype_choreography_v1. motion: \"reduced\" requires prototype_reduced_motion_v1; iOS Reduce Motion selects reduced, Android animator/transition scale 0 selects off. sharedKey requires prototype_shared_element_v1; visibility morphs require visibleWhen and exactly two non-nested nodes per key, while a zoom source key names exactly one node without visibleWhen. At most 16 keys, and no repeat templates. Full motion morphs shared bounds, reduced fades, none snaps. Stack transition platform|slide|fade|none (default platform) and optional push/replace transition overrides require prototype_stack_transitions_v1; sharedAxisX|sharedAxisY|fadeThrough|zoom and push/replace source require prototype_stack_patterns_v1. Zoom needs source naming exactly one sharedKey node; Android substitutes fadeThrough and iOS substitutes platform push; pop/popToRoot take no override. Stack transition controls screen navigation, not its own visibleWhen. chart {variant line|area|bar|ring, series:[{path,x?,y,label,color?}] (1-4, each a /data array of objects with a numeric y), yRange?, xLabels?, goal?} requires prototype_chart_v1. Text nodes take exactly one of text or spans (1–64 strict {text,style?,onTap?} entries with nonempty text and inline typography/color/background only); spans require prototype_rich_text_v1, resolved span texts concatenate without separators for observe, and span taps run actions without opening URLs. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats.",
+          "description": "style.shadows, style.cornerStyle, style.border.gradient, scroll.fadeEdges and image.filter require prototype_style_polish_v2. Full prototype spec: id, window, optional theme (design material|platform, default platform; explicit platform requires prototype_design_platform_v1; mode light|dark|system, colors.seed hex or colors.source \"device\", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. window.backdrop {material ultraThin|thin|regular|thick|glass, blur? 0-150 dp, tint? one hex or role} blurs what is behind the window and needs prototype_backdrop_v1 (refused without it); lastResult.backdrop is blur or fallback (a tonal fill where blur is unavailable). show always renders the whole spec; spec.state is authoritative. Use show for a new screen or a window, theme or root change; patch for content (/data), state (/state) or one node by id (replaceNode), requiring prototype_patch_v1. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. searchBar requires prototype_search_bar_v1 for show and patch. State-key contains/startsWith/lengthGt/lengthLt conditions and textField errorWhen/errorText require prototype_string_conditions_v1. errorWhen forces error styling without changing checks-based validity. {data: pointer, empty: true|false} conditions (missing, [], {} or \"\" is empty) and style shimmer on box/row/column/card require prototype_loading_states_v1. Node animate {durationMs?,easing?}, style scale (0-4)/rotation (degrees), transition slideStart|slideEnd|scale and image zoomable {maxScale 1-8} (not with onDoubleTap) require prototype_motion_v2. transition as {type, delayMs?} (0-600 ms) or blurReplace, and box/row/column stagger {ms 0-100, order? forward|reverse|center} (every child's total delay at most 600 ms), require prototype_choreography_v1. list {repeat:{items:{path},as,key},children:[row],header?,footer?,axis?,spacing?,contentPadding?,onEndReached?,endThreshold?,refresh?,maxItems?} is a lazy scrolling collection requiring prototype_lazy_list_v1 and prototype_data_model_v1. Its row template counts once, supports up to 2000 keyed data rows, and refresh needs a vertical list. prependData {path,value} inserts one row at the start and requires prototype_lazy_list_v1; maxItems trims from the end. request.append {from,to} extends an existing data array from a response array; maxItems trims oldest rows atomically. String tables and {t:key|count} require prototype_strings_v1; show locale overrides device locales only for strings. Node semantics {heading,liveRegion,group,label,hint,traits} requires prototype_semantics_v1. motion: \"reduced\" requires prototype_reduced_motion_v1; iOS Reduce Motion selects reduced, Android animator/transition scale 0 selects off. sharedKey requires prototype_shared_element_v1; visibility morphs require visibleWhen and exactly two non-nested nodes per key, while a zoom source key names exactly one node without visibleWhen. At most 16 keys, and no repeat templates. Full motion morphs shared bounds, reduced fades, none snaps. Stack transition platform|slide|fade|none (default platform) and optional push/replace transition overrides require prototype_stack_transitions_v1; sharedAxisX|sharedAxisY|fadeThrough|zoom and push/replace source require prototype_stack_patterns_v1. Zoom needs source naming exactly one sharedKey node; Android substitutes fadeThrough and iOS substitutes platform push; pop/popToRoot take no override. Stack transition controls screen navigation, not its own visibleWhen. chart {variant line|area|bar|ring, series:[{path,x?,y,label,color?}] (1-4, each a /data array of objects with a numeric y), yRange?, xLabels?, goal?} requires prototype_chart_v1. Text nodes take exactly one of text or spans (1–64 strict {text,style?,onTap?} entries with nonempty text and inline typography/color/background only); spans require prototype_rich_text_v1, resolved span texts concatenate without separators for observe, and span taps run actions without opening URLs. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats.",
           "type": "object",
           "properties": {
             "id": {
@@ -19204,6 +19225,67 @@
             "window": {
               "type": "object",
               "properties": {
+                "ios": {
+                  "type": "object",
+                  "properties": {
+                    "buttonStyle": {
+                      "type": "string",
+                      "enum": ["glass", "glassProminent"]
+                    },
+                    "tab": {
+                      "type": "object",
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": ["search"]
+                        }
+                      },
+                      "required": ["role"],
+                      "additionalProperties": false
+                    },
+                    "sheet": {
+                      "type": "object",
+                      "properties": {
+                        "sizing": {
+                          "type": "string",
+                          "enum": ["form", "page", "fitted"]
+                        }
+                      },
+                      "required": ["sizing"],
+                      "additionalProperties": false
+                    },
+                    "hover": {
+                      "type": "string",
+                      "enum": ["lift", "highlight"]
+                    },
+                    "navigationTitle": {
+                      "type": "string",
+                      "enum": ["large", "inline"]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "android": {
+                  "type": "object",
+                  "properties": {
+                    "predictiveBack": {
+                      "type": "object",
+                      "properties": {
+                        "style": {
+                          "type": "string",
+                          "enum": ["default", "crossActivity", "none"]
+                        }
+                      },
+                      "required": ["style"],
+                      "additionalProperties": false
+                    },
+                    "indication": {
+                      "type": "string",
+                      "enum": ["ripple", "none"]
+                    }
+                  },
+                  "additionalProperties": false
+                },
                 "placement": {
                   "anyOf": [
                     {
@@ -19388,10 +19470,36 @@
                     }
                   ]
                 },
+                "backdrop": {
+                  "type": "object",
+                  "properties": {
+                    "material": {
+                      "type": "string",
+                      "enum": ["ultraThin", "thin", "regular", "thick", "glass"],
+                      "description": "Frosted material behind the window: ultraThin, thin, regular, thick, or glass (Liquid Glass on iOS 26+; the fallback dim elsewhere)"
+                    },
+                    "blur": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 150,
+                      "description": "Blur radius in dp (points on iOS), 0-150; absent uses the material's own radius"
+                    },
+                    "tint": {
+                      "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/2/properties/light",
+                      "description": "One colour (hex or Material role, not a per-mode pair) laid over the blur, and the solid fallback where blur is unavailable"
+                    }
+                  },
+                  "required": ["material"],
+                  "additionalProperties": false,
+                  "description": "Blur what is behind the window (needs prototype_backdrop_v1). The show result reports backdrop blur or fallback; fallback is a tonal fill (tint at 85% alpha, else the surfaceContainer role at 85%) where blur is unavailable"
+                },
                 "chrome": {
                   "type": "string",
                   "enum": ["none", "bar"],
                   "description": "Fullscreen only: none (default on a device advertising prototype_window_chrome_v1) removes the host dismiss bar; a two-finger long press (about 1 s) reveals a dismiss pill for 5 s. Device persistence defaults to bar. An older device keeps the bar and refuses explicit none; lastResult.chrome reports what it draws"
+                },
+                "deadTaps": {
+                  "type": "boolean"
                 },
                 "opacity": {
                   "type": "integer",
@@ -19416,6 +19524,16 @@
             "theme": {
               "type": "object",
               "properties": {
+                "ios": {
+                  "$ref": "#/properties/spec/properties/window/properties/ios"
+                },
+                "android": {
+                  "$ref": "#/properties/spec/properties/window/properties/android"
+                },
+                "design": {
+                  "type": "string",
+                  "enum": ["material", "platform"]
+                },
                 "mode": {
                   "type": "string",
                   "enum": ["light", "dark", "system"]
@@ -19688,6 +19806,7 @@
               "additionalProperties": false,
               "minProperties": 1
             },
+            "strings": {},
             "data": {},
             "state": {},
             "motion": {
@@ -20086,6 +20205,23 @@
                           "properties": {
                             "type": {
                               "type": "string",
+                              "enum": ["prependData"]
+                            },
+                            "path": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/7/properties/path"
+                            },
+                            "value": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/7/properties/value"
+                            }
+                          },
+                          "required": ["type", "path", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
                               "enum": ["removeData"]
                             },
                             "path": {
@@ -20113,7 +20249,7 @@
                               "maximum": 3600000
                             },
                             "everyMs": {
-                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/10/properties/afterMs"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/11/properties/afterMs"
                             },
                             "maxRuns": {
                               "type": "integer",
@@ -20140,7 +20276,7 @@
                               "enum": ["cancelTimer"]
                             },
                             "id": {
-                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/10/properties/id"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/11/properties/id"
                             }
                           },
                           "required": ["type", "id"],
@@ -20198,19 +20334,34 @@
                             "query": {
                               "type": "object",
                               "additionalProperties": {
-                                "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/12/properties/headers/additionalProperties"
+                                "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/13/properties/headers/additionalProperties"
                               },
                               "propertyNames": {
                                 "minLength": 1
                               }
                             },
                             "body": {
-                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/12/properties/headers/additionalProperties/anyOf/1"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/13/properties/headers/additionalProperties/anyOf/1"
                             },
                             "into": {
                               "type": "string",
                               "minLength": 1,
                               "maxLength": 261
+                            },
+                            "append": {
+                              "type": "object",
+                              "properties": {
+                                "from": {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                },
+                                "to": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 261
+                                }
+                              },
+                              "required": ["from", "to"],
+                              "additionalProperties": false
                             },
                             "statusKey": {
                               "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
@@ -20233,7 +20384,7 @@
                               "maxItems": 32
                             },
                             "onError": {
-                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/12/properties/onSuccess"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/13/properties/onSuccess"
                             }
                           },
                           "required": ["type", "url"],
@@ -20447,7 +20598,7 @@
                               "minLength": 1
                             },
                             "transition": {
-                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/transition"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/15/properties/transition"
                             },
                             "source": {
                               "type": "string",
@@ -20470,11 +20621,314 @@
               "required": ["on"],
               "additionalProperties": false
             },
+            "derive": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "of": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "data": {
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                          }
+                        },
+                        "required": ["data"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "state": {
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                          }
+                        },
+                        "required": ["state"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ]
+                          }
+                        },
+                        "required": ["value"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "format": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "number": {
+                            "type": "object",
+                            "properties": {
+                              "minFraction": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 20
+                              },
+                              "maxFraction": {
+                                "$ref": "#/properties/spec/properties/derive/additionalProperties/properties/format/anyOf/0/properties/number/properties/minFraction"
+                              },
+                              "grouping": {
+                                "type": "boolean"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["number"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "compact": {
+                            "type": "object",
+                            "properties": {
+                              "style": {
+                                "type": "string",
+                                "enum": ["short", "long"]
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["compact"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "currency": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                              }
+                            },
+                            "required": ["code"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["currency"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "percent": {
+                            "type": "object",
+                            "properties": {
+                              "minFraction": {
+                                "$ref": "#/properties/spec/properties/derive/additionalProperties/properties/format/anyOf/0/properties/number/properties/minFraction"
+                              },
+                              "maxFraction": {
+                                "$ref": "#/properties/spec/properties/derive/additionalProperties/properties/format/anyOf/0/properties/number/properties/minFraction"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["percent"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "object",
+                            "properties": {
+                              "style": {
+                                "type": "string",
+                                "enum": ["short", "medium", "long"]
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["date"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "time": {
+                            "type": "object",
+                            "properties": {
+                              "style": {
+                                "$ref": "#/properties/spec/properties/derive/additionalProperties/properties/format/anyOf/4/properties/date/properties/style"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["time"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "relative": {
+                            "type": "object",
+                            "properties": {
+                              "style": {
+                                "type": "string",
+                                "enum": ["narrow", "short", "long"]
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["relative"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "locale": {
+                    "type": "string",
+                    "maxLength": 35,
+                    "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$(?![\\s\\S])"
+                  },
+                  "timeZone": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z_]+([/+-][A-Za-z0-9_+-]+)*$(?![\\s\\S])"
+                  }
+                },
+                "required": ["of", "format"],
+                "additionalProperties": false
+              },
+              "propertyNames": {
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
+              }
+            },
             "root": {
               "anyOf": [
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "type": "object",
+                      "properties": {
+                        "heading": {
+                          "type": "boolean"
+                        },
+                        "group": {
+                          "type": "boolean"
+                        },
+                        "liveRegion": {
+                          "type": "string",
+                          "enum": ["polite", "assertive"]
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "hint": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "traits": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": ["button", "image", "selected"]
+                          },
+                          "minItems": 1,
+                          "maxItems": 3
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "onAppear": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
+                      },
+                      "minItems": 1,
+                      "maxItems": 32
+                    },
+                    "scrollLinked": {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "range": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          },
+                          "minItems": 2,
+                          "maxItems": 2
+                        },
+                        "alpha": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked/properties/range"
+                        },
+                        "scale": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked/properties/range"
+                        },
+                        "offsetY": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked/properties/range"
+                        },
+                        "offsetX": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked/properties/range"
+                        },
+                        "blur": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked/properties/range"
+                        }
+                      },
+                      "required": ["source", "range"],
+                      "additionalProperties": false
+                    },
+                    "scrollTransition": {
+                      "type": "object",
+                      "properties": {
+                        "axis": {
+                          "type": "string",
+                          "enum": ["horizontal", "vertical"]
+                        },
+                        "edge": {
+                          "type": "object",
+                          "properties": {
+                            "scale": {
+                              "type": "number"
+                            },
+                            "alpha": {
+                              "type": "number"
+                            },
+                            "rotation": {
+                              "type": "number"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["axis", "edge"],
+                      "additionalProperties": false
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "type": "integer",
                       "minimum": 1
@@ -20778,6 +21232,33 @@
                         },
                         "shimmer": {
                           "type": "boolean"
+                        },
+                        "shader": {
+                          "type": "object",
+                          "properties": {
+                            "asset": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256
+                            },
+                            "uniforms": {
+                              "allOf": [
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "number",
+                                    "minimum": -1000000,
+                                    "maximum": 1000000
+                                  },
+                                  "propertyNames": {
+                                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$(?![\\s\\S])"
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          "required": ["asset"],
+                          "additionalProperties": false
                         },
                         "scale": {
                           "type": "number",
@@ -21402,6 +21883,66 @@
                                   "key": {
                                     "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
+                                  "contains": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256
+                                  }
+                                },
+                                "required": ["key", "contains"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                  },
+                                  "startsWith": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256
+                                  }
+                                },
+                                "required": ["key", "startsWith"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                  },
+                                  "lengthGt": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 100000
+                                  }
+                                },
+                                "required": ["key", "lengthGt"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                  },
+                                  "lengthLt": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 100000
+                                  }
+                                },
+                                "required": ["key", "lengthLt"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                  },
                                   "gt": {
                                     "type": "number"
                                   }
@@ -21721,6 +22262,52 @@
                         "as": {
                           "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                         },
+                        "derive": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "of": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "item": {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                                      }
+                                    },
+                                    "required": ["item"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "$ref": "#/properties/spec/properties/derive/additionalProperties/properties/of/anyOf/2/properties/value"
+                                      }
+                                    },
+                                    "required": ["value"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "format": {
+                                "$ref": "#/properties/spec/properties/derive/additionalProperties/properties/format"
+                              },
+                              "locale": {
+                                "$ref": "#/properties/spec/properties/derive/additionalProperties/properties/locale"
+                              },
+                              "timeZone": {
+                                "$ref": "#/properties/spec/properties/derive/additionalProperties/properties/timeZone"
+                              }
+                            },
+                            "required": ["of", "format"],
+                            "additionalProperties": false
+                          },
+                          "propertyNames": {
+                            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
+                          }
+                        },
                         "key": {
                           "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                         }
@@ -21762,6 +22349,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21877,6 +22482,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21946,6 +22569,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22010,6 +22651,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22090,6 +22749,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22164,6 +22841,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22299,6 +22994,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22408,6 +23121,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22471,6 +23202,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22521,6 +23270,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22701,6 +23468,14 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "errorWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when"
+                    },
+                    "errorText": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
                     "keyboardType": {
                       "type": "string",
                       "enum": ["text", "number", "decimal", "email", "phone", "url", "password"]
@@ -22765,6 +23540,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22845,6 +23638,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22911,6 +23722,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22977,6 +23806,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23041,6 +23888,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23123,6 +23988,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23200,6 +24083,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23313,6 +24214,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23388,6 +24307,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23452,6 +24389,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23519,6 +24474,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23579,6 +24552,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23643,6 +24634,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23716,6 +24725,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23759,6 +24786,14 @@
                       "type": "string",
                       "enum": ["topAppBar"]
                     },
+                    "onScroll": {
+                      "type": "string",
+                      "enum": ["pinned", "enterAlways", "exitUntilCollapsed"]
+                    },
+                    "scroll": {
+                      "type": "string",
+                      "minLength": 1
+                    },
                     "title": {
                       "type": "string",
                       "minLength": 1
@@ -23785,6 +24820,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23839,6 +24892,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23893,6 +24964,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23953,6 +25042,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24054,6 +25161,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24148,6 +25273,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24237,6 +25380,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24303,6 +25464,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24399,6 +25578,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24464,6 +25661,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24532,6 +25747,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24594,6 +25827,178 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "sharedKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/sharedKey"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "animate": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/animate"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "axis": {
+                      "type": "string",
+                      "enum": ["vertical", "horizontal"],
+                      "default": "vertical"
+                    },
+                    "repeat": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                            }
+                          },
+                          "required": ["path"],
+                          "additionalProperties": false
+                        },
+                        "as": {
+                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                        },
+                        "key": {
+                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                        }
+                      },
+                      "required": ["items", "as", "key"],
+                      "additionalProperties": false
+                    },
+                    "spacing": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "contentPadding": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "onEndReached": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
+                      },
+                      "minItems": 1,
+                      "maxItems": 32
+                    },
+                    "endThreshold": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "refresh": {
+                      "type": "object",
+                      "properties": {
+                        "stateKey": {
+                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                        },
+                        "onRefresh": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
+                          },
+                          "minItems": 1,
+                          "maxItems": 32
+                        }
+                      },
+                      "required": ["stateKey", "onRefresh"],
+                      "additionalProperties": false
+                    },
+                    "maxItems": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2000
+                    },
+                    "children": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/root"
+                      },
+                      "minItems": 1,
+                      "maxItems": 1
+                    },
+                    "header": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/36/properties/children/items"
+                    },
+                    "footer": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/36/properties/children/items"
+                    }
+                  },
+                  "required": ["type", "repeat", "children"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24643,22 +26048,7 @@
                       "default": "vertical"
                     },
                     "refresh": {
-                      "type": "object",
-                      "properties": {
-                        "stateKey": {
-                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
-                        },
-                        "onRefresh": {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
-                          },
-                          "minItems": 1,
-                          "maxItems": 32
-                        }
-                      },
-                      "required": ["stateKey", "onRefresh"],
-                      "additionalProperties": false
+                      "$ref": "#/properties/spec/properties/root/anyOf/36/properties/refresh"
                     },
                     "fadeEdges": {
                       "type": "object",
@@ -24713,6 +26103,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24756,6 +26164,9 @@
                     "type": {
                       "type": "string",
                       "enum": ["pager"]
+                    },
+                    "stateKey": {
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "axis": {
                       "type": "string",
@@ -24814,6 +26225,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24843,7 +26272,7 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/sharedKey"
                     },
                     "transition": {
-                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/transition"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/15/properties/transition"
                     },
                     "animate": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/animate"
@@ -24870,6 +26299,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24913,6 +26360,14 @@
                       "type": "string",
                       "enum": ["tabBar"]
                     },
+                    "onScroll": {
+                      "type": "string",
+                      "enum": ["none", "hide", "minimize"]
+                    },
+                    "scroll": {
+                      "type": "string",
+                      "minLength": 1
+                    },
                     "items": {
                       "type": "array",
                       "items": {
@@ -24952,6 +26407,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24995,10 +26468,18 @@
                       "type": "string",
                       "enum": ["bottomNav"]
                     },
+                    "onScroll": {
+                      "type": "string",
+                      "enum": ["none", "hide", "minimize"]
+                    },
+                    "scroll": {
+                      "type": "string",
+                      "minLength": 1
+                    },
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/39/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/40/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -25017,6 +26498,24 @@
                 {
                   "type": "object",
                   "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -25193,8 +26692,14 @@
           "description": "show only: true (default) replaces other prototypes; false adds this prototype as another window (max 4 on screen; a fifth is refused listing the ones shown). A same-id show replaces only that prototype when false. Needs an Android device advertising prototype_multi_surface_v1; iOS shows one prototype at a time.",
           "type": "boolean"
         },
+        "locale": {
+          "description": "show only: locale override for strings (prototype_strings_v1). Each show states it afresh; omitted uses the device preferred locales and re-resolves live. Forwarded only when spec has strings; missing translations return strings.fallback platformNotes.",
+          "type": "string",
+          "maxLength": 35,
+          "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$"
+        },
         "pseudoLocale": {
-          "description": "show only: true sends a pseudo-localized copy of the spec: every text, label, placeholder, headline, title and span is accented and padded by about 40%, wrapped in [ ], with {bindings} left intact, so truncation and clipping show without a translation. The authored spec, status and patch base are unchanged; patch ops apply to the device copy. Each show states it afresh.",
+          "description": "show only: true sends a pseudo-localized copy of the spec: every string-table value/plural form, semantics label/hint, text, label, placeholder, headline, title and span is accented and padded by about 40%, wrapped in [ ], with {bindings} and {t:key|count} references left intact, so truncation and clipping show without a translation. The authored spec, status and patch base are unchanged; patch ops apply to the device copy. Each show states it afresh.",
           "type": "boolean"
         },
         "reset": {
@@ -25232,7 +26737,7 @@
                 "maxLength": 256
               },
               "path": {
-                "description": "Absolute path of a PNG, JPEG or WebP image, or a TTF/OTF font (up to 2 MiB), the daemon can read",
+                "description": "Absolute path the daemon can read: PNG/JPEG/WebP, a TTF/OTF font (2 MiB), or Android-only AGSL .agsl source (16 KiB; AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1 and prototype_custom_shaders_v1 required)",
                 "type": "string",
                 "minLength": 1
               },
@@ -25413,6 +26918,67 @@
           "description": "screenMap only: the same map as a Mermaid flowchart",
           "type": "string"
         },
+        "testSession": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": ["active", "ended"]
+            },
+            "prototypeId": {
+              "type": "string"
+            },
+            "deviceId": {
+              "type": "string"
+            },
+            "cohort": {
+              "type": "string"
+            },
+            "goal": {
+              "type": "string"
+            },
+            "startedAt": {
+              "type": "number"
+            },
+            "endedAt": {
+              "type": "number"
+            },
+            "eventCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "droppedCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "deadTaps": {
+              "type": "string",
+              "enum": ["enabled", "off"]
+            }
+          },
+          "required": [
+            "id",
+            "status",
+            "prototypeId",
+            "deviceId",
+            "startedAt",
+            "eventCount",
+            "droppedCount",
+            "deadTaps"
+          ],
+          "additionalProperties": false
+        },
+        "report": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "markdown": {
+          "type": "string"
+        },
         "saved": {
           "type": "object",
           "properties": {
@@ -25550,7 +27116,7 @@
               }
             },
             "data": {
-              "description": "/data paths a newer device write (setData, appendData, removeData) touched",
+              "description": "/data paths a newer device write (setData, appendData, prependData, removeData) touched",
               "maxItems": 64,
               "type": "array",
               "items": {
@@ -25584,67 +27150,73 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/$defs/__schema0"
-              },
-              "all": {
                 "$ref": "#/$defs/__schema1"
               },
-              "lastAction": {
+              "all": {
                 "$ref": "#/$defs/__schema2"
               },
-              "adopted": {
+              "lastAction": {
                 "$ref": "#/$defs/__schema3"
               },
-              "persistent": {
+              "adopted": {
                 "$ref": "#/$defs/__schema4"
               },
-              "hiddenReason": {
+              "persistent": {
                 "$ref": "#/$defs/__schema5"
               },
-              "suspended": {
+              "hiddenReason": {
                 "$ref": "#/$defs/__schema6"
               },
-              "displayId": {
+              "suspended": {
                 "$ref": "#/$defs/__schema7"
               },
-              "chrome": {
+              "displayId": {
                 "$ref": "#/$defs/__schema8"
               },
-              "appearance": {
+              "chrome": {
                 "$ref": "#/$defs/__schema9"
               },
-              "degradedEffects": {
+              "backdrop": {
                 "$ref": "#/$defs/__schema10"
               },
-              "warning": {
+              "appearance": {
+                "$ref": "#/$defs/__schema11"
+              },
+              "degradedEffects": {
                 "$ref": "#/$defs/__schema12"
               },
-              "storage": {
-                "$ref": "#/$defs/__schema13"
-              },
-              "timers": {
+              "warning": {
                 "$ref": "#/$defs/__schema14"
               },
-              "success": {
+              "storage": {
                 "$ref": "#/$defs/__schema15"
               },
-              "error": {
+              "shaderFailures": {
                 "$ref": "#/$defs/__schema16"
               },
-              "totalTimeMs": {
+              "timers": {
                 "$ref": "#/$defs/__schema17"
               },
-              "timestamp": {
+              "success": {
                 "$ref": "#/$defs/__schema18"
               },
-              "pendingCount": {
+              "error": {
                 "$ref": "#/$defs/__schema19"
               },
-              "lastSequence": {
+              "totalTimeMs": {
                 "$ref": "#/$defs/__schema20"
               },
-              "droppedCount": {
+              "timestamp": {
                 "$ref": "#/$defs/__schema21"
+              },
+              "pendingCount": {
+                "$ref": "#/$defs/__schema22"
+              },
+              "lastSequence": {
+                "$ref": "#/$defs/__schema23"
+              },
+              "droppedCount": {
+                "$ref": "#/$defs/__schema24"
               },
               "pages": {
                 "type": "object",
@@ -25710,14 +27282,14 @@
                   "type": "string"
                 },
                 "additionalProperties": {
-                  "$ref": "#/$defs/__schema22"
+                  "$ref": "#/$defs/__schema25"
                 }
               },
               "context": {
-                "$ref": "#/$defs/__schema23"
+                "$ref": "#/$defs/__schema26"
               },
               "contextTruncated": {
-                "$ref": "#/$defs/__schema25"
+                "$ref": "#/$defs/__schema28"
               },
               "lastKnown": {
                 "description": "Pages, stacks and state are the last reported device snapshot, not a live device query",
@@ -25733,72 +27305,78 @@
           "type": "object",
           "properties": {
             "id": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "all": {
               "$ref": "#/$defs/__schema1"
             },
-            "lastAction": {
+            "all": {
               "$ref": "#/$defs/__schema2"
             },
-            "adopted": {
+            "lastAction": {
               "$ref": "#/$defs/__schema3"
             },
-            "persistent": {
+            "adopted": {
               "$ref": "#/$defs/__schema4"
             },
-            "hiddenReason": {
+            "persistent": {
               "$ref": "#/$defs/__schema5"
             },
-            "suspended": {
+            "hiddenReason": {
               "$ref": "#/$defs/__schema6"
             },
-            "displayId": {
+            "suspended": {
               "$ref": "#/$defs/__schema7"
             },
-            "chrome": {
+            "displayId": {
               "$ref": "#/$defs/__schema8"
             },
-            "appearance": {
+            "chrome": {
               "$ref": "#/$defs/__schema9"
             },
-            "degradedEffects": {
+            "backdrop": {
               "$ref": "#/$defs/__schema10"
             },
-            "warning": {
+            "appearance": {
+              "$ref": "#/$defs/__schema11"
+            },
+            "degradedEffects": {
               "$ref": "#/$defs/__schema12"
             },
-            "storage": {
-              "$ref": "#/$defs/__schema13"
-            },
-            "timers": {
+            "warning": {
               "$ref": "#/$defs/__schema14"
             },
-            "success": {
+            "storage": {
               "$ref": "#/$defs/__schema15"
             },
-            "error": {
+            "shaderFailures": {
               "$ref": "#/$defs/__schema16"
             },
-            "totalTimeMs": {
+            "timers": {
               "$ref": "#/$defs/__schema17"
             },
-            "timestamp": {
+            "success": {
               "$ref": "#/$defs/__schema18"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema19"
+            },
+            "totalTimeMs": {
+              "$ref": "#/$defs/__schema20"
+            },
+            "timestamp": {
+              "$ref": "#/$defs/__schema21"
             }
           },
           "required": ["lastAction", "success", "timestamp"],
           "additionalProperties": false
         },
         "platformNotes": {
-          "description": "Successful show on iOS only: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
+          "description": "Successful show on either platform (legacy renderer differences apply to iOS only): strings.fallback applies to all platforms, lists locale and up to 20 referenced keys falling through to default (values), with paths strings.default.<key>; other notes describe platform differences: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
               "platform": {
                 "type": "string",
-                "const": "ios"
+                "enum": ["android", "ios", "all"]
               },
               "construct": {
                 "type": "string",
@@ -25816,6 +27394,9 @@
                   "searchBar",
                   "searchBar.icons",
                   "rich-text-links",
+                  "strings.fallback",
+                  "design.fallback",
+                  "platformNamespace",
                   "menu",
                   "select"
                 ]
@@ -25851,7 +27432,7 @@
           }
         },
         "accessibilityFindings": {
-          "description": "Successful show or patch: advisory accessibility lint of the device spec (never refuses a show). rule is unlabeled-control, unlabeled-image, unlabeled-text-field, low-contrast (authored text colour vs. its resolved background, per light/dark mode, WCAG AA), small-touch-target (authored size under 48dp) or transition-without-visible-when (a node transition with no visibleWhen, which never runs); path is the node in the component-expanded device spec; value/minimum give the ratio or dp. Absent when nothing is found.",
+          "description": "Successful show or patch: advisory accessibility lint of the device spec (never refuses a show). rule is unlabeled-control, unlabeled-image, unlabeled-text-field, low-contrast (authored text colour vs. its resolved background, per light/dark mode, WCAG AA), small-touch-target (authored size under 48dp), missing-translation, unknown-translation-key, empty-heading or transition-without-visible-when (a node transition with no visibleWhen, which never runs); path is the node in the component-expanded device spec; value/minimum give the ratio or dp. Absent when nothing is found.",
           "maxItems": 50,
           "type": "array",
           "items": {
@@ -25860,6 +27441,9 @@
               "rule": {
                 "type": "string",
                 "enum": [
+                  "missing-translation",
+                  "unknown-translation-key",
+                  "empty-heading",
                   "unlabeled-control",
                   "unlabeled-image",
                   "unlabeled-text-field",
@@ -25956,13 +27540,13 @@
               ]
             },
             "payload": {
-              "$ref": "#/$defs/__schema26"
+              "$ref": "#/$defs/__schema29"
             },
             "context": {
-              "$ref": "#/$defs/__schema23"
+              "$ref": "#/$defs/__schema26"
             },
             "contextTruncated": {
-              "$ref": "#/$defs/__schema25"
+              "$ref": "#/$defs/__schema28"
             },
             "state": {
               "type": "object",
@@ -26080,7 +27664,7 @@
         "degradedEffects": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/__schema11"
+            "$ref": "#/$defs/__schema13"
           }
         },
         "missingAssets": {
@@ -26213,13 +27797,13 @@
           "maximum": 9007199254740991
         },
         "pendingCount": {
-          "$ref": "#/$defs/__schema19"
+          "$ref": "#/$defs/__schema22"
         },
         "lastSequence": {
-          "$ref": "#/$defs/__schema20"
+          "$ref": "#/$defs/__schema23"
         },
         "droppedCount": {
-          "$ref": "#/$defs/__schema21"
+          "$ref": "#/$defs/__schema24"
         },
         "artifact": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -26256,47 +27840,83 @@
       "additionalProperties": false,
       "$defs": {
         "__schema0": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
+            }
+          ]
         },
         "__schema1": {
+          "type": "string"
+        },
+        "__schema2": {
           "type": "boolean",
           "const": true
         },
-        "__schema2": {
+        "__schema3": {
           "type": "string",
           "enum": ["show", "dismiss"]
         },
-        "__schema3": {
+        "__schema4": {
           "description": "The device reported this prototype through inspect; this host did not show it",
           "type": "boolean",
           "const": true
         },
-        "__schema4": {
+        "__schema5": {
           "description": "Adopted prototypes only: true when the device keeps the prototype after the host disconnects (window.persistence: device), false when it ends with the session",
           "type": "boolean"
         },
-        "__schema5": {
+        "__schema6": {
           "description": "Android: the prototype exists but is not visible, and why; absent when visible, when suspended, or with an older CtrlProxy",
           "type": "string",
           "enum": ["app_layer_window_hidden", "device_blocked"]
         },
-        "__schema6": {
+        "__schema7": {
           "description": "Android only: the prototype is hidden because the app it was shown over is not in front (as of the last inspect); its state is kept and it returns with the app. Absent when visible and on iOS",
           "type": "boolean",
           "const": true
         },
-        "__schema7": {
+        "__schema8": {
           "description": "Android logical display the prototype was shown on; absent for the default display",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema8": {
+        "__schema9": {
           "description": "show of a fullscreen window: the host chrome the device draws. none: no dismiss bar; a two-finger long press (about 1 s) reveals a dismiss pill. bar: the host dismiss bar across the top, which is what a device that does not advertise prototype_window_chrome_v1 always draws, whatever the spec default. Absent for sheet and floating windows, on dismiss and on a failed show",
           "type": "string",
           "enum": ["none", "bar"]
         },
-        "__schema9": {
+        "__schema10": {
+          "description": "show of a spec with window.backdrop: blur when the device blurred what is behind the window, fallback when it drew the tonal fill instead (blur unsupported or disabled). Absent without window.backdrop, on dismiss and on a failed show",
+          "type": "string",
+          "enum": ["blur", "fallback"]
+        },
+        "__schema11": {
           "description": "The light or dark mode the prototype is drawn in, as the device last reported it: in lastResult what a successful show resolved to, and per prototype in inspect that value, and in status its mode and source as refreshed by inspect and by appearance_changed events (status never carries deviceDark; after a show crossed by an appearance_changed event, its status entry has no appearance until a later event or inspect states it). Absent when the device does not advertise prototype_appearance_v1, on dismiss and on a failed show",
           "type": "object",
           "properties": {
@@ -26317,13 +27937,13 @@
           "required": ["mode", "source"],
           "additionalProperties": false
         },
-        "__schema10": {
+        "__schema12": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/__schema11"
+            "$ref": "#/$defs/__schema13"
           }
         },
-        "__schema11": {
+        "__schema13": {
           "type": "object",
           "properties": {
             "path": {
@@ -26342,11 +27962,11 @@
           "required": ["path", "type", "reason"],
           "additionalProperties": false
         },
-        "__schema12": {
+        "__schema14": {
           "description": "Effects omitted or frozen by the device, with their paths and reasons",
           "type": "string"
         },
-        "__schema13": {
+        "__schema15": {
           "description": "inspect only: what the device has stored for this prototype's storage block (prototype_storage_v1), as the device last reported it. Absent when the device does not report it or the prototype has no storage block",
           "type": "object",
           "properties": {
@@ -26391,7 +28011,16 @@
           "required": ["version", "keys", "totalBytes"],
           "additionalProperties": false
         },
-        "__schema14": {
+        "__schema16": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "__schema17": {
           "maxItems": 8,
           "type": "array",
           "items": {
@@ -26417,38 +28046,38 @@
             "additionalProperties": false
           }
         },
-        "__schema15": {
+        "__schema18": {
           "type": "boolean"
         },
-        "__schema16": {
+        "__schema19": {
           "type": "string"
         },
-        "__schema17": {
+        "__schema20": {
           "type": "number"
         },
-        "__schema18": {
+        "__schema21": {
           "description": "Host clock milliseconds when the request completed",
           "type": "number"
         },
-        "__schema19": {
+        "__schema22": {
           "description": "Unconsumed events, including events excluded by filters or cursor",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema20": {
+        "__schema23": {
           "description": "Highest sequence accepted for this prototype",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema21": {
+        "__schema24": {
           "description": "Cumulative events dropped by buffer overflow in this scope",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema22": {
+        "__schema25": {
           "anyOf": [
             {
               "type": "string"
@@ -26465,7 +28094,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema22"
+                "$ref": "#/$defs/__schema25"
               }
             },
             {
@@ -26474,12 +28103,12 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema22"
+                "$ref": "#/$defs/__schema25"
               }
             }
           ]
         },
-        "__schema23": {
+        "__schema26": {
           "allOf": [
             {
               "type": "object",
@@ -26487,13 +28116,13 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema24"
+                "$ref": "#/$defs/__schema27"
               }
             },
             {}
           ]
         },
-        "__schema24": {
+        "__schema27": {
           "anyOf": [
             {
               "type": "string"
@@ -26510,7 +28139,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema24"
+                "$ref": "#/$defs/__schema27"
               }
             },
             {
@@ -26519,16 +28148,16 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema24"
+                "$ref": "#/$defs/__schema27"
               }
             }
           ]
         },
-        "__schema25": {
+        "__schema28": {
           "type": "boolean",
           "const": true
         },
-        "__schema26": {
+        "__schema29": {
           "anyOf": [
             {
               "type": "string"
@@ -26545,7 +28174,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema26"
+                "$ref": "#/$defs/__schema29"
               }
             },
             {
@@ -26554,7 +28183,7 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema26"
+                "$ref": "#/$defs/__schema29"
               }
             }
           ]
@@ -26565,7 +28194,15 @@
       "automobile/deviceReadOnlyArgs": [
         {
           "argument": "action",
-          "values": ["status", "inspect", "listSaved", "screenMap"]
+          "values": [
+            "status",
+            "inspect",
+            "listSaved",
+            "screenMap",
+            "testSessionBegin",
+            "testSessionEnd",
+            "testSessionReport"
+          ]
         }
       ]
     }
@@ -33885,6 +35522,23 @@
               },
               "additionalProperties": false,
               "description": "Power and lifecycle fault injectors (Android only, behind the feature flag)."
+            },
+            "vehicle": {
+              "type": "object",
+              "properties": {
+                "motion": {
+                  "type": "string",
+                  "enum": ["parked", "driving", "unset"],
+                  "description": "Vehicle motion on an Android Automotive emulator: 'parked' (gear park, speed 0, parking brake on) or 'driving' (gear drive, moving, brake off), set together so the state is consistent. Restored to the values read before the first change; or unset."
+                },
+                "nightMode": {
+                  "type": "string",
+                  "enum": ["on", "off", "unset"],
+                  "description": "Vehicle night-mode signal on an Android Automotive emulator, restored to its prior value; or unset."
+                }
+              },
+              "additionalProperties": false,
+              "description": "Vehicle state (Android Automotive emulators only; 'unsupported' elsewhere), via `cmd car_service inject-vhal-event`."
             },
             "expiresInSeconds": {
               "type": "integer",

@@ -1,0 +1,41 @@
+{
+  "spec": {
+    "id": "bars",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "tab": 0
+    },
+    "root": {
+      "type": "stack",
+      "id": "routes",
+      "start": "one",
+      "screens": {
+        "one": {
+          "type": "column",
+          "children": [
+            {
+              "type": "topAppBar",
+              "title": "Feed",
+              "variant": "large",
+              "onScroll": "exitUntilCollapsed",
+              "scroll": "feed"
+            }
+          ]
+        },
+        "two": {
+          "type": "scroll",
+          "id": "feed",
+          "child": {
+            "type": "text",
+            "text": "Feed"
+          }
+        }
+      }
+    }
+  },
+  "expectedPath": "root.screens[\"one\"].children[0].scroll"
+}

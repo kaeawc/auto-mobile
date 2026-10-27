@@ -6,6 +6,7 @@ import {
   PROTOTYPE_NETWORK_CAPABILITY,
   PROTOTYPE_NETWORK_DEVICE_CAPABILITY,
   PROTOTYPE_WINDOW_CHROME_CAPABILITY,
+  PROTOTYPE_DEAD_TAP_CAPABILITY,
 } from "../../../src/features/observe/android/ctrlProxyProtocol";
 import {
   PROTOTYPE_SPEC_CAPABILITY_GATES,
@@ -22,6 +23,7 @@ const knownCapabilities = new Set([
   ...PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.capability),
   PROTOTYPE_ANCHOR_CAPABILITY,
   PROTOTYPE_WINDOW_CHROME_CAPABILITY,
+  PROTOTYPE_DEAD_TAP_CAPABILITY,
 ]);
 const deviceRequestSpec = {
   root: {

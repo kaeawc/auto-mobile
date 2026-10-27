@@ -21,6 +21,7 @@ enum PrototypeAgentProtocol {
         "get_prototype_status",
         patchRequest,
         patchCapability,
+        "prototype_chat_scroll_v1",
         showInPlaceCapability,
         anchorCapability,
         hideForCaptureRequest,
@@ -29,7 +30,9 @@ enum PrototypeAgentProtocol {
         inspectCapability,
         themeModesCapability,
         flowGridCapability,
+        "prototype_scroll_motion_v1",
         pagerOptionsCapability,
+        barScrollCapability,
         appearanceCapability,
         windowChromeCapability,
         iconSfSymbolsCapability,
@@ -43,19 +46,25 @@ enum PrototypeAgentProtocol {
         textFieldActionsCapability,
         carouselCapability,
         chartCapability,
+        PrototypeLazyList.capability,
         loadingStatesCapability,
         stylePolishV2Capability,
+        stringsCapability,
+        semanticsCapability,
+        stringConditionsCapability,
         textFieldLeadingIconCapability,
         refreshCapability,
         searchBarCapability,
         richTextCapability,
         linkifyCapability,
+        "prototype_format_v1",
         menusCapability,
         tooltipCapability,
         drawerCapability,
         stackCapability,
         stackTransitionsCapability,
         stackPatternsCapability,
+        designPlatformCapability,
         reducedMotionCapability,
         sharedElementCapability,
         emitContextCapability,
@@ -64,10 +73,13 @@ enum PrototypeAgentProtocol {
         bottomSheetDragCapability,
         clearStorageRequest,
         storageCapability,
+        "prototype_pager_state_key_v1",
+        backdropCapability,
         timersCapability,
         "prototype_platform_v1",
         "prototype_platform_device_v1",
         advanceClockRequest,
+        deadTapCapability,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -76,6 +88,7 @@ enum PrototypeAgentProtocol {
     /// Stack paths, four navigation actions, screen_changed and left-edge Back (#12068).
     static let stackCapability = "prototype_stack_v1"
     static let stackPatternsCapability = "prototype_stack_patterns_v1"
+    static let designPlatformCapability = "prototype_design_platform_v1"
     static let stackTransitionsCapability = "prototype_stack_transitions_v1"
     /// Reduced-motion profile: crossfades, loops at rest, no springs (#15115).
     static let reducedMotionCapability = "prototype_reduced_motion_v1"
@@ -109,6 +122,7 @@ enum PrototypeAgentProtocol {
     static let flowGridCapability = "prototype_flow_grid_v1"
     /// Draws pager axis, pageSpacing, peek and pageSize natively. The host refuses a spec that
     /// uses one on an agent that does not advertise it. Same name as the CtrlProxy capability.
+    static let barScrollCapability = "prototype_bar_scroll_v1"
     static let pagerOptionsCapability = "prototype_pager_options_v1"
     /// Appearance (#11222): `show_prototype` takes `appearance` (`device`, `light` or `dark`), the
     /// show result and `get_prototype_status` report `appearance: {mode, source, deviceDark}`, and
@@ -120,11 +134,13 @@ enum PrototypeAgentProtocol {
     /// Fullscreen `window.chrome` (#12064): `none` (default) fills the window with a hidden and
     /// accessible escape; `bar` reserves the host dismiss bar. Same name as the CtrlProxy capability.
     static let windowChromeCapability = "prototype_window_chrome_v1"
+    /// Opt-in unhandled taps inside the prototype window.
+    static let deadTapCapability = "prototype_dead_tap_v1"
     /// Read-only data (#11673): resolves path repeats, authored text and data conditions once per
     /// show before repeat expansion. Status reports the shown data alongside state.
     static let checksCapability = "prototype_checks_v1"
     static let dataModelCapability = "prototype_data_model_v1"
-    /// `setData`, `appendData` and `removeData` change `/data` from a tap and report each write as a
+    /// `setData`, `appendData`, `prependData` and `removeData` change `/data` from a tap and report each write as a
     /// `change` event named for the `/data/...` path with `{op, value?, revision}` (#12519). Same name
     /// as the CtrlProxy capability; the host refuses a spec using one on an agent without it.
     static let dataActionsCapability = "prototype_data_actions_v1"
@@ -149,8 +165,14 @@ enum PrototypeAgentProtocol {
     static let carouselCapability = "prototype_carousel_v1"
     /// The `chart` node (line, area, bar and ring over `/data` arrays) drawn with Swift Charts (#14679).
     static let chartCapability = "prototype_chart_v1"
+    /// Locale string tables and integer plural resolution (#14210).
+    static let stringsCapability = "prototype_strings_v1"
+    /// Authored accessibility semantics and live announcements (#14210).
+    static let semanticsCapability = "prototype_semantics_v1"
     /// `{data, empty}` conditions and style `shimmer` on box, row, column and card (#14207, #14689).
     static let loadingStatesCapability = "prototype_loading_states_v1"
+    /// State-key string comparisons and textField forced error presentation.
+    static let stringConditionsCapability = "prototype_string_conditions_v1"
     /// Text field `leadingIcon` drawn as an SF Symbol (#12066).
     static let textFieldLeadingIconCapability = "prototype_text_field_leading_icon_v1"
     /// Pull-to-refresh on a vertical scroll bound to a boolean state key (#12065).
@@ -181,6 +203,9 @@ enum PrototypeAgentProtocol {
     /// Wipes the values stored for `{id}`; the reply carries `cleared`, the number of keys removed. Listed
     /// beside `storageCapability` because the host checks request types against `capabilities`.
     static let clearStorageRequest = "clear_prototype_storage"
+    /// `window.backdrop` (#15126): SwiftUI Material behind the window (Liquid Glass for `glass` on
+    /// iOS 26+), a tonal fill where blur is unavailable, and `backdrop: blur|fallback` in the show reply.
+    static let backdropCapability = "prototype_backdrop_v1"
     static let timersCapability = "prototype_timers_v1"
     static let advanceClockRequest = "advance_prototype_clock"
     /// Atomic in-place `/data`, `/state` and `replaceNode` patches with revisions and state conflicts

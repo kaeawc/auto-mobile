@@ -1,6 +1,7 @@
 import type { ElementBounds } from "../../models/ElementBounds";
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import { nodeAttributes, type ViewHierarchyNode } from "../../models/ViewHierarchyResult";
+import { PROTOTYPE_WINDOW_MARKER_IDENTIFIERS } from "../prototype/prototypeHostControls";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { iosWindowLayer } from "./ios/iosWindowLayer";
 import type { CtrlProxyNode } from "./ios/types";
@@ -33,10 +34,7 @@ export type WindowRoots<N> = Map<N, boolean>;
  * agents mark the window's root view only for a chromeless fullscreen prototype; every other
  * prototype (and older agents) is found by its dismiss control. Authored content cannot remove these markers.
  */
-const IOS_PROTOTYPE_MARKER_IDENTIFIERS = [
-  "automobile-prototype-window",
-  "automobile-prototype-dismiss",
-];
+const IOS_PROTOTYPE_MARKER_IDENTIFIERS = PROTOTYPE_WINDOW_MARKER_IDENTIFIERS;
 
 /** The converted capture's nodes. */
 export const viewHierarchyLayerTree: LayerTree<ViewHierarchyNode> = {

@@ -1,0 +1,15 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "backdrop": "thin"
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "window.backdrop"
+}

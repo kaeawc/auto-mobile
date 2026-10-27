@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "appear",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Hello",
+      "onAppear": [
+        {
+          "type": "emit",
+          "name": "prototype_request"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onAppear[0].name"
+}

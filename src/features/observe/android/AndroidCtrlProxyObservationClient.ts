@@ -19,6 +19,7 @@ import {
   PROTOTYPE_MULTI_SURFACE_CAPABILITY,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_STORAGE_CAPABILITY,
+  PROTOTYPE_CUSTOM_SHADERS_CAPABILITY,
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
 } from "./ctrlProxyProtocol";
 import type { AccessibilityHierarchy } from "./types";
@@ -197,6 +198,7 @@ export abstract class AndroidCtrlProxyObservationClient extends AndroidCtrlProxy
         PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
         PROTOTYPE_MULTI_SURFACE_CAPABILITY,
         PROTOTYPE_STORAGE_CAPABILITY,
+        PROTOTYPE_CUSTOM_SHADERS_CAPABILITY,
       ].includes(messageType)
     ) {
       return this.supportedCommands?.has(messageType) === true;

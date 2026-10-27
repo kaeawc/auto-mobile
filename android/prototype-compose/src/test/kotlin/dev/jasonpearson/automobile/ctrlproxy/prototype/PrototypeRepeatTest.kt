@@ -467,4 +467,43 @@ class PrototypeRepeatTest {
     assertEquals(likedColor, likeColors()[0])
     assertNotEquals(likedColor, likeColors()[1])
   }
+
+  @Test
+  fun `error conditions bind repeat operands including empty strings`() {
+    val field =
+      PrototypeTextFieldNode(
+        stateKey = "value",
+        errorText = "Bad {item.label}",
+        errorWhen =
+          PrototypeCondition(key = "value", contains = PrototypeScalar.Text("{item.label}")),
+      )
+    val root = list(field, repeat = listOf(mapOf("label" to PrototypeScalar.Text(""))))
+    val mapped =
+      mapPrototypeSpec(spec(root, mapOf("value" to PrototypeScalar.Text("hello"))))
+        .root
+        .children
+        .single()
+    assertTrue(mapped.isError)
+    assertEquals("Bad ", mapped.errorMessage)
+  }
+
+  @Test
+  fun `a numeric repeat placeholder binds a substring operand as text`() {
+    val field =
+      PrototypeTextFieldNode(
+        stateKey = "value",
+        errorWhen = PrototypeCondition(key = "value", contains = PrototypeScalar.Text("{item.n}")),
+      )
+    val root = list(field, repeat = listOf(mapOf("n" to PrototypeScalar.Numeric(3.0))))
+
+    fun errorFor(value: String) =
+      mapPrototypeSpec(spec(root, mapOf("value" to PrototypeScalar.Text(value))))
+        .root
+        .children
+        .single()
+        .isError
+
+    assertTrue(errorFor("a3"))
+    assertFalse(errorFor("a4"))
+  }
 }

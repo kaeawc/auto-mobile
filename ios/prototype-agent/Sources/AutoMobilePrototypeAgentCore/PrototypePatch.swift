@@ -157,6 +157,14 @@ enum PrototypePatch {
         if name == "test", tests == .skip { return spec }
         state = try member(state, key: key, operation: operation, location: location)
         if name == "test" { return spec }
+        if let value = state[key]?.numberValue, value.isFinite, value.rounded(.towardZero) == value,
+           let root = spec["root"], let fields = root.objectFields,
+           let pager = tree(fields, tokens: [], path: "root")
+           .first(where: { $0.node["type"] == .string("pager") && $0.node["stateKey"] == .string(key) }),
+           case let .array(children)? = pager.node["children"], !children.isEmpty
+        {
+            state[key] = .number(min(max(value, 0), Double(children.count - 1)))
+        }
         var result = spec
         put(&result, "state", .object(state))
         return result

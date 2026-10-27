@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "strings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Hi",
+      "semantics": {}
+    },
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    }
+  },
+  "expectedPath": "root.semantics",
+  "expectedMessage": "Expected at least one semantics field"
+}

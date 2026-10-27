@@ -1,133 +1,102 @@
 {
   "spec": {
-    "id": "prototype",
+    "id": "style-polish",
     "window": {
       "placement": {
-        "type": "fullscreen",
-        "scrim": {
-          "light": "#66000000",
-          "dark": "scrim"
-        }
-      }
-    },
-    "theme": {
-      "colors": {
-        "seed": "#6750A4",
-        "primary": "#B3261E",
-        "light": {
-          "surface": "#FFFBFE",
-          "onSurface": "#1C1B1F"
-        },
-        "dark": {
-          "surface": "#1C1B1F",
-          "onSurface": "#E6E1E5",
-          "primary": "#F2B8B5"
-        }
-      }
+        "type": "fullscreen"
+      },
+      "opacity": 100
     },
     "state": {
-      "open": false
+      "active": true
     },
     "root": {
-      "type": "column",
-      "style": {
-        "background": {
-          "light": "#FFFFFF",
-          "dark": "#101014"
-        },
-        "border": {
-          "width": 1,
-          "color": {
-            "light": "outline",
-            "dark": "#44FFFFFF"
-          }
-        },
-        "elevation": 2,
-        "shadowColor": {
-          "light": "#40000000",
-          "dark": "scrim"
-        },
-        "gradient": {
-          "type": "linear",
-          "angle": 90,
-          "stops": [
+      "type": "scroll",
+      "axis": "vertical",
+      "fadeEdges": {
+        "top": 0,
+        "bottom": 24,
+        "start": 12,
+        "end": 1000
+      },
+      "child": {
+        "style": {
+          "cornerRadius": "full",
+          "border": {
+            "width": 2,
+            "gradient": {
+              "type": "linear",
+              "angle": 45,
+              "stops": [
+                {
+                  "color": {
+                    "light": "#FFFFFF",
+                    "dark": "#000000"
+                  }
+                },
+                {
+                  "color": "primary"
+                }
+              ]
+            }
+          },
+          "shadows": [
             {
-              "color": "primary"
+              "color": "#000000",
+              "radius": 20
             },
             {
               "color": {
-                "light": "#FF6200EE",
-                "dark": "primaryContainer"
+                "light": "#000000",
+                "dark": "scrim"
               },
-              "position": 0.5
+              "radius": 1000,
+              "spread": -1000,
+              "offset": {
+                "x": -1000,
+                "y": 1000
+              }
             },
             {
-              "color": "#00000000"
+              "color": "scrim",
+              "radius": 0,
+              "spread": 1000,
+              "inner": true
             }
-          ]
-        }
-      },
-      "styleWhen": [
-        {
-          "when": {
-            "key": "open",
-            "equals": true
-          },
-          "style": {
-            "background": {
-              "light": "surface",
-              "dark": "surfaceDim"
-            }
-          }
-        }
-      ],
-      "children": [
-        {
-          "type": "text",
-          "text": "Brand",
-          "style": {
-            "color": {
-              "light": "#0B57D0",
-              "dark": "#A8C7FA"
-            }
-          }
+          ],
+          "cornerStyle": "continuous"
         },
-        {
-          "type": "bottomSheet",
-          "openWhen": {
-            "key": "open",
-            "equals": true
-          },
-          "detents": ["half"],
-          "scrim": {
-            "light": "#52000000",
-            "dark": "#99000000"
-          },
-          "child": {
-            "type": "text",
-            "text": "Sheet",
+        "styleWhen": [
+          {
+            "when": {
+              "key": "active",
+              "equals": true
+            },
             "style": {
-              "background": "surfaceContainer"
+              "shadows": [
+                {
+                  "color": "#000000",
+                  "radius": 20
+                }
+              ],
+              "cornerStyle": "circular"
             }
           }
-        },
-        {
-          "type": "bottomSheet",
-          "openWhen": {
-            "key": "open",
-            "equals": true
-          },
-          "detents": ["full"],
-          "scrim": "scrim",
-          "child": {
-            "type": "spacer"
+        ],
+        "type": "image",
+        "asset": "photo",
+        "filter": {
+          "saturation": 2,
+          "tint": {
+            "light": "primary",
+            "dark": "#FFFFFF"
           }
         }
-      ]
+      }
     }
   },
   "options": {
-    "supportedCapabilities": []
+    "supportedCapabilities": ["prototype_style_polish_v2"]
   },
   "expectedPath": "$"
 }

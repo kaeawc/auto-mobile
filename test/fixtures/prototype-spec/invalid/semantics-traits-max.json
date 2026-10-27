@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "strings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Hi",
+      "semantics": {
+        "traits": ["button", "image", "selected", "button"]
+      }
+    },
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    }
+  },
+  "expectedPath": "root.semantics.traits",
+  "expectedMessage": "Array length out of range"
+}

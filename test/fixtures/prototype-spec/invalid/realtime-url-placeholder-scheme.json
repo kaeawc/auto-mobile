@@ -20,7 +20,7 @@
     "channels": {
       "chat": {
         "kind": "websocket",
-        "url": "{scheme}://example.com",
+        "url": "wss:{scheme}://example.com",
         "protocols": ["chat.v1"],
         "headers": {
           "Authorization": "Bearer {token}"
@@ -151,5 +151,5 @@
     }
   },
   "expectedPath": "channels.chat.url",
-  "expectedMessage": "A websocket channel url must use ws or wss"
+  "expectedMessage": "A templated websocket channel url must start with a literal ws:// or wss://"
 }

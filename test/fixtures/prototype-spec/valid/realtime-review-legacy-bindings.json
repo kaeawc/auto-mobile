@@ -1,0 +1,45 @@
+{
+  "id": "legacy",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["device", "test"]
+  },
+  "platform": {
+    "on": {
+      "device.changed": [
+        {
+          "type": "platform",
+          "call": "test.echo",
+          "args": {
+            "message": {
+              "event": "/value"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "legacy",
+    "visibleWhen": {
+      "platform": "/device/os",
+      "equals": "ios"
+    },
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "test.echo",
+        "args": {
+          "message": {
+            "platform": "/device/os"
+          }
+        }
+      }
+    ]
+  }
+}

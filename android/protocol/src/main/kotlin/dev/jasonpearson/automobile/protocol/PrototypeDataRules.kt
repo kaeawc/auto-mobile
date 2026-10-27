@@ -58,6 +58,14 @@ internal object PrototypeDataRules {
             "Data action paths are /data/<RFC 6901 pointer> and address a member of data",
           )
       val literal = (value["value"] as? JsonObject)?.get("value")
+      if (type == "upsertData" && literal != null) {
+        val identity = PrototypeDataPointer.resolve(literal, value.text("key").orEmpty())
+        if (identity == null || identity is JsonNull)
+          return fail(
+            "$path.value.value",
+            "upsertData key pointer must be present and non-null in the literal value",
+          )
+      }
       if (literal != null && dataError(JsonObject(mapOf("value" to literal))) != null) {
         return fail(
           "$path.value.value",

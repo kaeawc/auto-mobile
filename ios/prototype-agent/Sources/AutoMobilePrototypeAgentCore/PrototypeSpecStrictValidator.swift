@@ -90,6 +90,16 @@ public enum PrototypeSpecStrictValidator {
                     "Host requests are unavailable in a library"
                 )
             }
+            if library {
+                for id in (fields["channels"]?.objectFields ?? [:]).keys.sorted() {
+                    if fields["channels"]?.objectFields?[id]?.objectFields?["via"] != .string("device") {
+                        throw PrototypeContractValidator.invalid(
+                            "\(PrototypeLimits.dataMemberPath("channels", key: id)).via",
+                            "Host requests are unavailable in a library"
+                        )
+                    }
+                }
+            }
             if library { try secureLibrary(
                 fields,
                 nodes: context.locatedNodes,
@@ -126,6 +136,14 @@ public enum PrototypeSpecStrictValidator {
             if let text = raw?.stringValue { bindings.append((text, path, false, request)) }
             if let key = raw?.objectFields?["state"]?.stringValue {
                 bindings.append((key, "\(path).state", true, request))
+            }
+        }
+        for (id, raw) in fields["channels"]?.objectFields ?? [:] {
+            guard let channel = raw.objectFields else { continue }
+            let at = PrototypeLimits.dataMemberPath("channels", key: id)
+            append(channel["url"], path: "\(at).url", request: true)
+            for (name, value) in channel["headers"]?.objectFields ?? [:] {
+                append(value, path: PrototypeLimits.dataMemberPath("\(at).headers", key: name), request: true)
             }
         }
         for action in actions {

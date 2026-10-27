@@ -19,6 +19,23 @@ class PrototypeChannelsTest {
   }
 
   @TestFactory
+  fun libraryReviewAcceptance(): List<DynamicTest> =
+    listOf("realtime-review-boundaries", "realtime-review-legacy-bindings").map { name ->
+      DynamicTest.dynamicTest("library accepts $name") {
+        val file = File(fixtureDirectory(), "valid/$name.json")
+        val required =
+          PrototypeBundleCapabilities.required(PrototypeBundleSpec.references(file.readBytes()))
+            .toSet()
+        assertTrue(
+          PrototypeSpecValidator.validate(file.readText(), required, true)
+            is PrototypeSpecValidation.Success,
+        )
+        if (name.endsWith("legacy-bindings"))
+          assertFalse("prototype_platform_realtime_v1" in required)
+      }
+    }
+
+  @TestFactory
   fun bundleRealtimeCapabilities(): List<DynamicTest> {
     val expected =
       Json.parseToJsonElement(File(fixtureDirectory(), "corpus.json").readText())
@@ -56,7 +73,12 @@ class PrototypeChannelsTest {
               ?.map { it.jsonPrimitive.content }
               ?.toSet()
           val result =
-            PrototypeSpecValidator.validate(fixture.getValue("spec").toString(), supported)
+            PrototypeSpecValidator.validate(
+              fixture.getValue("spec").toString(),
+              supported,
+              (fixture["options"]?.jsonObject?.get("library") as? JsonPrimitive)?.booleanOrNull
+                ?: false,
+            )
           assertTrue(result is PrototypeSpecValidation.Failure)
           val error = (result as PrototypeSpecValidation.Failure).error
           assertEquals(fixture.getValue("expectedPath").jsonPrimitive.content, error.path)

@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "id": "review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "state": {
+      "secret": "",
+      "s": ""
+    },
+    "data": {
+      "rows": []
+    },
+    "channels": {
+      "c": {
+        "kind": "websocket",
+        "url": "wss://example.com",
+        "via": "device",
+        "protocols": ["a", "a"]
+      }
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "secret",
+      "secure": true
+    }
+  },
+  "expectedPath": "channels.c.protocols",
+  "expectedMessage": "protocols must be unique RFC 7230 tokens of 1 to 64 characters"
+}

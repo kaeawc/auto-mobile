@@ -357,6 +357,16 @@ extension PrototypeDataWrite {
                 "Data action paths are /data/<RFC 6901 pointer> and address a member of data"
             ) }
             if let literal = fields["value"]?.objectFields?["value"] {
+                if fields["type"] == .string("upsertData") {
+                    let identity = PrototypeDataPointer.resolve(
+                        literal,
+                        tokens: PrototypeDataPointer.tokens(fields["key"]?.stringValue ?? "")[...]
+                    )
+                    guard let identity, identity != .null else { throw PrototypeContractValidator.invalid(
+                        "\(action.path).value.value",
+                        "upsertData key pointer must be present and non-null in the literal value"
+                    ) }
+                }
                 do { try PrototypeLimits.guardDataWrite(["value": literal]) }
                 catch { throw PrototypeContractValidator.invalid(
                     "\(action.path).value.value",

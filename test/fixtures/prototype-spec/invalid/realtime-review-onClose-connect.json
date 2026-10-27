@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "state": {
+      "secret": "",
+      "s": ""
+    },
+    "data": {
+      "rows": []
+    },
+    "channels": {
+      "c": {
+        "kind": "websocket",
+        "url": "wss://example.com",
+        "via": "device",
+        "onClose": [
+          {
+            "type": "platform",
+            "call": "realtime.connect",
+            "args": {
+              "channel": "c"
+            }
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "secret",
+      "secure": true
+    }
+  },
+  "expectedPath": "channels.c.onClose[0].call",
+  "expectedMessage": "Channel callbacks cannot request, navigate or connect"
+}

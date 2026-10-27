@@ -2026,14 +2026,14 @@ ignored.
 
 ## Realtime channels
 
-The strict root `channels` map declares up to four channel IDs (state-key grammar), requires
-`realtime` in `requires.platform`, and gates the entire vocabulary on
-`prototype_platform_realtime_v1`. `via: "device"` additionally requires
+The strict root `channels` map declares up to four channel IDs (state-key grammar) and requires
+`realtime` in `requires.platform`. Channel declarations, realtime calls and realtime state reads
+require `prototype_platform_realtime_v1`. `via: "device"` additionally requires
 `prototype_platform_realtime_device_v1`. Neither runtime advertises these capabilities.
 
 A channel requires `kind: "websocket" | "sse"` and `url`. WebSocket URLs use ws/wss; SSE URLs
 use http/https, sharing request URL placeholder and length rules. Optional `protocols` has up to
-four WebSocket subprotocols. `headers` has up to 16 entries and shares the request rules, also
+four unique WebSocket subprotocols, each an RFC 7230 token of 1..64 characters. `headers` has up to 16 entries and shares the request rules, also
 refusing case-insensitive `Sec-WebSocket-*` and `Last-Event-ID`. Optional `via` defaults to host,
 `connect` to onShow (or manual), `decode` to json (or text); `statusKey` names declared string
 state. `reconnect` requires integer maxAttempts 0..20 and initialDelayMs/maxDelayMs with
@@ -2047,16 +2047,29 @@ reads a member. Root `platform.on` supports realtime.status and realtime.frame a
 `realtime.connect/disconnect` take a declared channel selector; `realtime.send` also takes a body
 value binding and requires a WebSocket channel. A selector is a literal string or `{value: id}`;
 dynamic channel selection is refused so validation can prove the declaration and kind.
+Callbacks refuse requests, navigation and realtime.connect, including in nested action lists;
+realtime.send and realtime.disconnect remain allowed. Library bundles refuse host channels
+(including the default via) and secure state bindings in channel URLs, headers and action payloads,
+using the request library policy.
 
 The read-only `/platform/realtime/<channel>` state contains status, attempt, framesIn,
 framesDropped, closeCode, closeReason and error, read through `/realtime/<channel>/<field>`
 platform pointers. The contract budgets are 65536 bytes per received frame, 16384 per send,
-eight open channels per device, and 50 ms per flush window. Limits are read from the shared
+eight open channels per device, and 50 ms per flush window. Literal send bodies are checked
+statically using UTF-8 string bytes or compact JSON bytes. Limits are read from the shared
 contract by the TS, Kotlin and Swift mirrors.
+
+The realtime capability gates `{event}` and `{platform}` values in setState, setData, appendData,
+prependData and upsertData, plus whole-event `{event: ""}` arguments to platform calls. Existing
+nonempty event arguments, platform arguments and platform conditions retain their existing gates.
+Known limit: static validation checks event scope and platform pointer declarations but skips
+source-to-target type checks for these two dynamic binding forms; the receiving runtime must
+validate the resolved value before applying a write or call.
 
 The realtime capability also gates `appendData.maxItems` and `upsertData {path, key, value,
 maxItems?}` everywhere actions can occur. Upsert replaces the first matching identity in place
-or appends; the incoming value must contain its valid, nonempty key pointer. JSON identity uses
+or appends; the incoming value must contain its valid, nonempty key pointer. A literal value is
+refused statically when that pointer is missing or resolves to null. JSON identity uses
 numeric value, exact strings and member names, and structural array/object equality. maxItems
 is an integer 1..2000; oldest rows are dropped after replacement/append and before final data
 limits. Missing/non-array targets and invalid writes leave input unchanged.

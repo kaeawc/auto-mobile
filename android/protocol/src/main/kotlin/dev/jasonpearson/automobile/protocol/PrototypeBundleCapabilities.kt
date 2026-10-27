@@ -56,7 +56,11 @@ internal object PrototypeBundleCapabilities {
 
   private fun actions(action: JsonObject, caps: MutableSet<String>) {
     val type = text(action["type"])
-    if (type == "upsertData" || (type == "appendData" && "maxItems" in action))
+    if (
+      type == "upsertData" ||
+        (type == "appendData" && "maxItems" in action) ||
+        PrototypeChannels.needsValueCapability(action)
+    )
       caps.add("prototype_platform_realtime_v1")
     when (type) {
       "request" -> {

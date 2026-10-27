@@ -220,6 +220,12 @@ internal object PrototypeBindableFields {
     return visitor.node(node, path)
   }
 
+  fun <T : Any> firstAction(
+    action: JsonObject,
+    path: String,
+    visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
+  ): T? = Visitor(visit).action(action, path)
+
   private fun objects(data: JsonObject, key: String, path: String): List<Pair<JsonObject, String>> =
     (data[key] as? JsonArray).orEmpty().mapIndexedNotNull { index, entry ->
       (entry as? JsonObject)?.let { it to "$path.$key[$index]" }

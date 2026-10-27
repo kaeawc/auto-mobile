@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "id": "review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "state": {
+      "secret": "",
+      "s": ""
+    },
+    "data": {
+      "rows": []
+    },
+    "channels": {
+      "c": {
+        "kind": "websocket",
+        "url": "wss://example.com",
+        "via": "device",
+        "onError": [
+          {
+            "type": "dismiss"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "secret",
+      "secure": true
+    }
+  },
+  "expectedPath": "channels.c.onError[0].type",
+  "expectedMessage": "Channel callbacks cannot request, navigate or connect"
+}

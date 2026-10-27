@@ -104,6 +104,15 @@ export function prototypeDataActionError(
     };
   }
   const value = (action.value ?? {}) as Record<string, unknown>;
+  if (action.type === "upsertData" && Object.hasOwn(value, "value")) {
+    const key = typeof action.key === "string" ? action.key : "";
+    const identity = resolvePrototypeDataPointer(value.value, key);
+    if (identity === undefined || identity === null)
+      return {
+        path: `${at}.value.value`,
+        message: "upsertData key pointer must be present and non-null in the literal value",
+      };
+  }
   if (Object.hasOwn(value, "value") && dataError({ value: value.value }) !== undefined) {
     return {
       path: `${at}.value.value`,

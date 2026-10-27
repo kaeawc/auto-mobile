@@ -36,6 +36,15 @@ internal object PrototypeStrictPolicy {
       if (host != null)
         return PrototypeSpecError("${host.path}.via", "Host requests are unavailable in a library")
     }
+    if (library) {
+      for ((id, raw) in (spec["channels"] as? JsonObject).orEmpty().toSortedMap()) {
+        if ((raw as? JsonObject)?.text("via") != "device")
+          return PrototypeSpecError(
+            "${PrototypeValidationPaths.keyPath("channels", id)}.via",
+            "Host requests are unavailable in a library",
+          )
+      }
+    }
     return if (library) secureLibraryError(spec, context) else null
   }
 
@@ -48,9 +57,27 @@ internal object PrototypeStrictPolicy {
     val scopes = PrototypeRepeatValidator.scopes(spec)
     val secure = secureStateKeys(scopes, context)
     if (secure.isEmpty()) return null
-    val requests = context.actions.filter { it.value.text("type") == "request" }.map { it.path }
+    val channels = (spec["channels"] as? JsonObject).orEmpty()
+    val requests =
+      context.actions.filter { it.value.text("type") == "request" }.map { it.path } +
+        channels.keys.map { PrototypeValidationPaths.keyPath("channels", it) }
+    val channelFields = mutableListOf<Field>()
+    for ((id, raw) in channels) {
+      val channel = raw.jsonObject
+      val at = PrototypeValidationPaths.keyPath("channels", id)
+      channelFields.add(Field(channel.text("url").orEmpty(), "$at.url", false))
+      for ((name, value) in (channel["headers"] as? JsonObject).orEmpty()) {
+        val path = PrototypeValidationPaths.keyPath("$at.headers", name)
+        if (value is JsonPrimitive && value.isString)
+          channelFields.add(Field(value.content, path, false))
+        else
+          (value as? JsonObject)?.text("state")?.let {
+            channelFields.add(Field(it, "$path.state", true))
+          }
+      }
+    }
     val leaked =
-      requestFields(context)
+      (requestFields(context) + channelFields)
         .sortedBy { it.path }
         .firstOrNull { field ->
           isSinkBinding(field, requests) && bindsSecure(field, scopes, secure)
@@ -87,6 +114,17 @@ internal object PrototypeStrictPolicy {
     val fields = mutableListOf<Field>()
     for (node in context.nodes) {
       PrototypeBindableFields.first<Boolean>(node.value, node.path) { raw, at, kind ->
+        val text = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content
+        if (
+          text != null &&
+            kind in listOf(PrototypeBindableKind.REQUEST_TEXT, PrototypeBindableKind.KEY)
+        )
+          fields.add(Field(text, at, kind == PrototypeBindableKind.KEY))
+        null
+      }
+    }
+    for (action in context.actions) {
+      PrototypeBindableFields.firstAction<Boolean>(action.value, action.path) { raw, at, kind ->
         val text = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content
         if (
           text != null &&
@@ -337,7 +375,11 @@ internal object PrototypeStrictPolicy {
       if (PrototypeStylePolishV2Rules.required(fields))
         result.add(PrototypeStylePolishV2Rules.CAPABILITY)
       val type = fields.text("type") ?: ""
-      if (type == "upsertData" || (type == "appendData" && "maxItems" in fields))
+      if (
+        type == "upsertData" ||
+          (type == "appendData" && "maxItems" in fields) ||
+          PrototypeChannels.needsValueCapability(fields)
+      )
         need("platform_realtime")
       val nodeTypes =
         PrototypeSpecContract.definitions

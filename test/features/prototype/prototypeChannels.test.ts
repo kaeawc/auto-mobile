@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import websocket from "../../fixtures/prototype-spec/valid/realtime-channels.json";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
@@ -91,3 +92,41 @@ test("channel selectors require own declarations and preserve an authored __prot
   expect(result.success).toBe(true);
   if (result.success) expect(Object.hasOwn(result.data.channels ?? {}, "__proto__")).toBe(true);
 });
+
+// Shared fixtures assert the same acceptance boundary and exact errors in all three validators.
+const reviewFixtures = new URL("../../fixtures/prototype-spec/", import.meta.url);
+for (const name of readdirSync(new URL("invalid/", reviewFixtures)).filter((name) =>
+  name.startsWith("realtime-review-"),
+)) {
+  const fixture = JSON.parse(readFileSync(new URL(`invalid/${name}`, reviewFixtures), "utf8"));
+  test(`review parity ${name}`, () => {
+    expect(
+      validatePrototypeSpec(fixture.spec, {
+        ...fixture.options,
+        requiredCapabilities: prototypeGateCapabilities,
+      }),
+    ).toEqual({
+      success: false,
+      error: { path: fixture.expectedPath, message: fixture.expectedMessage },
+    });
+  });
+}
+for (const name of [
+  "realtime-review-boundaries",
+  "realtime-review-legacy-bindings",
+  "realtime-review-menu-bindings",
+]) {
+  const spec = JSON.parse(readFileSync(new URL(`valid/${name}.json`, reviewFixtures), "utf8"));
+  test(`review accepts ${name}`, () => {
+    const supportedCapabilities = prototypeGateCapabilities(spec);
+    expect(
+      validatePrototypeSpec(spec, {
+        library: true,
+        supportedCapabilities,
+        requiredCapabilities: prototypeGateCapabilities,
+      }).success,
+    ).toBe(true);
+    if (name.endsWith("legacy-bindings"))
+      expect(supportedCapabilities).not.toContain("prototype_platform_realtime_v1");
+  });
+}

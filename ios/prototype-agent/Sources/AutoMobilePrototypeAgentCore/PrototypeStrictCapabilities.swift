@@ -112,7 +112,8 @@ enum PrototypeStrictCapabilities {
             }
             if ["setData", "appendData", "prependData", "upsertData", "removeData"]
                 .contains(type) { need("data_actions") }
-            if type == "upsertData" || (type == "appendData" && fields["maxItems"] != nil) { need("platform_realtime") }
+            if type == "upsertData" || (type == "appendData" && fields["maxItems"] != nil) || PrototypeChannels
+                .needsValueCapability(fields) { need("platform_realtime") }
             if type == "prependData" { need("lazy_list") }
             if type == "emit", fields["context"] != nil { need("emit_context") }
             if type == "platform" { need("platform") }

@@ -1,3 +1,4 @@
+import { MAX_PROTOTYPE_CHANNEL_SEND_BYTES } from "./prototypeChannelLimits";
 import { prototypeSpecNodeRoots } from "./prototypeNodeChildren";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import {
@@ -19,7 +20,18 @@ export function prototypeChannelUrlError(channel: Raw): string | undefined {
   const url = channel.kind === "websocket" ? raw.replace(/^ws(s?):/i, "http$1:") : raw;
   if (channel.kind === "websocket" && !/^wss?:/i.test(raw))
     return "A websocket channel url must use ws or wss";
-  return prototypeRequestUrlError(url);
+  const schemes = channel.kind === "websocket" ? "ws or wss" : "http or https";
+  if (!/^(?:wss?|https?):\/\//i.test(raw))
+    return raw.includes("{")
+      ? `A templated ${channel.kind === "websocket" ? "websocket channel" : "request"} url must start with a literal ${channel.kind === "websocket" ? "ws:// or wss://" : "http:// or https://"}`
+      : `A ${channel.kind === "websocket" ? "websocket channel" : "request"} url must be an absolute ${schemes} URL`;
+  const error = prototypeRequestUrlError(url);
+  return channel.kind === "websocket"
+    ? error
+        ?.replace("request", "websocket channel")
+        .replace("http or https", "ws or wss")
+        .replace("http:// or https://", "ws:// or wss://")
+    : error;
 }
 
 export function prototypeChannelsError(spec: unknown): PrototypePlatformError | undefined {
@@ -54,6 +66,23 @@ export function prototypeChannelsError(spec: unknown): PrototypePlatformError | 
         path: `${at}.protocols`,
         message: "protocols are only available for websocket channels",
       };
+    const protocols = channel.protocols as string[] | undefined;
+    if (
+      protocols &&
+      (new Set(protocols).size !== protocols.length ||
+        protocols.some(
+          (value) =>
+            value.length < 1 || value.length > 64 || /[^!#$%&'*+\-.^_`|~0-9A-Za-z]/.test(value),
+        ))
+    )
+      return {
+        path: `${at}.protocols`,
+        message: "protocols must be unique RFC 7230 tokens of 1 to 64 characters",
+      };
+    for (const name of ["onOpen", "onClose", "onError"]) {
+      const error = callbackError(channel[name], `${at}.${name}`);
+      if (error) return error;
+    }
     const status = prototypeRequestStatusKeyError(
       { ...channel, type: "request" },
       at,
@@ -67,6 +96,11 @@ export function prototypeChannelsError(spec: unknown): PrototypePlatformError | 
         message: "initialDelayMs must not exceed maxDelayMs",
       };
     for (const [index, route] of (Array.isArray(channel.routes) ? channel.routes : []).entries()) {
+      if (channel.kind !== "sse" && record(record(route)?.when)?.event !== undefined)
+        return {
+          path: `${at}.routes[${index}].when.event`,
+          message: "Event name matchers are only available for sse channels",
+        };
       const actions = record(route)?.actions as Raw[];
       for (const [actionIndex, action] of actions.entries()) {
         if (
@@ -92,6 +126,29 @@ export function prototypeChannelsError(spec: unknown): PrototypePlatformError | 
   return undefined;
 }
 
+function callbackError(value: unknown, path: string): PrototypePlatformError | undefined {
+  if (!Array.isArray(value)) return undefined;
+  for (const [index, raw] of value.entries()) {
+    const action = record(raw)!;
+    const at = `${path}[${index}]`;
+    if (
+      ["request", "push", "replace", "pop", "popToRoot", "dismiss", "setPage"].includes(
+        String(action.type),
+      ) ||
+      (action.type === "platform" && action.call === "realtime.connect")
+    )
+      return {
+        path: `${at}.${action.type === "platform" ? "call" : "type"}`,
+        message: "Channel callbacks cannot request, navigate or connect",
+      };
+    for (const key of ["actions", "onSuccess", "onError"]) {
+      const error = callbackError(action[key], `${at}.${key}`);
+      if (error) return error;
+    }
+  }
+  return undefined;
+}
+
 /** A channel selector is static; body remains an ordinary value binding. */
 export function prototypeChannelCallError(
   action: Raw,
@@ -106,6 +163,20 @@ export function prototypeChannelCallError(
     typeof id === "string" && Object.hasOwn(channels, id) ? record(channels[id]) : undefined;
   if (!channel)
     return { path: `${path}.args.channel`, message: "channel must name a declared channel" };
+  const body = record(record(action.args)?.body);
+  if (
+    action.call === "realtime.send" &&
+    body &&
+    Object.hasOwn(body, "value") &&
+    Buffer.byteLength(
+      typeof body.value === "string" ? body.value : JSON.stringify(body.value),
+      "utf8",
+    ) > MAX_PROTOTYPE_CHANNEL_SEND_BYTES
+  )
+    return {
+      path: `${path}.args.body.value`,
+      message: "realtime.send body exceeds the byte limit",
+    };
   return action.call === "realtime.send" && channel.kind !== "websocket"
     ? { path: `${path}.call`, message: "realtime.send requires a websocket channel" }
     : undefined;
@@ -132,6 +203,19 @@ export function prototypeRealtimeFields(spec: unknown, device = false): string[]
     if (!obj || (Object.keys(obj).length === 1 && Object.hasOwn(obj, "value"))) return;
     if (obj.type === "upsertData" || (obj.type === "appendData" && obj.maxItems !== undefined))
       paths.push(path);
+    const binding = record(obj.value);
+    if (
+      ["setState", "setData", "appendData", "prependData", "upsertData"].includes(
+        String(obj.type),
+      ) &&
+      binding &&
+      (Object.hasOwn(binding, "event") || Object.hasOwn(binding, "platform"))
+    )
+      paths.push(`${path}.value`);
+    if (obj.type === "platform") {
+      for (const [name, arg] of Object.entries(record(obj.args) ?? {}))
+        if (record(arg)?.event === "") paths.push(`${atKey(`${path}.args`, name)}.event`);
+    }
     for (const key of Object.keys(obj).sort())
       if (!["data", "state", "payload", "repeat", "value"].includes(key)) {
         if (key === "screens" && record(obj[key])) {

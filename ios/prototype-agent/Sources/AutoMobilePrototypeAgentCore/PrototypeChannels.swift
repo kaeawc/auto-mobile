@@ -36,7 +36,20 @@ enum PrototypeChannels {
             }
             let url = websocket ? (lower.hasPrefix("wss:") ? "https:" + raw.dropFirst(4) : "http:" + raw.dropFirst(3)) :
                 raw
-            try PrototypeRequestValidator.url(.string(url), path: "\(at).url", checkLength: false)
+            if websocket {
+                if raw.contains("{") {
+                    if !lower.hasPrefix("ws://"), !lower.hasPrefix("wss://") {
+                        throw fail(
+                            "\(at).url",
+                            "A templated websocket channel url must start with a literal ws:// or wss://"
+                        )
+                    }
+                } else if case .failure = PrototypeRequestURL.resolve(url, query: []) {
+                    throw fail("\(at).url", "A websocket channel url must be an absolute ws or wss URL")
+                }
+            } else {
+                try PrototypeRequestValidator.url(.string(url), path: "\(at).url", checkLength: false)
+            }
             for name in (channel["headers"]?.objectFields ?? [:]).keys.sorted() {
                 if name.lowercased().hasPrefix("sec-websocket-") || name.lowercased() == "last-event-id" {
                     throw fail(PrototypeLimits.dataMemberPath("\(at).headers", key: name), "Forbidden channel header")
@@ -46,6 +59,16 @@ enum PrototypeChannels {
             if !websocket,
                channel["protocols"] !=
                nil { throw fail("\(at).protocols", "protocols are only available for websocket channels") }
+            let protocols = PrototypeContractValidator.strings(channel["protocols"])
+            if Set(protocols).count != protocols.count || protocols
+                .contains(where: { $0.utf16.count < 1 || $0.utf16.count > 64 || $0.range(
+                    of: "[^!#$%&'*+\\-.^_`|~0-9A-Za-z]",
+                    options: .regularExpression
+                ) != nil })
+            {
+                throw fail("\(at).protocols", "protocols must be unique RFC 7230 tokens of 1 to 64 characters")
+            }
+            for name in ["onOpen", "onClose", "onError"] { try callback(channel[name], path: "\(at).\(name)") }
             if let key = channel["statusKey"]?.stringValue {
                 guard let value = state[key] else { throw fail(
                     "\(at).statusKey",
@@ -66,6 +89,12 @@ enum PrototypeChannels {
             ) }
             if case let .array(routes)? = channel["routes"] {
                 for (index, route) in routes.enumerated() {
+                    if websocket, route.objectFields?["when"]?.objectFields?["event"] != nil {
+                        throw fail(
+                            "\(at).routes[\(index)].when.event",
+                            "Event name matchers are only available for sse channels"
+                        )
+                    }
                     guard case let .array(actions)? = route.objectFields?["actions"] else { continue }
                     for (actionIndex, action) in actions.enumerated() {
                         guard [
@@ -90,6 +119,32 @@ enum PrototypeChannels {
         }
     }
 
+    private static func callback(_ value: JSONValue?, path: String) throws {
+        guard case let .array(actions)? = value else { return }
+        for (index, raw) in actions.enumerated() {
+            guard let action = raw.objectFields else { continue }
+            let at = "\(path)[\(index)]"
+            if ["request", "push", "replace", "pop", "popToRoot", "dismiss", "setPage"]
+                .contains(action["type"]?.stringValue ?? "") ||
+                (action["type"] == .string("platform") && action["call"] == .string("realtime.connect"))
+            {
+                throw fail(
+                    "\(at).\(action["type"] == .string("platform") ? "call" : "type")",
+                    "Channel callbacks cannot request, navigate or connect"
+                )
+            }
+            for key in ["actions", "onSuccess", "onError"] { try callback(action[key], path: "\(at).\(key)") }
+        }
+    }
+
+    static func needsValueCapability(_ action: [String: JSONValue]) -> Bool {
+        if ["setState", "setData", "appendData", "prependData", "upsertData"]
+            .contains(action["type"]?.stringValue ?? ""), let value = action["value"]?.objectFields,
+            value["event"] != nil || value["platform"] != nil { return true }
+        return action["type"] == .string("platform") && (action["args"]?.objectFields ?? [:]).values
+            .contains { $0.objectFields?["event"] == .string("") }
+    }
+
     static func call(_ action: [String: JSONValue], path: String, channels: [String: JSONValue]) throws {
         guard let call = action["call"]?.stringValue, call.hasPrefix("realtime.") else { return }
         let selector = action["args"]?.objectFields?["channel"]
@@ -98,6 +153,14 @@ enum PrototypeChannels {
             "\(path).args.channel",
             "channel must name a declared channel"
         ) }
+        if call == "realtime.send", let literal = action["args"]?.objectFields?["body"]?.objectFields?["value"] {
+            let size = literal.stringValue.map { $0.utf8.count } ?? PrototypeEmitContext.jsonByteCount(literal) ?? Int
+                .max
+            if size > PrototypeChannelLimits.maxSendBytes { throw fail(
+                "\(path).args.body.value",
+                "realtime.send body exceeds the byte limit"
+            ) }
+        }
         if call == "realtime.send",
            channel["kind"] !=
            .string("websocket") { throw fail("\(path).call", "realtime.send requires a websocket channel") }

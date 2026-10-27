@@ -40,7 +40,15 @@ internal object PrototypeChannels {
         if (websocket) raw.replaceFirst(Regex("^ws(s?):", RegexOption.IGNORE_CASE), "http$1:")
         else raw
       PrototypeRequestRules.requestUrlError(url)?.let {
-        return fail("$at.url", it)
+        return fail(
+          "$at.url",
+          if (websocket)
+            it
+              .replace("request", "websocket channel")
+              .replace("http or https", "ws or wss")
+              .replace("http:// or https://", "ws:// or wss://")
+          else it,
+        )
       }
       val headers = channel.member("headers").orEmpty()
       for (name in headers.keys.sorted()) {
@@ -53,6 +61,20 @@ internal object PrototypeChannels {
         }
       if (!websocket && channel["protocols"] != null)
         return fail("$at.protocols", "protocols are only available for websocket channels")
+      val protocols = (channel["protocols"] as? JsonArray)?.map { it.jsonPrimitive.content }
+      if (
+        protocols != null &&
+          (protocols.toSet().size != protocols.size ||
+            protocols.any { !Regex("^[!#\$%&'*+\\-.^_`|~0-9A-Za-z]{1,64}$").matches(it) })
+      )
+        return fail(
+          "$at.protocols",
+          "protocols must be unique RFC 7230 tokens of 1 to 64 characters",
+        )
+      for (name in listOf("onOpen", "onClose", "onError")) callbackError(channel[name], "$at.$name")
+        ?.let {
+          return it
+        }
       channel.text("statusKey")?.let { key ->
         val state = root.member("state").orEmpty()
         if (key !in state) return fail("$at.statusKey", "statusKey must name a declared state key")
@@ -67,6 +89,11 @@ internal object PrototypeChannels {
           return fail("$at.reconnect.initialDelayMs", "initialDelayMs must not exceed maxDelayMs")
       }
       (channel["routes"] as? JsonArray).orEmpty().forEachIndexed { index, route ->
+        if (websocket && (route.jsonObject["when"] as? JsonObject)?.get("event") != null)
+          return fail(
+            "$at.routes[$index].when.event",
+            "Event name matchers are only available for sse channels",
+          )
         (route.jsonObject["actions"] as JsonArray).forEachIndexed { actionIndex, action ->
           if (
             action.jsonObject.text("type") !in
@@ -92,6 +119,27 @@ internal object PrototypeChannels {
     return null
   }
 
+  private fun callbackError(value: JsonElement?, path: String): PrototypeSpecError? {
+    (value as? JsonArray).orEmpty().forEachIndexed { index, raw ->
+      val action = raw.jsonObject
+      val at = "$path[$index]"
+      if (
+        action.text("type") in
+          setOf("request", "push", "replace", "pop", "popToRoot", "dismiss", "setPage") ||
+          (action.text("type") == "platform" && action.text("call") == "realtime.connect")
+      )
+        return fail(
+          "$at.${if (action.text("type") == "platform") "call" else "type"}",
+          "Channel callbacks cannot request, navigate or connect",
+        )
+      for (key in listOf("actions", "onSuccess", "onError")) callbackError(action[key], "$at.$key")
+        ?.let {
+          return it
+        }
+    }
+    return null
+  }
+
   fun callError(action: JsonObject, path: String, root: JsonObject): PrototypeSpecError? {
     if (action.text("call")?.startsWith("realtime.") != true) return null
     val selector = action.member("args")?.get("channel")
@@ -101,9 +149,51 @@ internal object PrototypeChannels {
     val channel =
       id?.let { root.member("channels")?.get(it) as? JsonObject }
         ?: return fail("$path.args.channel", "channel must name a declared channel")
+    val literal = action.member("args")?.member("body")?.get("value")
+    if (action.text("call") == "realtime.send" && literal != null) {
+      val size =
+        (literal as? JsonPrimitive)
+          ?.takeIf { it.isString }
+          ?.content
+          ?.toByteArray(Charsets.UTF_8)
+          ?.size ?: jsonBytes(literal)
+      if (size > PrototypeChannelLimits.maxSendBytes)
+        return fail("$path.args.body.value", "realtime.send body exceeds the byte limit")
+    }
     return if (action.text("call") == "realtime.send" && channel.text("kind") != "websocket")
       fail("$path.call", "realtime.send requires a websocket channel")
     else null
+  }
+
+  // Match JSON.stringify at the static send boundary, including integral/exponent number text.
+  private fun jsonBytes(value: JsonElement): Int =
+    when (value) {
+      is JsonObject ->
+        2 +
+          maxOf(0, value.size - 1) +
+          value.entries.sumOf { (key, child) ->
+            PrototypeSpecInput.canonicalString(key).toByteArray(Charsets.UTF_8).size +
+              1 +
+              jsonBytes(child)
+          }
+      is JsonArray -> 2 + maxOf(0, value.size - 1) + value.sumOf(::jsonBytes)
+      is JsonPrimitive ->
+        when {
+          value.isString ->
+            PrototypeSpecInput.canonicalString(value.content).toByteArray(Charsets.UTF_8).size
+          value.doubleOrNull != null -> PrototypeRequests.numberText(value.double).length
+          else -> value.content.length
+        }
+    }
+
+  fun needsValueCapability(action: JsonObject): Boolean {
+    val value = action.member("value")
+    return (action.text("type") in
+      setOf("setState", "setData", "appendData", "prependData", "upsertData") &&
+      value != null &&
+      ("event" in value || "platform" in value)) ||
+      (action.text("type") == "platform" &&
+        action.member("args").orEmpty().values.any { (it as? JsonObject)?.text("event") == "" })
   }
 
   fun validRead(pointer: String, channels: JsonObject): Boolean {

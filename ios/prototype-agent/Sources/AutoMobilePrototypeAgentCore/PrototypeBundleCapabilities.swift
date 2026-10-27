@@ -133,7 +133,8 @@ enum PrototypeBundleCapabilities {
         if ["setData", "appendData", "prependData", "upsertData", "removeData"]
             .contains(type ?? "") { names.insert("prototype_data_actions_v1") }
         if type == "upsertData" ||
-            (type == "appendData" && fields["maxItems"] != nil) { names.insert("prototype_platform_realtime_v1") }
+            (type == "appendData" && fields["maxItems"] != nil) || PrototypeChannels
+            .needsValueCapability(fields) { names.insert("prototype_platform_realtime_v1") }
         if type == "prependData" { names.insert("prototype_lazy_list_v1") }
         if type == "emit", fields["context"] != nil { names.insert("prototype_emit_context_v1") }
         if type == "requireValid" { names.insert("prototype_checks_v1") }

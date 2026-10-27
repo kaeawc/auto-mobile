@@ -153,5 +153,5 @@
     }
   },
   "expectedPath": "channels.chat.routes[0].actions[0].value.value",
-  "expectedMessage": "A data write value must be a string, boolean, finite number, array or object"
+  "expectedMessage": "upsertData key pointer must be present and non-null in the literal value"
 }

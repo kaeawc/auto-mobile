@@ -2470,7 +2470,7 @@ in `PrototypeEffectShaders`.
 - **API floors and fallback.** Brush-based looks (`shimmer`, `glow`, `vignette`) draw on any API,
   `blur` needs 31, the AGSL ones 33. Below its floor an effect is omitted and the node renders
   unshaded. The device reports every omitted effect as `degradedEffects: [{path, type, reason:
-  "api"}]` on the show result and on `inspect_prototypes` (omitted when empty; older hosts see the
+"api"}]` on the show result and on `inspect_prototypes` (omitted when empty; older hosts see the
   same frame). `path` is the node's render identity (the `root.child...` key the renderer and
   `observe` use) plus the authored effect index, `<identity>.style.effects[<i>]`, and follows the
   `styleWhen` style in force when the reply is built. `reason: "budget"` entries use the same form.

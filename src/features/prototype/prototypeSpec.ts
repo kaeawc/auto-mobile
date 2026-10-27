@@ -499,6 +499,8 @@ const topAppBarBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["topAppBar"]),
+    onScroll: z.enum(["pinned", "enterAlways", "exitUntilCollapsed"]).optional(),
+    scroll: z.string().min(1).optional(),
     title: z.string().min(1),
     variant: z.enum(["small", "centerAligned", "medium", "large"]).optional(),
     navigationIcon: appBarActionSchema.optional(),
@@ -636,6 +638,8 @@ const tabBarBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["tabBar"]),
+    onScroll: z.enum(["none", "hide", "minimize"]).optional(),
+    scroll: z.string().min(1).optional(),
     items: z.array(itemSchema).min(1).max(32),
     pager: z.string().min(1).optional(),
     stateKey: stateKeySchema.optional(),
@@ -646,6 +650,8 @@ const bottomNavBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["bottomNav"]),
+    onScroll: z.enum(["none", "hide", "minimize"]).optional(),
+    scroll: z.string().min(1).optional(),
     items: z.array(itemSchema).min(2).max(5),
     pager: z.string().min(1).optional(),
     stateKey: stateKeySchema.optional(),

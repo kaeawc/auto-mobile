@@ -11,6 +11,7 @@ object AutoMobilePrototype {
 
   val capabilities: Set<String> =
     setOf(
+      "prototype_bar_scroll_v1",
       "prototype_carousel_v1",
       "prototype_chart_v1",
       "prototype_chat_scroll_v1",

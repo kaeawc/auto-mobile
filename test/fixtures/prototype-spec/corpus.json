@@ -245,7 +245,11 @@
     "z-effects-at-limits.json",
     "z-effects-style-when.json",
     "width-dp-at-max.json",
-    "window-dead-taps.json"
+    "window-dead-taps.json",
+    "bar-scroll-defaults.json",
+    "bar-scroll-enter-always.json",
+    "bar-scroll-material.json",
+    "bar-scroll-screen-local.json"
   ],
   "invalid": [
     "anchor-offset-x-over-max.json",
@@ -261,6 +265,14 @@
     "bad-shadow-color.json",
     "bad-text-decoration.json",
     "bad-transition.json",
+    "bar-scroll-bottom-enum.json",
+    "bar-scroll-cross-screen.json",
+    "bar-scroll-duplicate-target.json",
+    "bar-scroll-enum.json",
+    "bar-scroll-missing-target.json",
+    "bar-scroll-required-target.json",
+    "bar-scroll-tab-enum.json",
+    "bar-scroll-wrong-type.json",
     "border-width-over-max.json",
     "both-bindings.json",
     "bound-pager-state-key-boolean.json",
@@ -908,6 +920,7 @@
     "strict-duplicate-envelope.json",
     "strict-duplicate-escaped-key.json",
     "strict-duplicate-opaque.json",
+    "strict-gate-prototype_bar_scroll_v1.json",
     "strict-gate-prepend-prototype_lazy_list_v1.json",
     "strict-gate-on-appear-prototype_timers_v1.json",
     "strict-gate-prototype_carousel_v1.json",
@@ -1791,6 +1804,10 @@
     "z-effects-animated-phase.json": ["prototype_effects_v1"],
     "z-effects-at-limits.json": ["prototype_effects_v1"],
     "z-effects-style-when.json": ["prototype_effects_v1"],
-    "window-dead-taps.json": []
+    "window-dead-taps.json": [],
+    "bar-scroll-defaults.json": ["prototype_bar_scroll_v1"],
+    "bar-scroll-enter-always.json": ["prototype_bar_scroll_v1"],
+    "bar-scroll-material.json": ["prototype_bar_scroll_v1"],
+    "bar-scroll-screen-local.json": ["prototype_bar_scroll_v1", "prototype_stack_v1"]
   }
 }

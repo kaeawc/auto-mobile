@@ -5,6 +5,10 @@ import {
 } from "./prototypeStylePolishV2";
 import { PROTOTYPE_STYLE_POLISH_V2_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { prototypeScrollMotionFields } from "./prototypeScrollMotion";
+import {
+  prototypeBarScrollFields,
+  prototypeBarScrollUnsupportedMessage,
+} from "./prototypeBarScroll";
 import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
 import {
   prototypeFormatFields,
@@ -24,6 +28,7 @@ import {
   PROTOTYPE_THEME_MODES_CAPABILITY,
   PROTOTYPE_DATA_MODEL_CAPABILITY,
   PROTOTYPE_FLOW_GRID_CAPABILITY,
+  PROTOTYPE_BAR_SCROLL_CAPABILITY,
   PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
   PROTOTYPE_SCROLL_MOTION_CAPABILITY,
   PROTOTYPE_GESTURES_CAPABILITY,
@@ -237,6 +242,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     fields: (spec) => prototypePagerOptionFields(spec, ["stateKey"]),
     unsupportedMessage: (fields, platform) =>
       `The connected ${platform === "ios" ? "iOS prototype agent" : "CtrlProxy"} does not advertise prototype_pager_state_key_v1 required by ${fields[0]}. Nothing was shown. ${platform === "ios" ? "Relaunch with launchApp prototype: true" : "Update CtrlProxy"}, or remove pager.stateKey.`,
+  },
+  {
+    capability: PROTOTYPE_BAR_SCROLL_CAPABILITY,
+    fields: prototypeBarScrollFields,
+    unsupportedMessage: prototypeBarScrollUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_PAGER_OPTIONS_CAPABILITY,

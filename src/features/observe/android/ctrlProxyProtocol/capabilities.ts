@@ -439,6 +439,7 @@ export const KNOWN_REQUEST_TYPES: readonly CtrlProxyRequestType[] = Object.keys(
 
 export const PROTOTYPE_PAGER_STATE_KEY_CAPABILITY = "prototype_pager_state_key_v1";
 
+export const PROTOTYPE_BAR_SCROLL_CAPABILITY = "prototype_bar_scroll_v1";
 export const PROTOTYPE_PAGER_OPTIONS_CAPABILITY = "prototype_pager_options_v1";
 
 export const PROTOTYPE_STYLE_POLISH_V2_CAPABILITY = "prototype_style_polish_v2";

@@ -47,6 +47,7 @@ class CommandAdvertisementTest {
       "prototype_pager_state_key_v1",
       "prototype_flow_grid_v1",
       "prototype_pager_options_v1",
+      "prototype_bar_scroll_v1",
       "prototype_data_model_v1",
       "prototype_data_actions_v1",
       "prototype_network_v1",
@@ -162,6 +163,7 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_theme_modes_v1"))
     assertTrue(commands.contains("prototype_flow_grid_v1"))
     assertTrue(commands.contains("prototype_pager_options_v1"))
+    assertTrue(commands.contains("prototype_bar_scroll_v1"))
     assertTrue(commands.contains("prototype_data_model_v1"))
     assertTrue(commands.contains("prototype_data_actions_v1"))
     assertTrue(commands.contains("prototype_network_v1"))

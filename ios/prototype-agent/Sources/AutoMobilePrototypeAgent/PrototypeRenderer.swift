@@ -176,7 +176,7 @@
             // A node that draws nothing here (hidden, anchored elsewhere, a modal not yet in its layer)
             // returns no view at all: a stack puts its spacing around an empty ZStack too, which left
             // a gap Android does not (#10912). Container parents also leave such children out.
-            if !drawsNow {
+            if !drawsNow || barHidden {
                 EmptyView()
             } else if inStackSlot || node.visibleWhen == nil {
                 // A parent that lays children out through `drawnChildren` inserts and removes this node
@@ -184,7 +184,7 @@
                 // on the node and the parent drives the animation. No wrapping ZStack: a ZStack places
                 // its child at the size it measured, and a row re-laid out at exactly its ideal width
                 // shares that width out evenly, cutting "Edit"/"Save" short (#10899).
-                validatedContent.modifier(PrototypeScrollMotionModifier(node: node, model: model))
+                barContent.modifier(PrototypeScrollMotionModifier(node: node, model: model))
                     .transition(transition.swiftUITransition)
             } else {
                 // Parents without that filter (a root, a scroll child, a pager page): the conditional
@@ -194,12 +194,35 @@
                 // The container passes its parent's proposal through, unlike a ZStack (see above).
                 PrototypeLayeredLayout(alignment: .topLeading) {
                     if isVisible {
-                        validatedContent.modifier(PrototypeScrollMotionModifier(node: node, model: model))
+                        barContent.modifier(PrototypeScrollMotionModifier(node: node, model: model))
                             .transition(transition.swiftUITransition)
                     }
                 }
                 .animation(transition == .instant ? nil : .easeInOut(duration: 0.25), value: isVisible)
             }
+        }
+
+        @ViewBuilder private var barContent: some View {
+            if ["bottomNav", "tabBar"].contains(node.type), node.onScroll == "hide" {
+                validatedContent.modifier(PrototypeBarSlide(fraction: barFraction))
+            } else {
+                validatedContent
+            }
+        }
+
+        private var barFraction: Double {
+            model.barScroll(node).collapse(
+                node.onScroll,
+                extent: PrototypeBarScrollState.extent(variant: node.variant, behavior: node.onScroll),
+                reduced: reduceMotion || model.spec?.motion == "none"
+            )
+        }
+
+        private var barHidden: Bool {
+            (
+                (["bottomNav", "tabBar"].contains(node.type) && node.onScroll == "hide") ||
+                    (node.type == "topAppBar" && node.onScroll == "enterAlways")
+            ) && barFraction >= 1
         }
 
         @ViewBuilder private var validatedContent: some View {
@@ -368,6 +391,7 @@
                 PagerView(node: node, model: model)
             case "tabBar", "bottomNav":
                 navBar
+                    .modifier(PrototypeBarClip(fraction: node.onScroll == "hide" ? barFraction : 0))
             case "bottomSheet":
                 sheet
             case "slider":
@@ -748,9 +772,12 @@
                     } label: {
                         VStack(spacing: 2) {
                             navVisual(item)
-                            Text(item.label).font(.caption)
+                            if node.onScroll != "minimize" || barFraction == 0 { Text(item.label).font(.caption) }
                         }
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: node.onScroll == "minimize" && barFraction == 0 ? 64 : 44
+                        )
                         .foregroundColor(navForeground(selected: index == navSelection))
                         .background(
                             Capsule().fill(
@@ -758,6 +785,7 @@
                             )
                         )
                     }
+                    .accessibilityLabel(item.label)
                     .accessibilityAddTraits(index == navSelection ? .isSelected : [])
                 }
             }

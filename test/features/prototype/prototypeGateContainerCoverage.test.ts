@@ -65,6 +65,7 @@ const fixtures: Record<string, Node> = {
   },
   prototype_flow_grid_v1: { type: "flow", children: [label] },
   prototype_pager_state_key_v1: { type: "pager", stateKey: "page", children: [label] },
+  prototype_bar_scroll_v1: { type: "topAppBar", title: "Feed", onScroll: "pinned" },
   prototype_pager_options_v1: { type: "pager", axis: "horizontal", children: [label] },
   prototype_scroll_motion_v1: {
     ...label,

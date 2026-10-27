@@ -19,15 +19,17 @@
         private var coordinate: ObjectIdentifier { ObjectIdentifier(node) }
         var body: some View {
             PrototypeFadingScroll(axis: node.axis, spec: node.fadeEdges) {
-                if let child = node.child {
-                    NodeView(node: child, model: model)
-                        .background(GeometryReader { geometry in
-                            let origin = geometry.frame(in: .named(coordinate)).origin
-                            Color.clear.preference(
-                                key: PrototypeScrollOffsetPreference.self,
-                                value: [coordinate: -Double(node.axis == "horizontal" ? origin.x : origin.y)]
-                            )
-                        })
+                PrototypeBarScrollContent(node: node, model: model) {
+                    if let child = node.child {
+                        NodeView(node: child, model: model)
+                            .background(GeometryReader { geometry in
+                                let origin = geometry.frame(in: .named(coordinate)).origin
+                                Color.clear.preference(
+                                    key: PrototypeScrollOffsetPreference.self,
+                                    value: [coordinate: -Double(node.axis == "horizontal" ? origin.x : origin.y)]
+                                )
+                            })
+                    }
                 }
             }
             .coordinateSpace(name: coordinate)

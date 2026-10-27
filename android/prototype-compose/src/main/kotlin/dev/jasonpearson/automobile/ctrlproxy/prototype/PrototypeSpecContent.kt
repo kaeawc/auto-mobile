@@ -231,6 +231,7 @@ fun PrototypeSpecContent(
         (LocalPrototypeListEndTriggers.current
           ?: remember(LocalPrototypeShowEpoch.current) { PrototypeListEndTriggers() }),
       LocalPrototypeScrollOffsets provides scrollOffsets,
+      LocalPrototypeBarScroll provides rememberPrototypeBarScroll(root),
       LocalPrototypeAnchorLocals provides anchorLocals,
       LocalPrototypeGestureTaps provides gestureTaps,
       LocalPrototypeMenuLayers provides menuLayers,
@@ -854,20 +855,22 @@ private fun RenderPrototypeNodeContent(
         anchors.viewport = it
         motionViewport.bounds = it.boundsInRoot()
       }
+      val scrollModifier = modifier.prototypeBarScroll(node)
       val scrolling =
         if (source?.axis == "horizontal")
-          modifier
+          scrollModifier
             .then(viewport)
             .boundedScrollViewport(vertical = false)
             .prototypeFadeEdges(scroll, true, source.fadeEdges)
             .horizontalScroll(scroll)
         else if (refresh != null)
-          viewport
+          scrollModifier
+            .then(viewport)
             .boundedScrollViewport(vertical = true)
             .prototypeFadeEdges(scroll, false, source.fadeEdges, reverse)
             .verticalScroll(scroll, reverseScrolling = reverse)
         else
-          modifier
+          scrollModifier
             .then(viewport)
             .boundedScrollViewport(vertical = true)
             .prototypeFadeEdges(scroll, false, source?.fadeEdges, reverse)
@@ -1264,6 +1267,34 @@ private fun RenderPrototypePager(
   }
 }
 
+private data class PrototypeNavigationScroll(val minimized: Boolean, val modifier: Modifier)
+
+@Composable
+private fun prototypeNavigationScroll(
+  node: PrototypeRenderNode,
+  modifier: Modifier,
+): PrototypeNavigationScroll? {
+  val source = node.source
+  val behavior =
+    when (source) {
+      is PrototypeTabBarNode -> source.onScroll
+      is PrototypeBottomNavNode -> source.onScroll
+      else -> null
+    }
+  val binding = LocalPrototypeBarScroll.current.bars[node.identity]
+  val fraction =
+    binding?.fraction(LocalPrototypeMotion.current && !LocalPrototypeReducedMotion.current) ?: 0f
+  if (behavior == "hide" && fraction >= 1f) return null
+  val minimized = behavior == "minimize" && fraction > 0f
+  val barModifier =
+    when {
+      behavior == "hide" -> modifier.prototypeBarSlide(fraction)
+      minimized && source is PrototypeBottomNavNode -> modifier.height(56.dp)
+      else -> modifier
+    }
+  return PrototypeNavigationScroll(minimized, barModifier)
+}
+
 @Composable
 private fun RenderPrototypeNavigation(
   node: PrototypeRenderNode,
@@ -1287,40 +1318,48 @@ private fun RenderPrototypeNavigation(
     }
     else -> return
   }
+  val scroll = prototypeNavigationScroll(node, modifier) ?: return
   val select: (Int) -> Unit = { index ->
     interact(PrototypeInteraction.Select(pager, key, index, source.onTap.orEmpty()))
   }
   if (source is PrototypeBottomNavNode)
-    NavigationBar(modifier) {
+    NavigationBar(scroll.modifier) {
       items.forEachIndexed { index, item ->
         NavigationBarItem(
           node.selection == index,
           { select(index) },
           icon = { PrototypeNavigationIcon(item) },
-          label = { Text(item.label) },
+          label = if (scroll.minimized) null else ({ Text(item.label) }),
+          modifier = Modifier.semantics { if (scroll.minimized) contentDescription = item.label },
         )
       }
     }
   else if (source is PrototypeTabBarNode && source.scrollable)
-    ScrollableTabRow(node.selection, modifier) {
+    ScrollableTabRow(node.selection, scroll.modifier) {
       items.forEachIndexed { index, item ->
-        PrototypeNavigationTab(item, node.selection == index) { select(index) }
+        PrototypeNavigationTab(item, node.selection == index, scroll.minimized) { select(index) }
       }
     }
   else
-    TabRow(node.selection, modifier) {
+    TabRow(node.selection, scroll.modifier) {
       items.forEachIndexed { index, item ->
-        PrototypeNavigationTab(item, node.selection == index) { select(index) }
+        PrototypeNavigationTab(item, node.selection == index, scroll.minimized) { select(index) }
       }
     }
 }
 
 @Composable
-private fun PrototypeNavigationTab(item: PrototypeItem, selected: Boolean, select: () -> Unit) {
+private fun PrototypeNavigationTab(
+  item: PrototypeItem,
+  selected: Boolean,
+  minimized: Boolean,
+  select: () -> Unit,
+) {
   Tab(
     selected,
     select,
-    text = { Text(item.label) },
+    modifier = Modifier.semantics { if (minimized) contentDescription = item.label },
+    text = if (minimized) null else ({ Text(item.label) }),
     icon = { if (item.icon != null || item.image != null) PrototypeNavigationIcon(item) },
   )
 }

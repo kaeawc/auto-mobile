@@ -97,6 +97,12 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     leadingIcon: "search",
   }),
   prototype_flow_grid_v1: fixture({ type: "flow", id: "label", children: [label] }),
+  prototype_bar_scroll_v1: fixture({
+    type: "topAppBar",
+    id: "label",
+    title: "Feed",
+    onScroll: "pinned",
+  }),
   prototype_pager_options_v1: {
     ...fixture({
       type: "pager",

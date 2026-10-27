@@ -53,6 +53,7 @@
             return anchor
         }
 
+        var barScrollStates: [ObjectIdentifier: PrototypeBarScrollState] = [:]
         var menuBounds: [ObjectIdentifier: CGRect] = [:]
         private(set) var state: [String: JSONValue] = [:]
         /// Which swipe-actions row is open; opening one closes the others. Presentation only.
@@ -86,6 +87,7 @@
             // Only show, dismissal and a device data write (#12519, which rebuilds the drawn tree)
             // change structure; state transitions must not invalidate readers of an unchanged
             // (non-Equatable) spec merely by copying the session back.
+            if replacingSpec { barScrollStates.removeAll() }
             if replacingSpec || session.isShown != next.isShown || session.structureRevision != next.structureRevision {
                 spec = next.spec
             }

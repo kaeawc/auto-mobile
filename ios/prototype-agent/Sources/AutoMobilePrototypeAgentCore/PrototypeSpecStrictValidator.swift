@@ -49,6 +49,7 @@ public enum PrototypeSpecStrictValidator {
             let resolved = PrototypeDataResolver.resolveRoot(root, data: modelData)
             try PrototypeLimits.guardTree(resolved)
             let expanded = PrototypeRepeat.expand(resolved)
+            try PrototypeBarScroll.validate(expanded)
             try PrototypePagerOptions.validate(expanded)
             try PrototypeSwipe.validate(expanded)
             try PrototypeCarousel.validate(expanded)

@@ -210,6 +210,7 @@ struct PrototypeSpec: Decodable {
             formatter: formatContext.formatter,
             environment: formatContext.environment
         )
+        try PrototypeBarScroll.validate(expanded)
         try PrototypePagerOptions.validate(expanded)
         try PrototypeSwipe.validate(expanded)
         try PrototypeCarousel.validate(expanded)
@@ -892,6 +893,8 @@ final class PrototypeNode: Decodable {
     /// Menu entries decoded from the same `items` JSON key, preserving navigation items.
     let menuItems: [PrototypeMenuItem]?
     let pager: String?
+    let onScroll: String?
+    let scroll: String?
     let scrollable: Bool?
     let openWhen: Condition?
     /// Pull-to-refresh on a vertical `scroll` (`prototype_refresh_v1`).
@@ -973,6 +976,7 @@ final class PrototypeNode: Decodable {
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
         case name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
+        case onScroll, scroll
         case scrollable, openWhen, detents, scrim, dragHandle, options, icon, size
         case orientation, min, max, step, title, navigationIcon, actions, confirm
         case dismiss, action, durationMs, hourKey, minuteKey, is24Hour, headline, supporting
@@ -1032,6 +1036,8 @@ final class PrototypeNode: Decodable {
             menuItems = nil
         }
         pager = try container.decodeIfPresent(String.self, forKey: .pager)
+        onScroll = try container.decodeIfPresent(String.self, forKey: .onScroll)
+        scroll = try container.decodeIfPresent(String.self, forKey: .scroll)
         scrollable = try container.decodeIfPresent(Bool.self, forKey: .scrollable)
         anchorTo = try container.decodeIfPresent(String.self, forKey: .anchorTo)
         caret = try container.decodeIfPresent(PrototypeCaret.self, forKey: .caret)

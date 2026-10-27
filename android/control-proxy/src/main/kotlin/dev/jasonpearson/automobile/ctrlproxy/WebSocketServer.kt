@@ -349,6 +349,7 @@ class WebSocketServer(
     // Prototype specs honour pager axis, spacing, peek padding and fixed page sizes. Hosts refuse
     // these options on older APKs, which otherwise silently render a horizontal full-page pager.
     add("prototype_pager_options_v1")
+    add("prototype_bar_scroll_v1")
     // Prototype specs resolve read-only data, path repeat items, and data text/conditions. Older
     // APKs reject data, {path} items, repeat.key and data conditions as unknown, and draw
     // {data:/x} text literally, so hosts refuse such a spec for a device lacking this flag.

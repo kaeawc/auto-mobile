@@ -71,6 +71,9 @@ internal object PrototypeBundleNodeCapabilities {
             "text_field_leading_icon_v1" to setOf("leadingIcon"),
             "string_conditions_v1" to setOf("errorWhen", "errorText"),
           )
+        "topAppBar",
+        "bottomNav",
+        "tabBar" -> mapOf("bar_scroll_v1" to setOf("onScroll", "scroll"))
         "pager" ->
           mapOf(
             "carousel_v1" to setOf("indicator"),

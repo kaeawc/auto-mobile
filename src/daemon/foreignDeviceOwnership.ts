@@ -598,13 +598,11 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       claimPath === undefined ? undefined : this.evaluateOwner(claimPath, deviceId, "claim"),
       this.legacyClaimOwner(deviceId),
     ]);
-    // An owner a file names decides, so the table is not read (nor its owner asked) for it. A
-    // lease whose holder is idle does not: the table may still name a busy owner of the device.
-    const busyLeasePid = lease?.idleSocketPath === undefined ? lease?.pid : undefined;
-    const tableOwner =
-      (claimOwner ?? legacyOwner ?? busyLeasePid) === undefined
-        ? await this.tableClaimOwner(deviceId)
-        : undefined;
+    const tableOwner = await this.tableOwnerUnlessAFileDecides(
+      deviceId,
+      lease,
+      claimOwner ?? legacyOwner,
+    );
     if (
       lease?.idleSocketPath !== undefined &&
       (claimOwner ?? legacyOwner ?? tableOwner) === undefined
@@ -614,6 +612,21 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       this.idleLeaseHolders.delete(deviceId);
     }
     return lease?.pid ?? claimOwner ?? legacyOwner ?? tableOwner;
+  }
+
+  /**
+   * An owner a file names decides, so the table is not read (nor its owner asked) for it. A lease
+   * whose holder is idle does not: the table may still name a busy owner of the device.
+   */
+  private async tableOwnerUnlessAFileDecides(
+    deviceId: string,
+    lease: { pid: number; idleSocketPath?: string } | undefined,
+    claimOrLegacyOwner: number | undefined,
+  ): Promise<number | undefined> {
+    const busyLeasePid = lease?.idleSocketPath === undefined ? lease?.pid : undefined;
+    return (claimOrLegacyOwner ?? busyLeasePid) === undefined
+      ? this.tableClaimOwner(deviceId)
+      : undefined;
   }
 
   /**

@@ -6,6 +6,7 @@
  * A capability absent from the table runs on the floor.
  */
 export const PROTOTYPE_IOS_MINIMUM_OS: Readonly<Record<string, number>> = {
+  prototype_platform_namespace_v1: 17,
   prototype_icon_effects_v1: 17,
   prototype_zoom_transition_v1: 18,
 };

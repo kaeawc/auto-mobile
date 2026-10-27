@@ -680,15 +680,20 @@ private fun RenderPrototypeNodeContentWithViewport(
         PrototypeScrollViewport(node.identity, parentViewport)
       }
     CompositionLocalProvider(LocalPrototypeScrollViewport provides viewport) {
-      RenderPrototypeNodeContent(
-        node,
-        interact,
-        parentModifier.onGloballyPositioned { viewport.bounds = it.boundsInRoot() },
-        weightAxis,
-        windowRoot,
-      )
+      PrototypeNamespaceContent(node) {
+        RenderPrototypeNodeContent(
+          node,
+          interact,
+          parentModifier.onGloballyPositioned { viewport.bounds = it.boundsInRoot() },
+          weightAxis,
+          windowRoot,
+        )
+      }
     }
-  } else RenderPrototypeNodeContent(node, interact, parentModifier, weightAxis, windowRoot)
+  } else
+    PrototypeNamespaceContent(node) {
+      RenderPrototypeNodeContent(node, interact, parentModifier, weightAxis, windowRoot)
+    }
 }
 
 @Composable
@@ -1669,7 +1674,13 @@ private fun prototypeNodeModifier(
             onClickLabel = node.semantics?.hint,
             enabled = node.enabled,
             interactionSource = presses,
-            indication = prototypeIndication(LocalPrototypeMotion.current),
+            indication =
+              prototypeIndication(
+                namespaceIndicationEnabled(
+                  node.source.android?.indication,
+                  LocalPrototypeMotion.current,
+                ),
+              ),
             onClick = { gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) } },
             onLongClickLabel = longPress?.let { PROTOTYPE_LONG_PRESS_ACTION_LABEL },
             onLongClick = longPress?.let { { interact(PrototypeInteraction.Tap(it)) } },
@@ -1688,7 +1699,13 @@ private fun prototypeNodeModifier(
           onClickLabel = node.semantics?.hint,
           enabled = node.enabled,
           interactionSource = presses,
-          indication = prototypeIndication(LocalPrototypeMotion.current),
+          indication =
+            prototypeIndication(
+              namespaceIndicationEnabled(
+                node.source?.android?.indication,
+                LocalPrototypeMotion.current,
+              ),
+            ),
         ) {
           gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) }
         }
@@ -1910,30 +1927,6 @@ private fun prototypeIconOnlyLabel(children: List<PrototypeRenderNode>): String?
     else -> null
   }
 }
-
-/**
- * A pager reports its position (`Page 2 of 4`) and a time or date picker its bound [value]
- * (`07:30`, `2026-10-08`); other roles carry no state of their own here.
- */
-internal fun prototypeStateDescription(
-  role: String,
-  page: Int,
-  pageCount: Int,
-  value: String? = null,
-): String? =
-  when {
-    role == "pager" && pageCount > 0 -> "Page ${page + 1} of $pageCount"
-    role == "timePicker" || role == "datePicker" -> value
-    else -> null
-  }
-
-/** A time picker's bound value as 24-hour `HH:mm`, or a date picker's `YYYY-MM-DD`. */
-internal fun prototypePickerValue(node: PrototypeRenderNode): String? =
-  when (node.role) {
-    "timePicker" -> String.format(java.util.Locale.ROOT, "%02d:%02d", node.hour, node.minute)
-    "datePicker" -> node.selectedValue
-    else -> null
-  }
 
 /**
  * A node with no authored size on the main axis of its Row/Column `weight` ([weighted]) takes the

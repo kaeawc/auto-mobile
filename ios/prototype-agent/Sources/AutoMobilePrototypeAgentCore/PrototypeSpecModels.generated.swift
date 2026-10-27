@@ -94,8 +94,9 @@ struct IosNamespaceSheet: Codable, Equatable, Sendable {
     let sizing: String
 }
 
-struct IosNamespace: Codable, Equatable, Sendable {
+struct IosNamespace: Decodable {
     let buttonStyle: String?
+    let bottomAccessory: PrototypeNode?
     let tab: IosNamespaceTab?
     let sheet: IosNamespaceSheet?
     let hover: String?

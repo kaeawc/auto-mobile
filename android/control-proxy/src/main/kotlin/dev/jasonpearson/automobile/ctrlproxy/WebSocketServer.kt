@@ -414,7 +414,13 @@ class WebSocketServer(
     add("prototype_content_transition_v1")
     add("prototype_icon_effects_v1")
     add("prototype_stack_transitions_v1")
-    addAll(listOf("prototype_stack_patterns_v1", "prototype_zoom_transition_v1"))
+    addAll(
+      listOf(
+        "prototype_stack_patterns_v1",
+        "prototype_platform_namespace_v1",
+        "prototype_zoom_transition_v1",
+      ),
+    )
     add("prototype_reduced_motion_v1")
     add("prototype_shared_element_v1")
     add("prototype_shared_element_v2")

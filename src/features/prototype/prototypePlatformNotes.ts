@@ -1,3 +1,4 @@
+import { prototypeNamespaceNotes } from "./prototypeNamespaceNotes";
 import { designFallbackPaths } from "./prototypeDesign";
 import { prototypeStringsFallbackKeys } from "./prototypeStrings";
 import { prototypePlatformNamespaceFields } from "./prototypePlatformNamespace";
@@ -384,7 +385,7 @@ export function prototypePlatformNotes(
   const zoomNotes = prototypeZoomTransitionNotes(spec, platform, supports, osMajor);
   const foreign = platform === "android" ? "ios" : "android";
   const paths = prototypePlatformNamespaceFields(spec, foreign);
-  const namespaceNotes: PrototypePlatformNote[] = paths.length
+  const foreignNotes: PrototypePlatformNote[] = paths.length
     ? [
         {
           platform,
@@ -396,6 +397,7 @@ export function prototypePlatformNotes(
         },
       ]
     : [];
+  const namespaceNotes = [...foreignNotes, ...prototypeNamespaceNotes(spec, platform, osMajor)];
   if (platform === "android") {
     return [...namespaceNotes, ...zoomNotes, ...prototypeIconEffectNotes(spec, platform)];
   }

@@ -50,7 +50,12 @@ export const PROTOTYPE_TOOL_NAME = "prototype";
 // no second spec schema is authored.
 const convertSpec = (schema: ZodTypeAny): Record<string, unknown> =>
   zodToJsonSchema(schema, { strictUnions: true, pipeStrategy: "input" });
-const advertisedSpec = convertSpec(prototypeSpecSchema);
+// Give JSON Schema a canonical root before the recursive window/theme bottom-accessory slots.
+// Preserve the device parser's field order for serialized native resources.
+const { root: advertisedRoot, ...advertisedFields } = prototypeSpecSchema.shape;
+const advertisedSpec = convertSpec(
+  specZ.object({ root: advertisedRoot, ...advertisedFields }).strict(),
+);
 /**
  * The contract and validator reject `theme: {}` and `theme.colors: {}`, but a Zod refinement has no
  * JSON Schema form, so state it on the advertised schema for schema-driven clients.

@@ -1,8 +1,19 @@
 import { z } from "zod";
+import { prototypeNodeSchema, type PrototypeNode } from "./prototypeSpec";
 
-export const iosNamespaceSchema = z
+export type PrototypeIosNamespace = {
+  buttonStyle?: "glass" | "glassProminent";
+  bottomAccessory?: PrototypeNode;
+  tab?: { role: "search" };
+  sheet?: { sizing: "form" | "page" | "fitted" };
+  hover?: "lift" | "highlight";
+  navigationTitle?: "large" | "inline";
+};
+
+export const iosNamespaceSchema: z.ZodType<PrototypeIosNamespace, z.ZodTypeDef, unknown> = z
   .object({
     buttonStyle: z.enum(["glass", "glassProminent"]).optional(),
+    bottomAccessory: z.lazy(() => prototypeNodeSchema).optional(),
     tab: z
       .object({ role: z.enum(["search"]) })
       .strict()

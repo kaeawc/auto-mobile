@@ -106,7 +106,9 @@
     "motion3-expressive.json",
     "motion3-layout.json",
     "motion3-press.json",
+    "ns-android-ignored-on-ios.json",
     "ns-block-both.json",
+    "ns-ios-ignored-on-android.json",
     "on-appear-repeat.json",
     "on-appear.json",
     "opaque-json-keys.json",
@@ -1904,6 +1906,16 @@
     "zero-line-height.json",
     "zero-weight.json"
   ],
+  "validPlatformNotes": {
+    "ns-android-ignored-on-ios.json": {
+      "platform": "ios",
+      "paths": ["root.android"]
+    },
+    "ns-ios-ignored-on-android.json": {
+      "platform": "android",
+      "paths": ["root.ios"]
+    }
+  },
   "validCapabilities": {
     "backdrop-blur-zero.json": ["prototype_backdrop_v1"],
     "backdrop-full.json": ["prototype_backdrop_v1"],
@@ -2041,7 +2053,9 @@
     "motion3-expressive.json": ["prototype_motion_v3"],
     "motion3-layout.json": ["prototype_motion_v2", "prototype_motion_v3"],
     "motion3-press.json": ["prototype_motion_v3"],
+    "ns-android-ignored-on-ios.json": ["prototype_platform_namespace_v1"],
     "ns-block-both.json": ["prototype_platform_namespace_v1"],
+    "ns-ios-ignored-on-android.json": ["prototype_platform_namespace_v1"],
     "on-appear-repeat.json": ["prototype_timers_v1"],
     "on-appear.json": ["prototype_timers_v1"],
     "opaque-json-keys.json": [],

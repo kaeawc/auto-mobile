@@ -4879,6 +4879,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "text",
         "type": "string",
         "nullable": true,
@@ -4997,6 +5003,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -5143,6 +5155,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -5331,6 +5349,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "children",
         "type": "list",
         "nullable": false,
@@ -5461,6 +5485,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -5625,6 +5655,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "variant",
         "type": "string",
         "nullable": false,
@@ -5749,6 +5785,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -5899,6 +5941,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "variant",
         "type": "string",
         "nullable": false,
@@ -6045,6 +6093,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "stateKey",
         "type": "string",
         "nullable": false,
@@ -6187,6 +6241,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -6343,6 +6403,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "children",
         "type": "list",
         "nullable": false,
@@ -6473,6 +6539,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -7347,6 +7419,28 @@
         "type": "boolean",
         "nullable": false,
         "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace": [
+      {
+        "name": "predictiveBack",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespacePredictiveBack",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "indication",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespacePredictiveBack": [
+      {
+        "name": "style",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeAnimate": [
@@ -9779,6 +9873,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "openWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSheetCondition",
         "nullable": false,
@@ -9937,6 +10037,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "orientation",
         "type": "string",
         "nullable": false,
@@ -10055,6 +10161,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -10251,6 +10363,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "icon",
         "type": "string",
         "nullable": false,
@@ -10405,6 +10523,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "children",
         "type": "list",
         "nullable": false,
@@ -10543,6 +10667,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -10693,6 +10823,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "effect",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIconEffect",
         "nullable": true,
@@ -10823,6 +10959,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -10969,6 +11111,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -11137,6 +11285,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -11323,6 +11477,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "headline",
         "type": "string",
         "nullable": false,
@@ -11475,6 +11635,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "openWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSheetCondition",
         "nullable": false,
@@ -11599,6 +11765,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -11759,6 +11931,12 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "platform": [
@@ -11957,6 +12135,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "variant",
         "type": "string",
         "nullable": false,
@@ -12127,6 +12311,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -12409,6 +12599,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "swipeActions",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSwipeActions",
         "nullable": true,
@@ -12545,6 +12741,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -12733,6 +12935,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "stateKey",
         "type": "string",
         "nullable": false,
@@ -12897,6 +13105,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "stateKey",
         "type": "string",
         "nullable": false,
@@ -13021,6 +13235,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -13229,6 +13449,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "stateKey",
         "type": "string",
         "nullable": false,
@@ -13393,6 +13619,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "openWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSheetCondition",
         "nullable": false,
@@ -13531,6 +13763,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "stack": [
@@ -13645,6 +13883,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -13823,6 +14067,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "items",
         "type": "list",
         "nullable": false,
@@ -13987,6 +14237,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "text",
         "type": "string",
         "nullable": true,
@@ -14123,6 +14379,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -14363,6 +14625,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "hourKey",
         "type": "string",
         "nullable": false,
@@ -14523,6 +14791,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "openWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSheetCondition",
         "nullable": false,
@@ -14671,6 +14945,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },

@@ -4,7 +4,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
-/** Validated namespace blocks are currently ignored by the renderer, never by the validator. */
+/** Strip foreign node namespaces and window/theme blocks after strict contract validation. */
 internal fun stripPlatformNamespaces(element: JsonElement): JsonElement {
   val spec = element as? JsonObject ?: return element
   return JsonObject(
@@ -29,7 +29,9 @@ private fun stripNamespaceKeys(value: JsonElement): JsonElement =
   } ?: value
 
 private fun stripNodeNamespaces(value: JsonElement): JsonElement {
-  val node = stripNamespaceKeys(value) as? JsonObject ?: return value
+  val node =
+    (value as? JsonObject)?.let { JsonObject(it.filterKeys { key -> key != "ios" }) }
+      ?: return value
   return JsonObject(
     node.mapValues { (key, child) ->
       when (key) {

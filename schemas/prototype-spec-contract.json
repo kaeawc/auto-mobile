@@ -19555,6 +19555,10 @@
           },
           "optional": true
         },
+        "bottomAccessory": {
+          "rule": { "kind": "ref", "name": "node" },
+          "optional": true
+        },
         "tab": {
           "rule": {
             "kind": "object",
@@ -20656,6 +20660,10 @@
     "ios": {
       "buttonStyle": {
         "why": "Native iOS glass button treatments have no portable renderer equivalent.",
+        "requires": "prototype_platform_namespace_v1"
+      },
+      "bottomAccessory": {
+        "why": "The iOS tab bar bottom accessory has no Android navigation equivalent.",
         "requires": "prototype_platform_namespace_v1"
       },
       "tab.role": {

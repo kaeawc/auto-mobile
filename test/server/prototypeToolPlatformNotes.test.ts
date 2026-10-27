@@ -109,6 +109,80 @@ describe("prototype tool platform notes", () => {
       detail: `${foreign} namespace blocks are ignored on ${device.platform}.`,
     });
   });
+  test("iOS show includes namespace fallback and ignored native chrome paths", async () => {
+    agent.handshake.capabilities = [
+      ...agent.handshake.capabilities,
+      "prototype_platform_namespace_v1",
+    ];
+    const { payload } = await call(
+      {
+        action: "show",
+        spec: {
+          ...spec,
+          root: {
+            type: "button",
+            label: "Save",
+            ios: {
+              buttonStyle: "glass",
+              tab: { role: "search" },
+              navigationTitle: "large",
+              sheet: { sizing: "fitted" },
+              bottomAccessory: { type: "text", text: "Playing" },
+            },
+          },
+        },
+      },
+      { ...ios, osVersion: "25" },
+    );
+    expect(payload.success).toBe(true);
+    expect(payload.platformNotes).toContainEqual(
+      expect.objectContaining({
+        construct: "platformNamespace",
+        effect: "substituted",
+        paths: ["root.ios.buttonStyle"],
+      }),
+    );
+    expect(payload.platformNotes).toContainEqual(
+      expect.objectContaining({
+        construct: "platformNamespace",
+        effect: "ignored",
+        paths: [
+          "root.ios.tab.role",
+          "root.ios.navigationTitle",
+          "root.ios.sheet.sizing",
+          "root.ios.bottomAccessory",
+        ],
+      }),
+    );
+  });
+  test("Android show includes own namespace fields without an applicable target", async () => {
+    client.setSupportedCommands(["prototype_platform_namespace_v1"]);
+    const { payload } = await call(
+      {
+        action: "show",
+        spec: {
+          ...spec,
+          root: {
+            type: "text",
+            text: "Hello",
+            android: {
+              indication: "none",
+              predictiveBack: { style: "none" },
+            },
+          },
+        },
+      },
+      android,
+    );
+    expect(payload.success).toBe(true);
+    expect(payload.platformNotes).toContainEqual(
+      expect.objectContaining({
+        construct: "platformNamespace",
+        effect: "ignored",
+        paths: ["root.android.indication", "root.android.predictiveBack"],
+      }),
+    );
+  });
   test("successful iOS show returns all five typed notes", async () => {
     const { payload } = await call({ action: "show", spec });
     expect(payload.success).toBe(true);

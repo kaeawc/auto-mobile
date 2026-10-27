@@ -91,8 +91,8 @@ so tests assert records with a fake.
 
 ### Real-client conformance
 
-`test/server/claudeCodeElicitation.integration.test.ts` drives a real Claude Code (at least 2.1.311;
-`AUTOMOBILE_CLAUDE_BIN`, else `claude` on PATH; skipped without one) with a loopback stand-in for the
+`test/server/claudeCodeElicitation.integration.test.ts` drives a real Claude Code (at least 2.1.311, named by
+`AUTOMOBILE_CLAUDE_BIN`; skipped without one, and a `claude` on PATH is never spawned) with a loopback stand-in for the
 Anthropic API against a stdio stub built on the production dispatcher. It runs in the advisory nightly
 job `claude-code-elicitation-conformance` against a pinned binary and never touches a device. Measured
 against 2.1.311: headless `-p` declares `elicitation: {form, url}` on `initialize` and answers the

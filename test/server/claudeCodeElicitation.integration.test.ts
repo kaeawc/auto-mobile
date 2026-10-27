@@ -1,8 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import {
+  accessSync,
+  closeSync,
+  constants,
+  openSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 import { startFakeAnthropicApi, type FakeAnthropicApi } from "./fixtures/fakeAnthropicApi";
 
 /**
@@ -16,19 +27,33 @@ const MIN_VERSION = [2, 1, 311] as const;
 const RUN_TIMEOUT_MS = 90_000;
 const STUB = path.join(import.meta.dir, "fixtures", "elicitationStubServer.ts");
 
+/** Opt-in only: a developer's own `claude` on PATH is never spawned by the integration lane. */
 function resolveBinary(): string | undefined {
   const configured = process.env.AUTOMOBILE_CLAUDE_BIN;
-  const candidates = configured
-    ? [configured]
-    : (process.env.PATH ?? "").split(path.delimiter).map((dir) => path.join(dir, "claude"));
-  return candidates.find((candidate) => existsSync(candidate));
+  if (!configured) {
+    return undefined;
+  }
+  try {
+    accessSync(configured, constants.X_OK);
+    return statSync(configured).isFile() ? configured : undefined;
+  } catch {
+    // A missing or non-executable binary is the skip case, not a failure.
+    return undefined;
+  }
 }
+
+const VERSION_PROBE_TIMEOUT_MS = 10_000;
 
 async function versionOf(binary: string): Promise<string | undefined> {
   const child = spawn(binary, ["--version"], { stdio: ["ignore", "pipe", "ignore"] });
   let out = "";
   child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString("utf8")));
-  await new Promise((resolve) => child.once("close", resolve));
+  const killer = defaultTimer.setTimeout(() => child.kill("SIGKILL"), VERSION_PROBE_TIMEOUT_MS);
+  await new Promise((resolve) => {
+    child.once("error", resolve);
+    child.once("close", resolve);
+  });
+  defaultTimer.clearTimeout(killer);
   return /\d+\.\d+\.\d+/.exec(out)?.[0];
 }
 
@@ -49,7 +74,7 @@ const runnable = binary !== undefined && version !== undefined && atLeast(versio
 if (!runnable) {
   console.warn(
     `claudeCodeElicitation: skipped, no Claude Code >= ${MIN_VERSION.join(".")} ` +
-      `(AUTOMOBILE_CLAUDE_BIN or PATH; found ${version ?? "none"})`,
+      `(set AUTOMOBILE_CLAUDE_BIN; found ${version ?? "none"})`,
   );
 }
 
@@ -60,7 +85,8 @@ interface Observation {
 
 const cleanup: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
-  for (const step of cleanup.splice(0)) {
+  // Newest first: kill the child, then close the API, then remove the directory.
+  for (const step of cleanup.splice(0).reverse()) {
     await step();
   }
 });
@@ -88,6 +114,8 @@ async function runClaude(
       },
     }),
   );
+  const errFd = openSync(path.join(dir, "claude.err"), "w");
+  cleanup.push(() => closeSync(errFd));
   const child = spawn(
     binary as string,
     [
@@ -100,7 +128,7 @@ async function runClaude(
     ],
     {
       cwd: dir,
-      stdio: ["ignore", "ignore", "ignore"],
+      stdio: ["ignore", "ignore", errFd],
       env: {
         PATH: process.env.PATH ?? "",
         HOME: path.join(dir, "home"),
@@ -112,13 +140,26 @@ async function runClaude(
         ENABLE_TOOL_SEARCH: "false",
         DISABLE_AUTOUPDATER: "1",
         DISABLE_TELEMETRY: "1",
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
         ...env,
       },
     },
   );
   cleanup.push(() => void child.kill("SIGKILL"));
-  await new Promise((resolve) => child.once("close", resolve));
-  return observe(log, api);
+  const stop = defaultTimer.setTimeout(() => child.kill("SIGKILL"), RUN_TIMEOUT_MS - 5_000);
+  const exit = await new Promise<string>((resolve) => {
+    child.once("error", (error) => resolve(`spawn error: ${error.message}`));
+    child.once("close", (code, signal) => resolve(`code=${code} signal=${signal}`));
+  });
+  defaultTimer.clearTimeout(stop);
+  const observation = observe(log, api);
+  if (observation.lines.every((line) => line.kind !== "record")) {
+    // Nothing recorded means the run never reached the tool; keep Claude's own words for the log.
+    console.warn(
+      `claude ${era} run: ${exit}\n${readFileSync(path.join(dir, "claude.err"), "utf8")}`,
+    );
+  }
+  return observation;
 }
 
 function observe(log: string, api: FakeAnthropicApi): Observation {

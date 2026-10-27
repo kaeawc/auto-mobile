@@ -178,7 +178,7 @@ test("real handler serves the shared tools/list", async () => {
   expect(Array.isArray(frame.result.tools)).toBe(true);
   expect(frame.result.tools.length).toBeGreaterThan(0);
   // Private: the catalog is filtered per session key, so it must never be cacheable across callers.
-  expect(frame.result).toMatchObject({ ttlMs: 30_000, cacheScope: "private" });
+  expect(frame.result).toMatchObject({ ttlMs: 5_000, cacheScope: "private" });
 });
 
 test("real handler gives server/discover a private cache hint", async () => {

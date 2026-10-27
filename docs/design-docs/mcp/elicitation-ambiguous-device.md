@@ -58,8 +58,23 @@ retry response map ends the question flow, and a valid selection runs the backen
 
 ## Measuring before extending
 
-Extending to confirmations needs data on which clients declare elicitation and how asks end
-(accept, decline, timeout). This spike does not record either; add that counter before building more.
+Extending to confirmations needs data on which clients declare elicitation and how asks end. Every
+ambiguous-device refusal on a call without `deviceId` produces one `ElicitationRecord`
+(`src/server/elicitationOutcome.ts`):
+
+- `declared`: `none`, `bare` (`elicitation: {}`), `form` or `url`, read per connection (legacy) or from
+  the request envelope (modern).
+- `era`: `legacy` push or `modern` MRTR/task.
+- `outcome`: `not_offered` (client cannot be asked: the denominator for the rest), `asked` (modern
+  question handed back; the answer arrives on a later request), then `accept`, `decline`, `cancel`,
+  `timeout` (legacy only), `invalid` (accepted an unoffered device, malformed or missing answer) or
+  `error` (the ask itself failed).
+- `latencyMs`: ask to answer on the injected timer, for legacy asks and modern answers; absent for
+  `not_offered` and `asked`.
+
+The production recorder writes one `[elicitation] ...` info log line and a push-only `elicitation`
+telemetry event. The `ElicitationRecorder` is injectable (`ambiguousDeviceElicitation.recorder` for the
+legacy path, an argument to `withAmbiguousDeviceMrtr`), so tests assert records with a fake.
 
 ### MRTR limits (modern era)
 

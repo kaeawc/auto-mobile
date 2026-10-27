@@ -6,6 +6,10 @@ import type { TaskLeaseKeepalive } from "../../daemon/tasks/taskLeaseKeepalive";
 import { CLIENT_CAPABILITIES_META_KEY } from "@modelcontextprotocol/server";
 import { declaresFormElicitation } from "../ambiguousDeviceElicitation";
 import { executeWithDeviceChoice } from "../ambiguousDeviceChoice";
+import {
+  classifyElicitationDeclaration,
+  telemetryElicitationRecorder,
+} from "../elicitationOutcome";
 
 /**
  * Eligibility and cancellation policy for THIS call, including its arguments (#13090).
@@ -101,6 +105,12 @@ export function createTaskAwareToolCallExecutor(
           taskCall,
           (retry) => deps.execute(retry),
           async ({ inputRequests }) => ({ responses: await task.requestInput(inputRequests) }),
+          {
+            recorder: telemetryElicitationRecorder,
+            declared: classifyElicitationDeclaration(
+              call.extra.envelope?.[CLIENT_CAPABILITIES_META_KEY],
+            ),
+          },
         );
       },
     );

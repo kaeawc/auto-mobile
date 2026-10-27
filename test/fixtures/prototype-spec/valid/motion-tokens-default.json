@@ -1,0 +1,15 @@
+{
+  "id": "tokens",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "Hello",
+    "animate": {
+      "tempo": "default"
+    }
+  }
+}

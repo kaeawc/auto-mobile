@@ -478,6 +478,8 @@ internal object PrototypeStrictPolicy {
       fieldFeatures[key]?.let(::need)
       if (key == "style" && (child as? JsonObject)?.containsKey("shader") == true)
         need("custom_shaders")
+      if (key == "animate" && (child as? JsonObject)?.containsKey("tempo") == true)
+        need("motion_tokens")
       if (PrototypeMotionFeatures.usesMotion(key, child)) result.add("prototype_motion_v2")
       if (key == "scrollLinked" || key == "scrollTransition") need("scroll_motion")
       if (PrototypeMotionFeatures.usesChoreography(key, child)) need("choreography")

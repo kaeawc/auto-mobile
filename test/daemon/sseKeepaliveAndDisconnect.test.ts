@@ -1,5 +1,6 @@
 import { planDisconnectMonitorHarness } from "./helpers/planDisconnectMonitorHarness";
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { DaemonDisconnectHarness, createPooledDevice } from "./helpers/DaemonDisconnectHarness";
 
 import { getPerformanceMonitor } from "../../src/features/performance/PerformanceMonitor";
@@ -19,6 +20,7 @@ import { waitForObservation, type WaitForWithSettled } from "../../src/server/ob
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
+afterEach(() => DaemonState.getInstance().reset());
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
 

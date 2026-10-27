@@ -1454,7 +1454,8 @@ uses the default visibility animation; wrap the stack in a box to give that a cu
 
 ### Motion v2 (#14208, `prototype_motion_v2`, not device-verified)
 
-- **Animated style.** A node's `animate: {durationMs?, easing?}` (0–2000 ms, default 300;
+- **Animated style.** A node's `animate: {tempo?}` selects a contract spring (see Motion tokens), or
+  `animate: {durationMs?, easing?}` selects timing (0–2000 ms, default 300;
   `standard` (default), `emphasized`, `linear` or `spring`, which ignores the duration) makes
   changes to its `alpha`, `offset`, `scale`, `rotation`, `background` and `color` animate, for
   example a heart that grows and turns red when a `styleWhen` matches. Without `animate` those
@@ -3906,3 +3907,27 @@ namespace objects on nodes, window and theme for native semantics. Each field ha
 `why` in the contract. Foreign blocks are ignored and reported in `platformNotes`.
 Own-platform blocks require `prototype_platform_namespace_v1`; current renderers
 ignore both blocks and do not advertise it.
+
+### Motion tokens
+
+`animate.tempo: "fast" | "default" | "slow"` requires `prototype_motion_tokens_v1`
+and cannot be combined with `durationMs` or `easing`. The contract's `motionTokens`
+table selects a physical spring by scheme (`motion: "standard"` by default, or
+`"expressive"`), property role and tempo. `easing: "spring"` selects the default
+tempo of that scheme. Spatial properties are offset, scale, rotation, cornerRadius,
+elevation, shadowColor, padding, border width and dp width/height; alpha, background,
+color and border color use critically damped effects springs.
+
+| Scheme / role         | Damping ratio (fast / default / slow) | Stiffness (fast / default / slow) |
+| --------------------- | ------------------------------------- | --------------------------------- |
+| standard spatial      | 0.9 / 0.9 / 0.9                       | 1400 / 700 / 300                  |
+| expressive spatial    | 0.6 / 0.8 / 0.8                       | 800 / 380 / 200                   |
+| either scheme effects | 1 / 1 / 1                             | 3800 / 1600 / 800                 |
+
+Compose uses `spring(dampingRatio, stiffness)`. SwiftUI uses
+`interpolatingSpring(mass: 1, stiffness: k, damping: 2 * dampingRatio * sqrt(k))`,
+so both renderers use the same physical spring. Reduced motion snaps spatial
+changes and retains effects; motion off snaps everything. Existing motion v2/v3
+capability requirements still apply; iOS advertises the token capability but
+continues to refuse those broader features until its corresponding capabilities
+are available.

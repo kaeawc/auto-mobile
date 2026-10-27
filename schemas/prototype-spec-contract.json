@@ -18679,6 +18679,13 @@
             "values": ["standard", "emphasized", "linear", "spring"]
           },
           "optional": true
+        },
+        "tempo": {
+          "rule": {
+            "kind": "enum",
+            "values": ["fast", "default", "slow"]
+          },
+          "optional": true
         }
       }
     },
@@ -21687,6 +21694,68 @@
             }
           },
           "optional": true
+        }
+      }
+    }
+  },
+  "motionTokens": {
+    "standard": {
+      "spatial": {
+        "fast": {
+          "dampingRatio": 0.9,
+          "stiffness": 1400
+        },
+        "default": {
+          "dampingRatio": 0.9,
+          "stiffness": 700
+        },
+        "slow": {
+          "dampingRatio": 0.9,
+          "stiffness": 300
+        }
+      },
+      "effects": {
+        "fast": {
+          "dampingRatio": 1,
+          "stiffness": 3800
+        },
+        "default": {
+          "dampingRatio": 1,
+          "stiffness": 1600
+        },
+        "slow": {
+          "dampingRatio": 1,
+          "stiffness": 800
+        }
+      }
+    },
+    "expressive": {
+      "spatial": {
+        "fast": {
+          "dampingRatio": 0.6,
+          "stiffness": 800
+        },
+        "default": {
+          "dampingRatio": 0.8,
+          "stiffness": 380
+        },
+        "slow": {
+          "dampingRatio": 0.8,
+          "stiffness": 200
+        }
+      },
+      "effects": {
+        "fast": {
+          "dampingRatio": 1,
+          "stiffness": 3800
+        },
+        "default": {
+          "dampingRatio": 1,
+          "stiffness": 1600
+        },
+        "slow": {
+          "dampingRatio": 1,
+          "stiffness": 800
         }
       }
     }

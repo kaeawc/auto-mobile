@@ -534,6 +534,8 @@ struct Style: Decodable {
     let shadowColor: PrototypeModeValue?
     var shadows: [Shadow]? = nil
     var cornerStyle: String? = nil
+    var scale: Double?
+    var rotation: Double?
     let offset: Offset?
     let lineHeight: Double?
     let letterSpacing: Double?
@@ -581,6 +583,8 @@ struct Style: Decodable {
             shadowColor: prototype.shadowColor ?? shadowColor,
             shadows: prototype.shadows ?? shadows,
             cornerStyle: prototype.cornerStyle ?? cornerStyle,
+            scale: prototype.scale ?? scale,
+            rotation: prototype.rotation ?? rotation,
             offset: prototype.offset ?? offset,
             lineHeight: prototype.lineHeight ?? lineHeight,
             letterSpacing: prototype.letterSpacing ?? letterSpacing,
@@ -779,6 +783,7 @@ final class PrototypeNode: Decodable {
     let enabledWhen: Condition?
     let checks: [PrototypeCheck]?
     let validateOn: PrototypeValidateOn?
+    let animate: Animate?
     let keyframes: JSONValue?
     /// Stack navigation, or other nodes' `visibleWhen` enter/exit (`none`, `fade`, `expand`, `slide`).
     /// Absent visibility transitions use fade + expand; stacks always use that visibility default.
@@ -941,7 +946,7 @@ final class PrototypeNode: Decodable {
     private enum CodingKeys: String, CodingKey {
         case scrollTransition, scrollLinked
         case into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey,
-             transition, keyframes
+             transition, keyframes, animate
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
         case kind, selectionKey, openKey, list, detail, content, main
         case effect, name, label, variant, stateKey, placeholder, axis, items, pager
@@ -985,6 +990,7 @@ final class PrototypeNode: Decodable {
         visibleWhen = try container.decodeIfPresent(Condition.self, forKey: .visibleWhen)
         shared = try container.decodeIfPresent(Shared.self, forKey: .shared)
         sharedKey = try container.decodeIfPresent(String.self, forKey: .sharedKey)
+        animate = try container.decodeIfPresent(Animate.self, forKey: .animate)
         keyframes = try container.decodeIfPresent(JSONValue.self, forKey: .keyframes)
         transition = try container.decodeIfPresent(PrototypeTransitionForm.self, forKey: .transition)?.type
         scrollTransition = try container.decodeIfPresent(ScrollTransition.self, forKey: .scrollTransition)

@@ -1,3 +1,4 @@
+import { prototypeMotionObjectError } from "./prototypeMotionTokens";
 import { prototypeRoutesError } from "./prototypeRoutes";
 import { prototypeStylePolishV2ObjectError } from "./prototypeStylePolishV2";
 import { prototypeDerivedError } from "./prototypeDerivedValidation";
@@ -30,11 +31,7 @@ import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
 import { routeBoundKeys } from "./prototypeRoutes";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
-import {
-  chargeKeyframeNode,
-  prototypeKeyframesError,
-  prototypeKeyframeTracksError,
-} from "./prototypeKeyframes";
+import { chargeKeyframeNode, prototypeKeyframesError } from "./prototypeKeyframes";
 import { effectUses } from "./prototypeEffects";
 import { jsonCost } from "./prototypeJsonCost";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
@@ -303,17 +300,12 @@ function visitObject(
   }
   return objectRuleError(rule, data, path);
 }
-/** The `keyframes` object adds cross-point track rules on top of the generic object constraint. */
 function objectRuleError(
-  rule: Parameters<typeof objectConstraint>[1],
+  rule: Rule,
   data: Record<string, unknown>,
   path: string,
-): ReturnType<typeof objectConstraint> {
-  const tracks =
-    rule === definitions.keyframes
-      ? prototypeKeyframeTracksError(data.tracks, `${path}.tracks`)
-      : undefined;
-  return tracks ?? objectConstraint(data, rule, path);
+): PrototypeValidationError | undefined {
+  return prototypeMotionObjectError(rule, data, path) ?? objectConstraint(data, rule, path);
 }
 function objectConstraint(
   data: Record<string, unknown>,

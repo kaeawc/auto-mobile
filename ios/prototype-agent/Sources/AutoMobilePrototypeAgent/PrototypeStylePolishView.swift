@@ -3,9 +3,28 @@
 
     /// One path implementation for all style paints, including spread-adjusted shadow sources.
     struct PrototypeStyleShape: Shape {
-        let radius: CornerRadius?
+        var radius: CornerRadius?
         let continuous: Bool
         var spread: Double = 0
+
+        var animatableData: AnimatablePair<AnimatablePair<Double, Double>, AnimatablePair<Double, Double>> {
+            get {
+                switch radius {
+                case let .uniform(value): return .init(.init(value, value), .init(value, value))
+                case let .corners(topStart, topEnd, bottomEnd, bottomStart):
+                    return .init(.init(topStart, topEnd), .init(bottomEnd, bottomStart))
+                default: return .zero
+                }
+            }
+            set {
+                radius = .corners(
+                    topStart: newValue.first.first,
+                    topEnd: newValue.first.second,
+                    bottomEnd: newValue.second.first,
+                    bottomStart: newValue.second.second
+                )
+            }
+        }
 
         func path(in rect: CGRect) -> Path {
             let radii = PrototypeStyleCorners.radii(radius, width: rect.width, height: rect.height, spread: spread)
@@ -23,6 +42,7 @@
         let style: Style?
         let shape: PrototypeStyleShape
         let palette: PrototypePalette
+        var styleAnimation: PrototypeStyleAnimation? = nil
         let shimmerAnimated: Bool
         var effects: PrototypeEffects.Plan = .empty
         var motion = PrototypeMotion(specMotion: nil, reduceMotion: false)
@@ -33,30 +53,34 @@
         }
 
         func body(content: Content) -> some View {
-            content
-                // First, so it paints over the background and gradient below it and under the content.
+            let background = content
                 .background { PrototypeEffectMeshBackground(plan: effects, palette: palette) }
                 .background {
                     if let gradient = style?.gradient {
                         PrototypeGradientFill(gradient: gradient, palette: palette)
                     }
                 }
-                .background(palette.color(style?.background) ?? .clear)
+                .animation(styleAnimation?.animation("background")) { view in
+                    view.background(palette.color(style?.background) ?? .clear)
+                }
+            let clipped = background
                 .modifier(PrototypeShimmerModifier(
                     enabled: style?.shimmer == true, animated: shimmerAnimated, shape: shape
                 ))
-                .clipShape(shape)
+                .animation(styleAnimation?.animation("cornerRadius")) { view in view.clipShape(shape) }
                 .modifier(PrototypeEffectsModifier(
                     plan: effects, palette: palette, shape: shape, motion: motion, authored: authorsEffects
                 ))
+            let painted = clipped
                 .overlay { border }
                 .overlay { PrototypeStyleShadows(layers: layers, shape: shape, inner: true) }
                 .background { PrototypeStyleShadows(layers: layers, shape: shape, inner: false) }
-                .shadow(
-                    color: style?.shadows == nil && (style?.elevation ?? 0) > 0
-                        ? palette.color(style?.shadowColor) ?? .black.opacity(0.25) : .clear,
-                    radius: style?.elevation ?? 0
-                )
+            let shadow: Color = style?.shadows == nil && (style?.elevation ?? 0) > 0
+                ? palette.color(style?.shadowColor) ?? .black.opacity(0.25) : .clear
+            let elevation = CGFloat(style?.elevation ?? 0)
+            return painted.animation(styleAnimation?.animation("shadowColor")) { view in
+                view.shadow(color: shadow, radius: elevation)
+            }
         }
 
         @ViewBuilder private var border: some View {
@@ -69,7 +93,11 @@
                         )
                     }
                 } else {
-                    shape.stroke(palette.color(border.color) ?? .clear, lineWidth: border.width)
+                    shape.stroke(style: StrokeStyle(lineWidth: border.width))
+                        .animation(styleAnimation?.animation("border.color")) {
+                            $0.foregroundStyle(palette.color(border.color) ?? .clear)
+                        }
+                        .animation(styleAnimation?.animation("border.width"), value: border.width)
                 }
             }
         }

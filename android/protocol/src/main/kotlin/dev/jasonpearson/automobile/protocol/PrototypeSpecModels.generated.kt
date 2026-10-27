@@ -1837,11 +1837,12 @@ data class PrototypeSafeAreaPadding(
   val types: List<String>,
 )
 
-/** A node's style animation (#14208): `durationMs` 0..2000 (default 300) and `easing`. */
+/** A node's style animation: mutually exclusive `tempo` or `durationMs`/`easing`. */
 @Serializable
 data class PrototypeAnimate(
   val durationMs: Int? = null,
   val easing: String? = null,
+  val tempo: String? = null,
 )
 
 /** Container `stagger` (#15247): each `visibleWhen` child enters `ms` after the previous one. */

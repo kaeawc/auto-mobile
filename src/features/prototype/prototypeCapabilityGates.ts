@@ -218,6 +218,12 @@ import {
   prototypeMediaItemsUnsupportedMessage,
 } from "./prototypeMediaItems";
 
+import { PROTOTYPE_MOTION_TOKENS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeMotionTokenFields,
+  prototypeMotionTokensUnsupportedMessage,
+} from "./prototypeMotionTokens";
+
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
   readonly fields: (spec: unknown, platform?: "android" | "ios") => string[];
@@ -226,6 +232,11 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: PROTOTYPE_MOTION_TOKENS_CAPABILITY,
+    fields: prototypeMotionTokenFields,
+    unsupportedMessage: prototypeMotionTokensUnsupportedMessage,
+  },
   {
     capability: PROTOTYPE_CONTENT_TRANSITION_CAPABILITY,
     fields: prototypeContentTransitionFields,

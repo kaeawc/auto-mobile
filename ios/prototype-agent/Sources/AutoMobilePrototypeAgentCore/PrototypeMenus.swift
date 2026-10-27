@@ -86,15 +86,6 @@ enum PrototypeMenus {
         if let actions = fields["onTap"] { try validateActions(actions, path: "\(path).onTap") }
     }
 
-    private static func validateDataAction(_ fields: [String: JSONValue], type: String, path: String) throws {
-        _ = try string(fields["path"], "\(path).path")
-        if type != "removeData" {
-            guard let binding = fields["value"],
-                  (try? PrototypeEmitContext.validate(.object(["value": binding]), path: "value")) != nil
-            else { throw fail("\(path).value", "Invalid data write value") }
-        }
-    }
-
     private static func validatePageAction(_ fields: [String: JSONValue], path: String) throws {
         _ = try string(fields["pager"], "\(path).pager")
         let page = fields["page"]
@@ -114,10 +105,12 @@ enum PrototypeMenus {
             case "emit":
                 keys = ["type", "name", "payload"]
                 _ = try string(fields["name"], "\(path).name")
-            case "setState":
-                keys = ["type", "key", "value"]
-                try key(fields["key"], "\(path).key")
-                guard fields["value"]?.isScalar == true else { throw fail("\(path).value", "Expected scalar") }
+            case "setState", "setData", "appendData", "prependData", "upsertData", "removeData":
+                guard let rule = PrototypeContractValidator.definition("action") else {
+                    throw fail(path, "Embedded structural contract is unavailable")
+                }
+                try PrototypeContractValidator.validateValue(action, rule: rule, path: path)
+                continue
             case "toggle", "increment", "decrement":
                 keys = type == "toggle" ? ["type", "key"] : ["type", "key", "by"]
                 try key(fields["key"], "\(path).key")
@@ -128,9 +121,6 @@ enum PrototypeMenus {
                 keys = ["type", "pager", "page"]
                 try validatePageAction(fields, path: path)
             case "dismiss": keys = ["type"]
-            case "setData", "appendData", "prependData", "removeData":
-                keys = type == "removeData" ? ["type", "path"] : ["type", "path", "value"]
-                try validateDataAction(fields, type: type, path: path)
             default: throw fail("\(path).type", "Invalid string value")
             }
             try strict(fields, keys, path)

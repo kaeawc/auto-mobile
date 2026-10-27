@@ -1,0 +1,210 @@
+{
+  "spec": {
+    "id": "realtime",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "state": {
+      "chatStatus": "idle",
+      "unread": 0,
+      "peerTyping": false
+    },
+    "data": {
+      "messages": []
+    },
+    "channels": {
+      "chat": {
+        "kind": "websocket",
+        "url": "wss://chat.example.com/rooms/{roomId}",
+        "protocols": ["chat.v1"],
+        "headers": {
+          "Authorization": "Bearer {token}"
+        },
+        "via": "host",
+        "connect": "onShow",
+        "statusKey": "chatStatus",
+        "reconnect": {
+          "maxAttempts": 8,
+          "initialDelayMs": 500,
+          "maxDelayMs": 30000
+        },
+        "decode": "json",
+        "routes": [
+          {
+            "when": {
+              "pointer": "/type",
+              "equals": "message"
+            },
+            "actions": [
+              {
+                "type": "upsertData",
+                "path": "/data/messages",
+                "key": "/id",
+                "value": {
+                  "event": "/message"
+                },
+                "maxItems": 200
+              },
+              {
+                "type": "increment",
+                "key": "unread"
+              }
+            ]
+          },
+          {
+            "when": {
+              "pointer": "/typing",
+              "exists": true
+            },
+            "actions": [
+              {
+                "type": "setState",
+                "key": "peerTyping",
+                "value": {
+                  "event": "/typing"
+                }
+              }
+            ]
+          },
+          {
+            "actions": [
+              {
+                "type": "appendData",
+                "path": "/data/messages",
+                "value": {
+                  "event": ""
+                },
+                "maxItems": 200
+              }
+            ]
+          }
+        ],
+        "onOpen": [],
+        "onClose": [],
+        "onError": []
+      }
+    },
+    "platform": {
+      "on": {
+        "realtime.frame": [
+          {
+            "type": "setData",
+            "path": "/data/latest",
+            "value": {
+              "event": ""
+            }
+          }
+        ],
+        "realtime.status": [
+          {
+            "type": "setState",
+            "key": "chatStatus",
+            "value": {
+              "event": "/status"
+            }
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Chat",
+      "visibleWhen": {
+        "platform": "/realtime/chat/status",
+        "equals": "open"
+      },
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "realtime.connect",
+          "args": {
+            "channel": "chat"
+          }
+        },
+        {
+          "type": "platform",
+          "call": "realtime.send",
+          "args": {
+            "channel": {
+              "value": "chat"
+            },
+            "body": {
+              "value": {
+                "text": "hello"
+              }
+            }
+          }
+        },
+        {
+          "type": "platform",
+          "call": "realtime.disconnect",
+          "args": {
+            "channel": "chat"
+          }
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": [
+      "prototype_backdrop_v1",
+      "prototype_bar_scroll_v1",
+      "prototype_carousel_v1",
+      "prototype_chart_v1",
+      "prototype_chat_scroll_v1",
+      "prototype_checks_v1",
+      "prototype_choreography_v1",
+      "prototype_custom_shaders_v1",
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_design_platform_v1",
+      "prototype_drawer_v1",
+      "prototype_effects_v1",
+      "prototype_emit_context_v1",
+      "prototype_flow_grid_v1",
+      "prototype_format_v1",
+      "prototype_gestures_v1",
+      "prototype_lazy_list_v1",
+      "prototype_linkify_v1",
+      "prototype_loading_states_v1",
+      "prototype_menus_v1",
+      "prototype_motion_v2",
+      "prototype_network_device_v1",
+      "prototype_network_v1",
+      "prototype_pager_options_v1",
+      "prototype_pager_state_key_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_namespace_v1",
+      "prototype_platform_realtime_device_v1",
+      "prototype_platform_test_v1",
+      "prototype_platform_v1",
+      "prototype_reduced_motion_v1",
+      "prototype_refresh_v1",
+      "prototype_rich_text_v1",
+      "prototype_scroll_motion_v1",
+      "prototype_search_bar_v1",
+      "prototype_semantics_v1",
+      "prototype_shared_element_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1",
+      "prototype_storage_v1",
+      "prototype_string_conditions_v1",
+      "prototype_strings_v1",
+      "prototype_style_polish_v2",
+      "prototype_swipe_actions_v1",
+      "prototype_text_field_actions_v1",
+      "prototype_text_field_leading_icon_v1",
+      "prototype_text_field_options_v1",
+      "prototype_theme_modes_v1",
+      "prototype_timers_v1",
+      "prototype_tooltip_v1"
+    ]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_realtime_v1"
+}

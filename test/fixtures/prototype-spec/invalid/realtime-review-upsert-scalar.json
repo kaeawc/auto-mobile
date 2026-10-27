@@ -1,0 +1,44 @@
+{
+  "spec": {
+    "id": "review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "state": {
+      "secret": "",
+      "s": ""
+    },
+    "data": {
+      "rows": []
+    },
+    "channels": {
+      "c": {
+        "kind": "websocket",
+        "url": "wss://example.com",
+        "via": "device"
+      }
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "secret",
+      "secure": true,
+      "onTap": [
+        {
+          "type": "upsertData",
+          "path": "/data/rows",
+          "key": "/id",
+          "value": {
+            "value": 1
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].value.value",
+  "expectedMessage": "upsertData key pointer must be present and non-null in the literal value"
+}

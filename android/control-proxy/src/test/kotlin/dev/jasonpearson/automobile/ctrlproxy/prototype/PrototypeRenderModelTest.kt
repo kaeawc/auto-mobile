@@ -677,16 +677,31 @@ class PrototypeRenderModelTest {
       val decoded = (validated as PrototypeSpecValidation.Success).spec
       val encoded = Json.encodeToString(decoded)
       val roundTrip = PrototypeSpecValidator.validate(encoded)
+      val restored = (roundTrip as PrototypeSpecValidation.Success).spec
       assertEquals(
         "${file.name}: $roundTrip",
-        decoded,
-        (roundTrip as PrototypeSpecValidation.Success).spec,
+        decoded.copy(channels = null),
+        restored.copy(channels = null),
+      )
+      // Channel payload numbers may re-encode 1e21 as 1.0E21; JSON numeric value is the contract.
+      assertEquals(
+        file.name,
+        normalizedChannelNumbers(Json.encodeToJsonElement(decoded.channels)),
+        normalizedChannelNumbers(Json.encodeToJsonElement(restored.channels)),
       )
       // Derived values format through android.icu, which a plain JVM test cannot run; the
       // prototype-compose Robolectric tests map them.
       if (!file.readText().contains("\"derive\"")) mapPrototypeSpec(decoded)
     }
   }
+
+  private fun normalizedChannelNumbers(value: JsonElement): JsonElement =
+    when (value) {
+      is JsonObject -> JsonObject(value.mapValues { (_, child) -> normalizedChannelNumbers(child) })
+      is JsonArray -> JsonArray(value.map(::normalizedChannelNumbers))
+      is JsonPrimitive ->
+        if (value.isString) value else value.doubleOrNull?.let(::JsonPrimitive) ?: value
+    }
 
   @Test
   fun `forced text errors map independently of validation and preserve caption precedence`() {

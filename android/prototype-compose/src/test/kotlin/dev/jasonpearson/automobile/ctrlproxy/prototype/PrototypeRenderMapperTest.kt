@@ -228,6 +228,7 @@ class PrototypeRenderMapperFixtureTest(private val name: String, private val inp
     for ((key, value) in input.state.orEmpty()) {
       val next =
         when (value) {
+          is PrototypeScalar.Binding -> error("Expected resolved scalar state")
           is PrototypeScalar.BooleanValue -> PrototypeScalar.BooleanValue(!value.value)
           is PrototypeScalar.Numeric -> PrototypeScalar.Numeric(value.value + 1)
           is PrototypeScalar.Text -> PrototypeScalar.Text("${value.value} changed")

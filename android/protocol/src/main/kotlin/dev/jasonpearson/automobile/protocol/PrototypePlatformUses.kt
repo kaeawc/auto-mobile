@@ -31,6 +31,7 @@ internal object PrototypePlatformUses {
       found.add(Use.Handler(at, event))
       scan(handler, at, true, found)
     }
+    for ((handler, path) in PrototypeChannels.handlers(root)) scan(handler, path, true, found)
     root["root"]?.let { scan(it, "root", false, found) }
     for ((node, path) in context.nodes) {
       PrototypeBindableFields.first(node, path) { field, at, kind ->

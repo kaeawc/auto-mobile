@@ -736,7 +736,8 @@
     "path": "/data/items",
     "value": {
       "value": 1
-    }
+    },
+    "maxItems": 200
   },
   "actionPrependData": {
     "type": "prependData",
@@ -926,6 +927,17 @@
   "actionCancelTimer": {
     "type": "cancelTimer",
     "id": "tick"
+  },
+  "actionUpsertData": {
+    "type": "upsertData",
+    "path": "/data/items",
+    "key": "/id",
+    "value": {
+      "value": {
+        "id": 1
+      }
+    },
+    "maxItems": 200
   },
   "nodePasteButton": {
     "type": "pasteButton",

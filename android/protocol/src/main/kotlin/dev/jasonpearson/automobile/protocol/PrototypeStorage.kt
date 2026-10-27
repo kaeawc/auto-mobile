@@ -171,6 +171,7 @@ object PrototypeStorageRestorer {
   private fun fittingScalar(declared: PrototypeScalar?, stored: JsonElement): PrototypeScalar? {
     val primitive = stored as? JsonPrimitive ?: return null
     return when (declared) {
+      is PrototypeScalar.Binding -> null
       is PrototypeScalar.Text ->
         if (primitive.isString) PrototypeScalar.Text(primitive.content) else null
       is PrototypeScalar.Numeric ->

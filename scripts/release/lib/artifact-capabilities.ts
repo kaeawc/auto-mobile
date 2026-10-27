@@ -72,6 +72,10 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
       "imageAsset {data} has a validated contract only; no device media store yet, so the host refuses it (#14192)",
     prototype_platform_namespace_v1:
       "No renderer implements a platform-namespace field yet, so the host refuses own-platform blocks (#15257)",
+    prototype_platform_realtime_v1:
+      "Realtime channels have a validated contract only; the iOS agent does not implement transport, routing or lifecycle yet",
+    prototype_platform_realtime_device_v1:
+      "Device realtime channels are contract-only; the iOS agent does not implement device transport yet",
     prototype_platform_v1:
       "iOS agent validates platform specs but has no module registry yet (#14296)",
     prototype_routes_v1:

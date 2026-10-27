@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
-import {
-  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
-  SessionManager,
-  type SessionDeviceAssigner,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
 import {
   DeviceSessionRepository,
   deviceRestartReleaseReason,
@@ -418,24 +414,29 @@ describe("session persistence guards live in the statement, not in a prior read"
       manager.stopCleanupTimer();
       const releases: string[] = [];
       manager.onSessionRelease((_sessionId, _deviceId, reason) => releases.push(reason));
-      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
+      const session = await manager.createSession(SESSION, DEVICE, "android", {
+        timeoutMs: IDLE_WINDOW_MS,
+      });
       let landReleaseWrite!: () => void;
       store.park = new Promise<void>((resolve) => {
         landReleaseWrite = resolve;
       });
-      let superseded = false;
-      const release = manager.releaseSessionUnlessSuperseded(
-        SESSION,
-        `device-disconnected:${DEVICE}`,
-        { commitFence: () => !superseded },
+      // A release no longer leaves its session alive once its row statement is issued (#11799
+      // W5), so the superseded release's parked terminal write is tracked directly.
+      const reason = `device-disconnected:${DEVICE}`;
+      manager.testHooks.wiring.host.superseded.remember(session, [reason]);
+      manager.testHooks.wiring.releasePersistence.trackLateReleaseWrite(
+        store.markReleased(SESSION, "released", timer.now(), reason),
+        {
+          sessionId: SESSION,
+          deviceId: DEVICE,
+          releaseReason: reason,
+          releasedAtMs: timer.now(),
+          terminal: true,
+          heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
+        },
       );
       await settleMicrotasks(100);
-      // Fail the eager rewrite so the late terminal write drives the original activity race.
-      store.failPlainUpserts = 1;
-      // The serial is re-observed with a newer identity; the terminal write is still parked.
-      superseded = true;
-      await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
-      expect(await release).toEqual({ superseded: true });
       expect(manager.getSession(SESSION)).not.toBeNull();
       // A tool call's activity write runs right behind the late terminal write, before the
       // rewrite of the live row has landed.

@@ -647,7 +647,8 @@ struct PrototypeAction: Decodable, Sendable {
              animated, call, args
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
-        case requireValid, method, url, headers, query, progressKey, body, into, append, statusKey, via, timeoutMs, onSuccess,
+        case requireValid, method, url, headers, query, progressKey, body, into, append, statusKey, via, timeoutMs,
+             onSuccess,
              onError
     }
 
@@ -656,7 +657,9 @@ struct PrototypeAction: Decodable, Sendable {
         page: JSONValue?, stack: String?, screen: String?, path: String?, key: String?, value: JSONValue?,
         by incrementAmount: Double?, requireValid: [String]?, method: String? = nil, url: String? = nil,
         headers: [String: JSONValue]? = nil, query: [String: JSONValue]? = nil, body: JSONValue? = nil,
-        into: String? = nil, append: PrototypeRequestAppend? = nil, statusKey: String? = nil, progressKey: String? = nil, via: String? = nil,
+        into: String? = nil, append: PrototypeRequestAppend? = nil, statusKey: String? = nil,
+        progressKey: String? = nil,
+        via: String? = nil,
         timeoutMs: Double? = nil,
         onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
         id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,

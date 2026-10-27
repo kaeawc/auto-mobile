@@ -268,8 +268,8 @@ internal class PrototypeNodeMapping(
       else if (node is PrototypeListNode) entries.filter { it.path != "$path.children[0]" }
       else entries
     val staggerDelays = prototypeStaggerDelays(node, visibleEntries.map { it.node })
-    val children = visibleEntries.mapIndexed { index, (child, childPath) ->
-      map(child, childPath, if (inPager) localState else null, staggerDelays[index])
+    val children = visibleEntries.mapIndexed { index, (child, childPath, repeatDelay) ->
+      map(child, childPath, if (inPager) localState else null, staggerDelays[index] + repeatDelay)
     }
     val pager =
       when (node) {
@@ -921,7 +921,8 @@ internal fun modalPrototypeSheets(
   if (!node.visible) return emptyList()
   val modal = node.role in PROTOTYPE_MODAL_ROLES
   if (modal && !node.sheetOpen)
-    return if (includeClosedDrawers && node.role == "drawer") listOf(node) else emptyList()
+    return if (includeClosedDrawers && node.role in PROTOTYPE_ANIMATED_MODAL_ROLES) listOf(node)
+    else emptyList()
   val children =
     if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page)) else node.children
   return (if (modal) listOf(node) else emptyList()) +

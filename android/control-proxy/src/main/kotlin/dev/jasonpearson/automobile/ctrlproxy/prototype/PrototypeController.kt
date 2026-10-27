@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
@@ -217,6 +218,8 @@ class PrototypeController(
   private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
     dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
 ) {
+  // Asset cleanup must outlive service cancellation while retaining the injected worker dispatcher.
+  private val assetCleanupScope = CoroutineScope(requestScope.coroutineContext + SupervisorJob())
   private val platformLimiter = PrototypeRequestLimiter(PrototypePlatformCalls.maxInFlight)
 
   val isShowing: Boolean
@@ -239,15 +242,25 @@ class PrototypeController(
     // Titled windows identify their surface; legacy windows use the most recently shown one.
     val surface =
       (if (surfaceId != null) surfaces[surfaceId]?.takeIf { it.host.isShowing }
-      else surfaces.values.lastOrNull { it.host.isShowing }) ?: return null
-    val runtime = surface.runtime
-    return try {
-      val current = runtime.current
-      // Opacity follows the mode the window is drawn in, not every mode the spec could reach.
-      val shown = surface.theme.value
+      else surfaces.values.lastOrNull { it.host.isShowing })
+        ?: return exitResources.metadata(surfaceId)
+    val result =
+      surfaceMetadata(surface.runtime, surface.request, surface.theme.value) ?: return null
+    val motion = result.motion ?: PrototypeMotionState.Settled
+    return result.copy(
+      motion = motion.copy(active = motion.active + exitResources.count(surfaceId)),
+    )
+  }
+
+  private fun surfaceMetadata(
+    runtime: PrototypeRuntime,
+    request: PrototypeRequest,
+    shown: PrototypeShownTheme,
+  ): PrototypeWindowMetadata? =
+    try {
       prototypeWindowMetadata(
-          runtime.renderModel(current),
-          dismissBarDrawn = prototypeHostChrome(surface.request).dismissVisible,
+          runtime.renderModel(runtime.current),
+          dismissBarDrawn = prototypeHostChrome(request).dismissVisible,
           palettes = listOf(prototypeShownPalette(shown)),
           appearance = shown.appearance,
         )
@@ -256,7 +269,6 @@ class PrototypeController(
       Log.w("PrototypeController", "Prototype window metadata unavailable", error)
       null
     }
-  }
 
   /** True while a prototype exists but is hidden because its app left the foreground. */
   val isSuspendedByForeground: Boolean
@@ -600,6 +612,8 @@ class PrototypeController(
         .copy(
           displayId = displayId,
           chrome = prototypeWindowChrome(validated),
+          transition = validated.window.transition ?: "auto",
+          motion = validated.motion,
           surfaceId = validated.id,
           backdrop =
             validated.window.backdrop?.let {
@@ -618,6 +632,7 @@ class PrototypeController(
     val scope = reused?.foreground ?: if (surfaceHost === host) foreground else foreground.fork()
     val idle = reused?.idle ?: lifecycle.fork()
     val observerSession = lifecycle.observerSession()
+    var animateDismiss = true
     lateinit var runtime: PrototypeRuntime
     runtime =
       PrototypeRuntime(
@@ -629,7 +644,10 @@ class PrototypeController(
           sequences[validated.id] = next
           next
         },
-        requestDismiss = { removeSurface(runtime) },
+        beforeDismiss = {
+          animateDismiss = it == PrototypeDismissReason.USER || it == PrototypeDismissReason.AGENT
+        },
+        requestDismiss = { removeSurface(runtime, animateDismiss) },
         previousPages =
           if (preservePages) previous?.runtime?.current?.pages.orEmpty() else emptyMap(),
         initialRevision = nextRevision(validated.id),
@@ -658,8 +676,11 @@ class PrototypeController(
         hasStackBack = runtime.hasPoppableStack(mappedSpec),
         // Each window keeps its own focus flags; cross-window focus coordination is a follow-up.
         isSuspended = { scope.suspended },
-        bringToFront = reused != null && surfaces.values.lastOrNull() !== reused,
+        bringToFront = reused != null && request.transition != "none" && request.motion != "none",
         theme = theme,
+        motionActivity = runtime.motionActivity,
+        exitResources = exitResources,
+        exitMetadata = { surfaceMetadata(runtime, request, theme.value) },
         onHostDismiss = { interact(runtime, PrototypeInteraction.HostDismiss) },
         onHostBack = { interact(runtime, PrototypeInteraction.Back) },
         content = {
@@ -761,6 +782,8 @@ class PrototypeController(
     if (surfaces.isEmpty()) releaseAssets()
   }
 
+  private val exitResources = PrototypeExitResources()
+
   private val PrototypeRuntime.persistent: Boolean
     get() = isDevicePersistent(current.spec)
 
@@ -848,10 +871,10 @@ class PrototypeController(
     }
 
   /** Shared by dismiss_prototype and this runtime's own dismiss action, under mutex. */
-  private suspend fun removeSurface(runtime: PrototypeRuntime): Boolean {
+  private suspend fun removeSurface(runtime: PrototypeRuntime, animate: Boolean = true): Boolean {
     val surface = surfaceOf(runtime) ?: return true
     val wasShowing = isShowing
-    if (!surface.host.dismiss()) return false
+    if (!(if (animate) surface.host.dismiss() else surface.host.dismissImmediately())) return false
     surfaces = surfaces.filterValues { it !== surface }
     surface.foreground.release()
     surface.idle.cancel()
@@ -872,10 +895,19 @@ class PrototypeController(
 
   /** Asset cleanup is ancillary: it must never suppress a dismissal, event or lifecycle step. */
   private fun releaseAssets() {
-    try {
-      clearAssets()
-    } catch (error: Exception) {
-      Log.w("PrototypeController", "Prototype asset cleanup failed", error)
+    exitResources.whenIdle {
+      // Cleanup survives service cancellation, on the same worker dispatcher as requests.
+      assetCleanupScope.launch {
+        mutex.withLock {
+          if (surfaces.isEmpty()) {
+            try {
+              clearAssets()
+            } catch (error: Exception) {
+              Log.w("PrototypeController", "Prototype asset cleanup failed", error)
+            }
+          }
+        }
+      }
     }
   }
 
@@ -1247,7 +1279,7 @@ class PrototypeController(
    */
   private suspend fun restoreWindow(host: PrototypeHost, request: PrototypeRequest): Boolean =
     try {
-      host.show(request)
+      host.show(request.copy(animateEnter = false))
     } catch (error: CancellationException) {
       throw error
     } catch (error: Exception) {
@@ -1301,8 +1333,9 @@ class PrototypeController(
    * retryable.
    */
   suspend fun dismissForUnbind() = signal {
+    exitResources.drain()
     if (surfaces.isEmpty()) {
-      check(host.dismiss()) { "Prototype host failed to dismiss window" }
+      check(host.dismissImmediately()) { "Prototype host failed to dismiss window" }
       releaseAssets()
     } else
       forEachSurface(surfaces.values.toList()) {
@@ -1350,6 +1383,7 @@ class PrototypeController(
   /** Run from a teardown scope independent of the cancelled service scope; no blocking join. */
   suspend fun destroy() = mutex.withLock {
     destroyed = true
+    exitResources.drain()
     val selected = surfaces.values.toList()
     val remaining = linkedMapOf<String, Surface>()
     lifecycle.cancel()

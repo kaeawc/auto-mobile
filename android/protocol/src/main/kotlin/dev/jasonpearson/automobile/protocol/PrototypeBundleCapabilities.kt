@@ -38,6 +38,8 @@ internal object PrototypeBundleCapabilities {
       if ("ios" in block || "android" in block) caps.add("prototype_platform_namespace_v1")
     }
     if (text(spec["motion"]) == "reduced") caps.add("prototype_reduced_motion_v1")
+    if ((spec["window"] as? JsonObject)?.get("transition") != null)
+      caps.add("prototype_window_motion_v1")
     if (((spec["window"] as? JsonObject)?.get("backdrop")) != null)
       caps.add("prototype_backdrop_v1")
     if (text((spec["theme"] as? JsonObject)?.get("design")) == "platform") {

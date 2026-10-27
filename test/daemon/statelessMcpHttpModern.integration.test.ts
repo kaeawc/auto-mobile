@@ -31,6 +31,9 @@ import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
 import * as database from "../../src/db/database";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createDeviceChoiceRequestStateCodec } from "../../src/server/deviceChoiceRequestState";
+import { createMcpServer } from "../../src/server";
+import { taskEligibleByName } from "../../src/server/tasks/toolCallTasks";
+import { FakeTaskManager } from "../fakes/FakeTaskManager";
 
 const requestStateTimer = new FakeTimer();
 const requestStateCodec = createDeviceChoiceRequestStateCodec({
@@ -100,7 +103,9 @@ const TASK = {
   pollIntervalMs: 1000,
 } satisfies CreateTaskResult;
 
-function endpoint(deviceChoice = false) {
+const TASK_DEVICE_PROBE = "modernTaskDeviceChoiceProbe";
+
+function endpoint(deviceChoice = false, taskManager?: FakeTaskManager) {
   return new StatelessMcpHttpEndpoint<
     McpHttpRequestLike,
     CapturedResponse,
@@ -118,11 +123,22 @@ function endpoint(deviceChoice = false) {
       throw new Error("Modern request reached legacy transport");
     },
     createServer: (req: McpHttpRequestLike, scope) => {
-      const server = createStatelessMcpServer(
-        { deviceChoiceRequestState: requestStateCodec },
-        buildMcpRequestContext({ headers: req.headers }),
-        scope,
-      );
+      const server = taskManager
+        ? createMcpServer({
+            era: "modern",
+            stateless: true,
+            taskOwnerKey: scope.taskOwnerKey,
+            requestMcpSessionId: scope.requestMcpSessionId,
+            sessionContext: { sessionId: scope.requestScopeId },
+            taskManager,
+            taskEligibleTools: taskEligibleByName(new Set([TASK_DEVICE_PROBE])),
+            deviceChoiceRequestState: requestStateCodec,
+          })
+        : createStatelessMcpServer(
+            { deviceChoiceRequestState: requestStateCodec },
+            buildMcpRequestContext({ headers: req.headers }),
+            scope,
+          );
       // Fake feature execution, keeping the production SDK result wrapper and factory intact.
       if (!deviceChoice) {
         installToolCallDispatcher(server, {
@@ -143,8 +159,9 @@ async function exchange(
   params: Record<string, unknown> = {},
   deviceChoice = false,
   sessionKey = "modern-client",
+  taskManager?: FakeTaskManager,
 ) {
-  const server = endpoint(deviceChoice);
+  const server = endpoint(deviceChoice, taskManager);
   const res = new CapturedResponse();
   await server
     .handle(
@@ -154,6 +171,7 @@ async function exchange(
           "mcp-protocol-version": "2026-07-28",
           "mcp-method": method,
           ...(typeof params.name === "string" && { "mcp-name": params.name }),
+          ...(typeof params.taskId === "string" && { "mcp-name": params.taskId }),
           accept: "text/event-stream, application/json",
           "content-type": "application/json",
           [MCP_SESSION_KEY_HEADER]: sessionKey,
@@ -366,6 +384,98 @@ test("real modern handler asks for a device via MRTR and retries on the accepted
     expect(calls).toEqual([undefined, undefined, "device-b"]);
   } finally {
     ToolRegistry.unregister("modernDeviceChoiceProbe");
+  }
+});
+
+test("real modern task asks through tasks/get and only its owner can answer through tasks/update", async () => {
+  const manager = new FakeTaskManager();
+  const calls: Array<string | undefined> = [];
+  const candidates = [
+    { deviceId: "device-a", platform: "android" },
+    { deviceId: "device-b", platform: "ios" },
+  ];
+  ToolRegistry.register(
+    TASK_DEVICE_PROBE,
+    "Hermetic task device-choice probe",
+    z.object({ deviceId: z.string().optional() }),
+    async ({ deviceId }) => {
+      calls.push(deviceId);
+      return deviceId
+        ? { content: [{ type: "text", text: `used ${deviceId}` }] }
+        : {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ code: "ambiguous_device_target", candidates }),
+              },
+            ],
+          };
+    },
+  );
+  const post = (method: string, params: Record<string, unknown>, owner = "modern-client") =>
+    exchange(method, params, true, owner, manager);
+  try {
+    const created = await post("tools/call", { name: TASK_DEVICE_PROBE, arguments: {} });
+    expect(created.error).toBeUndefined();
+    expect(created.result).toMatchObject({ resultType: "task", status: "working" });
+    expect(created.result.inputRequests).toBeUndefined();
+    const taskId: string = created.result.taskId;
+    let waiting = await post("tasks/get", { taskId });
+    for (let turn = 0; turn < 20 && waiting.result.status === "working"; turn++) {
+      waiting = await post("tasks/get", { taskId });
+    }
+    expect(waiting.result).toMatchObject({
+      resultType: "complete",
+      status: "input_required",
+      inputRequests: {
+        deviceChoice: {
+          method: "elicitation/create",
+          params: {
+            mode: "form",
+            requestedSchema: {
+              required: ["deviceId"],
+              properties: {
+                deviceId: {
+                  oneOf: candidates.map(({ deviceId, platform }) => ({
+                    const: deviceId,
+                    title: `${deviceId} (${platform})`,
+                  })),
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(waiting.result.requestState).toBeUndefined();
+    expect(calls).toEqual([undefined]);
+    const answer = {
+      taskId,
+      inputResponses: { deviceChoice: { action: "accept", content: { deviceId: "device-b" } } },
+    };
+    const foreign = await post("tasks/update", answer, "foreign-owner");
+    expect(foreign.error).toEqual({
+      code: -32602,
+      message: "Failed to retrieve task: Task not found",
+    });
+    expect((await post("tasks/get", { taskId })).result.status).toBe("input_required");
+    expect((await post("tasks/update", answer)).result).toMatchObject({ resultType: "complete" });
+    let done = await post("tasks/get", { taskId });
+    for (let turn = 0; turn < 20 && done.result.status === "working"; turn++) {
+      done = await post("tasks/get", { taskId });
+    }
+    expect(done.result).toMatchObject({
+      status: "completed",
+      result: { content: [{ type: "text", text: "used device-b" }] },
+    });
+    expect(done.result.inputRequests).toBeUndefined();
+    expect(calls).toEqual([undefined, "device-b"]);
+  } finally {
+    for (const task of manager.created) {
+      await manager.cancel("modern-client", task.taskId);
+    }
+    ToolRegistry.unregister(TASK_DEVICE_PROBE);
   }
 });
 

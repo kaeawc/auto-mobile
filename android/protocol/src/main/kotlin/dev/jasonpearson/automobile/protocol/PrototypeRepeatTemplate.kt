@@ -498,34 +498,6 @@ internal object PrototypeBindableFields {
       when ((node["type"] as? JsonPrimitive)?.content) {
         "button",
         "fab" -> visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
-        "tooltip" ->
-          visitor.field(node, "text", path, PrototypeBindableKind.TEXT)
-            ?: objects(node, "onDismiss", path).firstNotNullOfOrNull { (entry, at) ->
-              visitor.action(entry, at)
-            }
-        // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
-        "image" -> visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
-        "segmentedButton" ->
-          objects(node, "options", path).firstNotNullOfOrNull { (option, optionPath) ->
-            visitor.field(option, "label", optionPath, PrototypeBindableKind.TEXT)
-          }
-        "topAppBar" ->
-          visitor.field(node, "title", path, PrototypeBindableKind.TEXT)
-            ?: part(node["navigationIcon"], "$path.navigationIcon")
-            ?: objects(node, "actions", path).firstNotNullOfOrNull { (entry, entryPath) ->
-              part(entry, entryPath)
-            }
-        "menu",
-        "select" -> menuComponent(node, path)
-        "textField",
-        "searchBar",
-        "dialog",
-        "snackbar" -> formComponent(node, path)
-        else -> null
-      }
-
-    private fun menuComponent(node: JsonObject, path: String): T? =
-      when ((node["type"] as? JsonPrimitive)?.content) {
         "menu" ->
           objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
             visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
@@ -536,6 +508,22 @@ internal object PrototypeBindableFields {
             ?: objects(node, "options", path).firstNotNullOfOrNull { (option, optionPath) ->
               visitor.field(option, "label", optionPath, PrototypeBindableKind.TEXT)
             }
+        "segmentedButton" ->
+          objects(node, "options", path).firstNotNullOfOrNull { (option, optionPath) ->
+            visitor.field(option, "label", optionPath, PrototypeBindableKind.TEXT)
+          }
+        "topAppBar" ->
+          visitor.field(node, "title", path, PrototypeBindableKind.TEXT)
+            ?: part(node["navigationIcon"], "$path.navigationIcon")
+            ?: objects(node, "actions", path).firstNotNullOfOrNull { (entry, entryPath) ->
+              part(entry, entryPath)
+            }
+        "textField",
+        "searchBar",
+        "dialog",
+        "snackbar" -> formComponent(node, path)
+        "tooltip",
+        "image" -> contentComponent(node, path)
         else -> null
       }
 
@@ -562,6 +550,18 @@ internal object PrototypeBindableFields {
         "snackbar" ->
           visitor.field(node, "text", path, PrototypeBindableKind.TEXT)
             ?: part(node["action"], "$path.action")
+        else -> null
+      }
+
+    private fun contentComponent(node: JsonObject, path: String): T? =
+      when ((node["type"] as? JsonPrimitive)?.content) {
+        "tooltip" ->
+          visitor.field(node, "text", path, PrototypeBindableKind.TEXT)
+            ?: objects(node, "onDismiss", path).firstNotNullOfOrNull { (entry, at) ->
+              visitor.action(entry, at)
+            }
+        // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
+        "image" -> visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
         else -> null
       }
 

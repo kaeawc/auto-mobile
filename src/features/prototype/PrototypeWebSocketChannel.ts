@@ -178,7 +178,9 @@ export class PrototypeWebSocketChannel implements PrototypeChannelHandle {
 
   close(code: number = WS_NORMAL_CLOSURE, reason?: string): void {
     if (this.socket === undefined) {
-      // Closed before the socket existed: nothing to wait for.
+      // Closed before the socket existed: nothing to wait for, so the lookup and deadline end too.
+      this.deadline.abort();
+      this.cleanup();
       this.sink.closed({ code, ...(reason === undefined ? {} : { reason }) });
       return;
     }

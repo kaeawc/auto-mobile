@@ -277,5 +277,6 @@ describe("WebSocketPrototypeChannelExecutor", () => {
     handle.close(1000);
     expect(sink.closes).toEqual([{ code: 1000 }]);
     expect(sockets.sockets).toEqual([]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 });
